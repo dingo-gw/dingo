@@ -127,3 +127,9 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Data files
+.hdf5
+.npy
+.npz
+.dat
