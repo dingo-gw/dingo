@@ -133,3 +133,6 @@ dmypy.json
 .npy
 .npz
 .dat
+
+# .DS_Store files for Mac OS
+.DS_Store
