@@ -16,7 +16,8 @@ setup(name='dingo',
       python_requires='>=3.6',
       install_requires=[
           'numpy',
-          'nflows'
+          'nflows',
+          'scipy'
       ],
       classifiers=[
           "Programming Language :: Python :: 3.6",
