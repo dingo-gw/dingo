@@ -19,6 +19,11 @@ setup(name='dingo',
           'nflows',
           'scipy'
       ],
+      extras_require={
+        "dev": [
+            "pytest",
+        ],
+      },
       classifiers=[
           "Programming Language :: Python :: 3.6",
           "Programming Language :: Python :: 3.7",
