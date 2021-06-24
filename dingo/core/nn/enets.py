@@ -38,19 +38,13 @@ class LinearProjectionRB(nn.Module):
         self.num_blocks, self.num_channels, self.num_bins = self.input_dims
         self.n_rb = n_rb
 
-        # self.output_dim_single = self.n_rb * 2 # output dim for a single detector is twice the number of rb basis elements, for imag and real part
-        # self.output_dim = self.output_dim_single * self.input_blocks
-
         # define a linear projection layer for each block
         layers = []
         for ind in range(self.num_blocks):
             layers.append(nn.Linear(self.num_bins * self.num_channels, self.n_rb * 2))
         self.layers = nn.ModuleList(layers)
-
-        # initialize layers with
+        # initialize layers with reduced basis
         self.init_layers(V_rb)
-
-        print('Module 1: {:} -> {:}'.format(self.input_dim, self.output_dim))
 
     @property
     def input_dim(self):
@@ -72,7 +66,6 @@ class LinearProjectionRB(nn.Module):
     def init_layers(self, V_rb):
         # loop through layers and initialize them individually
         for ind,layer in enumerate(self.layers):
-            print('Initializing reduced basis projection layer for block {:}.'.format(ind))
             v = V_rb[ind]
             # truncate v to n_rb basis elements
             v = v[:,:self.n_rb]
