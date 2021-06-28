@@ -6,17 +6,30 @@ from nflows.nn.nets.resnet import ResidualBlock
 
 class LinearProjectionRB(nn.Module):
     """
-    A compression layer that reduces the input dimensionality by projection onto a reduced basis.
+    A compression layer that reduces the input dimensionality via projection onto a reduced basis.
     The input data is of shape (batch_size, num_blocks, num_channels, num_bins).
-    Each block is treated independently. For GW use case, a block corresponds to a detector.
-    Each block has num_channels >= 2 channels. Channel 0 and 1 represent the real and imaginary part, respectively.
-    Each channel has num_bins bins.
+    Each of the num_blocks blocks (for GW use case: block=detector) is treated independently.
+
+    A single block consists of 1D data with num_bins bins (e.g. GW use case: num_bins=number of frequency bins).
+    It has num_channels>=2 different channels, channel 0 and 1 store the real and imaginary part of the signal.
+    Channels 2+ are used for auxiliary signals (such as PSD for GW use case).
+
+    This layer compresses the complex signal in channels 0 and 1 to n_rb reduced-basis (rb) components.
+    This is achieved by initializing the weights of this layer with the rb matrix V,
+    such that the (2*n_rb) dimensional output of each block is the concatenation of the
+    real and imaginary part of the reduced basis projection of the complex signal in channel 0 and 1.
+    The projection of the auxiliary channels 2+ onto these components is initialized with 0.
+
+    Layer specs
+    --------
+        input dimension:    (batch_size, num_blocks, num_channels, num_bins)
+        output dimension:   (batch_size, 2 * n_rb * num_blocks)
     """
 
     def __init__(self,
                  input_dims,
                  n_rb,
-                 V_rb,
+                 V_rb_list,
                  ):
         """
         Parameters
@@ -26,25 +39,29 @@ class LinearProjectionRB(nn.Module):
             input_dims = (num_blocks, num_channels, num_bins)
         n_rb : int
             number of reduced basis elements used for projection
-            the output dimension is 2 * n_rb * num_blocks
-        V_rb : list of np.arrays
-            list with v matrices of the reduced basis SVD projection
+            the output dimension of the layer is 2 * n_rb * num_blocks
+        V_rb_list : list of np.arrays
+            list with V matrices of the reduced basis SVD projection,
+            convention for SVD matrix decomposition: U @ s @ V^h
         """
 
         super(LinearProjectionRB, self).__init__()
 
-        self.test_dimensions(input_dims, n_rb, V_rb)
         self.input_dims = input_dims
+        if len(self.input_dims) != 3:
+            raise ValueError('Exactly 3 axes required: blocks, channels, bins')
         self.num_blocks, self.num_channels, self.num_bins = self.input_dims
         self.n_rb = n_rb
+        self.test_dimensions(V_rb_list)
 
         # define a linear projection layer for each block
         layers = []
         for ind in range(self.num_blocks):
             layers.append(nn.Linear(self.num_bins * self.num_channels, self.n_rb * 2))
         self.layers = nn.ModuleList(layers)
+
         # initialize layers with reduced basis
-        self.init_layers(V_rb)
+        self.init_layers(V_rb_list)
 
     @property
     def input_dim(self):
@@ -54,30 +71,45 @@ class LinearProjectionRB(nn.Module):
     def output_dim(self):
         return 2 * self.n_rb * self.num_blocks
 
-    def test_dimensions(self, input_dims, n_rb, V_rb):
-        assert len(input_dims) == 3, 'Exactly 3 axes required: blocks, channels, bins'
-        assert input_dims[1] >= 2, 'Number of channels needs to be at least 2, for real and imaginary parts.'
-        assert len(V_rb) == input_dims[0], 'There must be exactly one reduced basis matrix v for each block.'
-        for v in V_rb:
-            assert v.shape[0] == input_dims[2], 'Number of input bins and number of rows in V_rb need to match.'
-            assert v.shape[1] >= n_rb, 'More reduced basis elements requested than available.'
+    def test_dimensions(self, V_rb_list):
+        """Test if input dimensions to this layer are consistent with each other, and the reduced basis matrices V."""
+        if self.num_channels < 2:
+            raise ValueError('Number of channels needs to be at least 2, for real and imaginary parts.')
+        if len(V_rb_list) != self.num_blocks:
+            raise ValueError('There must be exactly one reduced basis matrix V for each block.')
+        for V in V_rb_list:
+            if not isinstance(V, np.ndarray) or len(V.shape) != 2:
+                raise ValueError('Reduced basis matrix V must be a numpy array with 2 axes.')
+            if V.shape[0] != self.num_bins:
+                raise ValueError('Number of input bins and number of rows in rb matrix V need to match.')
+            if V.shape[1] < self.n_rb:
+                raise ValueError('More reduced basis elements requested than available.')
 
 
-    def init_layers(self, V_rb):
-        # loop through layers and initialize them individually
+    def init_layers(self, V_rb_list):
+        """
+        Loop through layers and initialize them individually with the corresponding rb projection.
+        V_rb_list is a list that contains the rb matrix V for each block.
+        V is represented with a numpy array of shape (self.num_bins, num_el), where num_el >= self.n_rb.
+        """
+        n = self.n_rb
+        k = self.num_bins
         for ind,layer in enumerate(self.layers):
-            v = V_rb[ind]
-            # truncate v to n_rb basis elements
-            v = v[:,:self.n_rb]
-            v_real, v_imag = torch.from_numpy(v.real).float(), torch.from_numpy(v.imag).float()
+            V = V_rb_list[ind]
+
+            # truncate V to n_rb basis elements
+            V = V[:,:n]
+            V_real, V_imag = torch.from_numpy(V.real).float(), torch.from_numpy(V.imag).float()
+
             # initialize all weights and biases with zero
             layer.weight.data = torch.zeros_like(layer.weight.data)
             layer.bias.data = torch.zeros_like(layer.bias.data)
-            # load matrix v into weights
-            layer.weight.data[:self.n_rb,:self.num_bins] = (v_real).permute(1,0)
-            layer.weight.data[self.n_rb:,:self.num_bins] = (v_imag).permute(1,0)
-            layer.weight.data[:self.n_rb,self.num_bins:2*self.num_bins] = - (v_imag).permute(1,0)
-            layer.weight.data[self.n_rb:,self.num_bins:2*self.num_bins] = (v_real).permute(1,0)
+
+            # load matrix V into weights
+            layer.weight.data[:n,:k] = torch.transpose(V_real, 1,0)
+            layer.weight.data[n:,:k] = torch.transpose(V_imag, 1,0)
+            layer.weight.data[:n,k:2*k] = - torch.transpose(V_imag, 1,0)
+            layer.weight.data[n:,k:2*k] = torch.transpose(V_real, 1,0)
 
 
     def forward(self, x):
