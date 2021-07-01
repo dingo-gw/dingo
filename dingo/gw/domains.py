@@ -25,21 +25,21 @@ class Domain(ABC):
         pass
 
     @abstractmethod
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args, **kwargs) -> np.ndarray:
         """Array of bins in the domain"""
         # Note: generalizes sample_frequencies or times
         pass
 
     @property
     @abstractmethod
-    def noise_std(self):
+    def noise_std(self) -> float:
         """Standard deviation of the whitened noise distribution"""
         # FIXME: For this to make sense, it assumes knowledge about how the domain is used in conjunction
         #  with (waveform) data, whitening and adding noise. Is this the best place to define this?
         pass
 
     @abstractmethod
-    def context_dim(self, num_detectors):
+    def context_dim(self, num_detectors: int) -> int:
         """Dimensionality of the strain data in the entire network"""
         # FIXME: * may be better not to include this here and do the calculation manually outside this class
         pass
@@ -55,7 +55,7 @@ class UniformFrequencyDomain(Domain):
     window_factor is used to compute noise_std().
     """
 
-    def __init__(self, f_min, f_max, delta_f, window_factor):
+    def __init__(self, f_min: float, f_max: float, delta_f: float, window_factor: float):
         self._f_min = f_min
         self._f_max = f_max
         self._delta_f = delta_f
@@ -67,7 +67,7 @@ class UniformFrequencyDomain(Domain):
         return int(self._f_max / self._delta_f) + 1
 
     @lru_cache()
-    def __call__(self):
+    def __call__(self) -> np.ndarray:
         """Array of uniform frequency bins in the domain [0, f_max]"""
         num_bins = self.__len__()
         sample_frequencies = np.linspace(0.0, self._f_max, num=num_bins, endpoint=True, dtype=np.float32)
@@ -75,13 +75,13 @@ class UniformFrequencyDomain(Domain):
 
     @property
     @lru_cache()
-    def frequency_mask(self):
+    def frequency_mask(self) -> np.ndarray:
         """Mask which selects frequency bins greater than or equal to the starting frequency"""
         sample_frequencies = self.__call__()
         return sample_frequencies >= self._f_min
 
     @property
-    def noise_std(self):
+    def noise_std(self) -> float:
         """Standard deviation of the whitened noise distribution.
 
         To have noise that comes from a multivariate *unit* normal
@@ -92,7 +92,7 @@ class UniformFrequencyDomain(Domain):
         """
         return np.sqrt(self._window_factor) / np.sqrt(4.0 * self._delta_f)
 
-    def context_dim(self, num_detectors):
+    def context_dim(self, num_detectors: int) -> int:
         # FIXME: "detectors" is astronomy specific; is there a better generic term?
         """Size of context data given the number of detectors."""
         num_bins_nonzero_data = int((self._f_max - self._f_min) / self._delta_f) + 1
@@ -100,21 +100,21 @@ class UniformFrequencyDomain(Domain):
 
     # TODO: Do we want f_max to have a setter and getter and use sampling_rate internally as in the old code?
     @property
-    def f_max(self):
+    def f_max(self) -> float:
         """The maximum frequency is set to half the sampling rate."""
         return self._f_max
 
     @f_max.setter
-    def f_max(self, f_max):
+    def f_max(self, f_max: float):
         self._f_max = f_max
 
     @property
-    def sampling_rate(self):
+    def sampling_rate(self) -> float:
         """The sampling rate of the data."""
         return 2.0 * self._f_max
 
     @sampling_rate.setter
-    def sampling_rate(self, fs):
+    def sampling_rate(self, fs: float):
         self._f_max = fs / 2.0
 
 
@@ -126,7 +126,7 @@ class TimeDomain(Domain):
     window_factor is used to compute noise_std().
     """
 
-    def __init__(self, time_duration, sampling_rate):
+    def __init__(self, time_duration: float, sampling_rate: float):
         self._time_duration = time_duration
         self._sampling_rate = sampling_rate
 
@@ -136,23 +136,23 @@ class TimeDomain(Domain):
         return int(self._time_duration * self._sampling_rate)
 
     @lru_cache()
-    def __call__(self):
+    def __call__(self) -> np.ndarray:
         """Array of uniform times at which data is sampled"""
         num_bins = self.__len__()
         return np.linspace(0.0, self._time_duration, num=num_bins,
                            endpoint=False, dtype=np.float32)
 
     @property
-    def delta_t(self):
+    def delta_t(self) -> float:
         """The size of the time bins"""
         return 1.0 / self._sampling_rate
 
     @delta_t.setter
-    def delta_t(self, delta_t):
+    def delta_t(self, delta_t: float):
         self._sampling_rate = 1.0 / delta_t
 
     @property
-    def noise_std(self):
+    def noise_std(self) -> float:
         """Standard deviation of the whitened noise distribution.
 
         To have noise that comes from a multivariate *unit* normal
@@ -164,7 +164,7 @@ class TimeDomain(Domain):
         """
         return 1.0 / np.sqrt(2.0 * self.delta_t)
 
-    def context_dim(self, num_detectors):
+    def context_dim(self, num_detectors: int) -> int:
         # FIXME: "detectors" is astronomy specific; is there a better generic term?
         """Size of context data given the number of detectors."""
         num_bins = self.__len__()
@@ -179,7 +179,7 @@ class PCADomain(Domain):
     pass
 
     @property
-    def noise_std(self):
+    def noise_std(self) -> float:
         """Standard deviation of the whitened noise distribution.
 
         To have noise that comes from a multivariate *unit* normal
@@ -192,7 +192,7 @@ class PCADomain(Domain):
         # FIXME
         return np.sqrt(self.window_factor) / np.sqrt(4.0 * self.delta_f)
 
-    def context_dim(self, num_detectors):
+    def context_dim(self, num_detectors: int) -> int:
         # FIXME: "detectors" is astronomy specific; is there a better generic term?
         """Size of context data given the number of detectors."""
         num_rb = self.__len__()
