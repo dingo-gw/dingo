@@ -3,13 +3,11 @@ from functools import lru_cache
 from abc import ABC, abstractmethod
 
 
-# Note: I made Domain an abstract base class:
-#  - i.e. an "interface" which cannot be instantiated by itself
-#  - abstract methods need to be overridden in derived classes
-
 # TODO: Should Domains have any other behavior? Where do they interface with other classes?
 #  - A Domain must always be coupled with (waveform) data to be useful
 #  - classes Waveform, FrequencyDomainWaveform, TimeDomainWaveform should have a Domain attribute
+# - context_dim will be implemented elsewhere; it needs num_detectors
+
 
 class Domain(ABC):
     """Defines the physical domain on which the data of interest live.
@@ -17,17 +15,16 @@ class Domain(ABC):
     This includes a specification of the bins or points,
     and a few additional properties associated with the data.
     """
+    domain_type: str
 
     @abstractmethod
     def __len__(self):
         """Number of bins or points in the domain"""
-        # Note: This generalizes Nf, Nt, Nrb
         pass
 
     @abstractmethod
     def __call__(self, *args, **kwargs) -> np.ndarray:
         """Array of bins in the domain"""
-        # Note: generalizes sample_frequencies or times
         pass
 
     @property
@@ -36,12 +33,6 @@ class Domain(ABC):
         """Standard deviation of the whitened noise distribution"""
         # FIXME: For this to make sense, it assumes knowledge about how the domain is used in conjunction
         #  with (waveform) data, whitening and adding noise. Is this the best place to define this?
-        pass
-
-    @abstractmethod
-    def context_dim(self, num_detectors: int) -> int:
-        """Dimensionality of the strain data in the entire network"""
-        # FIXME: * may be better not to include this here and do the calculation manually outside this class
         pass
 
 
@@ -54,6 +45,7 @@ class UniformFrequencyDomain(Domain):
     starts at a frequency f_min and is zero below this frequency.
     window_factor is used to compute noise_std().
     """
+    domain_type = "uFD"
 
     def __init__(self, f_min: float, f_max: float, delta_f: float, window_factor: float):
         self._f_min = f_min
@@ -89,16 +81,13 @@ class UniformFrequencyDomain(Domain):
         dividing the whitened waveforms by this.
 
         TODO: This description makes some assumptions that need to be clarified.
+        Windowing of TD data; tapering window has a slope -> reduces power only for noise,
+        but not for the signal which is in the main part unaffected by the taper
         """
         return np.sqrt(self._window_factor) / np.sqrt(4.0 * self._delta_f)
 
-    def context_dim(self, num_detectors: int) -> int:
-        # FIXME: "detectors" is astronomy specific; is there a better generic term?
-        """Size of context data given the number of detectors."""
-        num_bins_nonzero_data = int((self._f_max - self._f_min) / self._delta_f) + 1
-        return num_bins_nonzero_data * num_detectors * 2
 
-    # TODO: Do we want f_max to have a setter and getter and use sampling_rate internally as in the old code?
+    # TODO: Do we want f_max to have a setter and getter? Any others?
     @property
     def f_max(self) -> float:
         """The maximum frequency is set to half the sampling rate."""
@@ -125,6 +114,7 @@ class TimeDomain(Domain):
     with spacing 1 / sampling_rate.
     window_factor is used to compute noise_std().
     """
+    domain_type = "TD"
 
     def __init__(self, time_duration: float, sampling_rate: float):
         self._time_duration = time_duration
@@ -164,19 +154,14 @@ class TimeDomain(Domain):
         """
         return 1.0 / np.sqrt(2.0 * self.delta_t)
 
-    def context_dim(self, num_detectors: int) -> int:
-        # FIXME: "detectors" is astronomy specific; is there a better generic term?
-        """Size of context data given the number of detectors."""
-        num_bins = self.__len__()
-        return num_bins * num_detectors
-
 
 class PCADomain(Domain):
     """TODO"""
-    # FIXME: Should this be defined for FD or TD bases or both?
+    domain_type = "PCA"
 
+    # Not super important right now
+    # FIXME: Should this be defined for FD or TD bases or both?
     # Nrb instead of Nf
-    pass
 
     @property
     def noise_std(self) -> float:
@@ -192,16 +177,11 @@ class PCADomain(Domain):
         # FIXME
         return np.sqrt(self.window_factor) / np.sqrt(4.0 * self.delta_f)
 
-    def context_dim(self, num_detectors: int) -> int:
-        # FIXME: "detectors" is astronomy specific; is there a better generic term?
-        """Size of context data given the number of detectors."""
-        num_rb = self.__len__()
-        return num_rb * num_detectors * 2
-
 
 class NonuniformFrequencyDomain(Domain):
     """TODO"""
+    domain_type = "nFD"
 
-    # It probably doesn't make sense to inherit from FrequencyDomain
+    # It probably doesn't make sense to inherit from FrequencyDomain; we'll need this for low mass binaries
     pass
 
