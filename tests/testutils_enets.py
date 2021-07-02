@@ -5,7 +5,6 @@ import torch
 from itertools import chain
 
 
-
 ########################
 # test utils for enet  #
 ########################
@@ -15,15 +14,17 @@ def generate_1d_series_data(batch_size, num_bins, alpha=20, beta=0):
     '''Generate a set of batch_size 1d series with num_bins bins.'''
 
     theta = np.random.rand(batch_size, 2)
-    x = np.linspace(0,1,num_bins)
+    x = np.linspace(0, 1, num_bins)
     y = np.zeros((batch_size, num_bins))
     for i in range(batch_size):
-        y[i,:] = np.cos(x*(0.1+theta[i,0])*alpha + theta[i,1]) * x**beta
-    y = y * np.exp(2j * np.pi * x**2)
+        y[i, :] = np.cos(
+            x * (0.1 + theta[i, 0]) * alpha + theta[i, 1]) * x ** beta
+    y = y * np.exp(2j * np.pi * x ** 2)
     return y
 
 
-def generate_1d_datasets_and_reduced_basis(batch_size=1000, num_bins=200, plot=False, n_rb=10):
+def generate_1d_datasets_and_reduced_basis(batch_size=1000, num_bins=200,
+                                           plot=False, n_rb=10):
     '''
     Generate two sets of batch_size 1d series with num_bins bins,
     and generate a reduced basis for these.
@@ -58,19 +59,20 @@ def get_y_batch(y_list, num_channels=3):
     Real and imaginary parts are separated into separate channels.
     '''
 
-    y_batch = torch.ones((y_list[0].shape[0], len(y_list), num_channels, y_list[0].shape[1]))
+    y_batch = torch.ones(
+        (y_list[0].shape[0], len(y_list), num_channels, y_list[0].shape[1]))
     for idx, y in enumerate(y_list):
-        y_batch[:,idx,0,:] = torch.from_numpy(y.real).float()
-        y_batch[:,idx,1,:] = torch.from_numpy(y.imag).float()
+        y_batch[:, idx, 0, :] = torch.from_numpy(y.real).float()
+        y_batch[:, idx, 1, :] = torch.from_numpy(y.imag).float()
     return y_batch
 
 
 def project_onto_reduced_basis_and_concat(y_list, V_rb_list, n_rb):
     '''
     Projects each y in y_list onto the corresponding reduced basis in V_rb_list.
-    n_rb basis elements are used.
-    For each y, the real and imaginary parts are concatenated.
-    Finally, the reduced basis representations of all y are concatenated and returned.
+    n_rb basis elements are used. For each y, the real and imaginary parts
+    are concatenated. Finally, the reduced basis representations of all y are
+    concatenated and returned.
     '''
 
     projections = [[(y[:] @ V_rb[:, :n_rb]).real, (y[:] @ V_rb[:, :n_rb]).imag]
