@@ -1,9 +1,13 @@
 import pytest
 from testutils_enets import *
-from dingo.core.nn.enets import LinearProjectionRB
+from dingo.core.nn.enets import LinearProjectionRB, DenseResidualNet
 
 
-def test_enet_reduced_basis_projection():
+def test_projection_of_LinearProjectionRB():
+    """
+    This function tests the LinearProjectionRB embedding network for the
+    dimensions and the correct application of the reduced basis projection.
+    """
     # define dimensions
     batch_size, num_bins, n_rb, num_channels = 1000, 200, 10, 3
     # generate datasets
@@ -49,6 +53,58 @@ def test_enet_reduced_basis_projection():
     with pytest.raises(ValueError):
         LinearProjectionRB(input_dims=(2, num_channels, num_bins, 1), n_rb=10,
                            V_rb_list=(V1, V2))
+
+
+def test_forward_pass_of_LinearProjectionRB():
+    """
+    Test forward pass of the LinearProjectionRB embedding network.
+    """
+    # define dimensions
+    batch_size, n_rb, num_blocks, num_channels, num_bins = 1000, 10, 2, 3, 200
+    # generate datasets
+    _, (V1, V2) = generate_1d_datasets_and_reduced_basis(batch_size, num_bins)
+    # define projection layer
+    enet = LinearProjectionRB(input_dims=(num_blocks, num_channels, num_bins),
+                              n_rb=10,
+                              V_rb_list=(V1, V2))
+    check_model_forward_pass(enet, (num_blocks, num_channels, num_bins),
+                             [enet.output_dim], batch_size)
+
+
+def test_backward_pass_of_LinearProjectionRB():
+    """
+    Test backward pass of the LinearProjectionRB embedding network.
+    """
+    # define dimensions
+    batch_size, n_rb, num_blocks, num_channels, num_bins = 1000, 10, 2, 3, 200
+    # generate datasets
+    _, (V1, V2) = generate_1d_datasets_and_reduced_basis(batch_size, num_bins)
+    # define projection layer
+    enet = LinearProjectionRB(input_dims=(num_blocks, num_channels, num_bins),
+                              n_rb=10,
+                              V_rb_list=(V1, V2))
+    check_model_backward_pass(enet, (num_blocks, num_channels, num_bins),
+                              batch_size)
+
+
+def test_forward_pass_of_DenseResidualNet():
+    """
+    Test forward pass of the DenseResidualNet embedding network.
+    """
+    batch_size = 100
+    input_dim, output_dim, hidden_dims = 120, 8, (128, 64, 32, 64, 16, 16)
+    enet = DenseResidualNet(input_dim, output_dim, hidden_dims)
+    check_model_forward_pass(enet, [input_dim], [output_dim], batch_size)
+
+
+def test_backward_pass_of_DenseResidualNet():
+    """
+    Test backward pass of the DenseResidualNet embedding network.
+    """
+    batch_size = 100
+    input_dim, output_dim, hidden_dims = 120, 8, (128, 64, 32, 64, 16, 16)
+    enet = DenseResidualNet(input_dim, output_dim, hidden_dims)
+    check_model_backward_pass(enet, [input_dim], batch_size)
 
 
 if __name__ == '__main__':
