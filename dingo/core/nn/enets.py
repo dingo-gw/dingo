@@ -1,6 +1,6 @@
 """Implementation of embedding networks."""
 
-from typing import Tuple, Callable
+from typing import Tuple, Callable, Union
 import torch
 import numpy as np
 import torch.nn as nn
@@ -38,7 +38,7 @@ class LinearProjectionRB(nn.Module):
     def __init__(self,
                  input_dims: Tuple[int, int, int],
                  n_rb: int,
-                 V_rb_list: Tuple,
+                 V_rb_list: Union[Tuple, None],
                  ):
         """
         Parameters
@@ -232,10 +232,11 @@ class EnetProjectionWithResnet(nn.Module):
         input dimension:    (batch_size, num_blocks, num_channels, num_bins)
         output dimension:   (batch_size, output_dim)
     """
+
     def __init__(self,
                  input_dims: Tuple[int, int, int],
                  n_rb: int,
-                 V_rb_list: Tuple,
+                 V_rb_list: Union[Tuple, None],
                  output_dim: int,
                  hidden_dims: Tuple,
                  activation: Callable = F.elu,
@@ -282,5 +283,63 @@ class EnetProjectionWithResnet(nn.Module):
         return x
 
 
+class ModuleMerger(nn.Module):
+    """
+    This is a wrapper to used to process multiple different kinds of context
+    information collected in x = (x_0, x_1, ...). For each kind of context
+    information x_i, an individual embedding network is provided in
+    enets = (enet_0, enet_1, ...). The embedded output of the forward method
+    is the concatenation of the individual embeddings enet_i(x_i). In the GW
+    use case, this wrapper can be used to embed the high-dimensional signal
+    input into a lower dimensional feature vector with a large embedding
+    network, while applying an identity embedding to the time shifts.
+
+    Module specs
+    --------
+        input dimension:    tuple((batch_size, ...), (batch_size, ...), ...)
+        output dimension:   (batch_size, ?)
+    """
+
+    def __init__(self,
+                 module_list: Tuple[nn.Module, ...],
+                 module_kwargs_list: Tuple[dict, ...],
+                 ):
+        """
+        Parameters
+        ----------
+        module_list : tuple
+            nn.Modules for embedding networks,
+            use torch.nn.Identity for identity mappings
+        module_kwargs_list : tuple
+            kwargs for the creation of nn.Modules from module_list
+        """
+        super(ModuleMerger, self).__init__()
+        if len(module_list) != len(module_kwargs_list):
+            raise ValueError('Each module needs exactly one set of kwargs.')
+        self.enets = nn.ModuleList(
+            [module(**module_kwargs) for module, module_kwargs in
+             zip(module_list, module_kwargs_list)])
+        print('done')
+
+    def forward(self, x):
+        if len(x) != len(self.enets):
+            raise ValueError('Invalid number of input tensors provided.')
+        x = [module(xi) for module, xi in zip(self.enets, x)]
+        return torch.cat(x, axis=1)
+
+
 if __name__ == '__main__':
-    pass
+    batch_size = 3
+    input_dim, output_dim, hidden_dims = 120, 8, (128, 64, 32, 64, 16, 16)
+    module_list = (DenseResidualNet, nn.Identity)
+    module_kwargs = ({'input_dim': input_dim, 'output_dim': output_dim,
+                      'hidden_dims': hidden_dims},
+                     {},
+                     )
+    enet = ModuleMerger(module_list, module_kwargs)
+    a = torch.rand((batch_size, input_dim))
+    b = torch.ones((batch_size, 3))
+    out = enet((a, b))
+
+    print('done')
+    # pass
