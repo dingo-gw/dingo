@@ -1,6 +1,6 @@
 import pytest
 from testutils_enets import *
-from dingo.core.nn.enets import LinearProjectionRB, DenseResidualNet
+from dingo.core.nn.enets import *
 
 
 def test_projection_of_LinearProjectionRB():
@@ -36,6 +36,10 @@ def test_projection_of_LinearProjectionRB():
     assert np.max(np.abs(out_b - ref_b)) < thr
     # check that results for different inputs disagree
     assert np.max(np.abs(out_a - ref_b)) > thr
+    # check that channels with index >= 2 don't affect the projection
+    y_batch_a[:, :, 2:, :] += torch.rand_like(y_batch_a[:, :, 2:, :])
+    assert np.all(out_a == np.array(projection_layer(y_batch_a).detach())), \
+        'Channels with index >= 2 should not affect rb projection.'
 
     # check that Error is raised if layer is initialized with inconsistent input
     with pytest.raises(ValueError):
@@ -105,6 +109,51 @@ def test_backward_pass_of_DenseResidualNet():
     input_dim, output_dim, hidden_dims = 120, 8, (128, 64, 32, 64, 16, 16)
     enet = DenseResidualNet(input_dim, output_dim, hidden_dims)
     check_model_backward_pass(enet, [input_dim], batch_size)
+
+
+def test_forward_pass_of_EnetProjectionWithResnet():
+    """
+    Test forward pass of the EnetProjectionWithResnet embedding network.
+    """
+    batch_size, n_rb, num_blocks, num_channels, num_bins = 1000, 10, 2, 3, 200
+    _, (V1, V2) = generate_1d_datasets_and_reduced_basis(batch_size, num_bins)
+
+    enet_kwargs = {
+        'input_dims': (num_blocks, num_channels, num_bins),
+        'n_rb': n_rb,
+        'V_rb_list': (V1, V2),
+        'output_dim': 8,
+        'hidden_dims': [32, 16, 16, 8],
+        'activation': torch.nn.functional.elu,
+        'dropout': 0.0,
+        'batch_norm': True,
+    }
+    # define projection layer
+    enet = EnetProjectionWithResnet(**enet_kwargs)
+    check_model_forward_pass(enet, enet_kwargs['input_dims'],
+                             [enet_kwargs['output_dim']], batch_size)
+
+
+def test_backward_pass_of_EnetProjectionWithResnet():
+    """
+    Test forward pass of the EnetProjectionWithResnet embedding network.
+    """
+    batch_size, n_rb, num_blocks, num_channels, num_bins = 1000, 10, 2, 3, 200
+    _, (V1, V2) = generate_1d_datasets_and_reduced_basis(batch_size, num_bins)
+
+    enet_kwargs = {
+        'input_dims': (num_blocks, num_channels, num_bins),
+        'n_rb': n_rb,
+        'V_rb_list': (V1, V2),
+        'output_dim': 8,
+        'hidden_dims': [32, 16, 16, 8],
+        'activation': torch.nn.functional.elu,
+        'dropout': 0.0,
+        'batch_norm': True,
+    }
+    # define projection layer
+    enet = EnetProjectionWithResnet(**enet_kwargs)
+    check_model_backward_pass(enet, enet_kwargs['input_dims'], batch_size)
 
 
 if __name__ == '__main__':
