@@ -1,3 +1,6 @@
+"""Implementation of embedding networks."""
+
+from typing import Tuple
 import torch
 import numpy as np
 import torch.nn as nn
@@ -33,9 +36,9 @@ class LinearProjectionRB(nn.Module):
     """
 
     def __init__(self,
-                 input_dims,
-                 n_rb,
-                 V_rb_list,
+                 input_dims: Tuple[int, int, int],
+                 n_rb: int,
+                 V_rb_list : Tuple,
                  ):
         """
         Parameters
@@ -46,23 +49,21 @@ class LinearProjectionRB(nn.Module):
         n_rb : int
             number of reduced basis elements used for projection
             the output dimension of the layer is 2 * n_rb * num_blocks
-        V_rb_list : list of np.arrays
-            list with V matrices of the reduced basis SVD projection,
+        V_rb_list : tuple of np.arrays
+            tuple with V matrices of the reduced basis SVD projection,
             convention for SVD matrix decomposition: U @ s @ V^h
         """
 
         super(LinearProjectionRB, self).__init__()
 
         self.input_dims = input_dims
-        if len(self.input_dims) != 3:
-            raise ValueError('Exactly 3 axes required: blocks, channels, bins')
         self.num_blocks, self.num_channels, self.num_bins = self.input_dims
         self.n_rb = n_rb
         self.test_dimensions(V_rb_list)
 
         # define a linear projection layer for each block
         layers = []
-        for ind in range(self.num_blocks):
+        for _ in range(self.num_blocks):
             layers.append(
                 nn.Linear(self.num_bins * self.num_channels, self.n_rb * 2))
         self.layers = nn.ModuleList(layers)
@@ -137,6 +138,65 @@ class LinearProjectionRB(nn.Module):
             out.append(self.layers[ind](x[:, ind, ...].flatten(start_dim=1)))
         x = torch.cat(out, dim=1)
         return x
+
+
+# class DenseResidualNet(nn.Module):
+#     """
+#     TODO
+#     """
+#
+#     def __init__(self,
+#                  input_dim: int,
+#                  output_dim: int,
+#                  hidden_dims: list,
+#                  activation=F.elu,
+#                  dropout=0.0,
+#                  batch_norm=True,
+#                  ):
+#         """
+#         Parameters
+#         ----------
+#         input_dim : int
+#             dimension of the input to this module
+#         output_dim : int
+#             output dimension of this module
+#         hidden_dims : list
+#             list with dimensions of hidden layers of this module
+#         """
+#
+#         super(DenseResidualNet, self).__init__()
+#         self.input_dim = input_dim
+#         self.output_dim = output_dim
+#         self.hidden_dims = hidden_dims
+#         self.num_res_blocks = len(self.hidden_dims)
+#
+#         self.initial_layer = nn.Linear(self.input_dim, hidden_dims[0])
+#         self.blocks = nn.ModuleList(
+#             [
+#                 ResidualBlock(
+#                     features=self.hidden_dims[n],
+#                     context_features=None,
+#                     activation=activation,
+#                     dropout_probability=dropout,
+#                     use_batch_norm=batch_norm,
+#                 )
+#                 for n in range(self.num_res_blocks)
+#             ]
+#         )
+#         self.resize_layers = nn.ModuleList(
+#             [
+#                 nn.Linear(self.hidden_dims[n - 1], self.hidden_dims[n])
+#                 if self.hidden_dims[n - 1] != self.hidden_dims[n]
+#                 else nn.Identity()
+#                 for n in range(1, self.num_res_blocks)
+#             ]
+#         )
+#         self.final_layer = nn.Linear(self.hidden_dims[-1], self.output_dim)
+#
+#         print('Module 1: {:} -> {:}'.format(
+#             self.input_dim * self.input_channels * self.input_blocks,
+#             self.output_dim))
+#         print('Module 2: {:} -> {:}'.format(in_features, out_features))
 
 
 if __name__ == '__main__':
