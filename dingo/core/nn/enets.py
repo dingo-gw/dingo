@@ -29,7 +29,7 @@ class LinearProjectionRB(nn.Module):
     channel 0 and 1. The projection of the auxiliary channels with index >=2
     onto these components is initialized with 0.
 
-    Layer specs
+    Module specs
     --------
         input dimension:    (batch_size, num_blocks, num_channels, num_bins)
         output dimension:   (batch_size, 2 * n_rb * num_blocks)
@@ -59,7 +59,6 @@ class LinearProjectionRB(nn.Module):
         self.input_dims = input_dims
         self.num_blocks, self.num_channels, self.num_bins = self.input_dims
         self.n_rb = n_rb
-        self.test_dimensions(V_rb_list)
 
         # define a linear projection layer for each block
         layers = []
@@ -69,7 +68,9 @@ class LinearProjectionRB(nn.Module):
         self.layers = nn.ModuleList(layers)
 
         # initialize layers with reduced basis
-        self.init_layers(V_rb_list)
+        if V_rb_list is not None:
+            self.test_dimensions(V_rb_list)
+            self.init_layers(V_rb_list)
 
     @property
     def input_dim(self):
@@ -147,7 +148,7 @@ class DenseResidualNet(nn.Module):
     resizing layers are used for resizing the input and output to match the
     first and last hidden dimension, respectively.
 
-    Layer specs
+    Module specs
     --------
         input dimension:    (batch_size, input_dim)
         output dimension:   (batch_size, output_dim)
@@ -212,6 +213,72 @@ class DenseResidualNet(nn.Module):
         for block, resize_layer in zip(self.blocks, self.resize_layers):
             x = block(x, context=None)
             x = resize_layer(x)
+        return x
+
+
+class EnetProjectionWithResnet(nn.Module):
+    """
+    A 2-stage embedding network for 1D data with multiple blocks (in GW use
+    case: block = detector) and channels (channel 0/1: real/imaginary part of
+    the signal, channel >=2: auxiliary information, e.g. PSD in GW use case).
+    Module 1 is a linear layer initialized as the projection of the complex
+    signal onto reduced basis components via the LinearProjectionRB,
+    where the blocks are kept separate. See docstring of LinearProjectionRB
+    for details. Module 2 is a sequence of dense residual layers, that is
+    used to further reduce the dimensionality.
+
+    Module specs
+    --------
+        input dimension:    (batch_size, num_blocks, num_channels, num_bins)
+        output dimension:   (batch_size, output_dim)
+    """
+    def __init__(self,
+                 input_dims: Tuple[int, int, int],
+                 n_rb: int,
+                 V_rb_list: Tuple,
+                 output_dim: int,
+                 hidden_dims: Tuple,
+                 activation: Callable = F.elu,
+                 dropout: int = 0.0,
+                 batch_norm: bool = True,
+                 ):
+        """
+        Parameters
+        ----------
+        input_dims : tuple
+            dimensions of input batch, omitting batch dimension
+            input_dims = (num_blocks, num_channels, num_bins)
+        n_rb : int
+            number of reduced basis elements used for projection
+            the output dimension of the layer is 2 * n_rb * num_blocks
+        V_rb_list : tuple of np.arrays
+            tuple with V matrices of the reduced basis SVD projection,
+            convention for SVD matrix decomposition: U @ s @ V^h
+        output_dim : int
+            output dimension of the full module
+        hidden_dims : tuple
+            tuple with dimensions of hidden layers of module 2
+        activation: callable
+            activation function used in residual blocks
+        dropout: int
+            dropout probability for residual blocks used for reqularization
+        batch_norm: bool
+            flag that specifies whether to use batch normalization
+        """
+
+        super(EnetProjectionWithResnet, self).__init__()
+        self.module_1 = LinearProjectionRB(input_dims, n_rb, V_rb_list)
+        self.module_2 = DenseResidualNet(input_dim=self.module_1.output_dim,
+                                         output_dim=output_dim,
+                                         hidden_dims=hidden_dims,
+                                         activation=activation,
+                                         dropout=dropout,
+                                         batch_norm=batch_norm
+                                         )
+
+    def forward(self, x):
+        x = self.module_1(x)
+        x = self.module_2(x)
         return x
 
 
