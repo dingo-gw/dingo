@@ -17,7 +17,9 @@ setup(name='dingo',
       install_requires=[
           'numpy',
           'nflows',
-          'scipy'
+          'scipy',
+          'bilby',
+          'astropy'
       ],
       extras_require={
         "dev": [
