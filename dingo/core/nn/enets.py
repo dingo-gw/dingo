@@ -49,9 +49,11 @@ class LinearProjectionRB(nn.Module):
         n_rb : int
             number of reduced basis elements used for projection
             the output dimension of the layer is 2 * n_rb * num_blocks
-        V_rb_list : tuple of np.arrays
+        V_rb_list : tuple of np.arrays, or None
             tuple with V matrices of the reduced basis SVD projection,
-            convention for SVD matrix decomposition: U @ s @ V^h
+            convention for SVD matrix decomposition: U @ s @ V^h;
+            if None, layer is not initialized with reduced basis projection,
+            this is useful when loading a saved model
         """
 
         super(LinearProjectionRB, self).__init__()
@@ -285,7 +287,7 @@ class EnetProjectionWithResnet(nn.Module):
 
 class ModuleMerger(nn.Module):
     """
-    This is a wrapper to used to process multiple different kinds of context
+    This is a wrapper used to process multiple different kinds of context
     information collected in x = (x_0, x_1, ...). For each kind of context
     information x_i, an individual embedding network is provided in
     enets = (enet_0, enet_1, ...). The embedded output of the forward method
@@ -319,7 +321,6 @@ class ModuleMerger(nn.Module):
         self.enets = nn.ModuleList(
             [module(**module_kwargs) for module, module_kwargs in
              zip(module_list, module_kwargs_list)])
-        print('done')
 
     def forward(self, x):
         if len(x) != len(self.enets):
