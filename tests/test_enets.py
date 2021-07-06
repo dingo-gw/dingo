@@ -1,6 +1,7 @@
 import pytest
 from testutils_enets import *
-from dingo.core.nn.enets import *
+from dingo.core.nn.enets import LinearProjectionRB, DenseResidualNet, \
+    ModuleMerger, create_enet_with_projection_layer_and_dense_resnet
 
 
 @pytest.fixture()
