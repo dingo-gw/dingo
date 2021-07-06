@@ -1,5 +1,6 @@
 from torch.nn import functional as F
 
+
 def get_activation_function_from_string(activation_name):
     if activation_name.lower() == 'elu':
         return F.elu
