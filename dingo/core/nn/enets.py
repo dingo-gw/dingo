@@ -341,8 +341,7 @@ def create_enet_with_projection_layer_and_dense_resnet(
     if not added_context:
         return enet
     else:
-        return ModuleMerger(
-            [enet] + [nn.Identity() for _ in range(added_context)])
+        return ModuleMerger((enet, nn.Identity()))
 
 
 if __name__ == '__main__':
