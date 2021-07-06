@@ -2,9 +2,13 @@
 # We're not using all of them. We could make the default prior more explicit
 # by defining it ourselves in the constructor.
 from bilby.gw.prior import BBHPriorDict, UniformSourceFrame
-from bilby.core.prior import Uniform, Constraint, Sine
+from bilby.core.prior import Uniform, Constraint, Sine, Cosine
+from astropy.cosmology import Planck15
 
-from typing import Dict
+import numpy as np
+from typing import Dict, Set
+import warnings
+
 
 # Silence INFO and WARNING messages from bilby
 import logging
@@ -14,15 +18,28 @@ logging.getLogger('bilby').setLevel("ERROR")
 # This is subclassing the Bilby BBHPriorDict.
 #
 # TODO:
-#  * [x] It would be useful to incorporate the ability to separately sample intrinsic
-#  and extrinsic parameters. From the list of parameters, it should therefore be able
-#  to determine which ones fall into each type.
 #  * For some extrinsic parameters (e.g., distance, time of coalescence) we need to also
 #  set reference values to be able to generate waveforms and position the detectors.
 #  I am wondering whether this class should also take care of that.
 #    - We could set delta function priors for some parameters, but this would mean
 #      that we can't sample from their usual distributions. Perhaps it is better to
 #      do this elsewhere?
+
+#  * [x] Check that the user has provided a "complete" set of prior parameters
+#    - How do you want to define complete? I.e. which parameters should always be present and which are optional?
+#  * Maybe there should be a default prior dict that gets used for parameters the user doesn't specify? I'm not sure how to deal with that. It looks like you are adding in a geocent_time prior if it's absent.
+#     - That can be done; I'm adding the time prior since bilby does not include it in the default BBH prior.
+
+#  * Allow for a variety of parametrizations (e.g., also zenith, azimuth would work for sky position)
+#    - That is possible, but ties in with checking for completeness
+#  * Let's leave the parameter conversion for the waveform generator
+#     - Agreed, but allowing for a variety of parametrizations implies that some conversion needs to be done
+#       There needs to be some underlying representation we can convert to in order to check completeness.
+#  * Provide "reference" values for certain extrinsic parameters (like distance, time) needed to generate waveforms. Should these be user-specified?
+#    - Should these really live in a prior class? A fixed value in terms of a distribution would be a delta function prior
+#      But don't we need to still sample from a distribution for e.g. distance? If we don't then having the reference values here is certainly fine.
+#  * For the geocent_time reference value, we need to decide where to keep track of that. It will be used in postprocessing as well to correct the right ascension.
+
 
 # Note:
 #  * We add bilby as a dependency here which requires further packages :
@@ -65,6 +82,7 @@ class GWPriorDict(BBHPriorDict):
     the mass parameters are over-specified in order to add constraints in the
     component mass plane on top of the chirp-mass and mass-ratio priors.
     """
+
     def __init__(self,
                  parameter_prior_dict: Dict = None,
                  geocent_time: float = 1126259642.413):
@@ -78,13 +96,16 @@ class GWPriorDict(BBHPriorDict):
             The geocentric GPS time used to determine the time prior.
         """
 
-        if (parameter_prior_dict is not None) and \
-                not isinstance(parameter_prior_dict, dict):
-            raise ValueError('Expected dictionary of parameters and priors, '
-                             'but got:', parameter_prior_dict)
+        if parameter_prior_dict is None:
+            warnings.warn('No priors specified. Using default 15D priors.')
+        else:
+            if not isinstance(parameter_prior_dict, dict):
+                raise ValueError('Expected dictionary of parameters and priors, '
+                                 'but got:', parameter_prior_dict)
 
         # Build this prior dict
         super().__init__(dictionary=parameter_prior_dict)
+        self._check_prior_completeness()
 
         # TODO: Which time parameter should be added?
         if not ('geocent_time' in self):
@@ -100,55 +121,126 @@ class GWPriorDict(BBHPriorDict):
         self._extrinsic_parameters = ['luminosity_distance', 'dec', 'ra', 'psi',
                                       'geocent_time']
 
-    @property
-    def intrinsic_parameters(self):
-        return self._intrinsic_parameters
+
+    def _check_mass_parameters(self, key_set):
+        """
+        Check the presence of mass parameters in the prior.
+
+        Either the component masses or mass-ratio and chirp-mass
+        must be specified. If both are specified then the component mass
+        priors must impose constraints on the mass-ratio and chirp-mass prior.
+        """
+        masses_present = {'mass_1', 'mass_2'} <= key_set
+        mc_q_present = {'mass_ratio', 'chirp_mass'} <= key_set
+
+        if masses_present:
+            comp_constraints = [isinstance(self[k], Constraint)
+                               for k in ['mass_1', 'mass_2']]
+            if not mc_q_present:
+                # This is OK as long as the masses are not just constraint priors
+                if any(comp_constraints):
+                    raise ValueError('Mass priors cannot be Constraint priors when'
+                                     'mass-ratio and chirp mass priors are not set.')
+            else:
+                if not all(comp_constraints):
+                    raise ValueError('When both component mass priors and chirp-mass and mass-ratio priors'
+                                     'are specified, component mass priors must be constraint priors.')
+        else:
+            warnings.warn('Using default mass priors. Please check that the limits are appropriate.')
+            if not mc_q_present:
+                self['mass_ratio'] = Uniform(minimum=0.125, maximum=1, name='mass_ratio')
+                self['chirp_mass'] = Uniform(minimum=25, maximum=100, name='chirp_mass')
+
+            # For the default prior we add constraint component mass priors
+            self['mass_1'] = Constraint(minimum=5, maximum=100, name='mass_1')
+            self['mass_2'] = Constraint(minimum=5, maximum=100, name='mass_2')
+
+    def _check_spin_parameters(self, key_set):
+        """Check presence of spin parameters.
+
+        These are not considered essential at the moment.
+        """
+        spin_params = {'a_1', 'a_2', 'tilt_1', 'tilt_2', 'phi_12', 'phi_jl'}
+        if not spin_params < key_set:
+            spin_keys_present = spin_params & key_set
+            warnings.warn('Prior does not contain a complete prescription of generic spins!'
+                          f'Only found spin parameters {spin_keys_present}')
+
+    def _check_required_parameters(self, key_set):
+        """
+        Check for several required parameters and use a default prior if missing.
+        """
+        default_prior_dict = {
+            'theta_jn': Sine(minimum=0, maximum=3.141592653589793, name='theta_jn'),
+            'psi': Uniform(minimum=0, maximum=3.141592653589793, name='psi', boundary='periodic'),
+            'phase': Uniform(minimum=0, maximum=6.283185307179586, name='phase', boundary='periodic'),
+            'dec': Cosine(minimum=-1.5707963267948966, maximum=1.5707963267948966, name='dec'),
+            'ra': Uniform(minimum=0, maximum=6.283185307179586, name='ra', boundary='periodic')
+        }
+        for k in ['theta_jn', 'phase', 'dec', 'ra', 'psi']:
+            if not (k in key_set):
+                warnings.warn(f'Missing prior for {k}. Adding default prior.')
+                self[k] = default_prior_dict[k]
+
+        if not ('luminosity_distance' in key_set):
+            warnings.warn('Missing prior for luminosity_distance. Please check distance limits.')
+            self['luminosity_distance'] = UniformSourceFrame(minimum=100.0, maximum=5000.0,
+                cosmology=Planck15, name='luminosity_distance')
+
+
+    def _check_prior_completeness(self):
+        """Check whether the prior specification includes required parameters
+        and add default priors for required parameters.
+        """
+        key_set = set(self.keys())
+        self._check_mass_parameters(key_set)
+        self._check_spin_parameters(key_set)
+        self._check_required_parameters(key_set)
+        # TODO: add support for (zenith, azimuth) for sky position instead of (ra, dec)
 
     @property
-    def extrinsic_parameters(self):
-        return self._extrinsic_parameters
+    def intrinsic_parameters(self) -> Set:
+        """
+        The set of intrinsic parameters.
 
-    def sample_intrinsic(self, size=None):
-        samples = self.sample_subset(keys=self._intrinsic_parameters, size=size)
+        This is the intersection of the full set of intrinsic parameters
+        with the set of user specified parameters. At the very least it includes
+        two mass parameters, phase and time.
+        """
+        return self.keys() & self._intrinsic_parameters
+
+    @property
+    def extrinsic_parameters(self) -> Set:
+        """
+        The set of extrinsic parameters.
+        """
+        return self.keys() & self._extrinsic_parameters
+
+    def sample_intrinsic(self, size: int = None) -> Dict[str, np.ndarray]:
+        """
+        Sample from the intrinsic prior distribution.
+
+        Parameters
+        ----------
+        size : int
+            The number of samples to draw.
+        """
+        samples = self.sample_subset(keys=list(self.intrinsic_parameters), size=size)
         samples = self.default_conversion_function(samples)
-        # Drop total mass and symmetric mass-ratio which are added automatically
-        # We could also keep them if they are useful
-        for k in ['total_mass', 'symmetric_mass_ratio']:
-            samples.pop(k)
-        return samples
+        # Note:
+        #   * total mass and symmetric mass-ratio are added automatically
+        #   * mass-ratio and chirp-mass are also added if not being sampled in
+        # Keep only samples in our intrinsic parameter list:
+        return {k: samples[k] for k in self.intrinsic_parameters}
 
     def sample_extrinsic(self, size=None):
-        return self.sample_subset(keys=self._extrinsic_parameters, size=size)
+        """
+        Sample from the extrinsic prior distribution.
 
+        Parameters
+        ----------
+        size : int
+            The number of samples to draw.
+        """
+        return self.sample_subset(keys=list(self.extrinsic_parameters), size=size)
 
-    # Anything below is probably not needed
-
-    # import copy
-    # def copy(self):
-    #     return copy.deepcopy(self)
-    #
-    # def define_intrinsic_extrinsic_priors(self):
-    #     # FIXME: If needed we could define separate intrinsic and extrinsic prior dicts
-    #     #  This could be done like so, but I'm not sure it is needed.
-    #     priors_intrinsic = self.copy()
-    #     priors_extrinsic = self.copy()
-    #     for k in self._extrinsic_parameters:
-    #         priors_intrinsic.pop(k)
-    #     for k in self._intrinsic_parameters:
-    #         priors_extrinsic.pop(k)
-    #     self.priors_intrinsic = priors_intrinsic
-    #     self.priors_extrinsic = priors_extrinsic
-    #
-    #     # With these new prior objects defined, we can sample from them like so:
-    #     print(self.priors_intrinsic.sample())
-    #     #self.priors_extrinsic.sample()  # Error because masses etc are missing
-    #     print(self.priors_extrinsic.sample_subset(keys=self._extrinsic_parameters))
-    #
-    #
-    # # TODO: Do we need to return partial prior objects? What would they be used for?
-    # #  We can sample from the intrinsic and extrinsic parameters with the methods below.
-    # def intrinsic_priors(self):
-    #     pass
-    #
-    # def extrinsic_priors(self):
-    #     pass

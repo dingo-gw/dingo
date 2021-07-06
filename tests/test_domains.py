@@ -1,5 +1,5 @@
-import pytest
 from dingo.gw.domains import UniformFrequencyDomain, TimeDomain
+import pytest
 import numpy as np
 
 
