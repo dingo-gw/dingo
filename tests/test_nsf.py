@@ -1,10 +1,12 @@
 import pytest
 import types
 import torch
+import torch.optim as optim
 from dingo.core.nn.nsf import create_nsf_model, FlowWrapper
 from dingo.core.nn.enets import \
     create_enet_with_projection_layer_and_dense_resnet
 from dingo.core.utils import torchutils
+
 
 @pytest.fixture()
 def data_setup_nsf_large():
@@ -26,7 +28,9 @@ def data_setup_nsf_large():
         'n_rb': 200,
         'V_rb_list': None,
         'output_dim': 128,
-        'hidden_dims': [1024, 1024, 1024, 1024, 1024, 1024, 512, 512, 512, 512, 512, 512, 256, 256, 256, 256, 256, 256, 128, 128, 128, 128, 128, 128],
+        'hidden_dims': [1024, 1024, 1024, 1024, 1024, 1024, 512, 512, 512, 512,
+                        512, 512, 256, 256, 256, 256, 256, 256, 128, 128, 128,
+                        128, 128, 128],
         'activation': 'elu',
         'dropout': 0.0,
         'batch_norm': True,
@@ -46,8 +50,8 @@ def data_setup_nsf_large():
 @pytest.fixture()
 def data_setup_nsf_small():
     d = types.SimpleNamespace()
-    d.input_dim = 15
-    d.context_dim = 130
+    d.input_dim = 4
+    d.context_dim = 10
     d.num_flow_steps = 5
     d.base_transform_kwargs = {
         "hidden_dim": 64,
@@ -62,7 +66,7 @@ def data_setup_nsf_small():
         'input_dims': (2, 3, 200),
         'n_rb': 10,
         'V_rb_list': None,
-        'output_dim': 32,
+        'output_dim': 8,
         'hidden_dims': [128, 64, 32],
         'activation': 'elu',
         'dropout': 0.0,
@@ -78,11 +82,16 @@ def data_setup_nsf_small():
         "base_transform_kwargs": d.base_transform_kwargs,
     }
 
-    d.batch_size = 10
+    d.batch_size = 20
     d.x = torch.rand((d.batch_size, *d.embedding_net_kwargs['input_dims']))
     d.z = torch.ones((d.batch_size,
                       d.context_dim - d.embedding_net_kwargs['output_dim']))
     d.y = torch.ones((d.batch_size, d.input_dim))
+
+    # build d.yy, which depends on input d.zz
+    d.xx = torch.cat((d.x, d.x))
+    d.yy = torch.cat((d.y, -d.y))
+    d.zz = torch.cat((d.z, -d.z))
 
     return d
 
@@ -104,7 +113,7 @@ def test_nsf_number_of_parameters(data_setup_nsf_large):
     assert num_params == 131448775, 'Unexpected number of model parameters.'
 
 
-def test_forward_pass_of_nsf_log_prob(data_setup_nsf_small):
+def test_sample_method_of_nsf(data_setup_nsf_small):
     """
     Test the forward pass of flow model for log_prob.
     """
@@ -115,12 +124,73 @@ def test_forward_pass_of_nsf_log_prob(data_setup_nsf_small):
     flow = d.nde_builder(**d.nde_kwargs)
     model = FlowWrapper(flow, embedding_net)
 
-    loss_0 = model(d.y, d.x, d.z)
+    samples = model.sample(d.x, d.z)
+
+    assert samples.shape == d.y.shape, 'Unexpected shape of samples.'
+    assert torch.all(samples > -10) and torch.all(samples < 10), \
+        'Unexpected samples encountered. Network initialization or ' \
+        'normalization seems broken.'
+
+    with pytest.raises(ValueError):
+        model.sample(d.z, d.x)
+    with pytest.raises(ValueError):
+        model.sample(d.x, d.z, d.z)
+    with pytest.raises(RuntimeError):
+        model.sample(d.x, d.x)
+
+
+def test_forward_pass_for_log_prob_of_nsf(data_setup_nsf_small):
+    """
+    Test the forward pass of flow model for log_prob.
+    """
+
+    d = data_setup_nsf_small
+
+    embedding_net = d.embedding_net_builder(**d.embedding_net_kwargs)
+    flow = d.nde_builder(**d.nde_kwargs)
+    model = FlowWrapper(flow, embedding_net)
+
+    loss = - model(d.y, d.x, d.z)
+    assert list(loss.shape) == [d.batch_size], 'Unexpected output shape.'
+    assert torch.all(loss > 0) and torch.all(loss < 40), \
+        'Unexpected log prob encountered. Network initialization or ' \
+        'normalization seems broken.'
+
     with pytest.raises(ValueError):
         model(d.y, d.z, d.x)
+    with pytest.raises(ValueError):
+        model(d.y, d.x, d.z, d.z)
     with pytest.raises(RuntimeError):
         model(d.y, d.x, d.x)
-    # TODO: check output
 
 
-# TODO: Tests for sampling and backward passes
+def test_backward_pass_for_log_prob_of_nsf(data_setup_nsf_small):
+    """
+    Test the backward pass of flow model for log_prob. This function also
+    checks that conditional sampling improves during training.
+    """
+
+    d = data_setup_nsf_small
+
+    embedding_net = d.embedding_net_builder(**d.embedding_net_kwargs)
+    flow = d.nde_builder(**d.nde_kwargs)
+    model = FlowWrapper(flow, embedding_net)
+    optimizer = optim.Adam(model.parameters(), lr=0.003)
+
+    # Simple train loop. The learned parameters yy are strongly correlated
+    # with the context information d.zz. We check that (i) the loss and (ii)
+    # the posterior samples improve during training.
+    losses = []
+    for idx in range(40):
+        yy = d.yy + 0.02 * torch.rand_like(d.yy)
+        xx = torch.rand_like(d.xx)
+        loss = - torch.mean(model(yy, xx, d.zz))
+        losses.append(loss.detach().item())
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+    samples_n = torch.mean(model.sample(d.xx, d.zz, num_samples=100), axis=1)
+
+    assert losses[-1] < losses[0], 'Loss did not improve in training.'
+    assert torch.mean((torch.abs(samples_n - d.yy) > 0.8).float()) < 0.3, \
+        'Training may not have worked. Check manually that sampling improves.'
