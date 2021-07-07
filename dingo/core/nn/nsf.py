@@ -270,11 +270,11 @@ class FlowWrapper(nn.Module):
                 self.embedding_net, x)
         return self.flow.log_prob(y, x)
 
-    def sample(self, *x):
+    def sample(self, *x, num_samples=1):
         if self.embedding_net is not None:
             x = torchutils.forward_pass_with_unpacked_tuple(
                 self.embedding_net, x)
-        return torch.squeeze(self.flow.sample(1, x))
+        return torch.squeeze(self.flow.sample(num_samples, x))
 
     def forward(self, y, *x):
         return self.log_prob(y, *x)
