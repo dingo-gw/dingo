@@ -135,8 +135,8 @@ class LinearProjectionRB(nn.Module):
             layer.weight.data[n:, k:2 * k] = torch.transpose(V_real, 1, 0)
 
     def forward(self, x):
-        assert x.shape[1:] == (
-            self.num_blocks, self.num_channels, self.num_bins)
+        if x.shape[1:] != (self.num_blocks, self.num_channels, self.num_bins):
+            raise ValueError('Invalid shape for projection layer.')
         out = []
         for ind in range(self.num_blocks):
             out.append(self.layers[ind](x[:, ind, ...].flatten(start_dim=1)))
