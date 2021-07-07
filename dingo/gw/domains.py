@@ -65,6 +65,11 @@ class UniformFrequencyDomain(Domain):
         sample_frequencies = np.linspace(0.0, self._f_max, num=num_bins, endpoint=True, dtype=np.float32)
         return sample_frequencies
 
+    def __getitem__(self, idx):
+        """Slice of uniform frequency grid."""
+        sample_frequencies = self.__call__()
+        return sample_frequencies[idx]
+
     @property
     @lru_cache()
     def frequency_mask(self) -> np.ndarray:
@@ -98,6 +103,16 @@ class UniformFrequencyDomain(Domain):
         self._f_max = f_max
 
     @property
+    def f_min(self) -> float:
+        """The minimum frequency."""
+        return self._f_min
+
+    @property
+    def delta_f(self) -> float:
+        """The frequency spacing of the uniform grid."""
+        return self._delta_f
+
+    @property
     def sampling_rate(self) -> float:
         """The sampling rate of the data."""
         return 2.0 * self._f_max
@@ -105,6 +120,11 @@ class UniformFrequencyDomain(Domain):
     @sampling_rate.setter
     def sampling_rate(self, fs: float):
         self._f_max = fs / 2.0
+
+    @property
+    def duration(self) -> float:
+        """Waveform duration."""
+        return 1.0 / self._delta_f
 
 
 class TimeDomain(Domain):

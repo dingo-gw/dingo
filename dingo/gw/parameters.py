@@ -197,6 +197,8 @@ class GWPriorDict(BBHPriorDict):
         self._check_spin_parameters(key_set)
         self._check_required_parameters(key_set)
         # TODO: add support for (zenith, azimuth) for sky position instead of (ra, dec)
+        # Use bilby.gw.utils.zenith_azimuth_to_ra_dec()
+        # Note that this requires the list of detectors!
 
     @property
     def intrinsic_parameters(self) -> Set:

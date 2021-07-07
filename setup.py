@@ -17,7 +17,7 @@ setup(name='dingo',
       install_requires=[
           'numpy',
           'nflows',
-          'bilby', 'astropy'
+          'bilby', 'astropy', 'lalsuite'
       ],
       classifiers=[
           "Programming Language :: Python :: 3.6",
