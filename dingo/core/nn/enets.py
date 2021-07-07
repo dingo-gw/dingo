@@ -234,7 +234,7 @@ class ModuleMerger(nn.Module):
 
     Module specs
     --------
-        input dimension:    tuple((batch_size, ...), (batch_size, ...), ...)
+        input dimension:    (batch_size, ...), (batch_size, ...), ...
         output dimension:   (batch_size, ?)
     """
 
@@ -251,7 +251,7 @@ class ModuleMerger(nn.Module):
         super(ModuleMerger, self).__init__()
         self.enets = nn.ModuleList(module_list)
 
-    def forward(self, x):
+    def forward(self, *x):
         if len(x) != len(self.enets):
             raise ValueError('Invalid number of input tensors provided.')
         x = [module(xi) for module, xi in zip(self.enets, x)]
@@ -285,7 +285,7 @@ def create_enet_with_projection_layer_and_dense_resnet(
     If added_context = True, the 2-stage embedding network described above is
     merged with an identity mapping via ModuleMerger. Then, the expected input
     is not x with x.shape = (batch_size, num_blocks, num_channels, num_bins),
-    but rather the tuple (x, z), where z is additional context information. The
+    but rather the tuple *(x, z), where z is additional context information. The
     output of the full module is then the concatenation of enet(x) and z. In
     GW use case, this is used to concatenate the applied time shifts z to the
     embedded feature vector of the strain data enet(x).
@@ -296,8 +296,8 @@ def create_enet_with_projection_layer_and_dense_resnet(
         input dimension:    (batch_size, num_blocks, num_channels, num_bins)
         output dimension:   (batch_size, output_dim)
     For added_context == True:
-        input dimension:    ((batch_size, num_blocks, num_channels, num_bins),
-                             (batch_size, N))
+        input dimension:    (batch_size, num_blocks, num_channels, num_bins),
+                            (batch_size, N)
         output dimension:   (batch_size, output_dim + N)
 
     :param input_dims:  tuple
