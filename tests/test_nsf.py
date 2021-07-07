@@ -63,11 +63,11 @@ def data_setup_nsf_small():
         "base_transform_type": "rq-coupling",
     }
     d.embedding_net_kwargs = {
-        'input_dims': (2, 3, 200),
+        'input_dims': (2, 3, 20),
         'n_rb': 10,
         'V_rb_list': None,
         'output_dim': 8,
-        'hidden_dims': [128, 64, 32],
+        'hidden_dims': [32, 16, 8],
         'activation': 'elu',
         'dropout': 0.0,
         'batch_norm': True,
