@@ -217,8 +217,9 @@ def test_forward_pass_of_2stage_enet_with_context(data_setup_rb):
     x = torch.rand((d['batch_size'], *enet_kwargs['input_dims']))
     z = torch.ones((d['batch_size'], 2))
 
-    check_model_forward_pass(enet, [enet_kwargs['output_dim'] + 2], x = (x,z))
+    check_model_forward_pass(enet, [enet_kwargs['output_dim'] + 2], x=(x, z))
 
+    _ = enet(x, z)
     with pytest.raises(ValueError):
         enet(x)
     with pytest.raises(ValueError):
@@ -239,9 +240,10 @@ def test_backward_pass_of_2stage_enet_with_context(data_setup_rb):
     x = torch.rand((d['batch_size'], *enet_kwargs['input_dims']))
     z = torch.ones((d['batch_size'], 2))
 
-    y1, y2 = check_model_backward_pass(enet, x = (x,z))
-    assert torch.all(y1[:,-2:]==1) and torch.all(y2[:,-2:]==1), \
+    y1, y2 = check_model_backward_pass(enet, x=(x, z))
+    assert torch.all(y1[:, -2:] == 1) and torch.all(y2[:, -2:] == 1), \
         'Indentity mapping for additional context is broken.'
+
 
 if __name__ == '__main__':
     pass

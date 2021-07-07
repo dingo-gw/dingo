@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from itertools import chain
+from dingo.core.utils.torchutils import forward_pass_with_unpacked_tuple
 
 
 ########################
@@ -103,7 +104,7 @@ def check_model_forward_pass(model, expected_output_shape, input_shape=None,
         assert input_shape is not None, \
             'input_shape required when x not provided.'
         x = torch.rand((batch_size, *input_shape))
-    y = model(x)
+    y = forward_pass_with_unpacked_tuple(model,x)  # replaces y = model(x)
     # check output shape
     assert y.shape[1:] == (*expected_output_shape,), \
         'Unexpected shape of model output.'
@@ -133,14 +134,14 @@ def check_model_backward_pass(model, input_shape=None, batch_size=100, x=None):
         assert input_shape is not None, \
             'input_shape required when x not provided.'
         x = torch.rand((batch_size, *input_shape))
-    y_0 = model(x)
+    y_0 = forward_pass_with_unpacked_tuple(model, x) # replaces y_0 = model(x)
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     loss_fn = nn.L1Loss()
     target = torch.rand_like(y_0)
     loss_before = loss_fn(y_0, target)
     loss_before.backward()
     optimizer.step()
-    y_1 = model(x)
+    y_1 = forward_pass_with_unpacked_tuple(model, x) # replaces y_1 = model(x)
     loss_after = loss_fn(y_1, target)
     assert loss_after < loss_before, \
         'Loss does not decrease with optimizer step.'
