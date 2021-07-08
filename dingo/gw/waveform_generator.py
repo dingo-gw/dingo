@@ -1,4 +1,6 @@
 import numpy as np
+import math
+import numbers
 from typing import Dict, List, Tuple
 import warnings
 
@@ -276,6 +278,7 @@ class StandardizeParameters(Transform):
     tr_dist.sample()
     ```
     """
+    bijective = True
     domain = constraints.real
     codomain = constraints.real
 
@@ -303,29 +306,31 @@ class StandardizeParameters(Transform):
     def _inverse(self, y):
         return self.mu + y * self.std
 
-    # def log_abs_det_jacobian(self, x, y):
-    #     # FIXME: implement
-    #     shape = x.shape
-    #     scale = self.scale
-    #     if isinstance(scale, numbers.Real):
-    #         result = torch.full_like(x, math.log(abs(scale)))
-    #     else:
-    #         result = torch.abs(scale).log()
-    #     if self.event_dim:
-    #         result_size = result.size()[:-self.event_dim] + (-1,)
-    #         result = result.view(result_size).sum(-1)
-    #         shape = shape[:-self.event_dim]
-    #     return result.expand(shape)
+    def log_abs_det_jacobian(self, x, y):
+        shape = x.shape
+        scale = 1.0 / self.std
+        if isinstance(scale, numbers.Real):
+            result = torch.full_like(x, math.log(abs(scale)))
+        else:
+            result = torch.abs(scale).log()
+        if self.event_dim:
+            result_size = result.size()[:-self.event_dim] + (-1,)
+            result = result.view(result_size).sum(-1)
+            shape = shape[:-self.event_dim]
+        return result.expand(shape)
 
 
 class StandardizedDistribution(TransformedDistribution):
     """Creates a standardized distribution from a base distribution
     and its (estimated) mean `mu` and standard deviation vector `std`.
     """
+    arg_constraints = {'mu': constraints.real, 'std': constraints.positive}
     support = constraints.real
     has_rsample = True
 
     def __init__(self, base_dist, mu, std, validate_args=None):
+        self.mu = mu
+        self.std = std
         super(StandardizedDistribution, self).__init__(base_dist,
                                                        StandardizeParameters(mu, std),
                                                        validate_args=validate_args)
@@ -337,7 +342,7 @@ class StandardizedDistribution(TransformedDistribution):
     # By definition we will have approximately zero mean and unit variance if
     # the input mu and std are accurate.
     # Could only compute the actual means and variance numerically from samples,
-    # or if we knew what the base distribution is and
+    # or if we knew what the base distribution is
     # @property
     # def mean(self):
     #     return
