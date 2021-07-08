@@ -198,6 +198,7 @@ class GWPriorDict(BBHPriorDict):
         self._check_required_parameters(key_set)
         # TODO: add support for (zenith, azimuth) for sky position instead of (ra, dec)
         # Use bilby.gw.utils.zenith_azimuth_to_ra_dec()
+        # TestSkyFrameConversion()
         # Note that this requires the list of detectors!
 
     @property

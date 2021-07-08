@@ -13,6 +13,7 @@ import lal
 import lalsimulation as LS
 
 from bilby.gw.conversion import convert_to_lal_binary_black_hole_parameters, bilby_to_lalsimulation_spins
+from bilby.gw.detector import InterferometerList
 
 from dingo.gw.domains import Domain
 from dingo.gw.parameters import GWPriorDict
@@ -71,7 +72,7 @@ class WaveformGenerator:
 
 
     def generate_hplus_hcross(self, parameters: Dict[str, float],
-                              catch_waveform_errors=True) -> Tuple[np.ndarray, np.ndarray]:
+                              catch_waveform_errors=True) -> Dict[str, np.ndarray]:
         """Generate GW polarizations (h_plus, h_cross).
 
         Parameters
@@ -125,7 +126,7 @@ class WaveformGenerator:
             raise ValueError(f'Unsupported domain type {D.domain_type}.')
 
         try:
-            h_plus, h_cross = wf_generator(parameters_lal)
+            wf_dict = wf_generator(parameters_lal)
         except Exception as e:
             if not catch_waveform_errors:
                 raise
@@ -138,7 +139,7 @@ class WaveformGenerator:
                 else:
                     raise
 
-        return h_plus, h_cross
+        return wf_dict
 
     def _convert_parameters_to_lal_frame(self, parameter_dict: Dict, lal_params=None):
         """Convert to lal source frame parameters
@@ -239,8 +240,7 @@ class WaveformGenerator:
         time_shift = np.exp(-1j * 2 * np.pi * dt * frequency_array)
         h_plus *= time_shift
         h_cross *= time_shift
-
-        return h_plus, h_cross
+        return {'h_plus': h_plus, 'h_cross': h_cross}
 
 
     def generate_TD_waveform(self, parameters_lal) -> Tuple[np.ndarray, np.ndarray]:
@@ -255,7 +255,9 @@ class WaveformGenerator:
         # TODO:
         #  * do we need to do anything else
         #  * put preferred way of calling EOB precessing models
-        return hp.data.data, hc.data.data
+        h_plus = hp.data.data,
+        h_cross = hc.data.data
+        return {'h_plus': h_plus, 'h_cross': h_cross}
 
 
 
@@ -351,7 +353,7 @@ class StandardizedDistribution(TransformedDistribution):
     #     return
 
 
-class RandomProjectToDetectors(object):
+class RandomProjectToDetectors:
     """Given a sample waveform (in terms of its polarizations, and intrinsic parameters),
     draw a sample from the extrinsic parameter prior distribution and project on the
     given detector network. Return the strain (FD?)
@@ -360,35 +362,51 @@ class RandomProjectToDetectors(object):
     (This is an example of a pytorch-like transform.)
     """
 
-    def __init__(self, domain: Domain, extrinsic_prior: GWPriorDict):
+    def __init__(self, domain: Domain, extrinsic_prior: GWPriorDict, ifos: InterferometerList):
 
         self.domain = domain
         self.extrinsic_prior = extrinsic_prior
+        self.ifos = ifos
 
-    def __call__(self, sample: Dict):
+    def __call__(self, waveform_polarizations: Dict, wf_parameters: Dict):
 
-        extrinsic_parameters = self.extrinsic_prior.sample()
-        return self.project_to_detectors(sample['hplus'], sample['hcross'],
-                                         sample['parameters'], extrinsic_parameters)
+        extrinsic_parameters = self.extrinsic_prior.sample_extrinsic()
+        h_plus, h_cross = waveform_polarizations['h_plus'], waveform_polarizations['h_cross']
+        return self.project_to_detectors(h_plus, h_cross, wf_parameters, extrinsic_parameters)
 
-    def project_to_detectors(self, hplus, hcross, old_parameters, new_extrinsic_parameters):
-        # FIXME: need info about detector network: list or dict of Detector objects
+    def project_to_detectors(self, h_plus, h_cross, wf_parameters, extrinsic_parameters):
+        # ifos[0].antenna_response(ra, dec, time, psi, mode)
+        waveform_polarizations = {'plus': h_plus, 'cross': h_cross}
+        # Uses
+        # extrinsic_parameters['ra'],
+        # extrinsic_parameters['dec'],
+        # extrinsic_parameters['geocent_time'],
+        # extrinsic_parameters['psi']
+        # FIXME: may need to combine intrinsic wf_parameters and extrinsic_parameters to get this
 
-        pass
+        # get_detector_response calls:
+        #   antenna_response()
+        #   for i in polarizations:
+        #       h_ifo_i *= det_response
+        #   h_ifo = sum(h_ifo_i.values())
+        #   time_delay_from_geocenter
+        #   dt = dt_geocent + time_shift
+        #   h_ifo[mask] *= np.exp(-1j * 2 * np.pi * dt * frequency_array[mask])
+        #
+        #   To have more control about the grid we could just call this directly
+        for ifo in ifos:
+            ifo.strain_data.frequency_domain_strain = ifo.get_detector_response(
+                waveform_polarizations, extrinsic_parameters)
+        return [ifo.strain_data.frequency_domain_strain for ifo in ifos]
+
         # see WaveformDataset.get_detector_waveforms()
         # Given ra, dec, psi, self.ref_time and a list of detector objects
         # loop over detectors, and compute h+ * F+ + hx + Fx and timeshift at detector
-        # code is long and needs to be split up - do we need all cases?
 
         # Detector objects:
         # see WaveformDataset.init_detectors()
         # So far using pycbc.detector.Detector -- get rid of this dependency? Look at structure of this class and what is used in existing code
 
-    # Which other methods should this class have?
-
-    # WaveformDataset._generate_whitened_waveform()
-    #  - polarizations: WaveformGenerator
-    #  - whitening
 
 
 
@@ -399,15 +417,33 @@ if __name__ == "__main__":
 
     approximant = 'IMRPhenomPv2'
     f_min = 20.0
-    domain = UniformFrequencyDomain(f_min=f_min, f_max=4096.0, delta_f=1.0/4.0, window_factor=1.0)
+    f_max = 4096.0
+    domain = UniformFrequencyDomain(f_min=f_min, f_max=f_max, delta_f=1.0/4.0, window_factor=1.0)
     parameters = {'chirp_mass': 34.0, 'mass_ratio': 0.35, 'chi_1': 0.2, 'chi_2': 0.1, 'theta_jn': 1.57, 'f_ref': 20.0, 'phase': 0.0, 'luminosity_distance': 1.0}
     WG = WaveformGenerator(approximant, domain)
-    hp, hc = WG.generate_hplus_hcross(parameters)
-    print(hp)
+    waveform_polarizations = WG.generate_hplus_hcross(parameters)
+    print(waveform_polarizations['h_plus'])
 
-    plt.loglog(domain(), np.abs(hp))
-    plt.xlim([f_min/2, 2048.0])
-    plt.axvline(f_min, c='gray', ls='--')
+    # plt.loglog(domain(), np.abs(waveform_polarizations['h_plus']))
+    # plt.xlim([f_min/2, 2048.0])
+    # plt.axvline(f_min, c='gray', ls='--')
+    # plt.show()
+
+
+    f_min = 20.0
+    domain = UniformFrequencyDomain(f_min=f_min, f_max=4096.0, delta_f=1.0/4.0, window_factor=1.0)
+    priors = GWPriorDict()
+    ifos = InterferometerList(["H1", "L1"])
+    sampling_frequency = 2*f_max
+    duration = 4.0
+    #ifos.set_strain_data_from_power_spectral_densities(sampling_frequency, duration, start_time=0)
+    ifos.set_strain_data_from_zero_noise(sampling_frequency, duration, start_time=0)
+    rp_det = RandomProjectToDetectors(domain, priors, ifos)
+    strain_list = rp_det(waveform_polarizations, parameters)
+    strain = strain_list[0]
+    idx = np.nonzero(strain)
+    print(strain[idx])
+    ifo = ifos[0]
+    plt.loglog(domain(), np.abs(waveform_polarizations['h_plus'] + 1j*waveform_polarizations['h_cross']))
+    plt.loglog(ifo.strain_data.frequency_array[idx], np.abs(strain[idx]))
     plt.show()
-
-

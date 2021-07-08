@@ -24,8 +24,9 @@ def test_waveform_generator_FD(uniform_fd_domain, aligned_spin_wf_parameters):
     parameters, approximant = aligned_spin_wf_parameters
 
     wf_gen = WaveformGenerator(approximant, domain)
-    hp, hc = wf_gen.generate_hplus_hcross(parameters)
-    assert len(hp) == len(domain)
+    wf_dict = wf_gen.generate_hplus_hcross(parameters)
+
+    assert len(wf_dict['h_plus']) == len(domain)
     assert domain()[domain.frequency_mask][0] == domain.f_min
 
 
