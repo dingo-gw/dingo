@@ -2,6 +2,11 @@ import numpy as np
 from typing import Dict, List, Tuple
 import warnings
 
+import torch
+from torch.distributions.transforms import Transform
+from torch.distributions import constraints
+from torch.distributions.transformed_distribution import TransformedDistribution
+
 import lal
 import lalsimulation as LS
 
@@ -253,18 +258,94 @@ class WaveformGenerator:
 
 
 # TODO:
-#  * Inherit from torch.distributions.transforms.Transform
-#  * implement one or both of _call or _inverse
-#  * if bijective=True, also implement log_abs_det_jacobian
-#
-# Capabilities:
-#  * can define a transform of a torch.distribution
-#  * can compose multiple transforms
-#  * can sample from the transformed distribution
-class StandardizeParameters:
-    pass
-    # standardize_parameters
-    # Need to save this info -- separate transform?
+#  * waveform_generator.WaveformDataset._compute_parameter_statistics()
+#    computes mean and stdev analytically for known distributions which
+#    is more accurate than computing sample means and stdevs
+
+
+class StandardizeParameters(Transform):
+    """Transform via the mapping (x - mu) / std.
+
+    This is just an affine transformation, but the syntax is more intuitive
+    compared to `AffineTransform(loc=-mean/std, scale=1.0/std)`.
+
+    How to transform a given base_dist derived from torch.distributions.Distribution:
+    ```
+    transforms = [StandardizeParameters(mu=mean, std=std)]
+    tr_dist = td.TransformedDistribution(base_dist, transforms)
+    tr_dist.sample()
+    ```
+    """
+    domain = constraints.real
+    codomain = constraints.real
+
+    def __init__(self, mu: torch.tensor, std: torch.tensor, cache_size=0):
+        """
+        Parameters
+        ----------
+        mu : torch.tensor()
+            The (estimated) 1D tensor of the means of a base distribution
+        std : torch.tensor()
+            The (estimated) 1D tensor of the standard deviations of a base
+            distribution
+        cache_size : int
+            Size of cache. If zero, no caching is done. If one, the latest
+            single value is cached. Only 0 and 1 are supported.
+        """
+        super(StandardizeParameters, self).__init__(cache_size=cache_size)
+        self.mu = mu
+        self.std = std
+
+    def _call(self, x):
+        print('in: mean, std:', torch.mean(x, dim=0), torch.std(x, dim=0))
+        y = (x - self.mu) / self.std
+        print('out: mean, std:', torch.mean(y, dim=0), torch.std(y, dim=0))
+        return y
+
+    def _inverse(self, y):
+        return self.mu + y * self.std
+
+    # def log_abs_det_jacobian(self, x, y):
+    #     # FIXME: implement
+    #     shape = x.shape
+    #     scale = self.scale
+    #     if isinstance(scale, numbers.Real):
+    #         result = torch.full_like(x, math.log(abs(scale)))
+    #     else:
+    #         result = torch.abs(scale).log()
+    #     if self.event_dim:
+    #         result_size = result.size()[:-self.event_dim] + (-1,)
+    #         result = result.view(result_size).sum(-1)
+    #         shape = shape[:-self.event_dim]
+    #     return result.expand(shape)
+
+
+class StandardizedDistribution(TransformedDistribution):
+    """Creates a standardized distribution from a base distribution
+    and its (estimated) mean `mu` and standard deviation vector `std`.
+    """
+    support = constraints.real
+    has_rsample = True
+
+    def __init__(self, base_dist, mu, std, validate_args=None):
+        super(StandardizedDistribution, self).__init__(base_dist,
+                                                       StandardizeParameters(mu, std),
+                                                       validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(StandardizedDistribution, _instance)
+        return super(StandardizedDistribution, self).expand(batch_shape, _instance=new)
+
+    # By definition we will have approximately zero mean and unit variance if
+    # the input mu and std are accurate.
+    # Could only compute the actual means and variance numerically from samples,
+    # or if we knew what the base distribution is and
+    # @property
+    # def mean(self):
+    #     return
+    # @property
+    # def variance(self):
+    #     return
 
 
 class RandomProjectToDetectors(object):
