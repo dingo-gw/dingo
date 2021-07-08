@@ -297,9 +297,7 @@ class StandardizeParameters(Transform):
         self.std = std
 
     def _call(self, x):
-        print('in: mean, std:', torch.mean(x, dim=0), torch.std(x, dim=0))
         y = (x - self.mu) / self.std
-        print('out: mean, std:', torch.mean(y, dim=0), torch.std(y, dim=0))
         return y
 
     def _inverse(self, y):
