@@ -35,6 +35,20 @@ class Domain(ABC):
         #  with (waveform) data, whitening and adding noise. Is this the best place to define this?
         pass
 
+    @property
+    def sampling_rate(self) -> float:
+        """The sampling rate of the data [Hz]."""
+        pass
+
+    @property
+    def f_max(self) -> float:
+        """The maximum frequency [Hz] is set to half the sampling rate."""
+
+    @property
+    def duration(self) -> float:
+        """Waveform duration in seconds."""
+        pass
+
 
 class UniformFrequencyDomain(Domain):
     """Defines the physical domain on which the data of interest live.
@@ -92,10 +106,9 @@ class UniformFrequencyDomain(Domain):
         return np.sqrt(self._window_factor) / np.sqrt(4.0 * self._delta_f)
 
 
-    # TODO: Do we want f_max to have a setter and getter? Any others?
     @property
     def f_max(self) -> float:
-        """The maximum frequency is set to half the sampling rate."""
+        """The maximum frequency [Hz] is set to half the sampling rate."""
         return self._f_max
 
     @f_max.setter
@@ -104,17 +117,17 @@ class UniformFrequencyDomain(Domain):
 
     @property
     def f_min(self) -> float:
-        """The minimum frequency."""
+        """The minimum frequency [Hz]."""
         return self._f_min
 
     @property
     def delta_f(self) -> float:
-        """The frequency spacing of the uniform grid."""
+        """The frequency spacing of the uniform grid [Hz]."""
         return self._delta_f
 
     @property
     def sampling_rate(self) -> float:
-        """The sampling rate of the data."""
+        """The sampling rate of the data [Hz]."""
         return 2.0 * self._f_max
 
     @sampling_rate.setter
@@ -123,7 +136,7 @@ class UniformFrequencyDomain(Domain):
 
     @property
     def duration(self) -> float:
-        """Waveform duration."""
+        """Waveform duration in seconds."""
         return 1.0 / self._delta_f
 
 
