@@ -200,41 +200,6 @@ class RandomProjectToDetectors:
         # We require that extrinsic_parameters includes ra, dec, geocent_time, psi
         return self.detector_network.project_onto_network(wf_dict, extrinsic_parameters)
 
-    #
-    # def project_to_detectors(self, h_plus, h_cross, wf_parameters, extrinsic_parameters):
-    #     # ifos[0].antenna_response(ra, dec, time, psi, mode)
-    #     waveform_polarizations = {'plus': h_plus, 'cross': h_cross}
-    #     # Uses
-    #     # extrinsic_parameters['ra'],
-    #     # extrinsic_parameters['dec'],
-    #     # extrinsic_parameters['geocent_time'],
-    #     # extrinsic_parameters['psi']
-    #
-    #
-    #     # get_detector_response calls:
-    #     #   antenna_response()
-    #     #   for i in polarizations:
-    #     #       h_ifo_i *= det_response
-    #     #   h_ifo = sum(h_ifo_i.values())
-    #     #   time_delay_from_geocenter
-    #     #   dt = dt_geocent + time_shift
-    #     #   h_ifo[mask] *= np.exp(-1j * 2 * np.pi * dt * frequency_array[mask])
-    #     #
-    #     #   To have more control about the grid we could just call this directly
-    #     for ifo in ifos:
-    #         ifo.strain_data.frequency_domain_strain = ifo.get_detector_response(
-    #             waveform_polarizations, extrinsic_parameters)
-    #     return [ifo.strain_data.frequency_domain_strain for ifo in ifos]
-    #
-    #     # see WaveformDataset.get_detector_waveforms()
-    #     # Given ra, dec, psi, self.ref_time and a list of detector objects
-    #     # loop over detectors, and compute h+ * F+ + hx + Fx and timeshift at detector
-    #
-    #     # Detector objects:
-    #     # see WaveformDataset.init_detectors()
-    #     # So far using pycbc.detector.Detector -- get rid of this dependency? Look at structure of this class and what is used in existing code
-    #
-
 
 if __name__ == "__main__":
     """A visual test."""
@@ -249,32 +214,6 @@ if __name__ == "__main__":
     parameters = {'chirp_mass': 34.0, 'mass_ratio': 0.35, 'chi_1': 0.2, 'chi_2': 0.1, 'theta_jn': 1.57, 'f_ref': 20.0, 'phase': 0.0, 'luminosity_distance': 1.0}
     WG = WaveformGenerator(approximant, domain)
     waveform_polarizations = WG.generate_hplus_hcross(parameters)
-    # print(waveform_polarizations['h_plus'])
-
-    # plt.loglog(domain(), np.abs(waveform_polarizations['h_plus']))
-    # plt.xlim([f_min/2, 2048.0])
-    # plt.axvline(f_min, c='gray', ls='--')
-    # plt.show()
-
-
-    # f_min = 20.0
-    # domain = UniformFrequencyDomain(f_min=f_min, f_max=4096.0, delta_f=1.0/4.0, window_factor=1.0)
-    # priors = GWPriorDict()
-    # ifos = InterferometerList(["H1", "L1"])
-    # sampling_frequency = 2*f_max
-    # duration = 4.0
-    #ifos.set_strain_data_from_power_spectral_densities(sampling_frequency, duration, start_time=0)
-    # ifos.set_strain_data_from_zero_noise(sampling_frequency, duration, start_time=0)
-    # rp_det = RandomProjectToDetectors(domain, priors, ifos)
-    # strain_list = rp_det(waveform_polarizations, parameters)
-    # strain = strain_list[0]
-    # idx = np.nonzero(strain)
-    # print(strain[idx])
-    # ifo = ifos[0]
-    # plt.loglog(domain(), np.abs(waveform_polarizations['h_plus'] + 1j*waveform_polarizations['h_cross']))
-    # plt.loglog(ifo.strain_data.frequency_array[idx], np.abs(strain[idx]))
-    # plt.show()
-
 
     det_network = DetectorNetwork(["H1", "L1"], domain, start_time=0)
     priors = GWPriorDict()
