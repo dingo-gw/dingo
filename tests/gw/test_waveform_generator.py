@@ -1,5 +1,5 @@
-from dingo.gw.domains import UniformFrequencyDomain, TimeDomain
-from dingo.gw.waveform_generator import WaveformGenerator, StandardizedDistribution
+from dingo.gw.domains import UniformFrequencyDomain
+from dingo.gw.waveform_generator import WaveformGenerator, StandardizeParameters
 import pytest
 import numpy as np
 import torch
@@ -34,11 +34,13 @@ def test_standardized_distribution():
     """Check standardization of samples from a multi-normal distribution."""
     mean_ = torch.tensor([3.0, 2.0, 8.0])
     std_ = torch.tensor([2.0, 4.0, 7.0])
-    base_dist = torch.distributions.Normal(mean_, std_)
-
-    std_dist = StandardizedDistribution(base_dist, mean_, std_)
-    Y2 = std_dist.sample((100000,))
+    n_samples = 100000
+    parameters = torch.distributions.Normal(mean_, std_).sample((n_samples,)).numpy()
+    samples = {'parameters': parameters, 'waveform': None}
+    tr = StandardizeParameters(mean_.numpy(), std_.numpy())
+    samples_tr = tr(samples)
+    parameters_tr = samples_tr['parameters']
 
     tol = 0.01
-    assert np.all(np.abs(torch.mean(Y2, dim=0).numpy()) < tol)
-    assert np.all(np.abs(torch.std(Y2, dim=0).numpy()) - np.ones(3) < tol)
+    assert np.all(np.abs(np.mean(parameters_tr, axis=0)) < tol)
+    assert np.all(np.abs(np.std(parameters_tr, axis=0)) - np.ones(3) < tol)

@@ -264,99 +264,60 @@ class WaveformGenerator:
 #    computes mean and stdev analytically for known distributions which
 #    is more accurate than computing sample means and stdevs
 
-
-class StandardizeParameters(Transform):
-    """Transform via the mapping (x - mu) / std.
-
-    This is just an affine transformation, but the syntax is more intuitive
-    compared to `AffineTransform(loc=-mean/std, scale=1.0/std)`.
-
-    How to transform a given base_dist derived from torch.distributions.Distribution:
-    ```
-    transforms = [StandardizeParameters(mu=mean, std=std)]
-    tr_dist = td.TransformedDistribution(base_dist, transforms)
-    tr_dist.sample()
-    ```
+class StandardizeParameters:
     """
-    bijective = True
-    domain = constraints.real
-    codomain = constraints.real
-
-    def __init__(self, mu: torch.tensor, std: torch.tensor, cache_size=0):
+    Standardize parameters according to the transform (x - mu) / std.
+    """
+    def __init__(self, mu: np.ndarray, std: np.ndarray):
         """
+        Initialize the standardization transform with means
+        and standard deviations for each parameter
+
         Parameters
         ----------
         mu : torch.tensor()
-            The (estimated) 1D tensor of the means of a base distribution
+            The (estimated) 1D tensor of the means
         std : torch.tensor()
-            The (estimated) 1D tensor of the standard deviations of a base
-            distribution
-        cache_size : int
-            Size of cache. If zero, no caching is done. If one, the latest
-            single value is cached. Only 0 and 1 are supported.
+            The (estimated) 1D tensor of the standard deviations
         """
-        super(StandardizeParameters, self).__init__(cache_size=cache_size)
         self.mu = mu
         self.std = std
 
-    def _call(self, x):
+    def __call__(self, samples: Dict[str, np.ndarray]):
+        """Standardize the parameter array according to the
+        specified means and standard deviations.
+
+        Parameters
+        ----------
+        samples: Dict[str, np.ndarray]
+            A dictionary with keys 'parameters', 'waveform'.
+
+        FIXME: Check: Only the parameters get transformed.
+        """
+        x = samples['parameters']
         y = (x - self.mu) / self.std
-        return y
+        return {'parameters': y, 'waveform': samples['waveform']}
 
-    def _inverse(self, y):
-        return self.mu + y * self.std
+    def inverse(self, samples: Dict[str, torch.tensor]):
+        """De-standardize the parameter array according to the
+        specified means and standard deviations.
 
-    def log_abs_det_jacobian(self, x, y):
-        shape = x.shape
-        scale = 1.0 / self.std
-        if isinstance(scale, numbers.Real):
-            result = torch.full_like(x, math.log(abs(scale)))
-        else:
-            result = torch.abs(scale).log()
-        if self.event_dim:
-            result_size = result.size()[:-self.event_dim] + (-1,)
-            result = result.view(result_size).sum(-1)
-            shape = shape[:-self.event_dim]
-        return result.expand(shape)
+        Parameters
+        ----------
+        samples: Dict[str, np.ndarray]
+            A dictionary with keys 'parameters', 'waveform'.
 
-
-class StandardizedDistribution(TransformedDistribution):
-    """Creates a standardized distribution from a base distribution
-    and its (estimated) mean `mu` and standard deviation vector `std`.
-    """
-    arg_constraints = {'mu': constraints.real, 'std': constraints.positive}
-    support = constraints.real
-    has_rsample = True
-
-    def __init__(self, base_dist, mu, std, validate_args=None):
-        self.mu = mu
-        self.std = std
-        super(StandardizedDistribution, self).__init__(base_dist,
-                                                       StandardizeParameters(mu, std),
-                                                       validate_args=validate_args)
-
-    def expand(self, batch_shape, _instance=None):
-        new = self._get_checked_instance(StandardizedDistribution, _instance)
-        return super(StandardizedDistribution, self).expand(batch_shape, _instance=new)
-
-    # By definition we will have approximately zero mean and unit variance if
-    # the input mu and std are accurate.
-    # Could only compute the actual means and variance numerically from samples,
-    # or if we knew what the base distribution is
-    # @property
-    # def mean(self):
-    #     return
-    # @property
-    # def variance(self):
-    #     return
-
-
+        FIXME: Check: Only the parameters get transformed.
+        """
+        y = samples['parameters']
+        x = self.mu + y * self.std
+        return {'parameters': x, 'waveform': samples['waveform']}
 
 
 
 if __name__ == "__main__":
     """A visual test."""
-    from dingo.gw.domains import Domain, UniformFrequencyDomain, TimeDomain
+    from dingo.gw.domains import Domain, UniformFrequencyDomain
     import matplotlib.pyplot as plt
 
     approximant = 'IMRPhenomPv2'
