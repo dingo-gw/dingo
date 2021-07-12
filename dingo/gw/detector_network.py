@@ -7,7 +7,6 @@ from dingo.gw.domains import Domain
 from dingo.gw.parameters import GWPriorDict
 
 
-
 class DetectorNetwork:
     """A wrapper class around bilby's Interferometer and InterferometerList
 
@@ -35,15 +34,6 @@ class DetectorNetwork:
             raise ValueError('domain should be an instance of a subclass of Domain, but got', type(domain))
         else:
             self.domain = domain
-
-        # Initialize strain data to zero
-        # Only support Domains which define f_max and duration
-        sampling_frequency = 2*domain.f_max
-        self.ifos.set_strain_data_from_zero_noise(sampling_frequency, domain.duration,
-                                             start_time=start_time)
-        # Note: Could also set strain data from a PSD if needed by calling
-        # ifos.set_strain_data_from_power_spectral_densities()
-
 
     def detector_antenna_response(self, ifo: Interferometer,
                                   parameters: Dict[str, float],
@@ -73,7 +63,6 @@ class DetectorNetwork:
         return ifo.antenna_response(parameters['ra'], parameters['dec'],
                                     parameters['geocent_time'],
                                     parameters['psi'], mode)
-
 
     def project_onto_detector(self, ifo: Interferometer,
                               waveform_polarizations: Dict[str, np.ndarray],
@@ -115,7 +104,7 @@ class DetectorNetwork:
         dt_geocent = parameters['geocent_time'] - ifo.strain_data.start_time
         dt = dt_geocent + time_shift
 
-        strain[mask] = strain[mask] * np.exp(-1j * 2*np.pi * dt * frequency_array[mask])
+        strain[mask] = strain[mask] * np.exp(-1j * 2 * np.pi * dt * frequency_array[mask])
 
         # Apply calibration correction if the calibration model has been set
         # By default, there is no correction.
@@ -125,9 +114,8 @@ class DetectorNetwork:
 
         return strain
 
-
     def project_onto_network(self, waveform_polarizations: Dict[str, np.ndarray],
-                                   parameters: Dict[str, float]) -> Dict[str, np.ndarray]:
+                             parameters: Dict[str, float]) -> Dict[str, np.ndarray]:
         """
         Project waveform polarizations onto the GW network
 
@@ -146,7 +134,7 @@ class DetectorNetwork:
         Return a dictionary of the strains over the detectors in the network.
         """
         return {ifo.name: self.project_onto_detector(ifo, waveform_polarizations, parameters)
-                    for ifo in self.ifos}
+                for ifo in self.ifos}
 
 
 class RandomProjectToDetectors:
@@ -210,8 +198,9 @@ if __name__ == "__main__":
     approximant = 'IMRPhenomPv2'
     f_min = 20.0
     f_max = 512.0
-    domain = UniformFrequencyDomain(f_min=f_min, f_max=f_max, delta_f=1.0/4.0, window_factor=1.0)
-    parameters = {'chirp_mass': 34.0, 'mass_ratio': 0.35, 'chi_1': 0.2, 'chi_2': 0.1, 'theta_jn': 1.57, 'f_ref': 20.0, 'phase': 0.0, 'luminosity_distance': 1.0}
+    domain = UniformFrequencyDomain(f_min=f_min, f_max=f_max, delta_f=1.0 / 4.0, window_factor=1.0)
+    parameters = {'chirp_mass': 34.0, 'mass_ratio': 0.35, 'chi_1': 0.2, 'chi_2': 0.1, 'theta_jn': 1.57, 'f_ref': 20.0,
+                  'phase': 0.0, 'luminosity_distance': 1.0}
     WG = WaveformGenerator(approximant, domain)
     waveform_polarizations = WG.generate_hplus_hcross(parameters)
 
@@ -220,10 +209,10 @@ if __name__ == "__main__":
     rp_det = RandomProjectToDetectors(det_network, priors)
     strain_dict = rp_det(waveform_polarizations, parameters)
     print(strain_dict)
-    plt.loglog(domain(), np.abs(waveform_polarizations['h_plus'] + 1j*waveform_polarizations['h_cross']), '--', label='hp + i*hx')
+    plt.loglog(domain(), np.abs(waveform_polarizations['h_plus'] + 1j * waveform_polarizations['h_cross']), '--',
+               label='hp + i*hx')
     for name, strain in strain_dict.items():
         plt.loglog(domain(), np.abs(strain), label=name)
     plt.legend()
-    plt.xlim([domain.f_min/2, domain.f_max])
+    plt.xlim([domain.f_min / 2, domain.f_max])
     plt.show()
-

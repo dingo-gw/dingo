@@ -53,9 +53,3 @@ def test_random_project_to_detectors(generate_waveform_polarizations):
     assert len(strain_dict) == len(ifo_list)
     assert len(list(strain_dict.values())[0]) == len(domain)
 
-    ifo = det_network.ifos[0]
-    assert np.allclose(ifo.strain_data.frequency_array,
-                       domain())
-    assert np.allclose(ifo.strain_data.frequency_array[ifo.strain_data.frequency_mask],
-                       domain()[domain.frequency_mask])
-
