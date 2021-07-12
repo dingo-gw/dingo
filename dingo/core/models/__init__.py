@@ -1,0 +1,1 @@
+from dingo.core.models.posterior_model import PosteriorModel
