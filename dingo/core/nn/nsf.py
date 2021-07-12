@@ -205,8 +205,8 @@ class FlowWrapper(nn.Module):
         :param embedding_net: nn.Module
         """
         super(FlowWrapper, self).__init__()
-        self.flow = flow
         self.embedding_net = embedding_net
+        self.flow = flow
 
     def log_prob(self, y, *x):
         if self.embedding_net is not None:
