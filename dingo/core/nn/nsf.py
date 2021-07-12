@@ -187,6 +187,43 @@ def create_transform(num_flow_steps: int,
     return transform
 
 
+class FlowWrapper(nn.Module):
+    """
+    This class wraps the neural spline flow. It is required for multiple
+    reasons. (i) some embedding networks take tuples as input, which is not
+    supported by the nflows package. (ii) paralellization across multiple
+    GPUs requires a forward method, but the relevant flow method for training
+    is log_prob.
+    """
+
+    def __init__(self,
+                 flow: flows.base.Flow,
+                 embedding_net: nn.Module = None):
+        """
+
+        :param flow: flows.base.Flow
+        :param embedding_net: nn.Module
+        """
+        super(FlowWrapper, self).__init__()
+        self.flow = flow
+        self.embedding_net = embedding_net
+
+    def log_prob(self, y, *x):
+        if self.embedding_net is not None:
+            x = torchutils.forward_pass_with_unpacked_tuple(
+                self.embedding_net, x)
+        return self.flow.log_prob(y, x)
+
+    def sample(self, *x, num_samples=1):
+        if self.embedding_net is not None:
+            x = torchutils.forward_pass_with_unpacked_tuple(
+                self.embedding_net, x)
+        return torch.squeeze(self.flow.sample(num_samples, x))
+
+    def forward(self, y, *x):
+        return self.log_prob(y, *x)
+
+
 def create_nsf_model(input_dim: int,
                      context_dim: int,
                      num_flow_steps: int,
@@ -243,41 +280,26 @@ def create_nsf_model(input_dim: int,
     return flow
 
 
-class FlowWrapper(nn.Module):
+def create_nsf_with_rb_projection_embedding_net(nsf_kwargs: dict,
+                                                embedding_net_kwargs: dict
+                                                ):
     """
-    This class wraps the neural spline flow. It is required for multiple
-    reasons. (i) some embedding networks take tuples as input, which is not
-    supported by the nflows package. (ii) paralellization across multiple
-    GPUs requires a forward method, but the relevant flow method for training
-    is log_prob.
+    Builds a neural spline flow with an embedding network that consists of a
+    reduced basis projection followed by a residual network.
+    with a reduced basis
+
+    :param nsf_kwargs: dict
+        kwargs for neural spline flow
+    :param embedding_net_kwargs:
+        kwargs for emebedding network
+    :return: nn.Module
+        neural spline flow model
     """
-
-    def __init__(self,
-                 flow: flows.base.Flow,
-                 embedding_net: nn.Module = None):
-        """
-
-        :param flow: flows.base.Flow
-        :param embedding_net: nn.Module
-        """
-        super(FlowWrapper, self).__init__()
-        self.flow = flow
-        self.embedding_net = embedding_net
-
-    def log_prob(self, y, *x):
-        if self.embedding_net is not None:
-            x = torchutils.forward_pass_with_unpacked_tuple(
-                self.embedding_net, x)
-        return self.flow.log_prob(y, x)
-
-    def sample(self, *x, num_samples=1):
-        if self.embedding_net is not None:
-            x = torchutils.forward_pass_with_unpacked_tuple(
-                self.embedding_net, x)
-        return torch.squeeze(self.flow.sample(num_samples, x))
-
-    def forward(self, y, *x):
-        return self.log_prob(y, *x)
+    embedding_net = create_enet_with_projection_layer_and_dense_resnet(
+        **embedding_net_kwargs)
+    flow = create_nsf_model(**nsf_kwargs)
+    model = FlowWrapper(flow, embedding_net)
+    return model
 
 
 if __name__ == '__main__':
