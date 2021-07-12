@@ -81,19 +81,28 @@ class GWPriorDict(BBHPriorDict):
     Note that this list does not explicitly include a time parameter, and that
     the mass parameters are over-specified in order to add constraints in the
     component mass plane on top of the chirp-mass and mass-ratio priors.
+
+
+    This class also stores reference values for two parameters which are
+    used for waveform generation and later updated when sampling from
+    extrinsic parameters: luminosity_distance, geocent_time.
     """
 
     def __init__(self,
                  parameter_prior_dict: Dict = None,
-                 geocent_time: float = 1126259642.413):
+                 geocent_time_ref: float = 1126259642.413,  # s
+                 luminosity_distance_ref: float = 500.0):   # Mpc
         """
         Parameters
         ----------
         parameter_prior_dict : Dict
             A dictionary of parameter names and 1-dimensional prior distribution
             objects. If None, we use a default binary black hole prior.
-        geocent_time : float
-            The geocentric GPS time used to determine the time prior.
+        geocent_time_ref : float
+            The geocentric GPS time reference value in seconds.
+            This is also used to determine the time prior.
+        luminosity_distance_ref : float
+            The luminosity distance reference value in Mpc.
         """
 
         if parameter_prior_dict is None:
@@ -108,10 +117,16 @@ class GWPriorDict(BBHPriorDict):
         self._check_prior_completeness()
 
         # TODO: Which time parameter should be added?
+        # FIXME: make sure that we use the reference value for wf generation,
+        #  rather than sampling from this prior
         if not ('geocent_time' in self):
             self['geocent_time'] = Uniform(
-                minimum=geocent_time - 0.1, maximum=geocent_time + 0.1,
+                minimum=geocent_time_ref - 0.1, maximum=geocent_time_ref + 0.1,
                 name='geocent_time', latex_label='$t_c$', unit='$s$')
+
+        # Store reference values
+        self._geocent_time_ref = geocent_time_ref
+        self._luminosity_distance_ref = luminosity_distance_ref
 
         # TODO: Please check whether this is what we want
         self._intrinsic_parameters = ['mass_1', 'mass_2', 'mass_ratio',
@@ -121,6 +136,16 @@ class GWPriorDict(BBHPriorDict):
         self._extrinsic_parameters = ['luminosity_distance', 'dec', 'ra', 'psi',
                                       'geocent_time']
 
+
+    @property
+    def geocentric_time_reference(self) -> float:
+        """The value of the geocentric reference (GPS) time in seconds."""
+        return self._geocent_time_ref
+
+    @property
+    def luminosity_distance_reference(self) -> float:
+        """The value of the reference luminosity distance."""
+        return self._luminosity_distance_ref
 
     def _check_mass_parameters(self, key_set):
         """
