@@ -1,11 +1,12 @@
 """Implementation of embedding networks."""
 
-from typing import Tuple, Callable
+from typing import Tuple, Callable, Union
 import torch
 import numpy as np
 import torch.nn as nn
 from torch.nn import functional as F
 from nflows.nn.nets.resnet import ResidualBlock
+from dingo.core.utils import torchutils
 
 
 class LinearProjectionRB(nn.Module):
@@ -29,7 +30,7 @@ class LinearProjectionRB(nn.Module):
     channel 0 and 1. The projection of the auxiliary channels with index >=2
     onto these components is initialized with 0.
 
-    Layer specs
+    Module specs
     --------
         input dimension:    (batch_size, num_blocks, num_channels, num_bins)
         output dimension:   (batch_size, 2 * n_rb * num_blocks)
@@ -38,7 +39,7 @@ class LinearProjectionRB(nn.Module):
     def __init__(self,
                  input_dims: Tuple[int, int, int],
                  n_rb: int,
-                 V_rb_list: Tuple,
+                 V_rb_list: Union[Tuple, None],
                  ):
         """
         Parameters
@@ -49,9 +50,11 @@ class LinearProjectionRB(nn.Module):
         n_rb : int
             number of reduced basis elements used for projection
             the output dimension of the layer is 2 * n_rb * num_blocks
-        V_rb_list : tuple of np.arrays
+        V_rb_list : tuple of np.arrays, or None
             tuple with V matrices of the reduced basis SVD projection,
-            convention for SVD matrix decomposition: U @ s @ V^h
+            convention for SVD matrix decomposition: U @ s @ V^h;
+            if None, layer is not initialized with reduced basis projection,
+            this is useful when loading a saved model
         """
 
         super(LinearProjectionRB, self).__init__()
@@ -59,7 +62,6 @@ class LinearProjectionRB(nn.Module):
         self.input_dims = input_dims
         self.num_blocks, self.num_channels, self.num_bins = self.input_dims
         self.n_rb = n_rb
-        self.test_dimensions(V_rb_list)
 
         # define a linear projection layer for each block
         layers = []
@@ -69,7 +71,9 @@ class LinearProjectionRB(nn.Module):
         self.layers = nn.ModuleList(layers)
 
         # initialize layers with reduced basis
-        self.init_layers(V_rb_list)
+        if V_rb_list is not None:
+            self.test_dimensions(V_rb_list)
+            self.init_layers(V_rb_list)
 
     @property
     def input_dim(self):
@@ -131,8 +135,8 @@ class LinearProjectionRB(nn.Module):
             layer.weight.data[n:, k:2 * k] = torch.transpose(V_real, 1, 0)
 
     def forward(self, x):
-        assert x.shape[1:] == (
-            self.num_blocks, self.num_channels, self.num_bins)
+        if x.shape[1:] != (self.num_blocks, self.num_channels, self.num_bins):
+            raise ValueError('Invalid shape for projection layer.')
         out = []
         for ind in range(self.num_blocks):
             out.append(self.layers[ind](x[:, ind, ...].flatten(start_dim=1)))
@@ -147,7 +151,7 @@ class DenseResidualNet(nn.Module):
     resizing layers are used for resizing the input and output to match the
     first and last hidden dimension, respectively.
 
-    Layer specs
+    Module specs
     --------
         input dimension:    (batch_size, input_dim)
         output dimension:   (batch_size, output_dim)
@@ -213,6 +217,131 @@ class DenseResidualNet(nn.Module):
             x = block(x, context=None)
             x = resize_layer(x)
         return x
+
+
+class ModuleMerger(nn.Module):
+    """
+    This is a wrapper used to process multiple different kinds of context
+    information collected in x = (x_0, x_1, ...). For each kind of context
+    information x_i, an individual embedding network is provided in
+    enets = (enet_0, enet_1, ...). The embedded output of the forward method
+    is the concatenation of the individual embeddings enet_i(x_i).
+
+    In the GW use case, this wrapper can be used to embed the
+    high-dimensional signal input into a lower dimensional feature vector
+    with a large embedding network, while applying an identity embedding to
+    the time shifts.
+
+    Module specs
+    --------
+        input dimension:    (batch_size, ...), (batch_size, ...), ...
+        output dimension:   (batch_size, ?)
+    """
+
+    def __init__(self,
+                 module_list: Tuple,
+                 ):
+        """
+        Parameters
+        ----------
+        module_list : tuple
+            nn.Modules for embedding networks,
+            use torch.nn.Identity for identity mappings
+        """
+        super(ModuleMerger, self).__init__()
+        self.enets = nn.ModuleList(module_list)
+
+    def forward(self, *x):
+        if len(x) != len(self.enets):
+            raise ValueError('Invalid number of input tensors provided.')
+        x = [module(xi) for module, xi in zip(self.enets, x)]
+        return torch.cat(x, axis=1)
+
+
+def create_enet_with_projection_layer_and_dense_resnet(
+        input_dims: Tuple[int, int, int],
+        n_rb: int,
+        V_rb_list: Union[Tuple, None],
+        output_dim: int,
+        hidden_dims: Tuple,
+        activation: str = 'elu',
+        dropout: int = 0.0,
+        batch_norm: bool = True,
+        added_context: bool = False,
+):
+    """
+    Builder function for 2-stage embedding network for 1D data with multiple
+    blocks and channels. Module 1 is a linear layer initialized as the
+    projection of the complex signal onto reduced basis components via the
+    LinearProjectionRB, where the blocks are kept separate. See docstring
+    of LinearProjectionRB for details. Module 2 is a sequence of dense residual
+    layers, that is used to further reduce the dimensionality.
+
+    The projection requires the complex signal to be represented via the real
+    part in channel 0 and the imaginary part in channel 1. Auxiliary signals
+    may be contained in channels with indices => 2. In GW use case a block
+    corresponds to a detector and channel 2 is used for ASD information.
+
+    If added_context = True, the 2-stage embedding network described above is
+    merged with an identity mapping via ModuleMerger. Then, the expected input
+    is not x with x.shape = (batch_size, num_blocks, num_channels, num_bins),
+    but rather the tuple *(x, z), where z is additional context information. The
+    output of the full module is then the concatenation of enet(x) and z. In
+    GW use case, this is used to concatenate the applied time shifts z to the
+    embedded feature vector of the strain data enet(x).
+
+    Module specs
+    --------
+    For added_context == False:
+        input dimension:    (batch_size, num_blocks, num_channels, num_bins)
+        output dimension:   (batch_size, output_dim)
+    For added_context == True:
+        input dimension:    (batch_size, num_blocks, num_channels, num_bins),
+                            (batch_size, N)
+        output dimension:   (batch_size, output_dim + N)
+
+    :param input_dims:  tuple
+        dimensions of input batch, omitting batch dimension
+        input_dims = (num_blocks, num_channels, num_bins)
+    :param n_rb: int
+        number of reduced basis elements used for projection
+        the output dimension of the layer is 2 * n_rb * num_blocks
+    :param V_rb_list: tuple of np.arrays, or None
+        tuple with V matrices of the reduced basis SVD projection,
+        convention for SVD matrix decomposition: U @ s @ V^h;
+        if None, layer is not initialized with reduced basis projection,
+        this is useful when loading a saved model
+    :param output_dim: int
+        output dimension of the full module
+    :param hidden_dims: tuple
+        tuple with dimensions of hidden layers of module 2
+    :param activation: str
+        str that specifies activation function used in residual blocks
+    :param dropout: int
+        dropout probability for residual blocks used for reqularization
+    :param batch_norm: bool
+        flag that specifies whether to use batch normalization
+    :param added_context: bool
+        if set to True, additional context z is concatenated to the embedded
+        feature vector enet(x); note that in this case, the expected input is
+        a tuple with 2 elements, input = (x, z) rather than just the tensor x.
+    :return: nn.Module
+    """
+    activation_fn = torchutils.get_activation_function_from_string(activation)
+    module_1 = LinearProjectionRB(input_dims, n_rb, V_rb_list)
+    module_2 = DenseResidualNet(input_dim=module_1.output_dim,
+                                output_dim=output_dim,
+                                hidden_dims=hidden_dims,
+                                activation=activation_fn,
+                                dropout=dropout,
+                                batch_norm=batch_norm
+                                )
+    enet = nn.Sequential(module_1, module_2)
+
+    if not added_context:
+        return enet
+    else:
+        return ModuleMerger((enet, nn.Identity()))
 
 
 if __name__ == '__main__':

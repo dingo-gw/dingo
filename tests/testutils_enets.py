@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from itertools import chain
+from dingo.core.utils.torchutils import forward_pass_with_unpacked_tuple
 
 
 ########################
@@ -83,8 +84,8 @@ def project_onto_reduced_basis_and_concat(y_list, V_rb_list, n_rb):
     return np.concatenate(projections, axis=1)
 
 
-def check_model_forward_pass(model, input_shape, expected_output_shape,
-                             batch_size=100):
+def check_model_forward_pass(model, expected_output_shape, input_shape=None,
+                             batch_size=100, x=None):
     """
     This function tests the forward pass of the model. It generates random
     input x with shape (batch_size, *input_shape) and performs a forward
@@ -97,21 +98,25 @@ def check_model_forward_pass(model, input_shape, expected_output_shape,
     :param expected_output_shape: expected shape of the output, omitting
     batch dimension
     :param batch_size: batch size
+    :param x: input to model, if provided input is not generated
     """
-    x = torch.rand((batch_size, *input_shape))
-    y = model(x)
+    if x is None:
+        assert input_shape is not None, \
+            'input_shape required when x not provided.'
+        x = torch.rand((batch_size, *input_shape))
+    y = forward_pass_with_unpacked_tuple(model,x)  # replaces y = model(x)
     # check output shape
-    assert y.shape == (batch_size, *expected_output_shape), \
+    assert y.shape[1:] == (*expected_output_shape,), \
         'Unexpected shape of model output.'
     # check that results are different for different inputs
-    permuted_indices = [idx - 1 for idx in range(x.shape[0])]
+    permuted_indices = [idx - 1 for idx in range(y.shape[0])]
     loss_fn = nn.L1Loss(reduction='none')
     loss = loss_fn(y, y[permuted_indices])
     assert torch.median(loss) / torch.median(torch.abs(y)) > 0.01, \
         'Model outputs could be insensitive to input. Check manually.'
 
 
-def check_model_backward_pass(model, input_shape, batch_size=100):
+def check_model_backward_pass(model, input_shape=None, batch_size=100, x=None):
     """
     This function tests the backward pass of the model and the optimizer
     step. It generates random input x with shape (batch_size, *input_shape),
@@ -123,16 +128,21 @@ def check_model_backward_pass(model, input_shape, batch_size=100):
     :param model: model to be checked
     :param input_shape: shape of the input data, omitting batch dimension
     :param batch_size: batch size
+    :param x: input to model, if provided input is not generated
     """
-    x = torch.rand((batch_size, *input_shape))
-    y = model(x)
+    if x is None:
+        assert input_shape is not None, \
+            'input_shape required when x not provided.'
+        x = torch.rand((batch_size, *input_shape))
+    y_0 = forward_pass_with_unpacked_tuple(model, x) # replaces y_0 = model(x)
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     loss_fn = nn.L1Loss()
-    target = torch.rand_like(y)
-    loss_before = loss_fn(y, target)
+    target = torch.rand_like(y_0)
+    loss_before = loss_fn(y_0, target)
     loss_before.backward()
     optimizer.step()
-    y = model(x)
-    loss_after = loss_fn(y, target)
+    y_1 = forward_pass_with_unpacked_tuple(model, x) # replaces y_1 = model(x)
+    loss_after = loss_fn(y_1, target)
     assert loss_after < loss_before, \
         'Loss does not decrease with optimizer step.'
+    return y_0, y_1
