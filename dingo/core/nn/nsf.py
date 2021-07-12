@@ -279,5 +279,6 @@ class FlowWrapper(nn.Module):
     def forward(self, y, *x):
         return self.log_prob(y, *x)
 
+
 if __name__ == '__main__':
     pass
