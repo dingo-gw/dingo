@@ -15,48 +15,6 @@ import logging
 logging.getLogger('bilby').setLevel("ERROR")
 
 
-# This is subclassing the Bilby BBHPriorDict.
-#
-# TODO:
-#  * For some extrinsic parameters (e.g., distance, time of coalescence) we need to also
-#  set reference values to be able to generate waveforms and position the detectors.
-#  I am wondering whether this class should also take care of that.
-#    - We could set delta function priors for some parameters, but this would mean
-#      that we can't sample from their usual distributions. Perhaps it is better to
-#      do this elsewhere?
-
-#  * [x] Check that the user has provided a "complete" set of prior parameters
-#    - How do you want to define complete? I.e. which parameters should always be present and which are optional?
-#  * Maybe there should be a default prior dict that gets used for parameters the user doesn't specify? I'm not sure how to deal with that. It looks like you are adding in a geocent_time prior if it's absent.
-#     - That can be done; I'm adding the time prior since bilby does not include it in the default BBH prior.
-
-#  * Allow for a variety of parametrizations (e.g., also zenith, azimuth would work for sky position)
-#    - That is possible, but ties in with checking for completeness
-#  * Let's leave the parameter conversion for the waveform generator
-#     - Agreed, but allowing for a variety of parametrizations implies that some conversion needs to be done
-#       There needs to be some underlying representation we can convert to in order to check completeness.
-#  * Provide "reference" values for certain extrinsic parameters (like distance, time) needed to generate waveforms. Should these be user-specified?
-#    - Should these really live in a prior class? A fixed value in terms of a distribution would be a delta function prior
-#      But don't we need to still sample from a distribution for e.g. distance? If we don't then having the reference values here is certainly fine.
-#  * For the geocent_time reference value, we need to decide where to keep track of that. It will be used in postprocessing as well to correct the right ascension.
-
-
-# Note:
-#  * We add bilby as a dependency here which requires further packages :
-#    https://git.ligo.org/lscsoft/bilby/blob/master/requirements.txt
-#  * bilby uses logger to log messages when using bilby classes; should
-#  we turn this off or reconfigure it somehow?
-
-# Note: We keep the detectors somewhat fixed at some reference time -- we assume
-# that Detectors don't move between events
-# in post-processing fix that by looking at how much the earth has rotated
-# They are not totally fixed (plug in reference time + dt)
-
-# Q: Do we need parameter conversion / transformation somewhere? Perhaps only
-# for transforming parameters for the posterior PDF.
-# Look at bilby.gw.conversion
-
-
 class GWPriorDict(BBHPriorDict):
     """
     Collect the prior distributions of parameters the data generating model
@@ -91,7 +49,8 @@ class GWPriorDict(BBHPriorDict):
     def __init__(self,
                  parameter_prior_dict: Dict = None,
                  geocent_time_ref: float = 1126259642.413,  # s
-                 luminosity_distance_ref: float = 500.0):   # Mpc
+                 luminosity_distance_ref: float = 500.0,  # Mpc
+                 reference_frequency: float = 20.0):  # Hz
         """
         Parameters
         ----------
@@ -103,6 +62,8 @@ class GWPriorDict(BBHPriorDict):
             This is also used to determine the time prior.
         luminosity_distance_ref : float
             The luminosity distance reference value in Mpc.
+        reference_frequency : float
+            The frequency in Hz at which the binary's spins are defined.
         """
 
         if parameter_prior_dict is None:
@@ -116,9 +77,7 @@ class GWPriorDict(BBHPriorDict):
         super().__init__(dictionary=parameter_prior_dict)
         self._check_prior_completeness()
 
-        # TODO: Which time parameter should be added?
-        # FIXME: make sure that we use the reference value for wf generation,
-        #  rather than sampling from this prior
+        # Add time prior if missing
         if not ('geocent_time' in self):
             self['geocent_time'] = Uniform(
                 minimum=geocent_time_ref - 0.1, maximum=geocent_time_ref + 0.1,
@@ -127,6 +86,7 @@ class GWPriorDict(BBHPriorDict):
         # Store reference values
         self._geocent_time_ref = geocent_time_ref
         self._luminosity_distance_ref = luminosity_distance_ref
+        self._reference_frequency = reference_frequency
 
         # TODO: Please check whether this is what we want
         self._intrinsic_parameters = ['mass_1', 'mass_2', 'mass_ratio',
@@ -138,14 +98,20 @@ class GWPriorDict(BBHPriorDict):
 
 
     @property
-    def geocentric_time_reference(self) -> float:
+    def reference_geocentric_time(self) -> float:
         """The value of the geocentric reference (GPS) time in seconds."""
         return self._geocent_time_ref
 
     @property
-    def luminosity_distance_reference(self) -> float:
+    def reference_luminosity_distance(self) -> float:
         """The value of the reference luminosity distance."""
         return self._luminosity_distance_ref
+
+    @property
+    def reference_frequency(self) -> float:
+        """The frequency in Hz at which the binary's spins are defined."""
+        return self._reference_frequency
+
 
     def _check_mass_parameters(self, key_set):
         """
@@ -244,7 +210,8 @@ class GWPriorDict(BBHPriorDict):
         """
         return self.keys() & self._extrinsic_parameters
 
-    def sample_intrinsic(self, size: int = None) -> Dict[str, np.ndarray]:
+    def sample_intrinsic(self, size: int = None,
+                         add_reference_values=True) -> Dict[str, np.ndarray]:
         """
         Sample from the intrinsic prior distribution.
 
@@ -252,16 +219,28 @@ class GWPriorDict(BBHPriorDict):
         ----------
         size : int
             The number of samples to draw.
+        add_reference_values : bool
+            If True, add reference frequency and distance to the output dict.
+            These are fixed values needed for waveform generation, not r.v.'s,
+            but are added for each sample.
+
+        Note that:
+          * total mass and symmetric mass-ratio are added automatically
+          * mass-ratio and chirp-mass are added if not being sampled in
         """
         samples = self.sample_subset(keys=list(self.intrinsic_parameters), size=size)
         samples = self.default_conversion_function(samples)
-        # Note:
-        #   * total mass and symmetric mass-ratio are added automatically
-        #   * mass-ratio and chirp-mass are also added if not being sampled in
         # Keep only samples in our intrinsic parameter list:
-        return {k: samples[k] for k in self.intrinsic_parameters}
+        sample_dict = {k: samples[k] for k in self.intrinsic_parameters}
 
-    def sample_extrinsic(self, size=None):
+        if add_reference_values:
+            ref_array = np.ones_like(sample_dict[self._intrinsic_parameters[0]])
+            sample_dict.update({'f_ref': self.reference_frequency * ref_array,
+                                'luminosity_distance': self.reference_luminosity_distance * ref_array})
+        return sample_dict
+
+
+    def sample_extrinsic(self, size: int = None) -> Dict[str, np.ndarray]:
         """
         Sample from the extrinsic prior distribution.
 

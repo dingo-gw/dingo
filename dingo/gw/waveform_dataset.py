@@ -1,27 +1,12 @@
 from torch.utils.data import Dataset
+import numpy as np
+import pandas as pd
+import h5py
+from tqdm import tqdm
 
 from dingo.gw.parameters import GWPriorDict
-from dingo.gw.domains import UniformFrequencyDomain, TimeDomain
-from dingo.gw.waveform_generator import WaveformGenerator, StandardizedDistribution
+from dingo.gw.waveform_generator import WaveformGenerator, StandardizeParameters
 
-
-
-# TODO:
-#  * here we will want to use a 2D array or pd.DataFrame of the waveform parameter samples
-#    since they will be repackaged into torch Tensors and this class will be repeatedly feeding the training loop.
-#  * These will be multi-process classes
-#   Only use pytorch rng generators; for numpy rng the seed would be the same --
-#   this currently hacked around by setting seeds differently; using pytorch should be easier
-
-# At which point do we actually sample?
-#  We can posit a joint prior distribution (currently in terms fo bilby priors)
-#  and later wrap it in a StandardizedDistribution.
-#  When we generate h+/hx we need to already have sampled from the intrinsic parameters
-#  Afterwards we want to standardize these parameters: this means that StandardizedDistribution
-#  should just operates on numerical values. This does not work with the current implementation
-#  since StandardizedDistribution will call .sample() on the base distribution.
-# At a later point (in WaveformDataset) we sample over extrinsic parameters and call
-#  RandomProjectToDetectors() to compute the strains in the detector network.
 
 
 class WaveformDataset(Dataset):
@@ -32,37 +17,135 @@ class WaveformDataset(Dataset):
     1. call with wf generator and extrinsic parameters
     2. call with dataset file and a transform (or composition of transforms -- there is a pytorch way of doing this)
         - example of which transforms should be performed?
+
+    Data will be consumed through __getitem__ through a chain of transforms
+    TODO: add transform handling
     """
 
-    def __init__(self, dataset_file=None,
-                 prior: GWPriorDict = None,
+    def __init__(self, dataset_file: str = None,
+                 priors: GWPriorDict = None,
                  waveform_generator: WaveformGenerator = None,
                  transform=None):
-        self.prior = prior # needs to contain the extrinsic parameters we still need to sample in
+        """
+        Parameters
+        ----------
+        dataset_file : str
+            Load the waveform dataset from this HDF5 file.
+        priors : GWPriorDict
+            The GWPriorDict instance from which to draw parameter samples.
+            It needs to contain intrinsic waveform parameters (and reference values)
+            for generating waveform polarizations. Later we will also draw
+            extrinsic parameters from it.
+        waveform_generator : WaveformGenerator
+            The waveform generator object to use to generate waveforms.
+        transform :
+            Transformations to apply.
+        """
+        self._priors = priors
+        self._waveform_generator = waveform_generator
+        self._parameter_samples = None
+        self._waveform_polarizations = None
+        if dataset_file is not None:
+            self.load(dataset_file)
 
     def __len__(self):
-        pass
+        """The number of waveform samples."""
+        return len(self._parameter_samples)
 
     def __getitem__(self, idx):
-        pass
+        """Return dictionary containing parameters and waveform polarizations
+        for sample with index `idx`."""
+        parameters = self._parameter_samples.iloc[idx].to_dict()
+        waveform_polarizations = self._waveform_polarizations.iloc[idx].to_dict()
+        return {'parameters': parameters, 'waveform': waveform_polarizations}
 
-    def generate_dataset(self, size):
+    def get_info(self):
+        """Print information on the stored pandas DataFrames."""
+        self._parameter_samples.info(memory_usage='deep')
+        self._waveform_polarizations.info(memory_usage='deep')
+        # Possibly capture and save the output
+        # import io
+        # buffer = io.StringIO()
+        # df.info(buf=buffer)
+        # s = buffer.getvalue()
+        # with open("df_info.txt", "w", encoding="utf-8") as f:
+        #     f.write(s)
 
-        self.parameter_samples = self.prior.sample(size)
+    def generate_dataset(self, size: int = 0):
+        """Generate a waveform dataset.
 
+        Parameters
+        ----------
+
+        size : int
+            The number of samples to draw and waveforms to generate.
+        """
+        # Draw intrinsic prior samples
+        # Note: Since we're using bilby's prior classes we are automatically using numpy rng
+        parameter_samples_dict = self._priors.sample_intrinsic(size=size)
+        self._parameter_samples = pd.DataFrame(parameter_samples_dict)
+        # The fixed f_ref and d_L reference values are added automatically in the call to sample_intrinsic.
+        # In the case of d_L make sure not to confuse them with samples drawn from a typical extrinsic distribution.
+
+        print('Generating waveform polarizations ...')  # Switch to logging
+        # TODO: Currently, simple in memory generation of wfs on a single core; extend to multiprocessing or MPI
+        #  For large datasets may not be able to store it in memory and need to write to disk while generating
+        wf_list_of_dicts = [self._waveform_generator.generate_hplus_hcross(p.to_dict())
+                            for _, p in tqdm(self._parameter_samples.iterrows())]
+        polarization_dict = {k: [wf[k] for wf in wf_list_of_dicts] for k in ['h_plus', 'h_cross']}
+        self._waveform_polarizations = pd.DataFrame(polarization_dict)
+
+        # If safe downcast to float: converted_float = gl_float.apply(pd.to_numeric, downcast='float')
         # Look at WaveformDataset.generate_dataset()
 
-        # convert to torch.tensors here?
+    def load(self, filename: str = 'waveform_dataset.h5'):
+        """Load waveform data set from HDF5 file."""
+        fp = h5py.File(filename, 'r')
 
-    def load(self):
-        # use SVD to compress more than just HDF5 compression?
-        pass
+        grp = fp['parameters']
+        parameter_samples_dict = {k: v[:] for k, v in grp.items()}
+        self._parameter_samples = pd.DataFrame(parameter_samples_dict)
 
-    def save(self):
-        pass
+        grp = fp['waveform_polarizations']
+        polarization_dict_2D = {k: v[:] for k, v in grp.items()}
+        polarization_dict = {k: [x for x in polarization_dict_2D[k]] for k in ['h_plus', 'h_cross']}
+        self._waveform_polarizations = pd.DataFrame(polarization_dict)
+
+        fp.close()
+
+    def _write_datafrane_to_hdf5(self, fp: h5py.File,
+                                 group_name: str,
+                                 df: pd.DataFrame):
+        """Write a DataFrame containing a dict of 2D arrays to HDF5."""
+        keys = list(df.keys())
+        data = df.to_numpy().T
+        grp = fp.create_group(group_name)
+        for k, v in zip(keys, data):
+            if v.dtype == np.dtype('O'):
+                v = np.vstack(v)  # convert object array into a proper 2D array
+            grp.create_dataset(str(k), data=v)
+
+    def save(self, filename: str = 'waveform_dataset.h5'):
+        """Save waveform data set to a HDF5 file."""
+        # TODO: use SVD to compress more than just HDF5 compression?
+        # Using h5py
+        fp = h5py.File(filename, 'w')
+        self._write_datafrane_to_hdf5(fp, 'parameters', self._parameter_samples)
+        self._write_datafrane_to_hdf5(fp, 'waveform_polarizations', self._waveform_polarizations)
+        fp.close()
+
+        # Using pandas and PyTables
+        # Warning: PyTables will pickle object types that it cannot map directly to c-types
+        # hdf = pd.HDFStore(filename, mode='a', complevel=complevel)
+        # # Using the 'table' format we could hdf.append() data. If we don't do that, use 'fixed'.
+        # hdf.put('parameters', self._parameter_samples, format='fixed', data_columns=None)
+        # hdf.put('waveform polarizations', self._waveform_polarizations, format='fixed', data_columns=None)
+        # hdf.close()
+
 
     def split_into_train_test(self, train_fraction):
         # of type WaveformDataset
         pass
+
 
 

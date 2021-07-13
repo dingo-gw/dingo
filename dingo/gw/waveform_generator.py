@@ -1,33 +1,12 @@
 import numpy as np
-import math
-import numbers
 from typing import Dict, List, Tuple, Union
 import warnings
-
 import torch
-from torch.distributions.transforms import Transform
-from torch.distributions import constraints
-from torch.distributions.transformed_distribution import TransformedDistribution
-
 import lal
 import lalsimulation as LS
-
 from bilby.gw.conversion import convert_to_lal_binary_black_hole_parameters, bilby_to_lalsimulation_spins
 
 from dingo.gw.domains import Domain
-
-
-# TODO:
-#  * Check FD and TD waveforms against pycbc
-#  * check EOB precessing model calls
-#  * add unit test for TD
-
-#  * GPNPE needs to be put in: need to carry around detector coalescence times
-#  * Need to transform into input data for NN. This will require an extra class, not in this module
-#  * whitening will be done later as a transform: ASD
-#    - Rather treat the noise as an additional transform: add noise and whiten
-#    similar for noise transients / realistic noise
-
 
 
 class WaveformGenerator:
@@ -329,6 +308,7 @@ class StandardizeParameters:
 if __name__ == "__main__":
     """A visual test."""
     from dingo.gw.domains import Domain, UniformFrequencyDomain
+    from dingo.gw.parameters import GWPriorDict
     import matplotlib.pyplot as plt
 
     # approximant = 'IMRPhenomPv2'

@@ -3,12 +3,6 @@ from functools import lru_cache
 from abc import ABC, abstractmethod
 
 
-# TODO: Should Domains have any other behavior? Where do they interface with other classes?
-#  - A Domain must always be coupled with (waveform) data to be useful
-#  - classes Waveform, FrequencyDomainWaveform, TimeDomainWaveform should have a Domain attribute
-# - context_dim will be implemented elsewhere; it needs num_detectors
-
-
 class Domain(ABC):
     """Defines the physical domain on which the data of interest live.
 

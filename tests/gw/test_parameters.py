@@ -25,7 +25,7 @@ def test_sample_intrinsic(parameter_lists):
 
     assert set(priors.intrinsic_parameters) == set(params_expected)
     # Draw samples from the prior
-    sample_dict = priors.sample_intrinsic(size=size)
+    sample_dict = priors.sample_intrinsic(size=size, add_reference_values=False)
     assert np.array(list(sample_dict.values())).shape == (len_expected, size)
 
 
@@ -60,7 +60,13 @@ def test_custom_prior(parameter_lists):
     size = 42
 
     # Draw samples from the intrinsic prior
-    sample_dict = priors.sample_intrinsic(size=size)
+    sample_dict = priors.sample_intrinsic(size=size, add_reference_values=False)
+    assert np.array(list(sample_dict.values())).shape == (len_expected, size)
+    assert set(sample_dict.keys()) == set(params_expected)
+
+    sample_dict = priors.sample_intrinsic(size=size, add_reference_values=True)
+    sample_dict.pop('f_ref')
+    sample_dict.pop('luminosity_distance')
     assert np.array(list(sample_dict.values())).shape == (len_expected, size)
     assert set(sample_dict.keys()) == set(params_expected)
 
