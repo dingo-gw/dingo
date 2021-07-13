@@ -1,7 +1,7 @@
 import numpy as np
 import math
 import numbers
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Union
 import warnings
 
 import torch
@@ -139,6 +139,16 @@ class WaveformGenerator:
 
         return wf_dict
 
+    def _convert_to_scalar(self, x: Union[np.ndarray, float]):
+        """Convert a single element array to a number."""
+        if isinstance(x, np.ndarray):
+            if x.shape == () or x.shape == (1, ):
+                return x.item()
+            else:
+                raise ValueError(f'Expected an array of length one, but shape = {x.shape}')
+        else:
+            return x
+
     def _convert_parameters_to_lal_frame(self, parameter_dict: Dict, lal_params=None):
         """Convert to lal source frame parameters
 
@@ -157,7 +167,8 @@ class WaveformGenerator:
         param_keys_in = ('theta_jn', 'phi_jl', 'tilt_1', 'tilt_2', 'phi_12',
                          'a_1', 'a_2', 'mass_1', 'mass_2', 'f_ref', 'phase')
         param_values_in = [p[k] for k in param_keys_in]
-        iota, s1x, s1y, s1z, s2x, s2y, s2z = bilby_to_lalsimulation_spins(*param_values_in)
+        iota_and_cart_spins = bilby_to_lalsimulation_spins(*param_values_in)
+        iota, s1x, s1y, s1z, s2x, s2y, s2z = [self._convert_to_scalar(x) for x in iota_and_cart_spins]
 
         # Convert to SI units
         p['mass_1'] *= lal.MSUN_SI
@@ -168,7 +179,7 @@ class WaveformGenerator:
         spins_cartesian = s1x, s1y, s1z, s2x, s2y, s2z
         masses = (p['mass_1'], p['mass_2'])
         extra_params = (p['luminosity_distance'], p['theta_jn'], p['phase'])
-        ecc_params = (0.0, 0.0, 0.0) # longAscNodes, eccentricity, meanPerAno
+        ecc_params = (0.0, 0.0, 0.0)  # longAscNodes, eccentricity, meanPerAno
 
         D = self.domain
         if D.domain_type == 'uFD':
@@ -320,16 +331,16 @@ if __name__ == "__main__":
     from dingo.gw.domains import Domain, UniformFrequencyDomain
     import matplotlib.pyplot as plt
 
-    approximant = 'IMRPhenomPv2'
-    f_min = 20.0
-    f_max = 512.0
-    domain = UniformFrequencyDomain(f_min=f_min, f_max=f_max, delta_f=1.0/4.0, window_factor=1.0)
-    parameters = {'chirp_mass': 34.0, 'mass_ratio': 0.35, 'chi_1': 0.2, 'chi_2': 0.1, 'theta_jn': 1.57, 'f_ref': 20.0, 'phase': 0.0, 'luminosity_distance': 1.0}
-    WG = WaveformGenerator(approximant, domain)
-    waveform_polarizations = WG.generate_hplus_hcross(parameters)
-    print(waveform_polarizations['h_plus'])
-
-    plt.loglog(domain(), np.abs(waveform_polarizations['h_plus']))
-    plt.xlim([f_min/2, 2048.0])
-    plt.axvline(f_min, c='gray', ls='--')
-    plt.show()
+    # approximant = 'IMRPhenomPv2'
+    # f_min = 20.0
+    # f_max = 512.0
+    # domain = UniformFrequencyDomain(f_min=f_min, f_max=f_max, delta_f=1.0/4.0, window_factor=1.0)
+    # parameters = {'chirp_mass': 34.0, 'mass_ratio': 0.35, 'chi_1': 0.2, 'chi_2': 0.1, 'theta_jn': 1.57, 'f_ref': 20.0, 'phase': 0.0, 'luminosity_distance': 1.0}
+    # WG = WaveformGenerator(approximant, domain)
+    # waveform_polarizations = WG.generate_hplus_hcross(parameters)
+    # print(waveform_polarizations['h_plus'])
+    #
+    # plt.loglog(domain(), np.abs(waveform_polarizations['h_plus']))
+    # plt.xlim([f_min/2, 2048.0])
+    # plt.axvline(f_min, c='gray', ls='--')
+    # plt.show()

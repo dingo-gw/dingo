@@ -18,10 +18,25 @@ def aligned_spin_wf_parameters():
     approximant = 'IMRPhenomPv2'
     return parameters, approximant
 
+@pytest.fixture
+def precessing_spin_wf_parameters():
+    parameters = {'chirp_mass': 34.0, 'mass_ratio': 0.35,
+                  'a_1': 0.5, 'a_2': 0.2, 'tilt_1': 2*np.pi/3.0, 'tilt_2': np.pi/4.0,
+                  'phi_12': np.pi/4.0, 'phi_jl': np.pi/3.0,
+                  'theta_jn': 1.57, 'f_ref': 100.0, 'phase': 0.0, 'luminosity_distance': 1.0}
+    approximant = 'IMRPhenomPv2'
+    return parameters, approximant
 
-def test_waveform_generator_FD(uniform_fd_domain, aligned_spin_wf_parameters):
+@pytest.fixture(params=["aligned_spin_wf_parameters", "precessing_spin_wf_parameters"])
+def wf_parameters(request):
+    return request.getfixturevalue(request.param)
+
+
+def test_waveform_generator_FD(uniform_fd_domain, wf_parameters):
+    """Basic check that a waveform can be generated without error and
+    it is consistent with the domain."""
     domain = uniform_fd_domain
-    parameters, approximant = aligned_spin_wf_parameters
+    parameters, approximant = wf_parameters
 
     wf_gen = WaveformGenerator(approximant, domain)
     wf_dict = wf_gen.generate_hplus_hcross(parameters)
@@ -30,7 +45,7 @@ def test_waveform_generator_FD(uniform_fd_domain, aligned_spin_wf_parameters):
     assert domain()[domain.frequency_mask][0] == domain.f_min
 
 
-def test_standardized_distribution():
+def test_standardize_parameters_on_distribution():
     """Check standardization of samples from a multi-normal distribution."""
     mean_ = torch.tensor([3.0, 2.0, 8.0])
     std_ = torch.tensor([2.0, 4.0, 7.0])
