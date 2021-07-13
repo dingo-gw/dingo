@@ -1,4 +1,4 @@
-import torch
+from typing import Dict
 
 
 # TODO:
@@ -11,9 +11,49 @@ import torch
 #  * more complex: database of PSDs for each detector
 #    - randomly select a PSD for each detector
 #  * Maybe create a PSD_DataSet class (open / non-open data), and transform
+#    - at each call randomly draw a psd
 #  * window_function
+# bilby's create_white_noise
 
-# pytorch transforms:
-# - https://pytorch.org/docs/stable/distributions.html?highlight=transform#module-torch.distributions.transforms
-# - torch.distributions.transforms.Transform(cache_size=0)
-# - torch.distributions.transforms.ComposeTransform(parts, cache_size=0)
+# TODO: Noise class needs to provide:
+# 1. sample_noise()
+# 2. provide_context() -- will not modify a tensor, but spit out a tensor that has the shape of expected noise summary
+#     particular function of the PSD
+class PSD:
+    def sample_noise(self):
+        pass
+
+    def provide_context(self):
+        pass
+
+class PSDDataSet:
+    """draw PSD object()"""
+    # Where does the random choice of index come in?
+    # transform class would have to call sample_index() and then sample_...
+    def sample_index(self):
+        index = .... # numpy generator -- be careful about setting seed
+
+    def sample_noise(self):
+        self._sample_noise(self, self.index)
+
+    def _sample_noise(self, index):
+        pass
+
+    def provide_context(self, index):
+        pass
+
+
+class AddNoiseAndWhiten:
+
+    def __init(self):
+        pass
+
+    def __call__(self, strain_dict: Dict[str, np.ndarray],
+                 psd: PSD) -> Dict[str, np.ndarray]:
+        """
+        Transform detector strain data transformation
+        #    1. add noise to detector_projected wf sample
+        #    2. whiten
+        """
+
+        pass
