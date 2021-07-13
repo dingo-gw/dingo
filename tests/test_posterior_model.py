@@ -2,6 +2,7 @@ import pytest
 import types
 import os
 from os.path import join
+import numpy as np
 import torch
 from dingo.core.nn.nsf import create_nsf_with_rb_projection_embedding_net
 from dingo.core.models import PosteriorModel
@@ -41,10 +42,54 @@ def data_setup_pm_1():
         'batch_norm': True,
         'added_context': True,
     }
+
+    d.model_kwargs = {'nsf_kwargs': d.nsf_kwargs,
+                      'embedding_net_kwargs': d.embedding_net_kwargs}
+
     return d
 
 
-def test_pm_saving_and_loading(data_setup_pm_1):
+@pytest.fixture()
+def data_setup_optimizer_scheduler():
+    d = types.SimpleNamespace()
+
+    d.adam_kwargs = {
+        'type': 'adam',
+        'lr': 0.0001,
+    }
+    d.sgd_kwargs = {
+        'type': 'sgd',
+        'lr': 0.0001,
+        'momentum': 0.9,
+    }
+
+    d.step_kwargs = {
+        'type': 'step',
+        'step_size': 3,
+        'gamma': 0.5
+    }
+    d.cosine_kwargs = {
+        'type': 'cosine',
+        'T_max': 10,
+    }
+    d.rop_kwargs = {
+        'type': 'reduce_on_plateau',
+        'factor': 0.5,
+        'patience': 3,
+    }
+
+    d.epochs = range(1, 10 + 1)
+    d.losses = [-1, -2, -3, -2, -2, -2, -2, -7, -8, -9]
+    d.rop_factors = [1, 1, 1, 1, 1, 1, 1, 0.5, 0.5, 0.5]
+    d.cosine_factors = (1 + np.cos(np.linspace(0, np.pi, 11))[:-1]) / 2
+    d.step_factors = [0.5 ** 0, 0.5 ** 0, 0.5 ** 0, 0.5 ** 1, 0.5 ** 1,
+                      0.5 ** 1,
+                      0.5 ** 2, 0.5 ** 2, 0.5 ** 2, 0.5 ** 3]
+
+    return d
+
+
+def test_pm_saving_and_loading_basic(data_setup_pm_1):
     """
     Test the most basic functionality of initializing, saving and loading a
     model. Two models built with identical hyperparameters should have the
@@ -57,8 +102,7 @@ def test_pm_saving_and_loading(data_setup_pm_1):
     # initialize model and save it
     pm_0 = PosteriorModel(
         model_builder=create_nsf_with_rb_projection_embedding_net,
-        model_kwargs={'nsf_kwargs': d.nsf_kwargs,
-                      'embedding_net_kwargs': d.embedding_net_kwargs},
+        model_kwargs=d.model_kwargs,
     )
     pm_0.save_model(d.model_filename)
 
@@ -71,8 +115,7 @@ def test_pm_saving_and_loading(data_setup_pm_1):
     # build a model with identical kwargs
     pm_2 = PosteriorModel(
         model_builder=create_nsf_with_rb_projection_embedding_net,
-        model_kwargs={'nsf_kwargs': d.nsf_kwargs,
-                      'embedding_net_kwargs': d.embedding_net_kwargs},
+        model_kwargs=d.model_kwargs,
     )
 
     # check that module names are identical in saved and loaded model
@@ -102,3 +145,89 @@ def test_pm_saving_and_loading(data_setup_pm_1):
         if not torch.std(param_0) == 0:
             assert not torch.all(param_0.data == param_2.data), \
                 'Model initialization does not seem to be random.'
+
+
+def test_pm_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler):
+    """
+    Test that the scheduler of PosteriorModel works as intended, also when
+    saving and loading the model.
+    """
+    d = data_setup_pm_1
+    e = data_setup_optimizer_scheduler
+
+    # Test step scheduler
+    optimizer_kwargs = e.adam_kwargs
+    scheduler_kwargs = e.step_kwargs
+    pm = PosteriorModel(
+        model_builder=create_nsf_with_rb_projection_embedding_net,
+        model_kwargs=d.model_kwargs,
+        optimizer_kwargs=optimizer_kwargs,
+        scheduler_kwargs=scheduler_kwargs,
+        init_for_training=True,
+    )
+    pm.optimizer.step() # this is to suppress a pytorch warning
+    factors = []
+    for epoch, loss in zip(e.epochs, e.losses):
+        if epoch == 5:
+            pm.save_model(d.model_filename, save_training_info=True)
+            pm = PosteriorModel(
+                model_builder=create_nsf_with_rb_projection_embedding_net,
+                model_filename=d.model_filename,
+                init_for_training=True,
+            )
+        lr = pm.optimizer.state_dict()['param_groups'][0]['lr']
+        factors.append(lr / pm.optimizer.defaults['lr'])
+        torchutils.perform_scheduler_step(pm.scheduler, loss)
+    assert factors == e.step_factors, 'Scheduler does not load correctly.'
+
+    # Test reduce_on_plateau scheduler
+    optimizer_kwargs = e.sgd_kwargs
+    scheduler_kwargs = e.rop_kwargs
+    pm = PosteriorModel(
+        model_builder=create_nsf_with_rb_projection_embedding_net,
+        model_kwargs=d.model_kwargs,
+        optimizer_kwargs=optimizer_kwargs,
+        scheduler_kwargs=scheduler_kwargs,
+        init_for_training=True,
+    )
+    pm.optimizer.step() # this is to suppress a pytorch warning
+    factors = []
+    for epoch, loss in zip(e.epochs, e.losses):
+        if epoch == 5:
+            pm.save_model(d.model_filename, save_training_info=True)
+            pm = PosteriorModel(
+                model_builder=create_nsf_with_rb_projection_embedding_net,
+                model_filename=d.model_filename,
+                init_for_training=True,
+            )
+        lr = pm.optimizer.state_dict()['param_groups'][0]['lr']
+        factors.append(lr / pm.optimizer.defaults['lr'])
+        torchutils.perform_scheduler_step(pm.scheduler, loss)
+    assert factors == e.rop_factors, 'Scheduler does not load correctly.'
+
+    # Test cosine scheduler
+    optimizer_kwargs = e.sgd_kwargs
+    scheduler_kwargs = e.cosine_kwargs
+    pm = PosteriorModel(
+        model_builder=create_nsf_with_rb_projection_embedding_net,
+        model_kwargs=d.model_kwargs,
+        optimizer_kwargs=optimizer_kwargs,
+        scheduler_kwargs=scheduler_kwargs,
+        init_for_training=True,
+    )
+    pm.optimizer.step() # this is to suppress a pytorch warning
+    factors = []
+    for epoch, loss in zip(e.epochs, e.losses):
+        if epoch == 5:
+            pm.save_model(d.model_filename, save_training_info=True)
+            pm = PosteriorModel(
+                model_builder=create_nsf_with_rb_projection_embedding_net,
+                model_filename=d.model_filename,
+                init_for_training=True,
+            )
+        lr = pm.optimizer.state_dict()['param_groups'][0]['lr']
+        factors.append(lr / pm.optimizer.defaults['lr'])
+        torchutils.perform_scheduler_step(pm.scheduler, loss)
+    assert np.allclose(factors, e.cosine_factors), \
+        'Scheduler does not load correctly.'
+
