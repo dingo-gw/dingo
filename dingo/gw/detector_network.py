@@ -199,7 +199,14 @@ class RandomProjectToDetectors:
         # Rescale strain by reference distance / actual distance
         reference_distance = waveform_parameters['luminosity_distance']
         dist_factor = reference_distance / extrinsic_parameters['luminosity_distance']
-        return {ifo: dist_factor * strain for ifo, strain in strain_dict.items()}
+        strain_dict = {ifo: dist_factor * strain for ifo, strain in strain_dict.items()}
+
+        # Collect intrinsic and extrinsic parameters in a single dict
+        all_parameters = waveform_parameters.copy()
+        for k in ['ra', 'dec', 'geocent_time', 'psi', 'luminosity_distance']:
+            all_parameters[k] = extrinsic_parameters[k]
+
+        return {'parameters': all_parameters, 'waveform': strain_dict}
 
 
 if __name__ == "__main__":

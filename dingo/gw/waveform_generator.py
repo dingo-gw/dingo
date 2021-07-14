@@ -1,7 +1,6 @@
 import numpy as np
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Tuple, Union, Any
 import warnings
-import torch
 import lal
 import lalsimulation as LS
 from bilby.gw.conversion import convert_to_lal_binary_black_hole_parameters, bilby_to_lalsimulation_spins
@@ -258,51 +257,88 @@ class StandardizeParameters:
     """
     Standardize parameters according to the transform (x - mu) / std.
     """
-    def __init__(self, mu: np.ndarray, std: np.ndarray):
+    def __init__(self, mu: Dict[str, float], std: Dict[str, float]):
         """
         Initialize the standardization transform with means
         and standard deviations for each parameter
 
         Parameters
         ----------
-        mu : torch.tensor()
-            The (estimated) 1D tensor of the means
-        std : torch.tensor()
-            The (estimated) 1D tensor of the standard deviations
+        mu : Dict[str, float]
+            The (estimated) means
+        std : Dict[str, float]
+            The (estimated) standard deviations
         """
         self.mu = mu
         self.std = std
+        if not set(mu.keys()) == set(std.keys()):
+            raise ValueError('The keys in mu and std disagree:'
+                             f'mu: {mu.keys()}, std: {std.keys()}')
 
-    def __call__(self, samples: Dict[str, np.ndarray]):
+    def __call__(self, samples: Dict[Dict[str, float], Dict[str, np.ndarray]]):
         """Standardize the parameter array according to the
         specified means and standard deviations.
 
         Parameters
         ----------
-        samples: Dict[str, np.ndarray]
-            A dictionary with keys 'parameters', 'waveform'.
+        samples: Dict[Dict, Dict]
+            A nested dictionary with keys 'parameters', 'waveform'.
 
-        FIXME: Check: Only the parameters get transformed.
+        Only parameters included in mu, std get transformed.
         """
         x = samples['parameters']
-        y = (x - self.mu) / self.std
+        print('d_L in', x['luminosity_distance'])
+        y = {k: (x[k] - self.mu[k]) / self.std[k] for k in self.mu.keys()}
+        print('d_L tr', y['luminosity_distance'])
         return {'parameters': y, 'waveform': samples['waveform']}
 
-    def inverse(self, samples: Dict[str, torch.tensor]):
+    def inverse(self, samples: Dict[Dict[str, float], Dict[str, np.ndarray]]):
         """De-standardize the parameter array according to the
         specified means and standard deviations.
 
         Parameters
         ----------
-        samples: Dict[str, np.ndarray]
-            A dictionary with keys 'parameters', 'waveform'.
+        samples: Dict[Dict, Dict]
+            A nested dictionary with keys 'parameters', 'waveform'.
 
-        FIXME: Check: Only the parameters get transformed.
+        Only parameters included in mu, std get transformed.
         """
         y = samples['parameters']
-        x = self.mu + y * self.std
+        print('d_L inv', y['luminosity_distance'])
+        x = {k: self.mu[k] + y[k] * self.std[k] for k in self.mu.keys()}
+        print('d_L back', x['luminosity_distance'])
         return {'parameters': x, 'waveform': samples['waveform']}
 
+
+class Compose:
+    """Compose several transforms together.
+
+    E.g. for y = f( g( h(x) ) ), defines a transform T(x) := f( g( h(x) ) )
+    and its inverse T^{-1}(y) = h^{-1}( g^{-1}( f^{-1}(y) ) ) if it exists.
+
+    A transforms implements __call__ and consumes a particular data object.
+    (See torchvision.transforms.)
+    """
+    def __init__(self, transforms: List):
+        """
+        Parameters
+        ----------
+        transforms: List
+            A list of transforms which implement the __call__ method.
+        """
+        self.transforms = transforms
+
+    def __call__(self, data: Any):
+        for tr in self.transforms:
+            data = tr(data)
+        return data
+
+    def inverse(self, data: Any):
+        for tr in self.transforms[::-1]:
+            if not callable(getattr(tr, 'inverse', None)):
+                raise AttributeError(f'Transformation {tr} does not implement an inverse.')
+            data = tr.inverse(data)
+        return data
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ import h5py
 from tqdm import tqdm
 
 from dingo.gw.parameters import GWPriorDict
-from dingo.gw.waveform_generator import WaveformGenerator, StandardizeParameters
+from dingo.gw.waveform_generator import WaveformGenerator, StandardizeParameters, Compose
 
 
 
@@ -153,6 +153,7 @@ class WaveformDataset(Dataset):
         # of type WaveformDataset
         pass
 
+
 if __name__ == "__main__":
     from dingo.gw.domains import UniformFrequencyDomain
     from dingo.gw.detector_network import DetectorNetwork, RandomProjectToDetectors
@@ -186,16 +187,44 @@ if __name__ == "__main__":
     wd = WaveformDataset(priors=priors, waveform_generator=waveform_generator, transform=rp_det)
     n_waveforms = 17
     wd.generate_dataset(size=n_waveforms)
-    print(wd[9])
-
 
    # 2. AddNoiseAndWhiten (also standardizes data)  (single waveform)
    #    in:  strain_dict: Dict[str, np.ndarray], waveform_parameters: Dict[str, float]
    #    out: Dict[str, np.ndarray]      {'H1':h1_strain_plus_noise_whitened, ...}
    #    provide inverse ASD (fixed - at least needs to be the same shape, or a draw from a PSD dataset)
+
    # 3. StandardizeParameters (only standardizes parameters and leaves waveforms alone?) (single waveform)
    #    in: Dict[str, np.ndarray] : {'parameters': ..., 'waveform': ...}
    #    out:
+
+    # Example: Define fake means and stdevs
+    # Replace this with the correct ones given a particular prior choice
+    # This could be achieved by subclassing the bilby priors
+    # For reference parameter values could just put the fixed value as a mean and stdev = 1.
+    mu_dict = {'phi_jl': 1.0, 'tilt_1': 1.0, 'theta_jn': 2.0, 'tilt_2': 1.0, 'mass_1': 54.0, 'phi_12': 0.5,
+               'chirp_mass': 40.0, 'phase': np.pi, 'a_2': 0.5, 'mass_2': 39.0, 'mass_ratio': 0.5,
+               'a_1': 0.5, 'f_ref': 20.0, 'luminosity_distance': 1000.0, 'geocent_time': 1126259642.413,
+               'ra': 2.5, 'dec': 1.0, 'psi': np.pi}
+    std_dict = mu_dict
+
+
+    print('Chaining transforms')
+
+    # Note: This is difficult to test for extrinsic parameters, since they are generate in step 1
+    # and standardized in step 2, so that the transform chain combined with its inverse is not the
+    # identity
+    transform = Compose([
+        RandomProjectToDetectors(det_network, priors),
+        StandardizeParameters(mu=mu_dict, std=std_dict)
+    ])
+
+    wd = WaveformDataset(priors=priors, waveform_generator=waveform_generator, transform=transform)
+    n_waveforms = 17
+    wd.generate_dataset(size=n_waveforms)
+    # Raises an AttributeError as RandomProjectToDetectors does not have an inverse
+    err = {k: np.abs(transform.inverse(wd[9])['parameters'][k] - wd[9]['parameters'][k]) for k in mu_dict.keys()}
+
    # 4. ToTensor / ToNetworkInput (which formats the data appropriately for input to the network) (single waveform)
    #     - trim off 0s in frequencies
    #     - lookup the required shape
+
