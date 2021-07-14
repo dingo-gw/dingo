@@ -19,7 +19,9 @@ class WaveformDataset(Dataset):
         - example of which transforms should be performed?
 
     Data will be consumed through __getitem__ through a chain of transforms
-    TODO: add transform handling
+    TODO:
+      * add transform handling
+      * add compression
     """
 
     def __init__(self, dataset_file: str = None,
@@ -47,6 +49,7 @@ class WaveformDataset(Dataset):
         self._waveform_polarizations = None
         if dataset_file is not None:
             self.load(dataset_file)
+        self.transform = transform
 
     def __len__(self):
         """The number of waveform samples."""
@@ -57,7 +60,10 @@ class WaveformDataset(Dataset):
         for sample with index `idx`."""
         parameters = self._parameter_samples.iloc[idx].to_dict()
         waveform_polarizations = self._waveform_polarizations.iloc[idx].to_dict()
-        return {'parameters': parameters, 'waveform': waveform_polarizations}
+        data = {'parameters': parameters, 'waveform': waveform_polarizations}
+        if self.transform:
+            data = self.transform(data)
+        return data
 
     def get_info(self):
         """Print information on the stored pandas DataFrames."""
@@ -147,5 +153,49 @@ class WaveformDataset(Dataset):
         # of type WaveformDataset
         pass
 
+if __name__ == "__main__":
+    from dingo.gw.domains import UniformFrequencyDomain
+    from dingo.gw.detector_network import DetectorNetwork, RandomProjectToDetectors
+
+    domain_kwargs = {'f_min': 20.0, 'f_max': 4096.0, 'delta_f': 1.0 / 4.0, 'window_factor': 1.0}
+    domain = UniformFrequencyDomain(**domain_kwargs)
+    priors = GWPriorDict(geocent_time_ref=1126259642.413, luminosity_distance_ref=500.0,
+                         reference_frequency=20.0)
+    approximant = 'IMRPhenomXPHM'
+    waveform_generator = WaveformGenerator(approximant, domain)
 
 
+    # Generate a dataset using the first waveform dataset object
+    wd = WaveformDataset(priors=priors, waveform_generator=waveform_generator)
+    n_waveforms = 17
+    wd.generate_dataset(size=n_waveforms)
+
+    # 1. RandomProjectToDetectors  (single waveform)
+    #    in:  waveform_polarizations: Dict[str, np.ndarray], waveform_parameters: Dict[str, float]
+    #    out: Dict[str, np.ndarray]      {'H1':h1_strain, ...}
+    #    changes extrinsic pars
+
+    det_network = DetectorNetwork(["H1", "L1"], domain, start_time=priors.reference_geocentric_time)
+    rp_det = RandomProjectToDetectors(det_network, priors)
+    data = wd[1]
+    #{'parameters': parameters, 'waveform': waveform_polarizations}
+    strain_dict = rp_det(data)  # needs to take a dict instead
+    print(strain_dict)  # {'H1':..., 'L1':...}
+
+    # Example of applying projection of detectors as a transformation
+    wd = WaveformDataset(priors=priors, waveform_generator=waveform_generator, transform=rp_det)
+    n_waveforms = 17
+    wd.generate_dataset(size=n_waveforms)
+    print(wd[9])
+
+
+   # 2. AddNoiseAndWhiten (also standardizes data)  (single waveform)
+   #    in:  strain_dict: Dict[str, np.ndarray], waveform_parameters: Dict[str, float]
+   #    out: Dict[str, np.ndarray]      {'H1':h1_strain_plus_noise_whitened, ...}
+   #    provide inverse ASD (fixed - at least needs to be the same shape, or a draw from a PSD dataset)
+   # 3. StandardizeParameters (only standardizes parameters and leaves waveforms alone?) (single waveform)
+   #    in: Dict[str, np.ndarray] : {'parameters': ..., 'waveform': ...}
+   #    out:
+   # 4. ToTensor / ToNetworkInput (which formats the data appropriately for input to the network) (single waveform)
+   #     - trim off 0s in frequencies
+   #     - lookup the required shape

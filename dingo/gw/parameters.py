@@ -220,9 +220,10 @@ class GWPriorDict(BBHPriorDict):
         size : int
             The number of samples to draw.
         add_reference_values : bool
-            If True, add reference frequency and distance to the output dict.
-            These are fixed values needed for waveform generation, not r.v.'s,
-            but are added for each sample.
+            If True, add reference frequency, distance and time to the output dict.
+            These are fixed values needed, not r.v.'s, but are added for each sample.
+            Reference frequency and distance are needed for waveform generation, and
+            reference time is used when projecting onto the detectors.
 
         Note that:
           * total mass and symmetric mass-ratio are added automatically
@@ -236,7 +237,9 @@ class GWPriorDict(BBHPriorDict):
         if add_reference_values:
             ref_array = np.ones_like(sample_dict[self._intrinsic_parameters[0]])
             sample_dict.update({'f_ref': self.reference_frequency * ref_array,
-                                'luminosity_distance': self.reference_luminosity_distance * ref_array})
+                                'luminosity_distance': self.reference_luminosity_distance * ref_array,
+                                'geocent_time': self.reference_geocentric_time * ref_array
+                                })
         return sample_dict
 
 

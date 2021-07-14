@@ -26,8 +26,7 @@ class DetectorNetwork:
             The physical domain on which waveforms are defined.
         start_time: float
             The GPS start-time of the data
-
-        Strain data is initialized to zero in each detector.
+        # FIXME: check: what does start_time do compared to the geocentric reference time in F+, Fx?
         """
         self.ifos = InterferometerList(ifo_list)
         if not issubclass(type(domain), Domain):
@@ -162,31 +161,45 @@ class RandomProjectToDetectors:
         self.domain = detector_network.domain
         self.extrinsic_prior = extrinsic_prior
 
-    def __call__(self, waveform_polarizations: Dict[str, np.ndarray],
-                 waveform_parameters: Dict[str, float]):
+    def __call__(self, waveform_dict: Dict[Dict[str, float], Dict[str, np.ndarray]]):
         """
         Compute strain from waveform polarizations and detector network
         for a random draw from the extrinsic parameter prior distribution.
 
         Parameters
         ----------
-        waveform_polarizations: Dict[str, np.ndarray]
-            The waveform polarizations 'h_plus', 'h_cross'.
-        waveform_parameters: Dict[str, float]
-            Dictionary of parameters used to generate waveform polarizations.
-            This needs to include any reference values for extrinsic parameters.
-            FIXME: LIST WHICH VALUES THESE ARE
-                CURRENTLY UNUSED
+        waveform_dict: Dict[Dict, Dict]
+            A nested dictionary containing waveform parameters
+            and polarizations: {'parameters': waveform_parameters,
+            'waveform': waveform_polarizations}
+
+            waveform_polarizations: Dict[str, np.ndarray]
+                The waveform polarizations 'h_plus', 'h_cross'.
+            waveform_parameters: Dict[str, float]
+                Dictionary of parameters used to generate waveform polarizations.
+                It also contains reference distance and time.
         """
+        waveform_polarizations = waveform_dict['waveform']
+        waveform_parameters = waveform_dict['parameters']
+
+        # Draw extrinsic parameter sample
         extrinsic_parameters = self.extrinsic_prior.sample_extrinsic()
-        # FIXME: combine extrinsic parameter sample with extrinsic parameter
-        #  reference values used to generate the polarizations
+        if not set(extrinsic_parameters.keys()) >= {'ra', 'dec', 'geocent_time', 'psi'}:
+            missing_keys = {'ra', 'dec', 'geocent_time', 'psi'} - set(extrinsic_parameters.keys())
+            raise ValueError('Extrinsic prior samples are missing keys', missing_keys)
 
         # Switch to naming convention of polarization modes in DetectorNetwork (and bilby)
         wf_dict = {'plus': waveform_polarizations['h_plus'],
                    'cross': waveform_polarizations['h_cross']}
-        # We require that extrinsic_parameters includes ra, dec, geocent_time, psi
-        return self.detector_network.project_onto_network(wf_dict, extrinsic_parameters)
+
+        # Set reference time
+        extrinsic_parameters['geocent_time'] = waveform_parameters['geocent_time']
+        strain_dict = self.detector_network.project_onto_network(wf_dict, extrinsic_parameters)
+
+        # Rescale strain by reference distance / actual distance
+        reference_distance = waveform_parameters['luminosity_distance']
+        dist_factor = reference_distance / extrinsic_parameters['luminosity_distance']
+        return {ifo: dist_factor * strain for ifo, strain in strain_dict.items()}
 
 
 if __name__ == "__main__":
@@ -200,14 +213,14 @@ if __name__ == "__main__":
     f_max = 512.0
     domain = UniformFrequencyDomain(f_min=f_min, f_max=f_max, delta_f=1.0 / 4.0, window_factor=1.0)
     parameters = {'chirp_mass': 34.0, 'mass_ratio': 0.35, 'chi_1': 0.2, 'chi_2': 0.1, 'theta_jn': 1.57, 'f_ref': 20.0,
-                  'phase': 0.0, 'luminosity_distance': 1.0}
+                  'phase': 0.0, 'luminosity_distance': 1.0, 'geocent_time': 1126259642.413}
     WG = WaveformGenerator(approximant, domain)
     waveform_polarizations = WG.generate_hplus_hcross(parameters)
 
     det_network = DetectorNetwork(["H1", "L1"], domain, start_time=0)
     priors = GWPriorDict()
     rp_det = RandomProjectToDetectors(det_network, priors)
-    strain_dict = rp_det(waveform_polarizations, parameters)
+    strain_dict = rp_det({'parameters': parameters, 'waveform': waveform_polarizations})
     print(strain_dict)
     plt.loglog(domain(), np.abs(waveform_polarizations['h_plus'] + 1j * waveform_polarizations['h_cross']), '--',
                label='hp + i*hx')

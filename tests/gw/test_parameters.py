@@ -67,6 +67,7 @@ def test_custom_prior(parameter_lists):
     sample_dict = priors.sample_intrinsic(size=size, add_reference_values=True)
     sample_dict.pop('f_ref')
     sample_dict.pop('luminosity_distance')
+    sample_dict.pop('geocent_time')
     assert np.array(list(sample_dict.values())).shape == (len_expected, size)
     assert set(sample_dict.keys()) == set(params_expected)
 

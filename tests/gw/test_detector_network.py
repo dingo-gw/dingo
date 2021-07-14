@@ -12,7 +12,8 @@ def generate_waveform_polarizations():
     f_min = 20.0
     f_max = 512.0
     domain = UniformFrequencyDomain(f_min=f_min, f_max=f_max, delta_f=1.0/4.0, window_factor=1.0)
-    parameters = {'chirp_mass': 34.0, 'mass_ratio': 0.35, 'chi_1': 0.2, 'chi_2': 0.1, 'theta_jn': 1.57, 'f_ref': 20.0, 'phase': 0.0, 'luminosity_distance': 1.0}
+    parameters = {'chirp_mass': 34.0, 'mass_ratio': 0.35, 'chi_1': 0.2, 'chi_2': 0.1, 'theta_jn': 1.57,
+                  'f_ref': 20.0, 'phase': 0.0, 'luminosity_distance': 1.0, 'geocent_time': 1126259642.413}
     wg = WaveformGenerator(approximant, domain)
     waveform_polarizations = wg.generate_hplus_hcross(parameters)
     return waveform_polarizations, parameters, domain
@@ -49,7 +50,7 @@ def test_random_project_to_detectors(generate_waveform_polarizations):
     det_network = DetectorNetwork(ifo_list, domain, start_time=0)
     priors = GWPriorDict()
     rp_det = RandomProjectToDetectors(det_network, priors)
-    strain_dict = rp_det(waveform_polarizations, parameters)
+    strain_dict = rp_det({'parameters': parameters, 'waveform': waveform_polarizations})
     assert len(strain_dict) == len(ifo_list)
     assert len(list(strain_dict.values())[0]) == len(domain)
 

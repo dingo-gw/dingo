@@ -20,8 +20,7 @@ setup(name='dingo',
           'scipy',
           'bilby',
           'astropy',
-          'lalsuite',
-          'tables'
+          'lalsuite'
       ],
       extras_require={
         "dev": [
