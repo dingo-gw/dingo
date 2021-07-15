@@ -86,6 +86,12 @@ class UniformFrequencyDomain(Domain):
         return sample_frequencies >= self._f_min
 
     @property
+    def frequency_mask_length(self) -> int:
+        """Number of samples in the subdomain domain[frequency_mask]."""
+        mask = self.frequency_mask
+        return len(np.flatnonzero(np.asarray(mask)))
+
+    @property
     def noise_std(self) -> float:
         """Standard deviation of the whitened noise distribution.
 

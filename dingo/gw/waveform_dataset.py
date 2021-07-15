@@ -1,12 +1,14 @@
-from torch.utils.data import Dataset
 import numpy as np
 import pandas as pd
+from typing import Dict, Tuple
 import h5py
 from tqdm import tqdm
+import torch
+from torch.utils.data import Dataset
 
 from dingo.gw.parameters import GWPriorDict
 from dingo.gw.waveform_generator import WaveformGenerator, StandardizeParameters, Compose
-
+from dingo.gw.domains import Domain
 
 
 class WaveformDataset(Dataset):
@@ -148,10 +150,110 @@ class WaveformDataset(Dataset):
         # hdf.put('waveform polarizations', self._waveform_polarizations, format='fixed', data_columns=None)
         # hdf.close()
 
-
     def split_into_train_test(self, train_fraction):
         # of type WaveformDataset
+        # TODO: implement
         pass
+
+
+class ToNetworkInput:
+    """
+    Format data for neural network.
+
+    Restrict waveform data to its support (trim off zeros).
+    Convert data to torch tensors which can be passed to a NN.
+    """
+    def __init__(self, domain: Domain):
+        """
+
+        Parameters
+        ----------
+        domain : Domain
+            The physical domain on which strains and ASDs are defined.
+        """
+        self.domain = domain
+
+    def _check_data(self, waveform_dict):
+        """
+        Check consistency between waveform and ASD data.
+        """
+        strain_keys = waveform_dict['waveform'].keys()
+        asd_keys = waveform_dict['asd'].keys()
+        if set(strain_keys) != set(asd_keys):
+            raise ValueError('Strains and ASDs must have the same interferometer keys.'
+                             f'But got strain: {strain_keys}, asd: {asd_keys}')
+
+        k = list(strain_keys)[0]
+        strain_shape = waveform_dict['waveform'][k].shape
+        asd_shape = waveform_dict['asd'][k].shape
+        if not (strain_shape == asd_shape):
+            raise ValueError('Shape of strain and ASD arrays must be the same.'
+                             f'But got strain: {strain_shape}, ASD: {asd_shape}')
+
+    def get_output_dimensions(self, waveform_dict: Dict[str, Dict[str, np.ndarray]]) -> Tuple[Tuple, Tuple]:
+        """
+        Return size of output tensors given input data.
+
+        Parameters
+        ----------
+        waveform_dict :
+            Nested data dictionary with keys 'parameters',
+            'waveform', and 'asd' at top level.
+        """
+        x = pd.DataFrame(waveform_dict['parameters'], index=[0])
+        x_shape = x.to_numpy().shape
+
+        n_freq_bins = self.domain.frequency_mask_length
+        self._check_data(waveform_dict)
+        strain_keys = waveform_dict['waveform'].keys()
+        n_ifos = len(strain_keys)
+        y_shape = (n_ifos, 3, n_freq_bins)
+        return x_shape, y_shape
+
+    def __call__(self, waveform_dict: Dict[str, Dict[str, np.ndarray]]) -> Tuple[torch.tensor, torch.tensor]:
+        """
+        Transform nested data dictionary into torch tensors.
+
+        Parameters
+        ----------
+        waveform_dict :
+            Nested data dictionary with keys 'parameters',
+            'waveform', and 'asd' at top level.
+        """
+        self._check_data(waveform_dict)
+        domain = self.domain
+
+        # 1. Convert binary parameters
+        x = pd.DataFrame(waveform_dict['parameters'], index=[0])
+        x = x.to_numpy()
+
+        # 2. Repackage detector waveform strains and ASDs for entire network
+        if domain.domain_type == 'uFD':
+            mask = domain.frequency_mask
+            strains = waveform_dict['waveform']
+            asds = waveform_dict['asd']
+            y = np.array([np.vstack([h[mask].real, h[mask].imag, asds[ifo][mask]])
+                          for ifo, h in strains.items()])
+
+            # y = np.zeros((n_ifos, 3, n_freq_bins))
+            # # y = np.empty((n_ifos, 3, n_freq_bins)) # not so safe, but perhaps a little bit faster
+            # for ind, (ifo, d) in enumerate(waveform_dict['waveform'].items()):
+            #     d = waveform_dict['waveform'][ifo][mask]
+            #     asd = waveform_dict['asd'][ifo][mask]
+            #     y[ind, 0, :] = d.real
+            #     y[ind, 1, :] = d.imag
+            #     y[ind, 2, :] = asd
+
+            # TODO: move this to a unit test
+            x_shape, y_shape = self.get_output_dimensions(waveform_dict)
+            assert (x.shape == x_shape) and (y.shape == y_shape)
+        else:
+            raise ValueError('Unsupported domain type', domain.domain_type)
+
+        # FIXME: how will the NN know which entries are which parameters and which rows are which detectors?
+        #  Must return this additional label data for later
+        return torch.from_numpy(y), torch.from_numpy(x)
+
 
 
 if __name__ == "__main__":
@@ -240,6 +342,16 @@ if __name__ == "__main__":
    #     - lookup the required shape
    # TODO: look at x_y_from_p_h()
    #
+   # Output the dimensions so that network pars can be set
+   # RB for wf compression to save them
+   # RB as initial projection basis in network: that basis has to be determined
+   #  - now: use a smooth PSD to whiten the wfs and define a basis based on that
+   #   look for old code, perhaps 50k wfs
+
+    tni = ToNetworkInput(domain)
+    xy = tni(nw_strain_dict)
+    print(xy)
+
    #  # Repackage.
    #
    #  if self.domain == 'FD':

@@ -101,10 +101,22 @@ class AddNoiseAndWhiten:
         (Alternatively could pass in a dict of PSD objects for the network.)
 
         network: DetectorNetwork
+        TODO: add options to only add noise or only whiten data
         """
         self.network = network
         self.domain = network.domain
         self.psd_dict = network.power_spectral_densities
+        self._compute_amplitude_spectral_densities()
+
+
+    def _compute_amplitude_spectral_densities(self):
+        """
+        Compute the amplitude spectral density from the
+        power spectral densities for all detectors in the network.
+        """
+        self.asd_dict = {ifo: np.sqrt(psd)
+                         for ifo, psd in self.psd_dict.items()}
+
 
     def _generate_white_noise(self) -> np.ndarray:
         """
@@ -135,25 +147,23 @@ class AddNoiseAndWhiten:
 
         return n_white
 
-    def _whiten_waveform(self, strain: np.ndarray, psd_array: np.ndarray) -> np.ndarray:
+    def _whiten_waveform(self, strain: np.ndarray, asd_array: np.ndarray) -> np.ndarray:
         """
-        Whiten strain with then given power spectral density.
+        Whiten strain with then given amplitude spectral density.
 
         Parameters
         ----------
         strain : np.ndarray
             GW strain in a particular detector
-        psd_array : np.ndarray
-            The power spectral density in a particular detector
+        asd_array : np.ndarray
+            The amplitude spectral density in a particular detector
         """
-        return strain / np.sqrt(psd_array)
+        return strain / asd_array
 
 
     def __call__(self, waveform_dict: Dict[Dict[str, float], Dict[str, np.ndarray]]) -> Dict[Dict[str, float], Dict[str, np.ndarray]]:
         """
-        Transform detector strain data transformation
-        #    1. add noise to detector_projected wf sample
-        #    2. whiten
+        Whiten detector strain waveforms and add white noise.
 
         Parameters
         ----------
@@ -161,46 +171,20 @@ class AddNoiseAndWhiten:
             Nested dictionary of parameters and strains
             {'parameters': ..., 'waveform': ...}
 
-        FIXME: I think the steps should be the other way around
-        given what is done in the old code -- looking at the calls in WaveformDatasetTorch.__getitem__()
-        otherwise would need to add colored noise, not white noise
         """
         strain_dict = waveform_dict['waveform']
 
         # 1. Whiten waveform
-        strain_dict = {ifo: self._whiten_waveform(h, self.psd_dict[ifo])
-                                for ifo, h in strain_dict.items()}
+        strain_dict = {ifo: self._whiten_waveform(h, self.asd_dict[ifo])
+                       for ifo, h in strain_dict.items()}
 
         # 2. Generate and add white noise
         strain_dict = {ifo: h + self._generate_white_noise()
                        for ifo, h in strain_dict.items()}
 
-        return {'parameters': waveform_dict['parameters'], 'waveform': strain_dict}
+        return {'parameters': waveform_dict['parameters'],
+                'waveform': strain_dict, 'asd': self.asd_dict}
 
-
-        # Dev code:
-        # # Obtain parameters and whitened waveforms
-        # p, h, asd, w, snr = self.wfd.p_h_random_extrinsic(idx, self.train)
-        #
-        #     if whiten_with_reference_PSD:
-        #         h_d = h_d / (self._get_psd(h_d.delta_f, ifo) ** 0.5)
-        #
-        #
-        # # Add noise, reshape, standardize
-        # x, y = self.wfd.x_y_from_p_h(p, h, asd, add_noise=self.add_noise)
-        #
-        #     # Add noise. Waveforms are assumed to be white in each detector.
-        #     if add_noise:
-        #         if self.domain in ('RB', 'FD'):
-        #             noise = (np.random.normal(scale=self._noise_std, size=n)
-        #                      + np.random.normal(scale=self._noise_std, size=n) * 1j)
-        #             noise = noise.astype(np.complex64)
-        #
-        #         elif self.domain == 'TD':
-        #             noise = np.random.normal(scale=self._noise_std, size=n)
-        #             noise = noise.astype(np.float32)
-        #
-        #         d = d + noise
 
 
     # TODO: somewhere add method to calculate SNR
