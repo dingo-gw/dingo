@@ -222,6 +222,8 @@ class WaveformGenerator:
             h_plus[:len(hp.data.data)] = hp.data.data
             h_cross[:len(hc.data.data)] = hc.data.data
 
+        # TODO: ensure that length of wf agrees with length of domain! Enforce by truncating frequencies beyond f_max
+
         # Undo the time shift done in SimInspiralFD to the waveform
         dt = 1 / hp.deltaF + (hp.epoch.gpsSeconds + hp.epoch.gpsNanoSeconds * 1e-9)
         time_shift = np.exp(-1j * 2 * np.pi * dt * frequency_array)

@@ -155,8 +155,11 @@ class WaveformDataset(Dataset):
 
 
 if __name__ == "__main__":
+    """Explore chaining transforms together and applying these to a waveform dataset."""
     from dingo.gw.domains import UniformFrequencyDomain
     from dingo.gw.detector_network import DetectorNetwork, RandomProjectToDetectors
+    from dingo.gw.noise import AddNoiseAndWhiten
+    import matplotlib.pyplot as plt
 
     domain_kwargs = {'f_min': 20.0, 'f_max': 4096.0, 'delta_f': 1.0 / 4.0, 'window_factor': 1.0}
     domain = UniformFrequencyDomain(**domain_kwargs)
@@ -188,17 +191,25 @@ if __name__ == "__main__":
     n_waveforms = 17
     wd.generate_dataset(size=n_waveforms)
 
-   # 2. AddNoiseAndWhiten (also standardizes data)  (single waveform)
-   #    in:  strain_dict: Dict[str, np.ndarray], waveform_parameters: Dict[str, float]
-   #    out: Dict[str, np.ndarray]      {'H1':h1_strain_plus_noise_whitened, ...}
-   #    provide inverse ASD (fixed - at least needs to be the same shape, or a draw from a PSD dataset)
+    # 2. AddNoiseAndWhiten (also standardizes data)  (single waveform)
+    #    in:  strain_dict: Dict[str, np.ndarray], waveform_parameters: Dict[str, float]
+    #    out: Dict[str, np.ndarray]      {'H1':h1_strain_plus_noise_whitened, ...}
+    #    provide inverse ASD (fixed - at least needs to be the same shape, or a draw from a PSD dataset)
 
-   # 3. StandardizeParameters (only standardizes parameters and leaves waveforms alone?) (single waveform)
-   #    in: Dict[str, np.ndarray] : {'parameters': ..., 'waveform': ...}
-   #    out:
+    nw = AddNoiseAndWhiten(det_network)
+    nw_strain_dict = nw(strain_dict)
+    # plt.loglog(domain(), np.abs(strain_dict['waveform']['H1']), label='d')
+    # plt.loglog(domain(), np.abs(nw_strain_dict['waveform']['H1']), label='d_w + n')
+    # plt.show()
+
+
+    # 3. StandardizeParameters (only standardizes parameters and leaves waveforms alone?) (single waveform)
+    #    in: Dict[str, np.ndarray] : {'parameters': ..., 'waveform': ...}
+    #    out:
 
     # Example: Define fake means and stdevs
-    # Replace this with the correct ones given a particular prior choice
+    # TODO: Replace this with the correct ones given a particular prior choice
+    #  -- look at _compute_parameter_statistics()
     # This could be achieved by subclassing the bilby priors
     # For reference parameter values could just put the fixed value as a mean and stdev = 1.
     mu_dict = {'phi_jl': 1.0, 'tilt_1': 1.0, 'theta_jn': 2.0, 'tilt_2': 1.0, 'mass_1': 54.0, 'phi_12': 0.5,
@@ -209,12 +220,12 @@ if __name__ == "__main__":
 
 
     print('Chaining transforms')
-
     # Note: This is difficult to test for extrinsic parameters, since they are generate in step 1
     # and standardized in step 2, so that the transform chain combined with its inverse is not the
     # identity
     transform = Compose([
         RandomProjectToDetectors(det_network, priors),
+        AddNoiseAndWhiten(det_network),
         StandardizeParameters(mu=mu_dict, std=std_dict)
     ])
 
@@ -222,9 +233,47 @@ if __name__ == "__main__":
     n_waveforms = 17
     wd.generate_dataset(size=n_waveforms)
     # Raises an AttributeError as RandomProjectToDetectors does not have an inverse
-    err = {k: np.abs(transform.inverse(wd[9])['parameters'][k] - wd[9]['parameters'][k]) for k in mu_dict.keys()}
+    #err = {k: np.abs(transform.inverse(wd[9])['parameters'][k] - wd[9]['parameters'][k]) for k in mu_dict.keys()}
 
    # 4. ToTensor / ToNetworkInput (which formats the data appropriately for input to the network) (single waveform)
    #     - trim off 0s in frequencies
    #     - lookup the required shape
+   # TODO: look at x_y_from_p_h()
+   #
+   #  # Repackage.
+   #
+   #  if self.domain == 'FD':
+   #      # Remove components below f_min
+   #      start_idx = int(self.f_min / self.delta_f)
+   #      d = d[start_idx:]
+   #      asd_ifo = asd_ifo[start_idx:]
+   #      # Real and imaginary parts separately
+   #      y[ind, 0, :] = d.real
+   #      y[ind, 1, :] = d.imag
+   #      y[ind, 2, :] = asd_ifo
+   #
+   #
+   #  elif self.domain == 'RB':
+   #      # Real and imaginary parts separately
+   #      y_list.append(d.real)
+   #      y_list.append(d.imag)
+   #
+   #  else:
+   #      y_list.append(d)
+   #
+   #  if self.domain == 'FD':
+   #      pass  # y already in correct format
+   #  else:
+   #      y = np.hstack(y_list)
 
+    # And finally convert to torch tensors using the output of:
+    #
+    #   p, h, asd, w, snr = self.wfd.p_h_random_extrinsic(idx, self.train)
+    #   x, y = self.wfd.x_y_from_p_h(p, h, asd, add_noise=self.add_noise)
+    #
+    # WaveformDatasetTorch.__getitem__():
+    # # Explicitly put the tensor w on the CPU, because default is CUDA.
+    # return (torch.from_numpy(y), torch.from_numpy(x),
+    #         torch.tensor(w, device='cpu'),
+    #         torch.tensor(snr, device='cpu')
+    #         )

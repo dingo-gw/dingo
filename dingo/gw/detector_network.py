@@ -135,6 +135,26 @@ class DetectorNetwork:
         return {ifo.name: self.project_onto_detector(ifo, waveform_polarizations, parameters)
                 for ifo in self.ifos}
 
+    def get_power_spectral_density_for_detector(self, ifo: Interferometer):
+        """ Returns the power spectral density (PSD) for a detector.
+
+        Parameters
+        ----------
+        ifo : Interferometer
+            A bilby Interferometer
+        """
+        return ifo.power_spectral_density.get_power_spectral_density_array(
+                frequency_array=self.domain())
+
+    @property
+    def power_spectral_densities(self) -> Dict[str, np.ndarray]:
+        """
+        A dictionary of power spectral densities for all detectors
+        in the network.
+        """
+        return {ifo.name: self.get_power_spectral_density_for_detector(ifo)
+                for ifo in self.ifos}
+
 
 class RandomProjectToDetectors:
     """Given a sample waveform (in terms of its polarizations, and intrinsic parameters),
