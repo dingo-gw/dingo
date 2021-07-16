@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Dict, List
+from typing import Dict, List, Union
 
 from bilby.gw.detector import Interferometer, InterferometerList
 
@@ -87,29 +87,32 @@ class DetectorNetwork:
 
         Return the strain array.
         """
-        strain = sum([wf_pol * self.detector_antenna_response(ifo, parameters, mode)
-                      for mode, wf_pol in waveform_polarizations.items()])
+        if self.domain.domain_type == 'uFD':
+            strain = sum([wf_pol * self.detector_antenna_response(ifo, parameters, mode)
+                          for mode, wf_pol in waveform_polarizations.items()])
 
-        mask = self.domain.frequency_mask
-        frequency_array = self.domain()
-        strain *= mask
+            mask = self.domain.frequency_mask
+            frequency_array = self.domain()
+            strain *= mask
 
-        # Apply time shift
-        time_shift = ifo.time_delay_from_geocenter(
-            parameters['ra'], parameters['dec'], parameters['geocent_time'])
+            # Apply time shift
+            time_shift = ifo.time_delay_from_geocenter(
+                parameters['ra'], parameters['dec'], parameters['geocent_time'])
 
-        # Be careful to first subtract the two GPS times which are ~1e9 sec.
-        # And then add the time_shift which varies at ~1e-5 sec
-        dt_geocent = parameters['geocent_time'] - ifo.strain_data.start_time
-        dt = dt_geocent + time_shift
+            # Be careful to first subtract the two GPS times which are ~1e9 sec.
+            # And then add the time_shift which varies at ~1e-5 sec
+            dt_geocent = parameters['geocent_time'] - ifo.strain_data.start_time
+            dt = dt_geocent + time_shift
 
-        strain[mask] = strain[mask] * np.exp(-1j * 2 * np.pi * dt * frequency_array[mask])
+            strain[mask] = strain[mask] * np.exp(-1j * 2 * np.pi * dt * frequency_array[mask])
 
-        # Apply calibration correction if the calibration model has been set
-        # By default, there is no correction.
-        strain[mask] *= ifo.calibration_model.get_calibration_factor(
-            frequency_array[mask],
-            prefix='recalib_{}_'.format(ifo.name), **parameters)
+            # Apply calibration correction if the calibration model has been set
+            # By default, there is no correction.
+            strain[mask] *= ifo.calibration_model.get_calibration_factor(
+                frequency_array[mask],
+                prefix='recalib_{}_'.format(ifo.name), **parameters)
+        else:
+            raise ValueError('Unsupported domain type', self.domain.domain_type)
 
         return strain
 
@@ -181,7 +184,7 @@ class RandomProjectToDetectors:
         self.domain = detector_network.domain
         self.extrinsic_prior = extrinsic_prior
 
-    def __call__(self, waveform_dict: Dict[Dict[str, float], Dict[str, np.ndarray]]):
+    def __call__(self, waveform_dict: Dict[str, Dict[str, Union[float, np.ndarray]]]):
         """
         Compute strain from waveform polarizations and detector network
         for a random draw from the extrinsic parameter prior distribution.

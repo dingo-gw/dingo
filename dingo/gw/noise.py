@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Union
 import numpy as np
 
 from dingo.gw.detector_network import DetectorNetwork
@@ -7,9 +7,6 @@ from bilby.gw.detector import PowerSpectralDensity
 from dingo.gw.domains import UniformFrequencyDomain
 
 # TODO:
-#  * Support transformations
-#    1. add noise to detector_projected wf sample
-#    2. whiten
 #  * Caveat: Don't use PSDs with float32!
 #  * simplest case: fixed designed sensitivity PSD
 #  * noise needs to know the domain
@@ -18,7 +15,6 @@ from dingo.gw.domains import UniformFrequencyDomain
 #  * Maybe create a PSD_DataSet class (open / non-open data), and transform
 #    - at each call randomly draw a psd
 #  * window_function
-# bilby's create_white_noise
 
 # TODO: Noise class needs to provide:
 # 1. sample_noise()
@@ -50,27 +46,8 @@ class PSD:
         """
         return self._psd.get_power_spectral_density_array(frequency_array)
 
-    # def sample_noise(self, sampling_frequency, duration):
-    #     """
-    #     Generate colored noise with zero mean in the Fourier domain
-    #
-    #     1. Generates white noise with given fs and duration.
-    #     \tilde n_white(f_i) ~ N(0, sigma) + i N(0, sigma)
-    #     sigma = 1/2 1/sqrt(df)  # missing window factor
-    #     Set DC to zero. If number of samples is even, set Nyquist = 0.
-    #
-    #     2. Color by PSD:
-    #     \tilde n_white(f_i) * sqrt(S_n(f_i))
-    #
-    #     TODO: Does not include sqrt(window_factor) which needs to be multiplied with sigma above!
-    #      therefore not useful for us
-    #
-    #     sampling_frequency:
-    #     duration:
-    #     """
-    #     return self._psd.get_noise_realisation(sampling_frequency, duration)
-
     def provide_context(self):
+        # TODO: What should this do in practse?
         pass
 
 
@@ -95,13 +72,20 @@ class PSDDataSet:
 
 
 class AddNoiseAndWhiten:
-    def __init__(self, network: DetectorNetwork):
+    def __init__(self, network: DetectorNetwork, whiten_data=True, add_noise=True):
         """
-        Pass in a DetectorNetwork which can return the PSD of each detector.
-        (Alternatively could pass in a dict of PSD objects for the network.)
+        Whiten strain data and add zero-mean, white Gaussian noise.
 
-        network: DetectorNetwork
-        TODO: add options to only add noise or only whiten data
+        network : DetectorNetwork
+            An instance of DetectorNetwork which implicitly defines
+            the physical domain and the power spectral density for
+            each detector in the network.
+        whiten_data : bool
+            Whether to whiten the strain data in __call__
+        add_noise : bool
+            Whether to add white noise in __call__
+            Caveat: If whiten_data = False, and the input strain
+            data has not been whitened this may not be want you want.
         """
         self.network = network
         self.domain = network.domain
@@ -109,7 +93,7 @@ class AddNoiseAndWhiten:
         self._compute_amplitude_spectral_densities()
 
 
-    def _compute_amplitude_spectral_densities(self):
+    def _compute_amplitude_spectral_densities(self) -> Dict[str, np.ndarray]:
         """
         Compute the amplitude spectral density from the
         power spectral densities for all detectors in the network.
@@ -118,9 +102,9 @@ class AddNoiseAndWhiten:
                          for ifo, psd in self.psd_dict.items()}
 
 
-    def _generate_white_noise(self) -> np.ndarray:
+    def _generate_Gaussian_white_noise(self) -> np.ndarray:
         """
-        Generate complex white noise in the Fourier domain
+        Generate complex zero-mean Gaussian white noise in the Fourier domain
 
         Assume a given frequency grid (or sampling rate and duration)
         as defined by the domain. Then draw samples
@@ -128,7 +112,8 @@ class AddNoiseAndWhiten:
             \tilde n_white(f_i) ~ N(0, sigma) + i N(0, sigma)
 
         where sigma is the standard deviation of the noise including
-        the window factor.
+        the window factor, and the noise in two frequency bins i and j
+        is independent for i != j.
 
         Set DC to zero. If number of samples is even, set Nyquist = 0.
         """
@@ -160,10 +145,11 @@ class AddNoiseAndWhiten:
         """
         return strain / asd_array
 
-
-    def __call__(self, waveform_dict: Dict[Dict[str, float], Dict[str, np.ndarray]]) -> Dict[Dict[str, float], Dict[str, np.ndarray]]:
+    def __call__(self, waveform_dict: Dict[str, Dict[str, Union[float, np.ndarray]]]) \
+            -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
         """
-        Whiten detector strain waveforms and add white noise.
+        Whiten detector strain waveforms and add zero-mean,
+        white Gaussian noise.
 
         Parameters
         ----------
@@ -178,19 +164,17 @@ class AddNoiseAndWhiten:
         strain_dict = {ifo: self._whiten_waveform(h, self.asd_dict[ifo])
                        for ifo, h in strain_dict.items()}
 
-        # 2. Generate and add white noise
-        strain_dict = {ifo: h + self._generate_white_noise()
+        # 2. Generate and add zero-mean white Gaussian noise
+        strain_dict = {ifo: h + self._generate_Gaussian_white_noise()
                        for ifo, h in strain_dict.items()}
 
         return {'parameters': waveform_dict['parameters'],
                 'waveform': strain_dict, 'asd': self.asd_dict}
 
 
-
     # TODO: somewhere add method to calculate SNR
     #     snr = (np.sqrt(np.sum(np.abs(stacked)**2)) / self._noise_std)
 
-    # TODO: look at init_relative_whitening() and whiten_relative(), whiten_absolute()
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
@@ -198,7 +182,8 @@ if __name__ == "__main__":
     f = np.logspace(np.log10(5), np.log10(20000), 1000)
     psd_array = psd.get_power_spectral_density_array(f)
     f_defined = f[np.isfinite(psd_array)]
-    print(f'PSD unudefined for f<{f_defined[0]}, f>{f_defined[-1]} Hz')
+    print(f'PSD undefined for f<{f_defined[0]}, f>{f_defined[-1]} Hz')
     plt.loglog(f, psd_array)
     plt.show()
+    # TODO: add unit tests
 

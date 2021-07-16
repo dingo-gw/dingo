@@ -19,7 +19,6 @@ class WaveformDataset(Dataset):
 
     Data will be consumed through __getitem__ through a chain of transforms
     TODO:
-      * add transform handling
       * add compression
     """
 
@@ -65,7 +64,10 @@ class WaveformDataset(Dataset):
         return data
 
     def get_info(self):
-        """Print information on the stored pandas DataFrames."""
+        """
+        Print information on the stored pandas DataFrames.
+        This is before any transformations are done.
+        """
         self._parameter_samples.info(memory_usage='deep')
         self._waveform_polarizations.info(memory_usage='deep')
         # Possibly capture and save the output
@@ -81,7 +83,6 @@ class WaveformDataset(Dataset):
 
         Parameters
         ----------
-
         size : int
             The number of samples to draw and waveforms to generate.
         """
@@ -104,7 +105,14 @@ class WaveformDataset(Dataset):
         # Look at WaveformDataset.generate_dataset()
 
     def load(self, filename: str = 'waveform_dataset.h5'):
-        """Load waveform data set from HDF5 file."""
+        """
+        Load waveform data set from HDF5 file.
+
+        Parameters
+        ----------
+        filename : str
+            The name of the HDF5 file containing the data set.
+        """
         fp = h5py.File(filename, 'r')
 
         grp = fp['parameters']
@@ -121,7 +129,18 @@ class WaveformDataset(Dataset):
     def _write_datafrane_to_hdf5(self, fp: h5py.File,
                                  group_name: str,
                                  df: pd.DataFrame):
-        """Write a DataFrame containing a dict of 2D arrays to HDF5."""
+        """
+        Write a DataFrame containing a dict of 2D arrays to HDF5.
+
+        Parameters
+        ----------
+        fp : h5py.File
+            A h5py file object for the output file.
+        group_name : str
+            The name of the HDF5 group the data will be written to.
+        df : pd.DataFrame
+            A pandas DataFrame containing thw data.
+        """
         keys = list(df.keys())
         data = df.to_numpy().T
         grp = fp.create_group(group_name)
@@ -131,7 +150,14 @@ class WaveformDataset(Dataset):
             grp.create_dataset(str(k), data=v)
 
     def save(self, filename: str = 'waveform_dataset.h5'):
-        """Save waveform data set to a HDF5 file."""
+        """
+        Save waveform data set to a HDF5 file.
+
+        Parameters
+        ----------
+        filename : str
+            The name of the output HDF5 file.
+        """
         # TODO: use SVD to compress more than just HDF5 compression?
         # Using h5py
         fp = h5py.File(filename, 'w')
@@ -151,8 +177,6 @@ class WaveformDataset(Dataset):
         # of type WaveformDataset
         # TODO: implement
         pass
-
-
 
 
 
@@ -229,12 +253,14 @@ if __name__ == "__main__":
     transform = Compose([
         RandomProjectToDetectors(det_network, priors),
         AddNoiseAndWhiten(det_network),
-        StandardizeParameters(mu=mu_dict, std=std_dict)
+        StandardizeParameters(mu=mu_dict, std=std_dict),
+        ToNetworkInput(domain)
     ])
 
     wd = WaveformDataset(priors=priors, waveform_generator=waveform_generator, transform=transform)
     n_waveforms = 17
     wd.generate_dataset(size=n_waveforms)
+    print(wd[9])
     # Raises an AttributeError as RandomProjectToDetectors does not have an inverse
     #err = {k: np.abs(transform.inverse(wd[9])['parameters'][k] - wd[9]['parameters'][k]) for k in mu_dict.keys()}
 

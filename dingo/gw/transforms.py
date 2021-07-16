@@ -1,4 +1,4 @@
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Union
 import numpy as np
 import pandas as pd
 import torch
@@ -42,7 +42,8 @@ class StandardizeParameters:
             raise ValueError('The keys in mu and std disagree:'
                              f'mu: {mu.keys()}, std: {std.keys()}')
 
-    def __call__(self, samples: Dict[Dict[str, float], Dict[str, np.ndarray]]):
+    def __call__(self, samples: Dict[str, Dict[str, Union[float, np.ndarray]]]) \
+            -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
         """Standardize the parameter array according to the
         specified means and standard deviations.
 
@@ -57,9 +58,12 @@ class StandardizeParameters:
         print('d_L in', x['luminosity_distance'])
         y = {k: (x[k] - self.mu[k]) / self.std[k] for k in self.mu.keys()}
         print('d_L tr', y['luminosity_distance'])
-        return {'parameters': y, 'waveform': samples['waveform']}
+        # samples['parameters'] = y
+        # return samples
+        return {'parameters': y, 'waveform': samples['waveform'], 'asd': samples['asd']}
 
-    def inverse(self, samples: Dict[Dict[str, float], Dict[str, np.ndarray]]):
+    def inverse(self, samples: Dict[str, Dict[str, Union[float, np.ndarray]]]) \
+            -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
         """De-standardize the parameter array according to the
         specified means and standard deviations.
 
@@ -74,7 +78,7 @@ class StandardizeParameters:
         print('d_L inv', y['luminosity_distance'])
         x = {k: self.mu[k] + y[k] * self.std[k] for k in self.mu.keys()}
         print('d_L back', x['luminosity_distance'])
-        return {'parameters': x, 'waveform': samples['waveform']}
+        return {'parameters': x, 'waveform': samples['waveform'], 'asd': samples['asd']}
 
 
 class ToNetworkInput:
@@ -94,7 +98,7 @@ class ToNetworkInput:
         """
         self.domain = domain
 
-    def _check_data(self, waveform_dict):
+    def _check_data(self, waveform_dict: Dict[str, Dict[str, np.ndarray]]):
         """
         Check consistency between waveform and ASD data.
         """
@@ -111,7 +115,8 @@ class ToNetworkInput:
             raise ValueError('Shape of strain and ASD arrays must be the same.'
                              f'But got strain: {strain_shape}, ASD: {asd_shape}')
 
-    def get_output_dimensions(self, waveform_dict: Dict[str, Dict[str, np.ndarray]]) -> Tuple[Tuple, Tuple]:
+    def get_output_dimensions(self, waveform_dict: Dict[str, Dict[str, np.ndarray]]) \
+            -> Tuple[Tuple, Tuple]:
         """
         Return size of output tensors given input data.
 
@@ -131,7 +136,8 @@ class ToNetworkInput:
         y_shape = (n_ifos, 3, n_freq_bins)
         return x_shape, y_shape
 
-    def __call__(self, waveform_dict: Dict[str, Dict[str, np.ndarray]]) -> Tuple[torch.tensor, torch.tensor]:
+    def __call__(self, waveform_dict: Dict[str, Dict[str, np.ndarray]]) \
+            -> Tuple[torch.tensor, torch.tensor]:
         """
         Transform nested data dictionary into torch tensors.
 
