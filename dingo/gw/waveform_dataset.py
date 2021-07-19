@@ -9,17 +9,18 @@ from dingo.gw.waveform_generator import WaveformGenerator
 
 
 class WaveformDataset(Dataset):
-    """This class generates, saves, and loads a dataset of simulated waveforms (plus and cross
-    polarizations, as well as associated parameter values.
+    """This class generates, saves, and loads a dataset of simulated waveforms
+    (plus and cross polarizations, as well as associated parameter values.
 
-    There are two ways of calling this -- should this be split into two classes?
-    1. call with wf generator and extrinsic parameters
-    2. call with dataset file and a transform (or composition of transforms -- there is a pytorch way of doing this)
-        - example of which transforms should be performed?
+    This class can generate waveform polarizations from scratch given a waveform
+    generator and an intrinsic prior distribution. Alternatively it can load
+    a stored set of waveforms from an HDF5 file.
+    Once a waveform data set is in memory, the waveform data are consumed through
+    a __getitem__() call, optionally applying a chain of transformations, which
+    are classes that implement the __call__() method.
 
-    Data will be consumed through __getitem__ through a chain of transforms
     TODO:
-      * add compression
+      * add compression for serializing data
     """
 
     def __init__(self, dataset_file: str = None,
@@ -53,9 +54,12 @@ class WaveformDataset(Dataset):
         """The number of waveform samples."""
         return len(self._parameter_samples)
 
-    def __getitem__(self, idx):
-        """Return dictionary containing parameters and waveform polarizations
-        for sample with index `idx`."""
+    def __getitem__(self, idx) -> Dict[str, Dict[str, float], Dict[str, np.ndarray]]:
+        """
+        Return a nested dictionary containing parameters and waveform polarizations
+        for sample with index `idx`. If defined a chain of transformations are being
+        applied to the waveform data.
+        """
         parameters = self._parameter_samples.iloc[idx].to_dict()
         waveform_polarizations = self._waveform_polarizations.iloc[idx].to_dict()
         data = {'parameters': parameters, 'waveform': waveform_polarizations}
@@ -120,13 +124,13 @@ class WaveformDataset(Dataset):
         self._parameter_samples = pd.DataFrame(parameter_samples_dict)
 
         grp = fp['waveform_polarizations']
-        polarization_dict_2D = {k: v[:] for k, v in grp.items()}
-        polarization_dict = {k: [x for x in polarization_dict_2D[k]] for k in ['h_plus', 'h_cross']}
+        polarization_dict_2d = {k: v[:] for k, v in grp.items()}
+        polarization_dict = {k: [x for x in polarization_dict_2d[k]] for k in ['h_plus', 'h_cross']}
         self._waveform_polarizations = pd.DataFrame(polarization_dict)
 
         fp.close()
 
-    def _write_datafrane_to_hdf5(self, fp: h5py.File,
+    def _write_dataframe_to_hdf5(self, fp: h5py.File,
                                  group_name: str,
                                  df: pd.DataFrame):
         """
@@ -161,21 +165,13 @@ class WaveformDataset(Dataset):
         # TODO: use SVD to compress more than just HDF5 compression?
         # Using h5py
         fp = h5py.File(filename, 'w')
-        self._write_datafrane_to_hdf5(fp, 'parameters', self._parameter_samples)
-        self._write_datafrane_to_hdf5(fp, 'waveform_polarizations', self._waveform_polarizations)
+        self._write_dataframe_to_hdf5(fp, 'parameters', self._parameter_samples)
+        self._write_dataframe_to_hdf5(fp, 'waveform_polarizations', self._waveform_polarizations)
         fp.close()
-
-        # Using pandas and PyTables
-        # Warning: PyTables will pickle object types that it cannot map directly to c-types
-        # hdf = pd.HDFStore(filename, mode='a', complevel=complevel)
-        # # Using the 'table' format we could hdf.append() data. If we don't do that, use 'fixed'.
-        # hdf.put('parameters', self._parameter_samples, format='fixed', data_columns=None)
-        # hdf.put('waveform polarizations', self._waveform_polarizations, format='fixed', data_columns=None)
-        # hdf.close()
 
     def split_into_train_test(self, train_fraction):
         # of type WaveformDataset
-        # TODO: implement
+        # TODO: implement -- or should this be implemented as a transformation after converting to torch tensors?
         pass
 
 
@@ -202,9 +198,6 @@ if __name__ == "__main__":
     wd.generate_dataset(size=n_waveforms)
 
     # 1. RandomProjectToDetectors  (single waveform)
-    #    in:  waveform_polarizations: Dict[str, np.ndarray], waveform_parameters: Dict[str, float]
-    #    out: Dict[str, np.ndarray]      {'H1':h1_strain, ...}
-    #    changes extrinsic pars
 
     det_network = DetectorNetwork(["H1", "L1"], domain, start_time=priors.reference_geocentric_time)
     rp_det = RandomProjectToDetectors(det_network, priors)
@@ -219,9 +212,6 @@ if __name__ == "__main__":
     wd.generate_dataset(size=n_waveforms)
 
     # 2. AddNoiseAndWhiten (also standardizes data)  (single waveform)
-    #    in:  strain_dict: Dict[str, np.ndarray], waveform_parameters: Dict[str, float]
-    #    out: Dict[str, np.ndarray]      {'H1':h1_strain_plus_noise_whitened, ...}
-    #    provide inverse ASD (fixed - at least needs to be the same shape, or a draw from a PSD dataset)
 
     nw = AddNoiseAndWhiten(det_network)
     nw_strain_dict = nw(strain_dict)
@@ -231,13 +221,11 @@ if __name__ == "__main__":
 
 
     # 3. StandardizeParameters (only standardizes parameters and leaves waveforms alone?) (single waveform)
-    #    in: Dict[str, np.ndarray] : {'parameters': ..., 'waveform': ...}
-    #    out:
-    # TODO: Move to parameters
     # Example: Define fake means and stdevs
-    # TODO: Replace this with the correct ones given a particular prior choice
-    #  -- look at _compute_parameter_statistics()
-    # This could be achieved by subclassing the bilby priors
+    # TODO: Replace this with the correct means and variances for a particular prior distribution in each parameter
+    #  - look at _compute_parameter_statistics(); this could be achieved by subclassing the bilby priors
+    #  - in practise we do not need to get the means and variances used for standardization exactly right,
+    #    as long as we make sure to store them, so that the transformation can be undone
     # For reference parameter values could just put the fixed value as a mean and stdev = 1.
     mu_dict = {'phi_jl': 1.0, 'tilt_1': 1.0, 'theta_jn': 2.0, 'tilt_2': 1.0, 'mass_1': 54.0, 'phi_12': 0.5,
                'chirp_mass': 40.0, 'phase': np.pi, 'a_2': 0.5, 'mass_2': 39.0, 'mass_ratio': 0.5,
@@ -245,11 +233,7 @@ if __name__ == "__main__":
                'ra': 2.5, 'dec': 1.0, 'psi': np.pi}
     std_dict = mu_dict
 
-
-    print('Chaining transforms')
-    # Note: This is difficult to test for extrinsic parameters, since they are generate in step 1
-    # and standardized in step 2, so that the transform chain combined with its inverse is not the
-    # identity
+    # Chaining transforms
     transform = Compose([
         RandomProjectToDetectors(det_network, priors),
         AddNoiseAndWhiten(det_network),
@@ -266,7 +250,6 @@ if __name__ == "__main__":
 
    # 4. ToTensor / ToNetworkInput (which formats the data appropriately for input to the network) (single waveform)
    # Output the dimensions so that network pars can be set
-
     tni = ToNetworkInput(domain)
     x_shape, y_shape = tni.get_output_dimensions(nw_strain_dict)
     print(x_shape, y_shape)
