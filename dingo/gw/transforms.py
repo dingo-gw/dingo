@@ -10,15 +10,6 @@ Collect transforms which do not naturally belong with other classes,
 such as RandomProjectToDetectors and AddNoiseAndWhiten.
 """
 
-# TODO:
-#  * waveform_generator.WaveformDataset._compute_parameter_statistics()
-#    computes mean and stdev analytically for known distributions which
-#    is more accurate than computing sample means and stdevs
-# TODO:
-#    When StandardizeParameters is called, this info comes into its constructore
-#    * Add means, stdev to the Bilby prior classes
-#    * Write perhaps a static method which, given the full bilby prior can compute the
-#    * means and stdevs for all parameters and return these into dictionaries
 
 class StandardizeParameters:
     """
@@ -179,7 +170,7 @@ class ToNetworkInput:
 
         # FIXME: how will the NN know which entries are which parameters and which rows are which detectors?
         #  Must return this additional label data for later
-        return torch.from_numpy(y), torch.from_numpy(x)
+        return torch.from_numpy(x), torch.from_numpy(y)
 
 
 class Compose:

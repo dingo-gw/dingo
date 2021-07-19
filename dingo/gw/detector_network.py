@@ -11,6 +11,7 @@ class DetectorNetwork:
     """A wrapper class around bilby's Interferometer and InterferometerList
 
     Coupled to our Domain classes.
+    TODO: extend to use PSDs from a database
     """
 
     def __init__(self, ifo_list: List[str],

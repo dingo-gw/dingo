@@ -4,8 +4,6 @@ import numpy as np
 from dingo.gw.detector_network import DetectorNetwork
 from bilby.gw.detector import PowerSpectralDensity
 
-from dingo.gw.domains import UniformFrequencyDomain
-
 
 class PSD:
     """
@@ -137,20 +135,15 @@ class AddNoiseAndWhiten:
 
     def _noise_summary_function(self, asd: np.ndarray):
         """
-        TODO:
-          * The NN flow needs to know what PSD realization it got
-            Return 1/ASD * some_factor so that it is in range [0, 1]
-            (or perhaps a different function in the future)
+        Map the inverse ASD into [0, 1].
         """
         z = 1.0 / asd
         return z / np.max(z)
 
     def noise_summary(self):
         """
-        TODO:
-          * The NN flow needs to know what PSD realization it got
-            Return 1/ASD * some_factor so that it is in range [0, 1]
-            (or perhaps a different function in the future)
+        Return a dictionary of noise summary data for the given
+        detector network. This serves as context data for the NN flow.
         """
         return {ifo: self._noise_summary_function(asd)
                 for ifo, asd in self.asd_dict.items()}

@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import h5py
 from tqdm import tqdm
+from typing import Dict, Union
 from torch.utils.data import Dataset
 
 from dingo.gw.parameters import GWPriorDict
@@ -54,7 +55,7 @@ class WaveformDataset(Dataset):
         """The number of waveform samples."""
         return len(self._parameter_samples)
 
-    def __getitem__(self, idx) -> Dict[str, Dict[str, float], Dict[str, np.ndarray]]:
+    def __getitem__(self, idx) -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
         """
         Return a nested dictionary containing parameters and waveform polarizations
         for sample with index `idx`. If defined a chain of transformations are being
