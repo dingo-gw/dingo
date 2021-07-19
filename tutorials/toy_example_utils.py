@@ -1,4 +1,91 @@
 import numpy as np
+import torch
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
+import matplotlib.pyplot as plt
+from typing import Union
+
+
+class HarmonicOscillator:
+    """
+    Simulator for the harmonic oscillator forward model. It is initialised
+    with an axis for the time samples T where the oscillator is evaluated.
+    """
+
+    def __init__(self, t_lower=0, t_upper=10, N_bins=2000):
+        # Time axis
+        self.t_upper = t_upper
+        self.t_lower = t_lower
+        self.N_bins = N_bins
+        self.t_axis = np.linspace(self.t_lower, self.t_upper, self.N_bins)
+        self.delta_t = (self.t_upper - self.t_lower) / (self.N_bins - 1)
+
+    def simulate(self, parameters):
+        if parameters.shape[1] == 3:
+            t, omega0, beta = parameters[:, 0], parameters[:, 1], \
+                              parameters[:, 2]
+        elif parameters.shape[1] == 2:
+            omega0, beta = parameters[:, 0], parameters[:, 1]
+            t = np.zeros_like(omega0)
+        else:
+            raise ValueError('Unexpected number of parameters')
+        A = np.ones(len(t))
+        a = A[:, np.newaxis] \
+            * np.exp(-np.outer(beta * omega0, self.t_axis) \
+                     + (beta * omega0 * t)[:, np.newaxis])
+        b = np.outer(np.sqrt(1 - beta ** 2) * omega0, self.t_axis) \
+            - (np.sqrt(1 - beta ** 2) * omega0 * t)[:, np.newaxis]
+        c = (np.sqrt(1 - beta ** 2) * omega0)
+        x = a * np.sin(b) / c[:, np.newaxis] * (self.t_axis > t[:, np.newaxis])
+        return x
+
+
+def sample_from_uniform_prior(prior_ranges, num_samples=10_000):
+    parameters = np.zeros((num_samples, len(prior_ranges)))
+    for idx, (low, high) in enumerate(prior_ranges):
+        parameters[:, idx] = np.random.uniform(low=low, high=high,
+                                               size=num_samples)
+    return parameters
+
+
+class SimulationsDataset(Dataset):
+    """Dataset with parameters and corresponding raw simulations."""
+
+    def __init__(self,
+                 parameters: np.array,
+                 simulations: np.array,
+                 transform: callable = None):
+        """
+        Parameters
+        ----------
+
+        parameters: np.array
+        Args:
+            parameters : np.array
+                array with parameters for simulation
+            simulations : np.array
+                array with corresponding simulated observations
+            transform : callable = None
+                optional transform to be applied on a sample.
+        """
+        self.parameters = parameters
+        self.simulations = simulations
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.parameters)
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+
+        sample = {'parameters': self.parameters[idx],
+                  'simulations': self.simulations[idx]}
+
+        if self.transform:
+            sample = self.transform(sample)
+
+        return sample
 
 
 def shift_time_series_by_t(x, t, t_axis_delta):
@@ -54,16 +141,20 @@ class NoiseModule:
 
     def whiten_signal_and_get_noise_summary(self,
                                             signal: np.ndarray,
+                                            noise_distribution: np.ndarray =
+                                            None,
                                             ):
         """
-        Sample a random noise distribution, whiten the signal accordingly.
-        Return the whitened signal and the summary information of the noise
-        distribution.
+        Sample a random noise distribution (unless provided), whiten the signal
+        accordingly. Return the whitened signal and the summary information
+        of the noise distribution.
 
         Parameters
         ----------
         signal: np.ndarray
             the signal to be whitened
+        noise_distribution: np.ndarray = None
+            noise distribution; if not provided, random one is sampled
 
         Returns
         -------
@@ -72,14 +163,44 @@ class NoiseModule:
         noise_summary: np.ndarray
              summary information about the sampled noise distribution
         """
-        noise_distribution = self.get_random_noise_distribution()
+        if noise_distribution is None:
+            noise_distribution = self.get_random_noise_distribution()
         signal = signal / noise_distribution
-        noise_summary = 1. / noise_distribution
+        noise_summary = self.get_noise_summary(noise_distribution)
         return signal, noise_summary
 
-    def add_white_noise(self,
-                        signal: np.ndarray,
-                        ):
+    def get_noise_summary(self, noise_distribution: np.ndarray):
+        """
+        Get the summary information for the noise distribution.
+
+        Parameters
+        ----------
+        noise_distribution: np.ndarray
+            array with noise distribution
+        Returns
+        -------
+        noise_summary: np.ndarray
+            summary information for the noise distribution
+        """
+        return 1. / noise_distribution
+
+    def get_noise_distribution_from_summary(self, noise_summary: np.ndarray):
+        """
+        Get the noise distribution from its summary information. This inverts
+        the method get_noise_summary.
+
+        Parameters
+        ----------
+        noise_summary: np.ndarray
+            array with noise summary
+        Returns
+        -------
+        noise_distribution: np.ndarray
+            noise distribution
+        """
+        return 1. / noise_summary
+
+    def add_white_noise(self, signal: np.ndarray):
         """
         Add white gaussian noise with standard deviation self.std to signal.
 
@@ -121,7 +242,7 @@ class ProjectOntoDetectors(object):
                  ti_priors_list: list = None,
                  ):
         if ti_priors_list is None:
-            ti_priors_list = [[0,5]] * num_detectors
+            ti_priors_list = [[0, 5]] * num_detectors
         self.num_detectors = num_detectors
         self.num_channels = num_channels
         self.t_axis_delta = t_axis_delta
@@ -148,23 +269,28 @@ class ProjectOntoDetectors(object):
 class WhitenSignalAndGetNoiseSummary(object):
     """
     This takes the signal data, whitens it and adds the noise context to the
-    context dimension.
+    context dimension. If no noise_distribution is provided in the sample,
+    a random one is sampled.
     """
 
-    def __init__(self,
-                 noise_module: NoiseModule,
-                 ):
+    def __init__(self, noise_module: NoiseModule):
         self.noise_module = noise_module
 
     def __call__(self, sample):
-        theta, x = sample['parameters'], sample['simulations']
+        x = sample.pop('simulations')
+        try:
+            noise_distribution = sample['noise_distributions']
+        except KeyError:
+            noise_distribution = [None] * x.shape[0]
         for idx in range(x.shape[0]):
             x_det, noise_summary = \
-                self.noise_module.whiten_signal_and_get_noise_summary(x[idx])
+                self.noise_module.whiten_signal_and_get_noise_summary(
+                    x[idx], noise_distribution[idx])
             x[idx] = x_det
             x[idx, 2:] = noise_summary
 
-        return {'parameters': theta, 'simulations': x}
+        sample['simulations'] = x
+        return sample
 
 
 class AddWhiteNoise(object):
@@ -172,9 +298,7 @@ class AddWhiteNoise(object):
     This takes the signal data and adds white noise.
     """
 
-    def __init__(self,
-                 noise_module: NoiseModule,
-                 ):
+    def __init__(self, noise_module: NoiseModule):
         self.noise_module = noise_module
 
     def __call__(self, sample):
@@ -187,19 +311,156 @@ class AddWhiteNoise(object):
 
 class NormalizeParameters(object):
     """
+    Normalization transform. If inverse=False, the sample parameters are
+    normalized by subtracting means and dividing by standard deviations. If
+    inverse=True, the parameters are denormalized by multiplying by standard
+    deviations and adding means.
 
+    Parameters
+    ----------
+    means: np.ndarray
+        array with means of sample parameters
+    stds: np.ndarray
+        array with standard deviations of sample parameters
+    inverse: bool = False
+        if True, apply normalization; if False, apply denormalization
     """
 
-    def __init__(self, prior_ranges):
-        prior_ranges = np.array(prior_ranges)
-        self.means = np.mean(prior_ranges, axis=1)
-        self.stds = np.abs(prior_ranges[:,1] - prior_ranges[:,0]) / np.sqrt(12.)
+    def __init__(self,
+                 means: np.ndarray,
+                 stds: np.ndarray,
+                 inverse: bool = False,
+                 ):
+        self.means = means
+        self.stds = stds
+        self.inverse = inverse
 
     def __call__(self, sample):
         theta, x = sample['parameters'], sample['simulations']
-        theta = (theta - self.means) / self.stds
+        if not self.inverse:
+            theta = (theta - self.means) / self.stds
+        else:
+            theta = theta * self.stds + self.means
 
         return {'parameters': theta, 'simulations': x}
+
+
+class DictElementsToTensor(object):
+    """Convert all numpy arrays in sample dict to torch tensors."""
+
+    def __call__(self, sample):
+        for key, item in sample.items():
+            if type(item) is np.ndarray:
+                sample[key] = torch.from_numpy(item)
+        return sample
+
+
+class ConvertDictsToArray(object):
+    """
+    This iterates through all elements of the sample dict and checks, whether
+    the element is a dict itself. In that case, it converts this dictionary
+    to a numpy array by concatenating the elements.
+    """
+
+    def __call__(self, sample):
+        for name, item in sample.items():
+            if type(item) == dict:
+                shape = next(iter(item.values())).shape
+                x = np.zeros((len(item), *shape))
+                for idx, (_, item_) in enumerate(item.items()):
+                    x[idx] = item_
+                sample[name] = x
+        return sample
+
+
+class AddContextChannels(object):
+    """
+    Add num_channels additional context channels along axis 1 to sample[key].
+    """
+
+    def __init__(self, key, num_channels=1):
+        self.key = key
+        self.num_channels = num_channels
+
+    def __call__(self, sample):
+        x = sample[self.key]
+        shape_new = list(x.shape)
+        shape_new[1] += self.num_channels
+        x_new = np.zeros(shape_new)
+        x_new[:, :x.shape[1], :] = x
+        sample[self.key] = x_new
+        return sample
+
+
+def get_train_transformations_composite(projection_kwargs: dict,
+                                        noise_module_kwargs: dict,
+                                        normalization_kwargs: dict,
+                                        ):
+    """
+    Build the full preprocessing transformation for the training data,
+    the transforms the raw data from the dataset to input tensors for the
+    neural network.
+
+    Parameters
+    ----------
+    projection_kwargs: dict
+        kwargs for projection onto the detectors
+    noise_module_kwargs: dict
+        kwargs for the noise module, which is used for whitening the signals
+        and adding noise
+    normalization_kwargs: dict
+        kwargs for normalization of model parameters; contains means and stds
+
+    Returns
+    -------
+    train_transformation
+        transformation object for preprocessing training data
+    """
+    transform_projection = ProjectOntoDetectors(**projection_kwargs)
+
+    noise_module = NoiseModule(**noise_module_kwargs)
+    transform_whiten_signal_and_add_noise_summary = \
+        WhitenSignalAndGetNoiseSummary(noise_module)
+    transform_add_white_noise = AddWhiteNoise(noise_module)
+
+    transform_normalize_parameters = NormalizeParameters(
+        **normalization_kwargs, inverse=False)
+
+    transform_to_tensors = DictElementsToTensor()
+
+    train_transformation = transforms.Compose([
+        transform_projection,
+        transform_whiten_signal_and_add_noise_summary,
+        transform_add_white_noise,
+        transform_normalize_parameters,
+        transform_to_tensors,
+    ])
+
+    return train_transformation
+
+
+def get_means_and_stds_from_uniform_prior_ranges(
+        prior_ranges: Union[list, np.ndarray],
+):
+    """
+    Compute and return means and standard deviations of uniform distributions
+    with specified prior ranges.
+
+    Parameters
+    ----------
+    prior_ranges: Union[list, np.ndarray]
+        ranges of uniform priors in format [[low, high], [low, high], ...]
+
+    Returns
+    -------
+    means, stds: (np.ndarray, np.ndarray)
+        numpy arrays with means and standard deviations
+    """
+    prior_ranges = np.array(prior_ranges)
+    means = np.mean(prior_ranges, axis=1)
+    stds = np.abs(prior_ranges[:, 1] - prior_ranges[:, 0]) / np.sqrt(12.)
+    return means, stds
+
 
 def main_old():
     from scipy import linalg
