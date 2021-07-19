@@ -6,25 +6,17 @@ from bilby.gw.detector import PowerSpectralDensity
 
 from dingo.gw.domains import UniformFrequencyDomain
 
-# TODO:
-#  * Caveat: Don't use PSDs with float32!
-#  * simplest case: fixed designed sensitivity PSD
-#  * noise needs to know the domain
-#  * more complex: database of PSDs for each detector
-#    - randomly select a PSD for each detector
-#  * Maybe create a PSD_DataSet class (open / non-open data), and transform
-#    - at each call randomly draw a psd
-#  * window_function
 
-# TODO: Noise class needs to provide:
-# 1. sample_noise()
-# 2. provide_context() -- will not modify a tensor, but spit out a tensor that has the shape of expected noise summary
-#     particular function of the PSD
 class PSD:
-    """TODO: Should a DetectorNetwork have a list of PSDs?
+    """
+    Load a PSD from a file, or look up a standard PSD available from lalsuite / bilby.
 
-    This class could take a domain class and then truncate the generate PSD onto this domain
-    or always use the domain grid as input to get_power_spectral_density_array.
+    TODO:
+        * Add lookup of reference PSDs
+        * Take a domain class instance and then truncate the generated PSD onto this domain
+          or always use the domain grid as input to get_power_spectral_density_array.
+        * Should a DetectorNetwork have a list of PSDs?
+        * Caveat: Don't use PSDs with float32!
     """
     def __init__(self, psd_file: str):
         if psd_file is not None:
@@ -53,7 +45,15 @@ class PSD:
 
 
 class PSDDataSet:
-    """draw PSD object()"""
+    """draw PSD object()
+
+    TODO:
+       * implement a database of PSDs for each detector
+       * Want to randomly draw a PSD for each detector
+       * Consider open / non-open data
+       * transform to a standard domain
+
+    """
     # TODO: Look at old code: class NoiseModule
     # Where does the random choice of index come in?
     # transform class would have to call sample_index() and then sample_...
@@ -86,6 +86,9 @@ class AddNoiseAndWhiten:
             Whether to add white noise in __call__
             Caveat: If whiten_data = False, and the input strain
             data has not been whitened this may not be want you want.
+
+        TODO: add support for using PSD and PSDDataSet classes via
+          DetectorNetwork
         """
         self.network = network
         self.domain = network.domain
@@ -93,7 +96,7 @@ class AddNoiseAndWhiten:
         self._compute_amplitude_spectral_densities()
 
 
-    def _compute_amplitude_spectral_densities(self) -> Dict[str, np.ndarray]:
+    def _compute_amplitude_spectral_densities(self):
         """
         Compute the amplitude spectral density from the
         power spectral densities for all detectors in the network.
@@ -132,9 +135,29 @@ class AddNoiseAndWhiten:
 
         return n_white
 
+    def _noise_summary_function(self, asd: np.ndarray):
+        """
+        TODO:
+          * The NN flow needs to know what PSD realization it got
+            Return 1/ASD * some_factor so that it is in range [0, 1]
+            (or perhaps a different function in the future)
+        """
+        z = 1.0 / asd
+        return z / np.max(z)
+
+    def noise_summary(self):
+        """
+        TODO:
+          * The NN flow needs to know what PSD realization it got
+            Return 1/ASD * some_factor so that it is in range [0, 1]
+            (or perhaps a different function in the future)
+        """
+        return {ifo: self._noise_summary_function(asd)
+                for ifo, asd in self.asd_dict.items()}
+
     def _whiten_waveform(self, strain: np.ndarray, asd_array: np.ndarray) -> np.ndarray:
         """
-        Whiten strain with then given amplitude spectral density.
+        Whiten strain with the given amplitude spectral density.
 
         Parameters
         ----------
@@ -156,7 +179,6 @@ class AddNoiseAndWhiten:
         waveform_dict: Dict[Dict[str, float], Dict[str, np.ndarray]]
             Nested dictionary of parameters and strains
             {'parameters': ..., 'waveform': ...}
-
         """
         strain_dict = waveform_dict['waveform']
 
@@ -172,7 +194,7 @@ class AddNoiseAndWhiten:
                 'waveform': strain_dict, 'asd': self.asd_dict}
 
 
-    # TODO: somewhere add method to calculate SNR
+    # TODO: somewhere add a method to calculate SNR
     #     snr = (np.sqrt(np.sum(np.abs(stacked)**2)) / self._noise_std)
 
 
@@ -183,7 +205,55 @@ if __name__ == "__main__":
     psd_array = psd.get_power_spectral_density_array(f)
     f_defined = f[np.isfinite(psd_array)]
     print(f'PSD undefined for f<{f_defined[0]}, f>{f_defined[-1]} Hz')
-    plt.loglog(f, psd_array)
-    plt.show()
+    # plt.loglog(f, psd_array)
+    # plt.show()
     # TODO: add unit tests
+
+
+
+    from dingo.gw.parameters import GWPriorDict
+    from dingo.gw.domains import UniformFrequencyDomain
+    from dingo.gw.detector_network import DetectorNetwork, RandomProjectToDetectors
+    from dingo.gw.noise import AddNoiseAndWhiten
+    from dingo.gw.waveform_generator import WaveformGenerator
+    from dingo.gw.waveform_dataset import WaveformDataset
+    import matplotlib.pyplot as plt
+
+    domain_kwargs = {'f_min': 20.0, 'f_max': 4096.0, 'delta_f': 1.0 / 8.0, 'window_factor': 1.0}
+    domain = UniformFrequencyDomain(**domain_kwargs)
+    # priors = GWPriorDict(geocent_time_ref=1126259642.413, luminosity_distance_ref=500.0,
+    #                      reference_frequency=20.0)
+    # approximant = 'IMRPhenomXPHM'
+    # waveform_generator = WaveformGenerator(approximant, domain)
+
+
+    # Generate a dataset using the first waveform dataset object
+    # wd = WaveformDataset(priors=priors, waveform_generator=waveform_generator)
+    # n_waveforms = 17
+    # wd.generate_dataset(size=n_waveforms)
+
+    # 1. RandomProjectToDetectors  (single waveform)
+    #    in:  waveform_polarizations: Dict[str, np.ndarray], waveform_parameters: Dict[str, float]
+    #    out: Dict[str, np.ndarray]      {'H1':h1_strain, ...}
+    #    changes extrinsic pars
+
+    det_network = DetectorNetwork(["H1", "L1"], domain)
+    nw = AddNoiseAndWhiten(det_network)
+    fake_strain_dict = {'H1': np.zeros_like(domain()), 'L1': np.ones_like(domain())}
+    data_dict = {'parameters': None, 'waveform': fake_strain_dict}
+    ret_dict = nw(data_dict)
+    assert ret_dict['parameters'] == data_dict['parameters']
+    assert len(ret_dict.keys()) == 3
+    n = ret_dict['waveform']['H1']
+    print(n)
+    plt.plot(domain(), n.real)
+    print(np.mean(n.real), np.std(n.real))
+    plt.show()
+
+    # noise summary
+    # plt.clf()
+    # for ifo, ns in nw.noise_summary().items():
+    #     plt.plot(domain(), ns, label=ifo)
+    # plt.legend()
+    # plt.show()
 
