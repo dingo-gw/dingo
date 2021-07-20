@@ -392,6 +392,51 @@ class AddContextChannels(object):
         return sample
 
 
+class NetworkInputToObservation(object):
+    """
+    This takes simulated data that is processed for training input and
+    transforms this to a non-whitened observation.
+
+    Parameters
+    ----------
+
+    noise_module: NoiseModule
+        noise module used to generate noise distribution from noise summary
+    """
+
+    def __init__(self, noise_module: NoiseModule):
+        self.noise_module = noise_module
+
+    def __call__(self, sample):
+        # separate whitened observation from simulation
+        observations_white = np.array(sample['simulations'][:, :2, :])
+        Nd = len(observations_white)
+        # get noise distribution from context data
+        noise_distributions = np.array(
+            self.noise_module.get_noise_distribution_from_summary(
+                sample['simulations'][:, 2, :]
+            )
+        )
+        # undo the whitening
+        observations = np.zeros_like(observations_white)
+        for idx in range(Nd):
+            observations[idx] = \
+                observations_white[idx] * noise_distributions[idx]
+        # store observed data in dicts
+        observations = {
+            'Detector{:}'.format(idx): observations[idx] for idx in range(Nd)
+        }
+        noise_distributions = {
+            'Detector{:}'.format(idx): noise_distributions[idx] for idx in
+            range(Nd)
+        }
+        sample = {
+            'simulations': observations,
+            'noise_distributions': noise_distributions,
+        }
+        return sample
+
+
 def get_train_transformations_composite(projection_kwargs: dict,
                                         noise_module_kwargs: dict,
                                         normalization_kwargs: dict,
@@ -437,6 +482,57 @@ def get_train_transformations_composite(projection_kwargs: dict,
     ])
 
     return train_transformation
+
+
+def get_transformations_composites(projection_kwargs: dict,
+                                   noise_module_kwargs: dict,
+                                   normalization_kwargs: dict,
+                                   ):
+    """
+    Build the full preprocessing transformation for the training data,
+    the transforms the raw data from the dataset to input tensors for the
+    neural network.
+
+    Parameters
+    ----------
+    projection_kwargs: dict
+        kwargs for projection onto the detectors
+    noise_module_kwargs: dict
+        kwargs for the noise module, which is used for whitening the signals
+        and adding noise
+    normalization_kwargs: dict
+        kwargs for normalization of model parameters; contains means and stds
+
+    Returns
+    -------
+    train_transformation
+        transformation object for preprocessing training data
+    """
+    noise_module = NoiseModule(**noise_module_kwargs)
+
+    # train transformation
+    transform_list = []
+    transform_list.append(ProjectOntoDetectors(**projection_kwargs))
+    transform_list.append(WhitenSignalAndGetNoiseSummary(noise_module))
+    transform_list.append(AddWhiteNoise(noise_module))
+    transform_list.append(NormalizeParameters(**normalization_kwargs,
+                                              inverse=False))
+    transform_list.append(DictElementsToTensor())
+    train_transformation = transforms.Compose(transform_list)
+
+    # generate observations transformation
+    gen_obs_transformation = NetworkInputToObservation(noise_module)
+
+    # inference transformation
+    transform_list = []
+    transform_list.append(ConvertDictsToArray())
+    transform_list.append(AddContextChannels('simulations', 1))
+    transform_list.append(WhitenSignalAndGetNoiseSummary(noise_module))
+    transform_list.append(DictElementsToTensor())
+    inference_transformation = transforms.Compose(transform_list)
+
+    return train_transformation, gen_obs_transformation, \
+           inference_transformation
 
 
 def get_means_and_stds_from_uniform_prior_ranges(
