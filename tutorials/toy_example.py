@@ -22,104 +22,114 @@ Nd parameters {t, omega0, beta, t0, t1, ...}.
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
 from toy_example_utils import *
-
-
-class HarmonicOscillator:
-    """
-    Simulator for the harmonic oscillator forward model. It is initialised
-    with a axis for the time samples T where the oscillator is evaluated.
-    """
-
-    def __init__(self, t_lower=0, t_upper=10, N_bins=2000):
-        # Time axis
-        self.t_upper = t_upper
-        self.t_lower = t_lower
-        self.N_bins = N_bins
-        self.t_axis = np.linspace(self.t_lower, self.t_upper, self.N_bins)
-        self.delta_t = (self.t_upper - self.t_lower) / (self.N_bins - 1)
-
-    def simulate(self, parameters):
-        if parameters.shape[1] == 3:
-            t, omega0, beta = parameters[:, 0], parameters[:, 1], \
-                              parameters[:, 2]
-        elif parameters.shape[1] == 2:
-            omega0, beta = parameters[:, 0], parameters[:, 1]
-            t = np.zeros_like(omega0)
-        else:
-            raise ValueError('Unexpected number of parameters')
-        A = np.ones(len(t))
-        a = A[:, np.newaxis] \
-            * np.exp(-np.outer(beta * omega0, self.t_axis) \
-                     + (beta * omega0 * t)[:, np.newaxis])
-        b = np.outer(np.sqrt(1 - beta ** 2) * omega0, self.t_axis) \
-            - (np.sqrt(1 - beta ** 2) * omega0 * t)[:, np.newaxis]
-        c = (np.sqrt(1 - beta ** 2) * omega0)
-        x = a * np.sin(b) / c[:, np.newaxis] * (self.t_axis > t[:, np.newaxis])
-        return x
-
-
-def sample_from_uniform_prior(prior_ranges, num_samples=10_000):
-    parameters = np.zeros((num_samples, len(prior_ranges)))
-    for idx, (low, high) in enumerate(prior_ranges):
-        parameters[:, idx] = np.random.uniform(low=low, high=high,
-                                               size=num_samples)
-    return parameters
-
-
-class SimulationsDataset(Dataset):
-    """Dataset with parameters and corresponding raw simulations."""
-
-    def __init__(self,
-                 parameters: np.array,
-                 simulations: np.array,
-                 transform: callable = None):
-        """
-        Parameters
-        ----------
-
-        parameters: np.array
-        Args:
-            parameters : np.array
-                array with parameters for simulation
-            simulations : np.array
-                array with corresponding simulated observations
-            transform : callable = None
-                optional transform to be applied on a sample.
-        """
-        self.parameters = parameters
-        self.simulations = simulations
-        self.transform = transform
-
-    def __len__(self):
-        return len(self.parameters)
-
-    def __getitem__(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-
-        sample = {'parameters': self.parameters[idx],
-                  'simulations': self.simulations[idx]}
-
-        if self.transform:
-            sample = self.transform(sample)
-
-        return sample
+import yaml
+from os.path import join
+from dingo.core.nn.nsf import create_nsf_with_rb_projection_embedding_net
+from dingo.core.models import PosteriorModel
+import h5py
 
 
 if __name__ == '__main__':
+    model_builder = create_nsf_with_rb_projection_embedding_net
+    transform_builder = get_transformations_composites
+    log_dir = '../logs/toy_example/01/'
+    model_path = join(log_dir, 'model_latest.pt')
+    dataset_path = join(log_dir, 'dataset.hdf5')
+    initialize = True
+    if initialize:
+        # Read YAML file
+        with open(join(log_dir, 'config.yaml'), 'r') as stream:
+            config = yaml.safe_load(stream)
+
+        t_axis = config['simulator_settings']['t_axis']
+        simulator = HarmonicOscillator(*t_axis)
+
+        # get dataset for extrinsic parameters
+        extrinsic_prior = config['simulator_settings']['extrinsic_prior']
+        intrinsic_prior = config['simulator_settings']['intrinsic_prior']
+        num_samples = config['simulator_settings']['size_dataset']
+        prior = extrinsic_prior + intrinsic_prior
+        parameters = sample_from_uniform_prior(
+            extrinsic_prior, num_samples=num_samples)
+        simulations = simulator.simulate(parameters)
+
+        # build/load the dataset
+        with h5py.File(dataset_path, 'w') as f:
+            f.create_dataset('parameters', data=parameters)
+            f.create_dataset('simulations', data=simulations)
+        dataset_kwargs = {'dataset_filename': dataset_path}
+
+        # build the transformation kwargs
+        projection_kwargs = {
+            'num_detectors': len(intrinsic_prior),
+            'num_channels': 3,
+            't_axis_delta': simulator.delta_t,
+            'ti_priors_list': intrinsic_prior,
+        }
+        noise_module_kwargs = {
+            'num_bins': simulator.N_bins,
+            'std': 0.01,
+        }
+        normalization_kwargs = {
+            'means': get_means_and_stds_from_uniform_prior_ranges(prior)[0],
+            'stds': get_means_and_stds_from_uniform_prior_ranges(prior)[1],
+        }
+        transformation_kwargs = {
+            'projection_kwargs': projection_kwargs,
+            'noise_module_kwargs': noise_module_kwargs,
+            'normalization_kwargs': normalization_kwargs,
+        }
+        train_transform, *_ = transform_builder(**transformation_kwargs)
+
+        # build the model
+        nsf_kwargs = config['model_config']['nsf_kwargs']
+        nsf_kwargs['input_dim'] = len(prior)
+        embedding_net_kwargs = config['model_config']['embedding_net_kwargs']
+        embedding_net_kwargs['input_dims'] = \
+            (len(extrinsic_prior), 3, simulator.N_bins)
+        embedding_net_kwargs['V_rb_list'] = None
+        model_kwargs = {
+            'nsf_kwargs': nsf_kwargs,
+            'embedding_net_kwargs': embedding_net_kwargs,
+        }
+        pm = PosteriorModel(
+            model_builder=model_builder,
+            model_kwargs=model_kwargs,
+            optimizer_kwargs=config['model_config']['optimizer_kwargs'],
+            scheduler_kwargs=config['model_config']['scheduler_kwargs'],
+            init_for_training=True,
+            transform_kwargs=transformation_kwargs,
+            dataset_kwargs=dataset_kwargs,
+        )
+
+        pm.save_model(model_filename=model_path,
+                      save_training_info=True)
+
+
+    pm_loaded = PosteriorModel(
+        model_builder=model_builder,
+        model_filename=model_path,
+        init_for_training=True,
+    )
+
+    pm_loaded.initialize_dataloader(SimulationsDataset, transform_builder)
+
+
+    # set up the simulator
 
 
     # set up forward model
-    t_axis = [0, 10, 1000]
+    t_axis = config['simulator_settings']['t_axis']
     simulator = HarmonicOscillator(*t_axis)
 
     # get dataset for extrinsic parameters
     extrinsic_prior = [[3.0, 10.0], [0.2, 0.5]]
     intrinsic_prior = [[0, 3], [2, 5]]
     prior = extrinsic_prior + intrinsic_prior
-    parameters = sample_from_uniform_prior(extrinsic_prior, num_samples=5_000)
+    parameters = sample_from_uniform_prior(extrinsic_prior,
+                                           num_samples=5_000)
     simulations = simulator.simulate(parameters)
     dataset = SimulationsDataset(parameters, simulations)
 
@@ -127,19 +137,32 @@ if __name__ == '__main__':
     # transformations #
     ###################
 
-    transform_projection = ProjectOntoDetectors(
-        num_detectors=2,
-        num_channels=3,
-        t_axis_delta=simulator.delta_t,
-        ti_priors_list=intrinsic_prior,
-    )
+    projection_kwargs = {
+        'num_detectors': 2,
+        'num_channels': 3,
+        't_axis_delta': simulator.delta_t,
+        'ti_priors_list': intrinsic_prior,
+    }
+    noise_module_kwargs = {
+        'num_bins': simulator.N_bins,
+        'std': 0.01,
+    }
+    normalization_kwargs = {
+        'means': get_means_and_stds_from_uniform_prior_ranges(prior)[0],
+        'stds': get_means_and_stds_from_uniform_prior_ranges(prior)[1],
+    }
 
-    noise_module = NoiseModule(num_bins=simulator.N_bins, std=0.01)
+    transform_projection = ProjectOntoDetectors(**projection_kwargs)
+
+    noise_module = NoiseModule(**noise_module_kwargs)
     transform_whiten_signal_and_add_noise_summary = \
         WhitenSignalAndGetNoiseSummary(noise_module)
     transform_add_white_noise = AddWhiteNoise(noise_module)
 
-    transform_normalize_parameters = NormalizeParameters(prior)
+    transform_normalize_parameters = NormalizeParameters(
+        **normalization_kwargs, inverse=False)
+    transform_denormalize_parameters = NormalizeParameters(
+        **normalization_kwargs, inverse=True)
 
     # get data from dataset
     data = dataset[0]
@@ -153,8 +176,10 @@ if __name__ == '__main__':
     print(data['parameters'])
     for idx in range(data['simulations'].shape[0]):
         plt.title('Projection onto detector {:}'.format(idx))
-        plt.plot(simulator.t_axis, data['simulations'][idx, 0], label='real')
-        plt.plot(simulator.t_axis, data['simulations'][idx, 1], label='imag')
+        plt.plot(simulator.t_axis, data['simulations'][idx, 0],
+                 label='real')
+        plt.plot(simulator.t_axis, data['simulations'][idx, 1],
+                 label='imag')
         plt.plot(simulator.t_axis, data['simulations'][idx, 2])
         plt.legend()
         plt.show()
@@ -164,8 +189,10 @@ if __name__ == '__main__':
     print(data['parameters'])
     for idx in range(data['simulations'].shape[0]):
         plt.title('Whitened data in detector i {:}'.format(idx))
-        plt.plot(simulator.t_axis, data['simulations'][idx, 0], label='real')
-        plt.plot(simulator.t_axis, data['simulations'][idx, 1], label='imag')
+        plt.plot(simulator.t_axis, data['simulations'][idx, 0],
+                 label='real')
+        plt.plot(simulator.t_axis, data['simulations'][idx, 1],
+                 label='imag')
         plt.legend()
         plt.show()
         plt.title('Noise summary in detector i {:}'.format(idx))
@@ -177,8 +204,10 @@ if __name__ == '__main__':
     print(data['parameters'])
     for idx in range(data['simulations'].shape[0]):
         plt.title('Noisy data in detector i {:}'.format(idx))
-        plt.plot(simulator.t_axis, data['simulations'][idx, 0], label='real')
-        plt.plot(simulator.t_axis, data['simulations'][idx, 1], label='imag')
+        plt.plot(simulator.t_axis, data['simulations'][idx, 0],
+                 label='real')
+        plt.plot(simulator.t_axis, data['simulations'][idx, 1],
+                 label='imag')
         plt.legend()
         plt.show()
         plt.title('Noise summary in detector i {:}'.format(idx))
@@ -187,5 +216,36 @@ if __name__ == '__main__':
 
     data = transform_normalize_parameters(data)
     print(data['parameters'])
+    transform_denormalize_parameters(data)
+    print(transform_denormalize_parameters(data)['parameters'])
 
-    pass
+    transformation_kwargs = {
+        'projection_kwargs': projection_kwargs,
+        'noise_module_kwargs': noise_module_kwargs,
+        'normalization_kwargs': normalization_kwargs,
+    }
+    transform_full, _, inference_postprocessing = \
+        get_transformations_composite(**transformation_kwargs)
+
+    data_transformed = transform_full(dataset[0])
+
+    print(data['parameters'])
+    print(data_transformed['parameters'])
+    for idx in range(data['simulations'].shape[0]):
+        plt.title('Noisy data in detector i {:}'.format(idx))
+        plt.plot(simulator.t_axis, data['simulations'][idx, 0],
+                 label='real')
+        plt.plot(simulator.t_axis, data['simulations'][idx, 1],
+                 label='imag')
+        plt.plot(simulator.t_axis, data_transformed['simulations'][idx, 0],
+                 label='real')
+        plt.plot(simulator.t_axis, data_transformed['simulations'][idx, 1],
+                 label='imag')
+        plt.legend()
+        plt.show()
+        plt.title('Noise summary in detector i {:}'.format(idx))
+        plt.plot(simulator.t_axis, data['simulations'][idx, 2])
+        plt.plot(simulator.t_axis, data_transformed['simulations'][idx, 2])
+        plt.show()
+
+        pass

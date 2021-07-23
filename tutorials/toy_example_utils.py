@@ -4,6 +4,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 import matplotlib.pyplot as plt
 from typing import Union
+import h5py
 
 
 class HarmonicOscillator:
@@ -52,32 +53,54 @@ class SimulationsDataset(Dataset):
     """Dataset with parameters and corresponding raw simulations."""
 
     def __init__(self,
-                 parameters: np.array,
-                 simulations: np.array,
-                 transform: callable = None):
+                 dataset_filename: str = None,
+                 parameters: np.array = None,
+                 simulations: np.array = None,
+                 transform: callable = None,
+                 indices: np.array = None,
+                 ):
         """
         Parameters
         ----------
 
         parameters: np.array
         Args:
-            parameters : np.array
-                array with parameters for simulation
-            simulations : np.array
-                array with corresponding simulated observations
+            dataset_filename: str = None
+                path to a dataset hdf5 file
+            parameters : np.array = None
+                array with parameters for simulation,
+                required if dataset_filename=None
+            simulations : np.array = None
+                array with corresponding simulated observations,
+                required if dataset_filename=None
             transform : callable = None
-                optional transform to be applied on a sample.
+                optional transform to be applied on a sample
+            indices: np.array = None
+                array with indices used for dataset, this is useful to
+                partition dataset into train and validation splits
         """
         self.parameters = parameters
         self.simulations = simulations
+        if dataset_filename is not None:
+            with h5py.File(dataset_filename, 'r') as f:
+                self.parameters = f['parameters'][:]
+                self.simulations = f['simulations'][:]
+        if self.parameters is None or self.simulations is None:
+            raise ValueError('If no dataset filename is specified, parameters '
+                             'and simulations arguments are required.')
+
         self.transform = transform
+        self.indices = indices
 
     def __len__(self):
+        if self.indices is not None: return len(self.indices)
         return len(self.parameters)
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
+        if self.indices is not None:
+            idx = self.indices[idx]
 
         sample = {'parameters': self.parameters[idx],
                   'simulations': self.simulations[idx]}
@@ -531,8 +554,12 @@ def get_transformations_composites(projection_kwargs: dict,
     transform_list.append(DictElementsToTensor())
     inference_transformation = transforms.Compose(transform_list)
 
+    # inference postprocessing
+    postprocessing_transformation = NormalizeParameters(**normalization_kwargs,
+                                                        inverse=False)
+
     return train_transformation, gen_obs_transformation, \
-           inference_transformation
+           inference_transformation, postprocessing_transformation
 
 
 def get_means_and_stds_from_uniform_prior_ranges(
