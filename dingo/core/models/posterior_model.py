@@ -5,6 +5,7 @@ TODO: Docstring
 from typing import Callable
 import torch
 import dingo.core.utils.torchutils as torchutils
+from torch.utils.data import Dataset, DataLoader
 
 
 class PosteriorModel:
@@ -46,6 +47,8 @@ class PosteriorModel:
                  scheduler_kwargs: dict = None,
                  epoch: int = 1,
                  init_for_training: bool = False,
+                 transform_kwargs: dict = None,
+                 dataset_kwargs: dict = None,
                  ):
         """
         TODO: Docstring
@@ -58,6 +61,8 @@ class PosteriorModel:
         self.optimizer = None
         self.scheduler_kwargs = scheduler_kwargs
         self.scheduler = None
+        self.transform_kwargs = transform_kwargs
+        self.dataset_kwargs = dataset_kwargs
 
         # build model
         if model_filename is not None:
@@ -91,6 +96,22 @@ class PosteriorModel:
             self.scheduler = torchutils.get_scheduler_from_kwargs(
                 self.optimizer, **self.scheduler_kwargs)
 
+    def initialize_dataloader(self,
+                              DataSet,
+                              get_transformations=None
+                              ):
+        """
+        TODO: Docstring, train vs. val loader, batch size
+        """
+        if get_transformations is not None:
+            self.train_transformation, *_ = \
+                get_transformations(**self.transform_kwargs)
+        else:
+            self.train_transformation = None
+        self.dataset = DataSet(**self.dataset_kwargs,
+                               transform=self.train_transformation)
+        self.dataloader = DataLoader(self.dataset, batch_size=64, shuffle=True)
+
     def save_model(self,
                    model_filename: str,
                    save_training_info: bool = True,
@@ -111,7 +132,7 @@ class PosteriorModel:
             'model_kwargs': self.model_kwargs,
             'model_state_dict': self.model.state_dict(),
             'epoch': self.epoch,
-            # 'data_conditioning': None,
+            # 'training_data_information': None,
         }
         if save_training_info:
             model_dict['optimizer_kwargs'] = self.optimizer_kwargs
@@ -120,6 +141,10 @@ class PosteriorModel:
                 model_dict['optimizer_state_dict'] = self.optimizer.state_dict()
             if self.scheduler is not None:
                 model_dict['scheduler_state_dict'] = self.scheduler.state_dict()
+            if self.transform_kwargs is not None:
+                model_dict['transform_kwargs'] = self.transform_kwargs
+            if self.dataset_kwargs is not None:
+                model_dict['dataset_kwargs'] = self.dataset_kwargs
             # TODO
 
         torch.save(model_dict, model_filename)
@@ -153,6 +178,10 @@ class PosteriorModel:
                 self.optimizer_kwargs = d['optimizer_kwargs']
             if 'scheduler_kwargs' in d:
                 self.scheduler_kwargs = d['scheduler_kwargs']
+            if 'dataset_kwargs' in d:
+                self.dataset_kwargs = d['dataset_kwargs']
+            if 'transform_kwargs' in d:
+                self.transform_kwargs = d['transform_kwargs']
             # initialize optimizer and scheduler
             self.initialize_optimizer_and_scheduler()
             # load optimizer and scheduler state dict
@@ -161,7 +190,38 @@ class PosteriorModel:
             if 'scheduler_state_dict' in d:
                 self.scheduler.load_state_dict(d['scheduler_state_dict'])
 
+    def train(self,
+              train_loader: torch.utils.data.DataLoader,
+              validation_loader: torch.utils.data.DataLoader,
+              log_dir: str,
+              ):
+        pass
+
+
 if __name__ == '__main__':
+    """
+    # training
+    wfd = WaveformDataset(init_args)
+    pm.training_data_info = wfd.get_info()
+
+    train_transform = wfd.get_train_transform(**pm.training_data_info)
+    inference_transform = wfd.get_inference_transform(**pm.training_data_info)
+
+    # train_loader, validation_loader = wfd.data_loader_builder(
+    #     **pm.training_data_info)
+
+    pm = PosteriorModel(model_builder, model_path)
+    pm.build_inference_transform(transform_builder)
+        inference_transform = train_transform(pm.training_data_info)
+    pm.inference(data_dict, num_samples=100)
+
+    pm.build_inference_transform(get_inference_transform)
+
+    # inference
+    pm.load_model(model_builder, model_path)
+    inference_trafo = wfd.get_inference_transform(pm.training_data_info)
+    pm.get_samples(transformation=inference_trafo)
+    """
     from dingo.core.nn.nsf import create_nsf_with_rb_projection_embedding_net
     import os
     from os.path import join
