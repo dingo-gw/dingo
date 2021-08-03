@@ -177,6 +177,7 @@ class WaveformDataset(Dataset):
 
 
 
+
 if __name__ == "__main__":
     """Explore chaining transforms together and applying these to a waveform dataset."""
     from dingo.gw.domains import UniformFrequencyDomain

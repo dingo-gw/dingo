@@ -3,7 +3,10 @@ import numpy as np
 import pandas as pd
 import torch
 
-from dingo.gw.domains import Domain
+from dingo.gw.domains import Domain, UniformFrequencyDomain
+from dingo.gw.detector_network import DetectorNetwork, RandomProjectToDetectors
+from dingo.gw.noise import AddNoiseAndWhiten
+from dingo.gw.parameters import GWPriorDict
 
 """
 Collect transforms which do not naturally belong with other classes,
@@ -202,3 +205,123 @@ class Compose:
                 raise AttributeError(f'Transformation {tr} does not implement an inverse.')
             data = tr.inverse(data)
         return data
+
+
+class WaveformTransformationFactory:
+    """
+    Generate a standard chain of transformations from keyword arguments.
+
+    This is an alternative to explicitly deserializing the chain of
+    transform classes from a pickle file. We allow some of the transformation
+    classes and classes the transformation classes depend on, to be specified,
+    along with their arguments.
+    """
+    def __init__(self, *,
+                 domain_class: str = 'UniformFrequencyDomain',
+                 domain_kwargs: Dict[str, float],
+                 prior_class: str = 'GWPriorDict',
+                 prior_kwargs: Dict[str, float],
+                 detector_network_class: str = 'DetectorNetwork',
+                 ifo_list: List):
+        """
+        Some transformation classes and classes which they depend on are
+        specified as strings. They need to be imported into this module
+        in order to retrieve their class references.
+
+        Arguments that go with specified classes are in some cases to be
+        given as dictionaries so that they can be passed as kwargs into
+        the respective class constructor. In other cases, some arguments
+        only become available when other classes are instantiated here.
+
+        Parameters
+        ----------
+        domain_class: str
+            Name of the domain class to be used
+        domain_kwargs: dict
+            kwargs for instantiating the domain class
+        prior_class: str
+            Name of the prior class to be used
+        prior_kwargs: dict
+            kwargs for instantiating the prior class
+        detector_network_class: str
+            Name of the detector network class to be used
+        ifo_list: List
+            List of interferometer names
+        """
+        # Assume that classes for all options we want to support are imported into this module,
+        self.domain = globals()[domain_class](**domain_kwargs)
+        self.priors = globals()[prior_class](**prior_kwargs)
+        det_network_kwargs = {'ifo_list': ifo_list, 'domain': self.domain,
+                              'start_time': self.priors.reference_geocentric_time}
+        self.det_network = globals()[detector_network_class](**det_network_kwargs)
+
+
+    def __call__(self, mu_dict: Dict[str, float], std_dict: Dict[str, float]):
+        """
+        Return chain of waveform transforms
+
+        Parameters
+        ----------
+        mu_dict: dict
+            Dictionary of parameter means used along with a
+            waveform data set
+        std_dict: dict
+            Dictionary of parameter standard deviations used
+            along with a waveform data set
+
+        TODO: The data from which these dicts can be computed only becomes
+          available after all waveform parameters have been sampled,
+          i.e. for the extrinsic parameters.
+          We could instead set them to some reference values.
+          Alternatively, we could use the analytical means and stdevs
+          for each of the parameter distributions; these would naturally
+          belong in subclasses of the bilby priors.
+        """
+        # The transformation classes could be specified via arguments
+        # if we find that this feature is needed.
+        return Compose([
+            RandomProjectToDetectors(self.det_network, self.priors),
+            AddNoiseAndWhiten(self.det_network),
+            StandardizeParameters(mu=mu_dict, std=std_dict),
+            ToNetworkInput(self.domain)
+        ])
+
+
+
+
+if __name__ == "__main__":
+    """
+    Example for setting up a WaveformTransformationFactory and 
+    using it with a WaveformDataset and WaveformGenerator.
+    """
+    from dingo.gw.waveform_generator import WaveformGenerator
+    from dingo.gw.waveform_dataset import WaveformDataset
+    from dingo.gw.parameters import generate_default_prior_dictionary
+
+    domain_kwargs = {'f_min': 20.0, 'f_max': 4096.0, 'delta_f': 1.0 / 4.0, 'window_factor': 1.0}
+    parameter_prior_dict = generate_default_prior_dictionary()
+    prior_kwargs = {'parameter_prior_dict': parameter_prior_dict, 'geocent_time_ref': 1126259642.413,
+                    'luminosity_distance_ref': 500.0, 'reference_frequency': 20.0}
+    ifo_list = ["H1", "L1"]
+
+    F = WaveformTransformationFactory(
+        domain_class='UniformFrequencyDomain', domain_kwargs=domain_kwargs,
+        prior_class='GWPriorDict', prior_kwargs=prior_kwargs,
+        detector_network_class='DetectorNetwork', ifo_list=ifo_list
+    )
+
+    mu_dict = {'phi_jl': 1.0, 'tilt_1': 1.0, 'theta_jn': 2.0, 'tilt_2': 1.0, 'mass_1': 54.0, 'phi_12': 0.5,
+               'chirp_mass': 40.0, 'phase': np.pi, 'a_2': 0.5, 'mass_2': 39.0, 'mass_ratio': 0.5,
+               'a_1': 0.5, 'f_ref': 20.0, 'luminosity_distance': 1000.0, 'geocent_time': 1126259642.413,
+               'ra': 2.5, 'dec': 1.0, 'psi': np.pi}
+    std_dict = mu_dict
+    wf_transforms = F(mu_dict, std_dict)
+
+    approximant = 'IMRPhenomXPHM'
+    waveform_generator = WaveformGenerator(approximant, F.domain)
+    wd = WaveformDataset(priors=F.priors, waveform_generator=waveform_generator, transform=wf_transforms)
+    print(F.priors)
+    n_waveforms = 17
+    wd.generate_dataset(size=n_waveforms)
+    print(wd[9])
+
