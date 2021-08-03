@@ -6,7 +6,7 @@ from bilby.core.prior import Uniform, Constraint, Sine, Cosine
 from astropy.cosmology import Planck15
 
 import numpy as np
-from typing import Dict, Set
+from typing import Dict, Set, Any
 import warnings
 
 
@@ -254,3 +254,54 @@ class GWPriorDict(BBHPriorDict):
         """
         return self.sample_subset(keys=list(self.extrinsic_parameters), size=size)
 
+
+def generate_parameter_prior_dictionary(parameter_prior_dict_kwargs: Dict[str, Dict[str, Any]]) -> Dict[str, object]:
+    """
+    Generate dictionary of prior class instances from nested
+    dictionary of prior parameters.
+
+    Parameters
+    ----------
+    parameter_prior_dict_kwargs: Dict[str, Dict[str, Any]]
+        Nested dictionary. Each key corresponds to a physical
+        parameter, for which a dictionary of prior parameters
+        needs to be specified. These inner parameters must
+        include 'class_name': the name of the bilby prior class,
+        and key value pairs for all parameters that are needed
+        by this prior class.
+    """
+    pp_dict = parameter_prior_dict_kwargs.copy()
+    if not all(['class_name' in item.keys() for item in pp_dict.values()]):
+        raise ValueError('Parameter dictionaries must contain a key "class_name"'
+                         'specifying the name of the prior class for each parameter.')
+    # Assume that all required prior classes have been imported into this module
+    return {k: globals()[v.pop('class_name')](**v) for k, v in pp_dict.items()}
+
+
+def generate_default_prior_dictionary() -> Dict[str, object]:
+    """
+    Generate default binary black hole 15 dimensional prior dictionary
+    in terms of bilby prior classes.
+    """
+    parameter_prior_dict = {
+        'mass_1': {'class_name': 'Constraint', 'minimum': 5, 'maximum': 100},
+        'mass_2': {'class_name': 'Constraint', 'minimum': 5, 'maximum': 100},
+        'mass_ratio': {'class_name': 'Uniform', 'minimum': 0.125, 'maximum': 1},
+        'chirp_mass': {'class_name': 'Uniform', 'minimum': 25, 'maximum': 100},
+        'luminosity_distance': {'class_name': 'UniformSourceFrame', 'minimum': 100.0, 'maximum': 5000.0, 'cosmology': Planck15},
+        'dec': {'class_name': 'Cosine', 'minimum': -1.5707963267948966, 'maximum': 1.5707963267948966},
+        'ra': {'class_name': 'Uniform', 'minimum': 0, 'maximum': 6.283185307179586, 'boundary': 'periodic'},
+        'theta_jn': {'class_name': 'Sine', 'minimum': 0, 'maximum': 3.141592653589793},
+        'psi': {'class_name': 'Uniform', 'minimum': 0, 'maximum': 3.141592653589793, 'boundary': 'periodic'},
+        'phase': {'class_name': 'Uniform', 'minimum': 0, 'maximum': 6.283185307179586, 'boundary': 'periodic'},
+        'a_1': {'class_name': 'Uniform', 'minimum': 0, 'maximum': 0.99},
+        'a_2': {'class_name': 'Uniform', 'minimum': 0, 'maximum': 0.99},
+        'tilt_1': {'class_name': 'Sine', 'minimum': 0, 'maximum': 3.141592653589793},
+        'tilt_2': {'class_name': 'Sine', 'minimum': 0, 'maximum': 3.141592653589793},
+        'phi_12': {'class_name': 'Uniform', 'minimum': 0, 'maximum': 6.283185307179586, 'boundary': 'periodic'},
+        'phi_jl': {'class_name': 'Uniform', 'minimum': 0, 'maximum': 6.283185307179586, 'boundary': 'periodic'},
+        'geocent_time': {'class_name': 'Uniform', 'minimum': 1126259642.3130002, 'maximum': 1126259642.513}
+    }
+    for k, v in parameter_prior_dict.items():
+        v['name'] = k
+    return generate_parameter_prior_dictionary(parameter_prior_dict)
