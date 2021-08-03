@@ -18,7 +18,10 @@ setup(name='dingo',
           'numpy',
           'torch',
           'nflows',
-          'scipy'
+          'scipy',
+          'bilby',
+          'astropy',
+          'lalsuite'
       ],
       extras_require={
         "dev": [
