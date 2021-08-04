@@ -1,9 +1,10 @@
 # Import all of the prior classes needed to define the default BBH prior by hand.
 # We're not using all of them. We could make the default prior more explicit
 # by defining it ourselves in the constructor.
-from bilby.gw.prior import BBHPriorDict, UniformSourceFrame
-from bilby.core.prior import Uniform, Constraint, Sine, Cosine
+from bilby.gw.prior import BBHPriorDict
 from astropy.cosmology import Planck15
+
+from dingo.gw.prior import Uniform, Sine, Cosine, Constraint, UniformSourceFrame
 
 import numpy as np
 from typing import Dict, Set, Any
@@ -126,7 +127,7 @@ class GWPriorDict(BBHPriorDict):
 
         if masses_present:
             comp_constraints = [isinstance(self[k], Constraint)
-                               for k in ['mass_1', 'mass_2']]
+                                for k in ['mass_1', 'mass_2']]
             if not mc_q_present:
                 # This is OK as long as the masses are not just constraint priors
                 if any(comp_constraints):
@@ -305,3 +306,5 @@ def generate_default_prior_dictionary() -> Dict[str, object]:
     for k, v in parameter_prior_dict.items():
         v['name'] = k
     return generate_parameter_prior_dictionary(parameter_prior_dict)
+
+

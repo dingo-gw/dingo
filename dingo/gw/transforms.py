@@ -1,4 +1,4 @@
-from typing import Dict, Any, List, Tuple, Union
+from typing import Dict, Any, List, Tuple, Union, Set
 import numpy as np
 import pandas as pd
 import torch
@@ -6,6 +6,7 @@ import torch
 from dingo.gw.domains import Domain, UniformFrequencyDomain
 from dingo.gw.detector_network import DetectorNetwork, RandomProjectToDetectors
 from dingo.gw.noise import AddNoiseAndWhiten
+from dingo.gw.waveform_generator import WaveformGenerator
 from dingo.gw.parameters import GWPriorDict
 
 """
@@ -255,10 +256,22 @@ class WaveformTransformationFactory:
                               'start_time': self.priors.reference_geocentric_time}
         self.det_network = globals()[detector_network_class](**det_network_kwargs)
 
+        # Initialize prior means and standard deviations
+        # Will contain valid values for simple analytical distributions
+        # and NaNs for complicated ones.
+        self.mu_dict = {k: v.mean() for k, v in self.priors.items()}
+        self.std_dict = {k: v.std() for k, v in self.priors.items()}
 
-    def __call__(self, mu_dict: Dict[str, float], std_dict: Dict[str, float]):
+    def set_prior_means_stdevs(self, mu_dict: Dict[str, float], std_dict: Dict[str, float]):
         """
-        Return chain of waveform transforms
+        Set the means and standard deviations of the prior distributions.
+
+        Analytical means and standard deviations have been set for simple
+        priors in the constructor, while for complicated priors they have
+        been set to NaN and need to be overridden.
+        THis can be done either by calling this method or by calling
+        `set_standardization_values_from_samples()` to calculate
+        the sample mean and standard deviations from prior draws.
 
         Parameters
         ----------
@@ -268,25 +281,64 @@ class WaveformTransformationFactory:
         std_dict: dict
             Dictionary of parameter standard deviations used
             along with a waveform data set
+        """
+        self.mu_dict.update(mu_dict)
+        self.std_dict.update(std_dict)
 
-        TODO: The data from which these dicts can be computed only becomes
-          available after all waveform parameters have been sampled,
-          i.e. for the extrinsic parameters.
-          We could instead set them to some reference values.
-          Alternatively, we could use the analytical means and stdevs
-          for each of the parameter distributions; these would naturally
-          belong in subclasses of the bilby priors.
+    def get_prior_means_stdevs(self) -> Tuple[Dict[str, float], Dict[str, float]]:
+        """
+        Return the means and standard deviations of the prior distributions.
+        """
+        return self.mu_dict, self.std_dict
+
+    def check_standardization_values(self) -> Set:
+        """
+        Return set of parameters for which either the means or stdevs are NaN.
+        """
+        nan_means = {k for k, v in self.mu_dict.items() if np.isnan(v)}
+        nan_stds = {k for k, v in self.std_dict.items() if np.isnan(v)}
+        return nan_means | nan_stds
+
+    def set_standardization_values_from_samples(self, n_samples: int):
+        """
+        Helper method to set reference standardization values from samples.
+        Purely draw parameter samples without generating any waveforms.
+
+        Parameters
+        ----------
+        n_samples:
+            Number of samples to draw
+        """
+        # Draw prior samples and fill in non-sampling parameters
+        par_dict = self.priors.sample(size=n_samples)
+        par_dict = self.priors.default_conversion_function(par_dict)
+        par_dict = {k: par_dict[k] for k in self.check_standardization_values()}
+
+        # Calculate and set sample means and standard deviations
+        mu_dict = {k: np.mean(v) for k, v in par_dict.items()}
+        std_dict = {k: np.std(v) for k, v in par_dict.items()}
+        print(f'Calculated standardization values from {n_samples} samples:'
+              f'\nmeans: {mu_dict}\nstdev: {std_dict}')
+        print('Updating standardization dictionaries.')
+        self.set_prior_means_stdevs(mu_dict, std_dict)
+
+    def __call__(self):
+        """
+        Return chain of waveform transforms
         """
         # The transformation classes could be specified via arguments
         # if we find that this feature is needed.
+        nan_pars = self.check_standardization_values()
+        if len(nan_pars) > 0:
+            raise ValueError(f'Please set proper reference values for {nan_pars} which'
+                             f' are NaN. \nmeans: {self.mu_dict} \nstdevs: {self.std_dict}')
+
         return Compose([
             RandomProjectToDetectors(self.det_network, self.priors),
             AddNoiseAndWhiten(self.det_network),
-            StandardizeParameters(mu=mu_dict, std=std_dict),
+            StandardizeParameters(mu=self.mu_dict, std=self.std_dict),
             ToNetworkInput(self.domain)
         ])
-
-
 
 
 if __name__ == "__main__":
@@ -309,17 +361,12 @@ if __name__ == "__main__":
         prior_class='GWPriorDict', prior_kwargs=prior_kwargs,
         detector_network_class='DetectorNetwork', ifo_list=ifo_list
     )
-
-    mu_dict = {'phi_jl': 1.0, 'tilt_1': 1.0, 'theta_jn': 2.0, 'tilt_2': 1.0, 'mass_1': 54.0, 'phi_12': 0.5,
-               'chirp_mass': 40.0, 'phase': np.pi, 'a_2': 0.5, 'mass_2': 39.0, 'mass_ratio': 0.5,
-               'a_1': 0.5, 'f_ref': 20.0, 'luminosity_distance': 1000.0, 'geocent_time': 1126259642.413,
-               'ra': 2.5, 'dec': 1.0, 'psi': np.pi}
-    std_dict = mu_dict
-    wf_transforms = F(mu_dict, std_dict)
+    # For mass_1, mass_2, luminosity_distance:
+    F.set_standardization_values_from_samples(n_samples=10000)
 
     approximant = 'IMRPhenomXPHM'
     waveform_generator = WaveformGenerator(approximant, F.domain)
-    wd = WaveformDataset(priors=F.priors, waveform_generator=waveform_generator, transform=wf_transforms)
+    wd = WaveformDataset(priors=F.priors, waveform_generator=waveform_generator, transform=F())
     print(F.priors)
     n_waveforms = 17
     wd.generate_dataset(size=n_waveforms)
