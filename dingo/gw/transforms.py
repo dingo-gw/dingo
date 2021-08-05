@@ -45,7 +45,8 @@ class StandardizeParameters:
         Parameters
         ----------
         samples: Dict[Dict, Dict]
-            A nested dictionary with keys 'parameters', 'waveform'.
+            A nested dictionary with keys 'parameters', 'waveform',
+            'noise_summary'.
 
         Only parameters included in mu, std get transformed.
         """
@@ -55,7 +56,8 @@ class StandardizeParameters:
         print('d_L tr', y['luminosity_distance'])
         # samples['parameters'] = y
         # return samples
-        return {'parameters': y, 'waveform': samples['waveform'], 'asd': samples['asd']}
+        # FIXME
+        return {'parameters': y, 'waveform': samples['waveform'], 'noise_summary': samples['noise_summary']}
 
     def inverse(self, samples: Dict[str, Dict[str, Union[float, np.ndarray]]]) \
             -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
@@ -65,7 +67,8 @@ class StandardizeParameters:
         Parameters
         ----------
         samples: Dict[Dict, Dict]
-            A nested dictionary with keys 'parameters', 'waveform'.
+            A nested dictionary with keys 'parameters', 'waveform',
+            'noise_summary'.
 
         Only parameters included in mu, std get transformed.
         """
@@ -73,7 +76,7 @@ class StandardizeParameters:
         print('d_L inv', y['luminosity_distance'])
         x = {k: self.mu[k] + y[k] * self.std[k] for k in self.mu.keys()}
         print('d_L back', x['luminosity_distance'])
-        return {'parameters': x, 'waveform': samples['waveform'], 'asd': samples['asd']}
+        return {'parameters': x, 'waveform': samples['waveform'], 'noise_summary': samples['noise_summary']}
 
 
 class ToNetworkInput:
@@ -98,17 +101,17 @@ class ToNetworkInput:
         Check consistency between waveform and ASD data.
         """
         strain_keys = waveform_dict['waveform'].keys()
-        asd_keys = waveform_dict['asd'].keys()
-        if set(strain_keys) != set(asd_keys):
-            raise ValueError('Strains and ASDs must have the same interferometer keys.'
-                             f'But got strain: {strain_keys}, asd: {asd_keys}')
+        noise_summary_keys = waveform_dict['noise_summary'].keys()
+        if set(strain_keys) != set(noise_summary_keys):
+            raise ValueError('Strains and noise summary must have the same interferometer keys.'
+                             f'But got strain: {strain_keys}, asd: {noise_summary_keys}')
 
         k = list(strain_keys)[0]
         strain_shape = waveform_dict['waveform'][k].shape
-        asd_shape = waveform_dict['asd'][k].shape
-        if not (strain_shape == asd_shape):
+        noise_summary_shape = waveform_dict['noise_summary'][k].shape
+        if not (strain_shape == noise_summary_shape):
             raise ValueError('Shape of strain and ASD arrays must be the same.'
-                             f'But got strain: {strain_shape}, ASD: {asd_shape}')
+                             f'But got strain: {strain_shape}, ASD: {noise_summary_shape}')
 
     def get_output_dimensions(self, waveform_dict: Dict[str, Dict[str, np.ndarray]]) \
             -> Tuple[Tuple, Tuple]:
@@ -140,7 +143,7 @@ class ToNetworkInput:
         ----------
         waveform_dict :
             Nested data dictionary with keys 'parameters',
-            'waveform', and 'asd' at top level.
+            'waveform', and 'noise_summary' at top level.
         """
         self._check_data(waveform_dict)
         domain = self.domain
@@ -153,7 +156,7 @@ class ToNetworkInput:
         if domain.domain_type == 'uFD':
             mask = domain.frequency_mask
             strains = waveform_dict['waveform']
-            asds = waveform_dict['asd']
+            asds = waveform_dict['noise_summary']
             y = np.array([np.vstack([h[mask].real, h[mask].imag, asds[ifo][mask]])
                           for ifo, h in strains.items()])
 
@@ -208,9 +211,19 @@ class Compose:
         return data
 
 
-class WaveformTransformationFactory:
+class WaveformTransformationTraining:
     """
-    Generate a standard chain of transformations from keyword arguments.
+    Generate a standard chain of transformations from keyword arguments
+    to generate input data for training a neural network.
+
+    It consists of the following steps:
+    1. Sample in extrinsic parameters and project waveform polarizations
+       onto the detector network to compute the GW strain.
+    2. Whiten strain data and add zero-mean, white Gaussian noise.
+    3. Standardize waveform parameters using reference means and
+       standard deviations.
+    4. Convert parameters, strain and noise summary information to
+       torch tensors.
 
     This is an alternative to explicitly deserializing the chain of
     transform classes from a pickle file. We allow some of the transformation
@@ -343,7 +356,7 @@ class WaveformTransformationFactory:
 
 if __name__ == "__main__":
     """
-    Example for setting up a WaveformTransformationFactory and 
+    Example for setting up a WaveformTransformationTraining and 
     using it with a WaveformDataset and WaveformGenerator.
     """
     from dingo.gw.waveform_generator import WaveformGenerator
@@ -356,7 +369,7 @@ if __name__ == "__main__":
                     'luminosity_distance_ref': 500.0, 'reference_frequency': 20.0}
     ifo_list = ["H1", "L1"]
 
-    F = WaveformTransformationFactory(
+    F = WaveformTransformationTraining(
         domain_class='UniformFrequencyDomain', domain_kwargs=domain_kwargs,
         prior_class='GWPriorDict', prior_kwargs=prior_kwargs,
         detector_network_class='DetectorNetwork', ifo_list=ifo_list
