@@ -51,13 +51,10 @@ class StandardizeParameters:
         Only parameters included in mu, std get transformed.
         """
         x = samples['parameters']
-        print('d_L in', x['luminosity_distance'])
         y = {k: (x[k] - self.mu[k]) / self.std[k] for k in self.mu.keys()}
-        print('d_L tr', y['luminosity_distance'])
-        # samples['parameters'] = y
-        # return samples
-        # FIXME
-        return {'parameters': y, 'waveform': samples['waveform'], 'noise_summary': samples['noise_summary']}
+        samples_out = samples.copy()
+        samples_out['parameters'] = y
+        return samples_out
 
     def inverse(self, samples: Dict[str, Dict[str, Union[float, np.ndarray]]]) \
             -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
@@ -73,10 +70,10 @@ class StandardizeParameters:
         Only parameters included in mu, std get transformed.
         """
         y = samples['parameters']
-        print('d_L inv', y['luminosity_distance'])
         x = {k: self.mu[k] + y[k] * self.std[k] for k in self.mu.keys()}
-        print('d_L back', x['luminosity_distance'])
-        return {'parameters': x, 'waveform': samples['waveform'], 'noise_summary': samples['noise_summary']}
+        samples_out = samples.copy()
+        samples_out['parameters'] = x
+        return samples_out
 
 
 class ToNetworkInput:
