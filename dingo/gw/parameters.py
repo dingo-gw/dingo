@@ -69,6 +69,9 @@ class GWPriorDict(BBHPriorDict):
 
         if parameter_prior_dict is None:
             warnings.warn('No priors specified. Using default 15D priors.')
+            # Generate the default prior explicitly to ensure that
+            # the wrapped bilby prior classes are being used.
+            parameter_prior_dict = generate_default_prior_dictionary()
         else:
             if not isinstance(parameter_prior_dict, dict):
                 raise ValueError('Expected dictionary of parameters and priors, '
@@ -282,7 +285,7 @@ def generate_parameter_prior_dictionary(parameter_prior_dict_kwargs: Dict[str, D
 def generate_default_prior_dictionary() -> Dict[str, object]:
     """
     Generate default binary black hole 15 dimensional prior dictionary
-    in terms of bilby prior classes.
+    in terms of (wrappoed) bilby prior classes.
     """
     parameter_prior_dict = {
         'mass_1': {'class_name': 'Constraint', 'minimum': 5, 'maximum': 100},
