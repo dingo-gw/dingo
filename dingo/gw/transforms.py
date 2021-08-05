@@ -149,28 +149,19 @@ class ToNetworkInput:
         x = pd.DataFrame(waveform_dict['parameters'], index=[0])
         x = x.to_numpy()
 
-        # 2. Repackage detector waveform strains and ASDs for entire network
+        # 2. Repackage detector waveform strains and noise info for network
         if domain.domain_type == 'uFD':
             mask = domain.frequency_mask
             strains = waveform_dict['waveform']
-            asds = waveform_dict['noise_summary']
-            y = np.array([np.vstack([h[mask].real, h[mask].imag, asds[ifo][mask]])
+            noise = waveform_dict['noise_summary']
+            y = np.array([np.vstack([h[mask].real, h[mask].imag, noise[ifo][mask]])
                           for ifo, h in strains.items()])
-
-            # y = np.zeros((n_ifos, 3, n_freq_bins))
-            # # y = np.empty((n_ifos, 3, n_freq_bins)) # not so safe, but perhaps a little bit faster
-            # for ind, (ifo, d) in enumerate(waveform_dict['waveform'].items()):
-            #     d = waveform_dict['waveform'][ifo][mask]
-            #     asd = waveform_dict['asd'][ifo][mask]
-            #     y[ind, 0, :] = d.real
-            #     y[ind, 1, :] = d.imag
-            #     y[ind, 2, :] = asd
-
-            # TODO: move this to a unit test
-            x_shape, y_shape = self.get_output_dimensions(waveform_dict)
-            assert (x.shape == x_shape) and (y.shape == y_shape)
         else:
             raise ValueError('Unsupported domain type', domain.domain_type)
+
+        # Sanity check output shapes
+        x_shape, y_shape = self.get_output_dimensions(waveform_dict)
+        assert (x.shape == x_shape) and (y.shape == y_shape)
 
         # FIXME: how will the NN know which entries are which parameters and which rows are which detectors?
         #  Must return this additional label data for later
@@ -350,6 +341,19 @@ class WaveformTransformationTraining:
             ToNetworkInput(self.domain)
         ])
 
+    def get_parameter_list(self, waveform_generator: WaveformGenerator) -> List:
+        """
+        List of parameter labels which is stripped from the parameter
+        dictionary in ToNetworkInput().
+        """
+        rp_det = RandomProjectToDetectors(self.det_network, self.priors)
+        wd = WaveformDataset(priors=F.priors, waveform_generator=waveform_generator,
+                             transform=rp_det)
+        # Generate intrinsic parameters and waveform polarizations
+        wd.generate_dataset(size=1)
+        # Sample extrinsic parameters (and compute strain)
+        return list(wd[0]['parameters'].keys())
+
 
 if __name__ == "__main__":
     """
@@ -377,8 +381,10 @@ if __name__ == "__main__":
     approximant = 'IMRPhenomXPHM'
     waveform_generator = WaveformGenerator(approximant, F.domain)
     wd = WaveformDataset(priors=F.priors, waveform_generator=waveform_generator, transform=F())
-    print(F.priors)
+    print('F.priors', F.priors)
     n_waveforms = 17
     wd.generate_dataset(size=n_waveforms)
     print(wd[9])
 
+    # parameter labels for "x" tensor data
+    print(F.get_parameter_list(waveform_generator))
