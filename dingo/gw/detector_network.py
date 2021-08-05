@@ -118,7 +118,7 @@ class DetectorNetwork:
         return strain
 
     def project_onto_network(self, waveform_polarizations: Dict[str, np.ndarray],
-                             parameters: Dict[str, float]) -> Dict[str, np.ndarray]:
+                             parameters: Dict[str, Union[float, np.ndarray]]) -> Dict[str, np.ndarray]:
         """
         Project waveform polarizations onto the GW network
 
