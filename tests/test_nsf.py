@@ -2,7 +2,8 @@ import pytest
 import types
 import torch
 import torch.optim as optim
-from dingo.core.nn.nsf import create_nsf_model, FlowWrapper
+from dingo.core.nn.nsf import create_nsf_model, FlowWrapper, \
+    create_nsf_with_rb_projection_embedding_net
 from dingo.core.nn.enets import \
     create_enet_with_projection_layer_and_dense_resnet
 from dingo.core.utils import torchutils
@@ -194,3 +195,27 @@ def test_backward_pass_for_log_prob_of_nsf(data_setup_nsf_small):
     assert losses[-1] < losses[0], 'Loss did not improve in training.'
     assert torch.mean((torch.abs(samples_n - d.yy) > 0.8).float()) < 0.3, \
         'Training may not have worked. Check manually that sampling improves.'
+
+
+def test_model_builder_for_nsf_with_rb_embedding_net(data_setup_nsf_small):
+    """
+    Test the builder function create_nsf_with_rb_projection_embedding_net.
+    """
+
+    d = data_setup_nsf_small
+
+    model = create_nsf_with_rb_projection_embedding_net(d.nde_kwargs,
+                                                        d.embedding_net_kwargs)
+
+    loss = - model(d.y, d.x, d.z)
+    assert list(loss.shape) == [d.batch_size], 'Unexpected output shape.'
+    assert torch.all(loss > 0) and torch.all(loss < 40), \
+        'Unexpected log prob encountered. Network initialization or ' \
+        'normalization seems broken.'
+
+    with pytest.raises(ValueError):
+        model(d.y, d.z, d.x)
+    with pytest.raises(ValueError):
+        model(d.y, d.x, d.z, d.z)
+    with pytest.raises(RuntimeError):
+        model(d.y, d.x, d.x)

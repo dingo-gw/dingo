@@ -23,6 +23,9 @@ setup(name='dingo',
           'scipy',
           'pyyaml',
           'h5py',
+          'bilby',
+          'astropy',
+          'lalsuite'
       ],
       extras_require={
           "dev": [
