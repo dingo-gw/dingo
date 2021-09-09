@@ -11,20 +11,24 @@ setup(name='dingo',
       url='https://github.com/dingo-gw/dingo-devel',
       license="MIT",
       version=VERSION,
-      packages=['dingo', 'dingo.core', 'dingo.core.nn', 'dingo.gw'],
+      packages=['dingo', 'dingo.core', 'dingo.core.nn', 'dingo.gw',
+                'dingo.api',],
       package_dir={'dingo': 'dingo'},
       python_requires='>=3.6',
       install_requires=[
           'numpy',
           'torch',
+          'torchvision',
           'nflows',
-          'scipy'
+          'scipy',
+          'pyyaml',
+          'h5py',
       ],
       extras_require={
-        "dev": [
-            "pytest",
-            "pylint",
-        ],
+          "dev": [
+              "pytest",
+              "pylint",
+          ],
       },
       classifiers=[
           "Programming Language :: Python :: 3.6",
