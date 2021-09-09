@@ -136,3 +136,6 @@ dmypy.json
 
 # .DS_Store files for Mac OS
 .DS_Store
+
+# directories with temporary files
+**/tmp_files/*

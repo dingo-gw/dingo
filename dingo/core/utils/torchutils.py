@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from typing import Union, Tuple
+from typing import Union, Tuple, Iterable
 
 
 def get_activation_function_from_string(
@@ -68,3 +68,95 @@ def get_number_of_model_parameters(
                 n = n * s
             num_params += n
     return num_params
+
+
+def get_optimizer_from_kwargs(model_parameters: Iterable,
+                              **optimizer_kwargs,
+                              ):
+    """
+    Builds and returns an optimizer for model_parameters. The type of the
+    optimizer is determined by kwarg type, the remaining kwargs are passed to
+    the optimizer.
+
+    Parameters
+    ----------
+    model_parameters: Iterable
+        iterable of parameters to optimize or dicts defining parameter groups
+    optimizer_kwargs:
+        kwargs for optimizer; type needs to be one of [adagrad, adam, adamw,
+        lbfgs, RMSprop, sgd], the remaining kwargs are used for specific
+        optimizer kwargs, such as learning rate and momentum
+
+    Returns
+    -------
+    optimizer
+    """
+    optimizers_dict = {
+        'adagrad': torch.optim.Adagrad,
+        'adam': torch.optim.Adam,
+        'adamw': torch.optim.AdamW,
+        'lbfgs': torch.optim.LBFGS,
+        'RMSprop': torch.optim.RMSprop,
+        'sgd': torch.optim.SGD,
+    }
+    if not 'type' in optimizer_kwargs:
+        raise KeyError('Optimizer type needs to be specified.')
+    if not optimizer_kwargs['type'].lower() in optimizers_dict:
+        raise ValueError('No valid optimizer specified.')
+    optimizer = optimizers_dict[optimizer_kwargs.pop('type')]
+    return optimizer(model_parameters, **optimizer_kwargs)
+
+
+def get_scheduler_from_kwargs(optimizer: torch.optim.Optimizer,
+                              **scheduler_kwargs,
+                              ):
+    """
+    Builds and returns an scheduler for optimizer. The type of the
+    scheduler is determined by kwarg type, the remaining kwargs are passed to
+    the scheduler.
+
+    Parameters
+    ----------
+    optimizer: torch.optim.optimizer.Optimizer
+        optimizer for which the scheduler is used
+    scheduler_kwargs:
+        kwargs for scheduler; type needs to be one of [step, cosine,
+        reduce_on_plateau], the remaining kwargs are used for
+        specific scheduler kwargs, such as learning rate and momentum
+
+    Returns
+    -------
+    scheduler
+    """
+    schedulers_dict = {
+        'step': torch.optim.lr_scheduler.StepLR,
+        'cosine': torch.optim.lr_scheduler.CosineAnnealingLR,
+        'reduce_on_plateau': torch.optim.lr_scheduler.ReduceLROnPlateau,
+    }
+    if not 'type' in scheduler_kwargs:
+        raise KeyError('Scheduler type needs to be specified.')
+    if not scheduler_kwargs['type'].lower() in schedulers_dict:
+        raise ValueError('No valid scheduler specified.')
+    scheduler = schedulers_dict[scheduler_kwargs.pop('type')]
+    return scheduler(optimizer, **scheduler_kwargs)
+
+
+def perform_scheduler_step(scheduler,
+                           loss=None,
+                           ):
+    """
+    Wrapper for scheduler.step(). If scheduler is ReduceLROnPlateau,
+    then scheduler.step(loss) is called, if not, scheduler.step().
+
+    Parameters
+    ----------
+
+    scheduler:
+        scheduler for learning rate
+    loss:
+        validation loss
+    """
+    if type(scheduler) == torch.optim.lr_scheduler.ReduceLROnPlateau:
+        scheduler.step(loss)
+    else:
+        scheduler.step()
