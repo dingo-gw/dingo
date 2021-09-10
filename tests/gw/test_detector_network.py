@@ -52,5 +52,5 @@ def test_random_project_to_detectors(generate_waveform_polarizations):
     rp_det = RandomProjectToDetectors(det_network, priors)
     strain_dict = rp_det({'parameters': parameters, 'waveform': waveform_polarizations})
     assert len(strain_dict) == len(ifo_list)
-    assert len(list(strain_dict.values())[0]) == len(domain)
+    assert len(list(strain_dict['waveform'].values())[0]) == len(domain)
 
