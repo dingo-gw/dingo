@@ -52,10 +52,10 @@ def test_standardize_parameters_on_distribution():
     std_ = torch.tensor([2.0, 4.0, 7.0])
     n_samples = 100000
     parameters = torch.distributions.Normal(mean_, std_).sample((n_samples,)).numpy()
-    samples = {'parameters': parameters, 'waveform': None}
-    tr = StandardizeParameters(mean_.numpy(), std_.numpy())
+    samples = {'parameters': {'x': parameters}, 'waveform': None}
+    tr = StandardizeParameters({'x': mean_.numpy()}, {'x': std_.numpy()})
     samples_tr = tr(samples)
-    parameters_tr = samples_tr['parameters']
+    parameters_tr = samples_tr['parameters']['x']
 
     tol = 0.01
     assert np.all(np.abs(np.mean(parameters_tr, axis=0)) < tol)
