@@ -118,7 +118,7 @@ class DetectorNetwork:
         return strain
 
     def project_onto_network(self, waveform_polarizations: Dict[str, np.ndarray],
-                             parameters: Dict[str, float]) -> Dict[str, np.ndarray]:
+                             parameters: Dict[str, Union[float, np.ndarray]]) -> Dict[str, np.ndarray]:
         """
         Project waveform polarizations onto the GW network
 
@@ -189,6 +189,7 @@ class RandomProjectToDetectors:
         """
         Compute strain from waveform polarizations and detector network
         for a random draw from the extrinsic parameter prior distribution.
+        Parameters are sorted alphabetically.
 
         Parameters
         ----------
@@ -225,10 +226,11 @@ class RandomProjectToDetectors:
         dist_factor = reference_distance / extrinsic_parameters['luminosity_distance']
         strain_dict = {ifo: dist_factor * strain for ifo, strain in strain_dict.items()}
 
-        # Collect intrinsic and extrinsic parameters in a single dict
+        # Collect intrinsic and extrinsic parameters in a single dict and sort it
         all_parameters = waveform_parameters.copy()
         for k in ['ra', 'dec', 'geocent_time', 'psi', 'luminosity_distance']:
             all_parameters[k] = extrinsic_parameters[k]
+        all_parameters = {k: all_parameters[k] for k in sorted(all_parameters.keys())}
 
         return {'parameters': all_parameters, 'waveform': strain_dict}
 
@@ -252,10 +254,10 @@ if __name__ == "__main__":
     priors = GWPriorDict()
     rp_det = RandomProjectToDetectors(det_network, priors)
     strain_dict = rp_det({'parameters': parameters, 'waveform': waveform_polarizations})
-    print(strain_dict)
+
     plt.loglog(domain(), np.abs(waveform_polarizations['h_plus'] + 1j * waveform_polarizations['h_cross']), '--',
                label='hp + i*hx')
-    for name, strain in strain_dict.items():
+    for name, strain in strain_dict['waveform'].items():
         plt.loglog(domain(), np.abs(strain), label=name)
     plt.legend()
     plt.xlim([domain.f_min / 2, domain.f_max])

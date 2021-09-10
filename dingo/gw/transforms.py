@@ -1,9 +1,13 @@
-from typing import Dict, Any, List, Tuple, Union
+from typing import Dict, Any, List, Tuple, Union, Set
 import numpy as np
 import pandas as pd
 import torch
 
-from dingo.gw.domains import Domain
+from dingo.gw.domains import Domain, UniformFrequencyDomain
+from dingo.gw.detector_network import DetectorNetwork, RandomProjectToDetectors
+from dingo.gw.noise import AddNoiseAndWhiten, noise_summary_function
+from dingo.gw.waveform_generator import WaveformGenerator
+from dingo.gw.parameters import GWPriorDict
 
 """
 Collect transforms which do not naturally belong with other classes,
@@ -41,17 +45,16 @@ class StandardizeParameters:
         Parameters
         ----------
         samples: Dict[Dict, Dict]
-            A nested dictionary with keys 'parameters', 'waveform'.
+            A nested dictionary with keys 'parameters', 'waveform',
+            'noise_summary'.
 
         Only parameters included in mu, std get transformed.
         """
         x = samples['parameters']
-        print('d_L in', x['luminosity_distance'])
         y = {k: (x[k] - self.mu[k]) / self.std[k] for k in self.mu.keys()}
-        print('d_L tr', y['luminosity_distance'])
-        # samples['parameters'] = y
-        # return samples
-        return {'parameters': y, 'waveform': samples['waveform'], 'asd': samples['asd']}
+        samples_out = samples.copy()
+        samples_out['parameters'] = y
+        return samples_out
 
     def inverse(self, samples: Dict[str, Dict[str, Union[float, np.ndarray]]]) \
             -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
@@ -61,15 +64,16 @@ class StandardizeParameters:
         Parameters
         ----------
         samples: Dict[Dict, Dict]
-            A nested dictionary with keys 'parameters', 'waveform'.
+            A nested dictionary with keys 'parameters', 'waveform',
+            'noise_summary'.
 
         Only parameters included in mu, std get transformed.
         """
         y = samples['parameters']
-        print('d_L inv', y['luminosity_distance'])
         x = {k: self.mu[k] + y[k] * self.std[k] for k in self.mu.keys()}
-        print('d_L back', x['luminosity_distance'])
-        return {'parameters': x, 'waveform': samples['waveform'], 'asd': samples['asd']}
+        samples_out = samples.copy()
+        samples_out['parameters'] = x
+        return samples_out
 
 
 class ToNetworkInput:
@@ -94,17 +98,17 @@ class ToNetworkInput:
         Check consistency between waveform and ASD data.
         """
         strain_keys = waveform_dict['waveform'].keys()
-        asd_keys = waveform_dict['asd'].keys()
-        if set(strain_keys) != set(asd_keys):
-            raise ValueError('Strains and ASDs must have the same interferometer keys.'
-                             f'But got strain: {strain_keys}, asd: {asd_keys}')
+        noise_summary_keys = waveform_dict['noise_summary'].keys()
+        if set(strain_keys) != set(noise_summary_keys):
+            raise ValueError('Strains and noise summary must have the same interferometer keys.'
+                             f'But got strain: {strain_keys}, asd: {noise_summary_keys}')
 
         k = list(strain_keys)[0]
         strain_shape = waveform_dict['waveform'][k].shape
-        asd_shape = waveform_dict['asd'][k].shape
-        if not (strain_shape == asd_shape):
+        noise_summary_shape = waveform_dict['noise_summary'][k].shape
+        if not (strain_shape == noise_summary_shape):
             raise ValueError('Shape of strain and ASD arrays must be the same.'
-                             f'But got strain: {strain_shape}, ASD: {asd_shape}')
+                             f'But got strain: {strain_shape}, ASD: {noise_summary_shape}')
 
     def get_output_dimensions(self, waveform_dict: Dict[str, Dict[str, np.ndarray]]) \
             -> Tuple[Tuple, Tuple]:
@@ -136,7 +140,7 @@ class ToNetworkInput:
         ----------
         waveform_dict :
             Nested data dictionary with keys 'parameters',
-            'waveform', and 'asd' at top level.
+            'waveform', and 'noise_summary' at top level.
         """
         self._check_data(waveform_dict)
         domain = self.domain
@@ -145,31 +149,20 @@ class ToNetworkInput:
         x = pd.DataFrame(waveform_dict['parameters'], index=[0])
         x = x.to_numpy()
 
-        # 2. Repackage detector waveform strains and ASDs for entire network
+        # 2. Repackage detector waveform strains and noise info for network
         if domain.domain_type == 'uFD':
             mask = domain.frequency_mask
             strains = waveform_dict['waveform']
-            asds = waveform_dict['asd']
-            y = np.array([np.vstack([h[mask].real, h[mask].imag, asds[ifo][mask]])
+            noise = waveform_dict['noise_summary']
+            y = np.array([np.vstack([h[mask].real, h[mask].imag, noise[ifo][mask]])
                           for ifo, h in strains.items()])
-
-            # y = np.zeros((n_ifos, 3, n_freq_bins))
-            # # y = np.empty((n_ifos, 3, n_freq_bins)) # not so safe, but perhaps a little bit faster
-            # for ind, (ifo, d) in enumerate(waveform_dict['waveform'].items()):
-            #     d = waveform_dict['waveform'][ifo][mask]
-            #     asd = waveform_dict['asd'][ifo][mask]
-            #     y[ind, 0, :] = d.real
-            #     y[ind, 1, :] = d.imag
-            #     y[ind, 2, :] = asd
-
-            # TODO: move this to a unit test
-            x_shape, y_shape = self.get_output_dimensions(waveform_dict)
-            assert (x.shape == x_shape) and (y.shape == y_shape)
         else:
             raise ValueError('Unsupported domain type', domain.domain_type)
 
-        # FIXME: how will the NN know which entries are which parameters and which rows are which detectors?
-        #  Must return this additional label data for later
+        # Sanity check output shapes
+        x_shape, y_shape = self.get_output_dimensions(waveform_dict)
+        assert (x.shape == x_shape) and (y.shape == y_shape)
+
         return torch.from_numpy(x), torch.from_numpy(y)
 
 
@@ -202,3 +195,289 @@ class Compose:
                 raise AttributeError(f'Transformation {tr} does not implement an inverse.')
             data = tr.inverse(data)
         return data
+
+
+class WaveformTransformationTraining:
+    """
+    Generate a standard chain of transformations from keyword arguments
+    to generate input data for training a neural network.
+
+    It consists of the following steps:
+    1. Sample in extrinsic parameters and project waveform polarizations
+       onto the detector network to compute the GW strain.
+    2. Whiten strain data and add zero-mean, white Gaussian noise.
+    3. Standardize waveform parameters using reference means and
+       standard deviations.
+    4. Convert parameters, strain and noise summary information to
+       torch tensors.
+
+    This is an alternative to explicitly deserializing the chain of
+    transform classes from a pickle file. We allow some of the transformation
+    classes and classes the transformation classes depend on, to be specified,
+    along with their arguments.
+    """
+    def __init__(self, *,
+                 domain_class: str = 'UniformFrequencyDomain',
+                 domain_kwargs: Dict[str, float],
+                 prior_class: str = 'GWPriorDict',
+                 prior_kwargs: Dict[str, float],
+                 detector_network_class: str = 'DetectorNetwork',
+                 ifo_list: List):
+        """
+        Some transformation classes and classes which they depend on are
+        specified as strings. They need to be imported into this module
+        in order to retrieve their class references.
+
+        Arguments that go with specified classes are in some cases to be
+        given as dictionaries so that they can be passed as kwargs into
+        the respective class constructor. In other cases, some arguments
+        only become available when other classes are instantiated here.
+
+        Parameters
+        ----------
+        domain_class: str
+            Name of the domain class to be used
+        domain_kwargs: dict
+            kwargs for instantiating the domain class
+        prior_class: str
+            Name of the prior class to be used
+        prior_kwargs: dict
+            kwargs for instantiating the prior class
+        detector_network_class: str
+            Name of the detector network class to be used
+        ifo_list: List
+            List of interferometer names
+        """
+        # Assume that classes for all options we want to support are imported into this module,
+        self.domain = globals()[domain_class](**domain_kwargs)
+        self.priors = globals()[prior_class](**prior_kwargs)
+        det_network_kwargs = {'ifo_list': ifo_list, 'domain': self.domain,
+                              'start_time': self.priors.reference_geocentric_time}
+        self.det_network = globals()[detector_network_class](**det_network_kwargs)
+
+        # Initialize prior means and standard deviations
+        # Will contain valid values for simple analytical distributions
+        # and NaNs for complicated ones.
+        self.mu_dict = {k: v.mean() for k, v in self.priors.items()}
+        self.std_dict = {k: v.std() for k, v in self.priors.items()}
+
+    def set_prior_means_stdevs(self, mu_dict: Dict[str, float], std_dict: Dict[str, float]):
+        """
+        Set the means and standard deviations of the prior distributions.
+
+        Analytical means and standard deviations have been set for simple
+        priors in the constructor, while for complicated priors they have
+        been set to NaN and need to be overridden.
+        THis can be done either by calling this method or by calling
+        `set_standardization_values_from_samples()` to calculate
+        the sample mean and standard deviations from prior draws.
+
+        Parameters
+        ----------
+        mu_dict: dict
+            Dictionary of parameter means used along with a
+            waveform data set
+        std_dict: dict
+            Dictionary of parameter standard deviations used
+            along with a waveform data set
+        """
+        self.mu_dict.update(mu_dict)
+        self.std_dict.update(std_dict)
+
+    def get_prior_means_stdevs(self) -> Tuple[Dict[str, float], Dict[str, float]]:
+        """
+        Return the means and standard deviations of the prior distributions.
+        """
+        return self.mu_dict, self.std_dict
+
+    def check_standardization_values(self) -> Set:
+        """
+        Return set of parameters for which either the means or stdevs are NaN.
+        """
+        nan_means = {k for k, v in self.mu_dict.items() if np.isnan(v)}
+        nan_stds = {k for k, v in self.std_dict.items() if np.isnan(v)}
+        return nan_means | nan_stds
+
+    def set_standardization_values_from_samples(self, n_samples: int):
+        """
+        Helper method to set reference standardization values from samples.
+        Purely draw parameter samples without generating any waveforms.
+
+        Note: This could be a function, just pass in the priors instance
+
+        Parameters
+        ----------
+        n_samples:
+            Number of samples to draw
+        """
+        # Draw prior samples and fill in non-sampling parameters
+        par_dict = self.priors.sample(size=n_samples)
+        par_dict = self.priors.default_conversion_function(par_dict)
+        par_dict = {k: par_dict[k] for k in self.check_standardization_values()}
+
+        # Calculate and set sample means and standard deviations
+        mu_dict = {k: np.mean(v) for k, v in par_dict.items()}
+        std_dict = {k: np.std(v) for k, v in par_dict.items()}
+        print(f'Calculated standardization values from {n_samples} samples:'
+              f'\nmeans: {mu_dict}\nstdev: {std_dict}')
+        print('Updating standardization dictionaries.')
+        self.set_prior_means_stdevs(mu_dict, std_dict)
+
+    def __call__(self):
+        """
+        Return chain of waveform transforms
+        """
+        # Note:
+        # * This does not need to be __call__, it could also be some named method
+        #  or there could be a different method for each type of transform
+        # * The transformation classes could be specified via arguments
+        #   if we find that this feature is needed. I.e. could pass a dict of transform
+        #   class names and kwargs to the constructor and then create the
+        #   transformation object here
+        # * Could also output all transforms we might need
+        nan_pars = self.check_standardization_values()
+        if len(nan_pars) > 0:
+            raise ValueError(f'Please set proper reference values for {nan_pars} which'
+                             f' are NaN. \nmeans: {self.mu_dict} \nstdevs: {self.std_dict}')
+
+        return Compose([
+            RandomProjectToDetectors(self.det_network, self.priors),
+            AddNoiseAndWhiten(self.det_network),
+            StandardizeParameters(mu=self.mu_dict, std=self.std_dict),
+            ToNetworkInput(self.domain)
+        ])
+
+    def get_parameter_list(self, waveform_generator: WaveformGenerator) -> List:
+        """
+        List of parameter labels which is stripped from the parameter
+        dictionary in ToNetworkInput().
+        """
+        rp_det = RandomProjectToDetectors(self.det_network, self.priors)
+        wd = WaveformDataset(priors=F.priors, waveform_generator=waveform_generator,
+                             transform=rp_det)
+        # Generate intrinsic parameters and waveform polarizations
+        wd.generate_dataset(size=1)
+        # Sample extrinsic parameters (and compute strain)
+        return list(wd[0]['parameters'].keys())
+
+
+class GenerateObservationTransform:
+    """
+    Undo whitening and convert torch tensors to dicts of arrays
+    """
+    def __call__(self, x: torch.tensor, y: torch.tensor,
+                 asd_dict: Dict[str, np.ndarray]):
+        """
+        Parameters
+        ----------
+        x: torch.tensor
+            Parameter samples
+        y: torch.tensor
+            Real and imaginary strains and noise summary
+            for each detector. Shape: (n_detectors, 3, n_bins)
+        asd_dict: dict
+            A dictionary of ASDs for all detectors in the network.
+        """
+        # Note:
+        # We discard the normalized noise information generated by
+        # AddNoiseAndWhiten._noise_summary_function()
+        # We could use it if we stored the discarded scale somewhere
+        # or if _noise_summary_function() was just 1/asd
+        data = y.numpy()
+        strains = data[:, 0] + 1j * data[:, 1]
+        strain_dict = {k: h * asd_dict[k] for k, h in zip(asd_dict.keys(), strains)}
+        return {'strains': strain_dict, 'asds': asd_dict}
+
+
+class InferenceTransform:
+    """
+    Observation ---> Network Input
+
+    Prepare observed data for neural network:
+    1. Whiten strains
+    2. Compute noise summary data from ASDs
+    3. Transform to a single torch tensor
+    """
+    def __call__(self, obs_dict: Dict[Dict[str, np.ndarray], Dict[str, np.ndarray]]) -> torch.tensor:
+        """
+        Convert strain and ASD data to neural network input.
+
+        Parameters
+        ----------
+        obs_dict: dict
+            Nested dictionary containing 'strains' and 'asds'.
+        """
+        strains = obs_dict['strains']
+        asds = obs_dict['asds']
+        strains_white = {ifo: h / asds[ifo] for ifo, h in strains.items()}
+        noise_summary = {ifo: noise_summary_function(asd)
+                         for ifo, asd in asds.items()}
+        y = np.array([np.vstack([h.real, h.imag, noise_summary[ifo]])
+                      for ifo, h in strains_white.items()])
+        return torch.from_numpy(y)
+
+
+class PostprocessParameters:
+    """
+    Convert raw posterior samples to userfriendly format
+
+    1. Undo standardization
+    2. Convert to a dict of arrays?
+    TODO:
+    """
+    def __init__(self, mu_dict: Dict[str, float], std_dict: Dict[str, float]):
+        pass
+
+    def __call__(self, parameter_samples: torch.tensor, parameter_names: List) -> np.ndarray:
+        pass
+
+
+if __name__ == "__main__":
+    """
+    Example for setting up a WaveformTransformationTraining and 
+    using it with a WaveformDataset and WaveformGenerator.
+    """
+    from dingo.gw.waveform_generator import WaveformGenerator
+    from dingo.gw.waveform_dataset import WaveformDataset
+    from dingo.gw.parameters import generate_default_prior_dictionary
+
+    domain_kwargs = {'f_min': 20.0, 'f_max': 4096.0, 'delta_f': 1.0 / 4.0, 'window_factor': 1.0}
+    parameter_prior_dict = generate_default_prior_dictionary()
+    prior_kwargs = {'parameter_prior_dict': parameter_prior_dict, 'geocent_time_ref': 1126259642.413,
+                    'luminosity_distance_ref': 500.0, 'reference_frequency': 20.0}
+    ifo_list = ["H1", "L1"]
+
+    F = WaveformTransformationTraining(
+        domain_class='UniformFrequencyDomain', domain_kwargs=domain_kwargs,
+        prior_class='GWPriorDict', prior_kwargs=prior_kwargs,
+        detector_network_class='DetectorNetwork', ifo_list=ifo_list
+    )
+    # For mass_1, mass_2, luminosity_distance:
+    F.set_standardization_values_from_samples(n_samples=10000)
+
+    approximant = 'IMRPhenomXPHM'
+    waveform_generator = WaveformGenerator(approximant, F.domain)
+    wd = WaveformDataset(priors=F.priors, waveform_generator=waveform_generator, transform=F())
+    print('F.priors', F.priors)
+    n_waveforms = 17
+    wd.generate_dataset(size=n_waveforms)
+    print(wd[9])
+
+    # parameter labels for "x" tensor data
+    print(F.get_parameter_list(waveform_generator))
+
+
+    # Test observation transform
+    import matplotlib.pyplot as plt
+    O = GenerateObservationTransform()
+    # Grab some ASDs
+    psd_dict = F.det_network.power_spectral_densities
+    asd_dict = {ifo: np.sqrt(psd)[F.domain.frequency_mask] for ifo, psd in psd_dict.items()}
+    obs_data = O(*wd[9], asd_dict)
+    # for ifo, h in obs_data['strains'].items():
+    #     plt.loglog(np.abs(h), label=ifo)
+    # plt.legend()
+    # plt.show()
+
+    # Test inference transform
+    print(InferenceTransform()(obs_data))

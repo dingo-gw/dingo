@@ -93,6 +93,7 @@ class WaveformDataset(Dataset):
         """
         # Draw intrinsic prior samples
         # Note: Since we're using bilby's prior classes we are automatically using numpy rng
+        # The order of parameters return is random
         parameter_samples_dict = self._priors.sample_intrinsic(size=size)
         self._parameter_samples = pd.DataFrame(parameter_samples_dict)
         # The fixed f_ref and d_L reference values are added automatically in the call to sample_intrinsic.
@@ -174,6 +175,7 @@ class WaveformDataset(Dataset):
         # of type WaveformDataset
         # TODO: implement -- or should this be implemented as a transformation after converting to torch tensors?
         pass
+
 
 
 

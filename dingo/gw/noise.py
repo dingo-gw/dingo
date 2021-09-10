@@ -69,6 +69,14 @@ class PSDDataSet:
         pass
 
 
+def noise_summary_function(asd: np.ndarray) -> np.ndarray:
+    """
+    Map the inverse ASD into [0, 1].
+    """
+    z = 1.0 / asd
+    return z / np.max(z)
+
+
 class AddNoiseAndWhiten:
     def __init__(self, network: DetectorNetwork, whiten_data=True, add_noise=True):
         """
@@ -133,19 +141,12 @@ class AddNoiseAndWhiten:
 
         return n_white
 
-    def _noise_summary_function(self, asd: np.ndarray):
-        """
-        Map the inverse ASD into [0, 1].
-        """
-        z = 1.0 / asd
-        return z / np.max(z)
-
-    def noise_summary(self):
+    def noise_summary(self) -> Dict[str, np.ndarray]:
         """
         Return a dictionary of noise summary data for the given
         detector network. This serves as context data for the NN flow.
         """
-        return {ifo: self._noise_summary_function(asd)
+        return {ifo: noise_summary_function(asd)
                 for ifo, asd in self.asd_dict.items()}
 
     def _whiten_waveform(self, strain: np.ndarray, asd_array: np.ndarray) -> np.ndarray:
@@ -167,6 +168,9 @@ class AddNoiseAndWhiten:
         Whiten detector strain waveforms and add zero-mean,
         white Gaussian noise.
 
+        Return nested dictionary of waveform parameters, strains,
+        and noise summary information for the detector network.
+
         Parameters
         ----------
         waveform_dict: Dict[Dict[str, float], Dict[str, np.ndarray]]
@@ -184,7 +188,8 @@ class AddNoiseAndWhiten:
                        for ifo, h in strain_dict.items()}
 
         return {'parameters': waveform_dict['parameters'],
-                'waveform': strain_dict, 'asd': self.asd_dict}
+                'waveform': strain_dict,
+                'noise_summary': self.noise_summary()}
 
 
     # TODO: somewhere add a method to calculate SNR
