@@ -34,7 +34,7 @@ import h5py
 if __name__ == '__main__':
     model_builder = create_nsf_with_rb_projection_embedding_net
     transform_builder = get_transformations_composites
-    log_dir = '../logs/toy_example/01/'
+    log_dir = '../../logs/toy_example/01/'
     model_path = join(log_dir, 'model_latest.pt')
     dataset_path = join(log_dir, 'dataset.hdf5')
     initialize = True
@@ -131,7 +131,7 @@ if __name__ == '__main__':
     parameters = sample_from_uniform_prior(extrinsic_prior,
                                            num_samples=5_000)
     simulations = simulator.simulate(parameters)
-    dataset = SimulationsDataset(parameters, simulations)
+    dataset = SimulationsDataset(parameters=parameters, simulations=simulations)
 
     ###################
     # transformations #
@@ -224,8 +224,8 @@ if __name__ == '__main__':
         'noise_module_kwargs': noise_module_kwargs,
         'normalization_kwargs': normalization_kwargs,
     }
-    transform_full, _, inference_postprocessing = \
-        get_transformations_composite(**transformation_kwargs)
+    transform_full, _, inference_postprocessing, _ = \
+        get_transformations_composites(**transformation_kwargs)
 
     data_transformed = transform_full(dataset[0])
 

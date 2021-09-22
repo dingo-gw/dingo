@@ -78,7 +78,7 @@ prepared for the neural network by the following sequence of transformations.
 
 * Transform the arrays to tensors.
 """
-from tutorials.toy_example_utils import *
+from toy_example_utils import *
 
 # set up simulator
 t_axis = [0, 10, 1000]
