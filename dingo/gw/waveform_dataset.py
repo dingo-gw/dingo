@@ -4,9 +4,82 @@ import h5py
 from tqdm import tqdm
 from typing import Dict, Union
 from torch.utils.data import Dataset
+import scipy
+from sklearn.utils.extmath import randomized_svd
 
 from dingo.gw.parameters import GWPriorDict
 from dingo.gw.waveform_generator import WaveformGenerator
+from dingo.api import structured_array_from_dict_of_arrays
+
+
+class SVDBasis:
+    def __init__(self):
+        pass
+
+    def generate_basis(self, training_data: np.ndarray, n: int,
+                       method: str = 'random'):
+        """Generate the SVD basis from training data and store it.
+
+        The SVD decomposition takes
+
+        training_data = U @ diag(s) @ Vh
+
+        where U and Vh are unitary.
+
+        Parameters
+        ----------
+        training_data: np.ndarray
+            Array of waveform data on the physical domain
+
+        n: int
+            Number of basis elements to keep.
+            n=0 keeps all basis elements.
+        method: str
+            Select SVD method, 'random' or 'scipy'
+        """
+
+        if method == 'random':
+            U, s, Vh = randomized_svd(training_data, n)
+
+            self.Vh = Vh.astype(np.complex64)
+            self.V = self.Vh.T.conj()
+
+            self.n = n
+        elif method == 'scipy':
+            # Code below uses scipy's svd tool. Likely slower.
+            U, s, Vh = scipy.linalg.svd(training_data, full_matrices=False)
+            V = Vh.T.conj()
+
+            if (n == 0) or (n > len(V)):
+                self.V = V
+                self.Vh = Vh
+            else:
+                self.V = V[:, :n]
+                self.Vh = Vh[:n, :]
+
+            self.n = len(self.Vh)
+
+    def basis_coefficients_to_fseries(self, coefficients: np.ndarray):
+        """
+        Convert from basis coefficients to frequency series.
+
+        Parameters
+        ----------
+        coefficients:
+            Array of basis coefficients
+        """
+        return coefficients @ self.Vh
+
+    def fseries_to_basis_coefficients(self, fseries: np.ndarray):
+        """
+        Convert from frequency series to basis coefficients.
+
+        Parameters
+        ----------
+        fseries:
+            Array of frequency series
+        """
+        return fseries @ self.V
 
 
 class WaveformDataset(Dataset):
@@ -138,6 +211,11 @@ class WaveformDataset(Dataset):
         """
         Write a DataFrame containing a dict of 2D arrays to HDF5.
 
+        This creates a group containing as many 1D datasets
+        as there are keys in the DataFrame. I.e. the stored
+        format is a number of 1D arrays for parameters and
+        2D arrays for waveform polarizations.
+
         Parameters
         ----------
         fp : h5py.File
@@ -155,7 +233,21 @@ class WaveformDataset(Dataset):
                 v = np.vstack(v)  # convert object array into a proper 2D array
             grp.create_dataset(str(k), data=v)
 
-    def save(self, filename: str = 'waveform_dataset.h5'):
+    def dataframe_to_structured_array(self, df: pd.DataFrame):
+        """
+        Convert a pandas DataFrame of parameters to a structured numpy array.
+
+        Parameters
+        ----------
+        df:
+            A pandas DataFrame
+        """
+        d = {k: np.array(list(v.values())) for k, v in df.to_dict().items()}
+        return structured_array_from_dict_of_arrays(d)
+
+    def save(self, filename: str = 'waveform_dataset.h5',
+             parameter_fmt: str = 'structured_array',
+             compress_data: bool = True, n_rb: int = 0):
         """
         Save waveform data set to a HDF5 file.
 
@@ -163,12 +255,42 @@ class WaveformDataset(Dataset):
         ----------
         filename : str
             The name of the output HDF5 file.
+
+        parameter_fmt : str
+            Selects the way the waveform parameters are stored in the HDF5 file.
+            'group': saves each parameter as a dataset in a group 'parameters'
+            'structured_array': saves parameters as a 2D structured array with field names
+
+        compress_data : bool
+            If True project waveform polarizations onto an SVD basis.
+            Save the projection coefficients and the SVD basis to HDF5.
+
+        n_rb : int
+            The number of basis functions at which the SVD should be truncated.
+            n_rb = 0: no compression
         """
-        # TODO: use SVD to compress more than just HDF5 compression?
-        # Using h5py
         fp = h5py.File(filename, 'w')
-        self._write_dataframe_to_hdf5(fp, 'parameters', self._parameter_samples)
-        self._write_dataframe_to_hdf5(fp, 'waveform_polarizations', self._waveform_polarizations)
+
+        if parameter_fmt == 'group':
+            # This will create a group 'parameters' with a dataset for each parameter
+            self._write_dataframe_to_hdf5(fp, 'parameters', self._parameter_samples)
+        elif parameter_fmt == 'structured_array':
+            # Alternative which converts to a structured array
+            parameters_struct_arr = self.dataframe_to_structured_array(self._parameter_samples)
+            # d = {k: np.array(list(v.values())) for k, v in self._parameter_samples.to_dict().items()}
+            # parameters_struct_arr = structured_array_from_dict_of_arrays(d)
+            fp.create_dataset('parameters', data=parameters_struct_arr)
+
+        if compress_data:
+            pol_arrays = {k: np.vstack(v.to_numpy().T) for k, v in self._waveform_polarizations.items()}
+            basis = SVDBasis()
+            basis.generate_basis(pol_arrays['h_plus'], n_rb)
+            for k, v in pol_arrays.items():
+                h_proj = basis.fseries_to_basis_coefficients(v)
+                fp.create_dataset(k, data=h_proj)
+            fp.create_dataset('rb_matrix_V', data=basis.V)
+        else:
+            self._write_dataframe_to_hdf5(fp, 'waveform_polarizations', self._waveform_polarizations)
         fp.close()
 
     def split_into_train_test(self, train_fraction):
