@@ -4,13 +4,12 @@ domain_settings:
   kwargs:
     f_min: 10.0
     f_max: 1024.0
-    delta_f: 1.0/8.0
-    f_ref: 20.0
+    delta_f: 0.125  # 1.0/8.0 would require eval
     window_factor: 1.0 # this should maybe be in noise settings?
 
 # settings for waveform generator
 waveform_generator_settings:
-  approximant: SEOBNRv4PHM
+  approximant: IMRPhenomPv2 # SEOBNRv4PHM
   f_ref: 20.0
 
 # settings for prior over parameters
@@ -30,7 +29,9 @@ prior_settings:
   # reference values for extrinsic parameters
   # all non-specified ones will be set to zero
   extrinsic_parameters_reference_values:
-    luminosity_distance: 100.0
+    luminosity_distance: 100.0 # Mpc
+    reference_frequency: 20.0  # Hz
+  # MP: This shouldn't be needed if we use structured arrays.
   # indices for parameters in waveform_dataset.hdf5['parameters']
   # parameters should not be stored as dicts, since this is less efficient
   parameter_indices:
