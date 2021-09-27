@@ -178,9 +178,29 @@ class GWPriorDict(BBHPriorDict):
                 self[k] = default_prior_dict[k]
 
         if not ('luminosity_distance' in key_set):
-            warnings.warn('Missing prior for luminosity_distance. Please check distance limits.')
+            warnings.warn('Missing prior for luminosity_distance. Adding default prior.'
+                          'Please check distance limits.')
             self['luminosity_distance'] = UniformSourceFrame(minimum=100.0, maximum=5000.0,
                 cosmology=Planck15, name='luminosity_distance')
+
+
+    @staticmethod
+    def add_ra_dec_psi_dL(parameter_prior_dict: Dict):
+        """
+        Helper method for adding ra, dec, psi, and d_L extrinsic parameters to
+        a parameter dictionary.
+        """
+        default_prior_dict = {
+            'psi': Uniform(minimum=0, maximum=3.141592653589793, name='psi', boundary='periodic'),
+            'dec': Cosine(minimum=-1.5707963267948966, maximum=1.5707963267948966, name='dec'),
+            'ra': Uniform(minimum=0, maximum=6.283185307179586, name='ra', boundary='periodic'),
+            'luminosity_distance': UniformSourceFrame(minimum=100.0, maximum=5000.0,
+                cosmology=Planck15, name='luminosity_distance')
+        }
+        for k in default_prior_dict.keys():
+            if k not in parameter_prior_dict:
+                parameter_prior_dict[k] = default_prior_dict[k]
+        return parameter_prior_dict
 
 
     def _check_prior_completeness(self):

@@ -58,28 +58,8 @@ def generate_waveform_dataset(waveforms_directory: str, settings_file: str,
     # Build prior distribution
     prior_settings = settings['prior_settings']
     prior = build_prior(prior_settings['intrinsic_parameters'],
-                        prior_settings['extrinsic_parameters_reference_values'])
-
-
-    # Sample parameters and save them to the hdf5 file
-    # FIXME: Sampling is currently done automatically when generating waveform dataset
-    #  change behavior to check if we have sampled already and stored this
-    # Note: This adds a default value for geocent_time which is ignored for waveform generation.
-    parameters_dict = prior.sample_intrinsic(size=n_wfs, add_reference_values=True)
-    '''We save the parameters as an array of shape (n_wfs, 15), where 15 is the 
-    number of parameters. The api function below takes the parameter dicts and 
-    transforms them to the array.'''
-    # FIXME: Right now, this is usually smaller than 15-dimensional
-    # The dimension is set by explicitly specified parameters in the yaml file.
-    # We could specify the extrinsic parameters, but they're not sampled at wf generation time
-    # and we would just have some value for each. Do we really need this in the HDF5 file?
-    # It would just be good to decide which parameters are present in the HDF5 file.
-    # IMHO, adding parameters the waveform doesn't depend on is confusing.
-    # TODO: Is there a good reason why it should be 15D?
-
-    # MP: parameters are computed and saved internally in WaveformDataset
-    # So, the above sampling step and the conversion on the line below is not used.
-    parameters = structured_array_from_dict_of_arrays(parameters_dict)
+                        prior_settings['extrinsic_parameters_reference_values'],
+                        add_extrinsic_priors=True)
 
     # Define physical domain and set up waveform generator
     # MP: settings has f_ref, but we added 'reference_frequency' at the prior generation step
@@ -89,8 +69,11 @@ def generate_waveform_dataset(waveforms_directory: str, settings_file: str,
         settings['waveform_generator_settings']['approximant'], domain)
 
     wd = WaveformDataset(priors=prior, waveform_generator=waveform_generator, transform=None)
-    # FIXME: generate_dataset calls self._priors.sample_intrinsic;
-    #  want control over this and also a way to substitute loaded parameters from file
+
+    # TODO: implement and use wd.read_parameter_samples(filename) for regression test against dev code
+    #  to substitute loaded parameters from file
+    # Explicitly sample parameters
+    wd.sample_intrinsic(size=n_wfs, add_reference_values=True)
 
     # Generate polarizations for parameters in the dataset
     wd.generate_dataset(size=n_wfs)
@@ -111,10 +94,10 @@ if __name__ == "__main__":
     waveforms_directory = './datasets/waveforms/'
     # number of waveforms in the dataset
     # n_wfs = 100_000
-    n_wfs = 2000  # debugging setting
+    n_wfs = 200  # debugging setting
     # number of waveforms used to generate the reduced basis for compression
     # n_rb = 30_000
-    n_rb = 100  # debugging setting
+    n_rb = 10  # debugging setting
 
     settings_file = 'settings.yaml'
     dataset_file = 'dataset_test.hdf5'
@@ -127,4 +110,7 @@ if __name__ == "__main__":
     pars = fp['parameters'][:]
     print(pars)
     print(pars.dtype)
+    print(pars.shape)  # looks like 1D
+    print(len(pars.dtype))  # but have this many fields = columns
     fp.close()
+

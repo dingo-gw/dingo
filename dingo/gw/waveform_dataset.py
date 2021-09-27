@@ -156,6 +156,41 @@ class WaveformDataset(Dataset):
         # with open("df_info.txt", "w", encoding="utf-8") as f:
         #     f.write(s)
 
+    def sample_intrinsic(self, size: int = 0, add_reference_values: bool = True):
+        """
+        Draw intrinsic prior samples
+
+        Notes:
+          * Since we're using bilby's prior classes we are automatically
+            using numpy random number generator
+          * The order of returned parameters is random
+          * The fixed f_ref and d_L reference values are added automatically
+            in the call to sample_intrinsic. In the case of d_L make sure not
+            to confuse these fixed values with samples drawn from a typical
+            extrinsic distribution.
+
+        Parameters
+        ----------
+        size : int
+            The number of samples to draw.
+
+        add_reference_values : bool
+            If True, add reference frequency, distance and time to the output dict.
+            These are fixed values needed, not r.v.'s, but are added for each sample.
+            Reference frequency and distance are needed for waveform generation, and
+            reference time is used when projecting onto the detectors.
+        """
+        parameter_samples_dict = self._priors.sample_intrinsic(size=size,
+            add_reference_values=add_reference_values)
+        self._parameter_samples = pd.DataFrame(parameter_samples_dict)
+
+
+    def read_parameter_samples(self, filename: str):
+        # TODO: implement a method to read intrinsic parameter samples
+        #  and convert them into a DataFrame and store them in self._parameter_samples
+        pass
+
+
     def generate_dataset(self, size: int = 0):
         """Generate a waveform dataset.
 
@@ -164,13 +199,8 @@ class WaveformDataset(Dataset):
         size : int
             The number of samples to draw and waveforms to generate.
         """
-        # Draw intrinsic prior samples
-        # Note: Since we're using bilby's prior classes we are automatically using numpy rng
-        # The order of parameters return is random
-        parameter_samples_dict = self._priors.sample_intrinsic(size=size)
-        self._parameter_samples = pd.DataFrame(parameter_samples_dict)
-        # The fixed f_ref and d_L reference values are added automatically in the call to sample_intrinsic.
-        # In the case of d_L make sure not to confuse them with samples drawn from a typical extrinsic distribution.
+        if self._parameter_samples is not None:
+            self.sample_intrinsic(size)
 
         print('Generating waveform polarizations ...')  # Switch to logging
         # TODO: Currently, simple in memory generation of wfs on a single core; extend to multiprocessing or MPI

@@ -6,7 +6,7 @@ import numpy as np
 
 
 def build_prior(p_intrinsic: Dict[str, Union[List, str]],
-                p_extrinsic: Dict[str, float]):
+                p_extrinsic: Dict[str, float], add_extrinsic_priors: bool = True):
     """
     Generate Dictionary of prior instances for intrinsic parameters.
 
@@ -20,6 +20,21 @@ def build_prior(p_intrinsic: Dict[str, Union[List, str]],
 
     p_extrinsic: Dict
         A dictionary containing reference values for extrinsic parameters
+
+    add_extrinsic_priors: bool
+        Add default priors for ra, dec, psi, d_L if they have not been specified.
+
+    Note that default priors are added for certain missing parameters, but not
+    for others. Check the warning messages that are being generated in these cases.
+      * If mass priors are missing, default mass priors are added (including constraints)
+      * If priors for ra, dec, psi are missing, default priors are added.
+        If add_extrinsic_priors == True, then no warning messages will be shown.
+      * If the luminosity distance prior is missing a default prior is added.
+        If add_extrinsic_priors == True, then no warning messages will be shown.
+      * If spin priors are incomplete generating waveforms will fail.
+
+    Depending on the particular prior choices the dimensionality of a
+    parameter sample obtained from the returned GWPriorDict will vary.
     """
     default_prior = generate_default_prior_dictionary()
     parameter_dict = {
@@ -28,13 +43,16 @@ def build_prior(p_intrinsic: Dict[str, Union[List, str]],
     parameter_prior_dict = generate_parameter_prior_dictionary(parameter_dict)
     parameter_prior_dict_default = {k: default_prior[k] for k, v in p_intrinsic.items() if v == 'default'}
     parameter_prior_dict.update(parameter_prior_dict_default)
+
+    if add_extrinsic_priors:
+        # Avoid warning messages for extrinsic parameters: d_L, ra, dec, psi
+        parameter_prior_dict = GWPriorDict.add_ra_dec_psi_dL(parameter_prior_dict)
+
+    geocent_time_ref = 0  # dummy value
     kwargs = {'luminosity_distance_ref': p_extrinsic['luminosity_distance'],
-              'reference_frequency': p_extrinsic['reference_frequency']}
+              'reference_frequency': p_extrinsic['reference_frequency'],
+              'geocent_time_ref': geocent_time_ref}
 
-    # FIXME: Default priors will also be added for extrinsic parameters: d_L, ra, dec, psi
-    #  turn off warning or add dummies for these parameters
-
-    # FIXME: set geocent_time_ref to a dummy value? It gets added automatically
     return GWPriorDict(parameter_prior_dict, **kwargs)
 
 
