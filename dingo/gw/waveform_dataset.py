@@ -1,15 +1,18 @@
+import os
+import pickle
+from typing import Dict, Union
+
+import h5py
 import numpy as np
 import pandas as pd
-import h5py
-from tqdm import tqdm
-from typing import Dict, Union
-from torch.utils.data import Dataset
 import scipy
 from sklearn.utils.extmath import randomized_svd
+from torch.utils.data import Dataset
+from tqdm import tqdm
 
+from dingo.api import structured_array_from_dict_of_arrays
 from dingo.gw.parameters import GWPriorDict
 from dingo.gw.waveform_generator import WaveformGenerator
-from dingo.api import structured_array_from_dict_of_arrays
 
 
 class SVDBasis:
@@ -92,9 +95,6 @@ class WaveformDataset(Dataset):
     Once a waveform data set is in memory, the waveform data are consumed through
     a __getitem__() call, optionally applying a chain of transformations, which
     are classes that implement the __call__() method.
-
-    TODO:
-      * add compression for serializing data
     """
 
     def __init__(self, dataset_file: str = None,
@@ -186,9 +186,28 @@ class WaveformDataset(Dataset):
 
 
     def read_parameter_samples(self, filename: str):
-        # TODO: implement a method to read intrinsic parameter samples
-        #  and convert them into a DataFrame and store them in self._parameter_samples
-        pass
+        """
+        Read intrinsic parameter samples from a file.
+        Doing so will avoid drawing fresh samples from the
+        intrinsic prior distribution.
+
+        Parameters
+        ----------
+        filename : str
+            Supported file formats are:
+            '.pkl': a pickle of a dictionary of arrays
+            '.npy': a structured numpy array
+        """
+        _, file_extension = os.path.splitext(filename)
+        if file_extension == '.pkl':
+            with open(filename, 'rb') as fp:
+                parameters = pickle.load(fp)  # dict of arrays
+        elif file_extension == '.npy':
+            parameters = np.load(filename)  # structured array
+        else:
+            raise ValueError(f'Only .pkl or .npy format supported, but got {filename}')
+
+        self._parameter_samples = pd.DataFrame(parameters)
 
 
     def generate_dataset(self, size: int = 0):
@@ -199,12 +218,10 @@ class WaveformDataset(Dataset):
         size : int
             The number of samples to draw and waveforms to generate.
         """
-        if self._parameter_samples is not None:
+        if self._parameter_samples is None:
             self.sample_intrinsic(size)
 
         print('Generating waveform polarizations ...')  # Switch to logging
-        # TODO: Currently, simple in memory generation of wfs on a single core; extend to multiprocessing or MPI
-        #  For large datasets may not be able to store it in memory and need to write to disk while generating
         wf_list_of_dicts = [self._waveform_generator.generate_hplus_hcross(p.to_dict())
                             for _, p in tqdm(self._parameter_samples.iterrows())]
         polarization_dict = {k: [wf[k] for wf in wf_list_of_dicts] for k in ['h_plus', 'h_cross']}
@@ -323,11 +340,6 @@ class WaveformDataset(Dataset):
             self._write_dataframe_to_hdf5(fp, 'waveform_polarizations', self._waveform_polarizations)
         fp.close()
 
-    def split_into_train_test(self, train_fraction):
-        # of type WaveformDataset
-        # TODO: implement -- or should this be implemented as a transformation after converting to torch tensors?
-        pass
-
 
 
 
@@ -337,7 +349,6 @@ if __name__ == "__main__":
     from dingo.gw.detector_network import DetectorNetwork, RandomProjectToDetectors
     from dingo.gw.noise import AddNoiseAndWhiten
     from transforms import StandardizeParameters, ToNetworkInput, Compose
-    import matplotlib.pyplot as plt
 
     domain_kwargs = {'f_min': 20.0, 'f_max': 4096.0, 'delta_f': 1.0 / 4.0, 'window_factor': 1.0}
     domain = UniformFrequencyDomain(**domain_kwargs)
