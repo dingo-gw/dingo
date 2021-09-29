@@ -27,15 +27,9 @@ Example command line:
     python3 ./create_waveform_generation.dag.py --waveforms_directory ./datasets/waveforms/ --parameters_file_basis parameters_basis.npy --parameters_file_dataset parameters_dataset.npy --basis_file polarization_basis.npy --settings_file settings.yaml --dataset_file waveform_dataset.hdf5 --num_wfs_basis 200 --num_wfs_dataset 500 --num_wf_per_process 100 --rb_max 50
 """
 
-# FIXME: use queue argument and pass
-# FIXME: setup condor log, stdout, stderr
-# FIXME: request_cpus, etc
-# FIXME: Use logging instead of print statements as bilby
 
 import argparse
 from pycondor import Job, Dagman
-
-
 
 
 if __name__ == "__main__":
@@ -43,6 +37,7 @@ if __name__ == "__main__":
         Collect compressed waveform polarizations and parameters.
         Save consolidated waveform dataset in HDF5 format.
     """)
+    # dingo script arguments
     parser.add_argument('--waveforms_directory', type=str, required=True,
                         help='Directory containing waveform data, basis, and parameter file.')
     parser.add_argument('--parameters_file_basis', type=str, required=True,
@@ -60,76 +55,105 @@ if __name__ == "__main__":
                         help='Number of waveforms to generate per process.')
     parser.add_argument('--rb_max', type=int, default=0,
                         help='Truncate the SVD basis at this size. No truncation if zero.')
+
+    # condor arguments
+    parser.add_argument('--request_cpus', type=int, default=None)
+    parser.add_argument('--request_memory', type=int, default=None)
+    parser.add_argument('--error', type=str, default='condor/error')
+    parser.add_argument('--output', type=str, default='condor/output')
+    parser.add_argument('--log', type=str, default='condor/log')
+    parser.add_argument('--submit', type=str, default='condor/submit')
+
     args = parser.parse_args()
 
+    kwargs = {'request_cpus': args.request_cpus, 'request_memory': args.request_memory,
+              'submit': args.submit, 'error': args.error, 'output': args.output, 'log': args.log}
 
     chunk_size_basis = args.num_wfs_basis // args.num_wf_per_process
     chunk_size_dataset = args.num_wfs_dataset // args.num_wf_per_process
 
-    dagman = Dagman(name='example_dagman')
+    dagman = Dagman(name='example_dagman', submit=args.submit)
 
+    # 1(a) generate_parameters_basis ------------------------------------------
+    generate_parameters_basis_args = f'''
+    --waveforms_directory {args.waveforms_directory}
+    --settings_file {args.settings_file}
+    --parameters_file {args.parameters_file_basis}
+    --n_samples {chunk_size_basis}
+    '''
     generate_parameters_basis = Job(name='generate_parameters_basis',
-                                    executable='generate_parameters.py', dag=dagman)
-    generate_parameters_basis.add_arg(f'--waveforms_directory {args.waveforms_directory}')
-    generate_parameters_basis.add_arg(f'--settings_file {args.settings_file}')
-    generate_parameters_basis.add_arg(f'--parameters_file {args.parameters_file_basis}')
-    generate_parameters_basis.add_arg(f'--n_samples {chunk_size_basis}')
+                                    executable='generate_parameters.py', dag=dagman,
+                                    arguments=generate_parameters_basis_args, **kwargs)
 
+    # 1(b) generate_parameters_dataset ----------------------------------------
+    generate_parameters_dataset_args = f'''
+    --waveforms_directory {args.waveforms_directory}
+    --settings_file {args.settings_file}
+    --parameters_file {args.parameters_file_dataset}
+    --n_samples {chunk_size_dataset}
+    '''
     generate_parameters_dataset = Job(name='generate_parameters_dataset',
-                                    executable='generate_parameters.py', dag=dagman)
-    generate_parameters_dataset.add_arg(f'--waveforms_directory {args.waveforms_directory}')
-    generate_parameters_dataset.add_arg(f'--settings_file {args.settings_file}')
-    generate_parameters_dataset.add_arg(f'--parameters_file {args.parameters_file_dataset}')
-    generate_parameters_dataset.add_arg(f'--n_samples {chunk_size_dataset}')
+                                      executable='generate_parameters.py', dag=dagman,
+                                      arguments=generate_parameters_dataset_args, **kwargs)
+
+    # 2. generate_waveforms_basis ---------------------------------------------
+    generate_waveforms_basis_args = f'''
+    --waveforms_directory {args.waveforms_directory}
+    --settings_file {args.settings_file}
+    --parameters_file {args.parameters_file_basis}
+    --num_wf_per_process {args.num_wf_per_process}
+    --process_id $(Process)
+    '''
+    generate_waveforms_basis = Job(name=f'generate_waveforms_basis', queue=chunk_size_basis,
+                                   executable='generate_waveforms.py', dag=dagman,
+                                   arguments=generate_waveforms_basis_args, **kwargs)
+    generate_waveforms_basis.add_parent(generate_parameters_basis)
+
+    # 3. build_SVD_basis ------------------------------------------------------
+    build_SVD_basis_args = f'''
+    --waveforms_directory {args.waveforms_directory}
+    --parameters_file {args.parameters_file_basis}
+    --basis_file {args.basis_file}
+    --rb_max {args.rb_max}
+    '''
+    build_SVD_basis = Job(name='build_SVD_basis', executable='build_SVD_basis.py',
+                          dag=dagman, arguments=build_SVD_basis_args, **kwargs)
+    build_SVD_basis.add_parent(generate_waveforms_basis)
+
+    # 4. generate_waveforms_dataset -------------------------------------------
+    generate_waveforms_dataset_args = f'''
+    --waveforms_directory {args.waveforms_directory}
+    --settings_file {args.settings_file}
+    --parameters_file {args.parameters_file_dataset}
+    --num_wf_per_process {args.num_wf_per_process}
+    --process_id $(Process)
+    --use_compression
+    --basis_file {args.basis_file}
+    '''
+    generate_waveforms_dataset = Job(name=f'generate_waveforms_dataset', queue=chunk_size_dataset,
+                                     executable='generate_waveforms.py', dag=dagman,
+                                     arguments=generate_waveforms_dataset_args, **kwargs)
+    generate_waveforms_dataset.add_parent(build_SVD_basis)
+    generate_waveforms_dataset.add_parent(generate_parameters_dataset)
 
 
-    build_SVD_basis = Job(name='build_SVD_basis', executable='build_SVD_basis.py', dag=dagman)
-    build_SVD_basis.add_arg(f'--waveforms_directory {args.waveforms_directory}')
-    build_SVD_basis.add_arg(f'--parameters_file {args.parameters_file_basis}')
-    build_SVD_basis.add_arg(f'--basis_file {args.basis_file}')
-    build_SVD_basis.add_arg(f'--rb_max {args.rb_max}')
-
+    # 5. collect_waveform_dataset ---------------------------------------------
+    collect_waveform_dataset_args = f'''
+    --waveforms_directory {args.waveforms_directory}
+    --parameters_file {args.parameters_file_dataset}
+    --basis_file {args.basis_file}
+    --settings_file {args.settings_file}
+    --dataset_file {args.dataset_file}
+    '''
     collect_waveform_dataset = Job(name='collect_waveform_dataset',
-                                   executable='collect_waveform_dataset.py', dag=dagman)
-    collect_waveform_dataset.add_arg(f'--waveforms_directory {args.waveforms_directory}')
-    collect_waveform_dataset.add_arg(f'--parameters_file {args.parameters_file_dataset}')
-    collect_waveform_dataset.add_arg(f'--basis_file {args.basis_file}')
-    collect_waveform_dataset.add_arg(f'--settings_file {args.settings_file}')
-    collect_waveform_dataset.add_arg(f'--dataset_file {args.dataset_file}')
+                                   executable='collect_waveform_dataset.py', dag=dagman,
+                                   arguments=collect_waveform_dataset_args)
+    collect_waveform_dataset.add_parent(generate_waveforms_dataset)
 
-
-    for idx in range(chunk_size_basis):
-        generate_waveforms_basis = Job(name=f'generate_waveforms_basis_{idx}',
-                                       executable='generate_waveforms.py', dag=dagman)
-        generate_waveforms_basis.add_arg(f'--waveforms_directory {args.waveforms_directory}')
-        generate_waveforms_basis.add_arg(f'--settings_file {args.settings_file}')
-        generate_waveforms_basis.add_arg(f'--parameters_file {args.parameters_file_basis}')
-        generate_waveforms_basis.add_arg(f'--num_wf_per_process {args.num_wf_per_process}')
-        generate_waveforms_basis.add_arg(f'--process_id {idx}')
-
-        # Connect nodes
-        build_SVD_basis.add_parent(generate_waveforms_basis)
-        generate_waveforms_basis.add_parent(generate_parameters_basis)
-
-
-    for idx in range(chunk_size_dataset):
-        generate_waveforms_dataset = Job(name=f'generate_waveforms_dataset_{idx}',
-                                       executable='generate_waveforms.py', dag=dagman)
-        generate_waveforms_dataset.add_arg(f'--waveforms_directory {args.waveforms_directory}')
-        generate_waveforms_dataset.add_arg(f'--settings_file {args.settings_file}')
-        generate_waveforms_dataset.add_arg(f'--parameters_file {args.parameters_file_dataset}')
-        generate_waveforms_dataset.add_arg(f'--num_wf_per_process {args.num_wf_per_process}')
-        generate_waveforms_dataset.add_arg(f'--process_id {idx}')
-        generate_waveforms_dataset.add_arg(f'--use_compression')
-        generate_waveforms_dataset.add_arg(f'--basis_file {args.basis_file}')
-
-        # Connect nodes
-        generate_waveforms_dataset.add_parent(build_SVD_basis)
-        generate_waveforms_dataset.add_parent(generate_parameters_dataset)
-        generate_waveforms_dataset.add_child(collect_waveform_dataset)
 
     try:
         dagman.visualize('waveform_dataset_generation_workflow.png')
     except:
         pass
+
     dagman.build()
