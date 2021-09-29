@@ -17,7 +17,9 @@ from dingo.gw.waveform_generator import WaveformGenerator
 
 class SVDBasis:
     def __init__(self):
-        pass
+        self.V = None
+        self.Vh = None
+        self.n = None
 
     def generate_basis(self, training_data: np.ndarray, n: int,
                        method: str = 'random'):
@@ -46,7 +48,6 @@ class SVDBasis:
 
             self.Vh = Vh.astype(np.complex64)
             self.V = self.Vh.T.conj()
-
             self.n = n
         elif method == 'scipy':
             # Code below uses scipy's svd tool. Likely slower.
@@ -61,6 +62,8 @@ class SVDBasis:
                 self.Vh = Vh[:n, :]
 
             self.n = len(self.Vh)
+        else:
+            raise ValueError(f'Unsupported SVD method: {method}.')
 
     def basis_coefficients_to_fseries(self, coefficients: np.ndarray):
         """
@@ -83,6 +86,31 @@ class SVDBasis:
             Array of frequency series
         """
         return fseries @ self.V
+
+    def from_file(self, filename: str):
+        """
+        Load basis matrix V from a file.
+
+        Parameters
+        ----------
+        filename:
+            File in .npy format
+        """
+        self.V = np.load(filename)
+        self.Vh = self.V.T.conj()
+        self.n = self.V.shape[1]
+
+    def to_file(self, filename: str):
+        """
+        Save basis matrix V to a file.
+
+        Parameters
+        ----------
+        filename:
+            File in .npy format
+        """
+        if self.V is not None:
+            np.save(filename, self.V)
 
 
 class WaveformDataset(Dataset):
@@ -111,6 +139,8 @@ class WaveformDataset(Dataset):
             It needs to contain intrinsic waveform parameters (and reference values)
             for generating waveform polarizations. Later we will also draw
             extrinsic parameters from it.
+            If the prior is unspecified, sampling the prior is not supported,
+            and read_parameter_samples() must be called before generate_dataset().
         waveform_generator : WaveformGenerator
             The waveform generator object to use to generate waveforms.
         transform :
@@ -185,7 +215,7 @@ class WaveformDataset(Dataset):
         self._parameter_samples = pd.DataFrame(parameter_samples_dict)
 
 
-    def read_parameter_samples(self, filename: str):
+    def read_parameter_samples(self, filename: str, sl: slice = None):
         """
         Read intrinsic parameter samples from a file.
         Doing so will avoid drawing fresh samples from the
@@ -197,6 +227,8 @@ class WaveformDataset(Dataset):
             Supported file formats are:
             '.pkl': a pickle of a dictionary of arrays
             '.npy': a structured numpy array
+        sl : slice
+            A slice object for selecting a subset of parameter samples
         """
         _, file_extension = os.path.splitext(filename)
         if file_extension == '.pkl':
@@ -207,7 +239,7 @@ class WaveformDataset(Dataset):
         else:
             raise ValueError(f'Only .pkl or .npy format supported, but got {filename}')
 
-        self._parameter_samples = pd.DataFrame(parameters)
+        self._parameter_samples = pd.DataFrame(parameters)[sl]
 
 
     def generate_dataset(self, size: int = 0):
@@ -291,6 +323,26 @@ class WaveformDataset(Dataset):
         """
         d = {k: np.array(list(v.values())) for k, v in df.to_dict().items()}
         return structured_array_from_dict_of_arrays(d)
+
+    def get_polarizations(self):
+        """
+        Return a dictionary of polarization arrays.
+        """
+        return {k: np.vstack(v.to_numpy().T) for k, v in self._waveform_polarizations.items()}
+
+    def get_compressed_polarizations(self, basis: SVDBasis):
+        """
+        Project h_plus, and h_cross onto the given SVD basis and return
+        a dictionary of coefficients.
+
+        Parameters
+        ----------
+        basis: SVDBasis
+            An initialized SVD basis object
+        """
+        pol_arrays = {k: np.vstack(v.to_numpy().T) for k, v in self._waveform_polarizations.items()}
+        return {k: basis.fseries_to_basis_coefficients(v) for k, v in pol_arrays.items()}
+
 
     def save(self, filename: str = 'waveform_dataset.h5',
              parameter_fmt: str = 'structured_array',
