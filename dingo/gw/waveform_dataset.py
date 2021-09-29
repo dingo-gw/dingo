@@ -42,8 +42,10 @@ class SVDBasis:
         method: str
             Select SVD method, 'random' or 'scipy'
         """
-
         if method == 'random':
+            if n == 0:
+                n = min(training_data.shape)
+
             U, s, Vh = randomized_svd(training_data, n)
 
             self.Vh = Vh.astype(np.complex64)

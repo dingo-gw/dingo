@@ -4,7 +4,8 @@ Generate waveform dataset
 Step 2 / Step 4: generate waveforms for subset of parameter array
 
 Read parameters.npy
-A subset of parameters of the full array can be specified.
+Only a chunk of specified size (a slice) of the full parameter array
+is used to allow for parallel generation and to limit memory consumption.
 Optionally read an SVD basis to compress the data.
 Save polarizations in compressed or uncompressed form to .npy files.
 """
@@ -59,7 +60,7 @@ def generate_waveforms(wd: WaveformDataset, parameters_file: str,
     wd.generate_dataset()
 
 
-def save_polarizations(wd: WaveformDataset, idx_start: int,
+def save_polarizations(wd: WaveformDataset, idx: int,
                        use_compression: bool, basis_file: str = None):
     """
     Save polarizations in .npy files.
@@ -68,29 +69,27 @@ def save_polarizations(wd: WaveformDataset, idx_start: int,
     ----------
     wd:
         Waveform data set instance
-    idx_start:
-        Start index in the full parameter array
+    idx:
+        Index of this chunk in the full parameter array
     use_compression:
         Whether to project the polarizations onto a basis
     basis_file:
         File containing an SVD basis. Only used if use_compression == True
         File names indicate whether the data are full frequency series ('full')
         or SVD projection coefficients ('coeff').
-        The start index in the full parameter array is appended to the file name.
-
+        The chunk index in the full parameter array is appended to the file name.
     """
     # TODO: Would it be better to save to HDF5 and include the parameters used?
     if use_compression:
         basis = SVDBasis()
         basis.from_file(basis_file)
-        basis.fseries_to_basis_coefficients()
         pol_dict = wd.get_compressed_polarizations(basis)
         for k, v in pol_dict.items():
-            np.save(f'{k}_coeff_{idx_start}.npy', v)
+            np.save(f'{k}_coeff_{idx}.npy', v)
     else:
         pol_dict = wd.get_polarizations()
         for k, v in pol_dict.items():
-            np.save(f'{k}_full_{idx_start}.npy', v)
+            np.save(f'{k}_full_{idx}.npy', v)
 
 
 if __name__ == "__main__":
@@ -114,9 +113,15 @@ if __name__ == "__main__":
     os.chdir(args.waveforms_directory)
     wd = setup_waveform_dataset(args.settings_file)
 
-    # FIXME: want to batch this, use multiprocessing
+    # FIXME: want to batch this (as a big chunk of wfs may not fit into memory), use multiprocessing
     idx_start = args.num_wf_per_process * args.process_id
     idx_stop = idx_start + args.num_wf_per_process
+    print(f'Generating {args.num_wf_per_process} waveforms for chunk {args.process_id} of the parameter array.')
+    print(f'Slice [{idx_start}: {idx_stop}]')
+
+    num_samples = len(np.load(args.parameters_file))
+    if (idx_start > num_samples) or (idx_stop > num_samples):
+        raise ValueError(f'Specified chunk lies outside of parameter array of length {num_samples}.')
     generate_waveforms(wd, args.parameters_file, slice(idx_start, idx_stop))
 
-    save_polarizations(wd, idx_start, args.use_compression, args.basis_file)
+    save_polarizations(wd, args.process_id, args.use_compression, args.basis_file)

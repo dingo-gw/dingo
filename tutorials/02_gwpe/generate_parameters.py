@@ -18,10 +18,10 @@ from dingo.gw.waveform_dataset import WaveformDataset
 from dingo.gw.waveform_generator import WaveformGenerator
 
 
-def generate_parameters(settings_file: str, n_samples: int):
+def generate_parameters(settings_file: str, n_samples: int, parameters_file: str):
     """
     Parse settings file, set up priors, and draw samples from the intrinsic prior.
-    Save parameters as .pkl and .npy
+    Save parameters as .pkl and .npy.
 
     Parameters
     ----------
@@ -31,6 +31,10 @@ def generate_parameters(settings_file: str, n_samples: int):
 
     n_samples:
         Number of parameter samples to generate
+
+    parameters_file:
+        The name of the parameter output file.
+        Must end in either '.pkl' or '.npy'.
     """
     # Load settings
     with open(settings_file, 'r') as fp:
@@ -42,31 +46,21 @@ def generate_parameters(settings_file: str, n_samples: int):
                         prior_settings['extrinsic_parameters_reference_values'],
                         add_extrinsic_priors=True)
 
-    # Save parameter file
+    # Draw prior samples
     parameter_samples_dict = prior.sample_intrinsic(size=n_samples, add_reference_values=True)
-    # Pickle of dict of arrays
-    with open('parameters.pkl', 'wb') as fp:
-        pickle.dump(parameter_samples_dict, fp, pickle.HIGHEST_PROTOCOL)
-    # Structured numpy array
-    parameter_samples_arr = structured_array_from_dict_of_arrays(parameter_samples_dict)
-    np.save('parameters.npy', parameter_samples_arr)
 
-
-def test_load_parameters_and_generate_dataset(waveforms_directory: str, settings_file: str):
-    """
-    Function to test that parameters can be correctly loaded and used in a WaveformDataset
-    """
-    # Load settings
-    with open(settings_file, 'r') as fp:
-        settings = yaml.safe_load(fp)
-
-    domain = build_domain(settings['domain_settings'])
-    waveform_generator = WaveformGenerator(settings['waveform_generator_settings']['approximant'], domain)
-    wd = WaveformDataset(priors=None, waveform_generator=waveform_generator, transform=None)
-    wd.read_parameter_samples('parameters.npy')
-    wd.generate_dataset(size=42)
-    print(wd[0]['waveform'])
-
+    # Save parameter file
+    _, file_extension = os.path.splitext(parameters_file)
+    if file_extension == '.pkl':
+        # Pickle of dict of arrays
+        with open(parameters_file, 'wb') as fp:
+            pickle.dump(parameter_samples_dict, fp, pickle.HIGHEST_PROTOCOL)
+    elif file_extension == '.npy':
+        # Structured numpy array
+        parameter_samples_arr = structured_array_from_dict_of_arrays(parameter_samples_dict)
+        np.save(parameters_file, parameter_samples_arr)
+    else:
+        raise ValueError(f'Unsupported parameter file format {file_extension}.')
 
 
 if __name__ == "__main__":
@@ -74,10 +68,11 @@ if __name__ == "__main__":
     parser.add_argument('--waveforms_directory', type=str, required=True,
                         help='Directory containing the settings file which specifies the prior.')
     parser.add_argument('--settings_file', type=str, default='settings.yaml')
+    parser.add_argument('--parameters_file', type=str, default='parameters.npy',
+                        help='Write parameter samples to this file.')
     parser.add_argument('--n_samples', type=int, default=1)
     args = parser.parse_args()
 
     os.chdir(args.waveforms_directory)
-    generate_parameters(args.settings_file, args.n_samples)
-    #test_load_parameters_and_generate_dataset(args.settings_file)
-    print(f'Successfully generated {args.n_samples} parameters and saved to parameters.npy.')
+    generate_parameters(args.settings_file, args.n_samples, args.parameters_file)
+    print(f'Successfully generated {args.n_samples} parameters and saved to {args.parameters_file}.')
