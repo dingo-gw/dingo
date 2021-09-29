@@ -42,7 +42,7 @@ def generate_waveform_dataset(waveforms_directory: str, settings_file: str,
 
     dataset_file:
         Filename for the HDF5 file to which the generated
-        waveform polarizations and parameters are writted.
+        waveform polarizations and parameters are written.
 
     n_wfs:
         Number of waveforms to generate

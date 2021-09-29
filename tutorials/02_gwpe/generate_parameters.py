@@ -6,16 +6,14 @@ Step 1: Generate and save parameter array
 Save as parameters.pkl, parameters.npy.
 """
 
+import argparse
 import os
 import pickle
-import argparse
 
 import numpy as np
 import yaml
 
-from dingo.api import build_prior, build_domain, structured_array_from_dict_of_arrays
-from dingo.gw.waveform_dataset import WaveformDataset
-from dingo.gw.waveform_generator import WaveformGenerator
+from dingo.api import build_prior, structured_array_from_dict_of_arrays
 
 
 def generate_parameters(settings_file: str, n_samples: int, parameters_file: str):

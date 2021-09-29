@@ -7,22 +7,17 @@ Load hp, hc polarizations from .npy files
 Save SVD basis in .npy
 """
 
-import os
-import pickle
 import argparse
 import glob
+import os
 
 import numpy as np
-import yaml
-
 from tqdm import tqdm
 
-from dingo.api import build_domain
-from dingo.gw.waveform_dataset import WaveformDataset, SVDBasis
-from dingo.gw.waveform_generator import WaveformGenerator
+from dingo.gw.waveform_dataset import SVDBasis
 
 
-def load_polarizations_for_index(idx_start: int):
+def load_polarizations_for_index(idx: int, compressed: bool = False):
     """
     Load waveform polarizations for given index and return
     an array of stacked polarizations of shape (2*num_wfs, num_freqs).
@@ -32,16 +27,22 @@ def load_polarizations_for_index(idx_start: int):
 
     Parameters
     ----------
-    idx_start:
-        Select data file which corresponds to a slice
-        (idx_start, idx_start + num_wfs) of the full parameter array
-    """
-    pol_dict = {k: np.load(f'{k}_full_{idx_start}.npy') for k in ['h_plus', 'h_cross']}
+    idx:
+        Chunk index of data file
+     compressed:
+        Whether to look for compressed or full data files
+   """
+    if compressed:
+        infix = 'coeff'
+    else:
+        infix = 'full'
+
+    pol_dict = {k: np.load(f'{k}_{infix}_{idx}.npy') for k in ['h_plus', 'h_cross']}
     pol_stacked = np.vstack(list(pol_dict.values()))
     return pol_stacked
 
 
-def find_chunk_number(parameters_file: str):
+def find_chunk_number(parameters_file: str, compressed: bool = False):
     """
     Return the number of chunks the parameter array was divided into.
 
@@ -49,13 +50,19 @@ def find_chunk_number(parameters_file: str):
     ----------
     parameters_file:
         .npy file containing the full parameter array
+    compressed:
+        Whether to look for compressed or full data files
     """
     parameters = np.load(parameters_file)
     chunk_size = load_polarizations_for_index(0).shape[0] // 2
     num_chunks = len(parameters) // chunk_size
 
     # Sanity check
-    num_files_h_plus = len(glob.glob('h_plus_full_*.npy'))
+    if compressed:
+        file_pattern = 'h_plus_coeff_*.npy'
+    else:
+        file_pattern = 'h_plus_full_*.npy'
+    num_files_h_plus = len(glob.glob(file_pattern))
     if num_files_h_plus != num_chunks:
         raise ValueError(f'Expected {num_chunks} chunks, but found {num_files_h_plus} files "h_plus_full_*.npy"!')
 
@@ -76,7 +83,8 @@ def create_basis(num_chunks: int, outfile: str, rb_max: int = 0):
         Truncate the SVD at this size
     """
     print('Load polarization data for all chunks ...')
-    data = np.vstack([load_polarizations_for_index(idx) for idx in tqdm(np.arange(num_chunks))])
+    data = np.vstack([load_polarizations_for_index(idx, compressed=False)
+                      for idx in tqdm(np.arange(num_chunks))])
 
     print('Creating basis ...', end='')
     basis = SVDBasis()
@@ -89,15 +97,18 @@ def create_basis(num_chunks: int, outfile: str, rb_max: int = 0):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Generate SVD basis from waveform polarizations.')
     parser.add_argument('--waveforms_directory', type=str, required=True,
-                        help='Directory containing the settings file which specifies the prior.')
-    parser.add_argument('--parameters_file', type=str, required=True)  # only for sanity check
+                        help='Directory containing waveform data and parameter file.'
+                             'Write generated basis to this directory')
+    parser.add_argument('--parameters_file', type=str, required=True,
+                        help='Parameter file for waveforms to build basis from.'
+                             'This is only used for a sanity check.')
     parser.add_argument('--basis_file', type=str, default='polarization_basis.npy')
     parser.add_argument('--rb_max', type=int, default=0,
                         help='Truncate the SVD basis at this size. No truncation if zero.')
     args = parser.parse_args()
 
     os.chdir(args.waveforms_directory)
-    num_chunks, chunk_size = find_chunk_number(args.parameters_file)
+    num_chunks, chunk_size = find_chunk_number(args.parameters_file, compressed=False)
     n, V_shape = create_basis(num_chunks, args.basis_file, args.rb_max)
     print(f'Created SVD basis of size {n} from {num_chunks} chunks of size {chunk_size}.')
     print(f'V matrix of shape {V_shape} saved to {args.basis_file}.')

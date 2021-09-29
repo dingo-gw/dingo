@@ -10,9 +10,8 @@ Optionally read an SVD basis to compress the data.
 Save polarizations in compressed or uncompressed form to .npy files.
 """
 
-import os
-import pickle
 import argparse
+import os
 
 import numpy as np
 import yaml
@@ -100,7 +99,8 @@ if __name__ == "__main__":
     #  pass indices of current batches
     parser = argparse.ArgumentParser(description='Generate waveform polarizations.')
     parser.add_argument('--waveforms_directory', type=str, required=True,
-                        help='Directory containing the settings file which specifies the prior.')
+                        help='Directory containing the settings file which specifies the prior.'
+                             'Write generated waveforms to this directory')
     parser.add_argument('--settings_file', type=str, default='settings.yaml')
     parser.add_argument('--parameters_file', type=str, default='parameters.npy')
     parser.add_argument('--num_wf_per_process', type=int, default=1)
