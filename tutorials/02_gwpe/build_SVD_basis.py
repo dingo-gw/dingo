@@ -15,6 +15,7 @@ import numpy as np
 from tqdm import tqdm
 
 from dingo.gw.waveform_dataset import SVDBasis
+from dingo.api import setup_logger, logger
 
 
 def load_polarizations_for_index(idx: int, compressed: bool = False):
@@ -29,7 +30,7 @@ def load_polarizations_for_index(idx: int, compressed: bool = False):
     ----------
     idx:
         Chunk index of data file
-     compressed:
+    compressed:
         Whether to look for compressed or full data files
    """
     if compressed:
@@ -82,15 +83,15 @@ def create_basis(num_chunks: int, outfile: str, rb_max: int = 0):
     rb_max:
         Truncate the SVD at this size
     """
-    print('Load polarization data for all chunks ...')
+    logger.info('Load polarization data for all chunks ...')
     data = np.vstack([load_polarizations_for_index(idx, compressed=False)
                       for idx in tqdm(np.arange(num_chunks))])
 
-    print('Creating basis ...', end='')
+    logger.info('Creating basis ...', end='')
     basis = SVDBasis()
     basis.generate_basis(data, rb_max)
     basis.to_file(outfile)
-    print(' Done.')
+    logger.info(' Done.')
     return basis.n, basis.V.shape
 
 
@@ -108,7 +109,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     os.chdir(args.waveforms_directory)
+    setup_logger(outdir='.', label='collect_waveform_dataset', log_level="INFO")
+    logger.info('Executing build_SVD_basis:')
+
     num_chunks, chunk_size = find_chunk_number(args.parameters_file, compressed=False)
     n, V_shape = create_basis(num_chunks, args.basis_file, args.rb_max)
-    print(f'Created SVD basis of size {n} from {num_chunks} chunks of size {chunk_size}.')
-    print(f'V matrix of shape {V_shape} saved to {args.basis_file}.')
+    logger.info(f'Created SVD basis of size {n} from {num_chunks} chunks of size {chunk_size}.')
+    logger.info(f'V matrix of shape {V_shape} saved to {args.basis_file}.')

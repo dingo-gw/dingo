@@ -32,7 +32,7 @@ import argparse
 from pycondor import Job, Dagman
 
 
-if __name__ == "__main__":
+def parse_args():
     parser = argparse.ArgumentParser(description="""
         Collect compressed waveform polarizations and parameters.
         Save consolidated waveform dataset in HDF5 format.
@@ -64,14 +64,17 @@ if __name__ == "__main__":
     parser.add_argument('--log', type=str, default='condor/log')
     parser.add_argument('--submit', type=str, default='condor/submit')
 
-    args = parser.parse_args()
+    return parser.parse_args()
 
+
+def create_dag(args):
     kwargs = {'request_cpus': args.request_cpus, 'request_memory': args.request_memory,
               'submit': args.submit, 'error': args.error, 'output': args.output, 'log': args.log}
 
     chunk_size_basis = args.num_wfs_basis // args.num_wf_per_process
     chunk_size_dataset = args.num_wfs_dataset // args.num_wf_per_process
 
+    # DAG ---------------------------------------------------------------------
     dagman = Dagman(name='example_dagman', submit=args.submit)
 
     # 1(a) generate_parameters_basis ------------------------------------------
@@ -150,6 +153,11 @@ if __name__ == "__main__":
                                    arguments=collect_waveform_dataset_args)
     collect_waveform_dataset.add_parent(generate_waveforms_dataset)
 
+    return dagman
+
+if __name__ == "__main__":
+    args = parse_args()
+    dagman = create_dag(args)
 
     try:
         dagman.visualize('waveform_dataset_generation_workflow.png')

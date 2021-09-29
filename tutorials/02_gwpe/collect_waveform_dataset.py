@@ -13,6 +13,7 @@ import h5py
 import numpy as np
 from tqdm import tqdm
 
+from dingo.api import setup_logger, logger
 from build_SVD_basis import find_chunk_number
 
 
@@ -32,33 +33,33 @@ def consolidate_dataset(num_chunks: int, basis_file: str,
     dataset_file:
         Output HDF5 file for the dataset
     """
-    print('Load polarization data for all chunks ...')
+    logger.info('Load polarization data for all chunks ...')
     pol_keys = ['h_plus', 'h_cross']
     pol_data = {k: np.vstack([np.load(f'{k}_coeff_{idx}.npy')
                              for idx in tqdm(np.arange(num_chunks))])
                 for k in pol_keys}
 
-    print('Saving dataset to HDF5 ...')
+    logger.info('Saving dataset to HDF5 ...')
     fp = h5py.File(dataset_file, 'w')
     # Polarization projection coefficients
     grp = fp.create_group('waveform_polarizations')
-    print('waveform_polarizations  Group:')
+    logger.info('waveform_polarizations  Group:')
     for k, v in pol_data.items():
         grp.create_dataset(str(k), data=v)
-        print(f'\t{k}: {v.shape}')
+        logger.info(f'\t{k}: {v.shape}')
 
     # Parameter samples
     parameters = np.load(parameters_file)
-    print(f'parameters              Dataset ({len(parameters)}, {len(parameters.dtype)})')
+    logger.info(f'parameters              Dataset ({len(parameters)}, {len(parameters.dtype)})')
     fp.create_dataset('parameters', data=parameters)
 
     # SVD polarization basis
     basis_V_matrix = np.load(basis_file)
-    print(f'rb_matrix_V             Dataset {basis_V_matrix.shape}')
+    logger.info(f'rb_matrix_V             Dataset {basis_V_matrix.shape}')
     fp.create_dataset('rb_matrix_V', data=basis_V_matrix)
 
     fp.close()
-    print('Done')
+    logger.info('Done')
 
 
 if __name__ == "__main__":
@@ -75,6 +76,11 @@ if __name__ == "__main__":
     parser.add_argument('--dataset_file', type=str, default='waveform_dataset.hdf5')
     args = parser.parse_args()
 
+
     os.chdir(args.waveforms_directory)
-    num_chunks, chunk_size = find_chunk_number(args.parameters_file, compressed=True)
+    setup_logger(outdir='.', label='collect_waveform_dataset', log_level="INFO")
+    logger.info('Executing collect_waveform_dataset:')
+
+    #num_chunks, chunk_size = find_chunk_number(args.parameters_file, compressed=True)
+    num_chunks = 3
     consolidate_dataset(num_chunks, args.basis_file, args.parameters_file, args.dataset_file)

@@ -14,6 +14,7 @@ import numpy as np
 import yaml
 
 from dingo.api import build_prior, structured_array_from_dict_of_arrays
+from dingo.api import setup_logger, logger
 
 
 def generate_parameters(settings_file: str, n_samples: int, parameters_file: str):
@@ -50,11 +51,11 @@ def generate_parameters(settings_file: str, n_samples: int, parameters_file: str
     # Save parameter file
     _, file_extension = os.path.splitext(parameters_file)
     if file_extension == '.pkl':
-        # Pickle of dict of arrays
+        logger.info('Saving parameters as pickle of dict of arrays.')
         with open(parameters_file, 'wb') as fp:
             pickle.dump(parameter_samples_dict, fp, pickle.HIGHEST_PROTOCOL)
     elif file_extension == '.npy':
-        # Structured numpy array
+        logger.info('Saving parameters as structured numpy array.')
         parameter_samples_arr = structured_array_from_dict_of_arrays(parameter_samples_dict)
         np.save(parameters_file, parameter_samples_arr)
     else:
@@ -72,5 +73,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     os.chdir(args.waveforms_directory)
+    setup_logger(outdir='.', label='collect_waveform_dataset', log_level="INFO")
+    logger.info('Executing generate_parameters:')
+
     generate_parameters(args.settings_file, args.n_samples, args.parameters_file)
-    print(f'Successfully generated {args.n_samples} parameters and saved to {args.parameters_file}.')
+    logger.info(f'Successfully generated {args.n_samples} parameters and saved to {args.parameters_file}.')
