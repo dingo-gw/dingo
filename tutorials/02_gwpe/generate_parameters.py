@@ -2,6 +2,8 @@
 Generate waveform dataset
 
 Step 1: Generate and save parameter array
+
+Save as parameters.pkl, parameters.npy.
 """
 
 import os
@@ -16,17 +18,13 @@ from dingo.gw.waveform_dataset import WaveformDataset
 from dingo.gw.waveform_generator import WaveformGenerator
 
 
-def generate_parameters(waveforms_directory: str, settings_file: str, n_samples: int):
+def generate_parameters(settings_file: str, n_samples: int):
     """
     Parse settings file, set up priors, and draw samples from the intrinsic prior.
     Save parameters as .pkl and .npy
 
     Parameters
     ----------
-    waveforms_directory: str
-        Directory containing settings file.
-        The generated parameters will be saved there as well.
-
     settings_file:
         yaml file which contains options for the parameter prior.
         (Waveform domain and model settings are ignored.)
@@ -34,8 +32,6 @@ def generate_parameters(waveforms_directory: str, settings_file: str, n_samples:
     n_samples:
         Number of parameter samples to generate
     """
-    os.chdir(waveforms_directory)
-
     # Load settings
     with open(settings_file, 'r') as fp:
         settings = yaml.safe_load(fp)
@@ -60,8 +56,6 @@ def test_load_parameters_and_generate_dataset(waveforms_directory: str, settings
     """
     Function to test that parameters can be correctly loaded and used in a WaveformDataset
     """
-    #os.chdir(waveforms_directory)
-
     # Load settings
     with open(settings_file, 'r') as fp:
         settings = yaml.safe_load(fp)
@@ -83,5 +77,7 @@ if __name__ == "__main__":
     parser.add_argument('--n_samples', type=int, default=1)
     args = parser.parse_args()
 
-    generate_parameters(args.waveforms_directory, args.settings_file, args.n_samples)
-    #test_load_parameters_and_generate_dataset(args.waveforms_directory, args.settings_file)
+    os.chdir(args.waveforms_directory)
+    generate_parameters(args.settings_file, args.n_samples)
+    #test_load_parameters_and_generate_dataset(args.settings_file)
+    print(f'Successfully generated {args.n_samples} parameters and saved to parameters.npy.')
