@@ -25,7 +25,8 @@ setup(name='dingo',
           'h5py',
           'bilby',
           'astropy',
-          'lalsuite'
+          'lalsuite',
+          'pycondor'
       ],
       extras_require={
           "dev": [
