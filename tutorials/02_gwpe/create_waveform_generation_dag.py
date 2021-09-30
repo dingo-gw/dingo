@@ -154,7 +154,7 @@ def create_dag(args):
     '''
     collect_waveform_dataset = Job(name='collect_waveform_dataset',
                                    executable='collect_waveform_dataset.py', dag=dagman,
-                                   arguments=collect_waveform_dataset_args)
+                                   arguments=collect_waveform_dataset_args, **kwargs)
     collect_waveform_dataset.add_parent(generate_waveforms_dataset)
 
     return dagman
