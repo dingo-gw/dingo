@@ -59,6 +59,7 @@ def parse_args():
                         help='Truncate the SVD basis at this size. No truncation if zero.')
     parser.add_argument('--num_threads', type=int, default=1,
                         help='Number of threads to use in pool for parallel waveform generation')
+    parser.add_argument('--python_binary', type=str, default='python3')
 
     # condor arguments
     parser.add_argument('--request_cpus', type=int, default=None)
@@ -88,7 +89,7 @@ def create_dag(args):
     --parameters_file {args.parameters_file_basis}\
     --n_samples {chunk_size_basis}'
     generate_parameters_basis = Job(name='generate_parameters_basis',
-                                    executable='generate_parameters.py', dag=dagman,
+                                    executable=f'{args.python_binary} generate_parameters.py', dag=dagman,
                                     arguments=generate_parameters_basis_args, **kwargs)
 
     # 1(b) generate_parameters_dataset ----------------------------------------
@@ -98,7 +99,7 @@ def create_dag(args):
     --parameters_file {args.parameters_file_dataset}\
     --n_samples {chunk_size_dataset}'
     generate_parameters_dataset = Job(name='generate_parameters_dataset',
-                                      executable='generate_parameters.py', dag=dagman,
+                                      executable=f'{args.python_binary} generate_parameters.py', dag=dagman,
                                       arguments=generate_parameters_dataset_args, **kwargs)
 
     # 2. generate_waveforms_basis ---------------------------------------------
@@ -110,8 +111,8 @@ def create_dag(args):
     --num_threads {args.num_threads}\
     --process_id $(Process)'
     generate_waveforms_basis = Job(name=f'generate_waveforms_basis', queue=chunk_size_basis,
-                                   executable='generate_waveforms.py', dag=dagman,
-                                   arguments=generate_waveforms_basis_args, **kwargs)
+                                   executable=f'{args.python_binary} generate_waveforms.py',
+                                   dag=dagman, arguments=generate_waveforms_basis_args, **kwargs)
     generate_waveforms_basis.add_parent(generate_parameters_basis)
 
     # 3. build_SVD_basis ------------------------------------------------------
@@ -120,7 +121,8 @@ def create_dag(args):
     --parameters_file {args.parameters_file_basis}\
     --basis_file {args.basis_file}\
     --rb_max {args.rb_max}'
-    build_SVD_basis = Job(name='build_SVD_basis', executable='build_SVD_basis.py',
+    build_SVD_basis = Job(name='build_SVD_basis',
+                          executable=f'{args.python_binary} build_SVD_basis.py',
                           dag=dagman, arguments=build_SVD_basis_args, **kwargs)
     build_SVD_basis.add_parent(generate_waveforms_basis)
 
@@ -135,8 +137,8 @@ def create_dag(args):
     --use_compression\
     --basis_file {args.basis_file}'
     generate_waveforms_dataset = Job(name=f'generate_waveforms_dataset', queue=chunk_size_dataset,
-                                     executable='generate_waveforms.py', dag=dagman,
-                                     arguments=generate_waveforms_dataset_args, **kwargs)
+                                     executable=f'{args.python_binary} generate_waveforms.py',
+                                     dag=dagman, arguments=generate_waveforms_dataset_args, **kwargs)
     generate_waveforms_dataset.add_parent(build_SVD_basis)
     generate_waveforms_dataset.add_parent(generate_parameters_dataset)
 
@@ -149,8 +151,8 @@ def create_dag(args):
     --settings_file {args.settings_file}\
     --dataset_file {args.dataset_file}'
     collect_waveform_dataset = Job(name='collect_waveform_dataset',
-                                   executable='collect_waveform_dataset.py', dag=dagman,
-                                   arguments=collect_waveform_dataset_args, **kwargs)
+                                   executable=f'{args.python_binary} collect_waveform_dataset.py',
+                                   dag=dagman, arguments=collect_waveform_dataset_args, **kwargs)
     collect_waveform_dataset.add_parent(generate_waveforms_dataset)
 
     return dagman
