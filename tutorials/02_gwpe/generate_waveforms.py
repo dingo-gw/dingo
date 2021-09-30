@@ -15,6 +15,7 @@ import os
 
 import numpy as np
 import yaml
+from multiprocessing import Pool, freeze_support
 
 from dingo.api import build_domain
 from dingo.gw.waveform_dataset import WaveformDataset, SVDBasis
@@ -43,7 +44,7 @@ def setup_waveform_dataset(settings_file: str) -> WaveformDataset:
 
 
 def generate_waveforms(wd: WaveformDataset, parameters_file: str,
-                       sl: slice = None):
+                       sl: slice = None, pool: Pool = None):
     """
     Generate (a subset of) waveform polarizations from a parameter file.
 
@@ -57,7 +58,7 @@ def generate_waveforms(wd: WaveformDataset, parameters_file: str,
         Optionally select a slice of parameters from the full set to generate.
     """
     wd.read_parameter_samples(parameters_file, sl)
-    wd.generate_dataset()
+    wd.generate_dataset(pool=pool)
 
 
 def save_polarizations(wd: WaveformDataset, idx: int,
@@ -108,6 +109,8 @@ if __name__ == "__main__":
     parser.add_argument('--use_compression', default=False, action='store_true',
                         help='Save polarizations projected basis specified by --basis_file.')
     parser.add_argument('--basis_file', type=str, default='polarization_basis.npy')
+    parser.add_argument('--num_threads', type=int, default=1,
+                        help='Number of threads to use in pool for parallel waveform generation')
     args = parser.parse_args()
 
     os.chdir(args.waveforms_directory)
@@ -116,8 +119,6 @@ if __name__ == "__main__":
 
     wd = setup_waveform_dataset(args.settings_file)
 
-    # FIXME: may want to batch this (as a big chunk of wfs may not fit into memory),
-    #  use multiprocessing
     idx_start = args.num_wf_per_process * args.process_id
     idx_stop = idx_start + args.num_wf_per_process
     logger.info(f'Generating {args.num_wf_per_process} waveforms for chunk {args.process_id} of the parameter array.')
@@ -126,6 +127,15 @@ if __name__ == "__main__":
     num_samples = len(np.load(args.parameters_file))
     if (idx_start > num_samples) or (idx_stop > num_samples):
         raise ValueError(f'Specified chunk lies outside of parameter array of length {num_samples}.')
-    generate_waveforms(wd, args.parameters_file, slice(idx_start, idx_stop))
+
+    if args.num_threads > 1:
+        # Parallel execution
+        freeze_support()
+        print(f'Running in parallel on {args.num_threads} threads.')
+        with Pool(processes=args.num_threads) as pool:
+            generate_waveforms(wd, args.parameters_file, slice(idx_start, idx_stop), pool=pool)
+    else:
+        # Serial execution
+        generate_waveforms(wd, args.parameters_file, slice(idx_start, idx_stop), pool=None)
 
     save_polarizations(wd, args.process_id, args.use_compression, args.basis_file)

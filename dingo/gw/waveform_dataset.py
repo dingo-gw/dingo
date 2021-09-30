@@ -1,6 +1,7 @@
 import os
 import pickle
-from typing import Dict, Union
+from typing import Dict, Union, Tuple
+from multiprocessing import Pool
 
 import h5py
 import numpy as np
@@ -243,21 +244,40 @@ class WaveformDataset(Dataset):
 
         self._parameter_samples = pd.DataFrame(parameters)[sl]
 
+    def _generate_polarizations_task_fun(self, args: Tuple):
+        """
+        Picklable wrapper function for parallel waveform generation.
 
-    def generate_dataset(self, size: int = 0):
+        Parameters
+        ----------
+        args:
+            a tuple (index, pandas.core.series.Series)
+        """
+        p = args[1].to_dict()  # Extract parameter dict
+        return self._waveform_generator.generate_hplus_hcross(p)
+
+    def generate_dataset(self, size: int = 0, pool: Pool = None):
         """Generate a waveform dataset.
 
         Parameters
         ----------
         size : int
             The number of samples to draw and waveforms to generate.
+            This is only used if parameter samples have not been drawm
+            or loaded previously.
+        pool :
+            optional pool of workers for parallel generation
         """
         if self._parameter_samples is None:
             self.sample_intrinsic(size)
 
         print('Generating waveform polarizations ...')  # Switch to logging
-        wf_list_of_dicts = [self._waveform_generator.generate_hplus_hcross(p.to_dict())
-                            for _, p in tqdm(self._parameter_samples.iterrows())]
+        if pool is not None:
+            task_data = self._parameter_samples.iterrows()
+            wf_list_of_dicts = pool.map(self._generate_polarizations_task_fun, task_data)
+        else:
+            wf_list_of_dicts = [self._waveform_generator.generate_hplus_hcross(p.to_dict())
+                                for _, p in tqdm(self._parameter_samples.iterrows())]
         polarization_dict = {k: [wf[k] for wf in wf_list_of_dicts] for k in ['h_plus', 'h_cross']}
         self._waveform_polarizations = pd.DataFrame(polarization_dict)
 
