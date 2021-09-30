@@ -31,6 +31,7 @@ Example command line:
 
 
 import argparse
+import os
 from pycondor import Job, Dagman
 
 
@@ -88,8 +89,10 @@ def create_dag(args):
     --settings_file {args.settings_file}\
     --parameters_file {args.parameters_file_basis}\
     --n_samples {chunk_size_basis}'
+    script_path = os.path.abspath('generate_parameters.py')
+    executable = f'{args.python_binary} {script_path}'
     generate_parameters_basis = Job(name='generate_parameters_basis',
-                                    executable=f'{args.python_binary} generate_parameters.py', dag=dagman,
+                                    executable=executable, dag=dagman,
                                     arguments=generate_parameters_basis_args, **kwargs)
 
     # 1(b) generate_parameters_dataset ----------------------------------------
@@ -98,8 +101,10 @@ def create_dag(args):
     --settings_file {args.settings_file}\
     --parameters_file {args.parameters_file_dataset}\
     --n_samples {chunk_size_dataset}'
+    script_path = os.path.abspath('generate_parameters.py')
+    executable = f'{args.python_binary} {script_path}'
     generate_parameters_dataset = Job(name='generate_parameters_dataset',
-                                      executable=f'{args.python_binary} generate_parameters.py', dag=dagman,
+                                      executable=executable, dag=dagman,
                                       arguments=generate_parameters_dataset_args, **kwargs)
 
     # 2. generate_waveforms_basis ---------------------------------------------
@@ -110,9 +115,11 @@ def create_dag(args):
     --num_wf_per_process {args.num_wf_per_process}\
     --num_threads {args.num_threads}\
     --process_id $(Process)'
+    script_path = os.path.abspath('generate_waveforms.py')
+    executable = f'{args.python_binary} {script_path}'
     generate_waveforms_basis = Job(name=f'generate_waveforms_basis', queue=chunk_size_basis,
-                                   executable=f'{args.python_binary} generate_waveforms.py',
-                                   dag=dagman, arguments=generate_waveforms_basis_args, **kwargs)
+                                   executable=executable, dag=dagman,
+                                   arguments=generate_waveforms_basis_args, **kwargs)
     generate_waveforms_basis.add_parent(generate_parameters_basis)
 
     # 3. build_SVD_basis ------------------------------------------------------
@@ -121,8 +128,10 @@ def create_dag(args):
     --parameters_file {args.parameters_file_basis}\
     --basis_file {args.basis_file}\
     --rb_max {args.rb_max}'
+    script_path = os.path.abspath('build_SVD_basis.py')
+    executable = f'{args.python_binary} {script_path}'
     build_SVD_basis = Job(name='build_SVD_basis',
-                          executable=f'{args.python_binary} build_SVD_basis.py',
+                          executable=executable,
                           dag=dagman, arguments=build_SVD_basis_args, **kwargs)
     build_SVD_basis.add_parent(generate_waveforms_basis)
 
@@ -136,9 +145,11 @@ def create_dag(args):
     --process_id $(Process)\
     --use_compression\
     --basis_file {args.basis_file}'
+    script_path = os.path.abspath('generate_waveforms.py')
+    executable = f'{args.python_binary} {script_path}'
     generate_waveforms_dataset = Job(name=f'generate_waveforms_dataset', queue=chunk_size_dataset,
-                                     executable=f'{args.python_binary} generate_waveforms.py',
-                                     dag=dagman, arguments=generate_waveforms_dataset_args, **kwargs)
+                                     executable=executable, dag=dagman,
+                                     arguments=generate_waveforms_dataset_args, **kwargs)
     generate_waveforms_dataset.add_parent(build_SVD_basis)
     generate_waveforms_dataset.add_parent(generate_parameters_dataset)
 
@@ -150,9 +161,11 @@ def create_dag(args):
     --basis_file {args.basis_file}\
     --settings_file {args.settings_file}\
     --dataset_file {args.dataset_file}'
+    script_path = os.path.abspath('collect_waveform_dataset.py')
+    executable = f'{args.python_binary} {script_path}'
     collect_waveform_dataset = Job(name='collect_waveform_dataset',
-                                   executable=f'{args.python_binary} collect_waveform_dataset.py',
-                                   dag=dagman, arguments=collect_waveform_dataset_args, **kwargs)
+                                   executable=executable, dag=dagman,
+                                   arguments=collect_waveform_dataset_args, **kwargs)
     collect_waveform_dataset.add_parent(generate_waveforms_dataset)
 
     return dagman
