@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/home/mpuer/projects/dingo-devel/dingo-devenv/bin/python3
 
 """
 Setup DAG and jobs for the 5 steps in waveform dataset generation using pycondor
@@ -75,7 +75,8 @@ def parse_args():
 
 def create_dag(args):
     kwargs = {'request_cpus': args.request_cpus, 'request_memory': args.request_memory,
-              'submit': args.submit, 'error': args.error, 'output': args.output, 'log': args.log}
+              'submit': args.submit, 'error': args.error, 'output': args.output,
+              'log': args.log, 'getenv': True}
 
     chunk_size_basis = args.num_wfs_basis // args.num_wf_per_process
     chunk_size_dataset = args.num_wfs_dataset // args.num_wf_per_process
