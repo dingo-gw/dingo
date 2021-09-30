@@ -55,6 +55,8 @@ def parse_args():
                         help='Number of waveforms to generate per process.')
     parser.add_argument('--rb_max', type=int, default=0,
                         help='Truncate the SVD basis at this size. No truncation if zero.')
+    parser.add_argument('--num_threads', type=int, default=1,
+                        help='Number of threads to use in pool for parallel waveform generation')
 
     # condor arguments
     parser.add_argument('--request_cpus', type=int, default=None)
@@ -105,6 +107,7 @@ def create_dag(args):
     --settings_file {args.settings_file}
     --parameters_file {args.parameters_file_basis}
     --num_wf_per_process {args.num_wf_per_process}
+    --num_threads {args.num_threads}
     --process_id $(Process)
     '''
     generate_waveforms_basis = Job(name=f'generate_waveforms_basis', queue=chunk_size_basis,
@@ -129,6 +132,7 @@ def create_dag(args):
     --settings_file {args.settings_file}
     --parameters_file {args.parameters_file_dataset}
     --num_wf_per_process {args.num_wf_per_process}
+    --num_threads {args.num_threads}
     --process_id $(Process)
     --use_compression
     --basis_file {args.basis_file}
