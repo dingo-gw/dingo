@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 """
 Setup DAG and jobs for the 5 steps in waveform dataset generation using pycondor
 
