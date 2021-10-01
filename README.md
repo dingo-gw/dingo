@@ -15,6 +15,7 @@ $ source dingo-devenv/bin/activate
 In this virtual environment, install dingo.
 
 ```bash
-$ python setup.py bdist_wheel
+$ pip install wheel
+$ python3 setup.py bdist_wheel
 $ pip install -e ."[dev]"
 ```
