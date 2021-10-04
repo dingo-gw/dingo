@@ -75,7 +75,7 @@ def generate_parameter_command(n_samples: int, parameters_file: str, args: argpa
     --waveforms_directory {args.waveforms_directory} \\
     --settings_file {args.settings_file} \\
     --parameters_file {parameters_file} \\
-    --n_samples {n_samples} 2>&1 {out_file}\n'''
+    --n_samples {n_samples} > {out_file} 2>&1\n'''
 
 def generate_waveforms_command(parameters_file: str, args: argparse.Namespace,
                                use_compression=False, basis_file=None):
@@ -92,7 +92,7 @@ def generate_waveforms_command(parameters_file: str, args: argparse.Namespace,
         cmd += f''' \\
     --use_compression \\
     --basis_file {args.basis_file}'''
-    cmd += f' 2>&1 {out_file}\n'
+    cmd += f' > {out_file} 2>&1\n'
     return cmd
 
 def generate_basis_command(parameters_file: str, args: argparse.Namespace):
@@ -103,7 +103,7 @@ def generate_basis_command(parameters_file: str, args: argparse.Namespace):
     --waveforms_directory {args.waveforms_directory} \\
     --parameters_file {parameters_file} \\
     --basis_file {args.basis_file} \\
-    --rb_max {args.rb_max} 2>&1 {out_file}\n'''
+    --rb_max {args.rb_max} > {out_file} 2>&1\n'''
 
 def collect_waveform_dataset(args: argparse.Namespace):
     script = 'collect_waveform_dataset.py'
@@ -114,7 +114,7 @@ def collect_waveform_dataset(args: argparse.Namespace):
     --parameters_file {args.parameters_file_dataset} \\
     --basis_file {args.basis_file} \\
     --settings_file {args.settings_file} \\
-    --dataset_file {args.dataset_file} 2>&1 {out_file}\n'''
+    --dataset_file {args.dataset_file} > {out_file} 2>&1\n'''
 
 
 if __name__ == "__main__":
