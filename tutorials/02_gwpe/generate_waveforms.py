@@ -1,5 +1,3 @@
-#!/home/mpuer/projects/dingo-devel/dingo-devenv/bin/python3
-
 """
 Generate waveform dataset
 
@@ -95,11 +93,6 @@ def save_polarizations(wd: WaveformDataset, idx: int,
 
 
 if __name__ == "__main__":
-    # When calling this make sure to limit the number of waveforms per job
-    # TODO: Should use multi-processing?
-    #  Should check memory usage and save a logfile
-    #  should generate batches of waveforms so that batch size fits into memory, loop over batches
-    #  pass indices of current batches
     parser = argparse.ArgumentParser(description='Generate waveform polarizations.')
     parser.add_argument('--waveforms_directory', type=str, required=True,
                         help='Directory containing the settings file which specifies the prior.'

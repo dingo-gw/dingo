@@ -1,5 +1,3 @@
-#!/home/mpuer/projects/dingo-devel/dingo-devenv/bin/python3
-
 """
 Generate waveform dataset
 
@@ -57,7 +55,7 @@ def find_chunk_number(parameters_file: str, compressed: bool = False):
         Whether to look for compressed or full data files
     """
     parameters = np.load(parameters_file)
-    chunk_size = load_polarizations_for_index(0).shape[0] // 2
+    chunk_size = load_polarizations_for_index(0, compressed).shape[0] // 2  # number of datafiles for one polarization
     num_chunks = len(parameters) // chunk_size
 
     # Sanity check
@@ -89,11 +87,11 @@ def create_basis(num_chunks: int, outfile: str, rb_max: int = 0):
     data = np.vstack([load_polarizations_for_index(idx, compressed=False)
                       for idx in tqdm(np.arange(num_chunks))])
 
-    logger.info('Creating basis ...', end='')
+    logger.info('Creating basis ...')
     basis = SVDBasis()
     basis.generate_basis(data, rb_max)
     basis.to_file(outfile)
-    logger.info(' Done.')
+    logger.info('Done.')
     return basis.n, basis.V.shape
 
 

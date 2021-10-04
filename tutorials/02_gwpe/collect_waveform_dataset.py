@@ -1,5 +1,3 @@
-#!/home/mpuer/projects/dingo-devel/dingo-devenv/bin/python3
-
 """
 Generate waveform dataset
 
@@ -83,6 +81,5 @@ if __name__ == "__main__":
     setup_logger(outdir='.', label='collect_waveform_dataset', log_level="INFO")
     logger.info('Executing collect_waveform_dataset:')
 
-    #num_chunks, chunk_size = find_chunk_number(args.parameters_file, compressed=True)
-    num_chunks = 3
+    num_chunks, chunk_size = find_chunk_number(args.parameters_file, compressed=True)
     consolidate_dataset(num_chunks, args.basis_file, args.parameters_file, args.dataset_file)
