@@ -116,7 +116,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     os.chdir(args.waveforms_directory)
-    setup_logger(outdir='.', label='collect_waveform_dataset', log_level="INFO")
+    setup_logger(outdir='.', label='generate_waveform', log_level="INFO")
     logger.info('Executing generate_waveforms:')
 
     wd = setup_waveform_dataset(args.settings_file)

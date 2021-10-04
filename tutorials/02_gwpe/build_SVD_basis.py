@@ -111,7 +111,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     os.chdir(args.waveforms_directory)
-    setup_logger(outdir='.', label='collect_waveform_dataset', log_level="INFO")
+    setup_logger(outdir='.', label='build_SVD_basis', log_level="INFO")
     logger.info('Executing build_SVD_basis:')
 
     num_chunks, chunk_size = find_chunk_number(args.parameters_file, compressed=False)
