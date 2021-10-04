@@ -26,6 +26,7 @@ setup(name='dingo',
           'bilby',
           'astropy',
           'lalsuite',
+          'sklearn',
           'pycondor'
       ],
       extras_require={
