@@ -66,26 +66,24 @@ def parse_args():
     return parser.parse_args()
 
 
-def generate_parameter_command(script_dir: str, n_samples: int,
-                               parameters_file: str, args: argparse.Namespace):
-    script_path = os.path.join(script_dir, 'generate_parameters.py')
-    id_str = 'generate_parameters_' + os.path.basename(parameters_file).split('.')[0]
+def generate_parameter_command(n_samples: int, parameters_file: str, args: argparse.Namespace):
+    script = 'generate_parameters.py'
+    id_str = script.split('.')[0] + '_' + os.path.basename(parameters_file).split('.')[0]
     out_file = os.path.join(args.logdir, id_str+'.log')
 
-    return f'''{script_path} \\
+    return f'''$SCRIPT_DIR/{script} \\
     --waveforms_directory {args.waveforms_directory} \\
     --settings_file {args.settings_file} \\
     --parameters_file {parameters_file} \\
     --n_samples {n_samples} 2>&1 {out_file}\n'''
 
-def generate_waveforms_command(script_dir: str, parameters_file: str,
-                               args: argparse.Namespace,
+def generate_waveforms_command(parameters_file: str, args: argparse.Namespace,
                                use_compression=False, basis_file=None):
-    script_path = os.path.join(script_dir, 'generate_waveforms.py')
-    id_str = 'generate_parameters_' + os.path.basename(parameters_file).split('.')[0]
+    script = 'generate_waveforms.py'
+    id_str = script.split('.')[0] + '_' + os.path.basename(parameters_file).split('.')[0]
     out_file = os.path.join(args.logdir, id_str+'.log')
 
-    cmd = f'''{script_path} \\
+    cmd = f'''$SCRIPT_DIR/{script} \\
     --waveforms_directory {args.waveforms_directory} \\
     --settings_file {args.settings_file} \\
     --parameters_file {parameters_file} \\
@@ -97,23 +95,21 @@ def generate_waveforms_command(script_dir: str, parameters_file: str,
     cmd += f' 2>&1 {out_file}\n'
     return cmd
 
-def generate_basis_command(script_dir: str, parameters_file: str,
-                           args: argparse.Namespace):
-    script_path = os.path.join(script_dir, 'build_SVD_basis.py')
-    out_file = os.path.join(args.logdir, 'build_SVD_basis.log')
+def generate_basis_command(parameters_file: str, args: argparse.Namespace):
+    script = 'build_SVD_basis.py'
+    out_file = os.path.join(args.logdir, script.split('.')[0]+'.log')
 
-
-    return f'''{script_path} \\
+    return f'''$SCRIPT_DIR/{script} \\
     --waveforms_directory {args.waveforms_directory} \\
     --parameters_file {parameters_file} \\
     --basis_file {args.basis_file} \\
     --rb_max {args.rb_max} 2>&1 {out_file}\n'''
 
-def collect_waveform_dataset(script_dir: str, args: argparse.Namespace):
-    script_path = os.path.join(script_dir, 'collect_waveform_dataset.py')
-    out_file = os.path.join(args.logdir, 'collect_waveform_dataset.log')
+def collect_waveform_dataset(args: argparse.Namespace):
+    script = 'collect_waveform_dataset.py'
+    out_file = os.path.join(args.logdir, script.split('.')[0]+'.log')
 
-    return f'''{script_path} \\
+    return f'''$SCRIPT_DIR/{script} \\
     --waveforms_directory {args.waveforms_directory} \\
     --parameters_file {args.parameters_file_dataset} \\
     --basis_file {args.basis_file} \\
@@ -128,26 +124,27 @@ if __name__ == "__main__":
     with open(args.script_name, 'w') as fp:
         doc = f'#!/bin/bash\n\nsource {args.env_path}/bin/activate\n'
         doc += f'\nmkdir -p {args.logdir}\n'
+        doc += f'SCRIPT_DIR={script_dir}\n'
 
         doc += '\necho "Step (1): Generate parameter files"\n'
-        doc += generate_parameter_command(script_dir, args.num_wfs_basis,
+        doc += generate_parameter_command(args.num_wfs_basis,
                                           args.parameters_file_basis, args)
         doc += '\n'
-        doc += generate_parameter_command(script_dir, args.num_wfs_dataset,
+        doc += generate_parameter_command(args.num_wfs_dataset,
                                           args.parameters_file_dataset, args)
 
         doc += '\necho "Step (2): Generate waveforms for SVD basis"\n'
-        doc += generate_waveforms_command(script_dir, args.parameters_file_basis, args)
+        doc += generate_waveforms_command(args.parameters_file_basis, args)
 
         doc += '\necho "Step (3): Build SVD basis from polarizations"\n'
-        doc += generate_basis_command(script_dir, args.parameters_file_basis, args)
+        doc += generate_basis_command(args.parameters_file_basis, args)
 
         doc += '\necho "Step (4): Generate production waveforms and project onto SVD basis"\n'
-        doc += generate_waveforms_command(script_dir, args.parameters_file_dataset, args,
+        doc += generate_waveforms_command(args.parameters_file_dataset, args,
                                           use_compression=True, basis_file=args.basis_file)
 
         doc += '\necho "Step (5): Consolidate waveform dataset"\n'
-        doc += collect_waveform_dataset(script_dir, args)
+        doc += collect_waveform_dataset(args)
         doc += '\n'
         fp.writelines(doc)
 
