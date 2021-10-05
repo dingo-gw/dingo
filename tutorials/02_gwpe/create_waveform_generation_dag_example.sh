@@ -1,12 +1,8 @@
 #!/bin/bash
 
-cd /home/mpuer/projects/dingo-devel/
-#source dingo-devenv/bin/activate
-cd tutorials/02_gwpe
+D=/home/mpuer/projects/dingo-devel/env/bin
 
-PYTHON=/.auto/home/mpuer/projects/dingo-devel/dingo-devenv/bin/python
-
-$PYTHON create_waveform_generation_dag.py \
+$D/create_waveform_generation_dag \
   --waveforms_directory ./datasets/waveforms/ \
   --parameters_file_basis parameters_basis.npy \
   --parameters_file_dataset parameters_dataset.npy \
@@ -17,5 +13,5 @@ $PYTHON create_waveform_generation_dag.py \
   --num_wfs_dataset 10000 \
   --num_wf_per_process 500 \
   --rb_max 500 \
-  --python_binary $PYTHON
+  --env_path /home/mpuer/projects/dingo-devel/env
 
