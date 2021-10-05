@@ -5,67 +5,73 @@ Generate a shell script for the 5 steps in waveform dataset generation.
 
 import argparse
 import os
+import textwrap
+
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="""
-Build a shell script for waveform dataset generation.
-
-About the generated shell script:
-
-  * It samples parameters from the intrinsic prior, generates
-    waveform polarizations, projects them onto an SVD basis,
-    and saves the consolidated waveform dataset in HDF5 format.
-
-  * It runs on a single machine / node and is an alternative to 
-    the DAG generation script which requires condor. It can
-    use parallelization via a thread pool.
-
-
-Workflow:
-
-  1. (a) Parameter file for waveforms used to build the SVD basis:
-        generate_parameters.py
-     (b) Parameter file for the production waveforms:
-        generate_parameters.py
-
-  2. Generate waveforms for SVD basis:
-        generate_waveforms.py
-        There is only a single data chunk since we are running on a single node.
-        I.e. we have a single data file for each polarization.
-
-  3. Build SVD basis from polarizations:
-        build_SVD_basis.py
-
-  4. Generate production waveforms and project onto SVD basis
-        generate_waveforms.py
-        Again, there is only a single data chunk and a single data file for each polarization.
-
-  5. Consolidate waveform dataset
-        collect_waveform_dataset.py
-
-
-Example invocation:
-
-    ./env/bin/create_waveform_generation_bash_script \
-        --waveforms_directory ./datasets/waveforms/ \
-        --parameters_file_basis parameters_basis.npy \
-        --parameters_file_dataset parameters_dataset.npy \
-        --basis_file polarization_basis.npy \
-        --settings_file settings.yaml \
-        --dataset_file waveform_dataset.hdf5 \
-        --num_wfs_basis 10000 \
-        --num_wfs_dataset 50000 \
-        --rb_max 500 \
-        --env_path ../../venv \
-        --num_threads 4
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=textwrap.dedent("""\
+        Build a shell script for waveform dataset generation.
         
-    In addition to command line arguments this script requires a yaml
-    settings_file to be present in the waveforms_directory which
-    specifies physical parameters.
-
-    After executing this script run the generated bash script which 
-    carries out the five steps of the workflow described above.
+        About the generated shell script:
+        
+          * It samples parameters from the intrinsic prior, generates
+            waveform polarizations, projects them onto an SVD basis,
+            and saves the consolidated waveform dataset in HDF5 format.
+        
+          * It runs on a single machine / node and is an alternative to 
+            the DAG generation script which requires condor. It can
+            use parallelization via a thread pool.
+        
+        
+        Workflow:
+        
+          1. (a) Parameter file for waveforms used to build the SVD basis:
+                generate_parameters.py
+             (b) Parameter file for the production waveforms:
+                generate_parameters.py
+        
+          2. Generate waveforms for SVD basis:
+                generate_waveforms.py
+                There is only a single data chunk since we are running on a single node.
+                I.e. we have a single data file for each polarization.
+        
+          3. Build SVD basis from polarizations:
+                build_SVD_basis.py
+        
+          4. Generate production waveforms and project onto SVD basis
+                generate_waveforms.py
+                Again, there is only a single data chunk and a single data file for each polarization.
+        
+          5. Consolidate waveform dataset
+                collect_waveform_dataset.py
+        
+        
+        Example invocation:
+        
+            ./env/bin/create_waveform_generation_bash_script
+                --waveforms_directory ./datasets/waveforms/
+                --parameters_file_basis parameters_basis.npy
+                --parameters_file_dataset parameters_dataset.npy
+                --basis_file polarization_basis.npy
+                --settings_file settings.yaml
+                --dataset_file waveform_dataset.hdf5
+                --num_wfs_basis 10000
+                --num_wfs_dataset 50000
+                --rb_max 500
+                --env_path ./env
+                --num_threads 4
+                
+            In addition to command line arguments this script requires a yaml
+            settings_file to be present in the waveforms_directory which
+            specifies physical parameters.
+        
+            After executing this script run the generated bash script which 
+            carries out the five steps of the workflow described above.
     """)
+    )
+
     # dingo script arguments
     parser.add_argument('--waveforms_directory', type=str, required=True,
                         help='Directory containing waveform data, basis, and parameter file.')
@@ -92,7 +98,11 @@ Example invocation:
     return parser.parse_args()
 
 
-def generate_parameter_command(n_samples: int, parameters_file: str, args: argparse.Namespace):
+def generate_parameter_command(n_samples: int, parameters_file: str,
+                               args: argparse.Namespace):
+    """
+    Generate command string for 'generate_parameters' task.
+    """
     script = 'generate_parameters'
     id_str = script + '_' + os.path.basename(parameters_file).split('.')[0]
     out_file = os.path.join(args.logdir, id_str+'.log')
@@ -103,8 +113,14 @@ def generate_parameter_command(n_samples: int, parameters_file: str, args: argpa
     --parameters_file {parameters_file} \\
     --n_samples {n_samples} > {out_file} 2>&1\n'''
 
-def generate_waveforms_command(parameters_file: str, num_wfs: int, args: argparse.Namespace,
+
+def generate_waveforms_command(parameters_file: str, num_wfs: int,
+                               args: argparse.Namespace,
                                use_compression=False, basis_file=None):
+    """
+    Generate command string for 'generate_waveforms' task.
+    """
+
     script = 'generate_waveforms'
     id_str = script + '_' + os.path.basename(parameters_file).split('.')[0]
     out_file = os.path.join(args.logdir, id_str+'.log')
@@ -123,7 +139,13 @@ def generate_waveforms_command(parameters_file: str, num_wfs: int, args: argpars
     cmd += f' > {out_file} 2>&1\n'
     return cmd
 
-def generate_basis_command(parameters_file: str, args: argparse.Namespace):
+
+def generate_basis_command(parameters_file: str,
+                           args: argparse.Namespace):
+    """
+    Generate command string for 'build_SVD_basis' task.
+    """
+
     script = 'build_SVD_basis'
     out_file = os.path.join(args.logdir, script+'.log')
 
@@ -133,7 +155,12 @@ def generate_basis_command(parameters_file: str, args: argparse.Namespace):
     --basis_file {args.basis_file} \\
     --rb_max {args.rb_max} > {out_file} 2>&1\n'''
 
+
 def collect_waveform_dataset(args: argparse.Namespace):
+    """
+    Generate command string for 'collect_waveform_dataset' task.
+    """
+
     script = 'collect_waveform_dataset'
     out_file = os.path.join(args.logdir, script+'.log')
 
@@ -177,6 +204,7 @@ def main():
         fp.writelines(doc)
 
     print(f'Workflow written to {args.script_name}.')
+
 
 if __name__ == "__main__":
     main()

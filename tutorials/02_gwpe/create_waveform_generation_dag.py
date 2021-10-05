@@ -1,44 +1,82 @@
 """
-Setup DAG and jobs for the 5 steps in waveform dataset generation using pycondor
-
-Write submission files to disk.
-
-Workflow:
-  1. (a) Parameter file for waveforms used to build the SVD basis:
-        python3 ./generate_parameters.py --waveforms_directory ./datasets/waveforms/ --parameters_file parameters.npy --n_samples 2000
-     (b) Parameter file for the production waveforms:
-        python3 ./generate_parameters.py --waveforms_directory ./datasets/waveforms/ --parameters_file parameters_prod.npy --n_samples 10000
-
-  2. Generate waveforms for SVD basis:
-        python3 ./generate_waveforms.py --waveforms_directory ./datasets/waveforms/ --parameters_file parameters.npy --num_wf_per_process 200 --process_id 0
-        ... repeat for other chunks
-
-  3. Build SVD basis from polarizations
-        python3 ./build_SVD_basis.py --waveforms_directory ./datasets/waveforms/ --parameters_file parameters.npy --basis_file polarization_basis.npy --rb_max 50
-
-  4. Generate production waveforms and project onto SVD basis
-        python3 ./generate_waveforms.py --waveforms_directory ./datasets/waveforms/ --parameters_file parameters_prod.npy  --use_compression --basis_file polarization_basis.npy --num_wf_per_process 200 --process_id 0
-        ... repeat for other chunks
-
-  5. Consolidate waveform dataset
-        python3 ./collect_waveform_dataset.py --waveforms_directory ./datasets/waveforms/ --parameters_file parameters_prod.npy --settings_file settings.yaml --dataset_file waveform_dataset.hdf5
-
-Example command line:
-    python3 ./create_waveform_generation.dag.py --waveforms_directory ./datasets/waveforms/ --parameters_file_basis parameters_basis.npy --parameters_file_dataset parameters_dataset.npy --basis_file polarization_basis.npy --settings_file settings.yaml --dataset_file waveform_dataset.hdf5 --num_wfs_basis 200 --num_wfs_dataset 500 --num_wf_per_process 100 --rb_max 50 --env_path dingo-devel/venv
+Setup a condor DAG and jobs for the 5 steps in waveform dataset generation using pycondor
 """
 
 
 import argparse
 import os
+import textwrap
 from typing import Dict
 from pycondor import Job, Dagman
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="""
-        Collect compressed waveform polarizations and parameters.
-        Save consolidated waveform dataset in HDF5 format.
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=textwrap.dedent("""\
+        Build a condor DAG for waveform dataset generation.
+        
+        About the generated directed acyclic graph (DAG):
+        
+          * It samples parameters from the intrinsic prior, generates
+            waveform polarizations, projects them onto an SVD basis,
+            and saves the consolidated waveform dataset in HDF5 format.
+        
+          * The waveform generation tasks are parallelized over the 
+            specified number of compute nodes. On each node it can
+            use parallelization via a thread pool.
+        
+        
+        Workflow:
+        
+          1. (a) Parameter file for waveforms used to build the SVD basis:
+                generate_parameters.py
+             (b) Parameter file for the production waveforms:
+                generate_parameters.py
+        
+          2. Generate waveforms for SVD basis:
+                generate_waveforms.py
+                The parameter array is divided into chunks so that we
+                generate a specified number waveforms per node.
+                The polarization data on each node is saved into
+                one file for h_plus and h_cross.
+        
+          3. Build SVD basis from polarizations:
+                build_SVD_basis.py
+        
+          4. Generate production waveforms and project onto SVD basis
+                generate_waveforms.py
+                As above data is saved as many chunks as there are nodes.
+        
+          5. Consolidate waveform dataset
+                collect_waveform_dataset.py
+        
+        
+        Example invocation:
+        
+            ./env/bin/create_waveform_generation_dag
+              --waveforms_directory ./datasets/waveforms/
+              --parameters_file_basis parameters_basis.npy
+              --parameters_file_dataset parameters_dataset.npy
+              --basis_file polarization_basis.npy
+              --settings_file settings.yaml
+              --dataset_file waveform_dataset.hdf5
+              --num_wfs_basis 5000
+              --num_wfs_dataset 10000
+              --num_wf_per_process 500
+              --rb_max 500
+              --env_path ./env
+        
+            In addition to command line arguments this script requires a yaml
+            settings_file to be present in the waveforms_directory which
+            specifies physical parameters.
+        
+            After executing this script submit the generated condor DAG
+            in the submit directory with `condor_submit_dag`.
+            It will carry out the five steps of the workflow described above. 
     """)
+    )
+
     # dingo script arguments
     parser.add_argument('--waveforms_directory', type=str, required=True,
                         help='Directory containing waveform data, basis, and parameter file.')
@@ -72,6 +110,16 @@ def parse_args():
     parser.add_argument('--submit', type=str, default='condor/submit')
 
     return parser.parse_args()
+
+
+def modulus_check(a: int, b: int,
+                  a_label: str, b_label: str):
+    """
+    Raise error if a % b != 0.
+    """
+    if a % b != 0:
+        raise ValueError(f'Expected {a_label} mod {b_label} to be zero. '
+                         f'But got {a} mod {b} = {a % b}.')
 
 
 def create_args_string(args_dict: Dict):
@@ -194,6 +242,13 @@ def create_dag(args):
 
 def main():
     args = parse_args()
+
+    # Sanity checks
+    modulus_check(args.num_wfs_basis, args.num_wf_per_process,
+                  'num_wfs_basis', 'num_wf_per_process')
+    modulus_check(args.num_wfs_dataset, args.num_wf_per_process,
+                  'num_wfs_dataset', 'num_wf_per_process')
+
     dagman = create_dag(args)
 
     try:
@@ -202,6 +257,7 @@ def main():
         pass
 
     dagman.build()
+    print(f'DAG submission file written to {args.submit}.')
 
 
 if __name__ == "__main__":
