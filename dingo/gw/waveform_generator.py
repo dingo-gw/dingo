@@ -96,10 +96,10 @@ class WaveformGenerator:
         # Generate GW polarizations
         if self.domain.domain_type == 'uFD':
             wf_generator = self.generate_FD_waveform
-        elif domain.domain_type == 'TD':
+        elif self.domain.domain_type == 'TD':
             wf_generator = self.generate_TD_waveform
         else:
-            raise ValueError(f'Unsupported domain type {domain.domain_type}.')
+            raise ValueError(f'Unsupported domain type {self.domain.domain_type}.')
 
         try:
             wf_dict = wf_generator(parameters_lal)
@@ -205,6 +205,13 @@ class WaveformGenerator:
         #   longAscNodes, eccentricity, meanPerAno,
         #   deltaF, f_min, f_max, f_ref,
         #   lal_params, approximant
+
+        # Sanity check types of arguments
+        check_floats = all(map(lambda x: isinstance(x, float), parameters_lal[:18]))
+        check_int = isinstance(parameters_lal[19], int)
+        # parameters_lal[18]  # lal_params could be None or a LALDict
+        if not (check_floats and check_int):
+            raise ValueError('SimInspiralFD received invalid argument(s)', parameters_lal)
 
         # Depending on whether the domain is uniform or non-uniform call the appropriate wf generator
         hp, hc = LS.SimInspiralFD(*parameters_lal)

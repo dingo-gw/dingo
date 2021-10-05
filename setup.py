@@ -25,13 +25,23 @@ setup(name='dingo',
           'h5py',
           'bilby',
           'astropy',
-          'lalsuite'
+          'lalsuite',
+          'sklearn',
+          'pycondor'
       ],
       extras_require={
           "dev": [
               "pytest",
               "pylint",
           ],
+      },
+      entry_points={'console_scripts':
+          ['generate_parameters=tutorials.02_gwpe.generate_parameters:main',
+           'generate_waveforms=tutorials.02_gwpe.generate_waveforms:main',
+           'build_SVD_basis=tutorials.02_gwpe.build_SVD_basis:main',
+           'collect_waveform_dataset=tutorials.02_gwpe.collect_waveform_dataset:main',
+           'create_waveform_generation_bash_script=tutorials.02_gwpe.create_waveform_generation_bash_script:main',
+           'create_waveform_generation_dag=tutorials.02_gwpe.create_waveform_generation_dag:main']
       },
       classifiers=[
           "Programming Language :: Python :: 3.6",

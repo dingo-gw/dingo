@@ -1,12 +1,119 @@
+import os
+import pickle
+from typing import Dict, Union, Tuple
+from multiprocessing import Pool
+
+import h5py
 import numpy as np
 import pandas as pd
-import h5py
-from tqdm import tqdm
-from typing import Dict, Union
+import scipy
+from sklearn.utils.extmath import randomized_svd
 from torch.utils.data import Dataset
+from tqdm import tqdm
 
+from dingo.api import structured_array_from_dict_of_arrays
 from dingo.gw.parameters import GWPriorDict
 from dingo.gw.waveform_generator import WaveformGenerator
+
+
+class SVDBasis:
+    def __init__(self):
+        self.V = None
+        self.Vh = None
+        self.n = None
+
+    def generate_basis(self, training_data: np.ndarray, n: int,
+                       method: str = 'random'):
+        """Generate the SVD basis from training data and store it.
+
+        The SVD decomposition takes
+
+        training_data = U @ diag(s) @ Vh
+
+        where U and Vh are unitary.
+
+        Parameters
+        ----------
+        training_data: np.ndarray
+            Array of waveform data on the physical domain
+
+        n: int
+            Number of basis elements to keep.
+            n=0 keeps all basis elements.
+        method: str
+            Select SVD method, 'random' or 'scipy'
+        """
+        if method == 'random':
+            if n == 0:
+                n = min(training_data.shape)
+
+            U, s, Vh = randomized_svd(training_data, n)
+
+            self.Vh = Vh.astype(np.complex64)
+            self.V = self.Vh.T.conj()
+            self.n = n
+        elif method == 'scipy':
+            # Code below uses scipy's svd tool. Likely slower.
+            U, s, Vh = scipy.linalg.svd(training_data, full_matrices=False)
+            V = Vh.T.conj()
+
+            if (n == 0) or (n > len(V)):
+                self.V = V
+                self.Vh = Vh
+            else:
+                self.V = V[:, :n]
+                self.Vh = Vh[:n, :]
+
+            self.n = len(self.Vh)
+        else:
+            raise ValueError(f'Unsupported SVD method: {method}.')
+
+    def basis_coefficients_to_fseries(self, coefficients: np.ndarray):
+        """
+        Convert from basis coefficients to frequency series.
+
+        Parameters
+        ----------
+        coefficients:
+            Array of basis coefficients
+        """
+        return coefficients @ self.Vh
+
+    def fseries_to_basis_coefficients(self, fseries: np.ndarray):
+        """
+        Convert from frequency series to basis coefficients.
+
+        Parameters
+        ----------
+        fseries:
+            Array of frequency series
+        """
+        return fseries @ self.V
+
+    def from_file(self, filename: str):
+        """
+        Load basis matrix V from a file.
+
+        Parameters
+        ----------
+        filename:
+            File in .npy format
+        """
+        self.V = np.load(filename)
+        self.Vh = self.V.T.conj()
+        self.n = self.V.shape[1]
+
+    def to_file(self, filename: str):
+        """
+        Save basis matrix V to a file.
+
+        Parameters
+        ----------
+        filename:
+            File in .npy format
+        """
+        if self.V is not None:
+            np.save(filename, self.V)
 
 
 class WaveformDataset(Dataset):
@@ -19,9 +126,6 @@ class WaveformDataset(Dataset):
     Once a waveform data set is in memory, the waveform data are consumed through
     a __getitem__() call, optionally applying a chain of transformations, which
     are classes that implement the __call__() method.
-
-    TODO:
-      * add compression for serializing data
     """
 
     def __init__(self, dataset_file: str = None,
@@ -38,6 +142,8 @@ class WaveformDataset(Dataset):
             It needs to contain intrinsic waveform parameters (and reference values)
             for generating waveform polarizations. Later we will also draw
             extrinsic parameters from it.
+            If the prior is unspecified, sampling the prior is not supported,
+            and read_parameter_samples() must be called before generate_dataset().
         waveform_generator : WaveformGenerator
             The waveform generator object to use to generate waveforms.
         transform :
@@ -83,27 +189,95 @@ class WaveformDataset(Dataset):
         # with open("df_info.txt", "w", encoding="utf-8") as f:
         #     f.write(s)
 
-    def generate_dataset(self, size: int = 0):
+    def sample_intrinsic(self, size: int = 0, add_reference_values: bool = True):
+        """
+        Draw intrinsic prior samples
+
+        Notes:
+          * Since we're using bilby's prior classes we are automatically
+            using numpy random number generator
+          * The order of returned parameters is random
+          * The fixed f_ref and d_L reference values are added automatically
+            in the call to sample_intrinsic. In the case of d_L make sure not
+            to confuse these fixed values with samples drawn from a typical
+            extrinsic distribution.
+
+        Parameters
+        ----------
+        size : int
+            The number of samples to draw.
+
+        add_reference_values : bool
+            If True, add reference frequency, distance and time to the output dict.
+            These are fixed values needed, not r.v.'s, but are added for each sample.
+            Reference frequency and distance are needed for waveform generation, and
+            reference time is used when projecting onto the detectors.
+        """
+        parameter_samples_dict = self._priors.sample_intrinsic(size=size,
+            add_reference_values=add_reference_values)
+        self._parameter_samples = pd.DataFrame(parameter_samples_dict)
+
+
+    def read_parameter_samples(self, filename: str, sl: slice = None):
+        """
+        Read intrinsic parameter samples from a file.
+        Doing so will avoid drawing fresh samples from the
+        intrinsic prior distribution.
+
+        Parameters
+        ----------
+        filename : str
+            Supported file formats are:
+            '.pkl': a pickle of a dictionary of arrays
+            '.npy': a structured numpy array
+        sl : slice
+            A slice object for selecting a subset of parameter samples
+        """
+        _, file_extension = os.path.splitext(filename)
+        if file_extension == '.pkl':
+            with open(filename, 'rb') as fp:
+                parameters = pickle.load(fp)  # dict of arrays
+        elif file_extension == '.npy':
+            parameters = np.load(filename)  # structured array
+        else:
+            raise ValueError(f'Only .pkl or .npy format supported, but got {filename}')
+
+        self._parameter_samples = pd.DataFrame(parameters)[sl]
+
+    def _generate_polarizations_task_fun(self, args: Tuple):
+        """
+        Picklable wrapper function for parallel waveform generation.
+
+        Parameters
+        ----------
+        args:
+            a tuple (index, pandas.core.series.Series)
+        """
+        p = args[1].to_dict()  # Extract parameter dict
+        return self._waveform_generator.generate_hplus_hcross(p)
+
+    def generate_dataset(self, size: int = 0, pool: Pool = None):
         """Generate a waveform dataset.
 
         Parameters
         ----------
         size : int
             The number of samples to draw and waveforms to generate.
+            This is only used if parameter samples have not been drawm
+            or loaded previously.
+        pool :
+            optional pool of workers for parallel generation
         """
-        # Draw intrinsic prior samples
-        # Note: Since we're using bilby's prior classes we are automatically using numpy rng
-        # The order of parameters return is random
-        parameter_samples_dict = self._priors.sample_intrinsic(size=size)
-        self._parameter_samples = pd.DataFrame(parameter_samples_dict)
-        # The fixed f_ref and d_L reference values are added automatically in the call to sample_intrinsic.
-        # In the case of d_L make sure not to confuse them with samples drawn from a typical extrinsic distribution.
+        if self._parameter_samples is None:
+            self.sample_intrinsic(size)
 
         print('Generating waveform polarizations ...')  # Switch to logging
-        # TODO: Currently, simple in memory generation of wfs on a single core; extend to multiprocessing or MPI
-        #  For large datasets may not be able to store it in memory and need to write to disk while generating
-        wf_list_of_dicts = [self._waveform_generator.generate_hplus_hcross(p.to_dict())
-                            for _, p in tqdm(self._parameter_samples.iterrows())]
+        if pool is not None:
+            task_data = self._parameter_samples.iterrows()
+            wf_list_of_dicts = pool.map(self._generate_polarizations_task_fun, task_data)
+        else:
+            wf_list_of_dicts = [self._waveform_generator.generate_hplus_hcross(p.to_dict())
+                                for _, p in tqdm(self._parameter_samples.iterrows())]
         polarization_dict = {k: [wf[k] for wf in wf_list_of_dicts] for k in ['h_plus', 'h_cross']}
         self._waveform_polarizations = pd.DataFrame(polarization_dict)
 
@@ -138,6 +312,11 @@ class WaveformDataset(Dataset):
         """
         Write a DataFrame containing a dict of 2D arrays to HDF5.
 
+        This creates a group containing as many 1D datasets
+        as there are keys in the DataFrame. I.e. the stored
+        format is a number of 1D arrays for parameters and
+        2D arrays for waveform polarizations.
+
         Parameters
         ----------
         fp : h5py.File
@@ -155,7 +334,41 @@ class WaveformDataset(Dataset):
                 v = np.vstack(v)  # convert object array into a proper 2D array
             grp.create_dataset(str(k), data=v)
 
-    def save(self, filename: str = 'waveform_dataset.h5'):
+    def dataframe_to_structured_array(self, df: pd.DataFrame):
+        """
+        Convert a pandas DataFrame of parameters to a structured numpy array.
+
+        Parameters
+        ----------
+        df:
+            A pandas DataFrame
+        """
+        d = {k: np.array(list(v.values())) for k, v in df.to_dict().items()}
+        return structured_array_from_dict_of_arrays(d)
+
+    def get_polarizations(self):
+        """
+        Return a dictionary of polarization arrays.
+        """
+        return {k: np.vstack(v.to_numpy().T) for k, v in self._waveform_polarizations.items()}
+
+    def get_compressed_polarizations(self, basis: SVDBasis):
+        """
+        Project h_plus, and h_cross onto the given SVD basis and return
+        a dictionary of coefficients.
+
+        Parameters
+        ----------
+        basis: SVDBasis
+            An initialized SVD basis object
+        """
+        pol_arrays = {k: np.vstack(v.to_numpy().T) for k, v in self._waveform_polarizations.items()}
+        return {k: basis.fseries_to_basis_coefficients(v) for k, v in pol_arrays.items()}
+
+
+    def save(self, filename: str = 'waveform_dataset.h5',
+             parameter_fmt: str = 'structured_array',
+             compress_data: bool = True, n_rb: int = 0):
         """
         Save waveform data set to a HDF5 file.
 
@@ -163,18 +376,43 @@ class WaveformDataset(Dataset):
         ----------
         filename : str
             The name of the output HDF5 file.
-        """
-        # TODO: use SVD to compress more than just HDF5 compression?
-        # Using h5py
-        fp = h5py.File(filename, 'w')
-        self._write_dataframe_to_hdf5(fp, 'parameters', self._parameter_samples)
-        self._write_dataframe_to_hdf5(fp, 'waveform_polarizations', self._waveform_polarizations)
-        fp.close()
 
-    def split_into_train_test(self, train_fraction):
-        # of type WaveformDataset
-        # TODO: implement -- or should this be implemented as a transformation after converting to torch tensors?
-        pass
+        parameter_fmt : str
+            Selects the way the waveform parameters are stored in the HDF5 file.
+            'group': saves each parameter as a dataset in a group 'parameters'
+            'structured_array': saves parameters as a 2D structured array with field names
+
+        compress_data : bool
+            If True project waveform polarizations onto an SVD basis.
+            Save the projection coefficients and the SVD basis to HDF5.
+
+        n_rb : int
+            The number of basis functions at which the SVD should be truncated.
+            n_rb = 0: no compression
+        """
+        fp = h5py.File(filename, 'w')
+
+        if parameter_fmt == 'group':
+            # This will create a group 'parameters' with a dataset for each parameter
+            self._write_dataframe_to_hdf5(fp, 'parameters', self._parameter_samples)
+        elif parameter_fmt == 'structured_array':
+            # Alternative which converts to a structured array
+            parameters_struct_arr = self.dataframe_to_structured_array(self._parameter_samples)
+            # d = {k: np.array(list(v.values())) for k, v in self._parameter_samples.to_dict().items()}
+            # parameters_struct_arr = structured_array_from_dict_of_arrays(d)
+            fp.create_dataset('parameters', data=parameters_struct_arr)
+
+        if compress_data:
+            pol_arrays = {k: np.vstack(v.to_numpy().T) for k, v in self._waveform_polarizations.items()}
+            basis = SVDBasis()
+            basis.generate_basis(pol_arrays['h_plus'], n_rb)
+            for k, v in pol_arrays.items():
+                h_proj = basis.fseries_to_basis_coefficients(v)
+                fp.create_dataset(k, data=h_proj)
+            fp.create_dataset('rb_matrix_V', data=basis.V)
+        else:
+            self._write_dataframe_to_hdf5(fp, 'waveform_polarizations', self._waveform_polarizations)
+        fp.close()
 
 
 
@@ -185,7 +423,6 @@ if __name__ == "__main__":
     from dingo.gw.detector_network import DetectorNetwork, RandomProjectToDetectors
     from dingo.gw.noise import AddNoiseAndWhiten
     from transforms import StandardizeParameters, ToNetworkInput, Compose
-    import matplotlib.pyplot as plt
 
     domain_kwargs = {'f_min': 20.0, 'f_max': 4096.0, 'delta_f': 1.0 / 4.0, 'window_factor': 1.0}
     domain = UniformFrequencyDomain(**domain_kwargs)
