@@ -91,8 +91,10 @@ def create_dag(args):
               'submit': args.submit, 'error': args.error, 'output': args.output,
               'log': args.log, 'getenv': True}
 
-    chunk_size_basis = args.num_wfs_basis // args.num_wf_per_process
-    chunk_size_dataset = args.num_wfs_dataset // args.num_wf_per_process
+    # Number of chunks the datasets are split into by
+    # producing args.num_wf_per_process waveforms per node
+    num_chunks_basis = args.num_wfs_basis // args.num_wf_per_process
+    num_chunks_dataset = args.num_wfs_dataset // args.num_wf_per_process
 
     # scripts are installed in the env's bin directory
     path = os.path.join(args.env_path, 'bin')
@@ -105,7 +107,7 @@ def create_dag(args):
     args_dict = {'waveforms_directory': args.waveforms_directory,
                  'settings_file': args.settings_file,
                  'parameters_file': args.parameters_file_basis,
-                 'n_samples': chunk_size_basis
+                 'n_samples': args.num_wfs_basis
                  }
     args_str = create_args_string(args_dict)
     generate_parameters_basis = Job(name='generate_parameters_basis',
@@ -117,7 +119,7 @@ def create_dag(args):
     args_dict = {'waveforms_directory': args.waveforms_directory,
                  'settings_file': args.settings_file,
                  'parameters_file': args.parameters_file_dataset,
-                 'n_samples': chunk_size_basis
+                 'n_samples': args.num_wfs_dataset
                  }
     args_str = create_args_string(args_dict)
     generate_parameters_dataset = Job(name='generate_parameters_dataset',
@@ -135,7 +137,7 @@ def create_dag(args):
                  }
     args_str = create_args_string(args_dict)
     generate_waveforms_basis = Job(name=f'generate_waveforms_basis',
-                                   queue=chunk_size_basis,
+                                   queue=num_chunks_basis,
                                    executable=executable, dag=dagman,
                                    arguments=args_str, **kwargs)
     generate_waveforms_basis.add_parent(generate_parameters_basis)
@@ -166,7 +168,7 @@ def create_dag(args):
                  }
     args_str = create_args_string(args_dict)
     generate_waveforms_dataset = Job(name=f'generate_waveforms_dataset',
-                                     queue=chunk_size_dataset,
+                                     queue=num_chunks_dataset,
                                      executable=executable, dag=dagman,
                                      arguments=args_str, **kwargs)
     generate_waveforms_dataset.add_parent(build_SVD_basis)
