@@ -1,10 +1,10 @@
 #!/bin/bash
 
 cd /home/mpuer/projects/dingo-devel/
-source dingo-devenv/bin/activate
+#source dingo-devenv/bin/activate
 cd tutorials/02_gwpe
 
-PYTHON=/home/mpuer/projects/dingo-devel/dingo-devenv/bin/python
+PYTHON=/.auto/home/mpuer/projects/dingo-devel/dingo-devenv/bin/python
 
 $PYTHON create_waveform_generation_dag.py \
   --waveforms_directory ./datasets/waveforms/ \

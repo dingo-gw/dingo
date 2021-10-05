@@ -1,5 +1,3 @@
-#!/home/mpuer/projects/dingo-devel/dingo-devenv/bin/python3
-
 """
 Setup DAG and jobs for the 5 steps in waveform dataset generation using pycondor
 
@@ -167,7 +165,8 @@ def create_dag(args):
 
     return dagman
 
-if __name__ == "__main__":
+
+def main():
     args = parse_args()
     dagman = create_dag(args)
 
@@ -177,3 +176,8 @@ if __name__ == "__main__":
         pass
 
     dagman.build()
+
+
+if __name__ == "__main__":
+    main()
+

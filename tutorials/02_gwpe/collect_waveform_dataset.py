@@ -62,7 +62,7 @@ def consolidate_dataset(num_chunks: int, basis_file: str,
     logger.info('Done')
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description="""
         Collect compressed waveform polarizations and parameters.
         Save consolidated waveform dataset in HDF5 format.
@@ -83,3 +83,8 @@ if __name__ == "__main__":
 
     num_chunks, chunk_size = find_chunk_number(args.parameters_file, compressed=True)
     consolidate_dataset(num_chunks, args.basis_file, args.parameters_file, args.dataset_file)
+
+
+if __name__ == "__main__":
+    main()
+

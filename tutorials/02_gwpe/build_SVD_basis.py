@@ -95,7 +95,7 @@ def create_basis(num_chunks: int, outfile: str, rb_max: int = 0):
     return basis.n, basis.V.shape
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description='Generate SVD basis from waveform polarizations.')
     parser.add_argument('--waveforms_directory', type=str, required=True,
                         help='Directory containing waveform data and parameter file.'
@@ -116,3 +116,8 @@ if __name__ == "__main__":
     n, V_shape = create_basis(num_chunks, args.basis_file, args.rb_max)
     logger.info(f'Created SVD basis of size {n} from {num_chunks} chunks of size {chunk_size}.')
     logger.info(f'V matrix of shape {V_shape} saved to {args.basis_file}.')
+
+
+if __name__ == "__main__":
+    main()
+

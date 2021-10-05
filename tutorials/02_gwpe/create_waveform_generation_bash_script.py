@@ -145,7 +145,7 @@ def collect_waveform_dataset(args: argparse.Namespace):
     --dataset_file {args.dataset_file} > {out_file} 2>&1\n'''
 
 
-if __name__ == "__main__":
+def main():
     args = parse_args()
     script_dir = f'{args.env_path}/bin'
 
@@ -177,3 +177,7 @@ if __name__ == "__main__":
         fp.writelines(doc)
 
     print(f'Workflow written to {args.script_name}.')
+
+if __name__ == "__main__":
+    main()
+

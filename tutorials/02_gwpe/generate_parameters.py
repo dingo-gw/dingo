@@ -62,7 +62,7 @@ def generate_parameters(settings_file: str, n_samples: int, parameters_file: str
         raise ValueError(f'Unsupported parameter file format {file_extension}.')
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description='Generate waveform parameter file.')
     parser.add_argument('--waveforms_directory', type=str, required=True,
                         help='Directory containing the settings file which specifies the prior.')
@@ -78,3 +78,8 @@ if __name__ == "__main__":
 
     generate_parameters(args.settings_file, args.n_samples, args.parameters_file)
     logger.info(f'Successfully generated {args.n_samples} parameters and saved to {args.parameters_file}.')
+
+
+if __name__ == "__main__":
+    main()
+

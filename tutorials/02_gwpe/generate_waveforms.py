@@ -92,7 +92,7 @@ def save_polarizations(wd: WaveformDataset, idx: int,
             np.save(f'{k}_full_{idx}.npy', v)
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description='Generate waveform polarizations.')
     parser.add_argument('--waveforms_directory', type=str, required=True,
                         help='Directory containing the settings file which specifies the prior.'
@@ -134,3 +134,8 @@ if __name__ == "__main__":
         generate_waveforms(wd, args.parameters_file, slice(idx_start, idx_stop), pool=None)
 
     save_polarizations(wd, args.process_id, args.use_compression, args.basis_file)
+
+
+if __name__ == "__main__":
+    main()
+
