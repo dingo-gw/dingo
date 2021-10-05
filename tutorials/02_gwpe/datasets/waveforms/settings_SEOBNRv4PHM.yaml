@@ -1,0 +1,33 @@
+# settings for domain of waveforms
+domain_settings:
+  name: UniformFrequencyDomain
+  kwargs:
+    f_min: 10.0      # Require low starting frequency for waveform to generate
+    f_max: 4096.0    # Go a bit higher to resolve higher mode contributions
+    delta_f: 0.0625  # Require sufficiently high sampling rate, so that we can guarantee f_ringdown < f_Nyquist
+    window_factor: 1.0 # This should maybe be in noise settings? It is not used for the generation of waveform polarizations
+
+# settings for waveform generator
+waveform_generator_settings:
+  approximant: SEOBNRv4PHM # IMRPhenomPv2
+  f_ref: 20.0
+
+# settings for prior over parameters
+prior_settings:
+  # prior for intrinsic parameters of the dataset
+  intrinsic_parameters:
+    mass_1: [Uniform, 10, 80]
+    mass_2: [Uniform, 10, 80]
+    phase: default
+    a_1: [Uniform, 0, 0.88]
+    a_2: [Uniform, 0, 0.88]
+    tilt_1: default
+    tilt_2: default
+    phi_12: default
+    phi_jl: default
+    theta_jn: default
+  # reference values for extrinsic parameters
+  # all non-specified ones will be set to zero
+  extrinsic_parameters_reference_values:
+    luminosity_distance: 100.0 # Mpc
+    reference_frequency: 20.0  # Hz
