@@ -46,7 +46,7 @@ Workflow:
 
 Example invocation:
 
-    python3 ./create_waveform_generation_bash_script.py \
+    ./env/bin/create_waveform_generation_bash_script \
         --waveforms_directory ./datasets/waveforms/ \
         --parameters_file_basis parameters_basis.npy \
         --parameters_file_dataset parameters_dataset.npy \
@@ -93,8 +93,8 @@ Example invocation:
 
 
 def generate_parameter_command(n_samples: int, parameters_file: str, args: argparse.Namespace):
-    script = 'generate_parameters.py'
-    id_str = script.split('.')[0] + '_' + os.path.basename(parameters_file).split('.')[0]
+    script = 'generate_parameters'
+    id_str = script + '_' + os.path.basename(parameters_file).split('.')[0]
     out_file = os.path.join(args.logdir, id_str+'.log')
 
     return f'''python3 $SCRIPT_DIR/{script} \\
@@ -105,8 +105,8 @@ def generate_parameter_command(n_samples: int, parameters_file: str, args: argpa
 
 def generate_waveforms_command(parameters_file: str, num_wfs: int, args: argparse.Namespace,
                                use_compression=False, basis_file=None):
-    script = 'generate_waveforms.py'
-    id_str = script.split('.')[0] + '_' + os.path.basename(parameters_file).split('.')[0]
+    script = 'generate_waveforms'
+    id_str = script + '_' + os.path.basename(parameters_file).split('.')[0]
     out_file = os.path.join(args.logdir, id_str+'.log')
 
     cmd = f'''python3 $SCRIPT_DIR/{script} \\
@@ -124,8 +124,8 @@ def generate_waveforms_command(parameters_file: str, num_wfs: int, args: argpars
     return cmd
 
 def generate_basis_command(parameters_file: str, args: argparse.Namespace):
-    script = 'build_SVD_basis.py'
-    out_file = os.path.join(args.logdir, script.split('.')[0]+'.log')
+    script = 'build_SVD_basis'
+    out_file = os.path.join(args.logdir, script+'.log')
 
     return f'''python3 $SCRIPT_DIR/{script} \\
     --waveforms_directory {args.waveforms_directory} \\
@@ -134,8 +134,8 @@ def generate_basis_command(parameters_file: str, args: argparse.Namespace):
     --rb_max {args.rb_max} > {out_file} 2>&1\n'''
 
 def collect_waveform_dataset(args: argparse.Namespace):
-    script = 'collect_waveform_dataset.py'
-    out_file = os.path.join(args.logdir, script.split('.')[0]+'.log')
+    script = 'collect_waveform_dataset'
+    out_file = os.path.join(args.logdir, script+'.log')
 
     return f'''python3 $SCRIPT_DIR/{script} \\
     --waveforms_directory {args.waveforms_directory} \\
