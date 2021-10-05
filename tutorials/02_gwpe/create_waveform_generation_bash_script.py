@@ -85,7 +85,7 @@ Example invocation:
     parser.add_argument('--num_threads', type=int, default=1,
                         help='Number of threads to use in pool for parallel waveform generation')
     parser.add_argument('--env_path', type=str, help='Absolute path to the dingo Python environment. '
-                                                     'We will execute "env_path/bin/activate".')
+                                                     'We will execute scripts in  "env_path/bin".')
     parser.add_argument('--script_name', type=str, default='waveform_generation_script.sh')
     parser.add_argument('--logdir', type=str, default='log')
 
