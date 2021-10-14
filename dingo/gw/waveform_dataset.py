@@ -173,7 +173,6 @@ class WaveformDataset(Dataset):
         if '_Vh' in self.__dict__:
             data['waveform']['h_plus'] = data['waveform']['h_plus'] @ self._Vh
             data['waveform']['h_cross'] = data['waveform']['h_cross'] @ self._Vh
-            pass
         if self.transform:
             data = self.transform(data)
         return data
