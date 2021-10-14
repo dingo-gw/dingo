@@ -44,10 +44,10 @@ def consolidate_dataset(num_chunks: int, basis_file: str,
                 for k in pol_keys}
 
     if single_precision:
-        dtype = np.float32
+        dtype = np.complex64
         logger.info(f'Using single precision.')
     else:
-        dtype = np.float64
+        dtype = np.complex128
         logger.info(f'Using double precision.')
 
     logger.info('Saving dataset to HDF5 ...')
@@ -76,8 +76,8 @@ def consolidate_dataset(num_chunks: int, basis_file: str,
     logger.info(f'rb_matrix_V             Dataset {basis_V_matrix.shape}')
     fp.create_dataset('rb_matrix_V', data=basis_V_matrix)
 
-    with open('settings.yaml', 'r') as fp:
-        settings = yaml.safe_load(fp)
+    with open('settings.yaml', 'r') as f_settings:
+        settings = yaml.safe_load(f_settings)
     fp.attrs['settings'] = ''.join(f'{k}: {v}' for k, v in settings.items())
 
     fp.close()
