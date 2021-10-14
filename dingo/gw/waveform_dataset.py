@@ -170,6 +170,10 @@ class WaveformDataset(Dataset):
         parameters = self._parameter_samples.iloc[idx].to_dict()
         waveform_polarizations = self._waveform_polarizations.iloc[idx].to_dict()
         data = {'parameters': parameters, 'waveform': waveform_polarizations}
+        if '_Vh' in self.__dict__:
+            data['waveform']['h_plus'] = data['waveform']['h_plus'] @ self._Vh
+            data['waveform']['h_cross'] = data['waveform']['h_cross'] @ self._Vh
+            pass
         if self.transform:
             data = self.transform(data)
         return data
@@ -302,6 +306,10 @@ class WaveformDataset(Dataset):
         polarization_dict_2d = {k: v[:] for k, v in grp.items()}
         polarization_dict = {k: [x for x in polarization_dict_2d[k]] for k in ['h_plus', 'h_cross']}
         self._waveform_polarizations = pd.DataFrame(polarization_dict)
+
+        if 'rb_matrix_V' in fp.keys():
+            V = fp['rb_matrix_V'][:]
+            self._Vh = V.T.conj()
 
         fp.close()
 
