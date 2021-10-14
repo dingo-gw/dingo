@@ -295,9 +295,8 @@ class WaveformDataset(Dataset):
         """
         fp = h5py.File(filename, 'r')
 
-        grp = fp['parameters']
-        parameter_samples_dict = {k: v[:] for k, v in grp.items()}
-        self._parameter_samples = pd.DataFrame(parameter_samples_dict)
+        parameter_array = fp['parameters'][:]
+        self._parameter_samples = pd.DataFrame(parameter_array)
 
         grp = fp['waveform_polarizations']
         polarization_dict_2d = {k: v[:] for k, v in grp.items()}
