@@ -20,7 +20,7 @@ from .build_SVD_basis import find_chunk_number
 
 def consolidate_dataset(num_chunks: int, basis_file: str,
                         parameters_file: str, dataset_file: str,
-                        alpha=None, single_precision=False):
+                        single_precision=False):
     """
     Load data files and output a consolidated dataset in HDF5 format.
 
@@ -34,8 +34,6 @@ def consolidate_dataset(num_chunks: int, basis_file: str,
         .npy file containing the structured parameter array
     dataset_file:
         Output HDF5 file for the dataset
-    alpha:
-        Rescale SVD coefficients of waveforms by this factor
     """
     logger.info('Load polarization data for all chunks ...')
     pol_keys = ['h_plus', 'h_cross']
@@ -53,17 +51,11 @@ def consolidate_dataset(num_chunks: int, basis_file: str,
     logger.info('Saving dataset to HDF5 ...')
     fp = h5py.File(dataset_file, 'w')
 
-    if alpha is not None:
-        logger.info(f'Rescaled SVD coefficients by factor {alpha}.')
-    else:
-        alpha = 1.0
-    fp.attrs['Rescaled SVD coefficients by factor'] = alpha
-
     # Polarization projection coefficients
     grp = fp.create_group('waveform_polarizations')
     logger.info('waveform_polarizations  Group:')
     for k, v in pol_data.items():
-        grp.create_dataset(str(k), data=v*alpha, dtype=dtype)
+        grp.create_dataset(str(k), data=v, dtype=dtype)
         logger.info(f'\t{k}: {v.shape}')
 
     # Parameter samples
@@ -96,7 +88,6 @@ def main():
     parser.add_argument('--basis_file', type=str, default='polarization_basis.npy')
     parser.add_argument('--settings_file', type=str, default='settings.yaml')
     parser.add_argument('--dataset_file', type=str, default='waveform_dataset.hdf5')
-    parser.add_argument('--rescale_coefficients_factor', type=float, default=1.0e21)
     parser.add_argument('--single_precision', default=False, action='store_true')
     args = parser.parse_args()
 
@@ -107,8 +98,7 @@ def main():
 
     num_chunks, chunk_size = find_chunk_number(args.parameters_file, compressed=True)
     consolidate_dataset(num_chunks, args.basis_file, args.parameters_file,
-                        args.dataset_file, args.rescale_coefficients_factor,
-                        args.single_precision)
+                        args.dataset_file, args.single_precision)
 
 
 if __name__ == "__main__":
