@@ -1,4 +1,4 @@
-from dingo.gw.domains import UniformFrequencyDomain, TimeDomain
+from dingo.gw.domains import UniformFrequencyDomain, TimeDomain, build_domain
 import pytest
 import numpy as np
 
@@ -34,6 +34,11 @@ def test_uniform_FD_noise_std(uniform_FD_params):
     expected = np.sqrt(p['window_factor']) / np.sqrt(4.0 * p['delta_f'])
     assert np.abs(domain.noise_std - expected) < 1e-15
 
+def test_uniform_FD_domain_dict(uniform_FD_params):
+    p = uniform_FD_params
+    domain = UniformFrequencyDomain(**p)
+    domain2 = build_domain(domain.domain_dict)
+    assert domain.__dict__ == domain2.__dict__
 
 def test_TD():
     time_duration, sampling_rate = 4.0, 1.0/4096.0

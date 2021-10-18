@@ -45,6 +45,12 @@ class Domain(ABC):
         """Waveform duration in seconds."""
         pass
 
+    @property
+    def domain_dict(self):
+        """Enables to rebuild the domain via calling build_domain(domain_dict).
+        """
+        pass
+
 
 class UniformFrequencyDomain(Domain):
     """Defines the physical domain on which the data of interest live.
@@ -144,6 +150,18 @@ class UniformFrequencyDomain(Domain):
     def duration(self) -> float:
         """Waveform duration in seconds."""
         return 1.0 / self._delta_f
+
+    @property
+    def domain_dict(self):
+        """Enables to rebuild the domain via calling build_domain(domain_dict).
+        """
+        kwargs = {'f_min': self._f_min,
+                  'f_max': self._f_max,
+                  'delta_f': self._delta_f,
+                  'window_factor': self._window_factor,
+                  'truncation_range': self._truncation_range,
+                  }
+        return {'name': 'UniformFrequencyDomain', 'kwargs': kwargs}
 
 
 class TimeDomain(Domain):
