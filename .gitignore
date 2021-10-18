@@ -130,11 +130,11 @@ dmypy.json
 .pyre/
 
 # Data files
-.h5
-.hdf5
-.npy
-.npz
-.dat
+*.h5
+*.hdf5
+*.npy
+*.npz
+*.dat
 
 # .DS_Store files for Mac OS
 .DS_Store
