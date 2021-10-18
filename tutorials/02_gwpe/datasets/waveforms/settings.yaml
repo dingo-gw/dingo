@@ -31,3 +31,11 @@ prior_settings:
   extrinsic_parameters_reference_values:
     luminosity_distance: 100.0 # Mpc
     reference_frequency: 20.0  # Hz
+
+waveform_dataset_generation_settings:
+  # Number of waveforms to generate for building the SVD basis
+  num_wfs_basis: 10000
+  # Number of waveforms to generate for the waveform dataset
+  num_wfs_dataset: 50000
+  # Truncate the SVD basis at this size. No truncation if zero.
+  rb_max: 500

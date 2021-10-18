@@ -6,6 +6,10 @@ Generate a shell script for the 5 steps in waveform dataset generation.
 import argparse
 import os
 import textwrap
+import yaml
+
+from generate_parameters import PARAMETERS_FILE_BASIS, PARAMETERS_FILE_DATASET,\
+    BASIS_FILE, SETTINGS_FILE, DATASET_FILE
 
 
 def parse_args():
@@ -52,14 +56,6 @@ def parse_args():
         
             ./env/bin/create_waveform_generation_bash_script
                 --waveforms_directory ./datasets/waveforms/
-                --parameters_file_basis parameters_basis.npy
-                --parameters_file_dataset parameters_dataset.npy
-                --basis_file polarization_basis.npy
-                --settings_file settings.yaml
-                --dataset_file waveform_dataset.hdf5
-                --num_wfs_basis 10000
-                --num_wfs_dataset 50000
-                --rb_max 500
                 --env_path ./env
                 --num_threads 4
                 
@@ -75,19 +71,6 @@ def parse_args():
     # dingo script arguments
     parser.add_argument('--waveforms_directory', type=str, required=True,
                         help='Directory containing waveform data, basis, and parameter file.')
-    parser.add_argument('--parameters_file_basis', type=str, required=True,
-                        help='Parameter file for basis waveforms.')
-    parser.add_argument('--parameters_file_dataset', type=str, required=True,
-                        help='Parameter file for compressed production waveforms.')
-    parser.add_argument('--basis_file', type=str, default='polarization_basis.npy')
-    parser.add_argument('--settings_file', type=str, default='settings.yaml')
-    parser.add_argument('--dataset_file', type=str, default='waveform_dataset.hdf5')
-    parser.add_argument('--num_wfs_basis', type=int, default=1000,
-                        help='Number of waveforms to generate for building the SVD basis')
-    parser.add_argument('--num_wfs_dataset', type=int, default=10000,
-                        help='Number of waveforms to generate for the waveform dataset.')
-    parser.add_argument('--rb_max', type=int, default=0,
-                        help='Truncate the SVD basis at this size. No truncation if zero.')
     parser.add_argument('--num_threads', type=int, default=1,
                         help='Number of threads to use in pool for parallel waveform generation')
     parser.add_argument('--env_path', type=str, help='Absolute path to the dingo Python environment. '
@@ -109,7 +92,7 @@ def generate_parameter_command(n_samples: int, parameters_file: str,
 
     return f'''python3 $SCRIPT_DIR/{script} \\
     --waveforms_directory {args.waveforms_directory} \\
-    --settings_file {args.settings_file} \\
+    --settings_file {SETTINGS_FILE} \\
     --parameters_file {parameters_file} \\
     --n_samples {n_samples} > {out_file} 2>&1\n'''
 
@@ -127,7 +110,7 @@ def generate_waveforms_command(parameters_file: str, num_wfs: int,
 
     cmd = f'''python3 $SCRIPT_DIR/{script} \\
     --waveforms_directory {args.waveforms_directory} \\
-    --settings_file {args.settings_file} \\
+    --settings_file {SETTINGS_FILE} \\
     --parameters_file {parameters_file} \\
     --process_id 0 \\
     --num_wf_per_process {num_wfs} \\
@@ -135,7 +118,7 @@ def generate_waveforms_command(parameters_file: str, num_wfs: int,
     if use_compression and basis_file is not None:
         cmd += f''' \\
     --use_compression \\
-    --basis_file {args.basis_file}'''
+    --basis_file {basis_file}'''
     cmd += f' > {out_file} 2>&1\n'
     return cmd
 
@@ -152,7 +135,7 @@ def generate_basis_command(parameters_file: str,
     return f'''python3 $SCRIPT_DIR/{script} \\
     --waveforms_directory {args.waveforms_directory} \\
     --parameters_file {parameters_file} \\
-    --basis_file {args.basis_file} \\
+    --basis_file {BASIS_FILE} \\
     --rb_max {args.rb_max} > {out_file} 2>&1\n'''
 
 
@@ -166,15 +149,22 @@ def collect_waveform_dataset(args: argparse.Namespace):
 
     return f'''python3 $SCRIPT_DIR/{script} \\
     --waveforms_directory {args.waveforms_directory} \\
-    --parameters_file {args.parameters_file_dataset} \\
-    --basis_file {args.basis_file} \\
-    --settings_file {args.settings_file} \\
-    --dataset_file {args.dataset_file} > {out_file} 2>&1\n'''
+    --parameters_file {PARAMETERS_FILE_DATASET} \\
+    --basis_file {BASIS_FILE} \\
+    --settings_file {SETTINGS_FILE} \\
+    --dataset_file {DATASET_FILE} > {out_file} 2>&1\n'''
 
 
 def main():
     args = parse_args()
     script_dir = f'{args.env_path}/bin'
+
+    settings_path = os.path.join(args.waveforms_directory, SETTINGS_FILE)
+    with open(settings_path, 'r') as fp:
+        settings = yaml.safe_load(fp)
+
+    # Add the parameters from the settings file to args
+    args.__dict__.update(settings['waveform_dataset_generation_settings'])
 
     with open(args.script_name, 'w') as fp:
         doc = f'#!/bin/bash\n\nsource {args.env_path}/bin/activate\n'
@@ -183,20 +173,20 @@ def main():
 
         doc += '\necho "Step (1): Generate parameter files"\n'
         doc += generate_parameter_command(args.num_wfs_basis,
-                                          args.parameters_file_basis, args)
+                                          PARAMETERS_FILE_BASIS, args)
         doc += '\n'
         doc += generate_parameter_command(args.num_wfs_dataset,
-                                          args.parameters_file_dataset, args)
+                                          PARAMETERS_FILE_DATASET, args)
 
         doc += '\necho "Step (2): Generate waveforms for SVD basis"\n'
-        doc += generate_waveforms_command(args.parameters_file_basis, args.num_wfs_basis, args)
+        doc += generate_waveforms_command(PARAMETERS_FILE_BASIS, args.num_wfs_basis, args)
 
         doc += '\necho "Step (3): Build SVD basis from polarizations"\n'
-        doc += generate_basis_command(args.parameters_file_basis, args)
+        doc += generate_basis_command(PARAMETERS_FILE_BASIS, args)
 
         doc += '\necho "Step (4): Generate production waveforms and project onto SVD basis"\n'
-        doc += generate_waveforms_command(args.parameters_file_dataset, args.num_wfs_dataset, args,
-                                          use_compression=True, basis_file=args.basis_file)
+        doc += generate_waveforms_command(PARAMETERS_FILE_DATASET, args.num_wfs_dataset, args,
+                                          use_compression=True, basis_file=BASIS_FILE)
 
         doc += '\necho "Step (5): Consolidate waveform dataset"\n'
         doc += collect_waveform_dataset(args)

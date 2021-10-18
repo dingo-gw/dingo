@@ -9,9 +9,6 @@ $D/env/bin/create_waveform_generation_bash_script \
 --basis_file polarization_basis.npy \
 --settings_file settings.yaml \
 --dataset_file waveform_dataset.hdf5 \
---num_wfs_basis 10000 \
---num_wfs_dataset 50000 \
---rb_max 500 \
 --env_path $D/env \
 --num_threads 16
 

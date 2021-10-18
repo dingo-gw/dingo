@@ -17,6 +17,14 @@ from dingo.api import build_prior, structured_array_from_dict_of_arrays
 from dingo.api import setup_logger, logger
 
 
+# Fixed file names
+PARAMETERS_FILE_BASIS = 'parameters_basis.npy'
+PARAMETERS_FILE_DATASET = 'parameters_dataset.npy'
+BASIS_FILE = 'polarization_basis.npy'
+SETTINGS_FILE = 'settings.yaml'
+DATASET_FILE = 'waveform_dataset.hdf5'
+
+
 def generate_parameters(settings_file: str, n_samples: int, parameters_file: str):
     """
     Parse settings file, set up priors, and draw samples from the intrinsic prior.
