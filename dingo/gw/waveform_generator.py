@@ -146,7 +146,8 @@ class WaveformGenerator:
                          'a_1', 'a_2', 'mass_1', 'mass_2', 'f_ref', 'phase')
         param_values_in = [p[k] for k in param_keys_in]
         iota_and_cart_spins = bilby_to_lalsimulation_spins(*param_values_in)
-        iota, s1x, s1y, s1z, s2x, s2y, s2z = [self._convert_to_scalar(x) for x in iota_and_cart_spins]
+        iota, s1x, s1y, s1z, s2x, s2y, s2z = \
+            [float(self._convert_to_scalar(x)) for x in iota_and_cart_spins]
 
         # Convert to SI units
         p['mass_1'] *= lal.MSUN_SI
@@ -207,6 +208,8 @@ class WaveformGenerator:
         #   lal_params, approximant
 
         # Sanity check types of arguments
+        # parameters_lal = tuple(np.array(parameters_lal[:18], dtype=np.float32)) \
+        #                  + parameters_lal[18:]
         check_floats = all(map(lambda x: isinstance(x, float), parameters_lal[:18]))
         check_int = isinstance(parameters_lal[19], int)
         # parameters_lal[18]  # lal_params could be None or a LALDict
