@@ -1,23 +1,10 @@
 import logging
 import os
 import sys
-import yaml
-from dingo.gw.waveform_dataset import WaveformDataset
 
 """
 Utility functions
 """
-
-def get_info(filepath, object = WaveformDataset):
-    """
-    Prints metadata of object stored in filepath in yaml style.
-    TODO: Generalize to loaded objects
-    """
-    if object == WaveformDataset:
-        wfd = WaveformDataset(filepath)
-        print(yaml.dump(wfd.data_settings))
-    else:
-        raise NotImplementedError
 
 def check_directory_exists_and_if_not_mkdir(directory, logger):
     """Checks if the given directory exists and creates it if it does not exist
