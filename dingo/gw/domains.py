@@ -1,3 +1,5 @@
+from typing import Dict
+
 import numpy as np
 from functools import lru_cache
 from abc import ABC, abstractmethod
@@ -55,11 +57,15 @@ class UniformFrequencyDomain(Domain):
     """
     domain_type = "uFD"
 
-    def __init__(self, f_min: float, f_max: float, delta_f: float, window_factor: float):
+    def __init__(self, f_min: float, f_max: float, delta_f: float,
+                 window_factor: float, truncation_range: tuple = None):
         self._f_min = f_min
         self._f_max = f_max
         self._delta_f = delta_f
         self._window_factor = window_factor
+        self._truncation_range = truncation_range
+        if self._truncation_range is not None:
+            f_lower, f_upper = self._truncation_range
 
     @lru_cache()
     def __len__(self):
@@ -218,3 +224,19 @@ class NonuniformFrequencyDomain(Domain):
     # It probably doesn't make sense to inherit from FrequencyDomain; we'll need this for low mass binaries
     pass
 
+
+def build_domain(domain_settings: Dict):
+    """
+    Instantiate a domain class from settings.
+
+    Parameters
+    ----------
+    domain_settings:
+        A dictionary of settings for the domain class.
+    """
+    if domain_settings['name'] == 'UniformFrequencyDomain':
+        return domains.UniformFrequencyDomain(**domain_settings['kwargs'])
+    elif domain_settings['name'] == 'TimeDomain':
+        return domains.TimeDomain(**domain_settings['kwargs'])
+    else:
+        raise ValueError(f'Domain {domain_settings["name"]} not implemented.')

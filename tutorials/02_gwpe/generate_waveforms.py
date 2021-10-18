@@ -17,7 +17,7 @@ import numpy as np
 import yaml
 from multiprocessing import Pool, freeze_support
 
-from dingo.api import build_domain
+from dingo.gw.domains import build_domain
 from dingo.gw.waveform_dataset import WaveformDataset, SVDBasis
 from dingo.gw.waveform_generator import WaveformGenerator
 from dingo.api import setup_logger, logger

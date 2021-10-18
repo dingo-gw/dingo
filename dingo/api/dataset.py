@@ -1,4 +1,3 @@
-import dingo.gw.domains as domains
 from dingo.gw.parameters import GWPriorDict, generate_parameter_prior_dictionary, generate_default_prior_dictionary
 from typing import Dict, List, Union
 import pandas as pd
@@ -54,23 +53,6 @@ def build_prior(p_intrinsic: Dict[str, Union[List, str]],
               'geocent_time_ref': geocent_time_ref}
 
     return GWPriorDict(parameter_prior_dict, **kwargs)
-
-
-def build_domain(domain_settings: Dict):
-    """
-    Instantiate a domain class from settings.
-
-    Parameters
-    ----------
-    domain_settings:
-        A dictionary of settings for the domain class.
-    """
-    if domain_settings['name'] == 'UniformFrequencyDomain':
-        return domains.UniformFrequencyDomain(**domain_settings['kwargs'])
-    elif domain_settings['name'] == 'TimeDomain':
-        return domains.TimeDomain(**domain_settings['kwargs'])
-    else:
-        raise ValueError(f'Domain {domain_settings["name"]} not implemented.')
 
 
 def structured_array_from_dict_of_arrays(d: Dict[str, np.ndarray], fmt: str = 'f8'):
