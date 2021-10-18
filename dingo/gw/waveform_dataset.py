@@ -314,8 +314,8 @@ class WaveformDataset(Dataset):
             V = fp['rb_matrix_V'][:]
             self._Vh = V.T.conj()
 
-        settings = ast.literal_eval(fp.attrs['settings'])
-        self.domain = build_domain(settings['domain_settings'])
+        self.data_settings = ast.literal_eval(fp.attrs['settings'])
+        self.domain = build_domain(self.data_settings['domain_settings'])
 
         fp.close()
 
