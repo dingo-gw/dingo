@@ -23,6 +23,11 @@ class Domain(ABC):
         """Array of bins in the domain"""
         pass
 
+    # @abstractmethod
+    # def time_translate_strain_data(self, strain_data, dt) -> np.ndarray:
+    #     """Time translate strain data by dt seconds."""
+    #     pass
+
     @property
     @abstractmethod
     def noise_std(self) -> float:
@@ -69,9 +74,26 @@ class UniformFrequencyDomain(Domain):
         self._f_max = f_max
         self._delta_f = delta_f
         self._window_factor = window_factor
+        self.initialize_truncation(truncation_range)
+
+    def initialize_truncation(self, truncation_range):
+        """Initializes truncation with truncation_range."""
         self._truncation_range = truncation_range
         if self._truncation_range is not None:
             f_lower, f_upper = self._truncation_range
+            if not self._f_min <= f_lower < f_upper <= self._f_max:
+                raise ValueError(
+                    f'Invalid truncation range [{f_lower},{f_upper}] for '
+                    f'frequency range [{self._f_min},{self._f_max}].')
+            self._truncation_idx_lower = round(f_lower/self._delta_f)
+            self._truncation_idx_upper = round(f_upper/self._delta_f)
+            self._truncation_num_bins = self._truncation_idx_upper - \
+                                        self._truncation_idx_lower + 1
+            self._truncated_sample_frequencies = \
+                self[self._truncation_idx_lower:self._truncation_idx_upper]
+
+    def truncate_data(self, data):
+        pass
 
     @lru_cache()
     def __len__(self):
