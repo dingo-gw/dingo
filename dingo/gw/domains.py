@@ -235,8 +235,8 @@ def build_domain(domain_settings: Dict):
         A dictionary of settings for the domain class.
     """
     if domain_settings['name'] == 'UniformFrequencyDomain':
-        return domains.UniformFrequencyDomain(**domain_settings['kwargs'])
+        return UniformFrequencyDomain(**domain_settings['kwargs'])
     elif domain_settings['name'] == 'TimeDomain':
-        return domains.TimeDomain(**domain_settings['kwargs'])
+        return TimeDomain(**domain_settings['kwargs'])
     else:
         raise ValueError(f'Domain {domain_settings["name"]} not implemented.')
