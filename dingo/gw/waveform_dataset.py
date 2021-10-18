@@ -314,7 +314,8 @@ class WaveformDataset(Dataset):
             V = fp['rb_matrix_V'][:]
             self._Vh = V.T.conj()
 
-        self.domain = build_domain(ast.literal_eval(fp.attrs['domain_dict']))
+        settings = ast.literal_eval(fp.attrs['settings'])
+        self.domain = build_domain(settings['domain_settings'])
 
         fp.close()
 
@@ -427,7 +428,7 @@ class WaveformDataset(Dataset):
         else:
             self._write_dataframe_to_hdf5(fp, 'waveform_polarizations', self._waveform_polarizations)
 
-        fp.attrs['domain_dict'] = str(self.domain.domain_dict)
+        fp.attrs['settings'] = str({'domain_settings': self.domain.domain_dict})
 
         fp.close()
 
