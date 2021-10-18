@@ -208,8 +208,6 @@ class WaveformGenerator:
         #   lal_params, approximant
 
         # Sanity check types of arguments
-        # parameters_lal = tuple(np.array(parameters_lal[:18], dtype=np.float32)) \
-        #                  + parameters_lal[18:]
         check_floats = all(map(lambda x: isinstance(x, float), parameters_lal[:18]))
         check_int = isinstance(parameters_lal[19], int)
         # parameters_lal[18]  # lal_params could be None or a LALDict
