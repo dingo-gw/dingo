@@ -1,4 +1,6 @@
 import os
+from os.path import join, dirname
+import yaml
 import pickle
 from typing import Dict, Union, Tuple
 from multiprocessing import Pool
@@ -14,6 +16,7 @@ from tqdm import tqdm
 from dingo.api import structured_array_from_dict_of_arrays
 from dingo.gw.parameters import GWPriorDict
 from dingo.gw.waveform_generator import WaveformGenerator
+from dingo.gw.domains import build_domain
 
 
 class SVDBasis:
@@ -309,6 +312,10 @@ class WaveformDataset(Dataset):
         if 'rb_matrix_V' in fp.keys():
             V = fp['rb_matrix_V'][:]
             self._Vh = V.T.conj()
+
+        with open(join(dirname(filename), 'settings.yaml'), 'r') as f_settings:
+            settings = yaml.safe_load(f_settings)
+            self.domain = build_domain(settings['domain_settings'])
 
         fp.close()
 
