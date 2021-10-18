@@ -72,6 +72,8 @@ def consolidate_dataset(num_chunks: int, basis_file: str,
         settings = yaml.safe_load(f_settings)
     fp.attrs['settings'] = ''.join(f'{k}: {v}' for k, v in settings.items())
 
+    fp.attrs['domain_settings'] = str(settings['domain_settings'])
+
     fp.close()
     logger.info('Done')
 

@@ -1,6 +1,5 @@
 import os
-from os.path import join, dirname
-import yaml
+import ast
 import pickle
 from typing import Dict, Union, Tuple
 from multiprocessing import Pool
@@ -154,6 +153,8 @@ class WaveformDataset(Dataset):
         """
         self._priors = priors
         self._waveform_generator = waveform_generator
+        if self._waveform_generator is not None:
+            self.domain = self._waveform_generator.domain
         self._parameter_samples = None
         self._waveform_polarizations = None
         if dataset_file is not None:
@@ -313,9 +314,7 @@ class WaveformDataset(Dataset):
             V = fp['rb_matrix_V'][:]
             self._Vh = V.T.conj()
 
-        # with open(join(dirname(filename), 'settings.yaml'), 'r') as f_settings:
-        #     settings = yaml.safe_load(f_settings)
-        #     self.domain = build_domain(settings['domain_settings'])
+        self.domain = build_domain(ast.literal_eval(fp.attrs['domain_dict']))
 
         fp.close()
 
@@ -337,7 +336,7 @@ class WaveformDataset(Dataset):
         group_name : str
             The name of the HDF5 group the data will be written to.
         df : pd.DataFrame
-            A pandas DataFrame containing thw data.
+            A pandas DataFrame containing the data.
         """
         keys = list(df.keys())
         data = df.to_numpy().T
@@ -423,12 +422,13 @@ class WaveformDataset(Dataset):
             grp = fp.create_group('waveform_polarizations')
             for k, v in pol_arrays.items():
                 h_proj = basis.fseries_to_basis_coefficients(v)
-                # fp.create_dataset(k, data=h_proj)
                 grp.create_dataset(str(k), data=h_proj)
             fp.create_dataset('rb_matrix_V', data=basis.V)
-
         else:
             self._write_dataframe_to_hdf5(fp, 'waveform_polarizations', self._waveform_polarizations)
+
+        fp.attrs['domain_dict'] = str(self.domain.domain_dict)
+
         fp.close()
 
 
