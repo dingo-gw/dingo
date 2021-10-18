@@ -38,8 +38,11 @@ def test_waveform_dataset_save_load(setup_waveform_generator):
     wd.save(filename)
 
     # Now load this dataset using a second waveform dataset object
-    wd2 = WaveformDataset(priors=priors, waveform_generator=waveform_generator)
+    wd2 = WaveformDataset()
     wd2.load(filename)
+
+    # check that domain is loaded correctly
+    assert wd2.domain.__dict__ == wd.domain.__dict__
 
     # Check that polarization data is unchanged
     idx = np.random.randint(0, n_waveforms)
