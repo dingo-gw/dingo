@@ -313,9 +313,9 @@ class WaveformDataset(Dataset):
             V = fp['rb_matrix_V'][:]
             self._Vh = V.T.conj()
 
-        with open(join(dirname(filename), 'settings.yaml'), 'r') as f_settings:
-            settings = yaml.safe_load(f_settings)
-            self.domain = build_domain(settings['domain_settings'])
+        # with open(join(dirname(filename), 'settings.yaml'), 'r') as f_settings:
+        #     settings = yaml.safe_load(f_settings)
+        #     self.domain = build_domain(settings['domain_settings'])
 
         fp.close()
 
@@ -418,11 +418,15 @@ class WaveformDataset(Dataset):
         if compress_data:
             pol_arrays = {k: np.vstack(v.to_numpy().T) for k, v in self._waveform_polarizations.items()}
             basis = SVDBasis()
-            basis.generate_basis(pol_arrays['h_plus'], n_rb)
+            basis.generate_basis(np.concatenate((pol_arrays['h_plus'],
+                                                 pol_arrays['h_cross'])), n_rb)
+            grp = fp.create_group('waveform_polarizations')
             for k, v in pol_arrays.items():
                 h_proj = basis.fseries_to_basis_coefficients(v)
-                fp.create_dataset(k, data=h_proj)
+                # fp.create_dataset(k, data=h_proj)
+                grp.create_dataset(str(k), data=h_proj)
             fp.create_dataset('rb_matrix_V', data=basis.V)
+
         else:
             self._write_dataframe_to_hdf5(fp, 'waveform_polarizations', self._waveform_polarizations)
         fp.close()
