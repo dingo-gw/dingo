@@ -3,6 +3,7 @@ from typing import Dict
 import numpy as np
 from functools import lru_cache
 from abc import ABC, abstractmethod
+from .gwutils import *
 
 
 class Domain(ABC):
@@ -86,14 +87,26 @@ class UniformFrequencyDomain(Domain):
                     f'Invalid truncation range [{f_lower},{f_upper}] for '
                     f'frequency range [{self._f_min},{self._f_max}].')
             self._truncation_idx_lower = round(f_lower/self._delta_f)
-            self._truncation_idx_upper = round(f_upper/self._delta_f)
+            self._truncation_idx_upper = round(f_upper/self._delta_f) + 1
             self._truncation_num_bins = self._truncation_idx_upper - \
-                                        self._truncation_idx_lower + 1
+                                        self._truncation_idx_lower
             self._truncated_sample_frequencies = \
                 self[self._truncation_idx_lower:self._truncation_idx_upper]
 
-    def truncate_data(self, data):
-        pass
+    def truncate_data(self, data, axis=None):
+        """Truncate data to self._truncation_range. If axis is not specified
+        it is detected automatically."""
+        if self._truncation_range is None:
+            raise ValueError('Truncation not initialized. Call '
+                             'self.initialize_truncation with appropriate '
+                             'range.')
+        if axis is None:
+            axis = find_axis(data, len(self))
+        if data.shape[axis] != len(self):
+            raise ValueError(f'Truncation along axis {axis} failed. Dim '
+                             f'{data.shape[axis]} instead of {len(self)}.')
+        return truncate_array(data, axis, self._truncation_idx_lower,
+                              self._truncation_idx_upper)
 
     @lru_cache()
     def __len__(self):

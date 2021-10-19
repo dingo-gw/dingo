@@ -43,11 +43,32 @@ def test_FD_domain_dict(uniform_FD_params):
 def test_FD_truncation(uniform_FD_params):
     p = uniform_FD_params
     domain = UniformFrequencyDomain(**p)
+    N = len(domain)
     domain.initialize_truncation((40,1024))
     assert domain._truncated_sample_frequencies[0] == 40
     assert domain._truncated_sample_frequencies[-1] == 1024
-    data = np.sin(domain()/100)
-    # TODO: finish test
+    # test that array can be truncated with automatic axis selection
+    a = np.random.rand(3, N, 4, 2)
+    a_truncated = domain.truncate_data(a)
+    assert a_truncated.shape[1] == domain._truncation_num_bins
+    assert a_truncated.shape[0] == a.shape[0]
+    assert a_truncated.shape[2:] == a.shape[2:]
+    assert np.all(a[:,domain._truncation_idx_lower:domain._truncation_idx_upper]
+                  == a_truncated)
+    assert not np.all(a[:,0:domain._truncation_num_bins] == a_truncated)
+    # test that axis can be selected manually
+    a_truncated_2 = domain.truncate_data(a, axis=1)
+    assert np.all(a_truncated == a_truncated_2)
+    # test that errors are raised as intended
+    with pytest.raises(ValueError):
+        domain.truncate_data(a, axis=0)
+    with pytest.raises(ValueError):
+        domain.truncate_data(np.zeros((10, N-1, N+1)))
+    with pytest.raises(ValueError):
+        domain.truncate_data(np.zeros((10, N, N)))
+    # test that manual axis selection works in the above case
+    assert domain.truncate_data(np.zeros((10, N, N)), axis=1).shape == \
+           (10, domain._truncation_num_bins, N)
 
 
 def test_TD():
