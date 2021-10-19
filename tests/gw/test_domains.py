@@ -70,6 +70,28 @@ def test_FD_truncation(uniform_FD_params):
     assert domain.truncate_data(np.zeros((10, N, N)), axis=1).shape == \
            (10, domain._truncation_num_bins, N)
 
+def test_FD_time_translation(uniform_FD_params):
+    p = uniform_FD_params
+    domain = UniformFrequencyDomain(**p)
+    domain.initialize_truncation((40,1024))
+    dt = 1e-3
+    data = np.sin(np.outer(np.arange(3)+1, domain())/100) + \
+           1j * np.cos(np.outer(np.arange(3)+1, domain())/100)
+    data_translated = domain.time_translate_data(data, dt)
+    # check that time translation has correct inverse
+    assert not np.allclose(data_translated, data)
+    assert np.allclose(domain.time_translate_data(data_translated, -dt), data)
+    # check that truncation and time translation commutes
+    data_truncated = domain.truncate_data(data)
+    data_truncated_translated = domain.time_translate_data(data_truncated, dt)
+    data_translated_truncated = domain.truncate_data(data_translated)
+    assert np.all(data_translated_truncated == data_truncated_translated)
+    # import matplotlib.pyplot as plt
+    # plt.plot(data[0].real)
+    # plt.plot(data_translated[0].real)
+    # plt.plot(domain.time_translate_data(data_translated, -dt)[0].real)
+    # plt.show()
+
 
 def test_TD():
     time_duration, sampling_rate = 4.0, 1.0/4096.0

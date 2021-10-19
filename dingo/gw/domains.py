@@ -108,6 +108,41 @@ class UniformFrequencyDomain(Domain):
         return truncate_array(data, axis, self._truncation_idx_lower,
                               self._truncation_idx_upper)
 
+    def time_translate_data(self, data, dt):
+        """Time translate complex frequency domain data by dt [in seconds]."""
+        if not isinstance(data, np.ndarray):
+            raise NotImplementedError(f'Only implemented for numpy arrays, '
+                                      f'got {type(data)}.')
+        if not np.iscomplexobj(data):
+            raise ValueError('Method expects complex frequency domain data, '
+                             'got real array.')
+        # find out whether data is truncated or not
+        ax0 = np.where(np.array(data.shape) == len(self))[0]
+        if self._truncation_range is not None:
+            ax1 = np.where(np.array(data.shape) == self._truncation_num_bins)[0]
+        if len(ax0) + len(ax1) != 1:
+            raise NotImplementedError('Can not identify unique frequency axis.')
+        elif len(ax0) == 1:
+            f = self.__call__()
+        else:
+            f = self._truncated_sample_frequencies
+        # shift data
+        return data * np.exp(- 2j * np.pi * dt * f)
+
+    # def time_translate_batch(self, data, dt, axis=None):
+    #     # h_d * np.exp(- 2j * np.pi * time_shift * self.sample_frequencies)
+    #     if isinstance(data, np.ndarray):
+    #         if np.iscomplexobj(data):
+    #             pass
+    #         else:
+    #             pass
+    #     elif isinstance(data, torch.Tensor):
+    #         pass
+    #     else:
+    #         raise NotImplementedError(f'Method only implemented for np arrays '
+    #                                   f'and torch tensors, got {type(data)}')
+
+
     @lru_cache()
     def __len__(self):
         """Number of frequency bins in the domain [0, f_max]"""
