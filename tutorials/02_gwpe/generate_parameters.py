@@ -54,10 +54,6 @@ def generate_parameters(settings_file: str, n_samples: int, parameters_file: str
     # Draw prior samples
     parameter_samples_dict = prior.sample(size=n_samples)
 
-    # TODO: Do we want to apply the default_conversion_function to expand the samples?
-    # Probably not needed, since parameters alone have enough information...
-    # But then we might need to do it elsewhere
-
     # Save parameter file
     _, file_extension = os.path.splitext(parameters_file)
     if file_extension == '.pkl':

@@ -16,6 +16,7 @@ class WaveformGenerator:
     def __init__(self,
                  approximant: str,
                  domain: Domain,
+                 reference_frequency: float,
                  mode_list: List[Tuple] = None):
         """
         Parameters
@@ -27,6 +28,8 @@ class WaveformGenerator:
             Domain object that specifies on which physical domain the
             waveform polarizations will be generated, e.g. Fourier
             domain, time domain.
+        reference_frequency : float
+            Reference frequency for the waveforms
         mode_list : List[Tuple]
             A list of waveform (ell, m) modes to include when generating
             the polarizations.
@@ -41,6 +44,8 @@ class WaveformGenerator:
             raise ValueError('domain should be an instance of a subclass of Domain, but got', type(domain))
         else:
             self.domain = domain
+
+        self.reference_frequency = reference_frequency
 
         self.lal_params = None
         if mode_list is not None:
@@ -89,6 +94,9 @@ class WaveformGenerator:
             raise ValueError('parameters should be a dictionary, but got', parameters)
         elif not isinstance(list(parameters.values())[0], float):
             raise ValueError('parameters dictionary must contain floats', parameters)
+
+        # Include reference frequency with the parameters
+        parameters['f_ref'] = self.reference_frequency
 
         # Convert to lalsimulation parameters according to the specified domain
         parameters_lal = self._convert_parameters_to_lal_frame(parameters, self.lal_params)
