@@ -15,18 +15,20 @@ def uniform_fd_domain():
 @pytest.fixture
 def aligned_spin_wf_parameters():
     parameters = {'chirp_mass': 34.0, 'mass_ratio': 0.35, 'chi_1': 0.2, 'chi_2': 0.1,
-                  'theta_jn': 1.57, 'f_ref': 20.0, 'phase': 0.0, 'luminosity_distance': 1.0}
+                  'theta_jn': 1.57, 'phase': 0.0, 'luminosity_distance': 1.0}
+    f_ref = 20.0
     approximant = 'IMRPhenomPv2'
-    return parameters, approximant
+    return parameters, f_ref, approximant
 
 @pytest.fixture
 def precessing_spin_wf_parameters():
     parameters = {'chirp_mass': 34.0, 'mass_ratio': 0.35,
                   'a_1': 0.5, 'a_2': 0.2, 'tilt_1': 2*np.pi/3.0, 'tilt_2': np.pi/4.0,
                   'phi_12': np.pi/4.0, 'phi_jl': np.pi/3.0,
-                  'theta_jn': 1.57, 'f_ref': 100.0, 'phase': 0.0, 'luminosity_distance': 1.0}
+                  'theta_jn': 1.57, 'phase': 0.0, 'luminosity_distance': 1.0}
+    f_ref = 100.0
     approximant = 'IMRPhenomPv2'
-    return parameters, approximant
+    return parameters, f_ref, approximant
 
 @pytest.fixture(params=["aligned_spin_wf_parameters", "precessing_spin_wf_parameters"])
 def wf_parameters(request):
@@ -37,9 +39,9 @@ def test_waveform_generator_FD(uniform_fd_domain, wf_parameters):
     """Basic check that a waveform can be generated without error and
     it is consistent with the domain."""
     domain = uniform_fd_domain
-    parameters, approximant = wf_parameters
+    parameters, f_ref, approximant = wf_parameters
 
-    wf_gen = WaveformGenerator(approximant, domain)
+    wf_gen = WaveformGenerator(approximant, domain, f_ref)
     wf_dict = wf_gen.generate_hplus_hcross(parameters)
 
     assert len(wf_dict['h_plus']) == len(domain)
