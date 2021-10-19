@@ -29,7 +29,7 @@ intrinsic_prior:
   theta_jn: default
   # reference values for fixed (extrinsic) parameters
   luminosity_distance: 100.0 # Mpc
-  t_geocent: 0.0 # s
+  geocent_time: 0.0 # s
 
 reference_frequency: 20.0  # Hz
 
