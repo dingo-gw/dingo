@@ -209,7 +209,6 @@ if __name__ == "__main__":
 
 
 
-    from dingo.gw.parameters import GWPriorDict
     from dingo.gw.domains import UniformFrequencyDomain
     from dingo.gw.detector_network import DetectorNetwork, RandomProjectToDetectors
     from dingo.gw.noise import AddNoiseAndWhiten

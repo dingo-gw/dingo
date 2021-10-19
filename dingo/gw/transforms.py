@@ -7,7 +7,6 @@ from dingo.gw.domains import Domain, UniformFrequencyDomain
 from dingo.gw.detector_network import DetectorNetwork, RandomProjectToDetectors
 from dingo.gw.noise import AddNoiseAndWhiten, noise_summary_function
 from dingo.gw.waveform_generator import WaveformGenerator
-from dingo.gw.parameters import GWPriorDict
 
 """
 Collect transforms which do not naturally belong with other classes,

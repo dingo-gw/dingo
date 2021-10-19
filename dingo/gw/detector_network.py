@@ -4,7 +4,6 @@ from typing import Dict, List, Union
 from bilby.gw.detector import Interferometer, InterferometerList
 
 from dingo.gw.domains import Domain
-from dingo.gw.parameters import GWPriorDict
 from dingo.gw.prior_split import BBHExtrinsicPriorDict
 
 
@@ -13,6 +12,7 @@ class DetectorNetwork:
 
     Coupled to our Domain classes.
     TODO: extend to use PSDs from a database
+    TODO: set up with a reference time?
     """
 
     def __init__(self, ifo_list: List[str],
@@ -239,6 +239,7 @@ if __name__ == "__main__":
     """A visual test."""
     from dingo.gw.domains import UniformFrequencyDomain
     from dingo.gw.waveform_generator import WaveformGenerator
+    from dingo.gw.prior_split import default_extrinsic_dict
     import matplotlib.pyplot as plt
 
     approximant = 'IMRPhenomPv2'
@@ -251,7 +252,7 @@ if __name__ == "__main__":
     waveform_polarizations = WG.generate_hplus_hcross(parameters)
 
     det_network = DetectorNetwork(["H1", "L1"], domain, start_time=0)
-    priors = GWPriorDict()
+    priors = BBHExtrinsicPriorDict(default_extrinsic_dict)
     rp_det = RandomProjectToDetectors(det_network, priors)
     strain_dict = rp_det({'parameters': parameters, 'waveform': waveform_polarizations})
 

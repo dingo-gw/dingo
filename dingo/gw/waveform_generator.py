@@ -260,7 +260,6 @@ class WaveformGenerator:
 if __name__ == "__main__":
     """A visual test."""
     from dingo.gw.domains import Domain, UniformFrequencyDomain
-    from dingo.gw.parameters import GWPriorDict
     import matplotlib.pyplot as plt
 
     # approximant = 'IMRPhenomPv2'
