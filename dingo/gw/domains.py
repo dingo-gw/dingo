@@ -24,10 +24,10 @@ class Domain(ABC):
         """Array of bins in the domain"""
         pass
 
-    # @abstractmethod
-    # def time_translate_strain_data(self, strain_data, dt) -> np.ndarray:
-    #     """Time translate strain data by dt seconds."""
-    #     pass
+    @abstractmethod
+    def time_translate_data(self, data, dt) -> np.ndarray:
+        """Time translate strain data by dt seconds."""
+        pass
 
     @property
     @abstractmethod
@@ -280,6 +280,9 @@ class TimeDomain(Domain):
         noise would at each point go to infinity, hence the delta_t factor.
         """
         return 1.0 / np.sqrt(2.0 * self.delta_t)
+
+    def time_translate_data(self, data, dt) -> np.ndarray:
+        raise NotImplementedError
 
 
 class PCADomain(Domain):
