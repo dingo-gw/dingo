@@ -44,8 +44,9 @@ def test_FD_truncation(uniform_FD_params):
     p = uniform_FD_params
     domain = UniformFrequencyDomain(**p)
     domain.initialize_truncation((40,1024))
-    assert domain._truncated_sample_frequencies[0,-1] == 40, 1024
-    data = np.sin(domain/100)
+    assert domain._truncated_sample_frequencies[0] == 40
+    assert domain._truncated_sample_frequencies[-1] == 1024
+    data = np.sin(domain()/100)
     # TODO: finish test
 
 
