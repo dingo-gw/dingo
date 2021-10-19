@@ -81,6 +81,7 @@ class BBHExtrinsicPriorDict(BBHPriorDict):
 
 # TODO: Add latex labels, names
 
+
 default_extrinsic_dict = {
     'dec': 'bilby.core.prior.Cosine(minimum=-np.pi/2, maximum=np.pi/2)',
     'ra': 'bilby.core.prior.Uniform(minimum=0., maximum=2*np.pi, boundary="periodic")',

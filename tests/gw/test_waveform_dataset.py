@@ -20,7 +20,7 @@ def setup_waveform_generator():
 
 def test_waveform_dataset_generation(setup_waveform_generator):
     waveform_generator, priors = setup_waveform_generator
-    wd = WaveformDataset(priors=priors, waveform_generator=waveform_generator)
+    wd = WaveformDataset(prior=priors, waveform_generator=waveform_generator)
     n_waveforms = 10
     wd.generate_dataset(size=n_waveforms)
     assert len(wd) == n_waveforms
@@ -31,7 +31,7 @@ def test_waveform_dataset_save_load(setup_waveform_generator):
     waveform_generator, priors = setup_waveform_generator
 
     # Generate a dataset using the first waveform dataset object
-    wd = WaveformDataset(priors=priors, waveform_generator=waveform_generator)
+    wd = WaveformDataset(prior=priors, waveform_generator=waveform_generator)
     n_waveforms = 17
     wd.generate_dataset(size=n_waveforms)
     filename = 'waveform_dataset.h5'

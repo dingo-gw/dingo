@@ -353,7 +353,7 @@ class WaveformTransformationTraining:
         dictionary in ToNetworkInput().
         """
         rp_det = RandomProjectToDetectors(self.det_network, self.priors)
-        wd = WaveformDataset(priors=F.priors, waveform_generator=waveform_generator,
+        wd = WaveformDataset(prior=F.priors, waveform_generator=waveform_generator,
                              transform=rp_det)
         # Generate intrinsic parameters and waveform polarizations
         wd.generate_dataset(size=1)
@@ -457,7 +457,7 @@ if __name__ == "__main__":
 
     approximant = 'IMRPhenomXPHM'
     waveform_generator = WaveformGenerator(approximant, F.domain)
-    wd = WaveformDataset(priors=F.priors, waveform_generator=waveform_generator, transform=F())
+    wd = WaveformDataset(prior=F.priors, waveform_generator=waveform_generator, transform=F())
     print('F.priors', F.priors)
     n_waveforms = 17
     wd.generate_dataset(size=n_waveforms)

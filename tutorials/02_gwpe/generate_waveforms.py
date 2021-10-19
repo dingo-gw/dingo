@@ -39,7 +39,7 @@ def setup_waveform_dataset(settings_file: str) -> WaveformDataset:
 
     domain = build_domain(settings['domain_settings'])
     waveform_generator = WaveformGenerator(settings['waveform_generator_settings']['approximant'], domain)
-    wd = WaveformDataset(priors=None, waveform_generator=waveform_generator, transform=None)
+    wd = WaveformDataset(prior=None, waveform_generator=waveform_generator, transform=None)
     return wd
 
 
