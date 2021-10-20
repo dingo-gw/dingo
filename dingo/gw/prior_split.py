@@ -27,9 +27,10 @@ class BBHExtrinsicPriorDict(BBHPriorDict):
         out_sample = fill_from_fixed_priors(sample, self)
         out_sample, _ = convert_to_lal_binary_black_hole_parameters(out_sample)
 
-        # The previous call always adds phi_jl, phi_12 parameters. These are not needed so they can be deleted.
-        del out_sample['phi_jl']
-        del out_sample['phi_12']
+        # The previous call sometimes adds phi_jl, phi_12 parameters. These are
+        # not needed so they can be deleted.
+        if 'phi_jl' in out_sample.keys(): del out_sample['phi_jl']
+        if 'phi_12' in out_sample.keys(): del out_sample['phi_12']
 
         return out_sample
 
