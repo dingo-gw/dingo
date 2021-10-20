@@ -7,7 +7,6 @@ from dingo.gw.domains import Domain, UniformFrequencyDomain
 from dingo.gw.detector_network import DetectorNetwork, RandomProjectToDetectors
 from dingo.gw.noise import AddNoiseAndWhiten, noise_summary_function
 from dingo.gw.waveform_generator import WaveformGenerator
-from dingo.gw.parameters import GWPriorDict
 
 """
 Collect transforms which do not naturally belong with other classes,
@@ -353,7 +352,7 @@ class WaveformTransformationTraining:
         dictionary in ToNetworkInput().
         """
         rp_det = RandomProjectToDetectors(self.det_network, self.priors)
-        wd = WaveformDataset(priors=F.priors, waveform_generator=waveform_generator,
+        wd = WaveformDataset(prior=F.priors, waveform_generator=waveform_generator,
                              transform=rp_det)
         # Generate intrinsic parameters and waveform polarizations
         wd.generate_dataset(size=1)
@@ -457,7 +456,7 @@ if __name__ == "__main__":
 
     approximant = 'IMRPhenomXPHM'
     waveform_generator = WaveformGenerator(approximant, F.domain)
-    wd = WaveformDataset(priors=F.priors, waveform_generator=waveform_generator, transform=F())
+    wd = WaveformDataset(prior=F.priors, waveform_generator=waveform_generator, transform=F())
     print('F.priors', F.priors)
     n_waveforms = 17
     wd.generate_dataset(size=n_waveforms)

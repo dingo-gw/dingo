@@ -1,7 +1,8 @@
 from dingo.gw.domains import UniformFrequencyDomain
-from dingo.gw.parameters import GWPriorDict
 from dingo.gw.waveform_generator import WaveformGenerator
 from dingo.gw.waveform_dataset import WaveformDataset
+from bilby.gw.prior import BBHPriorDict
+from dingo.gw.prior_split import default_intrinsic_dict
 
 import pytest
 import numpy as np
@@ -11,16 +12,15 @@ import numpy as np
 def setup_waveform_generator():
     domain_kwargs = {'f_min': 20.0, 'f_max': 4096.0, 'delta_f': 1.0 / 4.0, 'window_factor': 1.0}
     domain = UniformFrequencyDomain(**domain_kwargs)
-    priors = GWPriorDict(geocent_time_ref=1126259642.413, luminosity_distance_ref=500.0,
-                         reference_frequency=20.0)
+    priors = BBHPriorDict(default_intrinsic_dict)
     approximant = 'IMRPhenomXPHM'
-    waveform_generator = WaveformGenerator(approximant, domain)
+    waveform_generator = WaveformGenerator(approximant, domain, reference_frequency=20.0)
     return waveform_generator, priors
 
 
 def test_waveform_dataset_generation(setup_waveform_generator):
     waveform_generator, priors = setup_waveform_generator
-    wd = WaveformDataset(priors=priors, waveform_generator=waveform_generator)
+    wd = WaveformDataset(prior=priors, waveform_generator=waveform_generator)
     n_waveforms = 10
     wd.generate_dataset(size=n_waveforms)
     assert len(wd) == n_waveforms
@@ -31,7 +31,7 @@ def test_waveform_dataset_save_load(setup_waveform_generator):
     waveform_generator, priors = setup_waveform_generator
 
     # Generate a dataset using the first waveform dataset object
-    wd = WaveformDataset(priors=priors, waveform_generator=waveform_generator)
+    wd = WaveformDataset(prior=priors, waveform_generator=waveform_generator)
     n_waveforms = 17
     wd.generate_dataset(size=n_waveforms)
     filename = 'waveform_dataset.h5'

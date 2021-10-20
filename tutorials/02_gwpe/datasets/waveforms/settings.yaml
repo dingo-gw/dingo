@@ -12,25 +12,26 @@ waveform_generator_settings:
   approximant: IMRPhenomPv2 # SEOBNRv4PHM
   f_ref: 20.0
 
-# settings for prior over parameters
-prior_settings:
-  # prior for intrinsic parameters of the dataset
-  intrinsic_parameters:
-    mass_1: [Uniform, 10, 80]
-    mass_2: [Uniform, 10, 80]
-    phase: default
-    a_1: [Uniform, 0, 0.88]
-    a_2: [Uniform, 0, 0.88]
-    tilt_1: default
-    tilt_2: default
-    phi_12: default
-    phi_jl: default
-    theta_jn: default
-  # reference values for extrinsic parameters
-  # all non-specified ones will be set to zero
-  extrinsic_parameters_reference_values:
-    luminosity_distance: 100.0 # Mpc
-    reference_frequency: 20.0  # Hz
+# settings for intrinsic prior over parameters
+intrinsic_prior:
+  # prior for non-fixed parameters
+  mass_1: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)
+  mass_2: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)
+  mass_ratio: bilby.core.prior.Uniform(minimum=0.125, maximum=1.0)
+  chirp_mass: bilby.core.prior.Uniform(minimum=25.0, maximum=100.0)
+  phase: default
+  a_1: bilby.core.prior.Uniform(minimum=0.0, maximum=0.88)
+  a_2: bilby.core.prior.Uniform(minimum=0.0, maximum=0.88)
+  tilt_1: default
+  tilt_2: default
+  phi_12: default
+  phi_jl: default
+  theta_jn: default
+  # reference values for fixed (extrinsic) parameters
+  luminosity_distance: 100.0 # Mpc
+  geocent_time: 0.0 # s
+
+reference_frequency: 20.0  # Hz
 
 waveform_dataset_generation_settings:
   # Number of waveforms to generate for building the SVD basis

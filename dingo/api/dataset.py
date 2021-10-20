@@ -1,58 +1,35 @@
-from dingo.gw.parameters import GWPriorDict, generate_parameter_prior_dictionary, generate_default_prior_dictionary
 from typing import Dict, List, Union
 import pandas as pd
 import numpy as np
+from copy import deepcopy
+from dingo.gw.prior_split import default_intrinsic_dict
+from bilby.gw.prior import BBHPriorDict
 
 
-def build_prior(p_intrinsic: Dict[str, Union[List, str]],
-                p_extrinsic: Dict[str, float], add_extrinsic_priors: bool = True):
+def build_prior_with_defaults(prior_settings: Dict[str, str]):
     """
-    Generate Dictionary of prior instances for intrinsic parameters.
+    Generate BBHPriorDict based on dictionary of prior settings,
+    allowing for default values.
 
     Parameters
     ----------
-    p_intrinsic: Dict
-        A dictionary containing prior options for intrinsic parameters
+    prior_settings: Dict
+        A dictionary containing prior definitions for intrinsic parameters
         Allowed values for each parameter are:
             * 'default' to use a default prior
-            * a list [prior_class_name, minimum, maximum] for a custom prior
-
-    p_extrinsic: Dict
-        A dictionary containing reference values for extrinsic parameters
-
-    add_extrinsic_priors: bool
-        Add default priors for ra, dec, psi, d_L if they have not been specified.
-
-    Note that default priors are added for certain missing parameters, but not
-    for others. Check the warning messages that are being generated in these cases.
-      * If mass priors are missing, default mass priors are added (including constraints)
-      * If priors for ra, dec, psi are missing, default priors are added.
-        If add_extrinsic_priors == True, then no warning messages will be shown.
-      * If the luminosity distance prior is missing a default prior is added.
-        If add_extrinsic_priors == True, then no warning messages will be shown.
-      * If spin priors are incomplete generating waveforms will fail.
+            * a string for a custom prior, e.g.,
+               "Uniform(minimum=10.0, maximum=80.0, name=None, latex_label=None, unit=None, boundary=None)"
 
     Depending on the particular prior choices the dimensionality of a
     parameter sample obtained from the returned GWPriorDict will vary.
     """
-    default_prior = generate_default_prior_dictionary()
-    parameter_dict = {
-        k: {'class_name': v[0], 'minimum': v[1], 'maximum': v[2]}
-        for k, v in p_intrinsic.items() if isinstance(v, List)}
-    parameter_prior_dict = generate_parameter_prior_dictionary(parameter_dict)
-    parameter_prior_dict_default = {k: default_prior[k] for k, v in p_intrinsic.items() if v == 'default'}
-    parameter_prior_dict.update(parameter_prior_dict_default)
 
-    if add_extrinsic_priors:
-        # Avoid warning messages for extrinsic parameters: d_L, ra, dec, psi
-        parameter_prior_dict = GWPriorDict.add_ra_dec_psi_dL(parameter_prior_dict)
+    full_prior_settings = deepcopy(prior_settings)
+    for k, v in prior_settings.items():
+        if v == 'default':
+            full_prior_settings[k] = default_intrinsic_dict[k]
 
-    geocent_time_ref = 0  # dummy value
-    kwargs = {'luminosity_distance_ref': p_extrinsic['luminosity_distance'],
-              'reference_frequency': p_extrinsic['reference_frequency'],
-              'geocent_time_ref': geocent_time_ref}
-
-    return GWPriorDict(parameter_prior_dict, **kwargs)
+    return BBHPriorDict(full_prior_settings)
 
 
 def structured_array_from_dict_of_arrays(d: Dict[str, np.ndarray], fmt: str = 'f8'):

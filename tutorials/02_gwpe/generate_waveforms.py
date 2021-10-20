@@ -38,8 +38,10 @@ def setup_waveform_dataset(settings_file: str) -> WaveformDataset:
         settings = yaml.safe_load(fp)
 
     domain = build_domain(settings['domain_settings'])
-    waveform_generator = WaveformGenerator(settings['waveform_generator_settings']['approximant'], domain)
-    wd = WaveformDataset(priors=None, waveform_generator=waveform_generator, transform=None)
+    waveform_generator = WaveformGenerator(settings['waveform_generator_settings']['approximant'],
+                                           domain,
+                                           settings['reference_frequency'])
+    wd = WaveformDataset(prior=None, waveform_generator=waveform_generator, transform=None)
     return wd
 
 

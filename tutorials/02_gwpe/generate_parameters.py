@@ -13,7 +13,7 @@ import pickle
 import numpy as np
 import yaml
 
-from dingo.api import build_prior, structured_array_from_dict_of_arrays
+from dingo.api import build_prior_with_defaults, structured_array_from_dict_of_arrays
 from dingo.api import setup_logger, logger
 
 
@@ -48,13 +48,11 @@ def generate_parameters(settings_file: str, n_samples: int, parameters_file: str
         settings = yaml.safe_load(fp)
 
     # Build prior distribution
-    prior_settings = settings['prior_settings']
-    prior = build_prior(prior_settings['intrinsic_parameters'],
-                        prior_settings['extrinsic_parameters_reference_values'],
-                        add_extrinsic_priors=True)
+    prior_settings = settings['intrinsic_prior']
+    prior = build_prior_with_defaults(prior_settings)
 
     # Draw prior samples
-    parameter_samples_dict = prior.sample_intrinsic(size=n_samples, add_reference_values=True)
+    parameter_samples_dict = prior.sample(size=n_samples)
 
     # Save parameter file
     _, file_extension = os.path.splitext(parameters_file)

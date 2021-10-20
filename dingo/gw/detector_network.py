@@ -4,7 +4,7 @@ from typing import Dict, List, Union
 from bilby.gw.detector import Interferometer, InterferometerList
 
 from dingo.gw.domains import Domain
-from dingo.gw.parameters import GWPriorDict
+from dingo.gw.prior_split import BBHExtrinsicPriorDict
 
 
 class DetectorNetwork:
@@ -12,11 +12,12 @@ class DetectorNetwork:
 
     Coupled to our Domain classes.
     TODO: extend to use PSDs from a database
+    TODO: set up with a reference time?
     """
 
     def __init__(self, ifo_list: List[str],
                  domain: Domain,
-                 start_time: float = 0.0):
+                 reference_time: float):
         """
         Parameters
         ----------
@@ -25,8 +26,8 @@ class DetectorNetwork:
             The available instruments are: H1, L1, V1, GEO600, CE
         domain: Domain
             The physical domain on which waveforms are defined.
-        start_time: float
-            The GPS start-time of the data
+        reference_time: float
+            The GPS reference time for the detectors
         # FIXME: check: what does start_time do compared to the geocentric reference time in F+, Fx?
         """
         self.ifos = InterferometerList(ifo_list)
@@ -167,7 +168,7 @@ class RandomProjectToDetectors:
     """
 
     def __init__(self, detector_network: DetectorNetwork,
-                 extrinsic_prior: GWPriorDict):
+                 extrinsic_prior: BBHExtrinsicPriorDict):
         """
         Parameters
         ----------
@@ -175,10 +176,9 @@ class RandomProjectToDetectors:
             A DetectorNetwork object. Its Domain object needs to be
             consistent with the physical domain on which the
             waveform polarizations passed to __call__() are defined.
-        extrinsic_prior: GWPriorDict
+        extrinsic_prior: BBHExtrinsicPriorDict
             The prior distribution from which extrinsic samples will
-            be drawn. Intrinsic parameters can be present and will be
-            ignored.
+            be drawn.
         """
 
         self.detector_network = detector_network
@@ -208,7 +208,7 @@ class RandomProjectToDetectors:
         waveform_parameters = waveform_dict['parameters']
 
         # Draw extrinsic parameter sample
-        extrinsic_parameters = self.extrinsic_prior.sample_extrinsic()
+        extrinsic_parameters = self.extrinsic_prior.sample()
         if not set(extrinsic_parameters.keys()) >= {'ra', 'dec', 'geocent_time', 'psi'}:
             missing_keys = {'ra', 'dec', 'geocent_time', 'psi'} - set(extrinsic_parameters.keys())
             raise ValueError('Extrinsic prior samples are missing keys', missing_keys)
@@ -239,6 +239,7 @@ if __name__ == "__main__":
     """A visual test."""
     from dingo.gw.domains import UniformFrequencyDomain
     from dingo.gw.waveform_generator import WaveformGenerator
+    from dingo.gw.prior_split import default_extrinsic_dict
     import matplotlib.pyplot as plt
 
     approximant = 'IMRPhenomPv2'
@@ -251,7 +252,7 @@ if __name__ == "__main__":
     waveform_polarizations = WG.generate_hplus_hcross(parameters)
 
     det_network = DetectorNetwork(["H1", "L1"], domain, start_time=0)
-    priors = GWPriorDict()
+    priors = BBHExtrinsicPriorDict(default_extrinsic_dict)
     rp_det = RandomProjectToDetectors(det_network, priors)
     strain_dict = rp_det({'parameters': parameters, 'waveform': waveform_polarizations})
 

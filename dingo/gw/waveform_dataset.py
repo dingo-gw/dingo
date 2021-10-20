@@ -13,9 +13,9 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 
 from dingo.api import structured_array_from_dict_of_arrays
-from dingo.gw.parameters import GWPriorDict
 from dingo.gw.waveform_generator import WaveformGenerator
 from dingo.gw.domains import build_domain
+from bilby.gw.prior import BBHPriorDict
 
 
 class SVDBasis:
@@ -131,7 +131,7 @@ class WaveformDataset(Dataset):
     """
 
     def __init__(self, dataset_file: str = None,
-                 priors: GWPriorDict = None,
+                 prior: BBHPriorDict = None,
                  waveform_generator: WaveformGenerator = None,
                  transform=None):
         """
@@ -139,11 +139,11 @@ class WaveformDataset(Dataset):
         ----------
         dataset_file : str
             Load the waveform dataset from this HDF5 file.
-        priors : GWPriorDict
-            The GWPriorDict instance from which to draw parameter samples.
-            It needs to contain intrinsic waveform parameters (and reference values)
+        prior : BBHPriorDict
+            The BBHPriorDict instance from which to draw parameter samples.
+            It needs to contain intrinsic waveform parameters (and reference values as delta distributions)
             for generating waveform polarizations. Later we will also draw
-            extrinsic parameters from it.
+            extrinsic parameters from a BBHExtrinsicPriorDict.
             If the prior is unspecified, sampling the prior is not supported,
             and read_parameter_samples() must be called before generate_dataset().
         waveform_generator : WaveformGenerator
@@ -151,7 +151,7 @@ class WaveformDataset(Dataset):
         transform :
             Transformations to apply.
         """
-        self._priors = priors
+        self._prior = prior
         self._waveform_generator = waveform_generator
         if self._waveform_generator is not None:
             self.domain = self._waveform_generator.domain
@@ -196,34 +196,25 @@ class WaveformDataset(Dataset):
         # with open("df_info.txt", "w", encoding="utf-8") as f:
         #     f.write(s)
 
-    def sample_intrinsic(self, size: int = 0, add_reference_values: bool = True):
+    def sample_prior(self, size: int = 0, add_reference_values: bool = True):
         """
-        Draw intrinsic prior samples
+        Draw (intrinsic) prior samples.
 
         Notes:
           * Since we're using bilby's prior classes we are automatically
             using numpy random number generator
           * The order of returned parameters is random
-          * The fixed f_ref and d_L reference values are added automatically
-            in the call to sample_intrinsic. In the case of d_L make sure not
-            to confuse these fixed values with samples drawn from a typical
+          * The fixed t_geocent and d_L reference values must be included in the prior.
+            Make sure not to confuse these fixed values with samples drawn from a typical
             extrinsic distribution.
 
         Parameters
         ----------
         size : int
             The number of samples to draw.
-
-        add_reference_values : bool
-            If True, add reference frequency, distance and time to the output dict.
-            These are fixed values needed, not r.v.'s, but are added for each sample.
-            Reference frequency and distance are needed for waveform generation, and
-            reference time is used when projecting onto the detectors.
         """
-        parameter_samples_dict = self._priors.sample_intrinsic(size=size,
-            add_reference_values=add_reference_values)
+        parameter_samples_dict = self._prior.sample(size=size)
         self._parameter_samples = pd.DataFrame(parameter_samples_dict)
-
 
     def read_parameter_samples(self, filename: str, sl: slice = None):
         """
@@ -276,7 +267,7 @@ class WaveformDataset(Dataset):
             optional pool of workers for parallel generation
         """
         if self._parameter_samples is None:
-            self.sample_intrinsic(size)
+            self.sample_prior(size)
 
         print('Generating waveform polarizations ...')  # Switch to logging
         if pool is not None:
@@ -378,7 +369,6 @@ class WaveformDataset(Dataset):
         pol_arrays = {k: np.vstack(v.to_numpy().T) for k, v in self._waveform_polarizations.items()}
         return {k: basis.fseries_to_basis_coefficients(v) for k, v in pol_arrays.items()}
 
-
     def save(self, filename: str = 'waveform_dataset.h5',
              parameter_fmt: str = 'structured_array',
              compress_data: bool = True, n_rb: int = 0):
@@ -433,25 +423,22 @@ class WaveformDataset(Dataset):
         fp.close()
 
 
-
-
 if __name__ == "__main__":
     """Explore chaining transforms together and applying these to a waveform dataset."""
     from dingo.gw.domains import UniformFrequencyDomain
     from dingo.gw.detector_network import DetectorNetwork, RandomProjectToDetectors
     from dingo.gw.noise import AddNoiseAndWhiten
+    from dingo.gw.prior_split import default_intrinsic_dict
     from transforms import StandardizeParameters, ToNetworkInput, Compose
 
     domain_kwargs = {'f_min': 20.0, 'f_max': 4096.0, 'delta_f': 1.0 / 4.0, 'window_factor': 1.0}
     domain = UniformFrequencyDomain(**domain_kwargs)
-    priors = GWPriorDict(geocent_time_ref=1126259642.413, luminosity_distance_ref=500.0,
-                         reference_frequency=20.0)
+    priors = BBHPriorDict(default_intrinsic_dict)
     approximant = 'IMRPhenomXPHM'
     waveform_generator = WaveformGenerator(approximant, domain)
 
-
     # Generate a dataset using the first waveform dataset object
-    wd = WaveformDataset(priors=priors, waveform_generator=waveform_generator)
+    wd = WaveformDataset(prior=priors, waveform_generator=waveform_generator)
     n_waveforms = 17
     wd.generate_dataset(size=n_waveforms)
 
@@ -460,12 +447,12 @@ if __name__ == "__main__":
     det_network = DetectorNetwork(["H1", "L1"], domain, start_time=priors.reference_geocentric_time)
     rp_det = RandomProjectToDetectors(det_network, priors)
     data = wd[1]
-    #{'parameters': parameters, 'waveform': waveform_polarizations}
+    # {'parameters': parameters, 'waveform': waveform_polarizations}
     strain_dict = rp_det(data)  # needs to take a dict instead
     print(strain_dict)  # {'H1':..., 'L1':...}
 
     # Example of applying projection of detectors as a transformation
-    wd = WaveformDataset(priors=priors, waveform_generator=waveform_generator, transform=rp_det)
+    wd = WaveformDataset(prior=priors, waveform_generator=waveform_generator, transform=rp_det)
     n_waveforms = 17
     wd.generate_dataset(size=n_waveforms)
 
@@ -499,7 +486,7 @@ if __name__ == "__main__":
         ToNetworkInput(domain)
     ])
 
-    wd = WaveformDataset(priors=priors, waveform_generator=waveform_generator, transform=transform)
+    wd = WaveformDataset(prior=priors, waveform_generator=waveform_generator, transform=transform)
     n_waveforms = 17
     wd.generate_dataset(size=n_waveforms)
     print(wd[9])
