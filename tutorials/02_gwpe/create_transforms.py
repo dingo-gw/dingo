@@ -20,7 +20,8 @@ class SampleExtrinsicParameters(object):
         self.extrinsic_prior_dict = extrinsic_prior_dict
         self.prior = BBHExtrinsicPriorDict(extrinsic_prior_dict)
 
-    def __call__(self, sample):
+    def __call__(self, input_sample):
+        sample = input_sample.copy()
         extrinsic_parameters = self.prior.sample()
         sample['extrinsic_parameters'] = extrinsic_parameters
         return sample
@@ -39,7 +40,8 @@ class GetDetectorTimes(object):
         self.ifo_list = ifo_list
         self.ref_time = ref_time
 
-    def __call__(self, sample):
+    def __call__(self, input_sample):
+        sample = input_sample.copy()
         ra = sample['extrinsic_parameters']['ra']
         dec = sample['extrinsic_parameters']['dec']
         geocent_time = sample['extrinsic_parameters']['geocent_time']
@@ -68,7 +70,8 @@ class ProjectOntoDetectors(object):
         self.domain = domain
         self.ref_time = ref_time
 
-    def __call__(self, sample):
+    def __call__(self, input_sample):
+        sample = input_sample.copy()
         try:
             d_ref = sample['parameters']['luminosity_distance']
             d_new = sample['extrinsic_parameters']['luminosity_distance']
