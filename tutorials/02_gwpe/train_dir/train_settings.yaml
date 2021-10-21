@@ -1,0 +1,12 @@
+# settings for transforms
+transform_settings:
+  detectors:
+    - H1
+    - L1
+  extrinsic_prior:
+    dec: default
+    ra: default
+    geocent_time: bilby.core.prior.Uniform(minimum=-0.1, maximum=0.1)
+    psi: default
+    luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0)
+  ref_time: 1126259462.391
