@@ -34,7 +34,7 @@ class BBHExtrinsicPriorDict(BBHPriorDict):
 
         return out_sample
 
-    def mean_std(self, keys=([]), sample_size=50000):
+    def mean_std(self, keys=([]), sample_size=50000, force_numerical=False):
         """
         Calculate the mean and standard deviation over the prior.
 
@@ -52,22 +52,25 @@ class BBHExtrinsicPriorDict(BBHPriorDict):
         mean = {}
         std = {}
 
-        # First try to calculate analytically (works for standard priors)
-        estimation_keys = []
-        for key in keys:
-            p = self[key]
-            # A few analytic cases
-            if isinstance(p, Uniform):
-                mean[key] = (p.maximum + p.minimum) / 2.0
-                std[key] = np.sqrt((p.maximum - p.minimum)**2.0 / 12.0)
-            elif isinstance(p, Sine) and p.minimum == 0.0 and p.maximum == np.pi:
-                mean[key] = np.pi / 2.0
-                std[key] = np.sqrt(0.25 * (np.pi**2) - 2)
-            elif isinstance(p, Cosine) and p.minimum == -np.pi/2 and p.maximum == np.pi/2:
-                mean[key] = 0.0
-                std[key] = np.sqrt(0.25 * (np.pi**2) - 2)
-            else:
-                estimation_keys.append(key)
+        if not force_numerical:
+            # First try to calculate analytically (works for standard priors)
+            estimation_keys = []
+            for key in keys:
+                p = self[key]
+                # A few analytic cases
+                if isinstance(p, Uniform):
+                    mean[key] = (p.maximum + p.minimum) / 2.0
+                    std[key] = np.sqrt((p.maximum - p.minimum)**2.0 / 12.0)
+                elif isinstance(p, Sine) and p.minimum == 0.0 and p.maximum == np.pi:
+                    mean[key] = np.pi / 2.0
+                    std[key] = np.sqrt(0.25 * (np.pi**2) - 2)
+                elif isinstance(p, Cosine) and p.minimum == -np.pi/2 and p.maximum == np.pi/2:
+                    mean[key] = 0.0
+                    std[key] = np.sqrt(0.25 * (np.pi**2) - 2)
+                else:
+                    estimation_keys.append(key)
+        else:
+            estimation_keys = keys
 
         # For remaining parameters, estimate numerically
         if len(estimation_keys) > 0:
