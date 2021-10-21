@@ -40,10 +40,14 @@ class BBHExtrinsicPriorDict(BBHPriorDict):
 
         Parameters
         ----------
-        keys:
-            A list of desired parameters
-        sample_size:
-            For nonanalytic priors, number samples to use to estimate the result.
+        keys: list(str)
+            A list of desired parameter names
+        sample_size: int
+            For nonanalytic priors, number of samples to use to estimate the
+            result.
+        force_numerical: bool (False)
+            Whether to force a numerical estimation of result, even when
+            analytic results are available (useful for testing)
 
         Returns dictionaries for the means and standard deviations.
 
