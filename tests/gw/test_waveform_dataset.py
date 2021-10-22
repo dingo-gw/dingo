@@ -18,36 +18,19 @@ def setup_waveform_generator():
     return waveform_generator, priors
 
 
-def test_waveform_dataset_generation(setup_waveform_generator):
-    waveform_generator, priors = setup_waveform_generator
-    wd = WaveformDataset(prior=priors, waveform_generator=waveform_generator)
-    n_waveforms = 10
-    wd.generate_dataset(size=n_waveforms)
-    assert len(wd) == n_waveforms
-    assert len(wd[9]['waveform']['h_plus']) == len(waveform_generator.domain)
-
-
-def test_waveform_dataset_save_load(setup_waveform_generator):
-    waveform_generator, priors = setup_waveform_generator
-
-    # Generate a dataset using the first waveform dataset object
-    wd = WaveformDataset(prior=priors, waveform_generator=waveform_generator)
-    n_waveforms = 17
-    wd.generate_dataset(size=n_waveforms)
-    filename = 'waveform_dataset.h5'
-    wd.save(filename)
-
-    # Now load this dataset using a second waveform dataset object
-    wd2 = WaveformDataset()
-    wd2.load(filename)
-
-    # check that domain is loaded correctly
-    assert wd2.domain.__dict__ == wd.domain.__dict__
-
-    # Check that polarization data is unchanged
-    idx = np.random.randint(0, n_waveforms)
-    assert all([np.allclose(wd[idx]['parameters'][k], wd2[idx]['parameters'][k])
-                for k in wd[idx]['parameters'].keys()])
-    h0 = np.linalg.norm(wd[idx]['waveform']['h_plus'])
-    assert np.allclose(wd[idx]['waveform']['h_plus'] / h0, wd2[idx]['waveform']['h_plus'] / h0)
-    assert np.allclose(wd[idx]['waveform']['h_cross'] / h0, wd2[idx]['waveform']['h_cross'] / h0)
+# def test_load_waveform_dataset(setup_waveform_generator):
+#     # FIXME: call generation script and activate test
+#     waveform_generator, priors = setup_waveform_generator
+#     root = '/Users/mpuer/Documents/NDE/dingo-devel/'
+#     path = f'{root}/tutorials/02_gwpe/datasets/waveforms/waveform_dataset.hdf5'
+#     wd = WaveformDataset(prior=priors, waveform_generator=waveform_generator)
+#     wd.load(path)
+#
+#     assert len(wd) > 0
+#     el = wd[0]
+#     assert isinstance(el, dict)
+#     assert list(el.keys()) == ['parameters', 'waveform']
+#     assert isinstance(el['parameters'], dict)
+#     assert isinstance(el['waveform'], dict)
+#     assert isinstance(el['waveform']['h_plus'], np.ndarray)
+#     assert isinstance(el['waveform']['h_cross'], np.ndarray)
