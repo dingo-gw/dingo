@@ -118,6 +118,7 @@ class UniformFrequencyDomain(Domain):
                              'got real array.')
         # find out whether data is truncated or not
         ax0 = np.where(np.array(data.shape) == len(self))[0]
+        ax1 = []
         if self._truncation_range is not None:
             ax1 = np.where(np.array(data.shape) == self._truncation_num_bins)[0]
         if len(ax0) + len(ax1) != 1:
