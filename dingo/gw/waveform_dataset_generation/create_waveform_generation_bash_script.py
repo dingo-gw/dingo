@@ -8,11 +8,11 @@ import os
 import textwrap
 import yaml
 
-from generate_parameters import PARAMETERS_FILE_BASIS, PARAMETERS_FILE_DATASET,\
+from .generate_parameters import PARAMETERS_FILE_BASIS, PARAMETERS_FILE_DATASET,\
     BASIS_FILE, SETTINGS_FILE, DATASET_FILE
 
 
-def parse_args():
+def parse_args(args=None):
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=textwrap.dedent("""\
@@ -78,35 +78,32 @@ def parse_args():
     parser.add_argument('--script_name', type=str, default='waveform_generation_script.sh')
     parser.add_argument('--logdir', type=str, default='log')
 
-    return parser.parse_args()
+    return parser.parse_args(args=args)
 
 
 def generate_parameter_command(n_samples: int, parameters_file: str,
-                               args: argparse.Namespace):
+                               args: argparse.Namespace, log_file):
     """
     Generate command string for 'generate_parameters' task.
     """
     script = 'generate_parameters'
     id_str = script + '_' + os.path.basename(parameters_file).split('.')[0]
-    out_file = os.path.join(args.logdir, id_str+'.log')
 
     return f'''python3 $SCRIPT_DIR/{script} \\
     --waveforms_directory {args.waveforms_directory} \\
     --settings_file {SETTINGS_FILE} \\
     --parameters_file {parameters_file} \\
-    --n_samples {n_samples} > {out_file} 2>&1\n'''
+    --n_samples {n_samples} > {log_file} 2>&1\n'''
 
 
 def generate_waveforms_command(parameters_file: str, num_wfs: int,
-                               args: argparse.Namespace,
+                               args: argparse.Namespace, log_file,
                                use_compression=False, basis_file=None):
     """
     Generate command string for 'generate_waveforms' task.
     """
-
     script = 'generate_waveforms'
     id_str = script + '_' + os.path.basename(parameters_file).split('.')[0]
-    out_file = os.path.join(args.logdir, id_str+'.log')
 
     cmd = f'''python3 $SCRIPT_DIR/{script} \\
     --waveforms_directory {args.waveforms_directory} \\
@@ -119,45 +116,42 @@ def generate_waveforms_command(parameters_file: str, num_wfs: int,
         cmd += f''' \\
     --use_compression \\
     --basis_file {basis_file}'''
-    cmd += f' > {out_file} 2>&1\n'
+    cmd += f' > {log_file} 2>&1\n'
     return cmd
 
 
 def generate_basis_command(parameters_file: str,
-                           args: argparse.Namespace):
+                           args: argparse.Namespace, log_file):
     """
     Generate command string for 'build_SVD_basis' task.
     """
-
     script = 'build_SVD_basis'
-    out_file = os.path.join(args.logdir, script+'.log')
 
     return f'''python3 $SCRIPT_DIR/{script} \\
     --waveforms_directory {args.waveforms_directory} \\
     --parameters_file {parameters_file} \\
     --basis_file {BASIS_FILE} \\
-    --rb_max {args.rb_max} > {out_file} 2>&1\n'''
+    --rb_max {args.rb_max} > {log_file} 2>&1\n'''
 
 
-def collect_waveform_dataset(args: argparse.Namespace):
+def collect_waveform_dataset(args: argparse.Namespace, log_file):
     """
     Generate command string for 'collect_waveform_dataset' task.
     """
 
     script = 'collect_waveform_dataset'
-    out_file = os.path.join(args.logdir, script+'.log')
 
     return f'''python3 $SCRIPT_DIR/{script} \\
     --waveforms_directory {args.waveforms_directory} \\
     --parameters_file {PARAMETERS_FILE_DATASET} \\
     --basis_file {BASIS_FILE} \\
     --settings_file {SETTINGS_FILE} \\
-    --dataset_file {DATASET_FILE} > {out_file} 2>&1\n'''
+    --dataset_file {DATASET_FILE} > {log_file} 2>&1\n'''
 
 
-def main():
-    args = parse_args()
+def generate_workflow(args):
     script_dir = f'{args.env_path}/bin'
+    log_file = os.path.join(args.logdir, 'create_waveform_generation_bash_script.log')
 
     settings_path = os.path.join(args.waveforms_directory, SETTINGS_FILE)
     with open(settings_path, 'r') as fp:
@@ -173,27 +167,34 @@ def main():
 
         doc += '\necho "Step (1): Generate parameter files"\n'
         doc += generate_parameter_command(args.num_wfs_basis,
-                                          PARAMETERS_FILE_BASIS, args)
+                                          PARAMETERS_FILE_BASIS, args, log_file)
         doc += '\n'
         doc += generate_parameter_command(args.num_wfs_dataset,
-                                          PARAMETERS_FILE_DATASET, args)
+                                          PARAMETERS_FILE_DATASET, args, log_file)
 
         doc += '\necho "Step (2): Generate waveforms for SVD basis"\n'
-        doc += generate_waveforms_command(PARAMETERS_FILE_BASIS, args.num_wfs_basis, args)
+        doc += generate_waveforms_command(PARAMETERS_FILE_BASIS,
+                                          args.num_wfs_basis, args, log_file)
 
         doc += '\necho "Step (3): Build SVD basis from polarizations"\n'
-        doc += generate_basis_command(PARAMETERS_FILE_BASIS, args)
+        doc += generate_basis_command(PARAMETERS_FILE_BASIS, args, log_file)
 
         doc += '\necho "Step (4): Generate production waveforms and project onto SVD basis"\n'
-        doc += generate_waveforms_command(PARAMETERS_FILE_DATASET, args.num_wfs_dataset, args,
-                                          use_compression=True, basis_file=BASIS_FILE)
+        doc += generate_waveforms_command(PARAMETERS_FILE_DATASET, args.num_wfs_dataset,
+                                          args, log_file, use_compression=True,
+                                          basis_file=BASIS_FILE)
 
         doc += '\necho "Step (5): Consolidate waveform dataset"\n'
-        doc += collect_waveform_dataset(args)
+        doc += collect_waveform_dataset(args, log_file)
         doc += '\n'
         fp.writelines(doc)
 
     print(f'Workflow written to {args.script_name}.')
+
+
+def main():
+    args = parse_args()
+    generate_workflow(args)
 
 
 if __name__ == "__main__":

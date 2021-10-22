@@ -69,21 +69,23 @@ def generate_parameters(settings_file: str, n_samples: int, parameters_file: str
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Generate waveform parameter file.')
+    parser = argparse.ArgumentParser(description='Generate waveform parameter file by sampling from the prior.')
     parser.add_argument('--waveforms_directory', type=str, required=True,
                         help='Directory containing the settings file which specifies the prior.')
     parser.add_argument('--settings_file', type=str, default='settings.yaml')
     parser.add_argument('--parameters_file', type=str, default='parameters.npy',
                         help='Write parameter samples to this file.')
-    parser.add_argument('--n_samples', type=int, default=1)
+    parser.add_argument('--n_samples', type=int, default=1,
+                        help='Number of parameter samples to draw.')
     args = parser.parse_args()
 
     os.chdir(args.waveforms_directory)
     setup_logger(outdir='.', label='generate_parameters', log_level="INFO")
-    logger.info('Executing generate_parameters:')
+    logger.info('*** Executing generate_parameters ***')
 
     generate_parameters(args.settings_file, args.n_samples, args.parameters_file)
     logger.info(f'Successfully generated {args.n_samples} parameters and saved to {args.parameters_file}.')
+    logger.info('*** Done with generate_parameters ***\n')
 
 
 if __name__ == "__main__":

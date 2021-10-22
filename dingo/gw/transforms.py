@@ -346,19 +346,6 @@ class WaveformTransformationTraining:
             ToNetworkInput(self.domain)
         ])
 
-    def get_parameter_list(self, waveform_generator: WaveformGenerator) -> List:
-        """
-        List of parameter labels which is stripped from the parameter
-        dictionary in ToNetworkInput().
-        """
-        rp_det = RandomProjectToDetectors(self.det_network, self.priors)
-        wd = WaveformDataset(prior=F.priors, waveform_generator=waveform_generator,
-                             transform=rp_det)
-        # Generate intrinsic parameters and waveform polarizations
-        wd.generate_dataset(size=1)
-        # Sample extrinsic parameters (and compute strain)
-        return list(wd[0]['parameters'].keys())
-
 
 class GenerateObservationTransform:
     """
@@ -456,14 +443,12 @@ if __name__ == "__main__":
 
     approximant = 'IMRPhenomXPHM'
     waveform_generator = WaveformGenerator(approximant, F.domain)
-    wd = WaveformDataset(prior=F.priors, waveform_generator=waveform_generator, transform=F())
+    dataset_file = 'path_to_your_waveform_dataset.hdf5'
+    wd = WaveformDataset(dataset_file, transform=F())
     print('F.priors', F.priors)
     n_waveforms = 17
     wd.generate_dataset(size=n_waveforms)
     print(wd[9])
-
-    # parameter labels for "x" tensor data
-    print(F.get_parameter_list(waveform_generator))
 
 
     # Test observation transform

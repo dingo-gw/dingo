@@ -56,6 +56,19 @@ def structured_array_from_dict_of_arrays(d: Dict[str, np.ndarray], fmt: str = 'f
     return arr_struct
 
 
+def dataframe_to_structured_array(df: pd.DataFrame):
+    """
+    Convert a pandas DataFrame of parameters to a structured numpy array.
+
+    Parameters
+    ----------
+    df:
+        A pandas DataFrame
+    """
+    d = {k: np.array(list(v.values())) for k, v in df.to_dict().items()}
+    return structured_array_from_dict_of_arrays(d)
+
+
 def get_params_dict_from_array(params_array, params_inds, f_ref=None):
     """
     Transforms an array with shape (num_parameters) to a dict. This is

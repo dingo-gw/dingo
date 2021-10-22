@@ -110,12 +110,13 @@ def main():
 
     os.chdir(args.waveforms_directory)
     setup_logger(outdir='.', label='build_SVD_basis', log_level="INFO")
-    logger.info('Executing build_SVD_basis:')
+    logger.info('*** Executing build_SVD_basis ***')
 
     num_chunks, chunk_size = find_chunk_number(args.parameters_file, compressed=False)
     n, V_shape = create_basis(num_chunks, args.basis_file, args.rb_max)
     logger.info(f'Created SVD basis of size {n} from {num_chunks} chunks of size {chunk_size}.')
     logger.info(f'V matrix of shape {V_shape} saved to {args.basis_file}.')
+    logger.info('*** Done with build_SVD_basis ***\n')
 
 
 if __name__ == "__main__":

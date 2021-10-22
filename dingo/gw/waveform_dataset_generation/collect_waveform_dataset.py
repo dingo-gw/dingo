@@ -15,7 +15,7 @@ import numpy as np
 from tqdm import tqdm
 
 from dingo.api import setup_logger, logger
-from .build_SVD_basis import find_chunk_number
+from dingo.gw.waveform_dataset_generation.build_SVD_basis import find_chunk_number
 
 
 def consolidate_dataset(num_chunks: int, basis_file: str,
@@ -95,11 +95,12 @@ def main():
 
     os.chdir(args.waveforms_directory)
     setup_logger(outdir='.', label='collect_waveform_dataset', log_level="INFO")
-    logger.info('Executing collect_waveform_dataset:')
+    logger.info('*** Executing collect_waveform_dataset ***')
 
     num_chunks, chunk_size = find_chunk_number(args.parameters_file, compressed=True)
     consolidate_dataset(num_chunks, args.basis_file, args.parameters_file,
                         args.dataset_file, args.single_precision)
+    logger.info('*** Done with collect_waveform_dataset ***\n')
 
 
 if __name__ == "__main__":
