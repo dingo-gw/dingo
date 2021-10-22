@@ -13,7 +13,7 @@ Save polarizations in compressed or uncompressed form to .npy files.
 import argparse
 import os
 import pickle
-from typing import Tuple, Dict
+from typing import Tuple
 
 import numpy as np
 import pandas as pd

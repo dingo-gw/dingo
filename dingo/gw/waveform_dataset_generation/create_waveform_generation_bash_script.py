@@ -8,11 +8,11 @@ import os
 import textwrap
 import yaml
 
-from generate_parameters import PARAMETERS_FILE_BASIS, PARAMETERS_FILE_DATASET,\
+from .generate_parameters import PARAMETERS_FILE_BASIS, PARAMETERS_FILE_DATASET,\
     BASIS_FILE, SETTINGS_FILE, DATASET_FILE
 
 
-def parse_args():
+def parse_args(args=None):
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=textwrap.dedent("""\
@@ -78,7 +78,7 @@ def parse_args():
     parser.add_argument('--script_name', type=str, default='waveform_generation_script.sh')
     parser.add_argument('--logdir', type=str, default='log')
 
-    return parser.parse_args()
+    return parser.parse_args(args=args)
 
 
 def generate_parameter_command(n_samples: int, parameters_file: str,
@@ -149,8 +149,7 @@ def collect_waveform_dataset(args: argparse.Namespace, log_file):
     --dataset_file {DATASET_FILE} > {log_file} 2>&1\n'''
 
 
-def main():
-    args = parse_args()
+def generate_workflow(args):
     script_dir = f'{args.env_path}/bin'
     log_file = os.path.join(args.logdir, 'create_waveform_generation_bash_script.log')
 
@@ -191,6 +190,11 @@ def main():
         fp.writelines(doc)
 
     print(f'Workflow written to {args.script_name}.')
+
+
+def main():
+    args = parse_args()
+    generate_workflow(args)
 
 
 if __name__ == "__main__":
