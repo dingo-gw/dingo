@@ -133,14 +133,14 @@ class WaveformDataset(Dataset):
         transform :
             Transformations to apply.
         """
-        if dataset_file is not None:
-            self.load(dataset_file)
         self.transform = transform
         self.domain = None
         self.data_settings = None
         self._parameter_samples = None
         self._waveform_polarizations = None
         self._Vh = None
+        if dataset_file is not None:
+            self.load(dataset_file)
 
 
     def __len__(self):
