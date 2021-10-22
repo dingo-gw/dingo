@@ -216,71 +216,6 @@ class WaveformDataset(Dataset):
         parameter_samples_dict = self._prior.sample(size=size)
         self._parameter_samples = pd.DataFrame(parameter_samples_dict)
 
-    def read_parameter_samples(self, filename: str, sl: slice = None):
-        """
-        Read intrinsic parameter samples from a file.
-        Doing so will avoid drawing fresh samples from the
-        intrinsic prior distribution.
-
-        Parameters
-        ----------
-        filename : str
-            Supported file formats are:
-            '.pkl': a pickle of a dictionary of arrays
-            '.npy': a structured numpy array
-        sl : slice
-            A slice object for selecting a subset of parameter samples
-        """
-        _, file_extension = os.path.splitext(filename)
-        if file_extension == '.pkl':
-            with open(filename, 'rb') as fp:
-                parameters = pickle.load(fp)  # dict of arrays
-        elif file_extension == '.npy':
-            parameters = np.load(filename)  # structured array
-        else:
-            raise ValueError(f'Only .pkl or .npy format supported, but got {filename}')
-
-        self._parameter_samples = pd.DataFrame(parameters)[sl]
-
-    def _generate_polarizations_task_fun(self, args: Tuple):
-        """
-        Picklable wrapper function for parallel waveform generation.
-
-        Parameters
-        ----------
-        args:
-            a tuple (index, pandas.core.series.Series)
-        """
-        p = args[1].to_dict()  # Extract parameter dict
-        return self._waveform_generator.generate_hplus_hcross(p)
-
-    def generate_dataset(self, size: int = 0, pool: Pool = None):
-        """Generate a waveform dataset.
-
-        Parameters
-        ----------
-        size : int
-            The number of samples to draw and waveforms to generate.
-            This is only used if parameter samples have not been drawm
-            or loaded previously.
-        pool :
-            optional pool of workers for parallel generation
-        """
-        if self._parameter_samples is None:
-            self.sample_prior(size)
-
-        print('Generating waveform polarizations ...')  # Switch to logging
-        if pool is not None:
-            task_data = self._parameter_samples.iterrows()
-            wf_list_of_dicts = pool.map(self._generate_polarizations_task_fun, task_data)
-        else:
-            wf_list_of_dicts = [self._waveform_generator.generate_hplus_hcross(p.to_dict())
-                                for _, p in tqdm(self._parameter_samples.iterrows())]
-        polarization_dict = {k: [wf[k] for wf in wf_list_of_dicts] for k in ['h_plus', 'h_cross']}
-        self._waveform_polarizations = pd.DataFrame(polarization_dict)
-
-        # If safe downcast to float: converted_float = gl_float.apply(pd.to_numeric, downcast='float')
-        # Look at WaveformDataset.generate_dataset()
 
     def load(self, filename: str = 'waveform_dataset.h5'):
         """
@@ -349,25 +284,6 @@ class WaveformDataset(Dataset):
         """
         d = {k: np.array(list(v.values())) for k, v in df.to_dict().items()}
         return structured_array_from_dict_of_arrays(d)
-
-    def get_polarizations(self):
-        """
-        Return a dictionary of polarization arrays.
-        """
-        return {k: np.vstack(v.to_numpy().T) for k, v in self._waveform_polarizations.items()}
-
-    def get_compressed_polarizations(self, basis: SVDBasis):
-        """
-        Project h_plus, and h_cross onto the given SVD basis and return
-        a dictionary of coefficients.
-
-        Parameters
-        ----------
-        basis: SVDBasis
-            An initialized SVD basis object
-        """
-        pol_arrays = {k: np.vstack(v.to_numpy().T) for k, v in self._waveform_polarizations.items()}
-        return {k: basis.fseries_to_basis_coefficients(v) for k, v in pol_arrays.items()}
 
     def save(self, filename: str = 'waveform_dataset.h5',
              parameter_fmt: str = 'structured_array',
