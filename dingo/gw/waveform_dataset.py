@@ -273,18 +273,6 @@ class WaveformDataset(Dataset):
                 v = np.vstack(v)  # convert object array into a proper 2D array
             grp.create_dataset(str(k), data=v)
 
-    def dataframe_to_structured_array(self, df: pd.DataFrame):
-        """
-        Convert a pandas DataFrame of parameters to a structured numpy array.
-
-        Parameters
-        ----------
-        df:
-            A pandas DataFrame
-        """
-        d = {k: np.array(list(v.values())) for k, v in df.to_dict().items()}
-        return structured_array_from_dict_of_arrays(d)
-
     def save(self, filename: str = 'waveform_dataset.h5',
              parameter_fmt: str = 'structured_array',
              compress_data: bool = True, n_rb: int = 0):
