@@ -202,7 +202,7 @@ def main():
     args = parse_args()
     os.chdir(args.waveforms_directory)
     setup_logger(outdir='.', label='generate_waveform', log_level="INFO")
-    logger.info('Executing generate_waveforms:')
+    logger.info('*** Executing generate_waveforms ***')
 
     waveform_generator = setup(args.settings_file)
 
@@ -210,7 +210,7 @@ def main():
     idx_start = args.num_wf_per_process * args.process_id
     idx_stop = idx_start + args.num_wf_per_process
     logger.info(f'Generating {args.num_wf_per_process} waveforms for '
-                'chunk {args.process_id} of the parameter array.')
+                f'chunk {args.process_id} of the parameter array.')
     logger.info(f'Slice [{idx_start}: {idx_stop}]')
 
     if not os.path.exists(args.parameters_file):
@@ -234,11 +234,12 @@ def main():
             waveform_generator, args.parameters_file,
             slice(idx_start, idx_stop), pool=None)
 
-    logger.info(f'Saving waveform polarizations to .npy file for '
-                'chunk: {args.process_id}.')
+    logger.info('Saving waveform polarizations to .npy file for '
+                f'chunk: {args.process_id}.')
     save_polarizations(waveform_polarizations, args.process_id,
                        args.use_compression, args.basis_file)
-    logger.info('generate_waveforms: all done.')
+    logger.info('*** Done with generate_waveforms ***\n')
+
 
 
 if __name__ == "__main__":
