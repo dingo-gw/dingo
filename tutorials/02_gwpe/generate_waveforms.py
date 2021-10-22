@@ -20,6 +20,7 @@ import pandas as pd
 import yaml
 import multiprocessing as mp
 from tqdm import tqdm
+from functools import partial
 
 from dingo.gw.domains import build_domain
 from dingo.gw.waveform_dataset import SVDBasis
@@ -72,17 +73,19 @@ def read_parameter_samples(filename: str, sl: slice = None):
     return pd.DataFrame(parameters)[sl]
 
 
-def generate_polarizations_task_fun(args: Tuple):
+def generate_polarizations_task_fun(args: Tuple,
+                                    waveform_generator: WaveformGenerator = None):
     """
     Picklable wrapper function for parallel waveform generation.
 
     Parameters
     ----------
     args:
-        a tuple (index, pandas.core.series.Series, WaveformGenerator)
+        A tuple of (index, pandas.core.series.Series)
+    waveform_generator:
+        A WaveformGenerator instance
     """
     parameters = args[1].to_dict()
-    waveform_generator = args[2]
     return waveform_generator.generate_hplus_hcross(parameters)
 
 
@@ -103,7 +106,9 @@ def generate_dataset(waveform_generator: WaveformGenerator,
     logger.info('Generating waveform polarizations ...')
     if pool is not None:
         task_data = parameter_samples.iterrows()
-        wf_list_of_dicts = pool.map(generate_polarizations_task_fun, task_data)
+        f = partial(generate_polarizations_task_fun,
+                    waveform_generator=waveform_generator)
+        wf_list_of_dicts = pool.map(f, task_data)
     else:
         wf_list_of_dicts = [waveform_generator.generate_hplus_hcross(p.to_dict())
                             for _, p in tqdm(parameter_samples.iterrows())]
@@ -132,33 +137,6 @@ def generate_waveforms(waveform_generator: WaveformGenerator,
     return generate_dataset(waveform_generator, parameter_samples, pool=pool)
 
 
-# FIXME: perhaps we don't need these two functions
-def get_polarizations(waveform_polarizations: pd.DataFrame) -> Dict:
-    """
-    Return a dictionary of polarization arrays.
-
-    waveform_polarizations: pd.DataFrame
-        A frequency series of waveform polarizations
-    """
-    return {k: np.vstack(v.to_numpy().T) for k, v in waveform_polarizations.items()}
-
-
-def get_compressed_polarizations(waveform_polarizations: pd.DataFrame, basis: SVDBasis):
-    """
-    Project h_plus, and h_cross onto the given SVD basis and return
-    a dictionary of coefficients.
-
-    Parameters
-    ----------
-    waveform_polarizations: pd.DataFrame
-        A frequency series of waveform polarizations
-    basis: SVDBasis
-        An initialized SVD basis object
-    """
-    pol_arrays = {k: np.vstack(v.to_numpy().T) for k, v in waveform_polarizations.items()}
-    return {k: basis.fseries_to_basis_coefficients(v) for k, v in pol_arrays.items()}
-
-
 def save_polarizations(waveform_polarizations: pd.DataFrame, idx: int,
                        use_compression: bool, basis_file: str = None):
     """
@@ -181,19 +159,27 @@ def save_polarizations(waveform_polarizations: pd.DataFrame, idx: int,
     if use_compression:
         basis = SVDBasis()
         basis.from_file(basis_file)
-        pol_dict = get_compressed_polarizations(waveform_polarizations, basis)
+        pol_arrays = {k: np.vstack(v.to_numpy().T)
+                      for k, v in waveform_polarizations.items()}
+        pol_dict = {k: basis.fseries_to_basis_coefficients(v)
+                    for k, v in pol_arrays.items()}
         for k, v in pol_dict.items():
             np.save(f'{k}_coeff_{idx}.npy', v)
     else:
-        pol_dict = get_polarizations(waveform_polarizations)
+        pol_dict = {k: np.vstack(v.to_numpy().T)
+                    for k, v in waveform_polarizations.items()}
         for k, v in pol_dict.items():
             np.save(f'{k}_full_{idx}.npy', v)
 
 
-def main():
+def parse_args():
+    """
+    Parse commandline arguments.
+    """
     parser = argparse.ArgumentParser(description='Generate waveform polarizations.')
     parser.add_argument('--waveforms_directory', type=str, required=True,
-                        help='Directory containing the settings file which specifies the prior.'
+                        help='Directory containing the settings file which '
+                             'specifies the prior.'
                              'Write generated waveforms to this directory')
     parser.add_argument('--settings_file', type=str, default='settings.yaml')
     parser.add_argument('--parameters_file', type=str, default='parameters.npy')
@@ -201,29 +187,38 @@ def main():
     parser.add_argument('--num_wf_per_process', type=int, default=1,
                         help='Number of waveforms to generate per process.')
     parser.add_argument('--process_id', type=int, default=0,
-                        help='Select slice of waveform parameter array for which to generate waveforms.')
+                        help='Select slice of waveform parameter array for '
+                             'which to generate waveforms.')
     parser.add_argument('--use_compression', default=False, action='store_true',
-                        help='If specified, save polarizations projected basis specified by --basis_file.')
+                        help='If specified, save polarizations projected basis '
+                             'specified by --basis_file.')
     parser.add_argument('--num_threads', type=int, default=1,
-                        help='Number of threads to use in multiprocessing pool for parallel waveform generation.')
-    args = parser.parse_args()
+                        help='Number of threads to use in multiprocessing pool for '
+                             'parallel waveform generation.')
+    return parser.parse_args()
 
+
+def main():
+    args = parse_args()
     os.chdir(args.waveforms_directory)
     setup_logger(outdir='.', label='generate_waveform', log_level="INFO")
     logger.info('Executing generate_waveforms:')
 
     waveform_generator = setup(args.settings_file)
 
+    # Grab slice of waveform parameter array
     idx_start = args.num_wf_per_process * args.process_id
     idx_stop = idx_start + args.num_wf_per_process
-    logger.info(f'Generating {args.num_wf_per_process} waveforms for chunk {args.process_id} of the parameter array.')
+    logger.info(f'Generating {args.num_wf_per_process} waveforms for '
+                'chunk {args.process_id} of the parameter array.')
     logger.info(f'Slice [{idx_start}: {idx_stop}]')
 
     if not os.path.exists(args.parameters_file):
         raise ValueError(f'Could not find parameter file {args.parameters_file}.')
     num_samples = len(np.load(args.parameters_file))
     if (idx_start > num_samples) or (idx_stop > num_samples):
-        raise ValueError(f'Specified chunk lies outside of parameter array of length {num_samples}.')
+        raise ValueError(f'Specified chunk lies outside of parameter '
+                         'array of length {num_samples}.')
 
     if args.num_threads > 1:
         # Parallel execution
@@ -231,14 +226,18 @@ def main():
         logger.info(f'Running in parallel on {args.num_threads} threads.')
         with mp.Pool(processes=args.num_threads) as pool:
             waveform_polarizations = generate_waveforms(
-                waveform_generator, args.parameters_file, slice(idx_start, idx_stop), pool=pool)
+                waveform_generator, args.parameters_file,
+                slice(idx_start, idx_stop), pool=pool)
     else:
         # Serial execution
         waveform_polarizations = generate_waveforms(
-            waveform_generator, args.parameters_file, slice(idx_start, idx_stop), pool=None)
+            waveform_generator, args.parameters_file,
+            slice(idx_start, idx_stop), pool=None)
 
-    logger.info(f'Saving waveform polarizations to .npy file for chunk: {args.process_id}.')
-    save_polarizations(waveform_polarizations, args.process_id, args.use_compression, args.basis_file)
+    logger.info(f'Saving waveform polarizations to .npy file for '
+                'chunk: {args.process_id}.')
+    save_polarizations(waveform_polarizations, args.process_id,
+                       args.use_compression, args.basis_file)
     logger.info('generate_waveforms: all done.')
 
 
