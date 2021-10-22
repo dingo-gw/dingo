@@ -123,8 +123,7 @@ class WaveformDataset(Dataset):
     are classes that implement the __call__() method.
     """
 
-    def __init__(self, dataset_file: str = None,
-                 transform=None):
+    def __init__(self, dataset_file: str, transform=None):
         """
         Parameters
         ----------
@@ -134,13 +133,8 @@ class WaveformDataset(Dataset):
             Transformations to apply.
         """
         self.transform = transform
-        self.domain = None
-        self.data_settings = None
-        self._parameter_samples = None
-        self._waveform_polarizations = None
         self._Vh = None
-        if dataset_file is not None:
-            self.load(dataset_file)
+        self.load(dataset_file)
 
 
     def __len__(self):

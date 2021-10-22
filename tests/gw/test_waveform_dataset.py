@@ -101,8 +101,7 @@ def test_load_waveform_dataset(generate_waveform_dataset_small):
     wfd_path = generate_waveform_dataset_small
 
     path = f'{wfd_path}/waveform_dataset.hdf5'
-    wd = WaveformDataset()
-    wd.load(path)
+    wd = WaveformDataset(path)
 
     assert len(wd) > 0
     el = wd[0]
