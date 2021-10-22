@@ -48,7 +48,7 @@ def setup(settings_file: str) -> WaveformGenerator:
     return waveform_generator
 
 
-def read_parameter_samples(filename: str, sl: slice = None):
+def read_parameter_samples(filename: str, sl: slice = slice(None)):
     """
     Read intrinsic parameter samples from a file.
 
