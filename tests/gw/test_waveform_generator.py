@@ -1,6 +1,6 @@
 from dingo.gw.domains import UniformFrequencyDomain
 from dingo.gw.waveform_generator import WaveformGenerator
-from dingo.gw.transforms import StandardizeParameters
+from dingo.gw.transforms.parameter_transforms import StandardizeParameters
 import pytest
 import numpy as np
 import torch
