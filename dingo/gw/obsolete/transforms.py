@@ -3,10 +3,9 @@ import numpy as np
 import pandas as pd
 import torch
 
-from dingo.gw.domains import Domain, UniformFrequencyDomain
-from dingo.gw.detector_network import DetectorNetwork, RandomProjectToDetectors
-from dingo.gw.noise import AddNoiseAndWhiten, noise_summary_function
-from dingo.gw.waveform_generator import WaveformGenerator
+from dingo.gw.domains import Domain
+from dingo.gw.detector_network import RandomProjectToDetectors
+from dingo.gw.obsolete.noise import AddNoiseAndWhiten, noise_summary_function
 
 """
 Collect transforms which do not naturally belong with other classes,
@@ -452,7 +451,6 @@ if __name__ == "__main__":
 
 
     # Test observation transform
-    import matplotlib.pyplot as plt
     O = GenerateObservationTransform()
     # Grab some ASDs
     psd_dict = F.det_network.power_spectral_densities
