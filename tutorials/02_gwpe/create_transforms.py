@@ -7,12 +7,10 @@ from dingo.gw.prior_split import default_extrinsic_dict
 from dingo.gw.domains import build_domain
 from dingo.gw.transforms.parameter_transforms import SampleExtrinsicParameters
 from dingo.gw.transforms.detector_transforms import GetDetectorTimes, ProjectOntoDetectors
+from dingo.gw.noise_dataset import ASDDataset
+from dingo.gw.transforms.noise_transforms import SampleNoiseASD, WhitenStrain
 
 import numpy as np
-
-
-
-
 
 if __name__ == '__main__':
     wfd_path = '/Users/mdax//Documents/dingo/devel/dingo-devel/tutorials/02_gwpe' \
@@ -32,21 +30,35 @@ if __name__ == '__main__':
     # build objects
     domain = build_domain(domain_dict)
     ifo_list = InterferometerList(detector_list)
+    asd_dataset = ASDDataset('../../../data/PSDs/asds_O1.hdf5')
 
     # build transforms
     sample_extrinsic_parameters = SampleExtrinsicParameters(extrinsic_prior_dict)
     get_detector_times = GetDetectorTimes(ifo_list, ref_time)
     project_onto_detectors = ProjectOntoDetectors(ifo_list, domain, ref_time)
+    sample_noise_asd = SampleNoiseASD(asd_dataset)
+    whiten_strain = WhitenStrain()
 
     d0 = wfd[0]
     d1 = sample_extrinsic_parameters(d0)
     d2 = get_detector_times(d1)
     d3 = project_onto_detectors(d2)
+    d4 = sample_noise_asd(d3)
+    d5 = whiten_strain(d4)
+
+
 
     import matplotlib.pyplot as plt
-    plt.plot(wfd[0]['waveform']['h_cross'].real / d3['parameters'][
-        'luminosity_distance'] * 100)
+    plt.plot(wfd[0]['waveform']['h_cross'].real /
+             d3['parameters']['luminosity_distance'] * 100)
     plt.plot(d3['waveform']['H1'].real)
+    plt.show()
+
+    plt.plot(d5['waveform']['H1'].real)
+    plt.show()
+
+    plt.yscale('log')
+    plt.plot(d5['asds']['H1'])
     plt.show()
 
     ref_data = np.load('train_dir/waveform_data.npy', allow_pickle=True).item()

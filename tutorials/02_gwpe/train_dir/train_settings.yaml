@@ -6,7 +6,7 @@ transform_settings:
   extrinsic_prior:
     dec: default
     ra: default
-    geocent_time: bilby.core.prior.Uniform(minimum=-0.1, maximum=0.1)
+    geocent_time: bilby.core.prior.Uniform(minimum=-0.03, maximum=0.03)
     psi: default
     luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0)
   ref_time: 1126259462.391
