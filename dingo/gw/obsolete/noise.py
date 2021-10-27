@@ -210,10 +210,8 @@ if __name__ == "__main__":
 
 
     from dingo.gw.domains import UniformFrequencyDomain
-    from dingo.gw.detector_network import DetectorNetwork, RandomProjectToDetectors
-    from dingo.gw.noise import AddNoiseAndWhiten
-    from dingo.gw.waveform_generator import WaveformGenerator
-    from dingo.gw.waveform_dataset import WaveformDataset
+    from dingo.gw.detector_network import DetectorNetwork
+    from dingo.gw.obsolete.noise import AddNoiseAndWhiten
     import matplotlib.pyplot as plt
 
     domain_kwargs = {'f_min': 20.0, 'f_max': 4096.0, 'delta_f': 1.0 / 8.0, 'window_factor': 1.0}
