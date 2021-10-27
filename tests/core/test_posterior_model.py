@@ -13,7 +13,7 @@ from dingo.core.utils import torchutils
 def data_setup_pm_1():
     d = types.SimpleNamespace()
 
-    tmp_dir = './tmp_files'
+    tmp_dir = '../tmp_files'
     os.makedirs(tmp_dir, exist_ok=True)
     d.model_filename = join(tmp_dir, 'model.pt')
 
