@@ -70,7 +70,7 @@ class UniformFrequencyDomain(Domain):
     domain_type = "uFD"
 
     def __init__(self, f_min: float, f_max: float, delta_f: float,
-                 window_factor: float, truncation_range: tuple = None):
+                 window_factor: float = None, truncation_range: tuple = None):
         self._f_min = f_min
         self._f_max = f_max
         self._delta_f = delta_f
