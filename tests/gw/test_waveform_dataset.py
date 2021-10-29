@@ -18,7 +18,6 @@ domain_settings:
     f_min: 10.0
     f_max: 1024.0
     delta_f: 1.0
-    window_factor: 1.0
 
 # settings for waveform generator
 waveform_generator_settings:

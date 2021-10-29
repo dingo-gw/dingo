@@ -3,7 +3,7 @@ from typing import Dict
 import numpy as np
 from functools import lru_cache
 from abc import ABC, abstractmethod
-from .gwutils import *
+from dingo.gw.gwutils import *
 
 
 class Domain(ABC):
@@ -65,16 +65,17 @@ class UniformFrequencyDomain(Domain):
     with spacing delta_f.
     Given a finite length of time domain data, the Fourier domain data
     starts at a frequency f_min and is zero below this frequency.
-    window_factor is used to compute noise_std().
+    window_kwargs specify windowing used for FFT to obtain FD data from TD
+    data in practice.
     """
     domain_type = "uFD"
 
     def __init__(self, f_min: float, f_max: float, delta_f: float,
-                 window_factor: float = None, truncation_range: tuple = None):
+                 window_kwargs: dict = None, truncation_range: tuple = None):
         self._f_min = f_min
         self._f_max = f_max
         self._delta_f = delta_f
-        self._window_factor = window_factor
+        self._window_kwargs = window_kwargs
         self.initialize_truncation(truncation_range)
 
     def initialize_truncation(self, truncation_range):
@@ -175,6 +176,15 @@ class UniformFrequencyDomain(Domain):
         return len(np.flatnonzero(np.asarray(mask)))
 
     @property
+    @lru_cache()
+    def window_factor(self) -> float:
+        """The window factor corrects for the windowing when taking FFT to
+        obtain FD data from TD data."""
+        if self._window_kwargs is None:
+            raise ValueError('Now windowing information provided.')
+        return get_window_factor(self._window_kwargs)
+
+    @property
     def noise_std(self) -> float:
         """Standard deviation of the whitened noise distribution.
 
@@ -186,8 +196,7 @@ class UniformFrequencyDomain(Domain):
         Windowing of TD data; tapering window has a slope -> reduces power only for noise,
         but not for the signal which is in the main part unaffected by the taper
         """
-        return np.sqrt(self._window_factor) / np.sqrt(4.0 * self._delta_f)
-
+        return np.sqrt(self.window_factor) / np.sqrt(4.0 * self._delta_f)
 
     @property
     def f_max(self) -> float:
@@ -229,7 +238,7 @@ class UniformFrequencyDomain(Domain):
         kwargs = {'f_min': self._f_min,
                   'f_max': self._f_max,
                   'delta_f': self._delta_f,
-                  'window_factor': self._window_factor,
+                  'window_kwargs': self._window_kwargs,
                   'truncation_range': self._truncation_range,
                   }
         return {'name': 'UniformFrequencyDomain', 'kwargs': kwargs}
@@ -326,6 +335,9 @@ def build_domain(domain_settings: Dict):
     domain_settings:
         A dictionary of settings for the domain class.
     """
+    if set(domain_settings.keys()) != {'name', 'kwargs'}:
+        raise ValueError(f'Got domain_settings {domain_settings.keys()}, '
+                         f'expected dict_keys([\'name\', \'kwargs\'])')
     if domain_settings['name'] == 'UniformFrequencyDomain':
         return UniformFrequencyDomain(**domain_settings['kwargs'])
     elif domain_settings['name'] == 'TimeDomain':

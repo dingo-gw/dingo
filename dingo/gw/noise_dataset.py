@@ -1,6 +1,8 @@
 import h5py
 import numpy as np
+from scipy.signal import tukey
 import ast
+from dingo.gw.gwutils import *
 
 class ASDDataset:
     def __init__(self, dataset, ifos=None):
@@ -44,16 +46,36 @@ if __name__ == '__main__':
         f_min, f_max, delta_f = freqs[0], freqs[-1], freqs[1] - freqs[0]
         domain = build_domain({'name': 'UniformFrequencyDomain',
                                'kwargs': {'f_min': f_min, 'f_max': f_max,
-                                          'delta_f': delta_f}})
+                                          'delta_f': delta_f,
+                                          'window_kwargs': {
+                                              'window_type': 'tukey',
+                                              **meta['tukey_window']}
+                                          },
+                               })
         settings['domain_dict'] = domain.domain_dict
-        settings['tukey_window'] = meta['tukey_window']
+        # settings['window'] = {'window_type': 'tukey', **meta['tukey_window']}
         f.create_dataset(f'asds_{ifo}', data=asds)
         gps_times[ifo] = meta['start_times']
 
     f.attrs['metadata'] = str(settings)
     f.close()
 
-    AD = ASDDataset(join(data_dir, f'asds_{run}.hdf5'))
-    asd_samples = AD.sample_random_asds()
+    asd_dataset = ASDDataset(join(data_dir, f'asds_{run}.hdf5'))
+    asd_samples = asd_dataset.sample_random_asds()
+
+    window_factor = get_window_factor(
+        asd_dataset.metadata['domain_dict']['kwargs']['window_kwargs'])
+
+    noise_std = np.sqrt(window_factor) / \
+                np.sqrt(4*asd_dataset.metadata['domain_dict']['kwargs']['delta_f'])
+
+    from dingo.gw.domains import build_domain
+    domain = build_domain(asd_dataset.metadata['domain_dict'])
+
+    print(window_factor)
+    print(noise_std**2)
+
+    print(domain.window_factor)
+    print(domain.noise_std**2)
 
     print('done')

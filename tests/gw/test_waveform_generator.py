@@ -9,7 +9,7 @@ import torch.distributions
 
 @pytest.fixture
 def uniform_fd_domain():
-    p = {'f_min': 20.0, 'f_max': 4096.0, 'delta_f': 1.0/4.0, 'window_factor': 1.0}
+    p = {'f_min': 20.0, 'f_max': 4096.0, 'delta_f': 1.0/4.0}
     return UniformFrequencyDomain(**p)
 
 @pytest.fixture
