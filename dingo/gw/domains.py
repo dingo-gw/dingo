@@ -97,13 +97,22 @@ class UniformFrequencyDomain(Domain):
                 raise ValueError(f'f_max = {f_max} is not in expected range '
                                  f'[{self._f_min, self._f_max}].')
 
-    def truncate_data(self, data):
-        """Truncate data from [0, self._f_max] to [self._f_min, self._f_max].
-        By convention, the last axis is the frequency axis."""
-        if data.shape[-1] != len(self):
-            raise ValueError(f'Expected {len(self)} bins in frequency axis -1, '
-                             f'but got {data.shape[-1]}.')
-        return data[...,self.f_min_idx:]
+    def truncate_data(self, data, allow_for_flexible_upper_bound = False):
+        """Truncate data from to [self._f_min, self._f_max]. By convention,
+        the last axis is the frequency axis.
+
+        By default, the input data is in the range [0, self._f_max] before
+        truncation. In some use cases, the input data has a different range,
+        [0, f_max], where f_max > self._f_max. To truncate such data,
+        set allow_for_flexible_upper_bound = True.
+        """
+        if allow_for_flexible_upper_bound:
+            return data[...,self.f_min_idx:self.f_max_idx+1]
+        else:
+            if data.shape[-1] != len(self):
+                raise ValueError(f'Expected {len(self)} bins in frequency axis -1, '
+                                 f'but got {data.shape[-1]}.')
+            return data[...,self.f_min_idx:]
 
     def time_translate_data(self, data, dt):
         """Time translate complex frequency domain data by dt [in seconds]."""
@@ -175,6 +184,11 @@ class UniformFrequencyDomain(Domain):
     @lru_cache()
     def f_min_idx(self):
         return round(self._f_min / self._delta_f)
+
+    @property
+    @lru_cache()
+    def f_max_idx(self):
+        return round(self._f_max / self._delta_f)
 
     @property
     def sample_frequencies_truncated(self):

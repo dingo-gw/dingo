@@ -68,7 +68,14 @@ def test_FD_truncation(uniform_FD_params):
     # test that ValueError is raised when trying to truncate data with
     # incorrect dimension
     with pytest.raises(ValueError):
-        b = domain.truncate_data(a[...,:-2])
+        _ = domain.truncate_data(a[...,:-2])
+    # test that data with a larger frequency range than expected can only be
+    # truncated if the corresponding flag is set
+    a = np.random.rand(10, 20, n+10)
+    with pytest.raises(ValueError):
+        _ = domain.truncate_data(a)
+    b = domain.truncate_data(a, allow_for_flexible_upper_bound=True)
+    assert np.all(b == a[...,n-nt:n])
 
 def test_FD_set_new_range(uniform_FD_params):
     p = uniform_FD_params
