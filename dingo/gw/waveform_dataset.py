@@ -151,7 +151,7 @@ class WaveformDataset(Dataset):
         parameters = self._parameter_samples.iloc[idx].to_dict()
         waveform_polarizations = self._waveform_polarizations.iloc[idx].to_dict()
         data = {'parameters': parameters, 'waveform': waveform_polarizations}
-        if '_Vh' in self.__dict__:
+        if self._Vh is not None:
             data['waveform']['h_plus'] = data['waveform']['h_plus'] @ self._Vh
             data['waveform']['h_cross'] = data['waveform']['h_cross'] @ self._Vh
         if self.transform:
@@ -168,7 +168,8 @@ class WaveformDataset(Dataset):
         self._waveform_polarizations.info(memory_usage='deep')
 
 
-    def load(self, filename: str = 'waveform_dataset.h5'):
+    def load(self, filename: str = 'waveform_dataset.h5',
+             truncation_range: tuple = None):
         """
         Load waveform data set from HDF5 file.
 
@@ -194,5 +195,48 @@ class WaveformDataset(Dataset):
 
         self.data_settings = ast.literal_eval(fp.attrs['settings'])
         self.domain = build_domain(self.data_settings['domain_settings'])
+        self.is_truncated = False
 
         fp.close()
+
+
+    def truncate_dataset(self, new_range = None):
+        """
+        The waveform dataset provides waveforms polarizations in a particular
+        range. In uniform Frequency domain for instance, this range is
+        [0, domain._f_max]. In practice one may want to apply data conditioning
+        different to that of the dataset by specifying a different range,
+        and truncating this dataset accordingly. That corresponds to
+        truncating the likelihood integral.
+
+        This method provides functionality for that. It truncates the dataset
+        to the range specified by the domain, by calling domain.truncate_data.
+        In uniform FD, this corresponds to truncating data in the range
+        [0, domain._f_max] to the range [domain._f_min, domain._f_max].
+
+        Before this truncation step, one may optionally modify the domain,
+        to set a new range. This is done by domain.set_new_range(*new_range),
+        which is called if new_range is not None.
+        """
+        if self.is_truncated:
+            raise ValueError('Dataset is already truncated')
+        len_domain_original = len(self.domain)
+
+        # optionally set new data range the dataset
+        if new_range is not None:
+            self.domain.set_new_range(*new_range)
+
+        # truncate the dataset
+        if self._Vh is not None:
+            assert self._Vh.shape[-1] == len_domain_original, \
+                f'Compression matrix Vh with shape {self._Vh.shape} is not ' \
+                f'compatible with the domain of length {len_domain_original}.'
+            self._Vh = self.domain.truncate_data(
+                self._Vh, allow_for_flexible_upper_bound=(new_range is not
+                                                          None))
+        else:
+            raise NotImplementedError('Truncation of the dataset is currently '
+                                      'only implemented for compressed '
+                                      'polarization data.')
+
+        self.is_truncated = True
