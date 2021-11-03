@@ -77,6 +77,19 @@ class UniformFrequencyDomain(Domain):
         self._delta_f = delta_f
         self._window_factor = window_factor
 
+    def clear_cache_for_all_instances(self):
+        """
+        Whenever self._f_min and self._f_max are modified, this method needs to
+        be the called to clear the cached properties such as
+        self.sample_frequencies.
+
+        This clears the cache for the corresponding properties for *all*
+        class instances.
+        """
+        UniformFrequencyDomain.sample_frequencies.fget.cache_clear()
+        UniformFrequencyDomain.sample_frequencies_truncated.fget.cache_clear()
+        UniformFrequencyDomain.frequency_mask.fget.cache_clear()
+
     def set_new_range(self, f_min: float = None, f_max: float = None):
         """
         Set a new range for the domain. This changes the range of the domain to
@@ -96,6 +109,9 @@ class UniformFrequencyDomain(Domain):
             else:
                 raise ValueError(f'f_max = {f_max} is not in expected range '
                                  f'[{self._f_min, self._f_max}].')
+        # clear cached properties, such that they are recomputed when needed
+        # instead of using the old (incorrect) ones.
+        self.clear_cache_for_all_instances()
 
     def truncate_data(self, data, allow_for_flexible_upper_bound = False):
         """Truncate data from to [self._f_min, self._f_max]. By convention,
@@ -147,19 +163,13 @@ class UniformFrequencyDomain(Domain):
     #         raise NotImplementedError(f'Method only implemented for np arrays '
     #                                   f'and torch tensors, got {type(data)}')
 
-
-    @lru_cache()
     def __len__(self):
         """Number of frequency bins in the domain [0, f_max]"""
         return int(self._f_max / self._delta_f) + 1
 
-    @lru_cache()
     def __call__(self) -> np.ndarray:
         """Array of uniform frequency bins in the domain [0, f_max]"""
-        num_bins = self.__len__()
-        sample_frequencies = np.linspace(0.0, self._f_max, num=num_bins,
-                                         endpoint=True, dtype=np.float32)
-        return sample_frequencies
+        return self.sample_frequencies
 
     def __getitem__(self, idx):
         """Slice of uniform frequency grid."""
@@ -168,11 +178,18 @@ class UniformFrequencyDomain(Domain):
 
     @property
     @lru_cache()
+    def sample_frequencies(self):
+        # print('Computing sample_frequencies.') # To understand caching
+        num_bins = self.__len__()
+        return np.linspace(0.0, self._f_max, num=num_bins,
+                           endpoint=True, dtype=np.float32)
+
+    @property
+    @lru_cache()
     def frequency_mask(self) -> np.ndarray:
         """Mask which selects frequency bins greater than or equal to the
         starting frequency"""
-        sample_frequencies = self.__call__()
-        return sample_frequencies >= self._f_min
+        return self.sample_frequencies >= self._f_min
 
     @property
     def frequency_mask_length(self) -> int:
@@ -181,21 +198,19 @@ class UniformFrequencyDomain(Domain):
         return len(np.flatnonzero(np.asarray(mask)))
 
     @property
-    @lru_cache()
     def f_min_idx(self):
         return round(self._f_min / self._delta_f)
 
     @property
-    @lru_cache()
     def f_max_idx(self):
         return round(self._f_max / self._delta_f)
 
     @property
+    @lru_cache()
     def sample_frequencies_truncated(self):
-        return self.__call__()[self.f_min_idx:]
+        return self.sample_frequencies[self.f_min_idx:]
 
     @property
-    @lru_cache()
     def len_truncated(self):
         return len(self.sample_frequencies_truncated)
 
@@ -353,3 +368,19 @@ def build_domain(domain_settings: Dict):
 if __name__ == '__main__':
     kwargs = {'f_min': 20, 'f_max': 2048, 'delta_f': 0.125}
     domain = UniformFrequencyDomain(**kwargs)
+
+    d1 = domain()
+    d2 = domain()
+    print('Clearing cache.', end=' ')
+    domain.clear_cache_for_all_instances()
+    print('Done.')
+    d3 = domain()
+
+    print('Changing domain range.', end=' ')
+    domain.set_new_range(20, 100)
+    print('Done.')
+
+    d4 = domain()
+    d5 = domain()
+
+    print(len(d1), len(d4))
