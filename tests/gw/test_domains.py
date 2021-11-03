@@ -70,25 +70,25 @@ def test_FD_truncation(uniform_FD_params):
     with pytest.raises(ValueError):
         b = domain.truncate_data(a[...,:-2])
 
-def test_FD_set_new_fmin_fmax(uniform_FD_params):
+def test_FD_set_new_range(uniform_FD_params):
     p = uniform_FD_params
     domain = UniformFrequencyDomain(**p)
     # test that ValueErrors are raised for infeasible inputs
     with pytest.raises(ValueError):
-        domain.set_new_fmin_fmax(p['f_max'] + 10, None)
+        domain.set_new_range(p['f_max'] + 10, None)
     with pytest.raises(ValueError):
-        domain.set_new_fmin_fmax(p['f_min'] - 10, None)
+        domain.set_new_range(p['f_min'] - 10, None)
     with pytest.raises(ValueError):
-        domain.set_new_fmin_fmax(None, p['f_max'] + 10)
+        domain.set_new_range(None, p['f_max'] + 10)
     with pytest.raises(ValueError):
-        domain.set_new_fmin_fmax(None, p['f_min'] - 10)
+        domain.set_new_range(None, p['f_min'] - 10)
     with pytest.raises(ValueError):
-        domain.set_new_fmin_fmax(p['f_min'] + 10, p['f_min'] + 5)
+        domain.set_new_range(p['f_min'] + 10, p['f_min'] + 5)
     # test that setting new frequency range works as intended
     f_min_new, f_max_new = 40, 800
     n = int(f_max_new / p['delta_f']) + 1
     nt = int((f_max_new - f_min_new) / p['delta_f']) + 1
-    domain.set_new_fmin_fmax(f_min_new,f_max_new)
+    domain.set_new_range(f_min_new,f_max_new)
     assert n == len(domain) == len(domain())
     assert nt == domain.len_truncated
     assert np.all(domain() == np.linspace(0, f_max_new, n))

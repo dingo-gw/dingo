@@ -77,7 +77,11 @@ class UniformFrequencyDomain(Domain):
         self._delta_f = delta_f
         self._window_factor = window_factor
 
-    def set_new_fmin_fmax(self, f_min: float = None, f_max: float = None):
+    def set_new_range(self, f_min: float = None, f_max: float = None):
+        """
+        Set a new range for the domain. This changes the range of the domain to
+        [0, f_max], and the truncation range to [f_min, f_max].
+        """
         if f_min is not None and f_max is not None and f_min >= f_max:
             raise ValueError('f_min must not be larger than f_max.')
         if f_min is not None:
