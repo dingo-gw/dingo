@@ -71,63 +71,53 @@ class UniformFrequencyDomain(Domain):
     domain_type = "uFD"
 
     def __init__(self, f_min: float, f_max: float, delta_f: float,
-                 window_kwargs: dict = None, truncation_range: tuple = None):
+                 window_factor: float = None):
         self._f_min = f_min
         self._f_max = f_max
         self._delta_f = delta_f
-        self._window_kwargs = window_kwargs
-        self.initialize_truncation(truncation_range)
+        self._window_factor = window_factor
 
-    def initialize_truncation(self, truncation_range):
-        """Initializes truncation with truncation_range."""
-        self._truncation_range = truncation_range
-        if self._truncation_range is not None:
-            f_lower, f_upper = self._truncation_range
-            if not self._f_min <= f_lower < f_upper <= self._f_max:
-                raise ValueError(
-                    f'Invalid truncation range [{f_lower},{f_upper}] for '
-                    f'frequency range [{self._f_min},{self._f_max}].')
-            self._truncation_idx_lower = round(f_lower/self._delta_f)
-            self._truncation_idx_upper = round(f_upper/self._delta_f) + 1
-            self._truncation_num_bins = self._truncation_idx_upper - \
-                                        self._truncation_idx_lower
-            self._truncated_sample_frequencies = \
-                self[self._truncation_idx_lower:self._truncation_idx_upper]
+    def set_new_fmin_fmax(self, f_min: float = None, f_max: float = None):
+        if f_min is not None and f_max is not None and f_min >= f_max:
+            raise ValueError('f_min must not be larger than f_max.')
+        if f_min is not None:
+            if self._f_min <= f_min <= self._f_max:
+                self._f_min = f_min
+            else:
+                raise ValueError(f'f_min = {f_min} is not in expected range '
+                                 f'[{self._f_min,self._f_max}].')
+        if f_max is not None:
+            if self._f_min <= f_max <= self._f_max:
+                self._f_max = f_max
+            else:
+                raise ValueError(f'f_max = {f_max} is not in expected range '
+                                 f'[{self._f_min, self._f_max}].')
 
-    def truncate_data(self, data, axis=None):
-        """Truncate data to self._truncation_range. If axis is not specified
-        it is detected automatically."""
-        if self._truncation_range is None:
-            raise ValueError('Truncation not initialized. Call '
-                             'self.initialize_truncation with appropriate '
-                             'range.')
-        if axis is None:
-            axis = find_axis(data, len(self))
-        if data.shape[axis] != len(self):
-            raise ValueError(f'Truncation along axis {axis} failed. Dim '
-                             f'{data.shape[axis]} instead of {len(self)}.')
-        return truncate_array(data, axis, self._truncation_idx_lower,
-                              self._truncation_idx_upper)
+    def truncate_data(self, data):
+        """Truncate data from [0, self._f_max] to [self._f_min, self._f_max].
+        By convention, the last axis is the frequency axis."""
+        if data.shape[-1] != len(self):
+            raise ValueError(f'Expected {len(self)} bins in frequency axis -1, '
+                             f'but got {data.shape[-1]}.')
+        return data[...,self.f_min_idx:]
 
     def time_translate_data(self, data, dt):
         """Time translate complex frequency domain data by dt [in seconds]."""
         if not isinstance(data, np.ndarray):
-            raise NotImplementedError(f'Only implemented for numpy arrays, '
-                                      f'got {type(data)}.')
+            raise NotImplementedError(
+                f'Only implemented for numpy arrays, got {type(data)}.')
         if not np.iscomplexobj(data):
-            raise ValueError('Method expects complex frequency domain data, '
-                             'got real array.')
+            raise ValueError(
+                'Method expects complex frequency domain data, got real array.')
         # find out whether data is truncated or not
-        ax0 = np.where(np.array(data.shape) == len(self))[0]
-        ax1 = []
-        if self._truncation_range is not None:
-            ax1 = np.where(np.array(data.shape) == self._truncation_num_bins)[0]
-        if len(ax0) + len(ax1) != 1:
-            raise NotImplementedError('Can not identify unique frequency axis.')
-        elif len(ax0) == 1:
+        if data.shape[-1] == len(self):
             f = self.__call__()
+        elif data.shape[-1] == self.len_truncated:
+            f = self.sample_frequencies_truncated
         else:
-            f = self._truncated_sample_frequencies
+            raise ValueError(f'Expected {len(self)} or {self.len_truncated} '
+                             f'bins in frequency axis -1, but got '
+                             f'{data.shape[-1]}.')
         # shift data
         return data * np.exp(- 2j * np.pi * dt * f)
 
@@ -154,7 +144,8 @@ class UniformFrequencyDomain(Domain):
     def __call__(self) -> np.ndarray:
         """Array of uniform frequency bins in the domain [0, f_max]"""
         num_bins = self.__len__()
-        sample_frequencies = np.linspace(0.0, self._f_max, num=num_bins, endpoint=True, dtype=np.float32)
+        sample_frequencies = np.linspace(0.0, self._f_max, num=num_bins,
+                                         endpoint=True, dtype=np.float32)
         return sample_frequencies
 
     def __getitem__(self, idx):
@@ -165,7 +156,8 @@ class UniformFrequencyDomain(Domain):
     @property
     @lru_cache()
     def frequency_mask(self) -> np.ndarray:
-        """Mask which selects frequency bins greater than or equal to the starting frequency"""
+        """Mask which selects frequency bins greater than or equal to the
+        starting frequency"""
         sample_frequencies = self.__call__()
         return sample_frequencies >= self._f_min
 
@@ -177,12 +169,17 @@ class UniformFrequencyDomain(Domain):
 
     @property
     @lru_cache()
-    def window_factor(self) -> float:
-        """The window factor corrects for the windowing when taking FFT to
-        obtain FD data from TD data."""
-        if self._window_kwargs is None:
-            raise ValueError('Now windowing information provided.')
-        return get_window_factor(self._window_kwargs)
+    def f_min_idx(self):
+        return round(self._f_min / self._delta_f)
+
+    @property
+    def sample_frequencies_truncated(self):
+        return self.__call__()[self.f_min_idx:]
+
+    @property
+    @lru_cache()
+    def len_truncated(self):
+        return len(self.sample_frequencies_truncated)
 
     @property
     def noise_std(self) -> float:
@@ -196,16 +193,15 @@ class UniformFrequencyDomain(Domain):
         Windowing of TD data; tapering window has a slope -> reduces power only for noise,
         but not for the signal which is in the main part unaffected by the taper
         """
-        return np.sqrt(self.window_factor) / np.sqrt(4.0 * self._delta_f)
+        if self._window_factor is None:
+            raise ValueError('Window factor needs to be set for noise_std.')
+        return np.sqrt(self._window_factor) / np.sqrt(4.0 * self._delta_f)
 
     @property
     def f_max(self) -> float:
-        """The maximum frequency [Hz] is set to half the sampling rate."""
+        """The maximum frequency [Hz] is typically set to half the sampling
+        rate."""
         return self._f_max
-
-    @f_max.setter
-    def f_max(self, f_max: float):
-        self._f_max = f_max
 
     @property
     def f_min(self) -> float:
@@ -216,15 +212,6 @@ class UniformFrequencyDomain(Domain):
     def delta_f(self) -> float:
         """The frequency spacing of the uniform grid [Hz]."""
         return self._delta_f
-
-    @property
-    def sampling_rate(self) -> float:
-        """The sampling rate of the data [Hz]."""
-        return 2.0 * self._f_max
-
-    @sampling_rate.setter
-    def sampling_rate(self, fs: float):
-        self._f_max = fs / 2.0
 
     @property
     def duration(self) -> float:
@@ -238,8 +225,7 @@ class UniformFrequencyDomain(Domain):
         kwargs = {'f_min': self._f_min,
                   'f_max': self._f_max,
                   'delta_f': self._delta_f,
-                  'window_kwargs': self._window_kwargs,
-                  'truncation_range': self._truncation_range,
+                  'window_factor': self._window_factor,
                   }
         return {'name': 'UniformFrequencyDomain', 'kwargs': kwargs}
 
@@ -344,3 +330,8 @@ def build_domain(domain_settings: Dict):
         return TimeDomain(**domain_settings['kwargs'])
     else:
         raise ValueError(f'Domain {domain_settings["name"]} not implemented.')
+
+
+if __name__ == '__main__':
+    kwargs = {'f_min': 20, 'f_max': 2048, 'delta_f': 0.125}
+    domain = UniformFrequencyDomain(**kwargs)
