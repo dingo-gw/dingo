@@ -95,7 +95,7 @@ def generate_waveform_dataset_small(venv_dir='venv'):
 
     return path
 
-
+@pytest.mark.slow
 def test_load_waveform_dataset(generate_waveform_dataset_small):
     wfd_path = generate_waveform_dataset_small
 
