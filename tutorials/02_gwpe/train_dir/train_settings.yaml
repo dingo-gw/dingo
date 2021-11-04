@@ -1,3 +1,17 @@
+# datasets
+waveform_dataset_path: /Users/mdax/Documents/dingo/devel/dingo-devel/tutorials/02_gwpe/datasets/waveforms/03_IMR_test/waveform_dataset.hdf5
+asd_dataset_path: /Users/mdax/Documents/dingo/devel/data/PSDs/asds_O1.hdf5
+
+# data conditioning for inference
+data_conditioning:
+  frequency_range: [20, 1024]
+  window_kwargs:
+    window_type: tukey
+    f_s: 4096
+    T: 8.0
+    roll_off: 0.4
+#  0.9374713897717841
+
 # settings for transforms
 transform_settings:
   detectors:

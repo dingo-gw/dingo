@@ -96,12 +96,7 @@ if __name__ == '__main__':
         f_min, f_max, delta_f = freqs[0], freqs[-1], freqs[1] - freqs[0]
         domain = build_domain({'name': 'UniformFrequencyDomain',
                                'kwargs': {'f_min': f_min, 'f_max': f_max,
-                                          'delta_f': delta_f,
-                                          'window_kwargs': {
-                                              'window_type': 'tukey',
-                                              **meta['tukey_window']}
-                                          },
-                               })
+                                          'delta_f': delta_f}})
         settings['domain_dict'] = domain.domain_dict
         # settings['window'] = {'window_type': 'tukey', **meta['tukey_window']}
         f.create_dataset(f'asds_{ifo}', data=asds)
@@ -113,8 +108,8 @@ if __name__ == '__main__':
     asd_dataset = ASDDataset(join(data_dir, f'asds_{run}.hdf5'))
     asd_samples = asd_dataset.sample_random_asds()
 
-    window_factor = get_window_factor(
-        asd_dataset.metadata['domain_dict']['kwargs']['window_kwargs'])
+    window_factor = get_window_factor({'window_type': 'tukey',
+                                       **meta['tukey_window']})
 
     noise_std = np.sqrt(window_factor) / \
                 np.sqrt(4*asd_dataset.metadata['domain_dict']['kwargs']['delta_f'])
@@ -123,8 +118,9 @@ if __name__ == '__main__':
 
     print(window_factor)
     print(noise_std**2)
+    print(noise_std)
 
-    print(domain.window_factor)
-    print(domain.noise_std**2)
+    # print(domain.window_factor)
+    # print(domain.noise_std**2)
 
     print('done')

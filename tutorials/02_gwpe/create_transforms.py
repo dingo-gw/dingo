@@ -8,43 +8,62 @@ from dingo.gw.domains import build_domain
 from dingo.gw.transforms.parameter_transforms import SampleExtrinsicParameters
 from dingo.gw.transforms.detector_transforms import GetDetectorTimes, ProjectOntoDetectors
 from dingo.gw.noise_dataset import ASDDataset
-from dingo.gw.transforms.noise_transforms import SampleNoiseASD, WhitenStrain
+from dingo.gw.transforms.noise_transforms import SampleNoiseASD, \
+    WhitenAndScaleStrain
+from dingo.gw.gwutils import *
 
 import numpy as np
 
 if __name__ == '__main__':
     wfd_path = '/Users/mdax//Documents/dingo/devel/dingo-devel/tutorials/02_gwpe' \
-               '/datasets/waveforms/02_IMR_test/waveform_dataset.hdf5'
-    wfd = WaveformDataset(wfd_path)
+               '/datasets/waveforms/03_IMR_test/waveform_dataset.hdf5'
 
     with open('./train_dir/train_settings.yaml', 'r') as fp:
         train_settings = yaml.safe_load(fp)
+
+    # build datasets
+    wfd = WaveformDataset(train_settings['waveform_dataset_path'])
+    asd_dataset = ASDDataset(
+        train_settings['asd_dataset_path'],
+        ifos=train_settings['transform_settings']['detectors'])
+    # truncate datasets
+    wfd.truncate_dataset_domain(
+        train_settings['data_conditioning']['frequency_range'])
+    asd_dataset.truncate_dataset_domain(
+        train_settings['data_conditioning']['frequency_range'])
+    # check compatibility of datasets
+    assert wfd.domain.domain_dict == asd_dataset.domain.domain_dict
+    # add window factor to domain
+    domain = build_domain(wfd.domain.domain_dict)
+    domain.set_window_factor(
+        train_settings['data_conditioning']['window_kwargs'])
+    assert domain.noise_std == 1.3692854996470123
 
     extrinsic_prior_dict = default_extrinsic_dict.copy()
     for k, v in train_settings['transform_settings']['extrinsic_prior'].items():
         if v.lower() != 'default':
             extrinsic_prior_dict[k] = v
     ref_time = train_settings['transform_settings']['ref_time']
-    detector_list = train_settings['transform_settings']['detectors']
-    domain_dict = wfd.domain.domain_dict
+    window_factor = get_window_factor(
+        train_settings['data_conditioning']['window_kwargs'])
     # build objects
-    domain = build_domain(domain_dict)
-    ifo_list = InterferometerList(detector_list)
-    asd_dataset = ASDDataset('../../../data/PSDs/asds_O1.hdf5')
+    ifo_list = InterferometerList(
+        train_settings['transform_settings']['detectors'])
 
     # build transforms
     sample_extrinsic_parameters = SampleExtrinsicParameters(extrinsic_prior_dict)
     get_detector_times = GetDetectorTimes(ifo_list, ref_time)
     project_onto_detectors = ProjectOntoDetectors(ifo_list, domain, ref_time)
     sample_noise_asd = SampleNoiseASD(asd_dataset)
-    whiten_strain = WhitenStrain()
+    # whiten_scale_strain = WhitenAndScaleStrain(domain.noise_std, window_factor)
+    whiten_scale_strain = WhitenAndScaleStrain(domain.noise_std)
 
     d0 = wfd[0]
     d1 = sample_extrinsic_parameters(d0)
     d2 = get_detector_times(d1)
     d3 = project_onto_detectors(d2)
     d4 = sample_noise_asd(d3)
-    d5 = whiten_strain(d4)
+    d5 = whiten_scale_strain(d4)
 
 
 
