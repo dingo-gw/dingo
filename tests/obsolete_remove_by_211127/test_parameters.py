@@ -1,5 +1,5 @@
-from dingo.gw.parameters import GWPriorDict, Uniform, Constraint,\
-    Sine, Cosine,UniformSourceFrame, Planck15
+# from dingo.gw.parameters import GWPriorDict, Uniform, Constraint,\
+#     Sine, Cosine,UniformSourceFrame, Planck15
 import pytest
 import numpy as np
 
@@ -15,6 +15,7 @@ def parameter_lists():
     return params_intrinsic, params_extrinsic
 
 
+@pytest.mark.obsolete
 def test_sample_intrinsic(parameter_lists):
     """Check samples drawn from intrinsic prior distribution."""
     priors = GWPriorDict()
@@ -29,6 +30,7 @@ def test_sample_intrinsic(parameter_lists):
     assert np.array(list(sample_dict.values())).shape == (len_expected, size)
 
 
+@pytest.mark.obsolete
 def test_sample_extrinsic(parameter_lists):
     """Check samples drawn from extrinsic prior distribution."""
     priors = GWPriorDict()
@@ -43,6 +45,7 @@ def test_sample_extrinsic(parameter_lists):
     assert np.array(list(sample_dict.values())).shape == (len_expected, size)
 
 
+@pytest.mark.obsolete
 def test_custom_prior(parameter_lists):
     """Specify a custom prior distribution."""
     params_intrinsic, params_extrinsic = parameter_lists
