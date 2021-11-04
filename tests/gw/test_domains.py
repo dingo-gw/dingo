@@ -124,6 +124,22 @@ def test_FD_time_translation(uniform_FD_params):
     assert np.allclose(a, domain.time_translate_data(a_dt, -dt))
     assert not np.allclose(a, domain.time_translate_data(a_dt, -1.01*dt))
 
+def test_FD_caching(uniform_FD_params):
+    p = uniform_FD_params
+    domain = UniformFrequencyDomain(**p)
+    domain_ref = UniformFrequencyDomain(**p)
+
+    assert np.all(domain() == domain_ref())
+    # we now modify domain._f_max by hand, which should not be done, as this
+    # does not update the cached properties
+    domain._f_max = 50
+    assert np.all(domain() == domain_ref())
+    domain.clear_cache_for_all_instances()
+    # after clearing the cache, the __call__ method should return the correct
+    # result
+    assert np.all(domain() != domain_ref())
+
+
 # def test_FD_truncation_old(uniform_FD_params):
 #     p = uniform_FD_params
 #     domain = UniformFrequencyDomain(**p)
