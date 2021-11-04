@@ -89,6 +89,7 @@ class UniformFrequencyDomain(Domain):
         UniformFrequencyDomain.sample_frequencies.fget.cache_clear()
         UniformFrequencyDomain.sample_frequencies_truncated.fget.cache_clear()
         UniformFrequencyDomain.frequency_mask.fget.cache_clear()
+        UniformFrequencyDomain.noise_std.fget.cache_clear()
 
     def set_new_range(self, f_min: float = None, f_max: float = None):
         """
@@ -112,6 +113,25 @@ class UniformFrequencyDomain(Domain):
         # clear cached properties, such that they are recomputed when needed
         # instead of using the old (incorrect) ones.
         self.clear_cache_for_all_instances()
+
+    def set_window_factor(self, window_info):
+        """
+        Sets self._window_factor, which is used for self.noise_std.
+        Subsequently, the cache for self.noise_std is cleared.
+
+        :param window_info: info about windowing, either the window factor
+        itself, or a dict from which the window_factor can be computed via
+        dingo.gwutils.get_window_factor(window_info).
+        """
+        if isinstance(window_info, (int, float)):
+            self._window_factor = window_info
+            UniformFrequencyDomain.noise_std.fget.cache_clear()
+        elif isinstance(window_info, dict):
+            self._window_factor = get_window_factor(window_info)
+            UniformFrequencyDomain.noise_std.fget.cache_clear()
+        else:
+            raise ValueError(f'Expected number or dict for window_info, '
+                             f'but got {type(window_info)}')
 
     def truncate_data(self, data, allow_for_flexible_upper_bound = False):
         """Truncate data from to [self._f_min, self._f_max]. By convention,
@@ -215,6 +235,7 @@ class UniformFrequencyDomain(Domain):
         return len(self.sample_frequencies_truncated)
 
     @property
+    @lru_cache()
     def noise_std(self) -> float:
         """Standard deviation of the whitened noise distribution.
 
