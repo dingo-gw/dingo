@@ -131,7 +131,7 @@ def test_load_waveform_dataset(generate_waveform_dataset_small):
     delta_f = wd.domain._delta_f
 
     # check basic truncation without setting new range
-    wd.truncate_dataset()
+    wd.truncate_dataset_domain()
     for pol in ['h_cross', 'h_plus']:
         a = el['waveform'][pol][int(f_min/delta_f):int(f_max/delta_f)+1]
         b = wd[0]['waveform'][pol]
@@ -140,14 +140,14 @@ def test_load_waveform_dataset(generate_waveform_dataset_small):
         assert not np.allclose(b / scale_factor, np.roll(a, 1) / scale_factor)
     # check that ValueError is raised if one tries to truncate again
     with pytest.raises(ValueError):
-        wd.truncate_dataset()
+        wd.truncate_dataset_domain()
 
     # check that truncation works as intended when setting new range
     wd2 = WaveformDataset(path)
     assert len(wd2.domain) == len(wd2.domain())
     f_min_new = 20
     f_max_new = 100
-    wd2.truncate_dataset(new_range=(f_min_new, f_max_new))
+    wd2.truncate_dataset_domain(new_range=(f_min_new, f_max_new))
     # check that new domain settings are correctly adapted
     assert wd2.domain.f_min == f_min_new
     assert wd2.domain.f_max == f_max_new

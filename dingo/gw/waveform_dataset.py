@@ -200,7 +200,7 @@ class WaveformDataset(Dataset):
         fp.close()
 
 
-    def truncate_dataset(self, new_range = None):
+    def truncate_dataset_domain(self, new_range = None):
         """
         The waveform dataset provides waveforms polarizations in a particular
         range. In uniform Frequency domain for instance, this range is
