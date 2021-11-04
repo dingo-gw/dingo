@@ -28,7 +28,7 @@ def transforms_setup_1():
     ref_time = 1126259462.391
     domain_dict = {'name': 'UniformFrequencyDomain',
                    'kwargs': {'f_min': 10.0, 'f_max': 1024.0, 'delta_f': 0.125,
-                              'window_factor': 1.0, 'truncation_range': None}}
+                              'window_factor': 1.0}}
     ifo_list = InterferometerList(['H1', 'L1'])
     domain = build_domain(domain_dict)
 
@@ -56,4 +56,3 @@ def test_detector_projection_agains_research_code(reference_data_research_code,
         deviation = np.abs(strain_ref - strain)
         assert np.max(deviation) / np.max(np.abs(strain)) < 5e-2
 
-    deviation = np.abs(sample_out['waveform']['H1'] - h_ref['H1'])
