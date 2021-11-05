@@ -56,6 +56,25 @@ class WhitenAndScaleStrain(object):
         sample['waveform'] = whitened_strains
         return sample
 
+class AddWhiteNoiseComplex(object):
+    """
+    Adds white noise with a standard deviation determined by self.scale to the
+    complex strain data.
+    """
+    def __init__(self, scale = 1.0):
+        self.scale = scale
+
+    def __call__(self, input_sample):
+        sample = input_sample.copy()
+        noisy_strains = {}
+        for ifo, pure_strain in sample['waveform'].items():
+            noise = (np.random.normal(scale=1.0, size=len(pure_strain))
+                     + np.random.normal(scale=1.0, size=len(pure_strain)) * 1j)
+            noise = noise.astype(np.complex64)
+            noisy_strains[ifo] = pure_strain + noise
+        sample['waveform'] = noisy_strains
+        return sample
+
 
 if __name__ == '__main__':
     AD = ASDDataset('../../../data/PSDs/asds_O1.hdf5')

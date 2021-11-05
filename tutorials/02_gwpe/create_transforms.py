@@ -9,10 +9,11 @@ from dingo.gw.transforms.parameter_transforms import SampleExtrinsicParameters
 from dingo.gw.transforms.detector_transforms import GetDetectorTimes, ProjectOntoDetectors
 from dingo.gw.noise_dataset import ASDDataset
 from dingo.gw.transforms.noise_transforms import SampleNoiseASD, \
-    WhitenAndScaleStrain
+    WhitenAndScaleStrain, AddWhiteNoiseComplex
 from dingo.gw.gwutils import *
 
 import numpy as np
+import time
 
 if __name__ == '__main__':
     wfd_path = '/Users/mdax//Documents/dingo/devel/dingo-devel/tutorials/02_gwpe' \
@@ -55,15 +56,24 @@ if __name__ == '__main__':
     get_detector_times = GetDetectorTimes(ifo_list, ref_time)
     project_onto_detectors = ProjectOntoDetectors(ifo_list, domain, ref_time)
     sample_noise_asd = SampleNoiseASD(asd_dataset)
-    # whiten_scale_strain = WhitenAndScaleStrain(domain.noise_std, window_factor)
     whiten_scale_strain = WhitenAndScaleStrain(domain.noise_std)
+    add_noise = AddWhiteNoiseComplex()
+
+
+    N = 100
 
     d0 = wfd[0]
-    d1 = sample_extrinsic_parameters(d0)
-    d2 = get_detector_times(d1)
-    d3 = project_onto_detectors(d2)
-    d4 = sample_noise_asd(d3)
-    d5 = whiten_scale_strain(d4)
+
+    t0 = time.time()
+    for idx in range(N):
+        d1 = sample_extrinsic_parameters(d0)
+        d2 = get_detector_times(d1)
+        d3 = project_onto_detectors(d2)
+        d4 = sample_noise_asd(d3)
+        d5 = whiten_scale_strain(d4)
+        d6 = add_noise(d5)
+
+    print(f'{(time.time() - t0)/N:.3f} seconds')
 
 
 
@@ -78,6 +88,15 @@ if __name__ == '__main__':
 
     plt.yscale('log')
     plt.plot(d5['asds']['H1'])
+    plt.show()
+
+    plt.title('strain.real in H1')
+    plt.xscale('log')
+    plt.plot(domain.sample_frequencies_truncated,
+             d6['waveform']['H1'].real, label='noisy waveform')
+    plt.plot(domain.sample_frequencies_truncated,
+             d5['waveform']['H1'].real, label='pure waveform')
+    plt.legend()
     plt.show()
 
     ref_data = np.load('train_dir/waveform_data.npy', allow_pickle=True).item()
