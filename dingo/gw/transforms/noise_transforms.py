@@ -56,39 +56,6 @@ class WhitenAndScaleStrain(object):
         sample['waveform'] = whitened_strains
         return sample
 
-class TruncateStrainAndASD(object):
-    """
-    Truncate the strain and asd data to the specified range. This corresponds
-    to truncating the likelihood integral accordingly.
-    """
-    def __init__(self, strain_domain, asd_domain, truncation_range):
-        """
-        :param strain_domain: domain object of the strain data
-        :param asd_domain: domain object of the asd data
-        :param truncation_range: frequency range for truncation
-        """
-        self.strain_domain = strain_domain
-        self.asd_domain = asd_domain
-        # initialize truncations
-        self.strain_domain.initialize_truncation(truncation_range)
-        self.asd_domain.initialize_truncation(truncation_range)
-
-    def __call__(self, input_sample):
-        sample = input_sample.copy()
-        ifos = sample['waveform'].keys()
-        if ifos != sample['asds'].keys():
-            raise ValueError(f'Detectors of strain data, {ifos}, do not match '
-                             f'those of asds, {sample["asds"].keys()}.')
-        truncated_strains =  \
-            {ifo: self.strain_domain.truncate_data(sample['waveform'][ifo])
-             for ifo in ifos}
-        truncated_asds =  \
-            {ifo: self.asd_domain.truncate_data(sample['asds'][ifo])
-             for ifo in ifos}
-        sample['waveform'] = truncated_strains
-        sample['asds'] = truncated_asds
-        return sample
-
 
 if __name__ == '__main__':
     AD = ASDDataset('../../../data/PSDs/asds_O1.hdf5')
