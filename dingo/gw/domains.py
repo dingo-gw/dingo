@@ -114,25 +114,6 @@ class UniformFrequencyDomain(Domain):
         # instead of using the old (incorrect) ones.
         self.clear_cache_for_all_instances()
 
-    def set_window_factor(self, window_info):
-        """
-        Sets self._window_factor, which is used for self.noise_std.
-        Subsequently, the cache for self.noise_std is cleared.
-
-        :param window_info: info about windowing, either the window factor
-        itself, or a dict from which the window_factor can be computed via
-        dingo.gwutils.get_window_factor(window_info).
-        """
-        if isinstance(window_info, (int, float)):
-            self._window_factor = window_info
-            UniformFrequencyDomain.noise_std.fget.cache_clear()
-        elif isinstance(window_info, dict):
-            self._window_factor = get_window_factor(window_info)
-            UniformFrequencyDomain.noise_std.fget.cache_clear()
-        else:
-            raise ValueError(f'Expected number or dict for window_info, '
-                             f'but got {type(window_info)}')
-
     def truncate_data(self, data, allow_for_flexible_upper_bound = False):
         """Truncate data from to [self._f_min, self._f_max]. By convention,
         the last axis is the frequency axis.
@@ -233,6 +214,16 @@ class UniformFrequencyDomain(Domain):
     @property
     def len_truncated(self):
         return len(self.sample_frequencies_truncated)
+
+    @property
+    def window_factor(self):
+        return self._window_factor
+
+    @window_factor.setter
+    def window_factor(self, value):
+        """Set self._window_factor and clear cache of self.noise_std."""
+        self._window_factor = value
+        UniformFrequencyDomain.noise_std.fget.cache_clear()
 
     @property
     @lru_cache()

@@ -12,14 +12,15 @@ def uniform_FD_params():
     return {'f_min': f_min, 'f_max': f_max, 'delta_f': delta_f}
 
 @pytest.fixture
-def uniform_FD_params_windowed():
-    f_min = 20.0
-    f_max = 4096.0
-    delta_f = 1.0 / 4.0
-    window = {'window_type': 'tukey', 'f_s': 4096.0, 'roll_off': 0.4, 'T': 8.0}
-    window_factor = get_window_factor(window)
-    return {'f_min': f_min, 'f_max': f_max, 'delta_f': delta_f,
-            'window_factor': window_factor}
+def window_setup():
+    window_type = 'tukey'
+    f_s = 4096
+    T = 8.0
+    roll_off = 0.4
+    window_kwargs = {'window_type': window_type, 'f_s': f_s, 'T': T,
+                     'roll_off': roll_off}
+    window_factor = get_window_factor(window_kwargs)
+    return window_kwargs, window_factor
 
 def test_uniform_FD(uniform_FD_params):
     p = uniform_FD_params
@@ -138,6 +139,36 @@ def test_FD_caching(uniform_FD_params):
     # after clearing the cache, the __call__ method should return the correct
     # result
     assert np.all(domain() != domain_ref())
+
+def test_FD_window_factor(uniform_FD_params, window_setup):
+    p = uniform_FD_params
+    domain = UniformFrequencyDomain(**p)
+    _, window_factor = window_setup
+    assert window_factor == 0.9374713897717841
+    # check that window_factor is initially not set
+    assert domain._window_factor is None
+    with pytest.raises(ValueError):
+        noise_std = domain.noise_std
+    # set new window_factor
+    domain.window_factor = window_factor
+    assert domain._window_factor == domain.window_factor == window_factor
+    noise_std = domain.noise_std
+    assert noise_std == \
+           np.sqrt(domain.window_factor) / np.sqrt(4 * domain.delta_f)
+    # set new window_factor incorrectly and check that noise_std is not updated
+    window_factor = 1
+    domain._window_factor = window_factor
+    assert domain._window_factor == domain.window_factor == window_factor
+    assert domain.noise_std == noise_std
+    assert domain.noise_std != \
+           np.sqrt(domain.window_factor) / np.sqrt(4 * domain.delta_f)
+    # now set new window factor correctly via the setter and check that
+    # noise_std is updated as intended since the cache is cleared
+    domain.window_factor = window_factor
+    assert domain._window_factor == domain.window_factor == window_factor
+    assert domain.noise_std != noise_std
+    assert domain.noise_std == \
+           np.sqrt(domain.window_factor) / np.sqrt(4 * domain.delta_f)
 
 
 # def test_FD_truncation_old(uniform_FD_params):

@@ -35,7 +35,7 @@ if __name__ == '__main__':
     assert wfd.domain.domain_dict == asd_dataset.domain.domain_dict
     # add window factor to domain
     domain = build_domain(wfd.domain.domain_dict)
-    domain.set_window_factor(
+    domain.window_factor = get_window_factor(
         train_settings['data_conditioning']['window_kwargs'])
     assert domain.noise_std == 1.3692854996470123
 
