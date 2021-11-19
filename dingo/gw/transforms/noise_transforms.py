@@ -68,8 +68,9 @@ class AddWhiteNoiseComplex(object):
         sample = input_sample.copy()
         noisy_strains = {}
         for ifo, pure_strain in sample['waveform'].items():
-            noise = (np.random.normal(scale=1.0, size=len(pure_strain))
-                     + np.random.normal(scale=1.0, size=len(pure_strain)) * 1j)
+            noise = \
+                (np.random.normal(scale=self.scale, size=len(pure_strain))
+                + np.random.normal(scale=self.scale, size=len(pure_strain)) *1j)
             noise = noise.astype(np.complex64)
             noisy_strains[ifo] = pure_strain + noise
         sample['waveform'] = noisy_strains
