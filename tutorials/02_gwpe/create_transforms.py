@@ -5,11 +5,10 @@ from bilby.gw.detector import InterferometerList
 from dingo.gw.waveform_dataset import WaveformDataset
 from dingo.gw.prior_split import default_extrinsic_dict
 from dingo.gw.domains import build_domain
-from dingo.gw.transforms.parameter_transforms import SampleExtrinsicParameters
-from dingo.gw.transforms.detector_transforms import GetDetectorTimes, ProjectOntoDetectors
-from dingo.gw.noise_dataset import ASDDataset
-from dingo.gw.transforms.noise_transforms import SampleNoiseASD, \
+from dingo.gw.transforms import SampleExtrinsicParameters,\
+    GetDetectorTimes, ProjectOntoDetectors, SampleNoiseASD, \
     WhitenAndScaleStrain, AddWhiteNoiseComplex
+from dingo.gw.noise_dataset import ASDDataset
 from dingo.gw.gwutils import *
 
 import numpy as np
@@ -60,9 +59,12 @@ if __name__ == '__main__':
     add_noise = AddWhiteNoiseComplex()
 
 
-    N = 100
+    N = 10
 
-    d0 = wfd[0]
+    t0 = time.time()
+    for idx in range(N):
+        d0 = wfd[0]
+    print(f'{(time.time() - t0) / N:.3f} seconds')
 
     t0 = time.time()
     for idx in range(N):
@@ -75,7 +77,10 @@ if __name__ == '__main__':
 
     print(f'{(time.time() - t0)/N:.3f} seconds')
 
+    a = np.random.rand(500)
+    Vh = np.random.rand(500, 8033)
 
+    # (500,)(500, 8033)
 
     import matplotlib.pyplot as plt
     plt.plot(wfd[0]['waveform']['h_cross'].real /

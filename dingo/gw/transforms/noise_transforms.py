@@ -2,7 +2,7 @@ import numpy as np
 
 class SampleNoiseASD(object):
     """
-    TODO
+    Sample a random asds for each detector and add them to sample['asds'].
     """
     def __init__(self, asd_dataset):
         self.asd_dataset = asd_dataset
