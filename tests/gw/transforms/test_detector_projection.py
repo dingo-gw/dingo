@@ -22,7 +22,7 @@ def reference_data_research_code():
     return sample_in, parameters_ref, h_ref
 
 @pytest.fixture
-def transforms_setup_1():
+def setup_detector_projection():
     # setup arguments
     extrinsic_prior_dict = default_extrinsic_dict
     ref_time = 1126259462.391
@@ -39,10 +39,10 @@ def transforms_setup_1():
     return sample_extrinsic_parameters, get_detector_times, \
            project_onto_detectors
 
-def test_detector_projection_agains_research_code(reference_data_research_code,
-                                                  transforms_setup_1):
+def test_detector_projection_against_research_code(reference_data_research_code,
+                                                   setup_detector_projection):
     sample_in, parameters_ref, h_ref = reference_data_research_code
-    _, get_detector_times, project_onto_detector = transforms_setup_1
+    _, get_detector_times, project_onto_detector = setup_detector_projection
 
     sample_out = get_detector_times(sample_in)
     sample_out['extrinsic_parameters']['H1_time'] = parameters_ref['H1_time']
@@ -54,4 +54,3 @@ def test_detector_projection_agains_research_code(reference_data_research_code,
         strain_ref = h_ref[ifo_name]
         deviation = np.abs(strain_ref - strain)
         assert np.max(deviation) / np.max(np.abs(strain)) < 5e-2
-
