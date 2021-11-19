@@ -78,6 +78,7 @@ if __name__ == '__main__':
     # this transforms the np psd datasets from the research code to the hdf5
     # datasets used by dingo
     from os.path import join
+    num_psds_max = None
     run = 'O1'
     ifos = ['H1', 'L1']
     data_dir = '../../../data/PSDs'
@@ -99,8 +100,8 @@ if __name__ == '__main__':
                                           'delta_f': delta_f}})
         settings['domain_dict'] = domain.domain_dict
         # settings['window'] = {'window_type': 'tukey', **meta['tukey_window']}
-        f.create_dataset(f'asds_{ifo}', data=asds)
-        gps_times[ifo] = meta['start_times']
+        f.create_dataset(f'asds_{ifo}', data=asds[:num_psds_max])
+        gps_times[ifo] = meta['start_times'][:num_psds_max]
 
     f.attrs['metadata'] = str(settings)
     f.close()

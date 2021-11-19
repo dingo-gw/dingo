@@ -77,6 +77,28 @@ class AddWhiteNoiseComplex(object):
         return sample
 
 
+class RepackageStrainsAndASDS(object):
+    """
+    Repackage the strains and the asds into an [num_ifos, 3, num_bins]
+    dimensional tensor. Order of ifos is provided by self.ifos. By
+    convention, [:,i,:] is used for:
+        i = 0: strain.real
+        i = 1: strain.imag
+        i = 2: 1 / (asd * 1e21)
+    """
+    def __init__(self, ifos):
+        self.ifos = ifos
+
+    def __call__(self, input_sample):
+        sample = input_sample.copy()
+        strains = np.empty((len(self.ifos),3,len(sample['asds'][self.ifos[0]])))
+        for ifo in self.ifos:
+            strains[0] = sample['waveform'][ifo].real
+            strains[1] = sample['waveform'][ifo].imag
+            strains[2] = sample['asds'][ifo]
+        sample['waveform'] = strains
+        return sample
+
 if __name__ == '__main__':
     AD = ASDDataset('../../../data/PSDs/asds_O1.hdf5')
     asd_samples = AD.sample_random_asds()

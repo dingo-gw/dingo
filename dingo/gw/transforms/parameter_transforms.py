@@ -1,3 +1,4 @@
+import numpy as np
 from dingo.gw.prior_split import BBHExtrinsicPriorDict
 
 
@@ -18,6 +19,30 @@ class SampleExtrinsicParameters(object):
     @property
     def reproduction_dict(self):
         return {'extrinsic_prior_dict': self.extrinsic_prior_dict}
+
+
+class SelectStandardizeRepackageParameters(object):
+    """
+    This transformation selects the parameters in standardization_dict,
+    normalizes them by setting p = (p - mean) / std, and repackages the
+    selected parameters to a numpy array.
+    """
+    def __init__(self, standardization_dict):
+        self.mean = standardization_dict['mean']
+        self.std = standardization_dict['std']
+        self.N = len(self.mean.keys())
+        self.selected_parameters = list(self.mean.keys())
+        if self.mean.keys() != self.std.keys():
+            raise ValueError('Keys of means and stds do not match.')
+
+    def __call__(self, input_sample):
+        sample = input_sample.copy()
+        parameters = np.empty(self.N)
+        for idx, par in enumerate(self.selected_parameters):
+            parameters[idx] = \
+                (sample['parameters'][par] - self.mean[par]) / self.std[par]
+        sample['parameters'] = parameters
+        return sample
 
 
 class StandardizeParameters:

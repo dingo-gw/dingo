@@ -7,7 +7,8 @@ from dingo.gw.prior_split import default_extrinsic_dict
 from dingo.gw.domains import build_domain
 from dingo.gw.transforms import SampleExtrinsicParameters,\
     GetDetectorTimes, ProjectOntoDetectors, SampleNoiseASD, \
-    WhitenAndScaleStrain, AddWhiteNoiseComplex
+    WhitenAndScaleStrain, AddWhiteNoiseComplex, \
+    SelectStandardizeRepackageParameters
 from dingo.gw.noise_dataset import ASDDataset
 from dingo.gw.gwutils import *
 
@@ -58,6 +59,30 @@ if __name__ == '__main__':
     whiten_scale_strain = WhitenAndScaleStrain(domain.noise_std)
     add_noise = AddWhiteNoiseComplex()
 
+    from dingo.gw.prior_split import BBHExtrinsicPriorDict
+
+    prior = BBHExtrinsicPriorDict(extrinsic_prior_dict)
+    mean_extrinsic, std_extrinsic = prior.mean_std(prior.keys())
+    mean_intrinsic = {k: np.mean(wfd._parameter_samples[k]) for k in
+                      wfd._parameter_samples.keys()}
+    std_intrinsic = {k: np.std(wfd._parameter_samples[k]) for k in
+                     wfd._parameter_samples.keys()}
+    # check that overlap between intrinsic and extrinsic parameters is only
+    # due to fiducial values (-> std 0)
+    for k in std_intrinsic.keys() & std_extrinsic.keys():
+        assert std_intrinsic[k] == 0
+    # merge dicts, overwriting fiducial values for parameters (e.g.,
+    # luminosity_distance) in intrinsic parameters by the extrinsic ones
+    mean = {**mean_intrinsic, **mean_extrinsic}
+    std = {**std_intrinsic, **std_extrinsic}
+
+    selected_parameters = ['chirp_mass', 'mass_ratio', 'luminosity_distance',
+                           'dec']
+    standardization_dict = {'mean': {k: mean[k] for k in selected_parameters},
+                            'std': {k: std[k] for k in selected_parameters}}
+    select_standardize_repackage = \
+        SelectStandardizeRepackageParameters(standardization_dict)
+
 
     N = 10
 
@@ -74,6 +99,7 @@ if __name__ == '__main__':
         d4 = sample_noise_asd(d3)
         d5 = whiten_scale_strain(d4)
         d6 = add_noise(d5)
+        d7 = select_standardize_repackage(d6)
 
     print(f'{(time.time() - t0)/N:.3f} seconds')
 
