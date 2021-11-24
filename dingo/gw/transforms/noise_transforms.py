@@ -84,7 +84,7 @@ class RepackageStrainsAndASDS(object):
     convention, [:,i,:] is used for:
         i = 0: strain.real
         i = 1: strain.imag
-        i = 2: 1 / (asd * 1e21)
+        i = 2: 1 / (asd * 1e23)
     """
     def __init__(self, ifos):
         self.ifos = ifos
@@ -92,10 +92,10 @@ class RepackageStrainsAndASDS(object):
     def __call__(self, input_sample):
         sample = input_sample.copy()
         strains = np.empty((len(self.ifos),3,len(sample['asds'][self.ifos[0]])))
-        for ifo in self.ifos:
-            strains[0] = sample['waveform'][ifo].real
-            strains[1] = sample['waveform'][ifo].imag
-            strains[2] = sample['asds'][ifo]
+        for idx_ifo, ifo in enumerate(self.ifos):
+            strains[idx_ifo,0] = sample['waveform'][ifo].real
+            strains[idx_ifo,1] = sample['waveform'][ifo].imag
+            strains[idx_ifo,2] = 1 / (sample['asds'][ifo] * 1e23)
         sample['waveform'] = strains
         return sample
 
