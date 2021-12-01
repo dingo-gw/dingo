@@ -160,3 +160,11 @@ def perform_scheduler_step(scheduler,
         scheduler.step(loss)
     else:
         scheduler.step()
+
+
+def split_dataset_into_train_and_test(dataset, train_fraction):
+    train_size = int(train_fraction * len(dataset))
+    test_size = len(dataset) - train_size
+    return torch.utils.data.random_split(
+        dataset, [train_size, test_size],
+        generator=torch.Generator().manual_seed(42))

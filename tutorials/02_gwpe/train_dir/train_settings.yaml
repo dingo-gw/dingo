@@ -24,3 +24,51 @@ transform_settings:
     psi: default
     luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0)
   ref_time: 1126259462.391
+  selected_parameters:
+    - chirp_mass
+    - mass_ratio
+    - luminosity_distance
+    - dec
+
+# model architecture
+model_arch:
+  # model builder for nde with enet
+  model_builder:
+    dingo.core.nn.nsf.create_nsf_with_rb_projection_embedding_net
+  # kwargs for model_builder
+  model_kwargs:
+    # kwargs for neural spline flow
+    nsf_kwargs:
+      input_dim: 15
+      context_dim: 129
+      num_flow_steps: 30
+      base_transform_kwargs:
+        hidden_dim: 512
+        num_transform_blocks: 5
+        activation: elu
+        dropout_probability: 0.0
+        batch_norm: True
+        num_bins: 8
+        base_transform_type: rq-coupling
+    # kwargs for embedding net
+    embedding_net_kwargs:
+      input_dims: [2, 3, 8033]
+      n_rb: 200
+      V_rb_list: null
+      output_dim: 128
+      hidden_dims: [1024, 1024, 1024, 1024, 1024, 1024,
+                    512, 512, 512, 512, 512, 512,
+                    256, 256, 256, 256, 256, 256,
+                    128, 128, 128, 128, 128, 128]
+      activation: elu
+      dropout: 0.0
+      batch_norm: True
+      # added_context = True for concatenation of GNPE proxies to enet output
+      added_context: True
+
+# settings for training
+train_settings:
+  # fraction of dataset used for training, rest is used for validation
+  train_fraction: 0.98
+  batch_size: 64
+  num_workers: 0 # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
