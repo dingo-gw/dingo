@@ -19,20 +19,12 @@ class PosteriorModel:
         initialize the NDE (including embedding net) as posterior model
     initialize_training:
         initialize for training, that includes storing the epoch, building
-        and optimizer and a learning rate scheduler
-    initialize_data_loader:
-        initialize the data loader used for training
-        TODO:
-        this should not be required at inference time. All information
-        regarding data conditioning should be stored in
-        self.data_conditioning_information.
-
+        an optimizer and a learning rate scheduler
     save_model:
         save the model, including all information required to rebuild it,
         except for the builder function
     load_model:
         load and build a model from a file
-
     train_model:
         train the model
     inference:
@@ -45,24 +37,40 @@ class PosteriorModel:
                  model_filename: str = None,
                  optimizer_kwargs: dict = None,
                  scheduler_kwargs: dict = None,
-                 epoch: int = 1,
                  init_for_training: bool = False,
-                 transform_kwargs: dict = None,
-                 dataset_kwargs: dict = None,
+                 metadata: dict = None,
                  ):
         """
-        TODO: Docstring
+
+        Parameters
+        ----------
+
+        model_builder: Callable
+            builder function for the model,
+            self.model = model_builder(**model_kwargs)
+        model_kwargs: dict = None
+            kwargs for for the model,
+            self.model = model_builder(**model_kwargs)
+        model_filename: str = None
+            path to filename of loaded model
+        optimizer_kwargs: dict = None
+            kwargs for optimizer
+        scheduler_kwargs: dict = None
+            kwargs for scheduler
+        init_for_training: bool = False
+            flag whether initialization for training (e.g., optimizer) required
+        metadata: dict = None
+            dict with metadata, used to save dataset_settings and train_settings
         """
         self.model_builder = model_builder
         self.model_kwargs = model_kwargs
 
-        self.epoch = epoch
+        self.epoch = 1
         self.optimizer_kwargs = optimizer_kwargs
         self.optimizer = None
         self.scheduler_kwargs = scheduler_kwargs
         self.scheduler = None
-        self.transform_kwargs = transform_kwargs
-        self.dataset_kwargs = dataset_kwargs
+        self.metadata = metadata
 
         # build model
         if model_filename is not None:
@@ -96,22 +104,6 @@ class PosteriorModel:
             self.scheduler = torchutils.get_scheduler_from_kwargs(
                 self.optimizer, **self.scheduler_kwargs)
 
-    def initialize_dataloader(self,
-                              DataSet,
-                              get_transformations=None
-                              ):
-        """
-        TODO: Docstring, train vs. val loader, batch size
-        """
-        if get_transformations is not None:
-            self.train_transformation, *_ = \
-                get_transformations(**self.transform_kwargs)
-        else:
-            self.train_transformation = None
-        self.dataset = DataSet(**self.dataset_kwargs,
-                               transform=self.train_transformation)
-        self.dataloader = DataLoader(self.dataset, batch_size=64, shuffle=True)
-
     def save_model(self,
                    model_filename: str,
                    save_training_info: bool = True,
@@ -141,10 +133,8 @@ class PosteriorModel:
                 model_dict['optimizer_state_dict'] = self.optimizer.state_dict()
             if self.scheduler is not None:
                 model_dict['scheduler_state_dict'] = self.scheduler.state_dict()
-            if self.transform_kwargs is not None:
-                model_dict['transform_kwargs'] = self.transform_kwargs
-            if self.dataset_kwargs is not None:
-                model_dict['dataset_kwargs'] = self.dataset_kwargs
+            if self.metadata is not None:
+                model_dict['metadata'] = self.metadata
             # TODO
 
         torch.save(model_dict, model_filename)
@@ -178,10 +168,8 @@ class PosteriorModel:
                 self.optimizer_kwargs = d['optimizer_kwargs']
             if 'scheduler_kwargs' in d:
                 self.scheduler_kwargs = d['scheduler_kwargs']
-            if 'dataset_kwargs' in d:
-                self.dataset_kwargs = d['dataset_kwargs']
-            if 'transform_kwargs' in d:
-                self.transform_kwargs = d['transform_kwargs']
+            if 'metadata' in d:
+                self.metadata = d['metadata']
             # initialize optimizer and scheduler
             self.initialize_optimizer_and_scheduler()
             # load optimizer and scheduler state dict
