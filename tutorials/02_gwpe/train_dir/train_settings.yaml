@@ -39,8 +39,8 @@ model_arch:
   model_kwargs:
     # kwargs for neural spline flow
     nsf_kwargs:
-      input_dim: 15
-      context_dim: 129
+      input_dim: 4 # 15
+      context_dim: 128 # 129
       num_flow_steps: 30
       base_transform_kwargs:
         hidden_dim: 512
@@ -64,7 +64,7 @@ model_arch:
       dropout: 0.0
       batch_norm: True
       # added_context = True for concatenation of GNPE proxies to enet output
-      added_context: True
+      added_context: False # True
 
 # settings for training
 train_settings:
@@ -72,3 +72,9 @@ train_settings:
   train_fraction: 0.98
   batch_size: 64
   num_workers: 0 # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
+  optimizer_kwargs:
+    type: adam
+    lr: 0.0001
+  scheduler_kwargs:
+    type: cosine
+    T_max: 300

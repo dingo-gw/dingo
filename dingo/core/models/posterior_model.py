@@ -39,6 +39,7 @@ class PosteriorModel:
                  scheduler_kwargs: dict = None,
                  init_for_training: bool = False,
                  metadata: dict = None,
+                 device: torch.device = 'cpu'
                  ):
         """
 
@@ -71,6 +72,7 @@ class PosteriorModel:
         self.scheduler_kwargs = scheduler_kwargs
         self.scheduler = None
         self.metadata = metadata
+        self.device = device
 
         # build model
         if model_filename is not None:
@@ -82,7 +84,7 @@ class PosteriorModel:
             if init_for_training:
                 self.initialize_optimizer_and_scheduler()
 
-        # TODO: initialize training and  data loader
+        # TODO: initialize training and data loader
 
     def initialize_model(self):
         """
@@ -184,6 +186,47 @@ class PosteriorModel:
               log_dir: str,
               ):
         pass
+
+
+def train_epoch(pm, dataloader):
+    pm.model.train()
+    loss_info = torchutils.LossInfo(pm.epoch, len(dataloader.dataset),
+                                    dataloader.batch_size, mode='Train',
+                                    print_freq=2)
+
+    for batch_idx, data in enumerate(dataloader):
+        pm.optimizer.zero_grad()
+        # data to device
+        data = [d.float().to(pm.device, non_blocking=True) for d in data]
+        # compute loss
+        loss = - pm.model(data[0], *data[1:]).mean()
+        # update loss for history and logging
+        loss_info.update(loss.detach().item() * len(data[0]), len(data[0]))
+        loss_info.print_info(batch_idx, loss.item())
+        # backward pass and optimizer step
+        loss.backward()
+        pm.optimizer.step()
+
+    return loss_info.get_avg()
+
+
+def test_epoch(pm, dataloader):
+    with torch.no_grad():
+        pm.model.eval()
+        loss_info = torchutils.LossInfo(pm.epoch, len(dataloader.dataset),
+                                        dataloader.batch_size, mode='Test',
+                                        print_freq=2)
+
+        for batch_idx, data in enumerate(dataloader):
+            # data to device
+            data = [d.float().to(pm.device, non_blocking=True) for d in data]
+            # compute loss
+            loss = - pm.model(data[0], *data[1:]).mean()
+            # update loss for history and logging
+            loss_info.update(loss.detach().item() * len(data[0]), len(data[0]))
+            loss_info.print_info(batch_idx, loss.item())
+
+        return loss_info.get_avg()
 
 
 if __name__ == '__main__':

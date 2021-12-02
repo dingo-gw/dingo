@@ -13,6 +13,8 @@ from dingo.gw.noise_dataset import ASDDataset
 from dingo.gw.gwutils import *
 
 from dingo.core.nn.nsf import create_nsf_with_rb_projection_embedding_net
+from dingo.core.models.posterior_model import PosteriorModel, train_epoch, \
+    test_epoch
 from dingo.core.utils.torchutils import *
 
 import numpy as np
@@ -69,7 +71,7 @@ wfd.transform = torchvision.transforms.Compose(transforms)
 train_dataset, test_dataset = split_dataset_into_train_and_test(
     wfd, train_settings['train_settings']['train_fraction'])
 
-# build dataloader
+# build dataloaders
 train_loader = DataLoader(
     train_dataset,
     batch_size=train_settings['train_settings']['batch_size'],
@@ -77,12 +79,33 @@ train_loader = DataLoader(
     pin_memory=True,
     num_workers=train_settings['train_settings']['num_workers'],
     worker_init_fn=lambda _:np.random.seed(int(torch.initial_seed())%(2**32-1)))
+test_loader = DataLoader(
+    test_dataset,
+    batch_size=train_settings['train_settings']['batch_size'],
+    shuffle=False,
+    pin_memory=True,
+    num_workers=train_settings['train_settings']['num_workers'],
+    worker_init_fn=lambda _:np.random.seed(int(torch.initial_seed())%(2**32-1)))
 
 # build model
-model = create_nsf_with_rb_projection_embedding_net(
-    **train_settings['model_arch']['model_kwargs'])
-assert get_number_of_model_parameters(model) == 131448775
+pm = PosteriorModel(model_builder=create_nsf_with_rb_projection_embedding_net,
+                    model_kwargs=train_settings['model_arch']['model_kwargs'],
+                    init_for_training=True,
+                    optimizer_kwargs=train_settings['train_settings'][
+                        'optimizer_kwargs'],
+                    scheduler_kwargs=train_settings['train_settings'][
+                        'scheduler_kwargs'],
+                    device='cpu',
+                    )
+# assert get_number_of_model_parameters(pm.model) == 131448775
 
+device = 'cpu'
+
+
+
+
+train_epoch(pm, train_loader)
+test_epoch(pm, test_loader)
 
 
 for idx, data in enumerate(train_loader):
