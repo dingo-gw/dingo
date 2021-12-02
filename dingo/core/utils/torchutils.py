@@ -163,6 +163,22 @@ def perform_scheduler_step(scheduler,
 
 
 def split_dataset_into_train_and_test(dataset, train_fraction):
+    """
+    Splits dataset into a trainset of size int(train_fraction * len(dataset)),
+    and a testset with the remainder. Uses fixed random seed for
+    reproducibility.
+
+    Parameters
+    ----------
+    dataset: torch.utils.data.Datset
+        dataset to be split
+    train_fraction: float
+        fraction of the dataset to be used for trainset
+
+    Returns
+    -------
+    trainset, testset
+    """
     train_size = int(train_fraction * len(dataset))
     test_size = len(dataset) - train_size
     return torch.utils.data.random_split(
