@@ -6,6 +6,7 @@ from typing import Callable
 import torch
 import dingo.core.utils.torchutils as torchutils
 from torch.utils.data import Dataset, DataLoader
+import time
 
 
 class PosteriorModel:
@@ -66,7 +67,7 @@ class PosteriorModel:
         self.model_builder = model_builder
         self.model_kwargs = model_kwargs
 
-        self.epoch = 1
+        self.epoch = 0
         self.optimizer_kwargs = optimizer_kwargs
         self.optimizer = None
         self.scheduler_kwargs = scheduler_kwargs
@@ -182,10 +183,33 @@ class PosteriorModel:
 
     def train(self,
               train_loader: torch.utils.data.DataLoader,
-              validation_loader: torch.utils.data.DataLoader,
+              test_loader: torch.utils.data.DataLoader,
               log_dir: str,
+              runtime_limits_kwargs: dict = None,
               ):
-        pass
+        runtime_limits = torchutils.RuntimeLimits(**runtime_limits_kwargs,
+                                                  epoch_start=self.epoch)
+
+        while not runtime_limits.runtime_limits_exceeded(self.epoch):
+            self.epoch += 1
+
+            # Training
+            print(f'Start training epoch {self.epoch} with learning rate '
+                  f'{torchutils.get_lr(self.optimizer)}')
+            time_start = time.time()
+            train_loss = train_epoch(self, train_loader)
+            print('Done. This took {:2.0f}:{:2.0f} min.'.format(
+                  *divmod(time.time() - time_start, 60)))
+
+            # Testing
+            print(f'Start testing epoch {self.epoch}')
+            time_start = time.time()
+            test_loss = test_epoch(self, test_loader)
+            print('Done. This took {:2.0f}:{:2.0f} min.'.format(
+                *divmod(time.time() - time_start, 60)))
+
+            # scheduler step for learning rate
+            torchutils.perform_scheduler_step(self.scheduler, test_loss)
 
 
 def train_epoch(pm, dataloader):

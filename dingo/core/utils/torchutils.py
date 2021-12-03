@@ -162,6 +162,10 @@ def perform_scheduler_step(scheduler,
     else:
         scheduler.step()
 
+def get_lr(optimizer):
+    """Returns a list with the learning rates of the optimizer."""
+    return [param_group['lr'] for param_group in optimizer.state_dict()[
+        'param_groups']]
 
 def split_dataset_into_train_and_test(dataset, train_fraction):
     """
@@ -236,3 +240,73 @@ class LossInfo():
             ), end='\t\t')
             print('Time per batch [s] (avg): {:.3f} ({:.3f})'.format(
                 self.dt, (time.time() - self.start_time) / (batch_idx + 1)))
+
+class RuntimeLimits:
+    """
+    Keeps track of the runtime limits (time limit, epoch limit, max. number
+    of epochs for model).
+    """
+    def __init__(self,
+                 max_time_per_run: float = None,
+                 max_epochs_per_run: int = None,
+                 max_epochs_total: int = None,
+                 epoch_start: int = None):
+        """
+
+        Parameters
+        ----------
+        max_time_per_run: float = None
+            maximum time for run, in seconds
+            [soft limit, break only after full epoch]
+        max_epochs_per_run: int = None
+            maximum number of epochs for run
+        max_epochs_total: int = None
+            maximum total number of epochs for model
+        epoch_start: int = None
+            start epoch of run
+        """
+        self.max_time_per_run = max_time_per_run
+        self.max_epochs_per_run = max_epochs_per_run
+        self.max_epochs_total = max_epochs_total
+        self.epoch_start = epoch_start
+        self.time_start = time.time()
+        if max_epochs_per_run is not None and epoch_start is None:
+                raise ValueError('epoch_start required to check '
+                                 'max_epochs_per_run.')
+
+    def runtime_limits_exceeded(self, epoch: int = None):
+        """
+        Check whether any of the runtime limits are exceeded.
+
+        Parameters
+        ----------
+        epoch: int = None
+
+        Returns
+        -------
+        limits_exceeded: bool
+            flag whether runtime limits are exceeded and run should be stopped;
+            if limits_exceeded = True, this prints a message for the reason
+        """
+        # check time limit for run
+        if self.max_time_per_run is not None:
+            if time.time() - self.time_start >= self.max_time_per_run:
+                print(f'Stop run: Time limit of {self.max_time_per_run} s '
+                      f'exceeded.')
+                return True
+        # check epoch limit for run
+        if self.max_epochs_per_run is not None:
+            if epoch is None:
+                raise ValueError('epoch required')
+            if epoch - self.epoch_start >= self.max_epochs_per_run:
+                print(f'Stop run: Epoch limit of {self.max_epochs_per_run} '
+                      f'per run reached.')
+                return True
+        # check total epoch limit
+        if self.max_epochs_total is not None:
+            if epoch >= self.max_epochs_total:
+                print(f'Stop run: Total epoch limit of '
+                      f'{self.max_epochs_total} reached.')
+                return True
+        # return False if none of the limits is exceeded
+        return False

@@ -69,7 +69,7 @@ model_arch:
 # settings for training
 train_settings:
   # fraction of dataset used for training, rest is used for validation
-  train_fraction: 0.98
+  train_fraction: 0.002
   batch_size: 64
   num_workers: 0 # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
   optimizer_kwargs:
@@ -78,3 +78,7 @@ train_settings:
   scheduler_kwargs:
     type: cosine
     T_max: 300
+  runtime_limits:
+    max_time_per_run: 1
+    max_epochs_per_run: 50
+    max_epochs_total: 40

@@ -102,10 +102,14 @@ pm = PosteriorModel(model_builder=create_nsf_with_rb_projection_embedding_net,
 device = 'cpu'
 
 
-
+pm.train(train_loader,
+         test_loader,
+         'a',
+         train_settings['train_settings']['runtime_limits'])
 
 train_epoch(pm, train_loader)
 test_epoch(pm, test_loader)
+
 
 
 for idx, data in enumerate(train_loader):
