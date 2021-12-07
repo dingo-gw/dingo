@@ -1,4 +1,5 @@
 import time
+import os
 from os.path import join, isfile
 import csv
 
@@ -157,3 +158,43 @@ def write_history(log_dir, epoch, train_loss, test_loss, learning_rates,
     with open(history_file, 'w' if epoch == 1 else 'a') as f:
         writer = csv.writer(f, delimiter='\t')
         writer.writerow([epoch, train_loss, test_loss, *learning_rates, *aux])
+
+
+def copyfile(src, dst):
+    """
+    copy src to dst.
+    :param src:
+    :param dst:
+    :return:
+    """
+    os.system('cp -p %s %s' % (src, dst))
+
+
+def save_model(pm, log_dir, model_prefix='model', checkpoint_epochs=None):
+    """
+    Save model to <model_prefix>_latest.pt in log_dir. Additionally,
+    all checkpoint_epochs a permanent checkpoint is saved.
+
+    Parameters
+    ----------
+    pm:
+        model to be saved
+    log_dir: str
+        log directory, where model is saved
+    model_prefix: str = 'model'
+        prefix for name of save model
+    checkpoint_epochs: int = None
+        number of steps between two consecutive model checkpoints
+    """
+    # save current model
+    model_name = join(log_dir, f'{model_prefix}_latest.pt')
+    print(f'Saving model to {model_name}.', end=' ')
+    pm.save_model(model_name, save_training_info=True)
+    print('Done.')
+
+    # potentially copy model to a checkpoint
+    if checkpoint_epochs is not None and pm.epoch % checkpoint_epochs == 0:
+        model_name_cp = join(log_dir, f'{model_prefix}_{pm.epoch:03d}.pt')
+        print(f'Copy model to checkpoint {model_name_cp}.', end=' ')
+        copyfile(model_name, model_name_cp)
+        print('Done.')

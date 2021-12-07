@@ -4,9 +4,11 @@ TODO: Docstring
 
 from typing import Callable
 import torch
-import dingo.core.utils.torchutils as torchutils
+import dingo.core.utils as utils
 from torch.utils.data import Dataset, DataLoader
 import time
+
+import dingo.core.utils.trainutils
 
 
 class PosteriorModel:
@@ -101,10 +103,10 @@ class PosteriorModel:
         and self.scheduler_kwargs, respectively.
         """
         if self.optimizer_kwargs is not None:
-            self.optimizer = torchutils.get_optimizer_from_kwargs(
+            self.optimizer = utils.get_optimizer_from_kwargs(
                 self.model.parameters(), **self.optimizer_kwargs)
         if self.scheduler_kwargs is not None:
-            self.scheduler = torchutils.get_scheduler_from_kwargs(
+            self.scheduler = utils.get_scheduler_from_kwargs(
                 self.optimizer, **self.scheduler_kwargs)
 
     def save_model(self,
@@ -129,6 +131,10 @@ class PosteriorModel:
             'epoch': self.epoch,
             # 'training_data_information': None,
         }
+
+        if self.metadata is not None:
+            model_dict['metadata'] = self.metadata
+
         if save_training_info:
             model_dict['optimizer_kwargs'] = self.optimizer_kwargs
             model_dict['scheduler_kwargs'] = self.scheduler_kwargs
@@ -136,8 +142,6 @@ class PosteriorModel:
                 model_dict['optimizer_state_dict'] = self.optimizer.state_dict()
             if self.scheduler is not None:
                 model_dict['scheduler_state_dict'] = self.scheduler.state_dict()
-            if self.metadata is not None:
-                model_dict['metadata'] = self.metadata
             # TODO
 
         torch.save(model_dict, model_filename)
@@ -166,13 +170,14 @@ class PosteriorModel:
 
         self.epoch = d['epoch']
 
+        if 'metadata' in d:
+            self.metadata = d['metadata']
+
         if load_training_info:
             if 'optimizer_kwargs' in d:
                 self.optimizer_kwargs = d['optimizer_kwargs']
             if 'scheduler_kwargs' in d:
                 self.scheduler_kwargs = d['scheduler_kwargs']
-            if 'metadata' in d:
-                self.metadata = d['metadata']
             # initialize optimizer and scheduler
             self.initialize_optimizer_and_scheduler()
             # load optimizer and scheduler state dict
@@ -186,16 +191,25 @@ class PosteriorModel:
               test_loader: torch.utils.data.DataLoader,
               log_dir: str,
               runtime_limits_kwargs: dict = None,
+              checkpoint_epochs: int = None,
               ):
-        runtime_limits = torchutils.RuntimeLimits(**runtime_limits_kwargs,
-                                                  epoch_start=self.epoch)
+        """
+
+        :param train_loader:
+        :param test_loader:
+        :param log_dir:
+        :param runtime_limits_kwargs:
+        :return:
+        """
+        runtime_limits = dingo.core.utils.trainutils.RuntimeLimits(**runtime_limits_kwargs,
+                                                                   epoch_start=self.epoch)
 
         while not runtime_limits.runtime_limits_exceeded(self.epoch):
             self.epoch += 1
 
             # Training
-            print(f'Start training epoch {self.epoch} with learning rate '
-                  f'{torchutils.get_lr(self.optimizer)}')
+            lr = utils.get_lr(self.optimizer)
+            print(f'\nStart training epoch {self.epoch} with lr {lr}')
             time_start = time.time()
             train_loss = train_epoch(self, train_loader)
             print('Done. This took {:2.0f}:{:2.0f} min.'.format(
@@ -204,19 +218,28 @@ class PosteriorModel:
             # Testing
             print(f'Start testing epoch {self.epoch}')
             time_start = time.time()
-            test_loss = test_epoch(self, test_loader)
+            # test_loss = test_epoch(self, test_loader)
+            test_loss = self.epoch * 0.5
             print('Done. This took {:2.0f}:{:2.0f} min.'.format(
                 *divmod(time.time() - time_start, 60)))
 
+            utils.write_history(log_dir, self.epoch, train_loss, test_loss, lr)
+            utils.save_model(self, log_dir, checkpoint_epochs=checkpoint_epochs)
+
             # scheduler step for learning rate
-            torchutils.perform_scheduler_step(self.scheduler, test_loss)
+            utils.perform_scheduler_step(self.scheduler, test_loss)
+
+            print(f'Finished training epoch {self.epoch}.\n')
+
+
+
 
 
 def train_epoch(pm, dataloader):
     pm.model.train()
-    loss_info = torchutils.LossInfo(pm.epoch, len(dataloader.dataset),
-                                    dataloader.batch_size, mode='Train',
-                                    print_freq=2)
+    loss_info = dingo.core.utils.trainutils.LossInfo(pm.epoch, len(dataloader.dataset),
+                                                     dataloader.batch_size, mode='Train',
+                                                     print_freq=2)
 
     for batch_idx, data in enumerate(dataloader):
         pm.optimizer.zero_grad()
@@ -237,9 +260,9 @@ def train_epoch(pm, dataloader):
 def test_epoch(pm, dataloader):
     with torch.no_grad():
         pm.model.eval()
-        loss_info = torchutils.LossInfo(pm.epoch, len(dataloader.dataset),
-                                        dataloader.batch_size, mode='Test',
-                                        print_freq=2)
+        loss_info = dingo.core.utils.trainutils.LossInfo(pm.epoch, len(dataloader.dataset),
+                                                         dataloader.batch_size, mode='Test',
+                                                         print_freq=2)
 
         for batch_idx, data in enumerate(dataloader):
             # data to device
@@ -318,7 +341,7 @@ if __name__ == '__main__':
     )
 
     optimizer_kwargs = {'type': 'adam', 'lr': 0.001}
-    optimizer = torchutils.get_optimizer_from_kwargs(pm.model.parameters(),
+    optimizer = utils.get_optimizer_from_kwargs(pm.model.parameters(),
                                                      **optimizer_kwargs)
 
     pm.save_model(model_filename)

@@ -1,4 +1,5 @@
 import yaml
+from os.path import join, isfile
 import torchvision
 from torch.utils.data import DataLoader
 
@@ -19,8 +20,15 @@ from dingo.core.utils.torchutils import *
 
 import numpy as np
 import time
+import argparse
 
-with open('./train_dir/train_settings.yaml', 'r') as fp:
+parser = argparse.ArgumentParser(description='Train Dingo.')
+parser.add_argument('--log_dir', required=True,
+                    help='Log directory for Dingo training. Contains'
+                         'train_settings.yaml file, used for logging.')
+args = parser.parse_args()
+
+with open(join(args.log_dir, 'train_settings.yaml'), 'r') as fp:
     train_settings = yaml.safe_load(fp)
 
 # build datasets
@@ -88,24 +96,40 @@ test_loader = DataLoader(
     worker_init_fn=lambda _:np.random.seed(int(torch.initial_seed())%(2**32-1)))
 
 # build model
-pm = PosteriorModel(model_builder=create_nsf_with_rb_projection_embedding_net,
-                    model_kwargs=train_settings['model_arch']['model_kwargs'],
-                    init_for_training=True,
-                    optimizer_kwargs=train_settings['train_settings'][
-                        'optimizer_kwargs'],
-                    scheduler_kwargs=train_settings['train_settings'][
-                        'scheduler_kwargs'],
-                    device='cpu',
-                    )
+if not isfile(join(args.log_dir, 'model_latest.pt')):
+    # complete model kwargs from train settings
+    model_kwargs = train_settings['model_arch']['model_kwargs']
+    model_kwargs['embedding_net_kwargs']['input_dims'] = \
+        (len(ifo_list), 3, domain.len_truncated)
+    if not model_kwargs['embedding_net_kwargs']['added_context']:
+        model_kwargs['nsf_kwargs']['context_dim'] = \
+            model_kwargs['embedding_net_kwargs']['output_dim']
+    else:
+        raise NotImplementedError('We need to adjust this dimension for GNPE')
+    # initialize posterior model
+    pm = PosteriorModel(
+        model_builder=create_nsf_with_rb_projection_embedding_net,
+        model_kwargs=model_kwargs,
+        init_for_training=True,
+        optimizer_kwargs=train_settings['train_settings']['optimizer_kwargs'],
+        scheduler_kwargs=train_settings['train_settings']['scheduler_kwargs'],
+        device='cpu')
+else:
+    pm = PosteriorModel(
+        model_builder=create_nsf_with_rb_projection_embedding_net,
+        model_filename=join(args.log_dir, 'model_latest.pt'),
+        init_for_training=True)
 # assert get_number_of_model_parameters(pm.model) == 131448775
 
 device = 'cpu'
 
-
-pm.train(train_loader,
-         test_loader,
-         'a',
-         train_settings['train_settings']['runtime_limits'])
+pm.train(
+    train_loader,
+    test_loader,
+    log_dir=args.log_dir,
+    runtime_limits_kwargs=train_settings['train_settings']['runtime_limits'],
+    checkpoint_epochs=train_settings['train_settings']['checkpoint_epochs'],
+)
 
 train_epoch(pm, train_loader)
 test_epoch(pm, test_loader)

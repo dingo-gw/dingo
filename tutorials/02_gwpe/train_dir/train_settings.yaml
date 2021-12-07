@@ -40,10 +40,11 @@ model_arch:
     # kwargs for neural spline flow
     nsf_kwargs:
       input_dim: 4 # 15
-      context_dim: 128 # 129
-      num_flow_steps: 30
+#      num_flow_steps: 30
+      num_flow_steps: 3
       base_transform_kwargs:
-        hidden_dim: 512
+#        hidden_dim: 512
+        hidden_dim: 64
         num_transform_blocks: 5
         activation: elu
         dropout_probability: 0.0
@@ -52,14 +53,14 @@ model_arch:
         base_transform_type: rq-coupling
     # kwargs for embedding net
     embedding_net_kwargs:
-      input_dims: [2, 3, 8033]
       n_rb: 200
       V_rb_list: null
       output_dim: 128
-      hidden_dims: [1024, 1024, 1024, 1024, 1024, 1024,
-                    512, 512, 512, 512, 512, 512,
-                    256, 256, 256, 256, 256, 256,
-                    128, 128, 128, 128, 128, 128]
+#      hidden_dims: [1024, 1024, 1024, 1024, 1024, 1024,
+#                    512, 512, 512, 512, 512, 512,
+#                    256, 256, 256, 256, 256, 256,
+#                    128, 128, 128, 128, 128, 128]
+      hidden_dims: [1024, 512, 256, 128]
       activation: elu
       dropout: 0.0
       batch_norm: True
@@ -69,7 +70,7 @@ model_arch:
 # settings for training
 train_settings:
   # fraction of dataset used for training, rest is used for validation
-  train_fraction: 0.002
+  train_fraction: 0.001
   batch_size: 64
   num_workers: 0 # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
   optimizer_kwargs:
@@ -79,6 +80,7 @@ train_settings:
     type: cosine
     T_max: 300
   runtime_limits:
-    max_time_per_run: 1
-    max_epochs_per_run: 50
-    max_epochs_total: 40
+    max_time_per_run: 36000
+    max_epochs_per_run: 5
+    max_epochs_total: 300
+  checkpoint_epochs: 3
