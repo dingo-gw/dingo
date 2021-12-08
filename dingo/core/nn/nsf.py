@@ -301,6 +301,40 @@ def create_nsf_with_rb_projection_embedding_net(nsf_kwargs: dict,
     model = FlowWrapper(flow, embedding_net)
     return model
 
+def autocomplete_model_kwargs_nsf(train_settings, ifo_list, domain,
+                                  gnpe_proxy_dim=0):
+    """
+    Autocomplete the model kwargs from train_settings:
+    (*) set input dimension of embedding net using ifo_list and domain
+    (*) set dimension of nsf parameter space using selected_parameters
+    (*) set added_context flag of embedding net if required for gnpe proxies
+    (*) set context dim of nsf to output dim of embedding net + gnpe proxy dim
+
+    :param train_settings: dict
+        train settings as loaded from .yaml file
+    :param ifo_list: bilby.gw.detector.InterferometerList
+        list of detectors
+    :param domain: dingo.gw.domains.Domain
+        domain of GW data
+    :param gnpe_proxy_dim: int = 0
+        number of gnpe proxies for additional context
+    :return: model_kwargs: dict
+        updated, autocompleted model_kwargs
+    """
+    model_kwargs = train_settings['model_arch']['model_kwargs']
+    # set input dims from ifo_list and domain information
+    model_kwargs['embedding_net_kwargs']['input_dims'] = \
+        (len(ifo_list), 3, domain.len_truncated)
+    # set dimension of parameter space of nsf
+    model_kwargs['nsf_kwargs']['input_dim'] = \
+        len(train_settings['transform_settings']['selected_parameters'])
+    # set added_context flag of embedding net if gnpe proxies are required
+    model_kwargs['embedding_net_kwargs']['added_context'] = gnpe_proxy_dim > 0
+    # set context dim of nsf to output dim of embedding net + gnpe proxy dim
+    model_kwargs['nsf_kwargs']['context_dim'] = \
+        model_kwargs['embedding_net_kwargs']['output_dim'] + gnpe_proxy_dim
+    return model_kwargs
+
 
 if __name__ == '__main__':
     pass

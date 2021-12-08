@@ -15,10 +15,11 @@ from dingo.gw.noise_dataset import ASDDataset
 from dingo.gw.prior_split import default_params
 from dingo.gw.gwutils import *
 
-from dingo.core.nn.nsf import create_nsf_with_rb_projection_embedding_net
+from dingo.core.nn.nsf import create_nsf_with_rb_projection_embedding_net, \
+    autocomplete_model_kwargs_nsf
 from dingo.core.models.posterior_model import PosteriorModel, train_epoch, \
     test_epoch
-from dingo.core.utils.torchutils import *
+from dingo.core.utils import *
 
 import numpy as np
 import time
@@ -109,21 +110,12 @@ test_loader = DataLoader(
     num_workers=train_settings['train_settings']['num_workers'],
     worker_init_fn=lambda _:np.random.seed(int(torch.initial_seed())%(2**32-1)))
 
+
 # build model
 if not isfile(join(args.log_dir, 'model_latest.pt')):
-    # autocomplete model kwargs from train settings
-    model_kwargs = train_settings['model_arch']['model_kwargs']
-    # set input dims from ifo_list and domain information
-    model_kwargs['embedding_net_kwargs']['input_dims'] = \
-        (len(ifo_list), 3, domain.len_truncated)
-    # set dimension of parameter space of nsf
-    model_kwargs['nsf_kwargs']['input_dim'] = \
-        len(train_settings['transform_settings']['selected_parameters'])
-    # set added_context flag of embedding net if gnpe proxies are required
-    model_kwargs['embedding_net_kwargs']['added_context'] = gnpe_proxy_dim > 0
-    # set context dim of nsf to output dim of embedding net + gnpe proxy dim
-    model_kwargs['nsf_kwargs']['context_dim'] = \
-            model_kwargs['embedding_net_kwargs']['output_dim'] + gnpe_proxy_dim
+    # autocomplete model kwargs is train settings (e.g., input dim from domain)
+    model_kwargs = autocomplete_model_kwargs_nsf(
+        train_settings, ifo_list, domain, gnpe_proxy_dim)
     # initialize posterior model
     pm = PosteriorModel(
         model_builder=create_nsf_with_rb_projection_embedding_net,
