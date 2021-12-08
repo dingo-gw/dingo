@@ -9,7 +9,8 @@ from dingo.gw.domains import build_domain
 from dingo.gw.transforms import SampleExtrinsicParameters,\
     GetDetectorTimes, ProjectOntoDetectors, SampleNoiseASD, \
     WhitenAndScaleStrain, AddWhiteNoiseComplex, \
-    SelectStandardizeRepackageParameters, RepackageStrainsAndASDS, UnpackDict
+    SelectStandardizeRepackageParameters, RepackageStrainsAndASDS, \
+    UnpackDict, GNPEDetectorTimes
 from dingo.gw.noise_dataset import ASDDataset
 from dingo.gw.prior_split import default_params
 from dingo.gw.gwutils import *
@@ -64,18 +65,28 @@ ifo_list = InterferometerList(
     train_settings['transform_settings']['detectors'])
 
 # build transforms
+gnpe_proxy_dim = 0
 transforms = []
 transforms.append(SampleExtrinsicParameters(extrinsic_prior_dict))
 transforms.append(GetDetectorTimes(ifo_list, ref_time))
+if 'gnpe_time_shifts' in train_settings['transform_settings']:
+    d = train_settings['transform_settings']['gnpe_time_shifts']
+    transforms.append(GNPEDetectorTimes(
+        ifo_list, d['kernel_kwargs'], d['exact_equiv'],
+        std=standardization_dict['std']['geocent_time']))
+    gnpe_proxy_dim += transforms[-1].gnpe_proxy_dim
 transforms.append(ProjectOntoDetectors(ifo_list, domain, ref_time))
 transforms.append(SampleNoiseASD(asd_dataset))
 transforms.append(WhitenAndScaleStrain(domain.noise_std))
 transforms.append(AddWhiteNoiseComplex())
-transforms.append(SelectStandardizeRepackageParameters(
-    standardization_dict))
+transforms.append(SelectStandardizeRepackageParameters(standardization_dict))
 transforms.append(RepackageStrainsAndASDS(
     train_settings['transform_settings']['detectors']))
-transforms.append(UnpackDict(selected_keys=['parameters', 'waveform']))
+if gnpe_proxy_dim == 0:
+    selected_keys = ['parameters', 'waveform']
+else:
+    selected_keys = ['parameters', 'waveform', 'gnpe_proxies']
+transforms.append(UnpackDict(selected_keys=selected_keys))
 # set wfd transforms to the composition of the above transforms
 wfd.transform = torchvision.transforms.Compose(transforms)
 
@@ -102,15 +113,17 @@ test_loader = DataLoader(
 if not isfile(join(args.log_dir, 'model_latest.pt')):
     # autocomplete model kwargs from train settings
     model_kwargs = train_settings['model_arch']['model_kwargs']
+    # set input dims from ifo_list and domain information
     model_kwargs['embedding_net_kwargs']['input_dims'] = \
         (len(ifo_list), 3, domain.len_truncated)
+    # set dimension of parameter space of nsf
     model_kwargs['nsf_kwargs']['input_dim'] = \
         len(train_settings['transform_settings']['selected_parameters'])
-    if not model_kwargs['embedding_net_kwargs']['added_context']:
-        model_kwargs['nsf_kwargs']['context_dim'] = \
-            model_kwargs['embedding_net_kwargs']['output_dim']
-    else:
-        raise NotImplementedError('We need to adjust this dimension for GNPE')
+    # set added_context flag of embedding net if gnpe proxies are required
+    model_kwargs['embedding_net_kwargs']['added_context'] = gnpe_proxy_dim > 0
+    # set context dim of nsf to output dim of embedding net + gnpe proxy dim
+    model_kwargs['nsf_kwargs']['context_dim'] = \
+            model_kwargs['embedding_net_kwargs']['output_dim'] + gnpe_proxy_dim
     # initialize posterior model
     pm = PosteriorModel(
         model_builder=create_nsf_with_rb_projection_embedding_net,

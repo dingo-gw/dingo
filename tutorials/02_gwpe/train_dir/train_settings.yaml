@@ -20,15 +20,14 @@ transform_settings:
   extrinsic_prior:
     dec: default
     ra: default
-    geocent_time: bilby.core.prior.Uniform(minimum=-0.03, maximum=0.03)
+    geocent_time: bilby.core.prior.Uniform(minimum=-0.10, maximum=0.10)
     psi: default
     luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0)
   ref_time: 1126259462.391
-  selected_parameters: default
-#    - chirp_mass
-#    - mass_ratio
-#    - luminosity_distance
-#    - dec
+  gnpe_time_shifts:
+    kernel_kwargs: {type: uniform, low: -0.001, high: 0.001}
+    exact_equiv: True
+  selected_parameters: default # [chirp_mass, mass_ratio,  luminosity_distance, dec]
 
 # model architecture
 model_arch:
@@ -62,12 +61,12 @@ model_arch:
       dropout: 0.0
       batch_norm: True
       # added_context = True for concatenation of GNPE proxies to enet output
-      added_context: False # True
+#      added_context: False # True
 
 # settings for training
 train_settings:
   # fraction of dataset used for training, rest is used for validation
-  train_fraction: 0.001
+  train_fraction: 0.005
   batch_size: 64
   num_workers: 0 # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
   optimizer_kwargs:
