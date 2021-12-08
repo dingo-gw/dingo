@@ -24,11 +24,11 @@ transform_settings:
     psi: default
     luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0)
   ref_time: 1126259462.391
-  selected_parameters:
-    - chirp_mass
-    - mass_ratio
-    - luminosity_distance
-    - dec
+  selected_parameters: default
+#    - chirp_mass
+#    - mass_ratio
+#    - luminosity_distance
+#    - dec
 
 # model architecture
 model_arch:
@@ -39,12 +39,9 @@ model_arch:
   model_kwargs:
     # kwargs for neural spline flow
     nsf_kwargs:
-      input_dim: 4 # 15
-#      num_flow_steps: 30
-      num_flow_steps: 3
+      num_flow_steps: 3 # 30
       base_transform_kwargs:
-#        hidden_dim: 512
-        hidden_dim: 64
+        hidden_dim: 64 # 512
         num_transform_blocks: 5
         activation: elu
         dropout_probability: 0.0

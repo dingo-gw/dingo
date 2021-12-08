@@ -11,6 +11,7 @@ from dingo.gw.transforms import SampleExtrinsicParameters,\
     WhitenAndScaleStrain, AddWhiteNoiseComplex, \
     SelectStandardizeRepackageParameters, RepackageStrainsAndASDS, UnpackDict
 from dingo.gw.noise_dataset import ASDDataset
+from dingo.gw.prior_split import default_params
 from dingo.gw.gwutils import *
 
 from dingo.core.nn.nsf import create_nsf_with_rb_projection_embedding_net
@@ -50,6 +51,8 @@ domain.window_factor = get_window_factor(
 
 extrinsic_prior_dict = get_extrinsic_prior_dict(
     train_settings['transform_settings']['extrinsic_prior'])
+if train_settings['transform_settings']['selected_parameters'] == 'default':
+    train_settings['transform_settings']['selected_parameters'] = default_params
 standardization_dict = get_standardization_dict(
     extrinsic_prior_dict, wfd,
     train_settings['transform_settings']['selected_parameters'])
@@ -97,10 +100,12 @@ test_loader = DataLoader(
 
 # build model
 if not isfile(join(args.log_dir, 'model_latest.pt')):
-    # complete model kwargs from train settings
+    # autocomplete model kwargs from train settings
     model_kwargs = train_settings['model_arch']['model_kwargs']
     model_kwargs['embedding_net_kwargs']['input_dims'] = \
         (len(ifo_list), 3, domain.len_truncated)
+    model_kwargs['nsf_kwargs']['input_dim'] = \
+        len(train_settings['transform_settings']['selected_parameters'])
     if not model_kwargs['embedding_net_kwargs']['added_context']:
         model_kwargs['nsf_kwargs']['context_dim'] = \
             model_kwargs['embedding_net_kwargs']['output_dim']
