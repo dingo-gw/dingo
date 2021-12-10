@@ -1,10 +1,11 @@
 import yaml
-from os.path import join, isfile
+from os.path import join, isfile, abspath, dirname
 import torchvision
 from torch.utils.data import DataLoader
 
 from bilby.gw.detector import InterferometerList
-from dingo.gw.waveform_dataset import WaveformDataset
+from dingo.gw.waveform_dataset import WaveformDataset, \
+    generate_and_save_reduced_basis
 from dingo.gw.domains import build_domain
 from dingo.gw.transforms import SampleExtrinsicParameters,\
     GetDetectorTimes, ProjectOntoDetectors, SampleNoiseASD, \
@@ -22,7 +23,6 @@ from dingo.core.models.posterior_model import PosteriorModel, train_epoch, \
 from dingo.core.utils import *
 
 import numpy as np
-import time
 import argparse
 
 parser = argparse.ArgumentParser(description='Train Dingo.')
@@ -88,6 +88,29 @@ if gnpe_proxy_dim == 0:
 else:
     selected_keys = ['parameters', 'waveform', 'gnpe_proxies']
 transforms.append(UnpackDict(selected_keys=selected_keys))
+
+
+# generate reduced basis
+# get rb transforms
+omitted_transforms = [AddWhiteNoiseComplex, RepackageStrainsAndASDS]
+transforms_rb = [tr for tr in transforms if type(tr) not in omitted_transforms]
+# set suffix according to gnpe settings
+suffix = ''
+if 'gnpe_time_shifts' in train_settings['transform_settings']:
+    dt = train_settings['transform_settings']['gnpe_time_shifts'][
+        'kernel_kwargs']['high']
+    suffix += f'_gnpe-timeshift-{dt:.4f}'
+
+generate_and_save_reduced_basis(
+    wfd,
+    torchvision.transforms.Compose(transforms_rb),
+    N = 50,
+    batch_size = 10,
+    num_workers = train_settings['train_settings']['num_workers'],
+    n_rb = 200,
+    out_dir = dirname(abspath(train_settings['asd_dataset_path'])),
+    suffix = suffix)
+
 # set wfd transforms to the composition of the above transforms
 wfd.transform = torchvision.transforms.Compose(transforms)
 

@@ -1,6 +1,6 @@
 # datasets
 waveform_dataset_path: /Users/mdax/Documents/dingo/devel/dingo-devel/tutorials/02_gwpe/datasets/waveforms/03_IMR_test/waveform_dataset.hdf5
-asd_dataset_path: /Users/mdax/Documents/dingo/devel/data/PSDs/asds_O1.hdf5
+asd_dataset_path: /Users/mdax/Documents/dingo/devel/data/PSDs/smooth_psds/asds_O1.hdf5
 
 # data conditioning for inference
 data_conditioning:
