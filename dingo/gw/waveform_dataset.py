@@ -42,11 +42,12 @@ class SVDBasis:
             if n == 0:
                 n = min(training_data.shape)
 
-            U, s, Vh = randomized_svd(training_data, n)
+            U, s, Vh = randomized_svd(training_data, n, random_state=0)
 
             self.Vh = Vh.astype(np.complex64)
             self.V = self.Vh.T.conj()
             self.n = n
+            self.s = s
         elif method == 'scipy':
             # Code below uses scipy's svd tool. Likely slower.
             U, s, Vh = scipy.linalg.svd(training_data, full_matrices=False)
@@ -60,6 +61,7 @@ class SVDBasis:
                 self.Vh = Vh[:n, :]
 
             self.n = len(self.Vh)
+            self.s = s
         else:
             raise ValueError(f'Unsupported SVD method: {method}.')
 
