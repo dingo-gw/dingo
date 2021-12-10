@@ -6,7 +6,9 @@ import numpy as np
 import pandas as pd
 import scipy
 from sklearn.utils.extmath import randomized_svd
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
+from os.path import join
+import time
 
 from dingo.gw.domains import build_domain
 
@@ -242,3 +244,85 @@ class WaveformDataset(Dataset):
                                       'polarization data.')
 
         self.is_truncated = True
+
+
+def generate_and_save_reduced_basis(wfd,
+                                    transforms_rb,
+                                    N = 50_000,
+                                    batch_size = 100,
+                                    num_workers = 16,
+                                    n_rb = 200,
+                                    out_dir = None,
+                                    suffix = ''
+                                    ):
+    """
+    Generate a reduced basis (rb) for network initialization. To that end,
+    a set of non-noisy waveforms from wfd are sampled (important: transforms_rb
+    should not contain any noise addition transforms), and an SVD basis is
+    build based on these.
+
+    :param wfd: dingo.gw.waveform_dataset.WaveformDataset
+        waveform dataset for rb generation
+    :param transforms_rb: transforms
+        transforms applied to obtain rb training set from wfd
+    :param N: int
+        size of training set for rb
+    :param batch_size: int
+        batch size for dataloader
+    :param num_workers: int
+        number of workers for dataloader
+    :param n_rb: int
+        number of rb basis elements
+    :param out_dir: str
+        directory for saving rb matrices
+    :param suffix: str
+        suffix for names of saved rb matrices V
+    :return: V_paths
+        paths to saved rb matrices V
+    """
+    wfd_transform_original = wfd.transform
+    wfd.transform = transforms_rb
+    ifos = list(wfd[0][1].keys())
+    M = len(wfd[0][1][ifos[0]])
+
+    # get training data for reduced basis
+    print('Collecting data for reduced basis generation.', end=' ')
+    time_start = time.time()
+    rb_train_data = {ifo: np.empty((N, M), dtype=np.complex128) for ifo in ifos}
+    rb_loader = DataLoader(wfd, batch_size=batch_size, num_workers=num_workers)
+    for idx, data in enumerate(rb_loader):
+        strain_data = data[1]
+        lower = idx * batch_size
+        n = min(batch_size, N - lower)
+        for k in rb_train_data.keys():
+            rb_train_data[k][lower:lower+n] = strain_data[k][:n]
+        if lower + n == N:
+            break
+    print(f'Done. This took {time.time() - time_start:.0f} s.\n')
+
+    # generate rb
+    print('Generating SVD basis for ifo:')
+    time_start = time.time()
+    basis_dict = {}
+    for ifo in rb_train_data.keys():
+        print(ifo, end=' ')
+        basis = SVDBasis()
+        basis.generate_basis(rb_train_data[ifo], n_rb)
+        basis_dict[ifo] = basis
+        print('done')
+    print(f'This took {time.time() - time_start:.0f} s.\n')
+
+    # save rb
+    V_paths = []
+    if out_dir is not None:
+        print(f'Saving SVD basis matrices to {out_dir}', end=' ')
+        for ifo in basis_dict:
+            basis_dict[ifo].to_file(join(out_dir, f'V_{ifo}{suffix}.npy'))
+            np.save(join(out_dir, f's_{ifo}{suffix}.npy'), basis_dict[ifo].s)
+            V_paths.append(join(out_dir, f'V_{ifo}{suffix}.npy'))
+    print('Done')
+
+    # set wfd.transform to original transform
+    wfd.transform = wfd_transform_original
+
+    return V_paths
