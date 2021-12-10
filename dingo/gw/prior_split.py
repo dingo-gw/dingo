@@ -114,3 +114,7 @@ default_intrinsic_dict = {
     'phi_jl': 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
     'geocent_time': 0.0,
 }
+
+default_params = ['mass_ratio', 'chirp_mass', 'phase', 'a_1', 'a_2',
+                  'tilt_1', 'tilt_2', 'phi_12', 'phi_jl', 'theta_jn',
+                  'luminosity_distance', 'geocent_time', 'ra', 'dec', 'psi']
