@@ -127,7 +127,8 @@ class WaveformDataset(Dataset):
     are classes that implement the __call__() method.
     """
 
-    def __init__(self, dataset_file: str, transform=None):
+    def __init__(self, dataset_file: str, transform=None,
+                 single_precision=True):
         """
         Parameters
         ----------
@@ -138,6 +139,7 @@ class WaveformDataset(Dataset):
         """
         self.transform = transform
         self._Vh = None
+        self.single_precision = single_precision
         self.load(dataset_file)
 
 
@@ -153,7 +155,8 @@ class WaveformDataset(Dataset):
         applied to the waveform data.
         """
         parameters = self._parameter_samples.iloc[idx].to_dict()
-        waveform_polarizations = self._waveform_polarizations.iloc[idx].to_dict()
+        waveform_polarizations = {'h_cross': self._hc[idx],
+                                  'h_plus': self._hp[idx]}
         data = {'parameters': parameters, 'waveform': waveform_polarizations}
         if self._Vh is not None:
             data['waveform']['h_plus'] = data['waveform']['h_plus'] @ self._Vh
@@ -169,11 +172,11 @@ class WaveformDataset(Dataset):
         This is before any transformations are done.
         """
         self._parameter_samples.info(memory_usage='deep')
-        self._waveform_polarizations.info(memory_usage='deep')
+        self._hc.info(memory_usage='deep')
+        self._hp.info(memory_usage='deep')
 
 
-    def load(self, filename: str = 'waveform_dataset.h5',
-             truncation_range: tuple = None):
+    def load(self, filename: str = 'waveform_dataset.h5'):
         """
         Load waveform data set from HDF5 file.
 
@@ -188,10 +191,13 @@ class WaveformDataset(Dataset):
         self._parameter_samples = pd.DataFrame(parameter_array)
 
         grp = fp['waveform_polarizations']
-        polarization_dict_2d = {k: v[:] for k, v in grp.items()}
-        polarization_dict = {k: [x for x in polarization_dict_2d[k]]
-                             for k in ['h_plus', 'h_cross']}
-        self._waveform_polarizations = pd.DataFrame(polarization_dict)
+        assert list(grp.keys()) == ['h_cross', 'h_plus']
+        self._hc = grp['h_cross'][:]
+        self._hp = grp['h_plus'][:]
+        # polarization_dict_2d = {k: v[:] for k, v in grp.items()}
+        # polarization_dict = {k: [x for x in polarization_dict_2d[k]]
+        #                      for k in ['h_plus', 'h_cross']}
+        # self._waveform_polarizations = pd.DataFrame(polarization_dict)
 
         if 'rb_matrix_V' in fp.keys():
             V = fp['rb_matrix_V'][:]
@@ -202,6 +208,14 @@ class WaveformDataset(Dataset):
         self.is_truncated = False
 
         fp.close()
+
+        # set requested datatype; if dtype is different for _hc/_hp and _Vh,
+        # __getitem__() becomes super slow
+        dtype = np.complex64 if self.single_precision else np.complex128
+        self._hc = np.array(self._hc, dtype=dtype)
+        self._hp = np.array(self._hp, dtype=dtype)
+        self._Vh = np.array(self._Vh, dtype=dtype)
+
 
 
     def truncate_dataset_domain(self, new_range = None):

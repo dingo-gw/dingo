@@ -7,8 +7,10 @@ from dingo.gw.domains import build_domain
 from dingo.gw.transforms import SampleExtrinsicParameters,\
     GetDetectorTimes, ProjectOntoDetectors, SampleNoiseASD, \
     WhitenAndScaleStrain, AddWhiteNoiseComplex, \
-    SelectStandardizeRepackageParameters, RepackageStrainsAndASDS, UnpackDict
+    SelectStandardizeRepackageParameters, RepackageStrainsAndASDS, UnpackDict, \
+    GNPEDetectorTimes
 from dingo.gw.noise_dataset import ASDDataset
+from dingo.gw.prior_split import default_params
 from dingo.gw.gwutils import *
 
 import numpy as np
@@ -37,6 +39,8 @@ assert domain.noise_std == 1.3692854996470123
 
 extrinsic_prior_dict = get_extrinsic_prior_dict(
     train_settings['transform_settings']['extrinsic_prior'])
+if train_settings['transform_settings']['selected_parameters'] == 'default':
+    train_settings['transform_settings']['selected_parameters'] = default_params
 standardization_dict = get_standardization_dict(
     extrinsic_prior_dict, wfd,
     train_settings['transform_settings']['selected_parameters'])
@@ -50,6 +54,10 @@ ifo_list = InterferometerList(
 # build transforms
 sample_extrinsic_parameters = SampleExtrinsicParameters(extrinsic_prior_dict)
 get_detector_times = GetDetectorTimes(ifo_list, ref_time)
+gnpe_time_shifts = GNPEDetectorTimes(
+    ifo_list,
+    train_settings['transform_settings']['gnpe_time_shifts']['kernel_kwargs'],
+    train_settings['transform_settings']['gnpe_time_shifts']['exact_equiv'])
 project_onto_detectors = ProjectOntoDetectors(ifo_list, domain, ref_time)
 sample_noise_asd = SampleNoiseASD(asd_dataset)
 whiten_scale_strain = WhitenAndScaleStrain(domain.noise_std)
@@ -71,6 +79,7 @@ t0 = time.time()
 for idx in range(N):
     d1 = sample_extrinsic_parameters(d0)
     d2 = get_detector_times(d1)
+    d_gnpe = gnpe_time_shifts(d2)
     d3 = project_onto_detectors(d2)
     d4 = sample_noise_asd(d3)
     d5 = whiten_scale_strain(d4)
@@ -87,6 +96,25 @@ Vh = np.random.rand(500, 8033)
 # (500,)(500, 8033)
 
 import matplotlib.pyplot as plt
+
+d2['extrinsic_parameters']['H1_time'] = 0
+a = project_onto_detectors(d2)
+d2['extrinsic_parameters']['H1_time'] = 0.050
+b = project_onto_detectors(d2)
+
+fig, ax = plt.subplots()
+ax.axis('off')
+plt.xlim((0,2000))
+plt.plot(a['waveform']['H1'])
+plt.savefig('waveform_shift_0.pdf')
+
+fig, ax = plt.subplots()
+ax.axis('off')
+plt.xlim((0,2000))
+plt.plot(b['waveform']['H1'])
+plt.savefig('waveform_shift_50ms.pdf')
+
+
 plt.plot(wfd[0]['waveform']['h_cross'].real /
          d3['parameters']['luminosity_distance'] * 100)
 plt.plot(d3['waveform']['H1'].real)
