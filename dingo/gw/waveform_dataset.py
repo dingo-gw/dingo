@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import scipy
 from sklearn.utils.extmath import randomized_svd
+from torchvision.transforms import Compose
 from torch.utils.data import Dataset, DataLoader
 from os.path import join
 import time
@@ -261,24 +262,24 @@ class WaveformDataset(Dataset):
 
 
 def generate_and_save_reduced_basis(wfd,
-                                    transforms_rb,
+                                    omitted_transforms,
                                     N = 50_000,
-                                    batch_size = 100,
-                                    num_workers = 16,
+                                    batch_size = 1000,
+                                    num_workers = 0,
                                     n_rb = 200,
                                     out_dir = None,
                                     suffix = ''
                                     ):
     """
     Generate a reduced basis (rb) for network initialization. To that end,
-    a set of non-noisy waveforms from wfd are sampled (important: transforms_rb
-    should not contain any noise addition transforms), and an SVD basis is
-    build based on these.
+    a set of non-noisy waveforms from wfd are sampled (important: noise
+    addition and strain repackaging transforms need to be omitted!), and an SVD
+    basis is build based on these.
 
     :param wfd: dingo.gw.waveform_dataset.WaveformDataset
         waveform dataset for rb generation
-    :param transforms_rb: transforms
-        transforms applied to obtain rb training set from wfd
+    :param omitted_transforms: transforms
+        transforms to be omitted for rb generation
     :param N: int
         size of training set for rb
     :param batch_size: int
@@ -295,7 +296,9 @@ def generate_and_save_reduced_basis(wfd,
         paths to saved rb matrices V
     """
     wfd_transform_original = wfd.transform
-    wfd.transform = transforms_rb
+    transforms_rb = [tr for tr in wfd.transform.transforms if type(tr) not in
+                     omitted_transforms]
+    wfd.transform = Compose(transforms_rb)
     ifos = list(wfd[0][1].keys())
     M = len(wfd[0][1][ifos[0]])
 
