@@ -21,12 +21,17 @@ wfd = build_dataset(train_settings)
 
 # set suffix according to gnpe settings
 wfd_dir = dirname(abspath(train_settings['waveform_dataset_path']))
+suffix = '_'
 with open(join(wfd_dir, 'settings.yaml'), 'r') as fp:
-    suffix = yaml.safe_load(fp)['waveform_generator_settings']['approximant']
+    suffix += yaml.safe_load(fp)['waveform_generator_settings']['approximant']
 if 'gnpe_time_shifts' in train_settings['transform_settings']:
     dt = train_settings['transform_settings']['gnpe_time_shifts'][
         'kernel_kwargs']['high']
     suffix += f'_gnpe-timeshift-{dt:.4f}'
+if 'gnpe_chirp_mass' in train_settings['transform_settings']:
+    dt = train_settings['transform_settings']['gnpe_chirp_mass'][
+        'kernel_kwargs']['high']
+    suffix += f'_gnpe-chirpmass-{dt:.2f}'
 
 generate_and_save_reduced_basis(
     wfd,

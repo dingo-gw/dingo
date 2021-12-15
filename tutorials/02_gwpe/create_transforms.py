@@ -8,7 +8,7 @@ from dingo.gw.transforms import SampleExtrinsicParameters,\
     GetDetectorTimes, ProjectOntoDetectors, SampleNoiseASD, \
     WhitenAndScaleStrain, AddWhiteNoiseComplex, \
     SelectStandardizeRepackageParameters, RepackageStrainsAndASDS, UnpackDict, \
-    GNPEDetectorTimes
+    GNPEDetectorTimes, GNPEChirpMass
 from dingo.gw.noise_dataset import ASDDataset
 from dingo.gw.prior_split import default_params
 from dingo.gw.gwutils import *
@@ -54,10 +54,18 @@ ifo_list = InterferometerList(
 # build transforms
 sample_extrinsic_parameters = SampleExtrinsicParameters(extrinsic_prior_dict)
 get_detector_times = GetDetectorTimes(ifo_list, ref_time)
-gnpe_time_shifts = GNPEDetectorTimes(
-    ifo_list,
-    train_settings['transform_settings']['gnpe_time_shifts']['kernel_kwargs'],
-    train_settings['transform_settings']['gnpe_time_shifts']['exact_equiv'])
+if 'gnpe_time_shifts' in train_settings['transform_settings']:
+    d = train_settings['transform_settings']['gnpe_time_shifts']
+    gnpe_time_shifts = GNPEDetectorTimes(
+        ifo_list, d['kernel_kwargs'], d['exact_equiv'],
+        std=standardization_dict['std']['geocent_time'])
+if 'gnpe_chirp_mass' in train_settings['transform_settings']:
+    d = train_settings['transform_settings']['gnpe_chirp_mass']
+    gnpe_chirp_mass = GNPEChirpMass(
+        domain.sample_frequencies_truncated,
+        d['kernel_kwargs'],
+        mean=standardization_dict['std']['chirp_mass'],
+        std=standardization_dict['std']['chirp_mass'])
 project_onto_detectors = ProjectOntoDetectors(ifo_list, domain, ref_time)
 sample_noise_asd = SampleNoiseASD(asd_dataset)
 whiten_scale_strain = WhitenAndScaleStrain(domain.noise_std)
@@ -80,6 +88,7 @@ for idx in range(N):
     d1 = sample_extrinsic_parameters(d0)
     d2 = get_detector_times(d1)
     d_gnpe = gnpe_time_shifts(d2)
+    d_gnpe_chirp_mass = gnpe_chirp_mass(d2)
     d3 = project_onto_detectors(d2)
     d4 = sample_noise_asd(d3)
     d5 = whiten_scale_strain(d4)
@@ -89,6 +98,18 @@ for idx in range(N):
     theta, x = unpack_dict(d8)
 
 print(f'{(time.time() - t0)/N:.3f} seconds')
+
+import matplotlib.pyplot as plt
+
+plt.plot(d2['waveform']['h_cross'].real, label='original')
+plt.plot(d_gnpe_chirp_mass['waveform']['h_cross'].real, label='gnpe chirp mass')
+plt.legend()
+plt.show()
+
+plt.plot(np.abs(d2['waveform']['h_cross']), label='original')
+plt.plot(np.abs(d_gnpe_chirp_mass['waveform']['h_cross']), label='gnpe chirp mass')
+plt.legend()
+plt.show()
 
 a = np.random.rand(500)
 Vh = np.random.rand(500, 8033)

@@ -8,7 +8,7 @@ from dingo.gw.transforms import SampleExtrinsicParameters,\
     GetDetectorTimes, ProjectOntoDetectors, SampleNoiseASD, \
     WhitenAndScaleStrain, AddWhiteNoiseComplex, \
     SelectStandardizeRepackageParameters, RepackageStrainsAndASDS, \
-    UnpackDict, GNPEDetectorTimes
+    UnpackDict, GNPEDetectorTimes, GNPEChirpMass
 from dingo.gw.noise_dataset import ASDDataset
 from dingo.gw.prior_split import default_params
 from dingo.gw.gwutils import *
@@ -51,11 +51,21 @@ def build_dataset(train_settings):
     transforms = []
     transforms.append(SampleExtrinsicParameters(extrinsic_prior_dict))
     transforms.append(GetDetectorTimes(ifo_list, ref_time))
+    # gnpe time shifts
     if 'gnpe_time_shifts' in train_settings['transform_settings']:
         d = train_settings['transform_settings']['gnpe_time_shifts']
         transforms.append(GNPEDetectorTimes(
             ifo_list, d['kernel_kwargs'], d['exact_equiv'],
             std=standardization_dict['std']['geocent_time']))
+        gnpe_proxy_dim += transforms[-1].gnpe_proxy_dim
+    # gnpe chirp mass
+    if 'gnpe_chirp_mass' in train_settings['transform_settings']:
+        d = train_settings['transform_settings']['gnpe_chirp_mass']
+        transforms.append(GNPEChirpMass(
+            domain.sample_frequencies_truncated,
+            d['kernel_kwargs'],
+            mean=standardization_dict['std']['chirp_mass'],
+            std=standardization_dict['std']['chirp_mass']))
         gnpe_proxy_dim += transforms[-1].gnpe_proxy_dim
     transforms.append(ProjectOntoDetectors(ifo_list, domain, ref_time))
     transforms.append(SampleNoiseASD(asd_dataset))

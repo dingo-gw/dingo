@@ -1,4 +1,5 @@
 import numpy as np
+import lal
 
 class GNPEDetectorTimes(object):
     """
@@ -32,9 +33,9 @@ class GNPEDetectorTimes(object):
         :param exact_global_equivariance: bool = True
             flag whether exact equivariance under global time translations is
         :param mean: float = 0
-            mean for standardization
+            mean for standardization of proxies
         :param std: float = 1
-            standard deviation for standardization
+            standard deviation for standardization of proxies
         """
         self.ifo_names = [ifo.name for ifo in ifo_list]
         self.kernel = get_gnpe_kernel(kernel_kwargs)
@@ -72,6 +73,54 @@ class GNPEDetectorTimes(object):
         # store standardized proxies in sample
         proxies_array = \
             (np.array([proxies[k] for k in proxies]) - self.mean) / self.std
+        if 'gnpe_proxies' in sample:
+            sample['gnpe_proxies'] = np.concatenate(
+                (sample['gnpe_proxies'], proxies_array))
+        else:
+            sample['gnpe_proxies'] = proxies_array
+        return sample
+
+
+class GNPEChirpMass(object):
+    """
+    GNPE [1] Transformation for chirp mass.
+
+    Todo
+
+    [1]: arxiv.org/abs/2111.13139
+    """
+    def __init__(self, frequencies, kernel_kwargs, mean=0, std=1):
+        """
+        :param frequencies: np.array
+            sample frequencies of strain data
+        :param kernel_kwargs: dict
+            kwargs for gnpe kernel
+        :param mean: float = 0
+            mean for standardization of proxy
+        :param std: float = 1
+            standard deviation for standardization of proxy
+        """
+        self.f = frequencies
+        self.kernel = get_gnpe_kernel(kernel_kwargs)
+        self.gnpe_proxy_dim = 1
+        self.mean = mean
+        self.std = std
+
+    def __call__(self, input_sample):
+        sample = input_sample.copy()
+
+        # get proxy by adding perturbation from kernel to Mc
+        Mc_hat = sample['parameters']['chirp_mass'] + self.kernel()
+        # convert to SI units
+        Mc_SI_hat = Mc_hat * lal.GMSUN_SI
+
+        rescaling = np.exp(1j * (3 / 4) * (
+                8 * np.pi * self.f * (Mc_SI_hat / lal.C_SI ** 3)) ** (-5 / 3))
+        hc = sample['waveform']['h_cross'] * rescaling
+        hp = sample['waveform']['h_plus'] * rescaling
+        sample['waveform'] = {'h_cross': hc, 'h_plus': hp}
+
+        proxies_array = (np.array([Mc_hat]) - self.mean) / self.std
         if 'gnpe_proxies' in sample:
             sample['gnpe_proxies'] = np.concatenate(
                 (sample['gnpe_proxies'], proxies_array))

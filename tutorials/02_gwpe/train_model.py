@@ -2,8 +2,7 @@ import yaml
 
 from dingo.api import build_dataset, build_train_and_test_loaders
 from dingo.core.nn.nsf import create_nsf_with_rb_projection_embedding_net, \
-    # move to api, since it contains train settings?
-    autocomplete_model_kwargs_nsf
+    autocomplete_model_kwargs_nsf # move to api, since it contains train settings?
 from dingo.core.models.posterior_model import PosteriorModel, train_epoch, \
     test_epoch
 from dingo.core.utils import *
