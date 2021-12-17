@@ -2,7 +2,8 @@ import yaml
 from os.path import join, abspath, dirname
 
 from dingo.gw.waveform_dataset import generate_and_save_reduced_basis
-from dingo.gw.transforms import AddWhiteNoiseComplex,  RepackageStrainsAndASDS
+from dingo.gw.transforms import AddWhiteNoiseComplex,  \
+    RepackageStrainsAndASDS, SelectStandardizeRepackageParameters
 from dingo.api import build_dataset
 from dingo.core.utils import *
 
@@ -17,6 +18,9 @@ args = parser.parse_args()
 with open(join(args.log_dir, 'train_settings.yaml'), 'r') as fp:
     train_settings = yaml.safe_load(fp)
 
+# build dataset with fixed luminosity distance of 100
+train_settings['transform_settings']['extrinsic_prior']['luminosity_distance'] \
+    = '100.0'
 wfd = build_dataset(train_settings)
 
 # set suffix according to gnpe settings
@@ -35,7 +39,8 @@ if 'gnpe_chirp_mass' in train_settings['transform_settings']:
 
 generate_and_save_reduced_basis(
     wfd,
-    omitted_transforms = [AddWhiteNoiseComplex, RepackageStrainsAndASDS],
+    omitted_transforms = [AddWhiteNoiseComplex, RepackageStrainsAndASDS,
+                          SelectStandardizeRepackageParameters],
     N = 50000,
     num_workers = train_settings['train_settings']['num_workers'],
     n_rb = 1000,
