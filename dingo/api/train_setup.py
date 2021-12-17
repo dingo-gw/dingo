@@ -12,6 +12,9 @@ from dingo.gw.transforms import SampleExtrinsicParameters,\
 from dingo.gw.noise_dataset import ASDDataset
 from dingo.gw.prior_split import default_params
 from dingo.gw.gwutils import *
+from dingo.core.nn.nsf import create_nsf_with_rb_projection_embedding_net, \
+    autocomplete_model_kwargs_nsf # move to api, since it contains train settings?
+from dingo.core.models.posterior_model import PosteriorModel
 from dingo.core.utils import *
 
 def build_dataset(train_settings):
@@ -109,3 +112,51 @@ def build_train_and_test_loaders(train_settings, wfd):
             int(torch.initial_seed()) % (2 ** 32 - 1)))
 
     return train_loader, test_loader
+
+
+def build_posterior_model(train_dir, train_settings, data_sample=None):
+    """
+    Initialize new posterior model, if no existing <log_dir>/model_latest.pt.
+    Else load the existing model.
+
+    :param log_dir: str
+        log directory containing model_latest.pt file
+    :param train_settings: dict
+        dict with train settings, as loaded from .yaml file
+    :param data_sample:
+        sample from dataset, used for autocompletion of model_kwargs
+    :return: PosteriorModel
+        loaded posterior model
+    """
+    # check if model exists
+    if not isfile(join(train_dir, 'model_latest.pt')):
+        print('Initializing new posterior model.')
+        # kwargs for initialization of new model
+        pm_kwargs = {
+            # autocomplete model kwargs in train settings
+            'model_kwargs': autocomplete_model_kwargs_nsf(
+                train_settings, data_sample),
+            'optimizer_kwargs': train_settings['train_settings'][
+                'optimizer_kwargs'],
+            'scheduler_kwargs': train_settings['train_settings'][
+                'scheduler_kwargs'],
+        }
+    else:
+        print(f'Loading posterior model {join(train_dir, "model_latest.pt")}.')
+        # kwargs for loaded model
+        pm_kwargs = {'model_filename': join(train_dir, 'model_latest.pt')}
+
+    # build posterior model
+    pm = PosteriorModel(model_builder=create_nsf_with_rb_projection_embedding_net,
+                        init_for_training=True, device='cpu', **pm_kwargs)
+    # assert get_number_of_model_parameters(pm.model) == 131448775
+
+    # optionally freeze model parameters
+    if 'freeze_rb_layer' in train_settings['train_settings'] and \
+            train_settings['train_settings']['freeze_rb_layer']:
+        set_requires_grad_flag(pm.model, 'embedding_net.enets.0.0', False)
+    n_grad = get_number_of_model_parameters(pm.model, (True,))
+    n_nograd = get_number_of_model_parameters(pm.model, (False,))
+    print(f'Fixed parameters: {n_nograd}\nLearnable parameters: {n_grad}\n')
+
+    return pm

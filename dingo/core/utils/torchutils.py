@@ -188,3 +188,13 @@ def split_dataset_into_train_and_test(dataset, train_fraction):
     return torch.utils.data.random_split(
         dataset, [train_size, test_size],
         generator=torch.Generator().manual_seed(42))
+
+
+def set_requires_grad_flag(model, prefix, requires_grad=True):
+    """
+    Set param.requires_grad of all model parameters with a name starting with
+    prefix to requires_grad.
+    """
+    for name, param in model.named_parameters():
+        if name.startswith(prefix):
+            param.requires_grad = requires_grad

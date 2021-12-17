@@ -67,6 +67,7 @@ model_arch:
 
 # settings for training
 train_settings:
+  freeze_rb_layer: True
   # fraction of dataset used for training, rest is used for validation
   train_fraction: 0.005
   batch_size: 64
