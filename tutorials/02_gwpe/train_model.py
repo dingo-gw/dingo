@@ -2,7 +2,7 @@ import yaml
 import argparse
 
 from dingo.api import build_dataset, build_train_and_test_loaders, \
-    build_posterior_model
+    build_posterior_model, resubmit_condor_job
 from dingo.core.utils import *
 
 parser = argparse.ArgumentParser(description='Train Dingo.')
@@ -32,9 +32,12 @@ pm.train(
     checkpoint_epochs=train_settings['train_settings']['checkpoint_epochs'],
 )
 
-
-
-
+# resubmit condor job
+resubmit_condor_job(
+    train_dir=args.train_dir,
+    train_settings=train_settings,
+    epoch=pm.epoch
+)
 
 
 
