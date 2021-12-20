@@ -29,7 +29,7 @@ def build_dataset(train_settings):
     asd_dataset.truncate_dataset_domain(
         train_settings['data_conditioning']['frequency_range'])
     # check compatibility of datasets
-    # assert wfd.domain.domain_dict == asd_dataset.domain.domain_dict
+    assert wfd.domain.domain_dict == asd_dataset.domain.domain_dict
     # add window factor to domain
     domain = build_domain(wfd.domain.domain_dict)
     domain.window_factor = get_window_factor(
@@ -43,8 +43,6 @@ def build_dataset(train_settings):
         extrinsic_prior_dict, wfd,
         train_settings['transform_settings']['selected_parameters'])
     ref_time = train_settings['transform_settings']['ref_time']
-    window_factor = get_window_factor(
-        train_settings['data_conditioning']['window_kwargs'])
     # build objects
     ifo_list = InterferometerList(
         train_settings['transform_settings']['detectors'])
