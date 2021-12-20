@@ -10,6 +10,8 @@ import time
 
 import dingo.core.utils.trainutils
 
+import pdb
+
 
 class PosteriorModel:
     """
@@ -42,7 +44,7 @@ class PosteriorModel:
                  scheduler_kwargs: dict = None,
                  init_for_training: bool = False,
                  metadata: dict = None,
-                 device: torch.device = 'cpu'
+                 device: str = 'cpu'
                  ):
         """
 
@@ -75,7 +77,6 @@ class PosteriorModel:
         self.scheduler_kwargs = scheduler_kwargs
         self.scheduler = None
         self.metadata = metadata
-        self.device = device
 
         # build model
         if model_filename is not None:
@@ -87,7 +88,24 @@ class PosteriorModel:
             if init_for_training:
                 self.initialize_optimizer_and_scheduler()
 
-        # TODO: initialize training and data loader
+        self.model_to_device(device)
+        # self.device = device
+
+
+    def model_to_device(self, device):
+        """
+        Put model to device, and set self.device accordingly.
+        """
+        if device not in ('cpu', 'cuda'):
+            raise ValueError(f'Device should be either cpu or cuda, got {device}.')
+        self.device = torch.device(device)
+        if device == 'cuda' and torch.cuda.device_count() > 1:
+            print("Using", torch.cuda.device_count(), "GPUs.")
+            raise NotImplementedError('This needs testing!')
+            # dim = 0 [512, ...] -> [256, ...], [256, ...] on 2 GPUs
+            self.model = torch.nn.DataParallel(self.model)
+        print(f'Putting posterior model to device {self.device}.')
+        self.model.to(self.device)
 
     def initialize_model(self):
         """
@@ -218,8 +236,7 @@ class PosteriorModel:
             # Testing
             print(f'Start testing epoch {self.epoch}')
             time_start = time.time()
-            # test_loss = test_epoch(self, test_loader)
-            test_loss = self.epoch * 0.5
+            test_loss = test_epoch(self, test_loader)
             print('Done. This took {:2.0f}:{:2.0f} min.'.format(
                 *divmod(time.time() - time_start, 60)))
 

@@ -29,7 +29,7 @@ def build_dataset(train_settings):
     asd_dataset.truncate_dataset_domain(
         train_settings['data_conditioning']['frequency_range'])
     # check compatibility of datasets
-    assert wfd.domain.domain_dict == asd_dataset.domain.domain_dict
+    # assert wfd.domain.domain_dict == asd_dataset.domain.domain_dict
     # add window factor to domain
     domain = build_domain(wfd.domain.domain_dict)
     domain.window_factor = get_window_factor(
@@ -146,7 +146,9 @@ def build_posterior_model(train_dir, train_settings, data_sample=None):
 
     # build posterior model
     pm = PosteriorModel(model_builder=create_nsf_with_rb_projection_embedding_net,
-                        init_for_training=True, device='cpu', **pm_kwargs)
+                        init_for_training=True, 
+                        device=train_settings['train_settings']['device'], 
+                        **pm_kwargs)
     # assert get_number_of_model_parameters(pm.model) == 131448775
 
     # optionally freeze model parameters
