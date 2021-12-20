@@ -89,7 +89,6 @@ class PosteriorModel:
                 self.initialize_optimizer_and_scheduler()
 
         self.model_to_device(device)
-        # self.device = device
 
 
     def model_to_device(self, device):
