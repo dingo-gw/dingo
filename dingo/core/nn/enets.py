@@ -72,6 +72,8 @@ class LinearProjectionRB(nn.Module):
 
         # initialize layers with reduced basis
         if V_rb_list is not None:
+            if type(V_rb_list[0]) == str:
+                V_rb_list = [np.load(el) for el in V_rb_list] 
             self.test_dimensions(V_rb_list)
             self.init_layers(V_rb_list)
 
