@@ -10,12 +10,12 @@ from dingo.core.utils import *
 import argparse
 
 parser = argparse.ArgumentParser(description='Train Dingo.')
-parser.add_argument('--log_dir', required=True,
-                    help='Log directory for Dingo training. Contains'
+parser.add_argument('--train_dir', required=True,
+                    help='Train directory for Dingo training. Contains'
                          'train_settings.yaml file, used for logging.')
 args = parser.parse_args()
 
-with open(join(args.log_dir, 'train_settings.yaml'), 'r') as fp:
+with open(join(args.train_dir, 'train_settings.yaml'), 'r') as fp:
     train_settings = yaml.safe_load(fp)
 
 # build dataset with fixed luminosity distance of 100
