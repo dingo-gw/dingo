@@ -195,10 +195,6 @@ class WaveformDataset(Dataset):
         assert list(grp.keys()) == ['h_cross', 'h_plus']
         self._hc = grp['h_cross'][:]
         self._hp = grp['h_plus'][:]
-        # polarization_dict_2d = {k: v[:] for k, v in grp.items()}
-        # polarization_dict = {k: [x for x in polarization_dict_2d[k]]
-        #                      for k in ['h_plus', 'h_cross']}
-        # self._waveform_polarizations = pd.DataFrame(polarization_dict)
 
         if 'rb_matrix_V' in fp.keys():
             V = fp['rb_matrix_V'][:]
