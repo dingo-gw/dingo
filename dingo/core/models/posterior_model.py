@@ -80,7 +80,7 @@ class PosteriorModel:
 
         # build model
         if model_filename is not None:
-            self.load_model(model_filename,
+            self.load_model(model_filename, device,
                             load_training_info=init_for_training)
         else:
             self.initialize_model()
@@ -88,7 +88,7 @@ class PosteriorModel:
             if init_for_training:
                 self.initialize_optimizer_and_scheduler()
 
-        self.model_to_device(device)
+            self.model_to_device(device)
 
 
     def model_to_device(self, device):
@@ -165,6 +165,7 @@ class PosteriorModel:
 
     def load_model(self,
                    model_filename: str,
+                   device: str,
                    load_training_info: bool = True,
                    ):
         """
@@ -189,6 +190,8 @@ class PosteriorModel:
 
         if 'metadata' in d:
             self.metadata = d['metadata']
+
+        self.model_to_device(device)
 
         if load_training_info:
             if 'optimizer_kwargs' in d:
@@ -236,6 +239,7 @@ class PosteriorModel:
             print(f'Start testing epoch {self.epoch}')
             time_start = time.time()
             test_loss = test_epoch(self, test_loader)
+
             print('Done. This took {:2.0f}:{:2.0f} min.'.format(
                 *divmod(time.time() - time_start, 60)))
 
