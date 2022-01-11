@@ -26,7 +26,10 @@ class ASDDataset:
             self.asds = {ifo: f[f'asds_{ifo}'][:] for ifo in ifos}
             # gps times are potentially relevant for continual learning tasks,
             # where one might want to only use ASDs in a particular time range
-            self.gps_times = {ifo: f['gps_times'][ifo][:] for ifo in ifos}
+            try:
+                self.gps_times = {ifo: f['gps_times'][ifo][:] for ifo in ifos}
+            except KeyError:
+                self.gps_times = {ifo: -1 for ifo in ifos}
             self.metadata = ast.literal_eval(f.attrs['metadata'])
 
         self.domain = build_domain(self.metadata['domain_dict'])

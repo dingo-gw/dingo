@@ -1,7 +1,5 @@
-# datasets
-waveform_dataset_path: /Users/mdax/Documents/dingo/devel/dingo-devel/tutorials/02_gwpe/datasets/waveforms/03_IMR_test/waveform_dataset.hdf5
-asd_dataset_path: /Users/mdax/Documents/dingo/devel/data/PSDs/smooth_psds/asds_O1.hdf5
-
+waveform_dataset_path: /home/jonas/Desktop/dingo-devel/tutorials/02_gwpe/datasets/waveforms/waveform_dataset.hdf5
+asd_dataset_path: /home/jonas/Desktop/dingo-devel/tutorials/02_gwpe/datasets/ASDs/asds_O2_synthetic.hdf5 #/home/jonas/Desktop/dingo-devel/tutorials/02_gwpe/datasets/ASDs/asds_O2.hdf5
 # data conditioning for inference
 data_conditioning:
   frequency_range: [20, 1024]
@@ -67,9 +65,10 @@ model_arch:
 
 # settings for training
 train_settings:
-  freeze_rb_layer: True
+  device: cuda
+  freeze_rb_layer: False
   # fraction of dataset used for training, rest is used for validation
-  train_fraction: 0.005
+  train_fraction: 0.95
   batch_size: 64
   num_workers: 0 # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
   optimizer_kwargs:
@@ -80,6 +79,14 @@ train_settings:
     T_max: 300
   runtime_limits:
     max_time_per_run: 36000
-    max_epochs_per_run: 5
+    max_epochs_per_run: 2
     max_epochs_total: 300
-  checkpoint_epochs: 3
+  checkpoint_epochs: 1
+
+condor_settings:
+  python: /home/jonas/Desktop/dingo-devel/venv/bin/python
+  num_cpus: 16
+  memory_cpus: 128000
+  num_gpus: 1
+  memory_gpus: 8000
+  train_script: /home/jonas/Desktop/dingo-devel/tutorials/02_gwpe/train_model.py
