@@ -154,7 +154,8 @@ def build_posterior_model(train_dir, train_settings, data_sample=None):
     # optionally freeze model parameters
     if 'freeze_rb_layer' in train_settings['train_settings'] and \
             train_settings['train_settings']['freeze_rb_layer']:
-        set_requires_grad_flag(pm.model, 'embedding_net.enets.0.0', False)
+        set_requires_grad_flag(pm.model, name_contains='layers_rb',
+                               requires_grad=False)
     n_grad = get_number_of_model_parameters(pm.model, (True,))
     n_nograd = get_number_of_model_parameters(pm.model, (False,))
     print(f'Fixed parameters: {n_nograd}\nLearnable parameters: {n_grad}\n')
