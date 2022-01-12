@@ -1,5 +1,9 @@
 import yaml
 import argparse
+import os
+
+os.environ['OMP_NUM_THREADS'] = str(1)
+os.environ['MKL_NUM_THREADS'] = str(1)
 
 from dingo.api import build_dataset, build_train_and_test_loaders, \
     build_posterior_model, resubmit_condor_job
