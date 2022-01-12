@@ -68,7 +68,7 @@ class LinearProjectionRB(nn.Module):
         for _ in range(self.num_blocks):
             layers.append(
                 nn.Linear(self.num_bins * self.num_channels, self.n_rb * 2))
-        self.layers = nn.ModuleList(layers)
+        self.layers_rb = nn.ModuleList(layers)
 
         # initialize layers with reduced basis
         if V_rb_list is not None:
@@ -118,7 +118,7 @@ class LinearProjectionRB(nn.Module):
         """
         n = self.n_rb
         k = self.num_bins
-        for ind, layer in enumerate(self.layers):
+        for ind, layer in enumerate(self.layers_rb):
             V = V_rb_list[ind]
 
             # truncate V to n_rb basis elements
@@ -141,7 +141,7 @@ class LinearProjectionRB(nn.Module):
             raise ValueError('Invalid shape for projection layer.')
         out = []
         for ind in range(self.num_blocks):
-            out.append(self.layers[ind](x[:, ind, ...].flatten(start_dim=1)))
+            out.append(self.layers_rb[ind](x[:, ind, ...].flatten(start_dim=1)))
         x = torch.cat(out, dim=1)
         return x
 
