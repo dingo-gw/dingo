@@ -190,11 +190,15 @@ def split_dataset_into_train_and_test(dataset, train_fraction):
         generator=torch.Generator().manual_seed(42))
 
 
-def set_requires_grad_flag(model, prefix, requires_grad=True):
+def set_requires_grad_flag(model,
+                           name_startswith=None,
+                           name_contains=None,
+                           requires_grad=True):
     """
     Set param.requires_grad of all model parameters with a name starting with
-    prefix to requires_grad.
+    name_startswith, or name containing name_contains, to requires_grad.
     """
     for name, param in model.named_parameters():
-        if name.startswith(prefix):
+        if name_startswith is not None and name.startswith(name_startswith) \
+                or name_contains is not None and name_contains in name:
             param.requires_grad = requires_grad
