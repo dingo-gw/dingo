@@ -261,7 +261,7 @@ def train_epoch(pm, dataloader):
     pm.model.train()
     loss_info = dingo.core.utils.trainutils.LossInfo(pm.epoch, len(dataloader.dataset),
                                                      dataloader.batch_size, mode='Train',
-                                                     print_freq=2)
+                                                     print_freq=1)
 
     for batch_idx, data in enumerate(dataloader):
         pm.optimizer.zero_grad()
@@ -284,7 +284,7 @@ def test_epoch(pm, dataloader):
         pm.model.eval()
         loss_info = dingo.core.utils.trainutils.LossInfo(pm.epoch, len(dataloader.dataset),
                                                          dataloader.batch_size, mode='Test',
-                                                         print_freq=2)
+                                                         print_freq=1)
 
         for batch_idx, data in enumerate(dataloader):
             # data to device
