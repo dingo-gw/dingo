@@ -131,7 +131,8 @@ def generate_basis_command(parameters_file: str,
     --waveforms_directory {args.waveforms_directory} \\
     --parameters_file {parameters_file} \\
     --basis_file {BASIS_FILE} \\
-    --rb_max {args.rb_max} > {log_file} 2>&1\n'''
+    --rb_max {args.rb_max} \\
+    --rb_train_fraction {args.rb_train_fraction} > {log_file} 2>&1\n'''
 
 
 def collect_waveform_dataset(args: argparse.Namespace, log_file):

@@ -17,6 +17,15 @@ args = parser.parse_args()
 
 with open(join(args.train_dir, 'train_settings.yaml'), 'r') as fp:
     train_settings = yaml.safe_load(fp)
+#
+# import matplotlib.pyplot as plt
+# import numpy as np
+# stats = np.load('/Users/maxdax/Documents/Projects/GW-Inference/dingo/datasets/PSDs/smooth_psds/V_L1_IMRPhenomPv2_gnpe-timeshift-0.0010_stats.npy', allow_pickle=True).item()
+# plt.yscale('log')
+# x = np.linspace(0,100,len(stats['mismatches'][50]))
+# plt.plot(x, np.sort(stats['mismatches'][50]))
+# plt.plot(x, np.sort(stats['mismatches'][100]))
+# plt.show()
 
 # build dataset with fixed luminosity distance of 100
 train_settings['transform_settings']['extrinsic_prior']['luminosity_distance'] \
@@ -41,8 +50,9 @@ generate_and_save_reduced_basis(
     wfd,
     omitted_transforms = [AddWhiteNoiseComplex, RepackageStrainsAndASDS,
                           SelectStandardizeRepackageParameters],
-    N = 50000,
+    N_train = 20_000,
+    N_test = 5_000,
     num_workers = train_settings['train_settings']['num_workers'],
-    n_rb = 1000,
+    n_rb = 128,
     out_dir = dirname(abspath(train_settings['asd_dataset_path'])),
     suffix = suffix)

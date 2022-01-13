@@ -68,6 +68,52 @@ class SVDBasis:
         else:
             raise ValueError(f'Unsupported SVD method: {method}.')
 
+    def test_basis(self, test_data, n_values=(50, 100, 200, 300, 500, 600, 800),
+                   outfile=None):
+        """
+        Test basis by computing mismatches of original waveforms in test_data
+        with reconstructed waveforms.
+
+        Parameters
+        ----------
+        test_data:
+            Array with test_data
+        n_values:
+            Iterable with values for n used to test reduced basis
+        outfile:
+            Save test_stats to outfile if not None
+        """
+        test_stats = {'s': self.s, 'mismatches': {}, 'max_deviations': {}}
+        for n in n_values:
+            if n > self.n: continue
+            matches = []
+            max_deviations = []
+            for h_test in test_data:
+                h_RB = h_test @ self.V[:,:n]
+                h_reconstructed = h_RB @ self.Vh[:n]
+                norm1 = np.mean(np.abs(h_test) ** 2)
+                norm2 = np.mean(np.abs(h_reconstructed) ** 2)
+                inner = np.mean(h_test.conj() * h_reconstructed).real
+                matches.append(inner / np.sqrt(norm1 * norm2))
+                max_deviations.append(np.max(np.abs(h_test - h_reconstructed)))
+            mismatches = 1 - np.array(matches)
+
+            test_stats['mismatches'][n] = mismatches
+            test_stats['max_deviations'][n] = max_deviations
+
+            print(f'n = {n}')
+            print('  Mean mismatch = {}'.format(np.mean(mismatches)))
+            print('  Standard deviation = {}'.format(np.std(mismatches)))
+            print('  Max mismatch = {}'.format(np.max(mismatches)))
+            print('  Median mismatch = {}'.format(np.median(mismatches)))
+            print('  Percentiles:')
+            print('    99    -> {}'.format(np.percentile(mismatches, 99)))
+            print('    99.9  -> {}'.format(np.percentile(mismatches, 99.9)))
+            print('    99.99 -> {}'.format(np.percentile(mismatches, 99.99)))
+
+        if outfile is not None:
+            np.save(outfile, test_stats, allow_pickle=True)
+
     def basis_coefficients_to_fseries(self, coefficients: np.ndarray):
         """
         Convert from basis coefficients to frequency series.
@@ -259,7 +305,8 @@ class WaveformDataset(Dataset):
 
 def generate_and_save_reduced_basis(wfd,
                                     omitted_transforms,
-                                    N = 50_000,
+                                    N_train = 50_000,
+                                    N_test = 10_000,
                                     batch_size = 1000,
                                     num_workers = 0,
                                     n_rb = 200,
@@ -276,8 +323,10 @@ def generate_and_save_reduced_basis(wfd,
         waveform dataset for rb generation
     :param omitted_transforms: transforms
         transforms to be omitted for rb generation
-    :param N: int
+    :param N_train: int
         size of training set for rb
+    :param N_test: int
+        size of test set for rb
     :param batch_size: int
         batch size for dataloader
     :param num_workers: int
@@ -299,6 +348,7 @@ def generate_and_save_reduced_basis(wfd,
     M = len(wfd[0][1][ifos[0]])
 
     # get training data for reduced basis
+    N = N_train + N_test
     print('Collecting data for reduced basis generation.', end=' ')
     time_start = time.time()
     rb_train_data = {ifo: np.empty((N, M), dtype=np.complex128) for ifo in ifos}
@@ -320,7 +370,7 @@ def generate_and_save_reduced_basis(wfd,
     for ifo in rb_train_data.keys():
         print(ifo, end=' ')
         basis = SVDBasis()
-        basis.generate_basis(rb_train_data[ifo], n_rb)
+        basis.generate_basis(rb_train_data[ifo][:N_train], n_rb)
         basis_dict[ifo] = basis
         print('done')
     print(f'This took {time.time() - time_start:.0f} s.\n')
@@ -333,6 +383,15 @@ def generate_and_save_reduced_basis(wfd,
             basis_dict[ifo].to_file(join(out_dir, f'V_{ifo}{suffix}.npy'))
             np.save(join(out_dir, f's_{ifo}{suffix}.npy'), basis_dict[ifo].s)
             V_paths.append(join(out_dir, f'V_{ifo}{suffix}.npy'))
+    print('Done')
+
+    # test rb
+    if out_dir is not None:
+        print(f'Testing SVD basis matrices, saving stats to {out_dir}')
+        for ifo in basis_dict:
+            basis_dict[ifo].test_basis(
+                rb_train_data[ifo][N_train:],
+                outfile=join(out_dir, f'V_{ifo}{suffix}_stats.npy'))
     print('Done')
 
     # set wfd.transform to original transform

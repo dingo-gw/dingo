@@ -39,8 +39,7 @@ def load_polarizations_for_index(idx: int, compressed: bool = False):
         infix = 'full'
 
     pol_dict = {k: np.load(f'{k}_{infix}_{idx}.npy') for k in ['h_plus', 'h_cross']}
-    pol_stacked = np.vstack(list(pol_dict.values()))
-    return pol_stacked
+    return list(pol_dict.values())
 
 
 def find_chunk_number(parameters_file: str, compressed: bool = False):
@@ -55,7 +54,7 @@ def find_chunk_number(parameters_file: str, compressed: bool = False):
         Whether to look for compressed or full data files
     """
     parameters = np.load(parameters_file)
-    chunk_size = load_polarizations_for_index(0, compressed).shape[0] // 2  # number of datafiles for one polarization
+    chunk_size = len(load_polarizations_for_index(0, compressed)[0])  # number of datafiles for one polarization
     num_chunks = len(parameters) // chunk_size
 
     # Sanity check
@@ -70,7 +69,8 @@ def find_chunk_number(parameters_file: str, compressed: bool = False):
     return num_chunks, chunk_size
 
 
-def create_basis(num_chunks: int, outfile: str, rb_max: int = 0):
+def create_basis(num_chunks: int, outfile: str, rb_max: int = 0,
+                 train_fraction: float = 1.0):
     """
     Create and save SVD basis
 
@@ -82,15 +82,27 @@ def create_basis(num_chunks: int, outfile: str, rb_max: int = 0):
         Output file for the SVD basis V matrix
     rb_max:
         Truncate the SVD at this size
+    train_fraction:
+        Fraction of data to be used for basis training, rest is for testing
     """
     logger.info('Load polarization data for all chunks ...')
-    data = np.vstack([load_polarizations_for_index(idx, compressed=False)
-                      for idx in tqdm(np.arange(num_chunks))])
+    # load polarization data for h_plus and h_cross separately
+    h_plus = np.vstack([load_polarizations_for_index(idx, compressed=False)[0]
+                        for idx in tqdm(np.arange(num_chunks))])
+    h_cross = np.vstack([load_polarizations_for_index(idx, compressed=False)[1]
+                        for idx in tqdm(np.arange(num_chunks))])
+    N_train = int(len(h_plus) * train_fraction)
+    train_data = np.vstack((h_plus[:N_train], h_cross[:N_train]))
+    test_data = np.vstack((h_plus[N_train:], h_cross[N_train:]))
 
     logger.info('Creating basis ...')
     basis = SVDBasis()
-    basis.generate_basis(data, rb_max)
+    basis.generate_basis(train_data, rb_max)
     basis.to_file(outfile)
+    logger.info('Done.')
+    logger.info('Testing basis ...')
+    basis.test_basis(test_data,
+                     outfile='.'.join(outfile.split('.')[:-1])+'_stats.npy')
     logger.info('Done.')
     return basis.n, basis.V.shape
 
@@ -106,6 +118,8 @@ def main():
     parser.add_argument('--basis_file', type=str, default='polarization_basis.npy')
     parser.add_argument('--rb_max', type=int, default=0,
                         help='Truncate the SVD basis at this size. No truncation if zero.')
+    parser.add_argument('--rb_train_fraction', type=float, default=1.0,
+                        help='Use this fraction for SVD training, rest for testing.')
     args = parser.parse_args()
 
     os.chdir(args.waveforms_directory)
@@ -113,7 +127,7 @@ def main():
     logger.info('*** Executing build_SVD_basis ***')
 
     num_chunks, chunk_size = find_chunk_number(args.parameters_file, compressed=False)
-    n, V_shape = create_basis(num_chunks, args.basis_file, args.rb_max)
+    n, V_shape = create_basis(num_chunks, args.basis_file, args.rb_max, args.rb_train_fraction)
     logger.info(f'Created SVD basis of size {n} from {num_chunks} chunks of size {chunk_size}.')
     logger.info(f'V matrix of shape {V_shape} saved to {args.basis_file}.')
     logger.info('*** Done with build_SVD_basis ***\n')
@@ -121,4 +135,14 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+    # waveforms_directory = '/Users/maxdax/Documents/Projects/GW-Inference/dingo/datasets/waveforms/01_IMRPhenomPv2'
+    # parameters_file = 'parameters_basis.npy'
+    # basis_file = 'polarization_basis.npy'
+    # rb_max = 128
+    # train_fraction = 0.9
+    # os.chdir(waveforms_directory)
+    #
+    # num_chunks, chunk_size = find_chunk_number(parameters_file, compressed=False)
+    # n, V_shape = create_basis(num_chunks, basis_file, rb_max, train_fraction)
 
