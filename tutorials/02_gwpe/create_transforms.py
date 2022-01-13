@@ -10,7 +10,7 @@ from dingo.gw.transforms import SampleExtrinsicParameters,\
     SelectStandardizeRepackageParameters, RepackageStrainsAndASDS, UnpackDict, \
     GNPEDetectorTimes, GNPEChirpMass
 from dingo.gw.noise_dataset import ASDDataset
-from dingo.gw.prior_split import default_params
+from dingo.gw.prior import default_params
 from dingo.gw.gwutils import *
 
 import numpy as np

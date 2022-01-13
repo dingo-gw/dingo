@@ -2,7 +2,7 @@ from typing import Dict, List, Union
 import pandas as pd
 import numpy as np
 from copy import deepcopy
-from dingo.gw.prior_split import default_intrinsic_dict
+from dingo.gw.prior import default_intrinsic_dict
 from bilby.gw.prior import BBHPriorDict
 
 

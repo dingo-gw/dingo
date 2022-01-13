@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.signal import tukey
-from dingo.gw.prior_split import default_extrinsic_dict
-from dingo.gw.prior_split import BBHExtrinsicPriorDict
+from dingo.gw.prior import default_extrinsic_dict
+from dingo.gw.prior import BBHExtrinsicPriorDict
 
 def find_axis(array, dim):
     """Looks for axis with dimension dim in array, and returns its index."""

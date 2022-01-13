@@ -1,5 +1,5 @@
 import numpy as np
-from dingo.gw.prior_split import BBHExtrinsicPriorDict
+from dingo.gw.prior import BBHExtrinsicPriorDict
 
 
 class SampleExtrinsicParameters(object):

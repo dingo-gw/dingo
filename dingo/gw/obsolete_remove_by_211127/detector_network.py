@@ -4,7 +4,7 @@ from typing import Dict, List, Union
 from bilby.gw.detector import Interferometer, InterferometerList
 
 from dingo.gw.domains import Domain
-from dingo.gw.prior_split import BBHExtrinsicPriorDict
+from dingo.gw.prior import BBHExtrinsicPriorDict
 
 
 class DetectorNetwork:
@@ -239,7 +239,7 @@ if __name__ == "__main__":
     """A visual test."""
     from dingo.gw.domains import UniformFrequencyDomain
     from dingo.gw.waveform_generator import WaveformGenerator
-    from dingo.gw.prior_split import default_extrinsic_dict
+    from dingo.gw.prior import default_extrinsic_dict
     import matplotlib.pyplot as plt
 
     approximant = 'IMRPhenomPv2'

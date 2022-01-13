@@ -5,7 +5,7 @@ from bilby.gw.detector import InterferometerList
 
 from dingo.gw.transforms import GetDetectorTimes, ProjectOntoDetectors, \
     SampleExtrinsicParameters
-from dingo.gw.prior_split import default_extrinsic_dict
+from dingo.gw.prior import default_extrinsic_dict
 from dingo.gw.domains import build_domain
 
 @pytest.fixture
