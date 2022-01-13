@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from dingo.gw.prior_split import BBHExtrinsicPriorDict, BBHPriorDict, default_extrinsic_dict, default_intrinsic_dict
+from dingo.gw.prior import BBHExtrinsicPriorDict, BBHPriorDict, default_extrinsic_dict, default_intrinsic_dict
 
 
 def test_prior_constraint():

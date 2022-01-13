@@ -10,7 +10,7 @@ from dingo.gw.transforms import SampleExtrinsicParameters,\
     SelectStandardizeRepackageParameters, RepackageStrainsAndASDS, \
     UnpackDict, GNPEDetectorTimes, GNPEChirpMass
 from dingo.gw.noise_dataset import ASDDataset
-from dingo.gw.prior_split import default_params
+from dingo.gw.prior import default_params
 from dingo.gw.gwutils import *
 from dingo.core.nn.nsf import create_nsf_with_rb_projection_embedding_net, \
     autocomplete_model_kwargs_nsf # move to api, since it contains train settings?
