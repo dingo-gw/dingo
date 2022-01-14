@@ -68,7 +68,7 @@ class SVDBasis:
         else:
             raise ValueError(f'Unsupported SVD method: {method}.')
 
-    def test_basis(self, test_data, n_values=(50, 100, 200, 300, 500, 600, 800),
+    def test_basis(self, test_data, n_values=(50, 100, 128, 200, 300, 500, 600),
                    outfile=None):
         """
         Test basis by computing mismatches of original waveforms in test_data
