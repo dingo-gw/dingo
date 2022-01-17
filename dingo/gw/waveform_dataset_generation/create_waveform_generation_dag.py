@@ -195,7 +195,8 @@ def create_dag(args):
     args_dict = {'waveforms_directory': args.waveforms_directory,
                  'parameters_file': args.parameters_file_basis,
                  'basis_file': args.basis_file,
-                 'rb_max': args.rb_max
+                 'rb_max': args.rb_max,
+                 'rb_train_fraction': 1.0
                  }
     args_str = create_args_string(args_dict)
     build_SVD_basis = Job(name='build_SVD_basis',
