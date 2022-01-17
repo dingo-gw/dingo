@@ -27,7 +27,9 @@ setup(name='dingo',
           'astropy',
           'lalsuite',
           'sklearn',
-          'pycondor'
+          'pycondor',
+          'gwpy',
+          'pycbc',
       ],
       extras_require={
           "dev": [
