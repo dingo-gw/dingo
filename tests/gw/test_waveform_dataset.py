@@ -7,7 +7,7 @@ import pytest
 
 from dingo.gw.domains import Domain
 from dingo.gw.waveform_dataset import WaveformDataset
-from dingo.gw.waveform_dataset_generation.create_waveform_generation_bash_script import parse_args, generate_workflow
+from dingo.gw.dataset_generation.create_waveform_generation_bash_script import parse_args, generate_workflow
 
 
 SETTINGS_YAML_SMALL = """\

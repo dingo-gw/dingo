@@ -38,12 +38,12 @@ setup(name='dingo',
           ],
       },
       entry_points={'console_scripts':
-          ['generate_parameters=dingo.gw.waveform_dataset_generation.generate_parameters:main',
-           'generate_waveforms=dingo.gw.waveform_dataset_generation.generate_waveforms:main',
-           'build_SVD_basis=dingo.gw.waveform_dataset_generation.build_SVD_basis:main',
-           'collect_waveform_dataset=dingo.gw.waveform_dataset_generation.collect_waveform_dataset:main',
-           'create_waveform_generation_bash_script=dingo.gw.waveform_dataset_generation.create_waveform_generation_bash_script:main',
-           'create_waveform_generation_dag=dingo.gw.waveform_dataset_generation.create_waveform_generation_dag:main']
+          ['generate_parameters=dingo.gw.dataset_generation.generate_parameters:main',
+           'generate_waveforms=dingo.gw.dataset_generation.generate_waveforms:main',
+           'build_SVD_basis=dingo.gw.dataset_generation.build_SVD_basis:main',
+           'collect_waveform_dataset=dingo.gw.dataset_generation.collect_waveform_dataset:main',
+           'create_waveform_generation_bash_script=dingo.gw.dataset_generation.create_waveform_generation_bash_script:main',
+           'create_waveform_generation_dag=dingo.gw.dataset_generation.create_waveform_generation_dag:main']
       },
       classifiers=[
           "Programming Language :: Python :: 3.6",

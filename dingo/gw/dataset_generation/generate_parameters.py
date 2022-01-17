@@ -13,7 +13,7 @@ import pickle
 import numpy as np
 import yaml
 
-from dingo.api import build_prior_with_defaults, structured_array_from_dict_of_arrays
+from .dataset_utils import build_prior_with_defaults, structured_array_from_dict_of_arrays
 from dingo.api import setup_logger, logger
 
 
