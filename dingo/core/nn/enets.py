@@ -164,7 +164,7 @@ class DenseResidualNet(nn.Module):
                  output_dim: int,
                  hidden_dims: Tuple,
                  activation: Callable = F.elu,
-                 dropout: int = 0.0,
+                 dropout: float = 0.0,
                  batch_norm: bool = True,
                  ):
         """
@@ -178,7 +178,7 @@ class DenseResidualNet(nn.Module):
             tuple with dimensions of hidden layers of this module
         activation: callable
             activation function used in residual blocks
-        dropout: int
+        dropout: float
             dropout probability for residual blocks used for reqularization
         batch_norm: bool
             flag that specifies whether to use batch normalization
@@ -267,7 +267,7 @@ def create_enet_with_projection_layer_and_dense_resnet(
         output_dim: int,
         hidden_dims: Tuple,
         activation: str = 'elu',
-        dropout: int = 0.0,
+        dropout: float = 0.0,
         batch_norm: bool = True,
         added_context: bool = False,
 ):
@@ -319,7 +319,7 @@ def create_enet_with_projection_layer_and_dense_resnet(
         tuple with dimensions of hidden layers of module 2
     :param activation: str
         str that specifies activation function used in residual blocks
-    :param dropout: int
+    :param dropout: float
         dropout probability for residual blocks used for reqularization
     :param batch_norm: bool
         flag that specifies whether to use batch normalization
