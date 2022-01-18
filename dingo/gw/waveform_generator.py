@@ -17,7 +17,8 @@ class WaveformGenerator:
                  approximant: str,
                  domain: Domain,
                  reference_frequency: float,
-                 mode_list: List[Tuple] = None):
+                 mode_list: List[Tuple] = None,
+                 transform=None):
         """
         Parameters
         ----------
@@ -50,6 +51,8 @@ class WaveformGenerator:
         self.lal_params = None
         if mode_list is not None:
             self.lal_params = self.setup_mode_array(mode_list)
+
+        self.transform = transform
 
 
     def generate_hplus_hcross(self, parameters: Dict[str, float],
@@ -123,7 +126,10 @@ class WaveformGenerator:
                 else:
                     raise
 
-        return wf_dict
+        if self.transform is not None:
+            return self.transform(wf_dict)
+        else:
+            return wf_dict
 
     def _convert_to_scalar(self, x: Union[np.ndarray, float]):
         """Convert a single element array to a number."""

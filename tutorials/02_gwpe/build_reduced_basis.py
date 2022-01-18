@@ -1,7 +1,7 @@
 import yaml
 from os.path import join, abspath, dirname
 
-from dingo.gw.waveform_dataset import generate_and_save_reduced_basis
+from dingo.gw.SVD import generate_and_save_reduced_basis
 from dingo.gw.transforms import AddWhiteNoiseComplex,  \
     RepackageStrainsAndASDS, SelectStandardizeRepackageParameters
 from dingo.api import build_dataset

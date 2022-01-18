@@ -23,7 +23,7 @@ from tqdm import tqdm
 from functools import partial
 
 from dingo.gw.domains import build_domain
-from dingo.gw.waveform_dataset import SVDBasis
+from dingo.gw.SVD import SVDBasis
 from dingo.gw.waveform_generator import WaveformGenerator
 from dingo.api import setup_logger, logger
 
