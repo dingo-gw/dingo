@@ -30,6 +30,7 @@ setup(name='dingo',
           'pycondor',
           'gwpy',
           'pycbc',
+          'pandas',
       ],
       extras_require={
           "dev": [
