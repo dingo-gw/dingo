@@ -37,8 +37,8 @@ num_samples: 10
 # Save a compressed representation of the dataset
 compression:
   whitening: aLIGOZeroDetuned  # PSD
-  SVD:
-    num_training_samples: 10000
-    num_validation_samples: 1000
+  svd:
+    num_training_samples: 2000
+    num_validation_samples: 500
     # Truncate the SVD basis at this size. No truncation if zero.
     size: 100

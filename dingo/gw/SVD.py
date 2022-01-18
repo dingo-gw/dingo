@@ -156,8 +156,12 @@ class SVDBasis:
             np.save(filename, self.V)
 
 
-def build_SVD(num_chunks: int, outfile: str, rb_max: int = 0,
-                 train_fraction: float = 1.0):
+def build_svd():
+
+    pass
+
+
+def build_svd_old(num_chunks: int, outfile: str, rb_max: int = 0, train_fraction: float = 1.0):
     """
     Create and save SVD basis
 
@@ -289,3 +293,23 @@ def generate_and_save_reduced_basis(wfd,
     wfd.transform = wfd_transform_original
 
     return V_paths
+
+
+class ApplySVD(object):
+
+    def __init__(self, svd_basis: SVDBasis):
+        self.svd_basis = svd_basis
+
+    def __call__(self, uncompressed_waveform: dict):
+        compressed_waveform = {k: self.svd_basis.fseries_to_basis_coefficients(v) for k, v in uncompressed_waveform.items()}
+        return compressed_waveform
+
+
+class UndoSVD(object):
+
+    def __init__(self, svd_basis: SVDBasis):
+        self.svd_basis = svd_basis
+
+    def __call__(self, compressed_waveform: dict):
+        uncompressed_waveform = {k: self.svd_basis.basis_coefficients_to_fseries(v) for k, v in compressed_waveform.items()}
+        return uncompressed_waveform

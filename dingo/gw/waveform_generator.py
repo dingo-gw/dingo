@@ -1,8 +1,12 @@
+from functools import partial
+from multiprocessing import Pool
+
 import numpy as np
 from typing import Dict, List, Tuple, Union, Any
 import warnings
 import lal
 import lalsimulation as LS
+import pandas as pd
 from bilby.gw.conversion import convert_to_lal_binary_black_hole_parameters, bilby_to_lalsimulation_spins
 
 from dingo.gw.domains import Domain
@@ -269,6 +273,54 @@ class WaveformGenerator:
         h_plus = hp.data.data,
         h_cross = hc.data.data
         return {'h_plus': h_plus, 'h_cross': h_cross}
+
+
+def generate_waveforms_task_func(
+    args: Tuple, waveform_generator: WaveformGenerator = None
+):
+    """
+    Picklable wrapper function for parallel waveform generation.
+
+    Parameters
+    ----------
+    args:
+        A tuple of (index, pandas.core.series.Series)
+    waveform_generator:
+        A WaveformGenerator instance
+    """
+    parameters = args[1].to_dict()
+    return waveform_generator.generate_hplus_hcross(parameters)
+
+
+def generate_waveforms_parallel(
+    waveform_generator: WaveformGenerator,
+    parameter_samples: pd.DataFrame,
+    pool: Pool = None,
+):
+    """Generate a waveform dataset, optionally in parallel.
+
+    Parameters
+    ----------
+    waveform_generator: WaveformGenerator
+        A WaveformGenerator instance
+    parameter_samples: pd.DataFrame
+        Intrinsic parameter samples
+    pool: multiprocessing.Pool
+        Optional pool of workers for parallel generation
+    """
+    # logger.info('Generating waveform polarizations ...')
+
+    task_func = partial(generate_waveforms_task_func, waveform_generator=waveform_generator)
+    task_data = parameter_samples.iterrows()
+    if pool is not None:
+        polarizations_list = pool.map(task_func, task_data)
+    else:
+        polarizations_list = list(map(task_func, task_data))
+    polarizations = {
+        pol: np.stack([wf[pol] for wf in polarizations_list])
+        for pol in polarizations_list[0].keys()
+    }
+    return polarizations
 
 
 if __name__ == "__main__":

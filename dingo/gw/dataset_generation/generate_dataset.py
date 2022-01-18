@@ -1,65 +1,94 @@
-# File from Nihar
-
 import yaml
 import argparse
-from torchvision.transforms import Compose
 from multiprocessing import Pool
 import pandas as pd
+import numpy as np
 import h5py
 
-from .dataset_utils import structured_array_from_dict_of_arrays
 from ..prior import build_prior_with_defaults
 from ..domains import build_domain
-from ..waveform_generator import WaveformGenerator
-from .generate_waveforms import generate_dataset_old
+from ..waveform_generator import WaveformGenerator, generate_waveforms_parallel
+from torchvision.transforms import Compose
+from ..SVD import SVDBasis, ApplySVD
 
 
 def generate_dataset(settings, num_processes):
 
-    prior = build_prior_with_defaults(settings['intrinsic_prior'])
-    domain = build_domain(settings['domain'])
-    waveform_generator = WaveformGenerator(settings['waveform_generator']['approximant'],
-                                           domain,
-                                           settings['waveform_generator']['f_ref'])
+    prior = build_prior_with_defaults(settings["intrinsic_prior"])
+    domain = build_domain(settings["domain"])
+    waveform_generator = WaveformGenerator(
+        settings["waveform_generator"]["approximant"],
+        domain,
+        settings["waveform_generator"]["f_ref"],
+    )
 
-    # if 'compression' in settings:
-    #     compression_transforms = []
-    #     if 'SVD' in settings['compression']:
-    #         compression_transforms.append(init_SVD_compression(prior,
-    #                                                            waveform_generator,
-    #                                                            settings['compression']['SVD']))
-    #     waveform_generator.transform = Compose(compression_transforms)
+    dataset = {}
 
-    parameter_samples = pd.DataFrame(prior.sample(settings['num_samples']))
+    if "compression" in settings:
+        compression_transforms = []
+
+        if "svd" in settings["compression"]:
+            svd_settings = settings["compression"]["svd"]
+            parameters = pd.DataFrame(
+                prior.sample(svd_settings["num_training_samples"])
+            )
+            with Pool(processes=num_processes) as pool:
+                polarizations = generate_waveforms_parallel(
+                    waveform_generator, parameters, pool
+                )
+            train_data = np.vstack(list(polarizations.values()))
+            basis = SVDBasis()
+            basis.generate_basis(train_data, svd_settings["size"])
+            compression_transforms.append(ApplySVD(basis))
+            dataset["svd_V"] = basis.V
+
+        waveform_generator.transform = Compose(compression_transforms)
+
+    # Generate main dataset
+    parameters = pd.DataFrame(prior.sample(settings["num_samples"]))
     with Pool(processes=num_processes) as pool:
-        polarizations = generate_dataset_old(waveform_generator, parameter_samples, pool)
+        polarizations = generate_waveforms_parallel(
+            waveform_generator, parameters, pool
+        )
 
-    return parameter_samples, polarizations
+    dataset["parameters"] = parameters
+    dataset["polarizations"] = polarizations
+
+    return dataset
 
 
-def save_dataset(parameters, polarizations, settings, file_name):
+def recursive_hdf5_save(group, d):
+    for k, v in d.items():
+        if isinstance(v, dict):
+            next_group = group.create_group(k)
+            recursive_hdf5_save(next_group, v)
+        else:
+            group.create_dataset(k, data=v)
 
-    f = h5py.File(file_name, 'w')
 
-    f.create_dataset('parameters', data=parameters)
-
-    grp = f.create_group('polarizations')
-    for pol, waveforms in polarizations.items():
-        grp.create_dataset(pol, data=waveforms)
-
-    f.attrs['settings'] = str(settings)
-
+def save_dataset(dataset, settings, file_name):
+    f = h5py.File(file_name, "w")
+    recursive_hdf5_save(f, dataset)
+    f.attrs["settings"] = str(settings)
     f.close()
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--settings_file', type=str, required=True,
-                        help='Directory containing waveform data, basis, and parameter file.')
-    parser.add_argument('--num_processes', type=int, default=1,
-                        help='Number of threads to use in pool for parallel waveform generation')
-    parser.add_argument('--out_file', type=str, required=True)
-    parser.add_argument('--logdir', type=str, default='log')
+    parser.add_argument(
+        "--settings_file",
+        type=str,
+        required=True,
+        help="Directory containing waveform data, basis, and parameter file.",
+    )
+    parser.add_argument(
+        "--num_processes",
+        type=int,
+        default=1,
+        help="Number of processes to use in pool for parallel waveform generation",
+    )
+    parser.add_argument("--out_file", type=str, required=True)
+    parser.add_argument("--logdir", type=str, default="log")
     return parser.parse_args()
 
 
@@ -67,17 +96,19 @@ def main():
     args = parse_args()
 
     # Load settings
-    with open(args.settings_file, 'r') as f:
+    with open(args.settings_file, "r") as f:
         settings = yaml.safe_load(f)
 
-    parameters, polarizations = generate_dataset(settings, args.num_processes)
+    dataset = generate_dataset(settings, args.num_processes)
 
-    save_dataset(parameters, polarizations, settings, args.out_file)
+    save_dataset(dataset, settings, args.out_file)
 
 
 if __name__ == "__main__":
     main()
 
+# File from Nihar
+#
 # cwd = "/home/n/Documents/Research/dingo/dingo-devel/tutorials/03_aligned_spin"
 # settings_file = f"{cwd}/datasets/waveforms/settings.yaml"
 #
