@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 from bilby.gw.prior import BBHPriorDict
 from bilby.gw.conversion import fill_from_fixed_priors, convert_to_lal_binary_black_hole_parameters
 from bilby.core.prior import Uniform, Sine, Cosine
@@ -118,3 +120,29 @@ default_intrinsic_dict = {
 default_params = ['mass_ratio', 'chirp_mass', 'phase', 'a_1', 'a_2',
                   'tilt_1', 'tilt_2', 'phi_12', 'phi_jl', 'theta_jn',
                   'luminosity_distance', 'geocent_time', 'ra', 'dec', 'psi']
+
+
+def build_prior_with_defaults(prior_settings: Dict[str, str]):
+    """
+    Generate BBHPriorDict based on dictionary of prior settings,
+    allowing for default values.
+
+    Parameters
+    ----------
+    prior_settings: Dict
+        A dictionary containing prior definitions for intrinsic parameters
+        Allowed values for each parameter are:
+            * 'default' to use a default prior
+            * a string for a custom prior, e.g.,
+               "Uniform(minimum=10.0, maximum=80.0, name=None, latex_label=None, unit=None, boundary=None)"
+
+    Depending on the particular prior choices the dimensionality of a
+    parameter sample obtained from the returned GWPriorDict will vary.
+    """
+
+    full_prior_settings = deepcopy(prior_settings)
+    for k, v in prior_settings.items():
+        if v == 'default':
+            full_prior_settings[k] = default_intrinsic_dict[k]
+
+    return BBHPriorDict(full_prior_settings)

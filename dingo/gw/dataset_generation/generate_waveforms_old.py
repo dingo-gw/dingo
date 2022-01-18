@@ -89,7 +89,7 @@ def generate_polarizations_task_fun(args: Tuple,
     return waveform_generator.generate_hplus_hcross(parameters)
 
 
-def generate_dataset_old(waveform_generator: WaveformGenerator,
+def generate_dataset(waveform_generator: WaveformGenerator,
                      parameter_samples: pd.DataFrame,
                      pool: mp.Pool = None) -> pd.DataFrame:
     """Generate a waveform dataset, optionally in parallel.
@@ -112,10 +112,8 @@ def generate_dataset_old(waveform_generator: WaveformGenerator,
     else:
         wf_list_of_dicts = [waveform_generator.generate_hplus_hcross(p.to_dict())
                             for _, p in tqdm(parameter_samples.iterrows())]
-    polarizations = {pol: np.stack([wf[pol] for wf in wf_list_of_dicts]) for pol in wf_list_of_dicts[0].keys()}
-    return polarizations
-    # polarization_dict = {k: [wf[k] for wf in wf_list_of_dicts] for k in ['h_plus', 'h_cross']}
-    # return pd.DataFrame(polarization_dict)
+    polarization_dict = {k: [wf[k] for wf in wf_list_of_dicts] for k in ['h_plus', 'h_cross']}
+    return pd.DataFrame(polarization_dict)
 
 
 def generate_waveforms(waveform_generator: WaveformGenerator,

@@ -1,35 +1,6 @@
-from typing import Dict, List, Union
+from typing import Dict
 import pandas as pd
 import numpy as np
-from copy import deepcopy
-from dingo.gw.prior import default_intrinsic_dict
-from bilby.gw.prior import BBHPriorDict
-
-
-def build_prior_with_defaults(prior_settings: Dict[str, str]):
-    """
-    Generate BBHPriorDict based on dictionary of prior settings,
-    allowing for default values.
-
-    Parameters
-    ----------
-    prior_settings: Dict
-        A dictionary containing prior definitions for intrinsic parameters
-        Allowed values for each parameter are:
-            * 'default' to use a default prior
-            * a string for a custom prior, e.g.,
-               "Uniform(minimum=10.0, maximum=80.0, name=None, latex_label=None, unit=None, boundary=None)"
-
-    Depending on the particular prior choices the dimensionality of a
-    parameter sample obtained from the returned GWPriorDict will vary.
-    """
-
-    full_prior_settings = deepcopy(prior_settings)
-    for k, v in prior_settings.items():
-        if v == 'default':
-            full_prior_settings[k] = default_intrinsic_dict[k]
-
-    return BBHPriorDict(full_prior_settings)
 
 
 def structured_array_from_dict_of_arrays(d: Dict[str, np.ndarray], fmt: str = 'f8'):

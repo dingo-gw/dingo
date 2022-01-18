@@ -43,7 +43,8 @@ setup(name='dingo',
            'build_SVD_basis=dingo.gw.dataset_generation.build_SVD_basis:main',
            'collect_waveform_dataset=dingo.gw.dataset_generation.collect_waveform_dataset:main',
            'create_waveform_generation_bash_script=dingo.gw.dataset_generation.create_waveform_generation_bash_script:main',
-           'create_waveform_generation_dag=dingo.gw.dataset_generation.create_waveform_generation_dag:main']
+           'create_waveform_generation_dag=dingo.gw.dataset_generation.create_waveform_generation_dag:main',
+           'generate_dataset=dingo.gw.dataset_generation.generate_dataset:main']
       },
       classifiers=[
           "Programming Language :: Python :: 3.6",
