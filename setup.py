@@ -45,7 +45,7 @@ setup(name='dingo',
            'collect_waveform_dataset=dingo.gw.dataset_generation.collect_waveform_dataset:main',
            'create_waveform_generation_bash_script=dingo.gw.dataset_generation.create_waveform_generation_bash_script:main',
            'create_waveform_generation_dag=dingo.gw.dataset_generation.create_waveform_generation_dag:main',
-           'generate_dataset=dingo.gw.dataset_generation.generate_dataset:main',
+           'dingo_generate_dataset=dingo.gw.dataset_generation.generate_dataset:main',
            'dingo_generate_dataset_dag=dingo.gw.dataset_generation.generate_dataset_dag:main']
       },
       classifiers=[

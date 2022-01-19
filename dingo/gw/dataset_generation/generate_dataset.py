@@ -40,15 +40,24 @@ def generate_dataset(settings, num_processes):
 
         if "svd" in settings["compression"]:
             svd_settings = settings["compression"]["svd"]
-            parameters, polarizations = generate_parameters_and_polarizations(
-                waveform_generator,
-                prior,
-                svd_settings["num_training_samples"],
-                num_processes,
-            )
-            train_data = np.vstack(list(polarizations.values()))
-            basis = SVDBasis()
-            basis.generate_basis(train_data, svd_settings["size"])
+
+            # Load an SVD basis from file, if specified.
+            if 'file' in svd_settings:
+                basis = SVDBasis()
+                basis.from_file(svd_settings['file'])
+
+            # Otherwise, generate the basis based on simulated waveforms.
+            else:
+                parameters, polarizations = generate_parameters_and_polarizations(
+                    waveform_generator,
+                    prior,
+                    svd_settings["num_training_samples"],
+                    num_processes,
+                )
+                train_data = np.vstack(list(polarizations.values()))
+                basis = SVDBasis()
+                basis.generate_basis(train_data, svd_settings["size"])
+
             compression_transforms.append(ApplySVD(basis))
             dataset["svd_V"] = basis.V
 
