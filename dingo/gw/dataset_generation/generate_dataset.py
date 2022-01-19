@@ -12,6 +12,17 @@ from torchvision.transforms import Compose
 from ..SVD import SVDBasis, ApplySVD
 
 
+def generate_parameters_and_polarizations(
+    waveform_generator, prior, num_samples, num_processes
+):
+    parameters = pd.DataFrame(prior.sample(num_samples))
+    with Pool(processes=num_processes) as pool:
+        polarizations = generate_waveforms_parallel(
+            waveform_generator, parameters, pool
+        )
+    return parameters, polarizations
+
+
 def generate_dataset(settings, num_processes):
 
     prior = build_prior_with_defaults(settings["intrinsic_prior"])
@@ -29,13 +40,12 @@ def generate_dataset(settings, num_processes):
 
         if "svd" in settings["compression"]:
             svd_settings = settings["compression"]["svd"]
-            parameters = pd.DataFrame(
-                prior.sample(svd_settings["num_training_samples"])
+            parameters, polarizations = generate_parameters_and_polarizations(
+                waveform_generator,
+                prior,
+                svd_settings["num_training_samples"],
+                num_processes,
             )
-            with Pool(processes=num_processes) as pool:
-                polarizations = generate_waveforms_parallel(
-                    waveform_generator, parameters, pool
-                )
             train_data = np.vstack(list(polarizations.values()))
             basis = SVDBasis()
             basis.generate_basis(train_data, svd_settings["size"])
@@ -45,12 +55,9 @@ def generate_dataset(settings, num_processes):
         waveform_generator.transform = Compose(compression_transforms)
 
     # Generate main dataset
-    parameters = pd.DataFrame(prior.sample(settings["num_samples"]))
-    with Pool(processes=num_processes) as pool:
-        polarizations = generate_waveforms_parallel(
-            waveform_generator, parameters, pool
-        )
-
+    parameters, polarizations = generate_parameters_and_polarizations(
+        waveform_generator, prior, settings["num_samples"], num_processes
+    )
     dataset["parameters"] = parameters
     dataset["polarizations"] = polarizations
 
