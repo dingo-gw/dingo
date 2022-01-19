@@ -116,6 +116,7 @@ def create_dag(args, settings):
 
     # scripts are installed in the env's bin directory
     path = os.path.join(args.env_path, "bin")
+    temp_dir = args.temp_dir
 
     # DAG ---------------------------------------------------------------------
     dagman = Dagman(name="dingo_generate_dataset_dagman", submit=args.submit)
@@ -128,9 +129,11 @@ def create_dag(args, settings):
             # --- (a) Generate dataset for SVD training. Split this over multiple jobs.
             executable = os.path.join(path, "dingo_generate_dataset")
             args_dict = {
-                "settings_file": settings_svd_part_fn,
+                "settings_file": os.path.join(temp_dir, settings_svd_part_fn),
                 "num_processes": args.request_cpus,
-                "out_file": svd_dataset_part_prefix + "$(Process).hdf5",
+                "out_file": os.path.join(
+                    temp_dir, svd_dataset_part_prefix + "$(Process).hdf5"
+                ),
             }
             args_str = create_args_string(args_dict)
             generate_svd_dataset_part = Job(
@@ -145,9 +148,9 @@ def create_dag(args, settings):
             # --- (b) Consolidate dataset.
             executable = os.path.join(path, "dingo_consolidate_dataset")
             args_dict = {
-                "prefix": svd_dataset_part_prefix,
+                "prefix": os.path.join(temp_dir, svd_dataset_part_prefix),
                 "num_parts": args.num_jobs,
-                "out_file": svd_dataset_fn,
+                "out_file": os.path.join(temp_dir, svd_dataset_fn),
             }
             args_str = create_args_string(args_dict)
             consolidate_svd_dataset = Job(
@@ -161,7 +164,10 @@ def create_dag(args, settings):
 
             # --- (c) Build SVD basis
             executable = os.path.join(path, "dingo_build_svd")
-            args_dict = {"dataset_file": svd_dataset_fn, "out_file": svd_fn}
+            args_dict = {
+                "dataset_file": os.path.join(temp_dir, svd_dataset_fn),
+                "out_file": os.path.join(temp_dir, svd_fn),
+            }
             args_str = create_args_string(args_dict)
             build_svd = Job(
                 name="build_svd",
@@ -177,9 +183,9 @@ def create_dag(args, settings):
     # --- (a) Generate dataset. Split over multiple jobs.
     executable = os.path.join(path, "dingo_generate_dataset")
     args_dict = {
-        "settings_file": settings_part_fn,
+        "settings_file": os.path.join(temp_dir, settings_part_fn),
         "num_processes": args.request_cpus,
-        "out_file": dataset_part_prefix + "$(Process).hdf5",
+        "out_file": os.path.join(temp_dir, dataset_part_prefix + "$(Process).hdf5"),
     }
     args_str = create_args_string(args_dict)
     generate_dataset_part = Job(
@@ -197,10 +203,10 @@ def create_dag(args, settings):
     # --- (b) Consolidate dataset
     executable = os.path.join(path, "dingo_consolidate_dataset")
     args_dict = {
-        "prefix": dataset_part_prefix,
+        "prefix": os.path.join(temp_dir, dataset_part_prefix),
         "num_parts": args.num_jobs,
         "out_file": args.out_file,
-        "settings": settings,
+        "settings_file": args.settings_file,
     }
     args_str = create_args_string(args_dict)
     consolidate_dataset = Job(
@@ -221,6 +227,10 @@ def main():
     # Load settings
     with open(args.settings_file, "r") as f:
         settings = yaml.safe_load(f)
+
+    # create temporary directory
+    if not os.path.exists(args.temp_dir):
+        os.mkdir(args.temp_dir)
 
     # Set up component .yaml files
     configure_runs(settings, args.num_jobs, args.temp_dir)
