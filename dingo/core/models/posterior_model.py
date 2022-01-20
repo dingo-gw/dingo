@@ -205,6 +205,8 @@ class PosteriorModel:
                 self.optimizer.load_state_dict(d['optimizer_state_dict'])
             if 'scheduler_state_dict' in d:
                 self.scheduler.load_state_dict(d['scheduler_state_dict'])
+        else:
+            self.initialize_optimizer_and_scheduler()
 
     def train(self,
               train_loader: torch.utils.data.DataLoader,

@@ -116,7 +116,6 @@ def build_posterior_model(train_dir, train_settings, data_sample=None):
     """
     Initialize new posterior model, if no existing <log_dir>/model_latest.pt.
     Else load the existing model.
-
     :param log_dir: str
         log directory containing model_latest.pt file
     :param train_settings: dict
@@ -142,12 +141,17 @@ def build_posterior_model(train_dir, train_settings, data_sample=None):
     else:
         print(f'Loading posterior model {join(train_dir, "model_latest.pt")}.')
         # kwargs for loaded model
-        pm_kwargs = {'model_filename': join(train_dir, 'model_latest.pt')}
+        pm_kwargs = {'model_filename': join(train_dir, 'model_latest.pt'),
+            'optimizer_kwargs': train_settings['train_settings'][
+                'optimizer_kwargs'],
+            'scheduler_kwargs': train_settings['train_settings'][
+                'scheduler_kwargs'],
+        }
 
     # build posterior model
     pm = PosteriorModel(model_builder=create_nsf_with_rb_projection_embedding_net,
-                        init_for_training=True, 
-                        device=train_settings['train_settings']['device'], 
+                        init_for_training=train_settings['train_settings']['init_for_training'],
+                        device=train_settings['train_settings']['device'],
                         **pm_kwargs)
     # assert get_number_of_model_parameters(pm.model) == 131448775
 
