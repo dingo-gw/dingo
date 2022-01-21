@@ -96,7 +96,7 @@ def merge_datasets_cli():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--prefix', type=str, required=True)
-    parser.add_argument('--num_parts', type=int, require=True)
+    parser.add_argument('--num_parts', type=int, required=True)
     parser.add_argument('--out_file', type=str, required=True)
     parser.add_argument('--settings_file', type=str)
     args = parser.parse_args()
