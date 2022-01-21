@@ -166,6 +166,7 @@ def create_dag(args, settings):
             executable = os.path.join(path, "dingo_build_svd")
             args_dict = {
                 "dataset_file": os.path.join(temp_dir, svd_dataset_fn),
+                "size": settings['compression']['svd']['size'],
                 "out_file": os.path.join(temp_dir, svd_fn),
             }
             args_str = create_args_string(args_dict)

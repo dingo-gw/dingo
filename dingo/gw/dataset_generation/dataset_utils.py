@@ -8,6 +8,7 @@ import h5py
 import yaml
 
 from dingo.core.utils.dataset_utils import recursive_hdf5_load, save_dataset
+from dingo.gw.SVD import SVDBasis
 
 
 def structured_array_from_dict_of_arrays(d: Dict[str, np.ndarray], fmt: str = 'f8'):
@@ -120,3 +121,24 @@ def merge_datasets_cli():
     # Update settings/num_samples to be consistent with the dataset.
     settings['num_samples'] = len(merged_dataset('parameters'))
     save_dataset(merged_dataset, settings, args.out_file)
+
+
+def build_svd_cli():
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset_file', type=str, required=True)
+    parser.add_argument('--size', type=int, required=True)
+    parser.add_argument('--out_file', type=str, required=True)
+    args = parser.parse_args()
+
+    # We build the SVD based on all of the polarizations.
+    polarizations = []
+    with h5py.File(args.dataset_file, 'r') as f:
+        for pol, data in f['polarizations'].items():
+            polarizations.append(data[...])
+    train_data = np.vstack(polarizations)
+
+    basis = SVDBasis()
+    basis.generate_basis(train_data, args.size)
+    basis.to_file(args.out_file)
+

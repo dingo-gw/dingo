@@ -48,7 +48,8 @@ setup(name='dingo',
            'create_waveform_generation_dag=dingo.gw.dataset_generation.create_waveform_generation_dag:main',
            'dingo_generate_dataset=dingo.gw.dataset_generation.generate_dataset:main',
            'dingo_generate_dataset_dag=dingo.gw.dataset_generation.generate_dataset_dag:main',
-           'dingo_merge_datasets=dingo.gw.dataset_generation.dataset_utils:merge_datasets_cli']
+           'dingo_merge_datasets=dingo.gw.dataset_generation.dataset_utils:merge_datasets_cli',
+           'dingo_build_svd=dingo.gw.dataset_generation.dataset_utils:build_svd_cli']
       },
       classifiers=[
           "Programming Language :: Python :: 3.6",
