@@ -3,6 +3,7 @@ from scipy.signal import tukey
 from dingo.gw.prior import default_extrinsic_dict
 from dingo.gw.prior import BBHExtrinsicPriorDict
 import h5py
+import ast
 
 def find_axis(array, dim):
     """Looks for axis with dimension dim in array, and returns its index."""
@@ -45,6 +46,16 @@ def save_dataset(dataset, settings, file_name):
     recursive_hdf5_save(f, dataset)
     f.attrs["settings"] = str(settings)
     f.close()
+
+def load_dataset(file_name):
+    f = h5py.File(file_name, "r")
+    data = recursive_hdf5_load(f)
+    try:
+        settings = ast.literal_eval(f.attrs["settings"])
+    except KeyError:
+        settings = None
+    f.close()
+    return data, settings
 
 def get_window(window_kwargs):
     """Compute window from window_kwargs."""
