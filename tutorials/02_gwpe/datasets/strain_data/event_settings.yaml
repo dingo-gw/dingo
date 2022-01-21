@@ -1,0 +1,14 @@
+# Events and their GPS times.
+events:
+  GW150914: 1126259462.4
+  GW151012: 1128678900.4
+
+# Data conditioning. Times in seconds, frequencies in Hz.
+time_segment: 8
+time_buffer: 2
+num_segments_psd: 128
+window:
+  window_type: tukey
+  f_s: 4096
+  roll_off: 0.4
+detectors: [H1, L1]
