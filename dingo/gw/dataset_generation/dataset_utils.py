@@ -85,7 +85,7 @@ def merge_datasets(dataset_list):
     # the values in the *first* dataset in the list.
     merged = copy.deepcopy(dataset_list[0])
 
-    merged["parameters"] = np.vstack([d["parameters"] for d in dataset_list])
+    merged["parameters"] = pd.concat([d["parameters"] for d in dataset_list])
     merged["polarizations"] = {}
     for pol in dataset_list[0]["polarizations"]:
         merged["polarizations"][pol] = np.vstack(

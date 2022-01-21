@@ -87,7 +87,7 @@ def configure_runs(settings, num_jobs, temp_dir):
             settings_svd_part["num_samples"] = num_samples // num_jobs
             del settings_svd_part["compression"]["svd"]
             with open(os.path.join(temp_dir, settings_svd_part_fn), "w") as f:
-                yaml.dump(settings_svd_part, f)
+                yaml.dump(settings_svd_part, f, default_flow_style=False, sort_keys=False)
 
             # Set the runs for the main dataset to use the saved SVD basis (assume it was
             # produced already, based on the above).
@@ -96,7 +96,7 @@ def configure_runs(settings, num_jobs, temp_dir):
             }
 
     with open(os.path.join(temp_dir, settings_part_fn), "w") as f:
-        yaml.dump(settings_part, f)
+        yaml.dump(settings_part, f, default_flow_style=False, sort_keys=False)
 
 
 def create_dag(args, settings):
