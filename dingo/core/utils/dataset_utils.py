@@ -14,8 +14,7 @@ def recursive_hdf5_load(group):
     d = {}
     for k, v in group.items():
         if isinstance(v, h5py.Group):
-            d[k] = {}
-            recursive_hdf5_load(group)
+            d[k] = recursive_hdf5_load(v)
         else:
             d[k] = v[...]
     return d
