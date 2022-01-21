@@ -122,7 +122,7 @@ def merge_datasets_cli():
             settings = ast.literal_eval(f.attrs["settings"])
 
     # Update settings/num_samples to be consistent with the dataset.
-    settings["num_samples"] = len(merged_dataset("parameters"))
+    settings["num_samples"] = len(merged_dataset["parameters"])
     save_dataset(merged_dataset, settings, args.out_file)
 
 
