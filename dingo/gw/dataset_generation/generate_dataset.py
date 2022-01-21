@@ -3,8 +3,8 @@ import argparse
 from multiprocessing import Pool
 import pandas as pd
 import numpy as np
-import h5py
 
+from dingo.core.utils.dataset_utils import save_dataset
 from ..prior import build_prior_with_defaults
 from ..domains import build_domain
 from ..waveform_generator import WaveformGenerator, generate_waveforms_parallel
@@ -71,22 +71,6 @@ def generate_dataset(settings, num_processes):
     dataset["polarizations"] = polarizations
 
     return dataset
-
-
-def recursive_hdf5_save(group, d):
-    for k, v in d.items():
-        if isinstance(v, dict):
-            next_group = group.create_group(k)
-            recursive_hdf5_save(next_group, v)
-        else:
-            group.create_dataset(k, data=v)
-
-
-def save_dataset(dataset, settings, file_name):
-    f = h5py.File(file_name, "w")
-    recursive_hdf5_save(f, dataset)
-    f.attrs["settings"] = str(settings)
-    f.close()
 
 
 def parse_args():

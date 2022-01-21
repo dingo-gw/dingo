@@ -146,7 +146,7 @@ def create_dag(args, settings):
             )
 
             # --- (b) Consolidate dataset.
-            executable = os.path.join(path, "dingo_consolidate_dataset")
+            executable = os.path.join(path, "dingo_merge_datasets")
             args_dict = {
                 "prefix": os.path.join(temp_dir, svd_dataset_part_prefix),
                 "num_parts": args.num_jobs,
@@ -201,7 +201,7 @@ def create_dag(args, settings):
             generate_dataset_part.add_parent(build_svd)
 
     # --- (b) Consolidate dataset
-    executable = os.path.join(path, "dingo_consolidate_dataset")
+    executable = os.path.join(path, "dingo_merge_datasets")
     args_dict = {
         "prefix": os.path.join(temp_dir, dataset_part_prefix),
         "num_parts": args.num_jobs,
