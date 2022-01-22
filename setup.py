@@ -25,9 +25,10 @@ setup(name='dingo',
           'h5py',
           'bilby',
           'astropy',
-          'lalsuite',
+          'lalsuite>=7.3',
           'sklearn',
-          'pycondor'
+          'pycondor',
+          'sphinx_rtd_theme'
       ],
       extras_require={
           "dev": [
