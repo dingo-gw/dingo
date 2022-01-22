@@ -1,10 +1,3 @@
-Usage
-=====
-
-Installation
-------------
-
-
 Development Installation 
 ------------------------
 
@@ -27,11 +20,3 @@ In this virtual environment, install dingo.
     pip install -e ."[dev]"
 
 
-How to use the autodoc feature (RST aka pycharm format): 
-
-.. autofunction:: dingo.core.utils.torchutils.get_number_of_model_parameters
-
-
-How to use the autodoc feature (numpy format):
-
-.. autofunction:: dingo.core.utils.torchutils.split_dataset_into_train_and_test
