@@ -117,9 +117,9 @@ def test_load_waveform_dataset(generate_waveform_dataset_small):
     assert isinstance(wd.domain.domain_dict, dict)
 
     # Check the associated data settings
-    data_settings_keys = {'domain_settings', 'waveform_generator_settings',
-                          'intrinsic_prior', 'reference_frequency',
-                          'waveform_dataset_generation_settings'}
+    data_settings_keys = {'domain', 'waveform_generator',
+                          'intrinsic_prior', 'num_samples',
+                          'compression'}
     assert set(wd.data_settings.keys()) == data_settings_keys
 
 

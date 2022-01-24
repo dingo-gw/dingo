@@ -100,7 +100,11 @@ class WaveformDataset(Dataset):
             self._Vh = V.T.conj()
 
         self.data_settings = ast.literal_eval(fp.attrs['settings'])
-        self.domain = build_domain(self.data_settings['domain_settings'])
+        if 'domain_settings' in self.data_settings:  # Backward compatibility
+            domain_settings = self.data_settings['domain_settings']
+        else:
+            domain_settings = self.data_settings['domain']
+        self.domain = build_domain(domain_settings)
         self.is_truncated = False
 
         fp.close()
