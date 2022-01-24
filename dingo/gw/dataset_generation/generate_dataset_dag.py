@@ -17,10 +17,30 @@ dataset_part_prefix = "dataset_part_"
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--settings_file", type=str, required=True)
-    parser.add_argument("--out_file", type=str, default="waveform_dataset.hdf5")
-    parser.add_argument("--num_jobs", type=int, required=True)
-    parser.add_argument("--temp_dir", type=str, default="temp")
+    parser.add_argument(
+        "--settings_file",
+        type=str,
+        required=True,
+        help="YAML file containing database settings",
+    )
+    parser.add_argument(
+        "--out_file",
+        type=str,
+        default="waveform_dataset.hdf5",
+        help="Name of file for storing dataset.",
+    )
+    parser.add_argument(
+        "--num_jobs",
+        type=int,
+        required=True,
+        help="Number of condor jobs over which to split work.",
+    )
+    parser.add_argument(
+        "--temp_dir",
+        type=str,
+        default="temp",
+        help="Directory for storing temporary files.",
+    )
     parser.add_argument(
         "--env_path",
         type=str,
@@ -30,8 +50,10 @@ def parse_args():
     )
 
     # condor arguments
-    parser.add_argument("--request_cpus", type=int, default=None)
-    parser.add_argument("--request_memory", type=int, default=None)
+    parser.add_argument("--request_cpus", type=int, default=None, help="CPUs per job.")
+    parser.add_argument(
+        "--request_memory", type=int, default=None, help="Memory per job."
+    )
     parser.add_argument("--error", type=str, default="condor/error")
     parser.add_argument("--output", type=str, default="condor/output")
     parser.add_argument("--log", type=str, default="condor/log")
@@ -87,7 +109,9 @@ def configure_runs(settings, num_jobs, temp_dir):
             settings_svd_part["num_samples"] = num_samples // num_jobs
             del settings_svd_part["compression"]["svd"]
             with open(os.path.join(temp_dir, settings_svd_part_fn), "w") as f:
-                yaml.dump(settings_svd_part, f, default_flow_style=False, sort_keys=False)
+                yaml.dump(
+                    settings_svd_part, f, default_flow_style=False, sort_keys=False
+                )
 
             # Set the runs for the main dataset to use the saved SVD basis (assume it was
             # produced already, based on the above).
@@ -167,7 +191,7 @@ def create_dag(args, settings):
             executable = os.path.join(path, "dingo_build_svd")
             args_dict = {
                 "dataset_file": os.path.join(temp_dir, svd_dataset_fn),
-                "size": settings['compression']['svd']['size'],
+                "size": settings["compression"]["svd"]["size"],
                 "out_file": os.path.join(temp_dir, svd_fn),
             }
             args_str = create_args_string(args_dict)

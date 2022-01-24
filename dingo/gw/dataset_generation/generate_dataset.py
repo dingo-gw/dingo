@@ -1,3 +1,5 @@
+import textwrap
+
 import yaml
 import argparse
 from multiprocessing import Pool
@@ -30,7 +32,7 @@ def generate_parameters_and_polarizations(
     pandas DataFrame of parameters
     dictionary of numpy arrays corresponding to waveform polarizations
     """
-    print('Generating dataset of size ' + str(num_samples))
+    print("Generating dataset of size " + str(num_samples))
     parameters = pd.DataFrame(prior.sample(num_samples))
     with Pool(processes=num_processes) as pool:
         polarizations = generate_waveforms_parallel(
@@ -73,7 +75,7 @@ def generate_dataset(settings, num_processes):
 
             # Load an SVD basis from file, if specified.
             if "file" in svd_settings:
-                print('Loading SVD basis from ' + svd_settings['file'])
+                print("Loading SVD basis from " + svd_settings["file"])
                 basis = SVDBasis()
                 basis.from_file(svd_settings["file"])
 
@@ -86,7 +88,7 @@ def generate_dataset(settings, num_processes):
                     num_processes,
                 )
                 train_data = np.vstack(list(polarizations.values()))
-                print('Building SVD basis.')
+                print("Building SVD basis.")
                 basis = SVDBasis()
                 basis.generate_basis(train_data, svd_settings["size"])
 
@@ -106,12 +108,19 @@ def generate_dataset(settings, num_processes):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=textwrap.dedent(
+            """\
+        Generate a waveform dataset based on a settings file.
+        """
+        ),
+    )
     parser.add_argument(
         "--settings_file",
         type=str,
         required=True,
-        help="Directory containing waveform data, basis, and parameter file.",
+        help="YAML file containing database settings",
     )
     parser.add_argument(
         "--num_processes",
@@ -119,8 +128,12 @@ def parse_args():
         default=1,
         help="Number of processes to use in pool for parallel waveform generation",
     )
-    parser.add_argument("--out_file", type=str, required=True)
-    parser.add_argument("--logdir", type=str, default="log")
+    parser.add_argument(
+        "--out_file",
+        type=str,
+        default="waveform_dataset.hdf5",
+        help="Name of file for storing dataset.",
+    )
     return parser.parse_args()
 
 

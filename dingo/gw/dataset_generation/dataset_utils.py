@@ -1,5 +1,5 @@
 import ast
-import argparse
+import argparse, textwrap
 import copy
 from typing import Dict
 import pandas as pd
@@ -92,7 +92,7 @@ def merge_datasets(dataset_list):
     A new dataset, which is a dictionary containing parameters and polarizations.
     """
 
-    print(f'Merging {len(dataset_list)} datasets into one.')
+    print(f"Merging {len(dataset_list)} datasets into one.")
 
     # This ensures that all of the keys are copied into the new dataset. The
     # "extensive" parts of the dataset (parameters, waveforms) will be overwritten by
@@ -116,11 +116,23 @@ def merge_datasets_cli():
     parallelized waveform generation.
     """
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--prefix", type=str, required=True)
-    parser.add_argument("--num_parts", type=int, required=True)
-    parser.add_argument("--out_file", type=str, required=True)
-    parser.add_argument("--settings_file", type=str)
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=textwrap.dedent("""\
+        Combine a collection of datasets into one.
+        
+        Datasets must be in sequentially-labeled HDF5 files with a fixed prefix. 
+        The settings for the new dataset will be based on those of the first file. 
+        Optionally, replace the settings with those specified in a YAML file.
+        """))
+    parser.add_argument("--prefix", type=str, required=True,
+                        help='Prefix of sequential files names.')
+    parser.add_argument("--num_parts", type=int, required=True,
+                        help='Total number of datasets to merge.')
+    parser.add_argument("--out_file", type=str, required=True,
+                        help='Name of file for new dataset.')
+    parser.add_argument("--settings_file", type=str,
+                        help='YAML file containing new dataset settings.')
     args = parser.parse_args()
 
     dataset_list = []
@@ -153,21 +165,28 @@ def build_svd_cli():
     waveform polarizations.
     """
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_file", type=str, required=True)
-    parser.add_argument("--size", type=int, required=True)
-    parser.add_argument("--out_file", type=str, required=True)
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=textwrap.dedent("""\
+        Build an SVD basis based on a set of waveforms.
+        """))
+    parser.add_argument("--dataset_file", type=str, required=True,
+                        help='HDF5 file containing training waveforms.')
+    parser.add_argument("--size", type=int, required=True,
+                        help='Number of basis elements to keep.')
+    parser.add_argument("--out_file", type=str, required=True,
+                        help='Name of file for saving SVD.')
     args = parser.parse_args()
 
     # We build the SVD based on all of the polarizations.
-    print('Loading saved waveforms.')
+    print("Loading saved waveforms.")
     polarizations = []
     with h5py.File(args.dataset_file, "r") as f:
         for pol, data in f["polarizations"].items():
             polarizations.append(data[...])
     train_data = np.vstack(polarizations)
 
-    print('Building SVD basis.')
+    print("Building SVD basis.")
     basis = SVDBasis()
     basis.generate_basis(train_data, args.size)
     basis.to_file(args.out_file)
