@@ -101,8 +101,9 @@ def configure_runs(settings, num_jobs, temp_dir):
 
 def create_dag(args, settings):
     """
-    Create a Condor DAG from command line arguments to
-    carry out the five steps in the workflow.
+    Create a Condor DAG from command line arguments to carry out the five steps in the
+    workflow.
+
     """
     kwargs = {
         "request_cpus": args.request_cpus,

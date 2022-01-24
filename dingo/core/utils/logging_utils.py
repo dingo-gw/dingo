@@ -6,6 +6,8 @@ import sys
 Utility functions
 """
 
+# This is not currently used. We should improve our logging throughout.
+
 def check_directory_exists_and_if_not_mkdir(directory, logger):
     """Checks if the given directory exists and creates it if it does not exist
 
@@ -21,6 +23,7 @@ def check_directory_exists_and_if_not_mkdir(directory, logger):
         logger.debug(f"Making directory {directory}")
     else:
         logger.debug(f"Directory {directory} exists")
+
 
 def setup_logger(outdir=None, label=None, log_level="INFO"):
     """Setup logging output: call at the start of the script to use

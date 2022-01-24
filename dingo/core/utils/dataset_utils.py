@@ -30,6 +30,7 @@ def recursive_hdf5_load(group):
 
 
 def save_dataset(dataset, settings, file_name):
+    print('Saving dataset to ' + file_name)
     f = h5py.File(file_name, "w")
     recursive_hdf5_save(f, dataset)
     f.attrs["settings"] = str(settings)

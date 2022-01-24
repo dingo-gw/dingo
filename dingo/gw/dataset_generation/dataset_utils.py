@@ -78,6 +78,21 @@ def get_params_dict_from_array(params_array, params_inds, f_ref=None):
 
 
 def merge_datasets(dataset_list):
+    """
+    Merge a collection of datasets into one.
+
+    Parameters
+    ----------
+    dataset_list : list
+        A list of datasets. Each item should be a dictionary containing parameters and
+        polarizations.
+
+    Returns
+    -------
+    A new dataset, which is a dictionary containing parameters and polarizations.
+    """
+
+    print(f'Merging {len(dataset_list)} datasets into one.')
 
     # This ensures that all of the keys are copied into the new dataset. The
     # "extensive" parts of the dataset (parameters, waveforms) will be overwritten by
@@ -96,6 +111,10 @@ def merge_datasets(dataset_list):
 
 
 def merge_datasets_cli():
+    """
+    Command-line function to combine a collection of datasets into one. Used for
+    parallelized waveform generation.
+    """
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--prefix", type=str, required=True)
@@ -125,8 +144,14 @@ def merge_datasets_cli():
     settings["num_samples"] = len(merged_dataset["parameters"])
     save_dataset(merged_dataset, settings, args.out_file)
 
+    print(f"Complete. New dataset consists of {settings['num_samples']} samples.")
+
 
 def build_svd_cli():
+    """
+    Command-line function to build an SVD based on a file containing a collection of
+    waveform polarizations.
+    """
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset_file", type=str, required=True)
@@ -135,12 +160,14 @@ def build_svd_cli():
     args = parser.parse_args()
 
     # We build the SVD based on all of the polarizations.
+    print('Loading saved waveforms.')
     polarizations = []
     with h5py.File(args.dataset_file, "r") as f:
         for pol, data in f["polarizations"].items():
             polarizations.append(data[...])
     train_data = np.vstack(polarizations)
 
+    print('Building SVD basis.')
     basis = SVDBasis()
     basis.generate_basis(train_data, args.size)
     basis.to_file(args.out_file)
