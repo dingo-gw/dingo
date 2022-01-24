@@ -1,5 +1,5 @@
 # settings for domain of waveforms
-domain:
+domain_settings:
   name: UniformFrequencyDomain
   kwargs:
     f_min: 10.0
@@ -8,9 +8,9 @@ domain:
     window_factor: 1.0 # This should maybe be in noise settings? It is not used for the generation of waveform polarizations
 
 # settings for waveform generator
-waveform_generator:
-  approximant: IMRPhenomPv2  # SEOBNRv4PHM
-  f_ref: 20.0  # Hz
+waveform_generator_settings:
+  approximant: IMRPhenomPv2 # SEOBNRv4PHM
+  f_ref: 20.0
 
 # settings for intrinsic prior over parameters
 intrinsic_prior:
@@ -31,14 +31,12 @@ intrinsic_prior:
   luminosity_distance: 100.0 # Mpc
   geocent_time: 0.0 # s
 
-# Number of samples in the dataset
-num_samples: 10000
+reference_frequency: 20.0  # Hz
 
-# Save a compressed representation of the dataset
-compression:
-  whitening: aLIGOZeroDetuned  # PSD
-  svd:
-    num_training_samples: 2000
-    num_validation_samples: 500
-    # Truncate the SVD basis at this size. No truncation if zero.
-    size: 100
+waveform_dataset_generation_settings:
+  # Number of waveforms to generate for building the SVD basis
+  num_wfs_basis: 10000
+  # Number of waveforms to generate for the waveform dataset
+  num_wfs_dataset: 50000
+  # Truncate the SVD basis at this size. No truncation if zero.
+  rb_max: 500
