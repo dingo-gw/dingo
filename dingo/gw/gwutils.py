@@ -2,6 +2,8 @@ import numpy as np
 from scipy.signal import tukey
 from dingo.gw.prior import default_extrinsic_dict
 from dingo.gw.prior import BBHExtrinsicPriorDict
+import h5py
+import ast
 
 def find_axis(array, dim):
     """Looks for axis with dimension dim in array, and returns its index."""
@@ -22,17 +24,66 @@ def truncate_array(array, axis, lower, upper):
     sl[axis] = slice(lower, upper)
     return array[tuple(sl)]
 
-def get_window_factor(window_kwargs):
-    """Compute window factor from window_kwargs."""
+def recursive_hdf5_save(group, d):
+    for k, v in d.items():
+        if isinstance(v, dict):
+            next_group = group.create_group(k)
+            recursive_hdf5_save(next_group, v)
+        else:
+            group.create_dataset(k, data=v)
+
+def recursive_hdf5_load(f):
+    d = {}
+    for k in f.keys():
+        if type(f[k]) == h5py._hl.group.Group:
+            d[k] = recursive_hdf5_load(f[k])
+        else:
+            d[k] = f[k][:]
+    return d
+
+def save_dataset(dataset, settings, file_name):
+    f = h5py.File(file_name, "w")
+    recursive_hdf5_save(f, dataset)
+    f.attrs["settings"] = str(settings)
+    f.close()
+
+def load_dataset(file_name):
+    f = h5py.File(file_name, "r")
+    data = recursive_hdf5_load(f)
+    try:
+        settings = ast.literal_eval(f.attrs["settings"])
+    except KeyError:
+        settings = None
+    f.close()
+    return data, settings
+
+def get_window(window_kwargs):
+    """Compute window from window_kwargs."""
     window_type = window_kwargs['window_type']
     if window_type == 'tukey':
         roll_off, T, f_s = window_kwargs['roll_off'], window_kwargs['T'], \
                            window_kwargs['f_s']
         alpha = 2 * roll_off / T
         w = tukey(int(T * f_s), alpha)
-        return np.sum(w ** 2) / (T * f_s)
+        return w
     else:
         raise NotImplementedError(f'Unknown window type {window_type}.')
+
+def get_window_factor(window):
+    """
+    TODO
+    Parameters
+    ----------
+    window
+
+    Returns
+    -------
+
+    """
+    """Compute window factor."""
+    if type(window) == dict:
+        window = get_window(window)
+    return np.sum(window ** 2) / len(window)
 
 def get_extrinsic_prior_dict(extrinsic_prior):
     """Build dict for extrinsic prior by starting with
