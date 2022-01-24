@@ -1,3 +1,5 @@
+import ast
+
 import h5py
 import numpy as np
 import pandas as pd
@@ -35,3 +37,14 @@ def save_dataset(dataset, settings, file_name):
     recursive_hdf5_save(f, dataset)
     f.attrs["settings"] = str(settings)
     f.close()
+
+
+def load_dataset(file_name):
+    f = h5py.File(file_name, "r")
+    data = recursive_hdf5_load(f)
+    try:
+        settings = ast.literal_eval(f.attrs["settings"])
+    except KeyError:
+        settings = None
+    f.close()
+    return data, settings

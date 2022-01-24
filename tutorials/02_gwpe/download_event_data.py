@@ -16,10 +16,8 @@ import pycbc.psd
 from dingo.gw.gwutils import (
     get_window,
     get_window_factor,
-    save_dataset,
-    load_dataset,
-    recursive_hdf5_load,
 )
+from dingo.core.utils.dataset_utils import save_dataset, load_dataset
 from dingo.gw.domains import UniformFrequencyDomain, build_domain
 from dingo.gw.transforms import WhitenAndScaleStrain
 from dingo.gw.download_strain_data import download_event_data_in_FD
