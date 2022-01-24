@@ -84,13 +84,19 @@ class WaveformDataset(Dataset):
         parameter_array = fp['parameters'][:]
         self._parameter_samples = pd.DataFrame(parameter_array)
 
-        grp = fp['waveform_polarizations']
+        if 'waveform_polarizations' in fp:
+            grp = fp['waveform_polarizations']  # Backward compatibility; remove later
+        else:
+            grp = fp['polarizations']
         assert list(grp.keys()) == ['h_cross', 'h_plus']
         self._hc = grp['h_cross'][:]
         self._hp = grp['h_plus'][:]
 
-        if 'rb_matrix_V' in fp.keys():
+        if 'rb_matrix_V' in fp.keys():  # Backward compatibility; remove later
             V = fp['rb_matrix_V'][:]
+            self._Vh = V.T.conj()
+        elif 'svd_V' in fp.keys():
+            V = fp['svd_V'][:]
             self._Vh = V.T.conj()
 
         self.data_settings = ast.literal_eval(fp.attrs['settings'])

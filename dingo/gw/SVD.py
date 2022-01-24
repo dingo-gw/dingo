@@ -41,7 +41,7 @@ class SVDBasis:
 
             U, s, Vh = randomized_svd(training_data, n, random_state=0)
 
-            self.Vh = Vh.astype(np.complex128)
+            self.Vh = Vh.astype(np.complex128)  # TODO: fix types
             self.V = self.Vh.T.conj()
             self.n = n
             self.s = s
