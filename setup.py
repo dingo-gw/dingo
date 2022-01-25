@@ -30,20 +30,20 @@ setup(name='dingo',
           'pycondor',
           'gwpy',
           'pycbc',
+          'pandas',
       ],
       extras_require={
           "dev": [
               "pytest",
               "pylint",
+              'black',
           ],
       },
       entry_points={'console_scripts':
-          ['generate_parameters=dingo.gw.waveform_dataset_generation.generate_parameters:main',
-           'generate_waveforms=dingo.gw.waveform_dataset_generation.generate_waveforms:main',
-           'build_SVD_basis=dingo.gw.waveform_dataset_generation.build_SVD_basis:main',
-           'collect_waveform_dataset=dingo.gw.waveform_dataset_generation.collect_waveform_dataset:main',
-           'create_waveform_generation_bash_script=dingo.gw.waveform_dataset_generation.create_waveform_generation_bash_script:main',
-           'create_waveform_generation_dag=dingo.gw.waveform_dataset_generation.create_waveform_generation_dag:main']
+          ['dingo_generate_dataset=dingo.gw.dataset_generation.generate_dataset:main',
+           'dingo_generate_dataset_dag=dingo.gw.dataset_generation.generate_dataset_dag:main',
+           'dingo_merge_datasets=dingo.gw.dataset_generation.dataset_utils:merge_datasets_cli',
+           'dingo_build_svd=dingo.gw.dataset_generation.dataset_utils:build_svd_cli']
       },
       classifiers=[
           "Programming Language :: Python :: 3.6",

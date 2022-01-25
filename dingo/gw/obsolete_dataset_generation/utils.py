@@ -1,38 +1,4 @@
-from typing import Dict, List, Union
-import pandas as pd
-import numpy as np
-from copy import deepcopy
-from dingo.gw.prior import default_intrinsic_dict
-from bilby.gw.prior import BBHPriorDict
-
-
-def build_prior_with_defaults(prior_settings: Dict[str, str]):
-    """
-    Generate BBHPriorDict based on dictionary of prior settings,
-    allowing for default values.
-
-    Parameters
-    ----------
-    prior_settings: Dict
-        A dictionary containing prior definitions for intrinsic parameters
-        Allowed values for each parameter are:
-            * 'default' to use a default prior
-            * a string for a custom prior, e.g.,
-               "Uniform(minimum=10.0, maximum=80.0, name=None, latex_label=None, unit=None, boundary=None)"
-
-    Depending on the particular prior choices the dimensionality of a
-    parameter sample obtained from the returned GWPriorDict will vary.
-    """
-
-    full_prior_settings = deepcopy(prior_settings)
-    for k, v in prior_settings.items():
-        if v == 'default':
-            full_prior_settings[k] = default_intrinsic_dict[k]
-
-    return BBHPriorDict(full_prior_settings)
-
-
-def structured_array_from_dict_of_arrays(d: Dict[str, np.ndarray], fmt: str = 'f8'):
+def structured_array_from_dict_of_arrays(d: Dict[str, np.ndarray], fmt: str = "f8"):
     """
     Given a dictionary of 1-D numpy arrays, create a numpy structured array
     with field names equal to the dict keys and using the specified format.
@@ -86,11 +52,13 @@ def get_params_dict_from_array(params_array, params_inds, f_ref=None):
         Dictionary with the parameters
     """
     if len(params_array.shape) > 1:
-        raise ValueError('This function only transforms a single set of '
-                         'parameters to a dict at a time.')
+        raise ValueError(
+            "This function only transforms a single set of "
+            "parameters to a dict at a time."
+        )
     params = {}
     for k, v in params_inds.items():
         params[k] = params_array[v]
     if f_ref is not None:
-        params['f_ref'] = f_ref
+        params["f_ref"] = f_ref
     return params

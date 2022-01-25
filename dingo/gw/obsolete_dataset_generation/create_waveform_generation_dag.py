@@ -1,5 +1,5 @@
 """
-Setup a condor DAG and jobs for the 5 steps in waveform dataset generation using pycondor
+Setup a condor DAG for waveform dataset generation using pycondor.
 """
 
 
@@ -8,6 +8,9 @@ import os
 import textwrap
 from typing import Dict
 from pycondor import Job, Dagman
+
+os.environ['OMP_NUM_THREADS'] = str(1)
+os.environ['MKL_NUM_THREADS'] = str(1)
 
 
 def parse_args():

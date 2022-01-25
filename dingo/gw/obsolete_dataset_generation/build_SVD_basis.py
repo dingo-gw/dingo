@@ -14,7 +14,7 @@ import os
 import numpy as np
 from tqdm import tqdm
 
-from dingo.gw.waveform_dataset import SVDBasis
+from dingo.gw.SVD import SVDBasis
 from dingo.api import setup_logger, logger
 
 
