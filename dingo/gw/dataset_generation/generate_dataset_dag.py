@@ -1,13 +1,13 @@
-import argparse
 import os
-import textwrap
+
+os.environ["OMP_NUM_THREADS"] = str(1)
+os.environ["MKL_NUM_THREADS"] = str(1)
+
+import argparse
 from typing import Dict
 from pycondor import Job, Dagman
 import yaml
 import copy
-
-os.environ['OMP_NUM_THREADS'] = str(1)
-os.environ['MKL_NUM_THREADS'] = str(1)
 
 # Fixed file names
 svd_fn = "svd.npy"

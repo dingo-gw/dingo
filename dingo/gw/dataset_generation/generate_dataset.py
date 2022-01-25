@@ -1,11 +1,14 @@
-import textwrap
+import os
 
+os.environ["OMP_NUM_THREADS"] = str(1)
+os.environ["MKL_NUM_THREADS"] = str(1)
+
+import textwrap
 import yaml
 import argparse
 from multiprocessing import Pool
 import pandas as pd
 import numpy as np
-import os
 
 from dingo.core.utils.dataset_utils import save_dataset
 from ..prior import build_prior_with_defaults
@@ -13,9 +16,6 @@ from ..domains import build_domain
 from ..waveform_generator import WaveformGenerator, generate_waveforms_parallel
 from torchvision.transforms import Compose
 from ..SVD import SVDBasis, ApplySVD
-
-os.environ['OMP_NUM_THREADS'] = str(1)
-os.environ['MKL_NUM_THREADS'] = str(1)
 
 
 def generate_parameters_and_polarizations(
