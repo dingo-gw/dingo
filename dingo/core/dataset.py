@@ -32,8 +32,28 @@ def recursive_hdf5_load(group):
 
 
 class DingoDataset(Dataset):
-    def __init__(self, file_name=None, dictionary=None, settings=None, save_keys=None):
+    """This is a generic dataset class with save / load methods.
 
+    It subclasses torch.utils.data.Dataset, and should in turn be subclassed,
+    with __getitem__ and __len__ methods defined.
+    """
+    def __init__(self, file_name=None, dictionary=None, settings=None, save_keys=None):
+        """
+        For constructing, provide either file_name, or dictionary and settings, or
+        neither.
+
+        Parameters
+        ----------
+        file_name : str
+            HDF5 file containing a dataset
+        dictionary : dict
+            Dataset contents other than settings
+        settings : dict
+        save_keys : list
+            Variables that should be saved / loaded. This allows for class to store
+            additional variables beyond those that are saved. Typically, this list
+            would be provided by any subclass.
+        """
         # Ensure all potential variables have None values to begin
         for key in save_keys:
             vars(self)[key] = None
