@@ -22,8 +22,15 @@ class WaveformDatasetNew(DingoDataset):
     __getitem__() call, optionally applying a chain of transformations, which are classes
     that implement a __call__() method.
     """
-    def __init__(self, file_name=None, dictionary=None, settings=None, transform=None,
-                 precision=None):
+
+    def __init__(
+        self,
+        file_name=None,
+        dictionary=None,
+        settings=None,
+        transform=None,
+        precision=None,
+    ):
         """
         For constructing, provide either file_name, or dictionary and settings, or
         neither.
@@ -45,33 +52,39 @@ class WaveformDatasetNew(DingoDataset):
         self.transform = transform
         self.decompression_transform = None
         self.precision = precision
-        super().__init__(file_name, dictionary, settings,
-                         save_keys=['parameters', 'polarizations', 'svd_V'])
+        super().__init__(
+            file_name,
+            dictionary,
+            settings,
+            save_keys=["parameters", "polarizations", "svd_V"],
+        )
 
     def load_supplemental(self):
         """Method called immediately after loading a dataset.
 
         Creates domain, updates dtypes, and initializes any decompression transform.
         """
-        self.domain = build_domain(self.settings['domain'])
+        self.domain = build_domain(self.settings["domain"])
 
         # Update dtypes if necessary
         if self.precision is not None:
-            if self.precision == 'single':
+            if self.precision == "single":
                 complex_type = np.complex64
                 real_type = np.float32
-            elif self.precision == 'double':
+            elif self.precision == "double":
                 complex_type = np.complex128
                 real_type = np.float64
             else:
-                raise TypeError('precision can only be changed to "single" or "double".')
+                raise TypeError(
+                    'precision can only be changed to "single" or "double".'
+                )
             self.parameters = self.parameters.astype(real_type, copy=False)
             for k, v in self.polarizations.items():
                 self.polarizations[k] = v.astype(complex_type, copy=False)
             if self.svd_V is not None:
                 self.svd_V = self.svd_V.astype(complex_type, copy=False)
 
-        if self.settings['compression'] is not None:
+        if self.settings["compression"] is not None:
             self.initialize_decompression()
 
     def initialize_decompression(self):
@@ -81,8 +94,8 @@ class WaveformDatasetNew(DingoDataset):
         """
         decompression_transform_list = []
 
-        if 'svd' in self.settings['compression']:
-            assert(self.svd_V is not None)
+        if "svd" in self.settings["compression"]:
+            assert self.svd_V is not None
             svd_basis = SVDBasis()
             svd_basis.from_V(self.svd_V)
             decompression_transform_list.append(UndoSVD(svd_basis))
@@ -100,8 +113,9 @@ class WaveformDatasetNew(DingoDataset):
         the waveform data.
         """
         parameters = self.parameters.iloc[idx].to_dict()
-        polarizations = {pol: waveforms[idx] for pol, waveforms in
-                         self.polarizations.items()}
+        polarizations = {
+            pol: waveforms[idx] for pol, waveforms in self.polarizations.items()
+        }
 
         # Decompression transforms are assumed to apply only to the waveform,
         # and do not involve parameters.
@@ -109,7 +123,7 @@ class WaveformDatasetNew(DingoDataset):
             polarizations = self.decompression_transform(polarizations)
 
         # Main transforms can depend also on parameters.
-        data = {'parameters': parameters, 'waveform': polarizations}
+        data = {"parameters": parameters, "waveform": polarizations}
         if self.transform is not None:
             data = self.transform(data)
         return data
@@ -132,18 +146,21 @@ class WaveformDatasetNew(DingoDataset):
         new_range is not None.
         """
         if self.is_truncated:
-            raise ValueError('Dataset is already truncated')
-        len_domain_original = len(self.domain)
+            raise ValueError("Dataset is already truncated")
+        # len_domain_original = len(self.domain)
 
         # Optionally set a new domain range.
         if new_range is not None:
             self.domain.set_new_range(*new_range)
+            self.settings['domain']['kwargs'] = self.domain.domain_dict.copy()
 
         # Determine where the truncation must be applied. If the dataset is SVD
         # compressed, then truncate the SVD matrices. Otherwise, truncate the dataset
         # itself.
-        if self.settings['compression'] is not None and 'svd' in self.settings[
-            'compression']:
+        if (
+            self.settings["compression"] is not None
+            and "svd" in self.settings["compression"]
+        ):
             self.svd_V = self.domain.truncate_data(self.svd_V, axis=0)
             self.initialize_decompression()
         else:
@@ -178,8 +195,7 @@ class WaveformDataset(Dataset):
     are classes that implement the __call__() method.
     """
 
-    def __init__(self, dataset_file: str, transform=None,
-                 single_precision=True):
+    def __init__(self, dataset_file: str, transform=None, single_precision=True):
         """
         Parameters
         ----------
@@ -193,11 +209,9 @@ class WaveformDataset(Dataset):
         self.single_precision = single_precision
         self.load(dataset_file)
 
-
     def __len__(self):
         """The number of waveform samples."""
         return len(self._parameter_samples)
-
 
     def __getitem__(self, idx) -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
         """
@@ -206,28 +220,25 @@ class WaveformDataset(Dataset):
         applied to the waveform data.
         """
         parameters = self._parameter_samples.iloc[idx].to_dict()
-        waveform_polarizations = {'h_cross': self._hc[idx],
-                                  'h_plus': self._hp[idx]}
-        data = {'parameters': parameters, 'waveform': waveform_polarizations}
+        waveform_polarizations = {"h_cross": self._hc[idx], "h_plus": self._hp[idx]}
+        data = {"parameters": parameters, "waveform": waveform_polarizations}
         if self._Vh is not None:
-            data['waveform']['h_plus'] = data['waveform']['h_plus'] @ self._Vh
-            data['waveform']['h_cross'] = data['waveform']['h_cross'] @ self._Vh
+            data["waveform"]["h_plus"] = data["waveform"]["h_plus"] @ self._Vh
+            data["waveform"]["h_cross"] = data["waveform"]["h_cross"] @ self._Vh
         if self.transform:
             data = self.transform(data)
         return data
-
 
     def get_info(self):
         """
         Print information on the stored pandas DataFrames.
         This is before any transformations are done.
         """
-        self._parameter_samples.info(memory_usage='deep')
-        self._hc.info(memory_usage='deep')
-        self._hp.info(memory_usage='deep')
+        self._parameter_samples.info(memory_usage="deep")
+        self._hc.info(memory_usage="deep")
+        self._hp.info(memory_usage="deep")
 
-
-    def load(self, filename: str = 'waveform_dataset.h5'):
+    def load(self, filename: str = "waveform_dataset.h5"):
         """
         Load waveform data set from HDF5 file.
 
@@ -236,31 +247,31 @@ class WaveformDataset(Dataset):
         filename : str
             The name of the HDF5 file containing the data set.
         """
-        fp = h5py.File(filename, 'r')
+        fp = h5py.File(filename, "r")
 
-        parameter_array = fp['parameters'][:]
+        parameter_array = fp["parameters"][:]
         self._parameter_samples = pd.DataFrame(parameter_array)
 
-        if 'waveform_polarizations' in fp:
-            grp = fp['waveform_polarizations']  # Backward compatibility; remove later
+        if "waveform_polarizations" in fp:
+            grp = fp["waveform_polarizations"]  # Backward compatibility; remove later
         else:
-            grp = fp['polarizations']
-        assert list(grp.keys()) == ['h_cross', 'h_plus']
-        self._hc = grp['h_cross'][:]
-        self._hp = grp['h_plus'][:]
+            grp = fp["polarizations"]
+        assert list(grp.keys()) == ["h_cross", "h_plus"]
+        self._hc = grp["h_cross"][:]
+        self._hp = grp["h_plus"][:]
 
-        if 'rb_matrix_V' in fp.keys():  # Backward compatibility; remove later
-            V = fp['rb_matrix_V'][:]
+        if "rb_matrix_V" in fp.keys():  # Backward compatibility; remove later
+            V = fp["rb_matrix_V"][:]
             self._Vh = V.T.conj()
-        elif 'svd_V' in fp.keys():
-            V = fp['svd_V'][:]
+        elif "svd_V" in fp.keys():
+            V = fp["svd_V"][:]
             self._Vh = V.T.conj()
 
-        self.data_settings = ast.literal_eval(fp.attrs['settings'])
-        if 'domain_settings' in self.data_settings:  # Backward compatibility
-            domain_settings = self.data_settings['domain_settings']
+        self.data_settings = ast.literal_eval(fp.attrs["settings"])
+        if "domain_settings" in self.data_settings:  # Backward compatibility
+            domain_settings = self.data_settings["domain_settings"]
         else:
-            domain_settings = self.data_settings['domain']
+            domain_settings = self.data_settings["domain"]
         self.domain = build_domain(domain_settings)
         self.is_truncated = False
 
@@ -273,9 +284,7 @@ class WaveformDataset(Dataset):
         self._hp = np.array(self._hp, dtype=dtype)
         self._Vh = np.array(self._Vh, dtype=dtype)
 
-
-
-    def truncate_dataset_domain(self, new_range = None):
+    def truncate_dataset_domain(self, new_range=None):
         """
         The waveform dataset provides waveforms polarizations in a particular
         range. In uniform Frequency domain for instance, this range is
@@ -294,7 +303,7 @@ class WaveformDataset(Dataset):
         which is called if new_range is not None.
         """
         if self.is_truncated:
-            raise ValueError('Dataset is already truncated')
+            raise ValueError("Dataset is already truncated")
         len_domain_original = len(self.domain)
 
         # optionally set new data range the dataset
@@ -303,17 +312,18 @@ class WaveformDataset(Dataset):
 
         # truncate the dataset
         if self._Vh is not None:
-            assert self._Vh.shape[-1] == len_domain_original, \
-                f'Compression matrix Vh with shape {self._Vh.shape} is not ' \
-                f'compatible with the domain of length {len_domain_original}.'
+            assert self._Vh.shape[-1] == len_domain_original, (
+                f"Compression matrix Vh with shape {self._Vh.shape} is not "
+                f"compatible with the domain of length {len_domain_original}."
+            )
             self._Vh = self.domain.truncate_data(
-                self._Vh, allow_for_flexible_upper_bound=(new_range is not
-                                                          None))
+                self._Vh, allow_for_flexible_upper_bound=(new_range is not None)
+            )
         else:
-            raise NotImplementedError('Truncation of the dataset is currently '
-                                      'only implemented for compressed '
-                                      'polarization data.')
+            raise NotImplementedError(
+                "Truncation of the dataset is currently "
+                "only implemented for compressed "
+                "polarization data."
+            )
 
         self.is_truncated = True
-
-
