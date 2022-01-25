@@ -15,7 +15,7 @@ def recursive_hdf5_save(group, d):
         elif isinstance(v, pd.DataFrame):
             group.create_dataset(k, data=v.to_records(index=False))
         else:
-            raise TypeError('Cannot save datatype {} as hdf5 dataset.'.format(type(v)))
+            raise TypeError("Cannot save datatype {} as hdf5 dataset.".format(type(v)))
 
 
 def recursive_hdf5_load(group):
@@ -32,7 +32,6 @@ def recursive_hdf5_load(group):
 
 
 class DingoDataset(Dataset):
-
     def __init__(self, file_name=None, dictionary=None, settings=None, save_keys=None):
 
         # Ensure all potential variables have None values to begin
@@ -48,20 +47,24 @@ class DingoDataset(Dataset):
             self.from_dictionary(dictionary, settings)
 
     def to_file(self, file_name):
-        print('Saving dataset to ' + file_name)
-        save_dict = {k: v for k, v in vars(self).items() if k in self._save_keys}
+        print("Saving dataset to " + file_name)
+        save_dict = {
+            k: v
+            for k, v in vars(self).items()
+            if k in self._save_keys and v is not None
+        }
         f = h5py.File(file_name, "w")
         recursive_hdf5_save(f, save_dict)
         f.attrs["settings"] = str(self.settings)
         f.close()
 
     def from_file(self, file_name):
-        print('Loading dataset from ' + file_name + ' :')
+        print("Loading dataset from " + file_name + " :")
         f = h5py.File(file_name, "r")
         loaded_dict = recursive_hdf5_load(f)
         for k, v in loaded_dict.items():
             if k in self._save_keys:  # Load only the keys that the class expects
-                print('  ' + k)
+                print("  " + k)
                 vars(self)[k] = v
         try:
             self.settings = ast.literal_eval(f.attrs["settings"])
@@ -80,6 +83,3 @@ class DingoDataset(Dataset):
 
     def load_supplemental(self):
         pass
-
-
-
