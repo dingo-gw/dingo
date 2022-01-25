@@ -1,5 +1,6 @@
 import ast
-import argparse, textwrap
+import argparse
+import textwrap
 import copy
 from typing import Dict
 import pandas as pd
@@ -7,11 +8,12 @@ import numpy as np
 import h5py
 import yaml
 
-from dingo.core.utils.dataset_utils import recursive_hdf5_load, save_dataset
+from dingo.core.utils.dataset_utils import save_dataset
+from dingo.core.dataset import recursive_hdf5_load
 from dingo.gw.SVD import SVDBasis
 
 
-def merge_datasets(dataset_list):
+def merge_datasets(dataset_list: list):
     """
     Merge a collection of datasets into one.
 
