@@ -2,7 +2,7 @@ import torchvision
 from torch.utils.data import DataLoader
 from bilby.gw.detector import InterferometerList
 
-from dingo.gw.waveform_dataset import WaveformDataset
+from dingo.gw.waveform_dataset import WaveformDatasetNew
 from dingo.gw.domains import build_domain
 from dingo.gw.transforms import SampleExtrinsicParameters,\
     GetDetectorTimes, ProjectOntoDetectors, SampleNoiseASD, \
@@ -19,7 +19,8 @@ from dingo.core.utils import *
 
 def build_dataset(train_settings):
     # build datasets
-    wfd = WaveformDataset(train_settings['waveform_dataset_path'])
+    wfd = WaveformDatasetNew(file_name=train_settings['waveform_dataset_path'],
+                             precision='single')
     asd_dataset = ASDDataset(
         train_settings['asd_dataset_path'],
         ifos=train_settings['transform_settings']['detectors'])

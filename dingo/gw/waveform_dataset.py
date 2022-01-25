@@ -1,4 +1,5 @@
 import ast
+import copy
 from typing import Dict, Union
 
 import h5py
@@ -152,7 +153,7 @@ class WaveformDatasetNew(DingoDataset):
         # Optionally set a new domain range.
         if new_range is not None:
             self.domain.set_new_range(*new_range)
-            self.settings['domain']['kwargs'] = self.domain.domain_dict.copy()
+            self.settings['domain'] = copy.deepcopy(self.domain.domain_dict)
 
         # Determine where the truncation must be applied. If the dataset is SVD
         # compressed, then truncate the SVD matrices. Otherwise, truncate the dataset
