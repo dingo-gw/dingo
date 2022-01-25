@@ -5,27 +5,82 @@ import h5py
 import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset
+from torchvision.transforms import Compose
 
 from dingo.core.dataset import DingoDataset
+from dingo.gw.SVD import SVDBasis, UndoSVD
 from dingo.gw.domains import build_domain
 
 
 class WaveformDatasetNew(DingoDataset):
 
     def __init__(self, file_name=None, dictionary=None, settings=None, transform=None,
-                 single_precision=True):
+                 precision=None):
         self.domain = None
         self.is_truncated = False
-        self.single_precision = single_precision
         self.transform = transform
+        self.decompression_transform = None
+        self.precision = precision
         super().__init__(file_name, dictionary, settings,
                          save_keys=['parameters', 'polarizations', 'svd_V'])
 
-    def init_supplemental(self):
+    def load_supplemental(self):
         self.domain = build_domain(self.settings['domain'])
 
-    def __getitem__(self, item):
-        pass
+        # Update dtypes if necessary
+        if self.precision is not None:
+            if self.precision == 'single':
+                complex_type = np.complex64
+                real_type = np.float32
+            elif self.precision == 'double':
+                complex_type = np.complex128
+                real_type = np.float64
+            else:
+                raise TypeError('precision can only be changed to "single" or "double".')
+            self.parameters = self.parameters.astype(real_type, copy=False)
+            for k, v in self.polarizations.items():
+                self.polarizations[k] = v.astype(complex_type, copy=False)
+            if self.svd_V is not None:
+                self.svd_V = self.svd_V.astype(complex_type, copy=False)
+
+        self.initialize_decompression()
+
+    def initialize_decompression(self):
+        if self.settings['compression'] is not None:
+            decompression_transform_list = []
+
+            if 'svd' in self.settings['compression']:
+                assert(self.svd_V is not None)
+                svd_basis = SVDBasis()
+                svd_basis.from_V(self.svd_V)
+                decompression_transform_list.append(UndoSVD(svd_basis))
+
+            self.decompression_transform = Compose(decompression_transform_list)
+
+    def __len__(self):
+        """The number of waveform samples."""
+        return len(self.parameters)
+
+    def __getitem__(self, idx) -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
+        """
+        Return a nested dictionary containing parameters and waveform polarizations
+        for sample with index `idx`. If defined a chain of transformations are being
+        applied to the waveform data.
+        """
+        parameters = self.parameters.iloc[idx].to_dict()
+        polarizations = {pol: waveforms[idx] for pol, waveforms in
+                         self.polarizations.items()}
+
+        # Decompression transforms are assumed to apply only to the waveform,
+        # and do not involve parameters.
+        if self.decompression_transform is not None:
+            polarizations = self.decompression_transform(polarizations)
+
+        # Main transforms can depend also on parameters.
+        data = {'parameters': parameters, 'waveform': polarizations}
+        if self.transform is not None:
+            data = self.transform(data)
+        return data
 
 
 class WaveformDataset(Dataset):

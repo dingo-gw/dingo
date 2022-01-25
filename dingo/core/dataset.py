@@ -34,8 +34,14 @@ def recursive_hdf5_load(group):
 class DingoDataset(Dataset):
 
     def __init__(self, file_name=None, dictionary=None, settings=None, save_keys=None):
+
+        # Ensure all potential variables have None values to begin
+        for key in save_keys:
+            vars(self)[key] = None
         self._save_keys = save_keys
         self.settings = None
+
+        # If data provided, load it
         if file_name is not None:
             self.from_file(file_name)
         elif dictionary is not None:
@@ -60,9 +66,9 @@ class DingoDataset(Dataset):
         try:
             self.settings = ast.literal_eval(f.attrs["settings"])
         except KeyError:
-            settings = None
+            self.settings = None  # Is this necessary?
         f.close()
-        self.init_extra()
+        self.load_supplemental()
 
     def from_dictionary(self, dictionary, settings=None):
         for k, v in dictionary.items():
@@ -70,9 +76,9 @@ class DingoDataset(Dataset):
                 vars(self)[k] = v
         if settings is not None:
             self.settings = settings
-        self.init_extra()
+        self.load_supplemental()
 
-    def init_supplemental(self):
+    def load_supplemental(self):
         pass
 
 
