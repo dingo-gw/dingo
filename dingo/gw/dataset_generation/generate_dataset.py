@@ -10,7 +10,7 @@ from multiprocessing import Pool
 import pandas as pd
 import numpy as np
 
-from dingo.core.utils.dataset_utils import save_dataset
+from dingo.gw.waveform_dataset import WaveformDatasetNew
 from ..prior import build_prior_with_defaults
 from ..domains import build_domain
 from ..waveform_generator import WaveformGenerator, generate_waveforms_parallel
@@ -72,7 +72,7 @@ def generate_dataset(settings, num_processes):
         settings["waveform_generator"]["f_ref"],
     )
 
-    dataset = {}
+    dataset_dict = {}
 
     if "compression" in settings:
         compression_transforms = []
@@ -100,7 +100,7 @@ def generate_dataset(settings, num_processes):
                 basis.generate_basis(train_data, svd_settings["size"])
 
             compression_transforms.append(ApplySVD(basis))
-            dataset["svd_V"] = basis.V
+            dataset_dict['svd_V'] = basis.V
 
         waveform_generator.transform = Compose(compression_transforms)
 
@@ -108,9 +108,10 @@ def generate_dataset(settings, num_processes):
     parameters, polarizations = generate_parameters_and_polarizations(
         waveform_generator, prior, settings["num_samples"], num_processes
     )
-    dataset["parameters"] = parameters
-    dataset["polarizations"] = polarizations
+    dataset_dict["parameters"] = parameters
+    dataset_dict["polarizations"] = polarizations
 
+    dataset = WaveformDatasetNew(dictionary=dataset_dict, settings=settings)
     return dataset
 
 
@@ -152,8 +153,7 @@ def main():
         settings = yaml.safe_load(f)
 
     dataset = generate_dataset(settings, args.num_processes)
-
-    save_dataset(dataset, settings, args.out_file)
+    dataset.to_file(args.out_file)
 
 
 if __name__ == "__main__":
