@@ -33,11 +33,15 @@ def recursive_hdf5_load(group):
 
 class DingoDataset(Dataset):
 
-    def __init__(self):
-        self._save_keys = []
+    def __init__(self, file_name=None, dictionary=None, settings=None, save_keys=None):
+        self._save_keys = save_keys
         self.settings = None
+        if file_name is not None:
+            self.from_file(file_name)
+        elif dictionary is not None:
+            self.from_dictionary(dictionary, settings)
 
-    def save(self, file_name):
+    def to_file(self, file_name):
         print('Saving dataset to ' + file_name)
         save_dict = {k: v for k, v in vars(self).items() if k in self._save_keys}
         f = h5py.File(file_name, "w")
@@ -45,7 +49,7 @@ class DingoDataset(Dataset):
         f.attrs["settings"] = str(self.settings)
         f.close()
 
-    def load(self, file_name):
+    def from_file(self, file_name):
         print('Loading dataset from ' + file_name + ' :')
         f = h5py.File(file_name, "r")
         loaded_dict = recursive_hdf5_load(f)
@@ -58,15 +62,18 @@ class DingoDataset(Dataset):
         except KeyError:
             settings = None
         f.close()
+        self.init_extra()
 
+    def from_dictionary(self, dictionary, settings=None):
+        for k, v in dictionary.items():
+            if k in self._save_keys:
+                vars(self)[k] = v
+        if settings is not None:
+            self.settings = settings
+        self.init_extra()
 
-class TestDataset(DingoDataset):
-
-    def __init__(self):
-        super().__init__()
-        self._save_keys = ['parameters', 'polarizations']
-
-    def __getitem__(self, item):
+    def init_supplemental(self):
         pass
+
 
 

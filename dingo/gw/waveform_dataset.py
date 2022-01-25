@@ -6,7 +6,26 @@ import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset
 
+from dingo.core.dataset import DingoDataset
 from dingo.gw.domains import build_domain
+
+
+class WaveformDatasetNew(DingoDataset):
+
+    def __init__(self, file_name=None, dictionary=None, settings=None, transform=None,
+                 single_precision=True):
+        self.domain = None
+        self.is_truncated = False
+        self.single_precision = single_precision
+        self.transform = transform
+        super().__init__(file_name, dictionary, settings,
+                         save_keys=['parameters', 'polarizations', 'svd_V'])
+
+    def init_supplemental(self):
+        self.domain = build_domain(self.settings['domain'])
+
+    def __getitem__(self, item):
+        pass
 
 
 class WaveformDataset(Dataset):
