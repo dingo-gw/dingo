@@ -28,8 +28,8 @@ def merge_datasets(dataset_list: list[WaveformDataset]) -> WaveformDataset:
 
     # This ensures that all of the keys are copied into the new dataset. The
     # "extensive" parts of the dataset (parameters, waveforms) will be overwritten by
-    # the combined datasets, whereas the "intensive" parts (e.g., SVD basis) will take
-    # the values in the *first* dataset in the list.
+    # the combined datasets, whereas the "intensive" parts (e.g., SVD basis, settings)
+    # will take the values in the *first* dataset in the list.
     merged_dict = copy.deepcopy(dataset_list[0].to_dictionary())
 
     merged_dict['parameters'] = pd.concat([d.parameters for d in dataset_list])
@@ -109,7 +109,8 @@ def merge_datasets_cli():
     # settings["num_samples"] = len(merged_dataset["parameters"])
     # save_dataset(merged_dataset, settings, args.out_file)
 
-    print(f"Complete. New dataset consists of {settings['num_samples']} samples.")
+    print(f"Complete. New dataset consists of {merged_dataset.settings['num_samples']} "
+          f"samples.")
 
 
 def build_svd_cli():
