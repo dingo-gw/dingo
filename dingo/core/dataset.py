@@ -37,41 +37,41 @@ class DingoDataset(Dataset):
     It subclasses torch.utils.data.Dataset, and should in turn be subclassed,
     with __getitem__ and __len__ methods defined.
     """
-    def __init__(self, file_name=None, dictionary=None, settings=None, save_keys=None):
+    def __init__(self, file_name=None, dictionary=None, data_keys=None):
         """
-        For constructing, provide either file_name, or dictionary and settings, or
-        neither.
+        For constructing, provide either file_name, or dictionary containing data and
+        settings entries, or neither.
 
         Parameters
         ----------
         file_name : str
             HDF5 file containing a dataset
         dictionary : dict
-            Dataset contents other than settings
-        settings : dict
-        save_keys : list
+            Contains settings and data entries. The data keys should be the same as
+            save_keys
+        data_keys : list
             Variables that should be saved / loaded. This allows for class to store
             additional variables beyond those that are saved. Typically, this list
             would be provided by any subclass.
         """
         # Ensure all potential variables have None values to begin
-        for key in save_keys:
+        for key in data_keys:
             vars(self)[key] = None
-        self._save_keys = save_keys
+        self._data_keys = data_keys
         self.settings = None
 
         # If data provided, load it
         if file_name is not None:
             self.from_file(file_name)
         elif dictionary is not None:
-            self.from_dictionary(dictionary, settings)
+            self.from_dictionary(dictionary)
 
     def to_file(self, file_name):
         print("Saving dataset to " + file_name)
         save_dict = {
             k: v
             for k, v in vars(self).items()
-            if k in self._save_keys and v is not None
+            if k in self._data_keys and v is not None
         }
         f = h5py.File(file_name, "w")
         recursive_hdf5_save(f, save_dict)
@@ -83,7 +83,7 @@ class DingoDataset(Dataset):
         f = h5py.File(file_name, "r")
         loaded_dict = recursive_hdf5_load(f)
         for k, v in loaded_dict.items():
-            if k in self._save_keys:  # Load only the keys that the class expects
+            if k in self._data_keys:  # Load only the keys that the class expects
                 print("  " + k)
                 vars(self)[k] = v
         try:
@@ -93,12 +93,10 @@ class DingoDataset(Dataset):
         f.close()
         self.load_supplemental()
 
-    def from_dictionary(self, dictionary, settings=None):
+    def from_dictionary(self, dictionary):
         for k, v in dictionary.items():
-            if k in self._save_keys:
+            if k in self._data_keys or k == 'settings':
                 vars(self)[k] = v
-        if settings is not None:
-            self.settings = settings
         self.load_supplemental()
 
     def load_supplemental(self):

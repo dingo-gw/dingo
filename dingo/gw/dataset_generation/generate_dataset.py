@@ -72,7 +72,7 @@ def generate_dataset(settings, num_processes):
         settings["waveform_generator"]["f_ref"],
     )
 
-    dataset_dict = {}
+    dataset_dict = {'settings': settings}
 
     if "compression" in settings:
         compression_transforms = []
@@ -111,7 +111,7 @@ def generate_dataset(settings, num_processes):
     dataset_dict["parameters"] = parameters
     dataset_dict["polarizations"] = polarizations
 
-    dataset = WaveformDatasetNew(dictionary=dataset_dict, settings=settings)
+    dataset = WaveformDatasetNew(dictionary=dataset_dict)
     return dataset
 
 

@@ -28,21 +28,20 @@ class WaveformDatasetNew(DingoDataset):
         self,
         file_name=None,
         dictionary=None,
-        settings=None,
         transform=None,
         precision=None,
     ):
         """
-        For constructing, provide either file_name, or dictionary and settings, or
-        neither.
+        For constructing, provide either file_name, or dictionary containing data and
+        settings entries, or neither.
 
         Parameters
         ----------
         file_name : str
             HDF5 file containing a dataset
         dictionary : dict
-            Dataset contents other than settings
-        settings : dict
+            Contains settings and data entries. The dictionary keys should be
+            'settings', 'parameters', and 'polarizations'.
         transform : Transform
             Transform to be applied to dataset samples when accessed through __getitem__
         precision : str ('single', 'double')
@@ -54,10 +53,9 @@ class WaveformDatasetNew(DingoDataset):
         self.decompression_transform = None
         self.precision = precision
         super().__init__(
-            file_name,
-            dictionary,
-            settings,
-            save_keys=["parameters", "polarizations", "svd_V"],
+            file_name=file_name,
+            dictionary=dictionary,
+            data_keys=["parameters", "polarizations", "svd_V"],
         )
 
     def load_supplemental(self):
