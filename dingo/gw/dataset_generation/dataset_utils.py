@@ -11,7 +11,7 @@ import yaml
 from dingo.core.utils.dataset_utils import save_dataset
 from dingo.core.dataset import recursive_hdf5_load
 from dingo.gw.SVD import SVDBasis
-from dingo.gw.waveform_dataset import WaveformDatasetNew
+from dingo.gw.waveform_dataset import WaveformDataset
 
 
 def merge_datasets(dataset_list: list):
@@ -115,7 +115,7 @@ def build_svd_cli():
     args = parser.parse_args()
 
     # We build the SVD based on all of the polarizations.
-    dataset = WaveformDatasetNew(file_name=args.dataset_file)
+    dataset = WaveformDataset(file_name=args.dataset_file)
     train_data = np.vstack(list(dataset.polarizations.values()))
 
     # print("Loading saved waveforms.")

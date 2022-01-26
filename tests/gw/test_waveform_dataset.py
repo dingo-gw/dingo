@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from dingo.gw.domains import Domain
-from dingo.gw.waveform_dataset import WaveformDatasetNew
+from dingo.gw.waveform_dataset import WaveformDataset
 from dingo.gw.dataset_generation.generate_dataset_dag import create_args_string
 
 SETTINGS_YAML_SMALL = """\
@@ -103,7 +103,7 @@ def test_load_waveform_dataset(generate_waveform_dataset_small):
     wfd_path = generate_waveform_dataset_small
 
     path = f'{wfd_path}/waveform_dataset.hdf5'
-    wd = WaveformDatasetNew(file_name=path, precision='single')
+    wd = WaveformDataset(file_name=path, precision='single')
 
     assert len(wd) > 0
     el = wd[0]
@@ -146,7 +146,7 @@ def test_load_waveform_dataset(generate_waveform_dataset_small):
         wd.truncate_dataset_domain()
 
     # check that truncation works as intended when setting new range
-    wd2 = WaveformDatasetNew(path)
+    wd2 = WaveformDataset(path)
     assert len(wd2.domain) == len(wd2.domain())
     f_min_new = 20
     f_max_new = 100

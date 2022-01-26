@@ -10,7 +10,7 @@ from multiprocessing import Pool
 import pandas as pd
 import numpy as np
 
-from dingo.gw.waveform_dataset import WaveformDatasetNew
+from dingo.gw.waveform_dataset import WaveformDataset
 from ..prior import build_prior_with_defaults
 from ..domains import build_domain
 from ..waveform_generator import WaveformGenerator, generate_waveforms_parallel
@@ -111,7 +111,7 @@ def generate_dataset(settings, num_processes):
     dataset_dict["parameters"] = parameters
     dataset_dict["polarizations"] = polarizations
 
-    dataset = WaveformDatasetNew(dictionary=dataset_dict)
+    dataset = WaveformDataset(dictionary=dataset_dict)
     return dataset
 
 
