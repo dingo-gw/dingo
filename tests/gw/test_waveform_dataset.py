@@ -1,13 +1,12 @@
 import os
-import stat
 import uuid
 
 import numpy as np
 import pytest
 
 from dingo.gw.domains import Domain
-from dingo.gw.waveform_dataset import WaveformDataset
-from dingo.gw.dataset_generation.generate_dataset_dag import create_args_string
+from dingo.gw.dataset.waveform_dataset import WaveformDataset
+from dingo.gw.dataset.generate_dataset_dag import create_args_string
 
 SETTINGS_YAML_SMALL = """\
 # settings for domain of waveforms

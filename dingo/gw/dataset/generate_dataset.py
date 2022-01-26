@@ -10,7 +10,7 @@ from multiprocessing import Pool
 import pandas as pd
 import numpy as np
 
-from dingo.gw.waveform_dataset import WaveformDataset
+from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from ..prior import build_prior_with_defaults
 from ..domains import build_domain
 from ..waveform_generator import WaveformGenerator, generate_waveforms_parallel

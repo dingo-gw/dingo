@@ -423,7 +423,7 @@ if __name__ == "__main__":
     using it with a WaveformDataset and WaveformGenerator.
     """
     from dingo.gw.waveform_generator import WaveformGenerator
-    from dingo.gw.waveform_dataset import WaveformDataset
+    from dingo.gw.dataset.waveform_dataset import WaveformDataset
     from dingo.gw.parameters import generate_default_prior_dictionary
 
     domain_kwargs = {'f_min': 20.0, 'f_max': 4096.0, 'delta_f': 1.0 / 4.0, 'window_factor': 1.0}
