@@ -34,7 +34,12 @@ def recursive_hdf5_load(group):
 class DingoDataset:
     """This is a generic dataset class with save / load methods.
 
-    It will frequently be inherited from along with torch.utils.data.Dataset.
+    A common use case is to inherit multiply from DingoDataset and
+    torch.utils.data.Dataset, in which case the subclass picks up these I/O methods,
+    and DingoDataset is acting as a Mixin class.
+
+    Alternatively, if the torch Dataset is not needed, then DingoDataset can be
+    subclassed directly.
     """
     def __init__(self, file_name=None, dictionary=None, data_keys=None):
         """
