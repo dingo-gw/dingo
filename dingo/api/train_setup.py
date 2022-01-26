@@ -19,7 +19,8 @@ from dingo.core.utils import *
 
 def build_dataset(train_settings):
     # build datasets
-    wfd = WaveformDataset(train_settings['waveform_dataset_path'])
+    wfd = WaveformDataset(file_name=train_settings['waveform_dataset_path'],
+                          precision='single')
     asd_dataset = ASDDataset(
         train_settings['asd_dataset_path'],
         ifos=train_settings['transform_settings']['detectors'])

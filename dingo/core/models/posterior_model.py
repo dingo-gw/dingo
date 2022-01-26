@@ -98,11 +98,12 @@ class PosteriorModel:
         if device not in ('cpu', 'cuda'):
             raise ValueError(f'Device should be either cpu or cuda, got {device}.')
         self.device = torch.device(device)
-        if device == 'cuda' and torch.cuda.device_count() > 1:
-            print("Using", torch.cuda.device_count(), "GPUs.")
-            raise NotImplementedError('This needs testing!')
-            # dim = 0 [512, ...] -> [256, ...], [256, ...] on 2 GPUs
-            self.model = torch.nn.DataParallel(self.model)
+        # Commented below so that code runs on first cuda device in the case of multiple.
+        # if device == 'cuda' and torch.cuda.device_count() > 1:
+        #     print("Using", torch.cuda.device_count(), "GPUs.")
+        #     raise NotImplementedError('This needs testing!')
+        #     # dim = 0 [512, ...] -> [256, ...], [256, ...] on 2 GPUs
+        #     self.model = torch.nn.DataParallel(self.model)
         print(f'Putting posterior model to device {self.device}.')
         self.model.to(self.device)
 

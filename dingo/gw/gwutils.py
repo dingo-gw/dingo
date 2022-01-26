@@ -67,10 +67,11 @@ def get_standardization_dict(extrinsic_prior_dict, wfd, selected_parameters):
     ext_prior = BBHExtrinsicPriorDict(extrinsic_prior_dict)
     mean_extrinsic, std_extrinsic = ext_prior.mean_std(ext_prior.keys())
     # get mean and std for intrinsic prior
-    mean_intrinsic = {k: np.mean(wfd._parameter_samples[k]) for k in
-                      wfd._parameter_samples.keys()}
-    std_intrinsic = {k: np.std(wfd._parameter_samples[k]) for k in
-                     wfd._parameter_samples.keys()}
+    mean_intrinsic, std_intrinsic = wfd.parameter_mean_std()
+    # mean_intrinsic = {k: np.mean(wfd._parameter_samples[k]) for k in
+    #                   wfd._parameter_samples.keys()}
+    # std_intrinsic = {k: np.std(wfd._parameter_samples[k]) for k in
+    #                  wfd._parameter_samples.keys()}
     # check that overlap between intrinsic and extrinsic parameters is only
     # due to fiducial values (-> std 0)
     for k in std_intrinsic.keys() & std_extrinsic.keys():

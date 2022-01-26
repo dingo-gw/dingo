@@ -114,7 +114,7 @@ class UniformFrequencyDomain(Domain):
         # instead of using the old (incorrect) ones.
         self.clear_cache_for_all_instances()
 
-    def truncate_data(self, data, allow_for_flexible_upper_bound = False):
+    def truncate_data(self, data, axis=-1, allow_for_flexible_upper_bound=False):
         """Truncate data from to [self._f_min, self._f_max]. By convention,
         the last axis is the frequency axis.
 
@@ -123,13 +123,20 @@ class UniformFrequencyDomain(Domain):
         [0, f_max], where f_max > self._f_max. To truncate such data,
         set allow_for_flexible_upper_bound = True.
         """
-        if allow_for_flexible_upper_bound:
-            return data[...,self.f_min_idx:self.f_max_idx+1]
-        else:
-            if data.shape[-1] != len(self):
-                raise ValueError(f'Expected {len(self)} bins in frequency axis -1, '
-                                 f'but got {data.shape[-1]}.')
-            return data[...,self.f_min_idx:]
+        sl = [slice(None)] * data.ndim
+        sl[axis] = slice(self.f_min_idx, self.f_max_idx + 1)
+        return data[tuple(sl)]
+
+        # Why do we need separate cases here? I believe I unified them above.
+        # I also removed a test that tests for this special case.
+
+        # if allow_for_flexible_upper_bound:
+        #     return data[...,self.f_min_idx:self.f_max_idx+1]
+        # else:
+        #     if data.shape[-1] != len(self):
+        #         raise ValueError(f'Expected {len(self)} bins in frequency axis -1, '
+        #                          f'but got {data.shape[-1]}.')
+        #     return data[...,self.f_min_idx:]
 
     def time_translate_data(self, data, dt):
         """Time translate complex frequency domain data by dt [in seconds]."""
