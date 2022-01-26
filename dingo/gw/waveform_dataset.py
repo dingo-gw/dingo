@@ -129,6 +129,11 @@ class WaveformDatasetNew(DingoDataset):
             data = self.transform(data)
         return data
 
+    def parameter_mean_std(self):
+        mean = self.parameters.mean().to_dict()
+        std = self.parameters.std().to_dict()
+        return mean, std
+
     def truncate_dataset_domain(self, new_range=None):
         """
         The waveform dataset provides waveform polarizations in a particular range. In
