@@ -128,6 +128,7 @@ class UniformFrequencyDomain(Domain):
         return data[tuple(sl)]
 
         # Why do we need separate cases here? I believe I unified them above.
+        # I also removed a test that tests for this special case.
 
         # if allow_for_flexible_upper_bound:
         #     return data[...,self.f_min_idx:self.f_max_idx+1]

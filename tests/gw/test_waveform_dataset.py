@@ -6,13 +6,12 @@ import numpy as np
 import pytest
 
 from dingo.gw.domains import Domain
-from dingo.gw.waveform_dataset import WaveformDataset
-from dingo.gw.dataset_generation.create_waveform_generation_bash_script import parse_args, generate_workflow
-
+from dingo.gw.waveform_dataset import WaveformDatasetNew
+from dingo.gw.dataset_generation.generate_dataset_dag import create_args_string
 
 SETTINGS_YAML_SMALL = """\
 # settings for domain of waveforms
-domain_settings:
+domain:
   name: UniformFrequencyDomain
   kwargs:
     f_min: 10.0
@@ -20,7 +19,7 @@ domain_settings:
     delta_f: 1.0
 
 # settings for waveform generator
-waveform_generator_settings:
+waveform_generator:
   approximant: IMRPhenomPv2
   f_ref: 20.0
 
@@ -43,15 +42,12 @@ intrinsic_prior:
   luminosity_distance: 100.0 # Mpc
   geocent_time: 0.0 # s
 
-reference_frequency: 20.0  # Hz
+num_samples: 50
 
-waveform_dataset_generation_settings:
-  # Number of waveforms to generate for building the SVD basis
-  num_wfs_basis: 10
-  # Number of waveforms to generate for the waveform dataset
-  num_wfs_dataset: 50
-  # Truncate the SVD basis at this size. No truncation if zero.
-  rb_max: 5
+compression:
+  svd:
+    num_training_samples: 10
+    size: 5
 """
 
 
@@ -66,32 +62,39 @@ def generate_waveform_dataset_small(venv_dir='venv'):
         virtual environment relative to the 'dingo-devel' root.
     """
     # Figure out the path to the 'dingo-devel' root directory
-    s = os.getcwd()
-    root = s.split('dingo-devel')[0] + 'dingo-devel'
-    venv_path = os.path.join(root, venv_dir)
+    # s = os.getcwd()
+    # root = s.split('dingo-devel')[0]  # + 'dingo-devel'
+    # venv_path = os.path.join(root, venv_dir)
+    # generate_waveform_path = os.path.join(venv_path, 'bin/dingo_generate_waveforms')
 
     # Create temp directory and settings file
-    path = os.path.join('/tmp', str(uuid.uuid4()))
-    os.mkdir(path)
+    path = os.path.join('./tmp_test', str(uuid.uuid4()))
+    os.makedirs(path, exist_ok=True)
     with open(os.path.join(path, 'settings.yaml'), 'w') as fp:
         fp.writelines(SETTINGS_YAML_SMALL)
 
-    # Mock up command line arguments for script generator
-    args_in = ['--waveforms_directory', path,
-               '--env_path', venv_path,
-               '--num_threads', '4']
-    args = parse_args(args_in)
-    out_script = './waveform_generation_script.sh'
-    if os.path.exists(out_script):
-        os.remove(out_script)
-    generate_workflow(args)
-
-    # Now execute the generated workflow
-    os.chmod(out_script, stat.S_IREAD | stat.S_IWRITE | stat.S_IXUSR)
-    res = os.system(f'{out_script} > ./waveform_generation_script.log 2>&1')
+    # Mock up command line arguments for script
+    args_in = {'settings_file': os.path.join(path, 'settings.yaml'),
+               'out_file': os.path.join(path, 'waveform_dataset.hdf5'),
+               'num_processes': '4'}
+    args_string = create_args_string(args_in)
+    res = os.system('dingo_generate_dataset ' + args_string)
     if not os.WIFEXITED(res):
-        raise RuntimeError(f'waveform_generation_script.sh returned a '
+        raise RuntimeError(f'dingo_generate_waveforms returned a '
                            f'nonzero exit code: {res}')
+
+    # args = parse_args(args_in)
+    # out_script = './waveform_generation_script.sh'
+    # if os.path.exists(out_script):
+    #     os.remove(out_script)
+    # generate_workflow(args)
+    #
+    # # Now execute the generated workflow
+    # os.chmod(out_script, stat.S_IREAD | stat.S_IWRITE | stat.S_IXUSR)
+    # res = os.system(f'{out_script} > ./waveform_generation_script.log 2>&1')
+    # if not os.WIFEXITED(res):
+    #     raise RuntimeError(f'waveform_generation_script.sh returned a '
+    #                        f'nonzero exit code: {res}')
 
     return path
 
@@ -100,7 +103,7 @@ def test_load_waveform_dataset(generate_waveform_dataset_small):
     wfd_path = generate_waveform_dataset_small
 
     path = f'{wfd_path}/waveform_dataset.hdf5'
-    wd = WaveformDataset(path)
+    wd = WaveformDatasetNew(file_name=path, precision='single')
 
     assert len(wd) > 0
     el = wd[0]
@@ -120,7 +123,7 @@ def test_load_waveform_dataset(generate_waveform_dataset_small):
     data_settings_keys = {'domain', 'waveform_generator',
                           'intrinsic_prior', 'num_samples',
                           'compression'}
-    assert set(wd.data_settings.keys()) == data_settings_keys
+    assert set(wd.settings.keys()) == data_settings_keys
 
 
     """Check truncation of wd. Ideally, this should be an individual test, 
@@ -143,7 +146,7 @@ def test_load_waveform_dataset(generate_waveform_dataset_small):
         wd.truncate_dataset_domain()
 
     # check that truncation works as intended when setting new range
-    wd2 = WaveformDataset(path)
+    wd2 = WaveformDatasetNew(path)
     assert len(wd2.domain) == len(wd2.domain())
     f_min_new = 20
     f_max_new = 100
