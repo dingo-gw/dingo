@@ -14,19 +14,19 @@ from dingo.gw.SVD import SVDBasis
 from dingo.gw.waveform_dataset import WaveformDataset
 
 
-def merge_datasets(dataset_list: list):
+def merge_datasets(dataset_list: list[WaveformDataset]) -> WaveformDataset:
     """
     Merge a collection of datasets into one.
 
     Parameters
     ----------
-    dataset_list : list
-        A list of datasets. Each item should be a dictionary containing parameters and
-        polarizations.
+    dataset_list : list[WaveformDataset]
+        A list of WaveformDatasets. Each item should be a dictionary containing
+        parameters and polarizations.
 
     Returns
     -------
-    A new dataset, which is a dictionary containing parameters and polarizations.
+    WaveformDataset containing the merged data.
     """
 
     print(f"Merging {len(dataset_list)} datasets into one.")
@@ -35,14 +35,27 @@ def merge_datasets(dataset_list: list):
     # "extensive" parts of the dataset (parameters, waveforms) will be overwritten by
     # the combined datasets, whereas the "intensive" parts (e.g., SVD basis) will take
     # the values in the *first* dataset in the list.
-    merged = copy.deepcopy(dataset_list[0])
+    merged_dict = copy.deepcopy(dataset_list[0].to_dictionary())
 
-    merged["parameters"] = pd.concat([d["parameters"] for d in dataset_list])
-    merged["polarizations"] = {}
-    for pol in dataset_list[0]["polarizations"]:
-        merged["polarizations"][pol] = np.vstack(
-            [d["polarizations"][pol] for d in dataset_list]
-        )
+    merged_dict['parameters'] = pd.concat([d.parameters for d in dataset_list])
+    merged_dict['polarizations'] = {}
+    for pol in dataset_list[0].polarizations:
+        merged_dict['polarizations'][pol] = np.vstack([d.polarizations[pol] for d in
+                                                       dataset_list])
+
+    # merged = copy.deepcopy(dataset_list[0])
+    #
+    # merged["parameters"] = pd.concat([d["parameters"] for d in dataset_list])
+    # merged["polarizations"] = {}
+    # for pol in dataset_list[0]["polarizations"]:
+    #     merged["polarizations"][pol] = np.vstack(
+    #         [d["polarizations"][pol] for d in dataset_list]
+    #     )
+
+    # Update the settings based on the total number of samples.
+    merged_dict['settings']['num_samples'] = len(merged_dict['parameters'])
+
+    merged = WaveformDataset(merged_dict)
 
     return merged
 
@@ -75,23 +88,31 @@ def merge_datasets_cli():
     dataset_list = []
     for i in range(args.num_parts):
         file_name = args.prefix + str(i) + ".hdf5"
-        with h5py.File(file_name, "r") as f:
-            dataset_list.append(recursive_hdf5_load(f))
+        dataset_list.append(WaveformDataset(file_name=file_name))
+        # with h5py.File(file_name, "r") as f:
+        #     dataset_list.append(recursive_hdf5_load(f))
     merged_dataset = merge_datasets(dataset_list)
 
+    # Optionally, update the settings file based on that provided at command line.
     if args.settings_file is not None:
         with open(args.settings_file, "r") as f:
             settings = yaml.safe_load(f)
-    else:
-        # If not included as an argument, just take the settings from the first dataset
-        # in the merge list.
-        file_name = args.prefix + "0.hdf5"
-        with h5py.File(file_name, "r") as f:
-            settings = ast.literal_eval(f.attrs["settings"])
+        # Make sure num_samples is correct
+        settings['num_samples'] = len(merged_dataset.parameters)
+        merged_dataset.settings = settings
+
+    merged_dataset.to_file(args.out_file)
+
+    # else:
+    #     # If not included as an argument, just take the settings from the first dataset
+    #     # in the merge list.
+    #     file_name = args.prefix + "0.hdf5"
+    #     with h5py.File(file_name, "r") as f:
+    #         settings = ast.literal_eval(f.attrs["settings"])
 
     # Update settings/num_samples to be consistent with the dataset.
-    settings["num_samples"] = len(merged_dataset["parameters"])
-    save_dataset(merged_dataset, settings, args.out_file)
+    # settings["num_samples"] = len(merged_dataset["parameters"])
+    # save_dataset(merged_dataset, settings, args.out_file)
 
     print(f"Complete. New dataset consists of {settings['num_samples']} samples.")
 
