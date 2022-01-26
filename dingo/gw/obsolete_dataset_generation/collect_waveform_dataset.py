@@ -15,7 +15,7 @@ import numpy as np
 from tqdm import tqdm
 
 from dingo.api import setup_logger, logger
-from dingo.gw.dataset_generation.build_SVD_basis import find_chunk_number
+from dingo.gw.dataset.build_SVD_basis import find_chunk_number
 
 
 def consolidate_dataset(num_chunks: int, basis_file: str,

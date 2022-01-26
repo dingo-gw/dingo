@@ -1,8 +1,10 @@
 import ast
-
 import h5py
 
 from dingo.core.dataset import recursive_hdf5_save, recursive_hdf5_load
+
+# This should eventually be removed. Most usages have been taken into the DingoDataset
+# class.
 
 
 def save_dataset(dataset, settings, file_name):

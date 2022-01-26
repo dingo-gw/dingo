@@ -2,7 +2,7 @@ import yaml
 
 from bilby.gw.detector import InterferometerList
 
-from dingo.gw.waveform_dataset import WaveformDataset
+from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.gw.domains import build_domain
 from dingo.gw.transforms import SampleExtrinsicParameters,\
     GetDetectorTimes, ProjectOntoDetectors, SampleNoiseASD, \
