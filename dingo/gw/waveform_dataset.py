@@ -5,7 +5,7 @@ from typing import Dict, Union
 import h5py
 import numpy as np
 import pandas as pd
-from torch.utils.data import Dataset
+import torch.utils.data
 from torchvision.transforms import Compose
 
 from dingo.core.dataset import DingoDataset
@@ -13,7 +13,7 @@ from dingo.gw.SVD import SVDBasis, UndoSVD
 from dingo.gw.domains import build_domain
 
 
-class WaveformDataset(DingoDataset):
+class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
     """This class stores a dataset of waveforms (polarizations) and corresponding
     parameters.
 
@@ -57,6 +57,13 @@ class WaveformDataset(DingoDataset):
             dictionary=dictionary,
             data_keys=["parameters", "polarizations", "svd_V"],
         )
+
+        if (
+            self.parameters is not None
+            and self.polarizations is not None
+            and self.settings is not None
+        ):
+            self.load_supplemental()
 
     def load_supplemental(self):
         """Method called immediately after loading a dataset.

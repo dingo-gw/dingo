@@ -2,7 +2,7 @@ import ast
 import h5py
 import numpy as np
 import pandas as pd
-from torch.utils.data import Dataset
+from abc import ABC
 
 
 def recursive_hdf5_save(group, d):
@@ -31,11 +31,10 @@ def recursive_hdf5_load(group):
     return d
 
 
-class DingoDataset(Dataset):
+class DingoDataset:
     """This is a generic dataset class with save / load methods.
 
-    It subclasses torch.utils.data.Dataset, and should in turn be subclassed,
-    with __getitem__ and __len__ methods defined.
+    It will frequently be inherited from along with torch.utils.data.Dataset.
     """
     def __init__(self, file_name=None, dictionary=None, data_keys=None):
         """
@@ -91,13 +90,8 @@ class DingoDataset(Dataset):
         except KeyError:
             self.settings = None  # Is this necessary?
         f.close()
-        self.load_supplemental()
 
     def from_dictionary(self, dictionary):
         for k, v in dictionary.items():
             if k in self._data_keys or k == 'settings':
                 vars(self)[k] = v
-        self.load_supplemental()
-
-    def load_supplemental(self):
-        pass
