@@ -1,15 +1,10 @@
-import ast
 import argparse
 import textwrap
 import copy
-from typing import Dict
 import pandas as pd
 import numpy as np
-import h5py
 import yaml
 
-from dingo.core.utils.dataset_utils import save_dataset
-from dingo.core.dataset import recursive_hdf5_load
 from dingo.gw.SVD import SVDBasis
 from dingo.gw.waveform_dataset import WaveformDataset
 
@@ -55,7 +50,7 @@ def merge_datasets(dataset_list: list[WaveformDataset]) -> WaveformDataset:
     # Update the settings based on the total number of samples.
     merged_dict['settings']['num_samples'] = len(merged_dict['parameters'])
 
-    merged = WaveformDataset(merged_dict)
+    merged = WaveformDataset(dictionary=merged_dict)
 
     return merged
 
