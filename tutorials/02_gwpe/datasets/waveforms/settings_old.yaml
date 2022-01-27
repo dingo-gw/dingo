@@ -1,6 +1,6 @@
 # settings for domain of waveforms
 domain_settings:
-  name: UniformFrequencyDomain
+  name: FrequencyDomain
   kwargs:
     f_min: 10.0
     f_max: 1024.0

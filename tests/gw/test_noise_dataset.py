@@ -9,8 +9,7 @@ from dingo.gw.noise_dataset import ASDDataset
 def noise_dataset():
     dataset_path = './asds_toydataset.hdf5'
 
-    domain_dict = {'name': 'UniformFrequencyDomain',
-                   'kwargs': {'f_min': 0.0, 'f_max': 100.0, 'delta_f': 1.0}}
+    domain_dict = {'type': 'FrequencyDomain', 'f_min': 0.0, 'f_max': 100.0, 'delta_f': 1.0}
     domain = build_domain(domain_dict)
     domain_dict = domain.domain_dict
     ifos_num_asds = {'H1': 10, 'L1': 8, 'V1': 5}

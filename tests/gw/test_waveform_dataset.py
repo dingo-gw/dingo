@@ -11,11 +11,10 @@ from dingo.gw.dataset.generate_dataset_dag import create_args_string
 SETTINGS_YAML_SMALL = """\
 # settings for domain of waveforms
 domain:
-  name: UniformFrequencyDomain
-  kwargs:
-    f_min: 10.0
-    f_max: 1024.0
-    delta_f: 1.0
+  type: FrequencyDomain
+  f_min: 10.0
+  f_max: 1024.0
+  delta_f: 1.0
 
 # settings for waveform generator
 waveform_generator:

@@ -17,7 +17,7 @@ from dingo.gw.gwutils import (
     get_window,
     get_window_factor,
 )
-from dingo.gw.domains import UniformFrequencyDomain, build_domain
+from dingo.gw.domains import FrequencyDomain, build_domain
 from dingo.gw.transforms import WhitenAndScaleStrain
 
 
@@ -173,7 +173,7 @@ def download_event_data_in_FD(
 
     # build domain object
     f_s = len(data["waveform"][detectors[0]]) / time_segment
-    domain = UniformFrequencyDomain(
+    domain = FrequencyDomain(
         f_min=0,
         f_max=f_s / 2,
         delta_f=1 / time_segment,

@@ -43,7 +43,8 @@ setup(name='dingo',
           ['dingo_generate_dataset=dingo.gw.dataset.generate_dataset:main',
            'dingo_generate_dataset_dag=dingo.gw.dataset.generate_dataset_dag:main',
            'dingo_merge_datasets=dingo.gw.dataset.utils:merge_datasets_cli',
-           'dingo_build_svd=dingo.gw.dataset.utils:build_svd_cli']
+           'dingo_build_svd=dingo.gw.dataset.utils:build_svd_cli',
+           'dingo_train=dingo.gw.training:main']
       },
       classifiers=[
           "Programming Language :: Python :: 3.6",

@@ -1,6 +1,6 @@
 # settings for domain of waveforms
 domain_settings:
-  name: UniformFrequencyDomain
+  name: FrequencyDomain
   kwargs:
     f_min: 10.0      # Require low starting frequency for waveform to generate
     f_max: 4096.0    # Go a bit higher to resolve higher mode contributions

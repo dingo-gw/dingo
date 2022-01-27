@@ -98,7 +98,7 @@ if __name__ == '__main__':
         scale_factor = meta['scale_factor']
         asds = np.sqrt(psds) / np.sqrt(scale_factor)
         f_min, f_max, delta_f = freqs[0], freqs[-1], freqs[1] - freqs[0]
-        domain = build_domain({'name': 'UniformFrequencyDomain',
+        domain = build_domain({'name': 'FrequencyDomain',
                                'kwargs': {'f_min': f_min, 'f_max': f_max,
                                           'delta_f': delta_f}})
         settings['domain_dict'] = domain.domain_dict
