@@ -74,6 +74,7 @@ class FrequencyDomain(Domain):
         self._delta_f = delta_f
         self._window_factor = window_factor
 
+    @staticmethod
     def clear_cache_for_all_instances(self):
         """
         Whenever self._f_min and self._f_max are modified, this method needs to
