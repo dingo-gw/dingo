@@ -35,20 +35,24 @@ class Domain(ABC):
         #  with (waveform) data, whitening and adding noise. Is this the best place to define this?
         pass
 
+    @abstractmethod
     @property
     def sampling_rate(self) -> float:
         """The sampling rate of the data [Hz]."""
         pass
 
+    @abstractmethod
     @property
     def f_max(self) -> float:
         """The maximum frequency [Hz] is set to half the sampling rate."""
 
+    @abstractmethod
     @property
     def duration(self) -> float:
         """Waveform duration in seconds."""
         pass
 
+    @abstractmethod
     @property
     def domain_dict(self):
         """Enables to rebuild the domain via calling build_domain(domain_dict)."""
@@ -276,6 +280,10 @@ class FrequencyDomain(Domain):
     def duration(self) -> float:
         """Waveform duration in seconds."""
         return 1.0 / self._delta_f
+
+    @property
+    def sampling_rate(self) -> float:
+        return 2.0 * self._f_max
 
     @property
     def domain_dict(self):
