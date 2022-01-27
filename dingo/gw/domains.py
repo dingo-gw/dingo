@@ -1,6 +1,5 @@
 from typing import Dict
 
-import numpy as np
 from functools import lru_cache
 from abc import ABC, abstractmethod
 from dingo.gw.gwutils import *
@@ -12,7 +11,6 @@ class Domain(ABC):
     This includes a specification of the bins or points,
     and a few additional properties associated with the data.
     """
-    domain_type: str
 
     @abstractmethod
     def __len__(self):
@@ -53,12 +51,11 @@ class Domain(ABC):
 
     @property
     def domain_dict(self):
-        """Enables to rebuild the domain via calling build_domain(domain_dict).
-        """
+        """Enables to rebuild the domain via calling build_domain(domain_dict)."""
         pass
 
 
-class UniformFrequencyDomain(Domain):
+class FrequencyDomain(Domain):
     """Defines the physical domain on which the data of interest live.
 
     The frequency bins are assumed to be uniform between [0, f_max]
@@ -68,10 +65,10 @@ class UniformFrequencyDomain(Domain):
     window_kwargs specify windowing used for FFT to obtain FD data from TD
     data in practice.
     """
-    domain_type = "uFD"
 
-    def __init__(self, f_min: float, f_max: float, delta_f: float,
-                 window_factor: float = None):
+    def __init__(
+        self, f_min: float, f_max: float, delta_f: float, window_factor: float = None
+    ):
         self._f_min = f_min
         self._f_max = f_max
         self._delta_f = delta_f
@@ -86,10 +83,10 @@ class UniformFrequencyDomain(Domain):
         This clears the cache for the corresponding properties for *all*
         class instances.
         """
-        UniformFrequencyDomain.sample_frequencies.fget.cache_clear()
-        UniformFrequencyDomain.sample_frequencies_truncated.fget.cache_clear()
-        UniformFrequencyDomain.frequency_mask.fget.cache_clear()
-        UniformFrequencyDomain.noise_std.fget.cache_clear()
+        FrequencyDomain.sample_frequencies.fget.cache_clear()
+        FrequencyDomain.sample_frequencies_truncated.fget.cache_clear()
+        FrequencyDomain.frequency_mask.fget.cache_clear()
+        FrequencyDomain.noise_std.fget.cache_clear()
 
     def set_new_range(self, f_min: float = None, f_max: float = None):
         """
@@ -97,19 +94,23 @@ class UniformFrequencyDomain(Domain):
         [0, f_max], and the truncation range to [f_min, f_max].
         """
         if f_min is not None and f_max is not None and f_min >= f_max:
-            raise ValueError('f_min must not be larger than f_max.')
+            raise ValueError("f_min must not be larger than f_max.")
         if f_min is not None:
             if self._f_min <= f_min <= self._f_max:
                 self._f_min = f_min
             else:
-                raise ValueError(f'f_min = {f_min} is not in expected range '
-                                 f'[{self._f_min,self._f_max}].')
+                raise ValueError(
+                    f"f_min = {f_min} is not in expected range "
+                    f"[{self._f_min,self._f_max}]."
+                )
         if f_max is not None:
             if self._f_min <= f_max <= self._f_max:
                 self._f_max = f_max
             else:
-                raise ValueError(f'f_max = {f_max} is not in expected range '
-                                 f'[{self._f_min, self._f_max}].')
+                raise ValueError(
+                    f"f_max = {f_max} is not in expected range "
+                    f"[{self._f_min, self._f_max}]."
+                )
         # clear cached properties, such that they are recomputed when needed
         # instead of using the old (incorrect) ones.
         self.clear_cache_for_all_instances()
@@ -142,21 +143,25 @@ class UniformFrequencyDomain(Domain):
         """Time translate complex frequency domain data by dt [in seconds]."""
         if not isinstance(data, np.ndarray):
             raise NotImplementedError(
-                f'Only implemented for numpy arrays, got {type(data)}.')
+                f"Only implemented for numpy arrays, got {type(data)}."
+            )
         if not np.iscomplexobj(data):
             raise ValueError(
-                'Method expects complex frequency domain data, got real array.')
+                "Method expects complex frequency domain data, got real array."
+            )
         # find out whether data is truncated or not
         if data.shape[-1] == len(self):
             f = self.__call__()
         elif data.shape[-1] == self.len_truncated:
             f = self.sample_frequencies_truncated
         else:
-            raise ValueError(f'Expected {len(self)} or {self.len_truncated} '
-                             f'bins in frequency axis -1, but got '
-                             f'{data.shape[-1]}.')
+            raise ValueError(
+                f"Expected {len(self)} or {self.len_truncated} "
+                f"bins in frequency axis -1, but got "
+                f"{data.shape[-1]}."
+            )
         # shift data
-        return data * np.exp(- 2j * np.pi * dt * f)
+        return data * np.exp(-2j * np.pi * dt * f)
 
     # def time_translate_batch(self, data, dt, axis=None):
     #     # h_d * np.exp(- 2j * np.pi * time_shift * self.sample_frequencies)
@@ -189,8 +194,9 @@ class UniformFrequencyDomain(Domain):
     def sample_frequencies(self):
         # print('Computing sample_frequencies.') # To understand caching
         num_bins = self.__len__()
-        return np.linspace(0.0, self._f_max, num=num_bins,
-                           endpoint=True, dtype=np.float32)
+        return np.linspace(
+            0.0, self._f_max, num=num_bins, endpoint=True, dtype=np.float32
+        )
 
     @property
     @lru_cache()
@@ -216,7 +222,7 @@ class UniformFrequencyDomain(Domain):
     @property
     @lru_cache()
     def sample_frequencies_truncated(self):
-        return self.sample_frequencies[self.f_min_idx:]
+        return self.sample_frequencies[self.f_min_idx :]
 
     @property
     def len_truncated(self):
@@ -230,7 +236,7 @@ class UniformFrequencyDomain(Domain):
     def window_factor(self, value):
         """Set self._window_factor and clear cache of self.noise_std."""
         self._window_factor = value
-        UniformFrequencyDomain.noise_std.fget.cache_clear()
+        FrequencyDomain.noise_std.fget.cache_clear()
 
     @property
     @lru_cache()
@@ -246,7 +252,7 @@ class UniformFrequencyDomain(Domain):
         but not for the signal which is in the main part unaffected by the taper
         """
         if self._window_factor is None:
-            raise ValueError('Window factor needs to be set for noise_std.')
+            raise ValueError("Window factor needs to be set for noise_std.")
         return np.sqrt(self._window_factor) / np.sqrt(4.0 * self._delta_f)
 
     @property
@@ -272,14 +278,14 @@ class UniformFrequencyDomain(Domain):
 
     @property
     def domain_dict(self):
-        """Enables to rebuild the domain via calling build_domain(domain_dict).
-        """
-        kwargs = {'f_min': self._f_min,
-                  'f_max': self._f_max,
-                  'delta_f': self._delta_f,
-                  'window_factor': self._window_factor,
-                  }
-        return {'name': 'UniformFrequencyDomain', 'kwargs': kwargs}
+        """Enables to rebuild the domain via calling build_domain(domain_dict)."""
+        return {
+            "type": "FrequencyDomain",
+            "f_min": self._f_min,
+            "f_max": self._f_max,
+            "delta_f": self._delta_f,
+            "window_factor": self._window_factor,
+        }
 
 
 class TimeDomain(Domain):
@@ -289,7 +295,6 @@ class TimeDomain(Domain):
     with spacing 1 / sampling_rate.
     window_factor is used to compute noise_std().
     """
-    domain_type = "TD"
 
     def __init__(self, time_duration: float, sampling_rate: float):
         self._time_duration = time_duration
@@ -304,8 +309,9 @@ class TimeDomain(Domain):
     def __call__(self) -> np.ndarray:
         """Array of uniform times at which data is sampled"""
         num_bins = self.__len__()
-        return np.linspace(0.0, self._time_duration, num=num_bins,
-                           endpoint=False, dtype=np.float32)
+        return np.linspace(
+            0.0, self._time_duration, num=num_bins, endpoint=False, dtype=np.float32
+        )
 
     @property
     def delta_t(self) -> float:
@@ -335,7 +341,6 @@ class TimeDomain(Domain):
 
 class PCADomain(Domain):
     """TODO"""
-    domain_type = "PCA"
 
     # Not super important right now
     # FIXME: Should this be defined for FD or TD bases or both?
@@ -356,48 +361,50 @@ class PCADomain(Domain):
         return np.sqrt(self.window_factor) / np.sqrt(4.0 * self.delta_f)
 
 
-class NonuniformFrequencyDomain(Domain):
-    """TODO"""
-    domain_type = "nFD"
-
-    # It probably doesn't make sense to inherit from FrequencyDomain; we'll need this for low mass binaries
-    pass
-
-
-def build_domain(domain_settings: Dict):
+def build_domain(settings: Dict) -> Domain:
     """
     Instantiate a domain class from settings.
 
     Parameters
     ----------
-    domain_settings:
-        A dictionary of settings for the domain class.
+    settings : dict
+        Dicionary with 'type' key denoting the type of domain, and keys corresponding
+        to the kwargs needed to construct the Domain.
+
+    Returns
+    -------
+    A Domain instance of the correct type.
     """
-    if set(domain_settings.keys()) != {'name', 'kwargs'}:
-        raise ValueError(f'Got domain_settings {domain_settings.keys()}, '
-                         f'expected dict_keys([\'name\', \'kwargs\'])')
-    if domain_settings['name'] == 'UniformFrequencyDomain':
-        return UniformFrequencyDomain(**domain_settings['kwargs'])
-    elif domain_settings['name'] == 'TimeDomain':
-        return TimeDomain(**domain_settings['kwargs'])
+    if "type" not in settings:
+        raise ValueError(
+            f'Domain settings must include a "type" key. Settings included '
+            f"the keys {settings.keys()}."
+        )
+
+    # The settings other than 'type' correspond to the kwargs of the Domain constructor.
+    kwargs = {k: v for k, v in settings.items() if k != "type"}
+    if settings["type"] in ["FrequencyDomain", "FD"]:
+        return FrequencyDomain(**kwargs)
+    elif settings["type"] == ["TimeDomain", "TD"]:
+        return TimeDomain(**kwargs)
     else:
-        raise ValueError(f'Domain {domain_settings["name"]} not implemented.')
+        raise NotImplementedError(f'Domain {settings["name"]} not implemented.')
 
 
-if __name__ == '__main__':
-    kwargs = {'f_min': 20, 'f_max': 2048, 'delta_f': 0.125}
-    domain = UniformFrequencyDomain(**kwargs)
+if __name__ == "__main__":
+    kwargs = {"f_min": 20, "f_max": 2048, "delta_f": 0.125}
+    domain = FrequencyDomain(**kwargs)
 
     d1 = domain()
     d2 = domain()
-    print('Clearing cache.', end=' ')
+    print("Clearing cache.", end=" ")
     domain.clear_cache_for_all_instances()
-    print('Done.')
+    print("Done.")
     d3 = domain()
 
-    print('Changing domain range.', end=' ')
+    print("Changing domain range.", end=" ")
     domain.set_new_range(20, 100)
-    print('Done.')
+    print("Done.")
 
     d4 = domain()
     d5 = domain()

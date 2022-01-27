@@ -215,7 +215,7 @@ class WaveformTransformationTraining:
     along with their arguments.
     """
     def __init__(self, *,
-                 domain_class: str = 'UniformFrequencyDomain',
+                 domain_class: str = 'FrequencyDomain',
                  domain_kwargs: Dict[str, float],
                  prior_class: str = 'GWPriorDict',
                  prior_kwargs: Dict[str, float],
@@ -433,7 +433,7 @@ if __name__ == "__main__":
     ifo_list = ["H1", "L1"]
 
     F = WaveformTransformationTraining(
-        domain_class='UniformFrequencyDomain', domain_kwargs=domain_kwargs,
+        domain_class='FrequencyDomain', domain_kwargs=domain_kwargs,
         prior_class='GWPriorDict', prior_kwargs=prior_kwargs,
         detector_network_class='DetectorNetwork', ifo_list=ifo_list
     )

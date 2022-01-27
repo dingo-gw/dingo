@@ -29,13 +29,8 @@ def main():
     with open(args.settings_file, 'r') as fp:
         train_settings = yaml.safe_load(fp)
 
-    # build WaveformDataset used for training
     wfd = build_dataset(train_settings)
-
-    # build DataLoader objects for training and testing
     train_loader, test_loader = build_train_and_test_loaders(train_settings, wfd)
-
-    # build posterior model; initialize a new one, or load existing model
     pm = build_posterior_model(args.train_dir, train_settings, wfd[0])
 
     # train model

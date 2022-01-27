@@ -18,7 +18,7 @@ from dingo.gw.gwutils import (
     get_window_factor,
 )
 from dingo.core.utils.dataset_utils import save_dataset, load_dataset
-from dingo.gw.domains import UniformFrequencyDomain, build_domain
+from dingo.gw.domains import FrequencyDomain, build_domain
 from dingo.gw.transforms import WhitenAndScaleStrain
 from dingo.gw.download_strain_data import download_event_data_in_FD
 

@@ -1,4 +1,4 @@
-from dingo.gw.domains import UniformFrequencyDomain
+from dingo.gw.domains import FrequencyDomain
 from dingo.gw.waveform_generator import WaveformGenerator
 from dingo.gw.transforms.parameter_transforms import StandardizeParameters
 import pytest
@@ -10,7 +10,7 @@ import torch.distributions
 @pytest.fixture
 def uniform_fd_domain():
     p = {'f_min': 20.0, 'f_max': 4096.0, 'delta_f': 1.0/4.0}
-    return UniformFrequencyDomain(**p)
+    return FrequencyDomain(**p)
 
 @pytest.fixture
 def aligned_spin_wf_parameters():

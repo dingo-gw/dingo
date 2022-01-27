@@ -9,7 +9,7 @@ import lalsimulation as LS
 import pandas as pd
 from bilby.gw.conversion import convert_to_lal_binary_black_hole_parameters, bilby_to_lalsimulation_spins
 
-from dingo.gw.domains import Domain
+from dingo.gw.domains import Domain, FrequencyDomain, TimeDomain
 
 
 class WaveformGenerator:
@@ -109,12 +109,12 @@ class WaveformGenerator:
         parameters_lal = self._convert_parameters_to_lal_frame(parameters, self.lal_params)
 
         # Generate GW polarizations
-        if self.domain.domain_type == 'uFD':
+        if isinstance(self.domain, FrequencyDomain):
             wf_generator = self.generate_FD_waveform
-        elif self.domain.domain_type == 'TD':
+        elif isinstance(self.domain, TimeDomain):
             wf_generator = self.generate_TD_waveform
         else:
-            raise ValueError(f'Unsupported domain type {self.domain.domain_type}.')
+            raise ValueError(f'Unsupported domain type {type(self.domain)}.')
 
         try:
             wf_dict = wf_generator(parameters_lal)
@@ -179,15 +179,15 @@ class WaveformGenerator:
         ecc_params = (0.0, 0.0, 0.0)  # longAscNodes, eccentricity, meanPerAno
 
         D = self.domain
-        if D.domain_type == 'uFD':
+        if isinstance(D, FrequencyDomain):
             domain_pars = (D.delta_f, D.f_min, D.f_max, p['f_ref'])
-        elif D.domain_type == 'TD':
+        elif isinstance(D, TimeDomain):
             # FIXME: compute f_min from duration or specify it if SimInspiralTD
             #  is used for a native FD waveform
             f_min = 20.0
             domain_pars = (D.delta_t, f_min, p['f_ref'])
         else:
-            raise ValueError(f'Unsupported domain type {D.domain_type}.')
+            raise ValueError(f'Unsupported domain type {type(D)}.')
 
         lal_parameter_tuple = masses + spins_cartesian + extra_params + ecc_params + \
                               domain_pars + (lal_params, self.approximant)
@@ -325,13 +325,13 @@ def generate_waveforms_parallel(
 
 if __name__ == "__main__":
     """A visual test."""
-    from dingo.gw.domains import Domain, UniformFrequencyDomain
+    from dingo.gw.domains import Domain, FrequencyDomain
     import matplotlib.pyplot as plt
 
     # approximant = 'IMRPhenomPv2'
     # f_min = 20.0
     # f_max = 512.0
-    # domain = UniformFrequencyDomain(f_min=f_min, f_max=f_max, delta_f=1.0/4.0, window_factor=1.0)
+    # domain = FrequencyDomain(f_min=f_min, f_max=f_max, delta_f=1.0/4.0, window_factor=1.0)
     # parameters = {'chirp_mass': 34.0, 'mass_ratio': 0.35, 'chi_1': 0.2, 'chi_2': 0.1, 'theta_jn': 1.57, 'f_ref': 20.0, 'phase': 0.0, 'luminosity_distance': 1.0}
     # WG = WaveformGenerator(approximant, domain)
     # waveform_polarizations = WG.generate_hplus_hcross(parameters)

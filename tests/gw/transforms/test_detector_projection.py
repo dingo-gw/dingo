@@ -26,8 +26,8 @@ def setup_detector_projection():
     # setup arguments
     extrinsic_prior_dict = default_extrinsic_dict
     ref_time = 1126259462.391
-    domain_dict = {'name': 'UniformFrequencyDomain',
-                   'kwargs': {'f_min': 10.0, 'f_max': 1024.0, 'delta_f': 0.125}}
+    domain_dict = {'type': 'FrequencyDomain', 'f_min': 10.0, 'f_max': 1024.0,
+                   'delta_f': 0.125}
     ifo_list = InterferometerList(['H1', 'L1'])
     domain = build_domain(domain_dict)
 

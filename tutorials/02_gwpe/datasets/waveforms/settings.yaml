@@ -1,11 +1,10 @@
 # settings for domain of waveforms
 domain:
-  name: UniformFrequencyDomain
-  kwargs:
-    f_min: 10.0
-    f_max: 1024.0
-    delta_f: 0.125  # Expressions like 1.0/8.0 would require eval and are not supported
-    window_factor: 1.0 # This should maybe be in noise settings? It is not used for the generation of waveform polarizations
+  type: FrequencyDomain
+  f_min: 10.0
+  f_max: 1024.0
+  delta_f: 0.125  # Expressions like 1.0/8.0 would require eval and are not supported
+  window_factor: 1.0 # This should maybe be in noise settings? It is not used for the generation of waveform polarizations
 
 # settings for waveform generator
 waveform_generator:

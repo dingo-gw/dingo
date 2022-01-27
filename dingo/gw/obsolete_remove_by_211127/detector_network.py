@@ -237,7 +237,7 @@ class RandomProjectToDetectors:
 
 if __name__ == "__main__":
     """A visual test."""
-    from dingo.gw.domains import UniformFrequencyDomain
+    from dingo.gw.domains import FrequencyDomain
     from dingo.gw.waveform_generator import WaveformGenerator
     from dingo.gw.prior import default_extrinsic_dict
     import matplotlib.pyplot as plt
@@ -245,7 +245,7 @@ if __name__ == "__main__":
     approximant = 'IMRPhenomPv2'
     f_min = 20.0
     f_max = 512.0
-    domain = UniformFrequencyDomain(f_min=f_min, f_max=f_max, delta_f=1.0 / 4.0, window_factor=1.0)
+    domain = FrequencyDomain(f_min=f_min, f_max=f_max, delta_f=1.0 / 4.0, window_factor=1.0)
     parameters = {'chirp_mass': 34.0, 'mass_ratio': 0.35, 'chi_1': 0.2, 'chi_2': 0.1, 'theta_jn': 1.57, 'f_ref': 20.0,
                   'phase': 0.0, 'luminosity_distance': 1.0, 'geocent_time': 1126259642.413}
     WG = WaveformGenerator(approximant, domain)
