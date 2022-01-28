@@ -11,7 +11,7 @@ import nflows.nn.nets as nflows_nets
 from dingo.core.utils import torchutils
 from dingo.core.nn.enets import \
     create_enet_with_projection_layer_and_dense_resnet
-from typing import Union, Callable
+from typing import Union, Callable, Tuple
 
 
 def create_linear_transform(
@@ -281,7 +281,8 @@ def create_nsf_model(input_dim: int,
 
 
 def create_nsf_with_rb_projection_embedding_net(nsf_kwargs: dict,
-                                                embedding_net_kwargs: dict
+                                                embedding_net_kwargs: dict,
+                                                initial_weights: dict,
                                                 ):
     """
     Builds a neural spline flow with an embedding network that consists of a
@@ -295,13 +296,17 @@ def create_nsf_with_rb_projection_embedding_net(nsf_kwargs: dict,
     :return: nn.Module
         neural spline flow model
     """
+    if initial_weights is not None:
+        V_rb_list = initial_weights['V_rb_list']
+    else:
+        V_rb_list = None
     embedding_net = create_enet_with_projection_layer_and_dense_resnet(
-        **embedding_net_kwargs)
+        **embedding_net_kwargs, V_rb_list=V_rb_list)
     flow = create_nsf_model(**nsf_kwargs)
     model = FlowWrapper(flow, embedding_net)
     return model
 
-def autocomplete_model_kwargs_nsf(train_settings, data_sample):
+def autocomplete_model_kwargs_nsf(model_kwargs, data_sample):
     """
     Autocomplete the model kwargs from train_settings and data_sample from
     the dataloader:
@@ -319,7 +324,6 @@ def autocomplete_model_kwargs_nsf(train_settings, data_sample):
     :return: model_kwargs: dict
         updated, autocompleted model_kwargs
     """
-    model_kwargs = train_settings['model_arch']['model_kwargs']
     # set input dims from ifo_list and domain information
     model_kwargs['embedding_net_kwargs']['input_dims'] = data_sample[1].shape
     # set dimension of parameter space of nsf
@@ -335,7 +339,7 @@ def autocomplete_model_kwargs_nsf(train_settings, data_sample):
         model_kwargs['embedding_net_kwargs']['added_context'] = False
         model_kwargs['nsf_kwargs']['context_dim'] = \
             model_kwargs['embedding_net_kwargs']['output_dim']
-    return model_kwargs
+    # return model_kwargs
 
 
 if __name__ == '__main__':

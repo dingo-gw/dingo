@@ -66,13 +66,13 @@ class BBHExtrinsicPriorDict(BBHPriorDict):
                 # A few analytic cases
                 if isinstance(p, Uniform):
                     mean[key] = (p.maximum + p.minimum) / 2.0
-                    std[key] = np.sqrt((p.maximum - p.minimum)**2.0 / 12.0)
+                    std[key] = np.sqrt((p.maximum - p.minimum)**2.0 / 12.0).item()
                 elif isinstance(p, Sine) and p.minimum == 0.0 and p.maximum == np.pi:
                     mean[key] = np.pi / 2.0
-                    std[key] = np.sqrt(0.25 * (np.pi**2) - 2)
+                    std[key] = np.sqrt(0.25 * (np.pi**2) - 2).item()
                 elif isinstance(p, Cosine) and p.minimum == -np.pi/2 and p.maximum == np.pi/2:
                     mean[key] = 0.0
-                    std[key] = np.sqrt(0.25 * (np.pi**2) - 2)
+                    std[key] = np.sqrt(0.25 * (np.pi**2) - 2).item()
                 else:
                     estimation_keys.append(key)
         else:
@@ -84,8 +84,8 @@ class BBHExtrinsicPriorDict(BBHPriorDict):
             samples = self.default_conversion_function(samples)
             for key in estimation_keys:
                 if key in samples.keys():
-                    mean[key] = np.mean(samples[key])
-                    std[key] = np.std(samples[key])
+                    mean[key] = np.mean(samples[key]).item()
+                    std[key] = np.std(samples[key]).item()
 
         return mean, std
 

@@ -33,10 +33,11 @@ train_settings['transform_settings']['extrinsic_prior']['luminosity_distance'] \
 wfd = build_dataset(train_settings)
 
 # set suffix according to gnpe settings
-wfd_dir = dirname(abspath(train_settings['waveform_dataset_path']))
+# wfd_dir = dirname(abspath(train_settings['waveform_dataset_path']))
 suffix = '_'
-with open(join(wfd_dir, 'settings.yaml'), 'r') as fp:
-    suffix += yaml.safe_load(fp)['waveform_generator_settings']['approximant']
+# with open(join(wfd_dir, 'settings.yaml'), 'r') as fp:
+#     suffix += yaml.safe_load(fp)['waveform_generator_settings']['approximant']
+suffix += wfd.settings['waveform_generator']['approximant']
 if 'gnpe_time_shifts' in train_settings['transform_settings']:
     dt = train_settings['transform_settings']['gnpe_time_shifts'][
         'kernel_kwargs']['high']
