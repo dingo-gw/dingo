@@ -9,7 +9,7 @@ from dingo.gw.transforms import SampleExtrinsicParameters,\
     WhitenAndScaleStrain, AddWhiteNoiseComplex, \
     SelectStandardizeRepackageParameters, RepackageStrainsAndASDS, \
     UnpackDict, GNPEDetectorTimes, GNPEChirpMass
-from dingo.gw.noise_dataset import ASDDataset
+from dingo.gw.ASD_dataset.noise_dataset import ASDDataset
 from dingo.gw.prior import default_params
 from dingo.gw.gwutils import *
 from dingo.core.nn.nsf import create_nsf_with_rb_projection_embedding_net, \
