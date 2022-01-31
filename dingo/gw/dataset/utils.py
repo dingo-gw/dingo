@@ -4,12 +4,13 @@ import copy
 import pandas as pd
 import numpy as np
 import yaml
+from typing import List
 
 from dingo.gw.SVD import SVDBasis
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
 
 
-def merge_datasets(dataset_list: list[WaveformDataset]) -> WaveformDataset:
+def merge_datasets(dataset_list: List[WaveformDataset]) -> WaveformDataset:
     """
     Merge a collection of datasets into one.
 
