@@ -144,10 +144,14 @@ def download_and_estimate_PSDs(data_dir: str, run: str, detector: str, settings:
     urls = URL_DIRECTORY[key]
     segment_path = join(data_dir, 'tmp', 'segment_lists')
 
+    starts, stops, durations = [], [], []
     for url in urls:
         r = requests.get(url, allow_redirects=True)
         c = StringIO(r.content.decode("utf-8"))
-        starts, stops, durations = np.loadtxt(c, dtype='int', unpack=True)
+        starts_seg, stops_seg, durations_seg = np.loadtxt(c, dtype='int', unpack=True)
+        starts = np.hstack([starts, starts_seg])
+        stops = np.hstack([stops, stops_seg])
+        durations = np.hstack([durations, durations_seg])
 
     T_PSD = settings['T_PSD']
     delta_T = settings['delta_T']
