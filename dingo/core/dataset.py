@@ -88,7 +88,7 @@ class DingoDataset:
         loaded_dict = recursive_hdf5_load(f)
         for k, v in loaded_dict.items():
             if k in self._data_keys:  # Load only the keys that the class expects
-                print("  " + k)
+                # print("  " + k)
                 vars(self)[k] = v
         try:
             self.settings = ast.literal_eval(f.attrs["settings"])
