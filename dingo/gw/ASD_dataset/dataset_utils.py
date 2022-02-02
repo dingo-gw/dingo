@@ -173,13 +173,13 @@ def download_and_estimate_PSDs(data_dir: str, run: str, detector: str, settings:
         filename = join(path_raw_psds, 'psd_{:05d}.npy'.format(index))
 
         if not os.path.exists(filename):
-            psd = TimeSeries.fetch_open_data(detector, start, end, cache=False)
+            strain = TimeSeries.fetch_open_data(detector, start, end, sample_rate=f_s, cache=False)
             assert f_s == len(psd) / T_PSD, 'Unexpected sampling frequency. A different one is used for Tukey window.'
-            psd = psd.to_pycbc()
-            psd_final = pycbc.psd.estimate.welch(psd, seg_len=int(T * f_s), seg_stride=int(T * f_s), window=w,
+            strain = strain.to_pycbc()
+            psd = pycbc.psd.estimate.welch(strain, seg_len=int(T * f_s), seg_stride=int(T * f_s), window=w,
                                                  avg_method='median')
             np.save(filename,
-                    {'detector': detector, 'segment': (index, start, end), 'time': (start, end), 'psd': psd_final,
+                    {'detector': detector, 'segment': (index, start, end), 'time': (start, end), 'psd': psd,
                      'tukey window': {'f_s': f_s, 'roll_off': roll_off, 'T': T}})
 
 
@@ -215,27 +215,27 @@ def create_dataset_from_files(data_dir: str, run: str, detectors: List[str], set
     for ifo in detectors:
 
         path_raw_psds = get_path_raw_data(data_dir, run, ifo, T_PSD, delta_T)
-        raw_PSDs = [el for el in os.listdir(path_raw_psds) if el.endswith('.npy')]
+        filenames = [el for el in os.listdir(path_raw_psds) if el.endswith('.npy')]
 
-        psd = np.load(join(path_raw_psds, raw_PSDs[0]), allow_pickle=True).item()
+        psd = np.load(join(path_raw_psds, filenames[0]), allow_pickle=True).item()
         freqs = np.array(psd['psd'].sample_frequencies)
 
 
         delta_f =  freqs[1] - freqs[0]
+        assert delta_f == 1 / settings["window"]["T"], "Unexpected spacing of frequency bins." \
+                                                   " A different one is used for windowing."
         domain = build_domain({'type': 'FrequencyDomain',
                                'f_min': f_min, 'f_max': f_max,
                                'delta_f': delta_f})
         domain_settings['domain_dict'] = domain.domain_dict
-        ind_min, ind_max = np.where(freqs == f_min)[0].item(), np.where(freqs == f_max)[0].item()
-        assert ind_min is not None, 'f_min is not in sample frequencies of the PSD'
-        assert ind_max is not None, 'f_max is not in sample frequencies of the PSD'
+        ind_min, ind_max = domain.f_min_idx, domain.f_min_idx
 
         Nf = ind_max - ind_min + 1
-        asds = np.zeros((len(raw_PSDs), Nf))
-        times = np.zeros(len(raw_PSDs))
+        asds = np.zeros((len(filenames), Nf))
+        times = np.zeros(len(filenames))
 
-        for ind, psd_name in enumerate(raw_PSDs):
-            psd = np.load(join(path_raw_psds, psd_name), allow_pickle=True).item()
+        for ind, filename in enumerate(filenames):
+            psd = np.load(join(path_raw_psds, filename), allow_pickle=True).item()
             asds[ind, :] = np.sqrt(psd['psd'][ind_min:ind_max + 1])
             times[ind] = psd['time'][0]
 
