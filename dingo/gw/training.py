@@ -1,8 +1,5 @@
 import os
 
-from dingo.core.utils import set_requires_grad_flag, get_number_of_model_parameters
-from dingo.gw.dataset import WaveformDataset
-
 os.environ["OMP_NUM_THREADS"] = str(1)
 os.environ["MKL_NUM_THREADS"] = str(1)
 
@@ -10,17 +7,13 @@ import time
 import torch
 import numpy as np
 import copy
-from torch.utils.data import DataLoader
-
-from dingo.core.nn.nsf import (
-    autocomplete_model_kwargs_nsf,
-    create_nsf_with_rb_projection_embedding_net,
-)
-from dingo.gw.SVD import SVDBasis
-
 import yaml
 import argparse
+import textwrap
+from torch.utils.data import DataLoader
 
+from dingo.core.nn.nsf import autocomplete_model_kwargs_nsf
+from dingo.gw.SVD import SVDBasis
 from dingo.api.train_setup_new import (
     build_dataset,
     build_train_and_test_loaders,
@@ -33,6 +26,8 @@ from dingo.gw.transforms import (
     SelectStandardizeRepackageParameters,
     UnpackDict,
 )
+from dingo.core.utils import set_requires_grad_flag, get_number_of_model_parameters
+from dingo.gw.dataset import WaveformDataset
 
 
 def build_svd_for_embedding_network(
@@ -46,13 +41,41 @@ def build_svd_for_embedding_network(
     batch_size: int = 1000,
     out_dir=None,
 ):
+    """
+    Construct SVD matrices V based on clean waveforms in each interferometer. These
+    will be used to seed the weights of the initial projection part of the embedding
+    network.
+
+    It first generates a number of training waveforms, and then produces the SVD.
+
+    Parameters
+    ----------
+    wfd : WaveformDataset
+    data_settings : dict
+    asd_dataset_path : str
+        Training waveforms will be whitened with respect to these ASDs.
+    size : int
+        Number of basis elements to include in the SVD projection.
+    num_training_samples : int
+    num_validation_samples : int
+    num_workers : int
+    batch_size : int
+    out_dir : str
+        SVD performance diagnostics are saved here.
+
+    Returns
+    -------
+    list of numpy arrays
+        The V matrices for each interferometer. They are ordered as in data_settings[
+        'detectors'].
+    """
     # Building the transforms can alter the data_settings dictionary. We do not want
     # the construction of the SVD to impact this, so begin with a fresh copy of this
     # dictionary.
     data_settings = copy.deepcopy(data_settings)
 
     # Fix the luminosity distance to a standard value, just in order to generate the SVD.
-    data_settings["extrinsic_prior"]["luminosity_distance"] = '100.0'
+    data_settings["extrinsic_prior"]["luminosity_distance"] = "100.0"
 
     # Build the dataset, but with certain transforms omitted. In particular, we want to
     # build the SVD based on zero-noise waveforms. They should still be whitened though.
@@ -118,7 +141,25 @@ def build_svd_for_embedding_network(
     return [basis_dict[ifo].V for ifo in data_settings["detectors"]]
 
 
-def prepare_training_new(train_settings, train_dir):
+def prepare_training_new(train_settings: dict, train_dir: str):
+    """
+    Based on a settings dictionary, initialize a WaveformDataset and PosteriorModel.
+
+    For model type 'nsf+embedding' (the only acceptable type at this point) this also
+    initializes the embedding network projection stage with SVD V matrices based on
+    clean detector waveforms.
+
+    Parameters
+    ----------
+    train_settings : dict
+        Settings which ultimately come from train_settings.yaml file.
+    train_dir : str
+        This is only used to save diagnostics from the SVD.
+
+    Returns
+    -------
+    (WaveformDataset, PosteriorModel)
+    """
 
     wfd = build_dataset(train_settings["data"])  # No transforms yet
     initial_weights = {}
@@ -128,12 +169,12 @@ def prepare_training_new(train_settings, train_dir):
     if train_settings["model"]["type"] == "nsf+embedding":
 
         # First, build the SVD for seeding the embedding network.
-        print('\nBuilding SVD for initialization of embedding network.')
+        print("\nBuilding SVD for initialization of embedding network.")
         initial_weights["V_rb_list"] = build_svd_for_embedding_network(
             wfd,
             train_settings["data"],
             train_settings["training"]["stage_0"]["asd_dataset_path"],
-            num_workers=train_settings['local']['num_workers'],
+            num_workers=train_settings["local"]["num_workers"],
             batch_size=train_settings["training"]["stage_0"]["batch_size"],
             out_dir=train_dir,
             **train_settings["model"]["embedding_net_kwargs"]["svd"],
@@ -175,6 +216,20 @@ def prepare_training_new(train_settings, train_dir):
 
 
 def prepare_training_resume(checkpoint_name):
+    """
+    Loads a PosteriorModel from a checkpoint, as well as the corresponding
+    WaveformDataset, in order to continue training. It initializes the saved optimizer
+    and scheduler from the checkpoint.
+
+    Parameters
+    ----------
+    checkpoint_name : str
+        File name containing the checkpoint (.pt format).
+
+    Returns
+    -------
+    (PosteriorModel, WaveformDataset)
+    """
 
     pm = PosteriorModel(model_filename=checkpoint_name)
     pm.initialize_optimizer_and_scheduler()
@@ -185,6 +240,28 @@ def prepare_training_resume(checkpoint_name):
 
 
 def initialize_stage(pm, wfd, stage, resume=False):
+    """
+    Initializes training based on PosteriorModel metadata and current stage:
+        * Builds transforms (based on noise settings for current stage);
+        * Builds DataLoaders;
+        * At the beginning of a stage (i.e., if not resuming mid-stage), initializes
+        a new optimizer and scheduler;
+        * Freezes / unfreezes SVD layer of embedding network
+
+    Parameters
+    ----------
+    pm : PosteriorModel
+    wfd : WaveformDataset
+    stage : dict
+        Settings specific to current stage of training
+    resume : bool
+        Whether training is resuming mid-stage. This controls whether the optimizer and
+        scheduler should be re-initialized based on contents of stage dict.
+
+    Returns
+    -------
+    (train_loader, test_loader)
+    """
 
     train_settings = pm.metadata["train_settings"]
 
@@ -202,7 +279,7 @@ def initialize_stage(pm, wfd, stage, resume=False):
     if not resume:
         # New optimizer and scheduler. If we are resuming, these should have been
         # loaded from the checkpoint.
-        print('Initializing new optimizer and scheduler.')
+        print("Initializing new optimizer and scheduler.")
         pm.optimizer_kwargs = stage["optimizer"]
         pm.scheduler_kwargs = stage["scheduler"]
         pm.initialize_optimizer_and_scheduler()
@@ -225,6 +302,17 @@ def initialize_stage(pm, wfd, stage, resume=False):
 
 
 def train_stages(pm, wfd, train_dir):
+    """
+    Train the network, iterating through the sequence of stages. Stages can change
+    certain settings such as the noise characteristics, optimizer, and scheduler settings.
+
+    Parameters
+    ----------
+    pm : PosteriorModel
+    wfd : WaveformDataset
+    train_dir : str
+        Directory for saving checkpoints and train history.
+    """
 
     train_settings = pm.metadata["train_settings"]
 
@@ -233,13 +321,13 @@ def train_stages(pm, wfd, train_dir):
     num_stages = 0
     while True:
         try:
-            stages.append(train_settings['training'][f"stage_{num_stages}"])
+            stages.append(train_settings["training"][f"stage_{num_stages}"])
             num_stages += 1
         except KeyError:
             break
     end_epochs = np.cumsum([stage["epochs"] for stage in stages])
 
-    num_starting_stage = np.searchsorted(end_epochs, pm.epoch+1)
+    num_starting_stage = np.searchsorted(end_epochs, pm.epoch + 1)
     for n in range(num_starting_stage, num_stages):
         stage = stages[n]
 
@@ -247,6 +335,7 @@ def train_stages(pm, wfd, train_dir):
             print(f"\nBeginning training stage {n}. Settings:")
             print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
             train_loader, test_loader = initialize_stage(pm, wfd, stage, resume=False)
+
         else:
             print(f"\nResuming training in stage {n}. Settings:")
             print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
@@ -268,7 +357,19 @@ def train_stages(pm, wfd, train_dir):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train Dingo.")
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=textwrap.dedent(
+            """\
+        Train a neural network for gravitational-wave single-event inference.
+        
+        This program can be called in one of two ways:
+            a) with a settings file. This will create a new network based on the 
+            contents of the settings file.
+            b) with a checkpoint file. This will resume training from the checkpoint.
+        """
+        ),
+    )
     parser.add_argument(
         "--settings_file",
         type=str,
@@ -280,14 +381,15 @@ def parse_args():
     parser.add_argument(
         "--checkpoint",
         type=str,
-        help="Checkpoint file from which to " "resume training.",
+        help="Checkpoint file from which to resume training.",
     )
     args = parser.parse_args()
 
+    # The settings file and checkpoint are mutually exclusive.
     if args.checkpoint is None and args.settings_file is None:
-        parser.error("Settings file required if not resuming from a checkpoint.")
+        parser.error("Must specify either a checkpoint file or a settings file.")
     if args.checkpoint is not None and args.settings_file is not None:
-        parser.error('Cannot specify a checkpoint file and a settings file.')
+        parser.error("Cannot specify both a checkpoint file and a settings file.")
 
     return args
 
@@ -299,13 +401,13 @@ def main():
     os.makedirs(args.train_dir, exist_ok=True)
 
     if args.settings_file is not None:
-        print('Beginning new training run.')
+        print("Beginning new training run.")
         with open(args.settings_file, "r") as fp:
             train_settings = yaml.safe_load(fp)
         pm, wfd = prepare_training_new(train_settings, args.train_dir)
 
     else:
-        print('Resuming training run.')
+        print("Resuming training run.")
         pm, wfd = prepare_training_resume(args.checkpoint)
 
     train_stages(pm, wfd, args.train_dir)
