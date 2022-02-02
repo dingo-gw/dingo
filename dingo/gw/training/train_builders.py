@@ -1,9 +1,4 @@
 import copy
-import os
-import time
-
-import numpy as np
-import torch
 import torchvision
 from torch.utils.data import DataLoader
 from bilby.gw.detector import InterferometerList
