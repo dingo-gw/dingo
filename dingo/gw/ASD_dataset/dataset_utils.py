@@ -187,6 +187,7 @@ def download_and_estimate_PSDs(
                 time_start=start,
                 time_segment=T,
                 window=w,
+                f_s=f_s,
                 num_segments=int(T_PSD / T),
             )
             np.save(
