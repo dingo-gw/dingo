@@ -21,7 +21,7 @@ from dingo.gw.transforms import (
     GNPEDetectorTimes,
     GNPEChirpMass,
 )
-from dingo.gw.noise_dataset import ASDDataset
+from dingo.gw.ASD_dataset.noise_dataset import ASDDataset
 from dingo.gw.prior import default_params
 from dingo.gw.gwutils import *
 from dingo.core.utils import *
@@ -75,7 +75,7 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         data_settings["conditioning"]["frequency_range"]
     )
     # check compatibility of datasets
-    # assert wfd.domain.domain_dict == asd_dataset.domain.domain_dict
+    assert wfd.domain.domain_dict == asd_dataset.domain.domain_dict
 
     # Add window factor to domain. Can this just be added directly rather than
     # using a second domain instance?
