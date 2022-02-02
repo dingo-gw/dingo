@@ -2,6 +2,7 @@
 Implementation of the neural spline flow (NSF). Most of this code is adapted
 from the uci.py example from https://github.com/bayesiains/nsf.
 """
+import copy
 
 import torch
 import torch.nn as nn
@@ -282,7 +283,7 @@ def create_nsf_model(input_dim: int,
 
 def create_nsf_with_rb_projection_embedding_net(nsf_kwargs: dict,
                                                 embedding_net_kwargs: dict,
-                                                initial_weights: dict,
+                                                initial_weights: dict = None,
                                                 ):
     """
     Builds a neural spline flow with an embedding network that consists of a
@@ -296,12 +297,19 @@ def create_nsf_with_rb_projection_embedding_net(nsf_kwargs: dict,
     :return: nn.Module
         neural spline flow model
     """
+    # We copy the embedding_net_kwargs to allow an insert of V_rb_list without
+    # affecting the original embedding_net_kwargs. This is because we don't want to
+    # save the embedding_net_kwargs with the huge V_rb_list included. This is a bit of
+    # a hack; improve setting of initial weights later.
+
+    embedding_net_kwargs = copy.deepcopy(embedding_net_kwargs)
     if initial_weights is not None:
-        V_rb_list = initial_weights['V_rb_list']
-    else:
-        V_rb_list = None
+        embedding_net_kwargs['V_rb_list'] = initial_weights['V_rb_list']
+    elif 'V_rb_list' not in embedding_net_kwargs:
+        embedding_net_kwargs['V_rb_list'] = None
+
     embedding_net = create_enet_with_projection_layer_and_dense_resnet(
-        **embedding_net_kwargs, V_rb_list=V_rb_list)
+        **embedding_net_kwargs)
     flow = create_nsf_model(**nsf_kwargs)
     model = FlowWrapper(flow, embedding_net)
     return model
