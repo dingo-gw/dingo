@@ -21,7 +21,9 @@ from dingo.gw.domains import FrequencyDomain, build_domain
 from dingo.gw.transforms import WhitenAndScaleStrain
 
 
-def download_psd(det, time_start, time_segment, window, num_segments: int = 128):
+def download_psd(
+    det, time_start, time_segment, window, f_s=4096, num_segments: int = 128
+):
     """
     Download strain data and generate a PSD based on these. Use num_segments of length
     time_segment, starting at GPS time time_start.
@@ -48,10 +50,12 @@ def download_psd(det, time_start, time_segment, window, num_segments: int = 128)
         array of psd
     """
     # download strain data for psd
-    print("Downloading strain data for PSD estimation.", end=" ")
+    # print("Downloading strain data for PSD estimation.", end=" ")
     time_end = time_start + time_segment * num_segments
-    psd_strain = TimeSeries.fetch_open_data(det, time_start, time_end, cache=True)
-    print("Done.")
+    psd_strain = TimeSeries.fetch_open_data(
+        det, time_start, time_end, sample_rate=f_s, cache=False
+    )
+    # print("Done.")
     psd_strain = psd_strain.to_pycbc()
 
     # optionally generate window
@@ -127,7 +131,12 @@ def download_strain_data_in_FD(det, time_event, time_segment, time_buffer, windo
 
 
 def download_event_data_in_FD(
-    detectors, time_event, time_segment, time_buffer, window, num_segments_psd = 128,
+    detectors,
+    time_event,
+    time_segment,
+    time_buffer,
+    window,
+    num_segments_psd=128,
 ):
     """
     Download event data in frequency domain. This includes strain data for the event at
