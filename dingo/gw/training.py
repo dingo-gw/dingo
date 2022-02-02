@@ -202,6 +202,7 @@ def initialize_stage(pm, wfd, stage, resume=False):
     if not resume:
         # New optimizer and scheduler. If we are resuming, these should have been
         # loaded from the checkpoint.
+        print('Initializing new optimizer and scheduler.')
         pm.optimizer_kwargs = stage["optimizer"]
         pm.scheduler_kwargs = stage["scheduler"]
         pm.initialize_optimizer_and_scheduler()
@@ -238,11 +239,11 @@ def train_stages(pm, wfd, train_dir):
             break
     end_epochs = np.cumsum([stage["epochs"] for stage in stages])
 
-    num_starting_stage = np.searchsorted(end_epochs, pm.epoch)
+    num_starting_stage = np.searchsorted(end_epochs, pm.epoch+1)
     for n in range(num_starting_stage, num_stages):
         stage = stages[n]
 
-        if pm.epoch == end_epochs[num_starting_stage] - stage["epochs"]:
+        if pm.epoch == end_epochs[n] - stage["epochs"]:
             print(f"\nBeginning training stage {n}. Settings:")
             print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
             train_loader, test_loader = initialize_stage(pm, wfd, stage, resume=False)
@@ -261,7 +262,7 @@ def train_stages(pm, wfd, train_dir):
             checkpoint_epochs=train_settings["local"]["checkpoint_epochs"],
         )
 
-        save_file = f"model_stage_{n}.pt"
+        save_file = os.path.join(train_dir, f"model_stage_{n}.pt")
         print(f"Training stage complete. Saving to {save_file}.")
         pm.save_model(save_file, save_training_info=True)
 
