@@ -5,7 +5,7 @@ from os.path import join
 import numpy as np
 import torch
 from dingo.core.nn.nsf import create_nsf_with_rb_projection_embedding_net
-from dingo.core.models.posterior_model_new import PosteriorModel
+from dingo.core.models.posterior_model import PosteriorModel
 from dingo.core.utils import torchutils
 
 

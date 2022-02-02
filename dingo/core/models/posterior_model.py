@@ -12,6 +12,8 @@ import dingo.core.utils.trainutils
 
 import pdb
 
+from dingo.core.nn.nsf import create_nsf_with_rb_projection_embedding_net
+
 
 class PosteriorModel:
     """
@@ -37,14 +39,9 @@ class PosteriorModel:
     """
 
     def __init__(self,
-                 model_builder: Callable,
-                 model_kwargs: dict = None,
                  model_filename: str = None,
-                 optimizer_kwargs: dict = None,
-                 scheduler_kwargs: dict = None,
-                 init_for_training: bool = False,
                  metadata: dict = None,
-                 device: str = 'cpu'
+                 initial_weights: dict = None,
                  ):
         """
 
@@ -68,28 +65,28 @@ class PosteriorModel:
         metadata: dict = None
             dict with metadata, used to save dataset_settings and train_settings
         """
-        self.model_builder = model_builder
-        self.model_kwargs = model_kwargs
+        self.optimizer_kwargs = None
+        self.model_kwargs = None
+        self.scheduler_kwargs = None
+        self.initial_weights = initial_weights
+
+        self.metadata = metadata
+        if self.metadata is not None:
+            self.model_kwargs = self.metadata['train_settings']['model']
+            # Expect self.optimizer_settings and self.scheduler_settings to be set 
+            # separately, and before calling initialize_optimizer_and_scheduler().
 
         self.epoch = 0
-        self.optimizer_kwargs = optimizer_kwargs
         self.optimizer = None
-        self.scheduler_kwargs = scheduler_kwargs
         self.scheduler = None
-        self.metadata = metadata
 
         # build model
         if model_filename is not None:
-            self.load_model(model_filename, device,
-                            load_training_info=init_for_training)
+            self.load_model(model_filename,
+                            load_training_info=True)
         else:
             self.initialize_model()
-            # initialize for training
-            if init_for_training:
-                self.initialize_optimizer_and_scheduler()
-
-            self.model_to_device(device)
-
+            self.model_to_device(self.metadata['train_settings']['local']['device'])
 
     def model_to_device(self, device):
         """
@@ -113,7 +110,10 @@ class PosteriorModel:
         self.model_builder with self.model_kwargs.
 
         """
-        self.model = self.model_builder(**self.model_kwargs)
+        model_builder = get_model_callable(self.model_kwargs['type'])
+        model_kwargs = {k: v for k, v in self.model_kwargs.items() if k != 'type'}
+        self.model = model_builder(**model_kwargs,
+                                   initial_weights=self.initial_weights)
 
     def initialize_optimizer_and_scheduler(self):
         """
@@ -147,7 +147,6 @@ class PosteriorModel:
             'model_kwargs': self.model_kwargs,
             'model_state_dict': self.model.state_dict(),
             'epoch': self.epoch,
-            # 'training_data_information': None,
         }
 
         if self.metadata is not None:
@@ -166,7 +165,6 @@ class PosteriorModel:
 
     def load_model(self,
                    model_filename: str,
-                   device: str,
                    load_training_info: bool = True,
                    ):
         """
@@ -189,11 +187,11 @@ class PosteriorModel:
 
         self.epoch = d['epoch']
 
-        if 'metadata' in d:
-            self.metadata = d['metadata']
+        self.metadata = d['metadata']
 
-        self.model_to_device(device)
+        self.model_to_device(self.metadata['train_settings']['local']['device'])
 
+        # I think this should probably not be optional...
         if load_training_info:
             if 'optimizer_kwargs' in d:
                 self.optimizer_kwargs = d['optimizer_kwargs']
@@ -255,7 +253,11 @@ class PosteriorModel:
             print(f'Finished training epoch {self.epoch}.\n')
 
 
-
+def get_model_callable(model_type: str):
+    if model_type == 'nsf+embedding':
+        return create_nsf_with_rb_projection_embedding_net
+    else:
+        raise KeyError('Invalid model type.')
 
 
 def train_epoch(pm, dataloader):

@@ -1,6 +1,15 @@
+import copy
+import os
+import time
+
+import numpy as np
+import torch
 import torchvision
 from torch.utils.data import DataLoader
 from bilby.gw.detector import InterferometerList
+
+from dingo.gw.SVD import SVDBasis
+from dingo.gw.dataset import WaveformDataset
 
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.gw.domains import build_domain
@@ -198,3 +207,114 @@ def build_train_and_test_loaders(
     )
 
     return train_loader, test_loader
+
+
+def build_svd_for_embedding_network(
+    wfd: WaveformDataset,
+    data_settings: dict,
+    asd_dataset_path: str,
+    size: int,
+    num_training_samples: int,
+    num_validation_samples: int,
+    num_workers: int = 0,
+    batch_size: int = 1000,
+    out_dir=None,
+):
+    """
+    Construct SVD matrices V based on clean waveforms in each interferometer. These
+    will be used to seed the weights of the initial projection part of the embedding
+    network.
+
+    It first generates a number of training waveforms, and then produces the SVD.
+
+    Parameters
+    ----------
+    wfd : WaveformDataset
+    data_settings : dict
+    asd_dataset_path : str
+        Training waveforms will be whitened with respect to these ASDs.
+    size : int
+        Number of basis elements to include in the SVD projection.
+    num_training_samples : int
+    num_validation_samples : int
+    num_workers : int
+    batch_size : int
+    out_dir : str
+        SVD performance diagnostics are saved here.
+
+    Returns
+    -------
+    list of numpy arrays
+        The V matrices for each interferometer. They are ordered as in data_settings[
+        'detectors'].
+    """
+    # Building the transforms can alter the data_settings dictionary. We do not want
+    # the construction of the SVD to impact this, so begin with a fresh copy of this
+    # dictionary.
+    data_settings = copy.deepcopy(data_settings)
+
+    # Fix the luminosity distance to a standard value, just in order to generate the SVD.
+    data_settings["extrinsic_prior"]["luminosity_distance"] = "100.0"
+
+    # Build the dataset, but with certain transforms omitted. In particular, we want to
+    # build the SVD based on zero-noise waveforms. They should still be whitened though.
+    set_train_transforms(
+        wfd,
+        data_settings,
+        asd_dataset_path,
+        omit_transforms=[
+            AddWhiteNoiseComplex,
+            RepackageStrainsAndASDS,
+            SelectStandardizeRepackageParameters,
+            UnpackDict,
+        ],
+    )
+
+    print("Generating waveforms for embedding network SVD initialization.")
+    time_start = time.time()
+    ifos = list(wfd[0]["waveform"].keys())
+    waveform_len = len(wfd[0]["waveform"][ifos[0]])
+    num_waveforms = num_training_samples + num_validation_samples
+    waveforms = {
+        ifo: np.empty((num_waveforms, waveform_len), dtype=np.complex128)
+        for ifo in ifos
+    }
+    loader = DataLoader(
+        wfd,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        worker_init_fn=lambda _: np.random.seed(
+            int(torch.initial_seed()) % (2 ** 32 - 1)
+        ),
+    )
+    for idx, data in enumerate(loader):
+        strain_data = data["waveform"]
+        lower = idx * batch_size
+        n = min(batch_size, num_waveforms - lower)
+        for ifo, strains in strain_data.items():
+            waveforms[ifo][lower : lower + n] = strains[:n]
+        if lower + n == num_waveforms:
+            break
+    print(f"...done. This took {time.time() - time_start:.0f} s.")
+
+    print("Generating SVD basis for ifo:")
+    time_start = time.time()
+    basis_dict = {}
+    for ifo in ifos:
+        basis = SVDBasis()
+        basis.generate_basis(waveforms[ifo][:num_training_samples], size)
+        basis_dict[ifo] = basis
+        print(f"...{ifo} done.")
+    print(f"...this took {time.time() - time_start:.0f} s.")
+
+    if out_dir is not None:
+        print(f"Testing SVD basis matrices, saving stats to {out_dir}")
+        for ifo, basis in basis_dict.items():
+            basis.test_basis(
+                waveforms[ifo][num_training_samples:],
+                outfile=os.path.join(out_dir, f"SVD_{ifo}_stats.npy"),
+            )
+    print("Done")
+
+    # Return V matrices in standard order.
+    return [basis_dict[ifo].V for ifo in data_settings["detectors"]]
