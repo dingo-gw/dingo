@@ -6,17 +6,15 @@ from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import *
 from dingo.gw.dataset import DingoDataset
 
+
 class ASDDataset(DingoDataset):
     """
     Dataset of amplitude spectral densities (ASDs). The ASDs are typically
     used for whitening strain data, and additionally passed as context to the
     neural density estimator.
     """
-    def __init__(self,
-                 file_name=None,
-                 dictionary=None,
-                 ifos=None
-                 ):
+
+    def __init__(self, file_name=None, dictionary=None, ifos=None):
         """
         Parameters
         ----------
@@ -41,10 +39,10 @@ class ASDDataset(DingoDataset):
                 if ifo not in ifos:
                     self.asds.pop(ifo)
 
-        self.domain = build_domain(self.settings['domain_dict'])
+        self.domain = build_domain(self.settings["domain_dict"])
         self.is_truncated = False
 
-    def truncate_dataset_domain(self, new_range = None):
+    def truncate_dataset_domain(self, new_range=None):
         """
         The asd dataset provides asds in the range [0, domain._f_max]. In
         practice one may want to apply data conditioning different to that of
@@ -61,7 +59,7 @@ class ASDDataset(DingoDataset):
         which is called if new_range is not None.
         """
         if self.is_truncated:
-            raise ValueError('Dataset is already truncated')
+            raise ValueError("Dataset is already truncated")
         len_domain_original = len(self.domain)
 
         # optionally set new data range the dataset
@@ -70,11 +68,13 @@ class ASDDataset(DingoDataset):
 
         # truncate the dataset
         for ifo, asds in self.asds.items():
-            assert asds.shape[-1] == len_domain_original, \
-                f'ASDs with shape {asds.shape[-1]} are not compatible' \
-                f'with the domain of length {len_domain_original}.'
+            assert asds.shape[-1] == len_domain_original, (
+                f"ASDs with shape {asds.shape[-1]} are not compatible"
+                f"with the domain of length {len_domain_original}."
+            )
             self.asds[ifo] = self.domain.truncate_data(
-                asds, allow_for_flexible_upper_bound=(new_range is not None))
+                asds, allow_for_flexible_upper_bound=(new_range is not None)
+            )
 
         self.is_truncated = True
 
@@ -83,8 +83,8 @@ class ASDDataset(DingoDataset):
         Sample a random asd for each detector.
         :return: Dict with a random asd from the dataset for each detector.
         """
-        return {k: v[np.random.choice(len(v), 1)[0]]
-                for k,v in self.asds.items()}
+        return {k: v[np.random.choice(len(v), 1)[0]] for k, v in self.asds.items()}
+
 
 # if __name__ == '__main__':
 #     this transforms the np psd datasets from the research code to the hdf5

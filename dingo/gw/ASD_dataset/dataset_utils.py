@@ -4,97 +4,90 @@ import requests
 from typing import Dict, List
 from functools import partial
 from tqdm import tqdm
+import random
 from multiprocessing import Pool
-from dingo.gw.download_strain_data import get_window
-from gwpy.timeseries import TimeSeries
 from dataset_utils import *
 from dingo.gw.domains import build_domain
-import pycbc
 import h5py
+import warnings
 from os.path import join
 from io import StringIO
 from tqdm import trange
+
 from dingo.core.dataset import recursive_hdf5_save
+from dingo.gw.download_strain_data import get_window, download_psd
+
 """
 Contains links for PSD segment lists with quality label BURST_CAT2 from the Gravitationa Wave Open Science Center.
 Some events are split up into multiple chunks such that there are multiple URLs for one observing run
 """
 URL_DIRECTORY = {
-    "O1_L1": ["https://www.gw-openscience.org/timeline/segments/O1/L1_BURST_CAT2/1126051217/11203200/"],
-    "O1_H1": ["https://www.gw-openscience.org/timeline/segments/O1/H1_BURST_CAT2/1126051217/11203200/"],
-
-    "O2_L1": ["https://www.gw-openscience.org/timeline/segments/O2_16KHZ_R1/L1_BURST_CAT2/1164556817/23176801/"],
-    "O2_H1": ["https://www.gw-openscience.org/timeline/segments/O2_16KHZ_R1/H1_BURST_CAT2/1164556817/23176801/"],
-    "O2_V1": ["https://www.gw-openscience.org/timeline/segments/O2_16KHZ_R1/V1_BURST_CAT2/1164556817/23176801/"],
-
-    "O3_L1": ["https://www.gw-openscience.org/timeline/segments/O3a_16KHZ_R1/L1_BURST_CAT2/1238166018/15811200/",
-              "https://www.gw-openscience.org/timeline/segments/O3b_16KHZ_R1/L1_BURST_CAT2/1256655618/12708000/"],
-    "O3_H1": ["https://www.gw-openscience.org/timeline/segments/O3a_16KHZ_R1/H1_BURST_CAT2/1238166018/15811200/",
-              "https://www.gw-openscience.org/timeline/segments/O3b_16KHZ_R1/H1_BURST_CAT2/1256655618/12708000/"],
-    "O3_V1": ["https://www.gw-openscience.org/timeline/segments/O3a_16KHZ_R1/V1_BURST_CAT2/1238166018/15811200/",
-              "https://www.gw-openscience.org/timeline/segments/O3b_16KHZ_R1/V1_BURST_CAT2/1256655618/12708000/"]
+    "O1_L1": [
+        "https://www.gw-openscience.org/timeline/segments/O1/L1_BURST_CAT2/1126051217/11203200/"
+    ],
+    "O1_H1": [
+        "https://www.gw-openscience.org/timeline/segments/O1/H1_BURST_CAT2/1126051217/11203200/"
+    ],
+    "O2_L1": [
+        "https://www.gw-openscience.org/timeline/segments/O2_16KHZ_R1/L1_BURST_CAT2/1164556817/23176801/"
+    ],
+    "O2_H1": [
+        "https://www.gw-openscience.org/timeline/segments/O2_16KHZ_R1/H1_BURST_CAT2/1164556817/23176801/"
+    ],
+    "O2_V1": [
+        "https://www.gw-openscience.org/timeline/segments/O2_16KHZ_R1/V1_BURST_CAT2/1164556817/23176801/"
+    ],
+    "O3_L1": [
+        "https://www.gw-openscience.org/timeline/segments/O3a_16KHZ_R1/L1_BURST_CAT2/1238166018/15811200/",
+        "https://www.gw-openscience.org/timeline/segments/O3b_16KHZ_R1/L1_BURST_CAT2/1256655618/12708000/",
+    ],
+    "O3_H1": [
+        "https://www.gw-openscience.org/timeline/segments/O3a_16KHZ_R1/H1_BURST_CAT2/1238166018/15811200/",
+        "https://www.gw-openscience.org/timeline/segments/O3b_16KHZ_R1/H1_BURST_CAT2/1256655618/12708000/",
+    ],
+    "O3_V1": [
+        "https://www.gw-openscience.org/timeline/segments/O3a_16KHZ_R1/V1_BURST_CAT2/1238166018/15811200/",
+        "https://www.gw-openscience.org/timeline/segments/O3b_16KHZ_R1/V1_BURST_CAT2/1256655618/12708000/",
+    ],
 }
 
-def get_segment(segs, seg_start, t_lower, t_upper):
-    """
-    Parameters
-    ----------
-    segs : Tuple[int, int]
-        Contains the start- and end gps_times that have been fetched from the GWOSC website
-    seg_start : int
-        Index from where to start checking if the segment is contained in the upper and lower bound
-    t_lower : int
-        Lower gps_time bound
-    t_upper : int
-        Upper gps_time bound
 
-    Returns
-    -------
-    Index of a single segment and a flag whether the segment is contained in the upper and lower gps_time bound
-    """
-    for ind in range(seg_start, len(segs)):
-        if segs[ind][1] >= t_lower:
-            if segs[ind][0] <= t_lower and segs[ind][1] >= t_upper:
-                return ind, True
-            else:
-                return ind, False
-    return None, None
-
-def get_valid_segments(segs, T_PSD, delta_T):
+def get_valid_segments(segs, T_PSD, T_gap):
     """
     Given the segments `segs` and the time constraints `T_PSD`, `delta_T`, return all segments
     that can be used to estimate a PSD
 
     Parameters
     ----------
-    segs : Tuple[int, int]
-        Contains the start- and end gps_times that have been fetched from the GWOSC website
-    T_PSD : str
+    segs : Tuple[int, int, int]
+        Contains the start- and end gps_times as well as their difference that have been fetched from the GWOSC website
+    T_PSD : int
         number of seconds used to estimate PSD
-    delta_T : str
-        number of seconds between two adjacent PSDs
+    T_gap : int
+        number of seconds between two adjacent PSDs. May be negative to indicate an overlap
 
     Returns
     -------
     All segments that can be used to estimate a PSD
     """
-    t_start = segs[0][0]
-    time_total = segs[-1][1] - segs[0][0]
-    num_PSD_max = int(time_total / (T_PSD + delta_T))
-    segment = 0
-    PSD_segs_valid = []
+    segs = np.array(segs, dtype=int)
+    segs = segs[segs[:, 2] >= T_PSD]
 
-    for ind in range(num_PSD_max):
-        t_lower = ind * (T_PSD + delta_T) + t_start
-        t_upper = t_lower + T_PSD
-        segment, flag = get_segment(segs, segment, t_lower, t_upper)
+    valid_segs = []
+    for idx in range(segs.shape[0]):
+        seg = segs[idx, :]
+        start_time = seg[0]
+        end_time = start_time + T_PSD
 
-        if flag:
-            PSD_segs_valid.append((t_lower, t_upper))
+        while end_time in range(seg[0], seg[1] + 1):
+            valid_segs.append((start_time, end_time))
+            start_time = end_time + T_gap
+            end_time = start_time + T_PSD
 
-    return PSD_segs_valid
+    return valid_segs
 
-def get_path_raw_data(data_dir, run, detector, T_PSD=1024, delta_T=1024):
+
+def get_path_raw_data(data_dir, run, detector, T_PSD=1024, T_gap=0):
     """
     Return the directory where the PSD data is to be stored
     Parameters
@@ -107,16 +100,21 @@ def get_path_raw_data(data_dir, run, detector, T_PSD=1024, delta_T=1024):
         Detector that is used for the PSD dataset generation
     T_PSD : str
         number of seconds used to estimate PSD
-    delta_T : str
+    T_gap : str
         number of seconds between two adjacent PSDs
 
     Returns
     -------
     the path where the data is stored
     """
-    return os.path.join(data_dir, 'tmp', 'raw_PSDs', run, detector, str(T_PSD) + '_' + str(delta_T))
+    return os.path.join(
+        data_dir, "tmp", "raw_PSDs", run, detector, str(T_PSD) + "_" + str(T_gap)
+    )
 
-def download_and_estimate_PSDs(data_dir: str, run: str, detector: str, settings: dict, verbose=False):
+
+def download_and_estimate_PSDs(
+    data_dir: str, run: str, detector: str, settings: dict, verbose=False
+):
     """
     Download segment lists from the official GWOSC website that have the BURST_CAT_2 quality label. A .npy file
     is created for every PSD that will be in the final dataset. These are stored in data_dir/tmp and may be removed
@@ -137,53 +135,79 @@ def download_and_estimate_PSDs(data_dir: str, run: str, detector: str, settings:
 
     -------
 
-    """""
+    """ ""
 
-    filename = f'{run}_{detector}_BURST_CAT2.txt'
+    filename = f"{run}_{detector}_BURST_CAT2.txt"
     key = run + "_" + detector
     urls = URL_DIRECTORY[key]
-    segment_path = join(data_dir, 'tmp', 'segment_lists')
 
     starts, stops, durations = [], [], []
     for url in urls:
         r = requests.get(url, allow_redirects=True)
         c = StringIO(r.content.decode("utf-8"))
-        starts_seg, stops_seg, durations_seg = np.loadtxt(c, dtype='int', unpack=True)
+        starts_seg, stops_seg, durations_seg = np.loadtxt(c, dtype="int", unpack=True)
         starts = np.hstack([starts, starts_seg])
         stops = np.hstack([stops, stops_seg])
         durations = np.hstack([durations, durations_seg])
 
-    T_PSD = settings['T_PSD']
-    delta_T = settings['delta_T']
+    T_PSD = settings["T_PSD"]
+    T_gap = settings["T_gap"]
+    T = settings["T"]
+    f_s = settings["f_s"]
 
-    f_s = settings['window']['f_s']
-    roll_off = settings['window']['roll_off']
-    T = settings['window']['T']
-    w = get_window(settings['window'])
+    window_kwargs = {
+        "f_s": f_s,
+        "roll_off": settings["window"]["roll_off"],
+        "window_type": settings["window"]["window_type"],
+        "T": T,
+    }
+    w = get_window(window_kwargs)
 
-    path_raw_psds = get_path_raw_data(data_dir, run, detector, T_PSD, delta_T)
+    path_raw_psds = get_path_raw_data(data_dir, run, detector, T_PSD, T_gap)
     os.makedirs(path_raw_psds, exist_ok=True)
 
-    valid_segments = get_valid_segments(list(zip(starts, stops)), T_PSD=T_PSD, delta_T=delta_T)
-    num_psds_max = len(valid_segments) if settings['num_psds_max'] <= 0 else settings['num_psds_max']
-    valid_segments = valid_segments[:num_psds_max]
-    print(f'Fetching data and computing Welch\'s estimate of {num_psds_max} valid segments:\n')
+    valid_segments = get_valid_segments(
+        list(zip(starts, stops, durations)), T_PSD=T_PSD, T_gap=T_gap
+    )
+
+    num_psds_max = settings["num_psds_max"]
+    if num_psds_max >= 1:
+        valid_segments = random.sample(valid_segments, num_psds_max)
+
+    print(
+        f"Fetching data and computing Welch's estimate of {len(valid_segments)} valid segments:\n"
+    )
 
     for index, (start, end) in enumerate(tqdm(valid_segments, disable=not verbose)):
-        filename = join(path_raw_psds, 'psd_{:05d}.npy'.format(index))
+        filename = join(path_raw_psds, "psd_{:05d}.npy".format(index))
 
         if not os.path.exists(filename):
-            strain = TimeSeries.fetch_open_data(detector, start, end, sample_rate=f_s, cache=False)
-            assert f_s == len(psd) / T_PSD, 'Unexpected sampling frequency. A different one is used for Tukey window.'
-            strain = strain.to_pycbc()
-            psd = pycbc.psd.estimate.welch(strain, seg_len=int(T * f_s), seg_stride=int(T * f_s), window=w,
-                                                 avg_method='median')
-            np.save(filename,
-                    {'detector': detector, 'segment': (index, start, end), 'time': (start, end), 'psd': psd,
-                     'tukey window': {'f_s': f_s, 'roll_off': roll_off, 'T': T}})
+            psd = download_psd(
+                det=detector,
+                time_start=start,
+                time_segment=T,
+                window=w,
+                num_segments=int(T_PSD / T),
+            )
+            np.save(
+                filename,
+                {
+                    "detector": detector,
+                    "segment": (index, start, end),
+                    "time": (start, end),
+                    "psd": psd,
+                    "tukey window": {
+                        "f_s": f_s,
+                        "roll_off": settings["window"]["roll_off"],
+                        "T": T,
+                    },
+                },
+            )
 
 
-def create_dataset_from_files(data_dir: str, run: str, detectors: List[str], settings: dict):
+def create_dataset_from_files(
+    data_dir: str, run: str, detectors: List[str], settings: dict
+):
 
     """
     Creates a .hdf5 ASD datset file for an observing run using the estimated detector PSDs.
@@ -201,10 +225,11 @@ def create_dataset_from_files(data_dir: str, run: str, detectors: List[str], set
     -------
     """
 
-    f_min = settings['f_min']
-    f_max = settings['f_max']
-    T_PSD = settings['T_PSD']
-    delta_T = settings['delta_T']
+    f_min = 0
+    f_max = settings["f_s"] / 2
+    T_PSD = settings["T_PSD"]
+    T_gap = settings["T_gap"]
+    T = settings["T"]
 
     domain_settings = {}
 
@@ -214,21 +239,22 @@ def create_dataset_from_files(data_dir: str, run: str, detectors: List[str], set
 
     for ifo in detectors:
 
-        path_raw_psds = get_path_raw_data(data_dir, run, ifo, T_PSD, delta_T)
-        filenames = [el for el in os.listdir(path_raw_psds) if el.endswith('.npy')]
-
+        path_raw_psds = get_path_raw_data(data_dir, run, ifo, T_PSD, T_gap)
+        filenames = [el for el in os.listdir(path_raw_psds) if el.endswith(".npy")]
         psd = np.load(join(path_raw_psds, filenames[0]), allow_pickle=True).item()
-        freqs = np.array(psd['psd'].sample_frequencies)
 
-
-        delta_f =  freqs[1] - freqs[0]
-        assert delta_f == 1 / settings["window"]["T"], "Unexpected spacing of frequency bins." \
-                                                   " A different one is used for windowing."
-        domain = build_domain({'type': 'FrequencyDomain',
-                               'f_min': f_min, 'f_max': f_max,
-                               'delta_f': delta_f})
-        domain_settings['domain_dict'] = domain.domain_dict
-        ind_min, ind_max = domain.f_min_idx, domain.f_min_idx
+        delta_f = 1 / T
+        domain = build_domain(
+            {
+                "type": "FrequencyDomain",
+                "f_min": f_min,
+                "f_max": f_max,
+                "delta_f": delta_f,
+                "window_factor": 1.0,
+            }
+        )
+        domain_settings["domain_dict"] = domain.domain_dict
+        ind_min, ind_max = domain.f_min_idx, domain.f_max_idx
 
         Nf = ind_max - ind_min + 1
         asds = np.zeros((len(filenames), Nf))
@@ -236,16 +262,16 @@ def create_dataset_from_files(data_dir: str, run: str, detectors: List[str], set
 
         for ind, filename in enumerate(filenames):
             psd = np.load(join(path_raw_psds, filename), allow_pickle=True).item()
-            asds[ind, :] = np.sqrt(psd['psd'][ind_min:ind_max + 1])
-            times[ind] = psd['time'][0]
+            asds[ind, :] = np.sqrt(psd["psd"][ind_min : ind_max + 1])
+            times[ind] = psd["time"][0]
 
         asds_dict[ifo] = asds
         gps_times_dict[ifo] = times
 
-    save_dict['asds'] = asds_dict
-    save_dict['gps_times'] = gps_times_dict
+    save_dict["asds"] = asds_dict
+    save_dict["gps_times"] = gps_times_dict
 
-    f = h5py.File(join(data_dir, f'asds_{run}_test.hdf5'), "w")
+    f = h5py.File(join(data_dir, f"asds_{run}.hdf5"), "w")
     recursive_hdf5_save(f, save_dict)
     f.attrs["settings"] = str(domain_settings)
     f.close()

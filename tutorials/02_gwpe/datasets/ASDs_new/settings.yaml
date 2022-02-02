@@ -1,13 +1,11 @@
 dataset_settings:
+  f_s: 4096
   T_PSD: 1024
-  delta_T: 1024
+  T: 8
   window:
-    f_s: 4096
     roll_off: 0.4
     window_type: tukey
-    T: 8
-  f_min: 0
-  f_max: 1024
+  T_gap: 0
   num_psds_max: 10
 
 parameterization_settings:
