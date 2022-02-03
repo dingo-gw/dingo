@@ -1,0 +1,11 @@
+# Sample stage settings. For use with dingo_append_training_stage.
+epochs: 100
+asd_dataset_path: ./asds_O2.hdf5
+freeze_rb_layer: False
+optimizer:
+  type: adam
+  lr: 0.00001
+scheduler:
+  type: cosine
+  T_max: 150
+batch_size: 64
