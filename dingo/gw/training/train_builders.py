@@ -75,7 +75,9 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         data_settings["conditioning"]["frequency_range"]
     )
     # check compatibility of datasets
-    assert wfd.domain.domain_dict == asd_dataset.domain.domain_dict
+    if wfd.domain.domain_dict != asd_dataset.domain.domain_dict:
+        raise ValueError(f'wfd.domain: {wfd.domain.domain_dict} \n!= '
+                         f'asd_dataset.domain: {asd_dataset.domain.domain_dict}')
 
     # Add window factor to domain. Can this just be added directly rather than
     # using a second domain instance?
