@@ -190,6 +190,12 @@ def train_stages(pm, wfd, train_dir):
     wfd : WaveformDataset
     train_dir : str
         Directory for saving checkpoints and train history.
+
+    Returns
+    -------
+    bool
+        True if all stages are complete
+        False otherwise
     """
 
     train_settings = pm.metadata["train_settings"]
@@ -233,6 +239,11 @@ def train_stages(pm, wfd, train_dir):
         print(f"Training stage complete. Saving to {save_file}.")
         pm.save_model(save_file, save_training_info=True)
 
+    if pm.epoch == end_epochs[-1]:
+        return True
+    else:
+        return False
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -272,7 +283,7 @@ def parse_args():
     return args
 
 
-def main():
+def train_local():
 
     args = parse_args()
 
@@ -288,4 +299,9 @@ def main():
         print("Resuming training run.")
         pm, wfd = prepare_training_resume(args.checkpoint)
 
-    train_stages(pm, wfd, args.train_dir)
+    complete = train_stages(pm, wfd, args.train_dir)
+
+    if complete:
+        print('All training stages complete.')
+    else:
+        print('Program terminated due to runtime limit.')

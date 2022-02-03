@@ -60,8 +60,8 @@ model:
     # added_context = True for concatenation of GNPE proxies to enet output
 #      added_context: False # True
 
+# Training is divided in stages. They each require all settings as indicated below.
 training:
-  # Training is divided in stages. They each require all settings as indicated below.
   stage_0:
     epochs: 300
     asd_dataset_path: ./asds_O2.hdf5 #/home/jonas/Desktop/dingo-devel/tutorials/02_gwpe/datasets/ASDs/asds_O2.hdf5
@@ -100,4 +100,4 @@ local:
     memory_cpus: 128000
     num_gpus: 1
     memory_gpus: 8000
-    train_script: /home/jonas/Desktop/dingo-devel/tutorials/02_gwpe/train_model.py
+    train_script: /home/jonas/Desktop/dingo-devel/venv/bin/dingo_train_condor  # I'm not sure if this is quite right
