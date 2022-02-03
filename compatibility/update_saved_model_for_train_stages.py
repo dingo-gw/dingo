@@ -1,6 +1,8 @@
 import torch
 import argparse
 import yaml
+import h5py
+import ast
 
 
 def parse_args():
@@ -66,6 +68,12 @@ def main():
         'training': training,
         'local': local,
     }}
+
+    # Save (for posterity) the waveform dataset settings
+    f = h5py.File(d['metadata']['train_settings']['data']['waveform_dataset_path'], 'r')
+    settings = ast.literal_eval(f.attrs['settings'])
+    d['metadata']['dataset_settings'] = settings
+    f.close()
 
     torch.save(d, args.out_file)
 
