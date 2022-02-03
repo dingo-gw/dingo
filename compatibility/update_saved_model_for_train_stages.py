@@ -1,3 +1,5 @@
+import os
+
 import torch
 import argparse
 import yaml
@@ -11,6 +13,7 @@ def parse_args():
     parser.add_argument('--checkpoint', type=str, required=True)
     parser.add_argument('--settings_file', type=str, required=True)
     parser.add_argument('--out_file', type=str, required=True)
+    parser.add_argument('--train_dir', type=str, required=True)
     return parser.parse_args()
 
 
@@ -66,7 +69,6 @@ def main():
         'data': data,
         'model': model,
         'training': training,
-        'local': local,
     }}
 
     # Save (for posterity) the waveform dataset settings
@@ -76,6 +78,10 @@ def main():
     f.close()
 
     torch.save(d, args.out_file)
+
+    # Save local settings
+    with open(os.path.join(args.train_dir, 'local_settings.yaml'), 'w') as f:
+        yaml.dump(local, f, default_flow_style=False, sort_keys=False)
 
 
 if __name__ == "__main__":

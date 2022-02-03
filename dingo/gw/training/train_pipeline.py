@@ -12,14 +12,15 @@ from dingo.core.nn.nsf import autocomplete_model_kwargs_nsf
 from dingo.gw.training.train_builders import (
     build_dataset,
     build_train_and_test_loaders,
-    set_train_transforms, build_svd_for_embedding_network,
+    set_train_transforms,
+    build_svd_for_embedding_network,
 )
 from dingo.core.models.posterior_model import PosteriorModel
 from dingo.core.utils import set_requires_grad_flag, get_number_of_model_parameters
 from dingo.gw.dataset import WaveformDataset
 
 
-def prepare_training_new(train_settings: dict, train_dir: str):
+def prepare_training_new(train_settings: dict, train_dir: str, local_settings: dict):
     """
     Based on a settings dictionary, initialize a WaveformDataset and PosteriorModel.
 
@@ -33,6 +34,8 @@ def prepare_training_new(train_settings: dict, train_dir: str):
         Settings which ultimately come from train_settings.yaml file.
     train_dir : str
         This is only used to save diagnostics from the SVD.
+    local_settings : dict
+        Local settings (e.g., num_workers, device)
 
     Returns
     -------
@@ -52,7 +55,7 @@ def prepare_training_new(train_settings: dict, train_dir: str):
             wfd,
             train_settings["data"],
             train_settings["training"]["stage_0"]["asd_dataset_path"],
-            num_workers=train_settings["local"]["num_workers"],
+            num_workers=local_settings["num_workers"],
             batch_size=train_settings["training"]["stage_0"]["batch_size"],
             out_dir=train_dir,
             **train_settings["model"]["embedding_net_kwargs"]["svd"],
@@ -88,12 +91,13 @@ def prepare_training_new(train_settings: dict, train_dir: str):
     pm = PosteriorModel(
         metadata=full_settings,
         initial_weights=initial_weights,
+        device=local_settings["device"],
     )
 
     return pm, wfd
 
 
-def prepare_training_resume(checkpoint_name):
+def prepare_training_resume(checkpoint_name, device):
     """
     Loads a PosteriorModel from a checkpoint, as well as the corresponding
     WaveformDataset, in order to continue training. It initializes the saved optimizer
@@ -103,13 +107,15 @@ def prepare_training_resume(checkpoint_name):
     ----------
     checkpoint_name : str
         File name containing the checkpoint (.pt format).
+    device : str
+        'cuda' or 'cpu'
 
     Returns
     -------
     (PosteriorModel, WaveformDataset)
     """
 
-    pm = PosteriorModel(model_filename=checkpoint_name)
+    pm = PosteriorModel(model_filename=checkpoint_name, device=device)
     pm.initialize_optimizer_and_scheduler()
 
     wfd = build_dataset(pm.metadata["train_settings"]["data"])
@@ -117,7 +123,7 @@ def prepare_training_resume(checkpoint_name):
     return pm, wfd
 
 
-def initialize_stage(pm, wfd, stage, resume=False):
+def initialize_stage(pm, wfd, stage, num_workers, resume=False):
     """
     Initializes training based on PosteriorModel metadata and current stage:
         * Builds transforms (based on noise settings for current stage);
@@ -132,6 +138,7 @@ def initialize_stage(pm, wfd, stage, resume=False):
     wfd : WaveformDataset
     stage : dict
         Settings specific to current stage of training
+    num_workers : int
     resume : bool
         Whether training is resuming mid-stage. This controls whether the optimizer and
         scheduler should be re-initialized based on contents of stage dict.
@@ -151,7 +158,7 @@ def initialize_stage(pm, wfd, stage, resume=False):
         wfd,
         train_settings["data"]["train_fraction"],
         stage["batch_size"],
-        train_settings["local"]["num_workers"],
+        num_workers,
     )
 
     if not resume:
@@ -179,7 +186,7 @@ def initialize_stage(pm, wfd, stage, resume=False):
     return train_loader, test_loader
 
 
-def train_stages(pm, wfd, train_dir):
+def train_stages(pm, wfd, train_dir, local_settings):
     """
     Train the network, iterating through the sequence of stages. Stages can change
     certain settings such as the noise characteristics, optimizer, and scheduler settings.
@@ -190,6 +197,7 @@ def train_stages(pm, wfd, train_dir):
     wfd : WaveformDataset
     train_dir : str
         Directory for saving checkpoints and train history.
+    local_settings : dict
 
     Returns
     -------
@@ -218,21 +226,25 @@ def train_stages(pm, wfd, train_dir):
         if pm.epoch == end_epochs[n] - stage["epochs"]:
             print(f"\nBeginning training stage {n}. Settings:")
             print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
-            train_loader, test_loader = initialize_stage(pm, wfd, stage, resume=False)
+            train_loader, test_loader = initialize_stage(
+                pm, wfd, stage, local_settings["num_workers"], resume=False
+            )
 
         else:
             print(f"\nResuming training in stage {n}. Settings:")
             print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
-            train_loader, test_loader = initialize_stage(pm, wfd, stage, resume=True)
+            train_loader, test_loader = initialize_stage(
+                pm, wfd, stage, local_settings["num_workers"], resume=True
+            )
 
-        runtime_limits_kwargs = train_settings["local"]["runtime_limits"].copy()
+        runtime_limits_kwargs = local_settings["runtime_limits"].copy()
         runtime_limits_kwargs["max_epochs_total"] = end_epochs[n]
         pm.train(
             train_loader,
             test_loader,
             train_dir=train_dir,
             runtime_limits_kwargs=runtime_limits_kwargs,
-            checkpoint_epochs=train_settings["local"]["checkpoint_epochs"],
+            checkpoint_epochs=local_settings["checkpoint_epochs"],
         )
 
         save_file = os.path.join(train_dir, f"model_stage_{n}.pt")
@@ -293,15 +305,26 @@ def train_local():
         print("Beginning new training run.")
         with open(args.settings_file, "r") as fp:
             train_settings = yaml.safe_load(fp)
-        pm, wfd = prepare_training_new(train_settings, args.train_dir)
+
+        # Extract the local settings from train settings file, save it separately. This
+        # file can later be modified, and the settings take effect immediately upon
+        # resuming.
+
+        local_settings = train_settings.pop("local")
+        with open(os.path.join(args.train_dir, "local_settings.yaml"), "w") as f:
+            yaml.dump(local_settings, f, default_flow_style=False, sort_keys=False)
+
+        pm, wfd = prepare_training_new(train_settings, args.train_dir, local_settings)
 
     else:
         print("Resuming training run.")
-        pm, wfd = prepare_training_resume(args.checkpoint)
+        with open(os.path.join(args.train_dir, "local_settings.yaml"), "r") as f:
+            local_settings = yaml.safe_load(f)
+        pm, wfd = prepare_training_resume(args.checkpoint, local_settings["device"])
 
-    complete = train_stages(pm, wfd, args.train_dir)
+    complete = train_stages(pm, wfd, args.train_dir, local_settings)
 
     if complete:
-        print('All training stages complete.')
+        print("All training stages complete.")
     else:
-        print('Program terminated due to runtime limit.')
+        print("Program terminated due to runtime limit.")

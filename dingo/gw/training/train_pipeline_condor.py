@@ -83,13 +83,25 @@ def train_condor():
             print("Beginning new training run.")
             with open(join(args.train_dir, "train_settings.yaml"), "r") as f:
                 train_settings = yaml.safe_load(f)
-            pm, wfd = prepare_training_new(train_settings, args.train_dir)
+
+            # Extract the local settings from train settings file, save it separately.
+            # This file can later be modified, and the settings take effect immediately
+            # upon resuming.
+
+            local_settings = train_settings.pop('local')
+            with open(os.path.join(args.train_dir, "local_settings.yaml"), "w") as f:
+                yaml.dump(local_settings, f, default_flow_style=False, sort_keys=False)
+
+            pm, wfd = prepare_training_new(train_settings, args.train_dir, local_settings)
 
         else:
             print("Resuming training run.")
-            pm, wfd = prepare_training_resume(join(args.train_dir, args.checkpoint))
+            with open(os.path.join(args.train_dir, 'local_settings.yaml'), 'r') as f:
+                local_settings = yaml.safe_load(f)
+            pm, wfd = prepare_training_resume(join(args.train_dir, args.checkpoint),
+                                              local_settings['device'])
 
-        complete = train_stages(pm, wfd, args.train_dir)
+        complete = train_stages(pm, wfd, args.train_dir, local_settings)
 
         print("Copying log files")
         copy_logfiles(args.train_dir, epoch=pm.epoch)

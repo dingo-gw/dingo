@@ -43,6 +43,7 @@ class PosteriorModel:
         model_filename: str = None,
         metadata: dict = None,
         initial_weights: dict = None,
+        device: str = 'cuda',
     ):
         """
 
@@ -83,10 +84,10 @@ class PosteriorModel:
 
         # build model
         if model_filename is not None:
-            self.load_model(model_filename, load_training_info=True)
+            self.load_model(model_filename, load_training_info=True, device=device)
         else:
             self.initialize_model()
-            self.model_to_device(self.metadata["train_settings"]["local"]["device"])
+            self.model_to_device(device)
 
     def model_to_device(self, device):
         """
@@ -169,6 +170,7 @@ class PosteriorModel:
         self,
         model_filename: str,
         load_training_info: bool = True,
+        device: str = 'cuda',
     ):
         """
         Load a posterior model from the disk.
@@ -185,18 +187,7 @@ class PosteriorModel:
         # Make sure that when the model is loaded, the torch tensors are put on the
         # device indicated in the saved metadata. External routines run on a cpu
         # machine may have moved the model from 'cuda' to 'cpu'.
-        d = torch.load(model_filename)
-        if (
-            list(d["model_state_dict"].values())[0].device.type
-            != d["metadata"]["train_settings"]["local"]["device"]
-        ):
-            print(
-                f"Model saved on "
-                f'{list(d["model_state_dict"].values())[0].device.type}. '
-                f'Reloading on {d["metadata"]["train_settings"]["local"]["device"]}.'
-            )
-            device = torch.device(d["metadata"]["train_settings"]["local"]["device"])
-            d = torch.load(model_filename, map_location=device)
+        d = torch.load(model_filename, map_location=device)
 
         self.model_kwargs = d["model_kwargs"]
         self.initialize_model()
@@ -206,7 +197,7 @@ class PosteriorModel:
 
         self.metadata = d["metadata"]
 
-        self.model_to_device(self.metadata["train_settings"]["local"]["device"])
+        self.model_to_device(device)
 
         # I think this should probably not be optional...
         if load_training_info:
