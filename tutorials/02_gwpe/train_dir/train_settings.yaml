@@ -61,7 +61,7 @@ model:
 #      added_context: False # True
 
 training:
-
+  # Training is divided in stages. They each require all settings as indicated below.
   stage_0:
     epochs: 300
     asd_dataset_path: ./asds_O2.hdf5 #/home/jonas/Desktop/dingo-devel/tutorials/02_gwpe/datasets/ASDs/asds_O2.hdf5
@@ -86,20 +86,10 @@ training:
       T_max: 150
     batch_size: 64
 
-# settings for training
-local:  # Most of these settings have no impact on the final network -> "local"
+# Local settings for training that have no impact on the final trained network.
+local:
   device: cuda
-#  freeze_rb_layer: False
-  # fraction of dataset used for training, rest is used for validation
-#  train_fraction: 0.95  # !! -> data -- this should be fixed once and for all
-#  batch_size: 64  # !! -> stages -- can in principle change during training
   num_workers: 0 # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
-#  optimizer_kwargs:
-#    type: adam
-#    lr: 0.0001
-#  scheduler_kwargs:
-#    type: cosine
-#    T_max: 300
   runtime_limits:
     max_time_per_run: 36000
     max_epochs_per_run: 2
