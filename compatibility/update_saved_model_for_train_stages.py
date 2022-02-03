@@ -18,7 +18,13 @@ def main():
     with open(args.settings_file, 'r') as f:
         train_settings = yaml.safe_load(f)
 
-    d = torch.load(args.checkpoint)
+    # Typically training is done on the GPU, so the model could be saved on a GPU
+    # device. Since this routine may be run on a CPU machine, allow for a remap of the
+    # torch tensors.
+    if torch.cuda.is_available():
+        d = torch.load(args.checkpoint)
+    else:
+        d = torch.load(args.checkpoint, map_location=torch.device('cpu'))
 
     data = {
         'waveform_dataset_path': train_settings['waveform_dataset_path'],

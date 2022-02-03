@@ -11,7 +11,14 @@ def append_stage():
     parser.add_argument("--out_file", type=str, required=True)
     args = parser.parse_args()
 
-    d = torch.load(args.checkpoint)
+    # Typically training is done on the GPU, so the model could be saved on a GPU
+    # device. Since this routine may be run on a CPU machine, allow for a remap of the
+    # torch tensors.
+    if torch.cuda.is_available():
+        d = torch.load(args.checkpoint)
+    else:
+        d = torch.load(args.checkpoint, map_location=torch.device('cpu'))
+
     num_stages = len(
         [
             k
