@@ -1,17 +1,16 @@
-waveform_dataset_path: /home/jonas/Desktop/dingo-devel/tutorials/02_gwpe/datasets/waveforms/waveform_dataset.hdf5
-asd_dataset_path: /home/jonas/Desktop/dingo-devel/tutorials/02_gwpe/datasets/ASDs/asds_O2_synthetic.hdf5 #/home/jonas/Desktop/dingo-devel/tutorials/02_gwpe/datasets/ASDs/asds_O2.hdf5
-# data conditioning for inference
-data_conditioning:
-  frequency_range: [20, 1024]
-  window_kwargs:
-    window_type: tukey
-    f_s: 4096
-    T: 8.0
-    roll_off: 0.4
-#  0.9374713897717841
-
-# settings for transforms
-transform_settings:
+# Settings for data generation
+data:
+  waveform_dataset_path: ./waveform_dataset.hdf5  # Contains intrinsic waveforms
+  train_fraction: 0.95
+  # data conditioning for inference
+  conditioning:
+    frequency_range: [ 20, 1024 ]
+    window_kwargs:
+      window_type: tukey
+      f_s: 4096
+      T: 8.0
+      roll_off: 0.4
+  #  0.9374713897717841
   detectors:
     - H1
     - L1
@@ -25,68 +24,80 @@ transform_settings:
   gnpe_time_shifts:
     kernel_kwargs: {type: uniform, low: -0.001, high: 0.001}
     exact_equiv: True
-  gnpe_chirp_mass:
-    kernel_kwargs: {type: uniform, low: -0.1, high: 0.1}
+#  gnpe_chirp_mass:
+#    kernel_kwargs: {type: uniform, low: -0.1, high: 0.1}
   selected_parameters: default # [chirp_mass, mass_ratio,  luminosity_distance, dec]
 
-# model architecture
-model_arch:
-  # model builder for nde with enet
-  model_builder:
-    dingo.core.nn.nsf.create_nsf_with_rb_projection_embedding_net
-  # kwargs for model_builder
-  model_kwargs:
-    # kwargs for neural spline flow
-    nsf_kwargs:
-      num_flow_steps: 3 # 30
-      base_transform_kwargs:
-        hidden_dim: 64 # 512
-        num_transform_blocks: 5
-        activation: elu
-        dropout_probability: 0.0
-        batch_norm: True
-        num_bins: 8
-        base_transform_type: rq-coupling
-    # kwargs for embedding net
-    embedding_net_kwargs:
-      n_rb: 200
-      V_rb_list: null
-      output_dim: 128
+# Model architecture
+model:
+  type: nsf+embedding
+  # kwargs for neural spline flow
+  nsf_kwargs:
+    num_flow_steps: 3 # 30
+    base_transform_kwargs:
+      hidden_dim: 64 # 512
+      num_transform_blocks: 5
+      activation: elu
+      dropout_probability: 0.0
+      batch_norm: True
+      num_bins: 8
+      base_transform_type: rq-coupling
+  # kwargs for embedding net
+  embedding_net_kwargs:
+    output_dim: 128
 #      hidden_dims: [1024, 1024, 1024, 1024, 1024, 1024,
 #                    512, 512, 512, 512, 512, 512,
 #                    256, 256, 256, 256, 256, 256,
 #                    128, 128, 128, 128, 128, 128]
-      hidden_dims: [1024, 512, 256, 128]
-      activation: elu
-      dropout: 0.0
-      batch_norm: True
-      # added_context = True for concatenation of GNPE proxies to enet output
+    hidden_dims: [1024, 512, 256, 128]
+    activation: elu
+    dropout: 0.0
+    batch_norm: True
+    svd:
+      num_training_samples: 20000
+      num_validation_samples: 5000
+      size: 200
+    # added_context = True for concatenation of GNPE proxies to enet output
 #      added_context: False # True
 
-# settings for training
-train_settings:
+# Training is divided in stages. They each require all settings as indicated below.
+training:
+  stage_0:
+    epochs: 300
+    asd_dataset_path: ./asds_O2.hdf5 #/home/jonas/Desktop/dingo-devel/tutorials/02_gwpe/datasets/ASDs/asds_O2.hdf5
+    freeze_rb_layer: True
+    optimizer:
+      type: adam
+      lr: 0.0001
+    scheduler:
+      type: cosine
+      T_max: 300
+    batch_size: 64
+
+  stage_1:
+    epochs: 150
+    asd_dataset_path: ./asds_O2.hdf5 #/home/jonas/Desktop/dingo-devel/tutorials/02_gwpe/datasets/ASDs/asds_O2.hdf5
+    freeze_rb_layer: False
+    optimizer:
+      type: adam
+      lr: 0.00001
+    scheduler:
+      type: cosine
+      T_max: 150
+    batch_size: 64
+
+# Local settings for training that have no impact on the final trained network.
+local:
   device: cuda
-  freeze_rb_layer: False
-  # fraction of dataset used for training, rest is used for validation
-  train_fraction: 0.95
-  batch_size: 64
   num_workers: 0 # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
-  optimizer_kwargs:
-    type: adam
-    lr: 0.0001
-  scheduler_kwargs:
-    type: cosine
-    T_max: 300
   runtime_limits:
     max_time_per_run: 36000
     max_epochs_per_run: 2
-    max_epochs_total: 300
   checkpoint_epochs: 1
-
-condor_settings:
-  python: /home/jonas/Desktop/dingo-devel/venv/bin/python
-  num_cpus: 16
-  memory_cpus: 128000
-  num_gpus: 1
-  memory_gpus: 8000
-  train_script: /home/jonas/Desktop/dingo-devel/tutorials/02_gwpe/train_model.py
+  condor:
+    python: /home/jonas/Desktop/dingo-devel/venv/bin/python
+    num_cpus: 16
+    memory_cpus: 128000
+    num_gpus: 1
+    memory_gpus: 8000
+    train_script: /home/jonas/Desktop/dingo-devel/venv/bin/dingo_train_condor  # I'm not sure if this is quite right

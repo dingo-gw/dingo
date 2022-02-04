@@ -3,7 +3,7 @@ import h5py
 import numpy as np
 
 from dingo.gw.domains import build_domain
-from dingo.gw.noise_dataset import ASDDataset
+from dingo.gw.ASD_dataset.noise_dataset import ASDDataset
 
 @pytest.fixture
 def noise_dataset():
@@ -18,12 +18,13 @@ def noise_dataset():
     gps_times = f.create_group('gps_times')
     settings = {'domain_dict': domain.domain_dict}
 
+    grp = f.create_group('asds')
     for ifo, num_asds in ifos_num_asds.items():
         asds = np.sin(np.outer(np.arange(num_asds)/100, domain()))
-        f.create_dataset(f'asds_{ifo}', data=asds)
+        grp.create_dataset(ifo, data=asds)
         gps_times[ifo] = np.arange(num_asds)
 
-    f.attrs['metadata'] = str(settings)
+    f.attrs['settings'] = str(settings)
     f.close()
 
     return dataset_path, domain_dict, ifos_num_asds

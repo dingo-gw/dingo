@@ -262,10 +262,11 @@ class ModuleMerger(nn.Module):
 
 def create_enet_with_projection_layer_and_dense_resnet(
         input_dims: Tuple[int, int, int],
-        n_rb: int,
+        # n_rb: int,
         V_rb_list: Union[Tuple, None],
         output_dim: int,
         hidden_dims: Tuple,
+        svd: dict,
         activation: str = 'elu',
         dropout: float = 0.0,
         batch_norm: bool = True,
@@ -330,7 +331,7 @@ def create_enet_with_projection_layer_and_dense_resnet(
     :return: nn.Module
     """
     activation_fn = torchutils.get_activation_function_from_string(activation)
-    module_1 = LinearProjectionRB(input_dims, n_rb, V_rb_list)
+    module_1 = LinearProjectionRB(input_dims, svd['size'], V_rb_list)
     module_2 = DenseResidualNet(input_dim=module_1.output_dim,
                                 output_dim=output_dim,
                                 hidden_dims=hidden_dims,

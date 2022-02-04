@@ -45,7 +45,9 @@ setup(name='dingo',
            'dingo_merge_datasets=dingo.gw.dataset.utils:merge_datasets_cli',
            'dingo_build_svd=dingo.gw.dataset.utils:build_svd_cli',
            'dingo_generate_ASD_dataset=dingo.gw.ASD_dataset.generate_dataset:main',
-           'dingo_train=dingo.gw.training:main']
+           'dingo_train=dingo.gw.training:train_local',
+           'dingo_train_condor=dingo.gw.training.train_pipeline_condor:train_condor',
+           'dingo_append_training_stage=dingo.gw.training:append_stage']
       },
       classifiers=[
           "Programming Language :: Python :: 3.6",

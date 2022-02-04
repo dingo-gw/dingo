@@ -26,7 +26,8 @@ def data_setup_nsf_large():
     }
     d.embedding_net_kwargs = {
         'input_dims': (2, 3, 8033),
-        'n_rb': 200,
+        # 'n_rb': 200,
+        'svd': {'size': 200},
         'V_rb_list': None,
         'output_dim': 128,
         'hidden_dims': [1024, 1024, 1024, 1024, 1024, 1024, 512, 512, 512, 512,
@@ -65,7 +66,7 @@ def data_setup_nsf_small():
     }
     d.embedding_net_kwargs = {
         'input_dims': (2, 3, 20),
-        'n_rb': 10,
+        # 'n_rb': 10,
         'V_rb_list': None,
         'output_dim': 8,
         'hidden_dims': [32, 16, 8],
@@ -73,6 +74,7 @@ def data_setup_nsf_small():
         'dropout': 0.0,
         'batch_norm': True,
         'added_context': True,
+        'svd': {'size': 10},
     }
     d.embedding_net_builder = create_enet_with_projection_layer_and_dense_resnet
     d.nde_builder = create_nsf_model

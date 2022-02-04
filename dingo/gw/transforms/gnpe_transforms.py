@@ -139,7 +139,9 @@ def get_gnpe_kernel(kernel_kwargs):
         corresponding numpy function.
     :return: kernel
     """
-    kernel_type = kernel_kwargs.pop('type')
+    # kernel_type = kernel_kwargs.pop('type')
+    kernel_type = kernel_kwargs['type']
+    kernel_kwargs = {k: v for k, v in kernel_kwargs.items() if k != 'type'}
     if kernel_type == 'uniform':
         def kernel():
             return np.random.uniform(**kernel_kwargs)

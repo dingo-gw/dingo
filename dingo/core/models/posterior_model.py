@@ -12,6 +12,8 @@ import dingo.core.utils.trainutils
 
 import pdb
 
+from dingo.core.nn.nsf import create_nsf_with_rb_projection_embedding_net
+
 
 class PosteriorModel:
     """
@@ -36,16 +38,13 @@ class PosteriorModel:
         perform inference
     """
 
-    def __init__(self,
-                 model_builder: Callable,
-                 model_kwargs: dict = None,
-                 model_filename: str = None,
-                 optimizer_kwargs: dict = None,
-                 scheduler_kwargs: dict = None,
-                 init_for_training: bool = False,
-                 metadata: dict = None,
-                 device: str = 'cpu'
-                 ):
+    def __init__(
+        self,
+        model_filename: str = None,
+        metadata: dict = None,
+        initial_weights: dict = None,
+        device: str = 'cuda',
+    ):
         """
 
         Parameters
@@ -68,35 +67,34 @@ class PosteriorModel:
         metadata: dict = None
             dict with metadata, used to save dataset_settings and train_settings
         """
-        self.model_builder = model_builder
-        self.model_kwargs = model_kwargs
+        self.optimizer_kwargs = None
+        self.model_kwargs = None
+        self.scheduler_kwargs = None
+        self.initial_weights = initial_weights
+
+        self.metadata = metadata
+        if self.metadata is not None:
+            self.model_kwargs = self.metadata["train_settings"]["model"]
+            # Expect self.optimizer_settings and self.scheduler_settings to be set
+            # separately, and before calling initialize_optimizer_and_scheduler().
 
         self.epoch = 0
-        self.optimizer_kwargs = optimizer_kwargs
         self.optimizer = None
-        self.scheduler_kwargs = scheduler_kwargs
         self.scheduler = None
-        self.metadata = metadata
 
         # build model
         if model_filename is not None:
-            self.load_model(model_filename, device,
-                            load_training_info=init_for_training)
+            self.load_model(model_filename, load_training_info=True, device=device)
         else:
             self.initialize_model()
-            # initialize for training
-            if init_for_training:
-                self.initialize_optimizer_and_scheduler()
-
             self.model_to_device(device)
-
 
     def model_to_device(self, device):
         """
         Put model to device, and set self.device accordingly.
         """
-        if device not in ('cpu', 'cuda'):
-            raise ValueError(f'Device should be either cpu or cuda, got {device}.')
+        if device not in ("cpu", "cuda"):
+            raise ValueError(f"Device should be either cpu or cuda, got {device}.")
         self.device = torch.device(device)
         # Commented below so that code runs on first cuda device in the case of multiple.
         # if device == 'cuda' and torch.cuda.device_count() > 1:
@@ -104,7 +102,7 @@ class PosteriorModel:
         #     raise NotImplementedError('This needs testing!')
         #     # dim = 0 [512, ...] -> [256, ...], [256, ...] on 2 GPUs
         #     self.model = torch.nn.DataParallel(self.model)
-        print(f'Putting posterior model to device {self.device}.')
+        print(f"Putting posterior model to device {self.device}.")
         self.model.to(self.device)
 
     def initialize_model(self):
@@ -113,7 +111,9 @@ class PosteriorModel:
         self.model_builder with self.model_kwargs.
 
         """
-        self.model = self.model_builder(**self.model_kwargs)
+        model_builder = get_model_callable(self.model_kwargs["type"])
+        model_kwargs = {k: v for k, v in self.model_kwargs.items() if k != "type"}
+        self.model = model_builder(**model_kwargs, initial_weights=self.initial_weights)
 
     def initialize_optimizer_and_scheduler(self):
         """
@@ -122,15 +122,18 @@ class PosteriorModel:
         """
         if self.optimizer_kwargs is not None:
             self.optimizer = utils.get_optimizer_from_kwargs(
-                self.model.parameters(), **self.optimizer_kwargs)
+                self.model.parameters(), **self.optimizer_kwargs
+            )
         if self.scheduler_kwargs is not None:
             self.scheduler = utils.get_scheduler_from_kwargs(
-                self.optimizer, **self.scheduler_kwargs)
+                self.optimizer, **self.scheduler_kwargs
+            )
 
-    def save_model(self,
-                   model_filename: str,
-                   save_training_info: bool = True,
-                   ):
+    def save_model(
+        self,
+        model_filename: str,
+        save_training_info: bool = True,
+    ):
         """
         Save the posterior model to the disk.
 
@@ -144,31 +147,31 @@ class PosteriorModel:
 
         """
         model_dict = {
-            'model_kwargs': self.model_kwargs,
-            'model_state_dict': self.model.state_dict(),
-            'epoch': self.epoch,
-            # 'training_data_information': None,
+            "model_kwargs": self.model_kwargs,
+            "model_state_dict": self.model.state_dict(),
+            "epoch": self.epoch,
         }
 
         if self.metadata is not None:
-            model_dict['metadata'] = self.metadata
+            model_dict["metadata"] = self.metadata
 
         if save_training_info:
-            model_dict['optimizer_kwargs'] = self.optimizer_kwargs
-            model_dict['scheduler_kwargs'] = self.scheduler_kwargs
+            model_dict["optimizer_kwargs"] = self.optimizer_kwargs
+            model_dict["scheduler_kwargs"] = self.scheduler_kwargs
             if self.optimizer is not None:
-                model_dict['optimizer_state_dict'] = self.optimizer.state_dict()
+                model_dict["optimizer_state_dict"] = self.optimizer.state_dict()
             if self.scheduler is not None:
-                model_dict['scheduler_state_dict'] = self.scheduler.state_dict()
+                model_dict["scheduler_state_dict"] = self.scheduler.state_dict()
             # TODO
 
         torch.save(model_dict, model_filename)
 
-    def load_model(self,
-                   model_filename: str,
-                   device: str,
-                   load_training_info: bool = True,
-                   ):
+    def load_model(
+        self,
+        model_filename: str,
+        load_training_info: bool = True,
+        device: str = 'cuda',
+    ):
         """
         Load a posterior model from the disk.
 
@@ -181,39 +184,43 @@ class PosteriorModel:
             loaded, e.g. optimizer state dict
         """
 
-        d = torch.load(model_filename)
+        # Make sure that when the model is loaded, the torch tensors are put on the
+        # device indicated in the saved metadata. External routines run on a cpu
+        # machine may have moved the model from 'cuda' to 'cpu'.
+        d = torch.load(model_filename, map_location=device)
 
-        self.model_kwargs = d['model_kwargs']
+        self.model_kwargs = d["model_kwargs"]
         self.initialize_model()
-        self.model.load_state_dict(d['model_state_dict'])
+        self.model.load_state_dict(d["model_state_dict"])
 
-        self.epoch = d['epoch']
+        self.epoch = d["epoch"]
 
-        if 'metadata' in d:
-            self.metadata = d['metadata']
+        self.metadata = d["metadata"]
 
         self.model_to_device(device)
 
+        # I think this should probably not be optional...
         if load_training_info:
-            if 'optimizer_kwargs' in d:
-                self.optimizer_kwargs = d['optimizer_kwargs']
-            if 'scheduler_kwargs' in d:
-                self.scheduler_kwargs = d['scheduler_kwargs']
+            if "optimizer_kwargs" in d:
+                self.optimizer_kwargs = d["optimizer_kwargs"]
+            if "scheduler_kwargs" in d:
+                self.scheduler_kwargs = d["scheduler_kwargs"]
             # initialize optimizer and scheduler
             self.initialize_optimizer_and_scheduler()
             # load optimizer and scheduler state dict
-            if 'optimizer_state_dict' in d:
-                self.optimizer.load_state_dict(d['optimizer_state_dict'])
-            if 'scheduler_state_dict' in d:
-                self.scheduler.load_state_dict(d['scheduler_state_dict'])
+            if "optimizer_state_dict" in d:
+                self.optimizer.load_state_dict(d["optimizer_state_dict"])
+            if "scheduler_state_dict" in d:
+                self.scheduler.load_state_dict(d["scheduler_state_dict"])
 
-    def train(self,
-              train_loader: torch.utils.data.DataLoader,
-              test_loader: torch.utils.data.DataLoader,
-              train_dir: str,
-              runtime_limits_kwargs: dict = None,
-              checkpoint_epochs: int = None,
-              ):
+    def train(
+        self,
+        train_loader: torch.utils.data.DataLoader,
+        test_loader: torch.utils.data.DataLoader,
+        train_dir: str,
+        runtime_limits_kwargs: dict = None,
+        checkpoint_epochs: int = None,
+    ):
         """
 
         :param train_loader:
@@ -223,53 +230,66 @@ class PosteriorModel:
         :return:
         """
         runtime_limits = dingo.core.utils.trainutils.RuntimeLimits(
-            **runtime_limits_kwargs, epoch_start=self.epoch)
+            **runtime_limits_kwargs, epoch_start=self.epoch
+        )
 
         while not runtime_limits.runtime_limits_exceeded(self.epoch):
             self.epoch += 1
 
             # Training
             lr = utils.get_lr(self.optimizer)
-            print(f'\nStart training epoch {self.epoch} with lr {lr}')
+            print(f"\nStart training epoch {self.epoch} with lr {lr}")
             time_start = time.time()
             train_loss = train_epoch(self, train_loader)
-            print('Done. This took {:2.0f}:{:2.0f} min.'.format(
-                  *divmod(time.time() - time_start, 60)))
+            print(
+                "Done. This took {:2.0f}:{:2.0f} min.".format(
+                    *divmod(time.time() - time_start, 60)
+                )
+            )
 
             # Testing
-            print(f'Start testing epoch {self.epoch}')
+            print(f"Start testing epoch {self.epoch}")
             time_start = time.time()
             test_loss = test_epoch(self, test_loader)
 
-            print('Done. This took {:2.0f}:{:2.0f} min.'.format(
-                *divmod(time.time() - time_start, 60)))
+            print(
+                "Done. This took {:2.0f}:{:2.0f} min.".format(
+                    *divmod(time.time() - time_start, 60)
+                )
+            )
 
-            utils.write_history(train_dir, self.epoch, train_loss, test_loss,
-                                lr)
-            utils.save_model(self, train_dir,
-                             checkpoint_epochs=checkpoint_epochs)
+            utils.write_history(train_dir, self.epoch, train_loss, test_loss, lr)
+            utils.save_model(self, train_dir, checkpoint_epochs=checkpoint_epochs)
 
             # scheduler step for learning rate
             utils.perform_scheduler_step(self.scheduler, test_loss)
 
-            print(f'Finished training epoch {self.epoch}.\n')
+            print(f"Finished training epoch {self.epoch}.\n")
 
 
-
+def get_model_callable(model_type: str):
+    if model_type == "nsf+embedding":
+        return create_nsf_with_rb_projection_embedding_net
+    else:
+        raise KeyError("Invalid model type.")
 
 
 def train_epoch(pm, dataloader):
     pm.model.train()
-    loss_info = dingo.core.utils.trainutils.LossInfo(pm.epoch, len(dataloader.dataset),
-                                                     dataloader.batch_size, mode='Train',
-                                                     print_freq=1)
+    loss_info = dingo.core.utils.trainutils.LossInfo(
+        pm.epoch,
+        len(dataloader.dataset),
+        dataloader.batch_size,
+        mode="Train",
+        print_freq=1,
+    )
 
     for batch_idx, data in enumerate(dataloader):
         pm.optimizer.zero_grad()
         # data to device
         data = [d.float().to(pm.device, non_blocking=True) for d in data]
         # compute loss
-        loss = - pm.model(data[0], *data[1:]).mean()
+        loss = -pm.model(data[0], *data[1:]).mean()
         # update loss for history and logging
         loss_info.update(loss.detach().item() * len(data[0]), len(data[0]))
         loss_info.print_info(batch_idx, loss.item())
@@ -283,15 +303,19 @@ def train_epoch(pm, dataloader):
 def test_epoch(pm, dataloader):
     with torch.no_grad():
         pm.model.eval()
-        loss_info = dingo.core.utils.trainutils.LossInfo(pm.epoch, len(dataloader.dataset),
-                                                         dataloader.batch_size, mode='Test',
-                                                         print_freq=1)
+        loss_info = dingo.core.utils.trainutils.LossInfo(
+            pm.epoch,
+            len(dataloader.dataset),
+            dataloader.batch_size,
+            mode="Test",
+            print_freq=1,
+        )
 
         for batch_idx, data in enumerate(dataloader):
             # data to device
             data = [d.float().to(pm.device, non_blocking=True) for d in data]
             # compute loss
-            loss = - pm.model(data[0], *data[1:]).mean()
+            loss = -pm.model(data[0], *data[1:]).mean()
             # update loss for history and logging
             loss_info.update(loss.detach().item() * len(data[0]), len(data[0]))
             loss_info.print_info(batch_idx, loss.item())

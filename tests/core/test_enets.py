@@ -13,13 +13,14 @@ def data_setup_rb():
         generate_1d_datasets_and_reduced_basis(batch_size, num_bins)
     enet_kwargs = {
         'input_dims': (num_blocks, num_channels, num_bins),
-        'n_rb': n_rb,
+        #'n_rb': n_rb,
         'V_rb_list': (V1, V2),
         'output_dim': 8,
         'hidden_dims': [32, 16, 16, 8],
         'activation': 'elu',
         'dropout': 0.0,
         'batch_norm': True,
+        'svd': {'size': n_rb}
     }
     return {
         'batch_size': batch_size,

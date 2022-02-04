@@ -347,6 +347,30 @@ class TimeDomain(Domain):
     def time_translate_data(self, data, dt) -> np.ndarray:
         raise NotImplementedError
 
+    @property
+    def f_max(self) -> float:
+        """The maximum frequency [Hz] is typically set to half the sampling
+        rate."""
+        return self._sampling_rate / 2.0
+
+    @property
+    def duration(self) -> float:
+        """Waveform duration in seconds."""
+        return self._time_duration
+
+    @property
+    def sampling_rate(self) -> float:
+        return self._sampling_rate
+
+    @property
+    def domain_dict(self):
+        """Enables to rebuild the domain via calling build_domain(domain_dict)."""
+        return {
+            "type": "TimeDomain",
+            "time_duration": self._time_duration,
+            "sampling_rate": self._sampling_rate,
+        }
+
 
 class PCADomain(Domain):
     """TODO"""

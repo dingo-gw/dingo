@@ -31,14 +31,14 @@ intrinsic_prior:
   geocent_time: 0.0 # s
 
 # Number of samples in the dataset
-num_samples: 10000
+num_samples: 50000
 
 # Save a compressed representation of the dataset
 compression:
   # whitening: aLIGOZeroDetuned  # PSD (not yet implemented)
   # single_precision: True  # (not yet implemented) be careful if using without whitening.
   svd:
-    num_training_samples: 2000
+    num_training_samples: 10000
     # num_validation_samples: 500  # (not yet implemented)
     # Truncate the SVD basis at this size. No truncation if zero.
     size: 100
