@@ -47,7 +47,8 @@ def parse_args():
     )
     parser.add_argument(
         "--detectors",
-        type=list,
+        type=str,
+        nargs='+',
         default=["H1", "L1"],
         help="Detectors for which to generate the dataset",
     )

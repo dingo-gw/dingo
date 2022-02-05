@@ -16,9 +16,9 @@ def noise_dataset():
 
     f = h5py.File(dataset_path, 'w')
     gps_times = f.create_group('gps_times')
+    grp = f.create_group('asds')
     settings = {'domain_dict': domain.domain_dict}
 
-    grp = f.create_group('asds')
     for ifo, num_asds in ifos_num_asds.items():
         asds = np.sin(np.outer(np.arange(num_asds)/100, domain()))
         grp.create_dataset(ifo, data=asds)
@@ -49,7 +49,7 @@ def test_noise_dataset_load(noise_dataset):
 
     # repeat tests for ASDDataset with only a subset of detectors
     ifos = ['H1', 'V1']
-    asd_dataset = ASDDataset(dataset_path, ifos)
+    asd_dataset = ASDDataset(dataset_path, ifos=ifos)
     # check domain
     assert asd_dataset.domain.domain_dict == domain_dict
     # check that the dataset has the correct ifos and corresponding datasets

@@ -137,7 +137,6 @@ def download_and_estimate_PSDs(
 
     """ ""
 
-    filename = f"{run}_{detector}_BURST_CAT2.txt"
     key = run + "_" + detector
     urls = URL_DIRECTORY[key]
 
