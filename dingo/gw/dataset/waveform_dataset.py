@@ -26,6 +26,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         dictionary=None,
         transform=None,
         precision=None,
+        domain_update=None,
     ):
         """
         For constructing, provide either file_name, or dictionary containing data and
@@ -59,14 +60,17 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             and self.polarizations is not None
             and self.settings is not None
         ):
-            self.load_supplemental()
+            self.load_supplemental(domain_update)
 
-    def load_supplemental(self):
+    def load_supplemental(self, domain_update=None):
         """Method called immediately after loading a dataset.
 
-        Creates domain, updates dtypes, and initializes any decompression transform.
+        Creates (and possibly updates) domain, updates dtypes, and initializes any
+        decompression transform. Also zeros data below f_min, and truncates above f_max.
         """
         self.domain = build_domain(self.settings["domain"])
+        if domain_update is not None:
+            self.update_domain(domain_update)
 
         # Update dtypes if necessary
         if self.precision is not None:
@@ -88,6 +92,22 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
 
         if self.settings["compression"] is not None:
             self.initialize_decompression()
+
+    def update_domain(self, domain_update):
+        self.domain.update(domain_update)
+        self.settings['domain'] = copy.deepcopy(self.domain.domain_dict)
+
+        # Determine where any domain adjustment must be applied. If the dataset is SVD
+        # compressed, then adjust the SVD matrices. Otherwise, adjust the dataset
+        # itself.
+        if (
+                self.settings["compression"] is not None
+                and "svd" in self.settings["compression"]
+        ):
+            self.svd_V = self.domain.adjust_data_range(self.svd_V, axis=0)
+        else:
+            for k, v in self.polarizations.items():
+                self.polarizations[k] = self.domain.adjust_data_range(v)
 
     def initialize_decompression(self):
         """

@@ -93,6 +93,23 @@ class FrequencyDomain(Domain):
         FrequencyDomain.frequency_mask.fget.cache_clear()
         FrequencyDomain.noise_std.fget.cache_clear()
 
+    def update(self, new_settings):
+        new_settings = new_settings.copy()
+        if "type" in new_settings and new_settings.pop("type") not in [
+            "FrequencyDomain",
+            "FD",
+        ]:
+            raise ValueError("Cannot update domain to type other than FrequencyDomain.")
+        for k, v in new_settings.items():
+            if k not in ['f_min', 'f_max', 'delta_f', 'window_factor']:
+                raise KeyError(f'Invalid key for domain update: {k}.')
+            if k == 'window_factor' and v != self._window_factor:
+                raise ValueError('Cannot update window_factor.')
+            if k == 'delta_f' and v != self._delta_f:
+                raise ValueError('Cannot update delta_f.')
+        self.set_new_range(f_min=new_settings.get('f_min', None),
+                           f_max=new_settings.get('f_max', None))
+
     def set_new_range(self, f_min: float = None, f_max: float = None):
         """
         Set a new range for the domain. This changes the range of the domain to
@@ -119,6 +136,19 @@ class FrequencyDomain(Domain):
         # clear cached properties, such that they are recomputed when needed
         # instead of using the old (incorrect) ones.
         self.clear_cache_for_all_instances()
+
+    def adjust_data_range(self, data, axis=-1, low_value=0.0):
+        sl = [slice(None)] * data.ndim
+
+        # First truncate beyond f_max.
+        sl[axis] = slice(0, self.f_max_idx + 1)
+        data = data[tuple(sl)]
+
+        # Set data value below f_min to low_value.
+        sl[axis] = slice(0, self.f_min_idx)
+        data[tuple(sl)] = low_value
+
+        return data
 
     def truncate_data(self, data, axis=-1, allow_for_flexible_upper_bound=False):
         """Truncate data from to [self._f_min, self._f_max]. By convention,

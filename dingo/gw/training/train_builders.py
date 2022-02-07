@@ -42,10 +42,13 @@ def build_dataset(data_settings):
     WaveformDataset
     """
     # Build and truncate datasets
+    domain_update = data_settings.get('domain_update', None)
     wfd = WaveformDataset(
-        file_name=data_settings["waveform_dataset_path"], precision="single"
+        file_name=data_settings["waveform_dataset_path"],
+        precision="single",
+        domain_update=domain_update,
     )
-    wfd.truncate_dataset_domain(data_settings["conditioning"]["frequency_range"])
+    # wfd.truncate_dataset_domain(data_settings["conditioning"]["frequency_range"])
     return wfd
 
 
