@@ -16,6 +16,7 @@ from dingo.gw.training.train_builders import (
     build_svd_for_embedding_network,
 )
 from dingo.core.models.posterior_model import PosteriorModel
+from dingo.core.utils.trainutils import RuntimeLimits
 from dingo.core.utils import set_requires_grad_flag, get_number_of_model_parameters
 from dingo.gw.dataset import WaveformDataset
 
@@ -116,7 +117,6 @@ def prepare_training_resume(checkpoint_name, device):
     """
 
     pm = PosteriorModel(model_filename=checkpoint_name, device=device)
-    pm.initialize_optimizer_and_scheduler()
 
     wfd = build_dataset(pm.metadata["train_settings"]["data"])
 
@@ -207,6 +207,9 @@ def train_stages(pm, wfd, train_dir, local_settings):
     """
 
     train_settings = pm.metadata["train_settings"]
+    runtime_limits = RuntimeLimits(
+        epoch_start=pm.epoch, **local_settings["runtime_limits"]
+    )
 
     # Extract list of stages from settings dict
     stages = []
@@ -217,7 +220,7 @@ def train_stages(pm, wfd, train_dir, local_settings):
             num_stages += 1
         except KeyError:
             break
-    end_epochs = np.cumsum([stage["epochs"] for stage in stages])
+    end_epochs = list(np.cumsum([stage["epochs"] for stage in stages]))
 
     num_starting_stage = np.searchsorted(end_epochs, pm.epoch + 1)
     for n in range(num_starting_stage, num_stages):
@@ -229,7 +232,6 @@ def train_stages(pm, wfd, train_dir, local_settings):
             train_loader, test_loader = initialize_stage(
                 pm, wfd, stage, local_settings["num_workers"], resume=False
             )
-
         else:
             print(f"\nResuming training in stage {n}. Settings:")
             print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
@@ -237,19 +239,22 @@ def train_stages(pm, wfd, train_dir, local_settings):
                 pm, wfd, stage, local_settings["num_workers"], resume=True
             )
 
-        runtime_limits_kwargs = local_settings["runtime_limits"].copy()
-        runtime_limits_kwargs["max_epochs_total"] = end_epochs[n]
+        runtime_limits.max_epochs_total = end_epochs[n]
         pm.train(
             train_loader,
             test_loader,
             train_dir=train_dir,
-            runtime_limits_kwargs=runtime_limits_kwargs,
+            runtime_limits=runtime_limits,
             checkpoint_epochs=local_settings["checkpoint_epochs"],
         )
 
-        save_file = os.path.join(train_dir, f"model_stage_{n}.pt")
-        print(f"Training stage complete. Saving to {save_file}.")
-        pm.save_model(save_file, save_training_info=True)
+        if pm.epoch == end_epochs[n]:
+            save_file = os.path.join(train_dir, f"model_stage_{n}.pt")
+            print(f"Training stage complete. Saving to {save_file}.")
+            pm.save_model(save_file, save_training_info=True)
+        if runtime_limits.local_limits_exceeded(pm.epoch):
+            print('Local runtime limits reached. Ending program.')
+            break
 
     if pm.epoch == end_epochs[-1]:
         return True

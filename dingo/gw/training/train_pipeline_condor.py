@@ -4,11 +4,10 @@ os.environ["OMP_NUM_THREADS"] = str(1)
 os.environ["MKL_NUM_THREADS"] = str(1)
 
 import sys
-from os.path import join, isfile
+from os.path import join, isfile, dirname
 import yaml
 import argparse
 
-from dingo.gw.dataset.generate_dataset_dag import create_args_string
 from dingo.gw.training import (
     prepare_training_new,
     prepare_training_resume,
@@ -16,7 +15,7 @@ from dingo.gw.training import (
 )
 
 
-def create_submission_file(train_dir, d, kwargs_dict, filename="submission_file.sub"):
+def create_submission_file(train_dir, condor_settings, filename="submission_file.sub"):
     """
     TODO: documentation
     :param train_dir:
@@ -24,15 +23,15 @@ def create_submission_file(train_dir, d, kwargs_dict, filename="submission_file.
     :return:
     """
     lines = []
-    lines.append(f'executable = {d["python"]}\n')
-    lines.append(f'request_cpus = {d["num_cpus"]}\n')
-    lines.append(f'request_memory = {d["memory_cpus"]}\n')
-    lines.append(f'request_gpus = {d["num_gpus"]}\n')
+    lines.append(f'executable = {condor_settings["executable"]}\n')
+    lines.append(f'request_cpus = {condor_settings["num_cpus"]}\n')
+    lines.append(f'request_memory = {condor_settings["memory_cpus"]}\n')
+    lines.append(f'request_gpus = {condor_settings["num_gpus"]}\n')
     lines.append(
-        f"requirements = TARGET.CUDAGlobalMemoryMb > " f'{d["memory_gpus"]}\n\n'
+        f"requirements = TARGET.CUDAGlobalMemoryMb > "
+        f'{condor_settings["memory_gpus"]}\n\n'
     )
-    kwargs_str = create_args_string(kwargs_dict)
-    lines.append(f'arguments = {d["train_script"]} {kwargs_str}\n')
+    lines.append(f'arguments = {condor_settings["arguments"]}\n')
     lines.append(f'error = {join(train_dir, "info.err")}\n')
     lines.append(f'output = {join(train_dir, "info.out")}\n')
     lines.append(f'log = {join(train_dir, "info.log")}\n')
@@ -88,18 +87,21 @@ def train_condor():
             # This file can later be modified, and the settings take effect immediately
             # upon resuming.
 
-            local_settings = train_settings.pop('local')
+            local_settings = train_settings.pop("local")
             with open(os.path.join(args.train_dir, "local_settings.yaml"), "w") as f:
                 yaml.dump(local_settings, f, default_flow_style=False, sort_keys=False)
 
-            pm, wfd = prepare_training_new(train_settings, args.train_dir, local_settings)
+            pm, wfd = prepare_training_new(
+                train_settings, args.train_dir, local_settings
+            )
 
         else:
             print("Resuming training run.")
-            with open(os.path.join(args.train_dir, 'local_settings.yaml'), 'r') as f:
+            with open(os.path.join(args.train_dir, "local_settings.yaml"), "r") as f:
                 local_settings = yaml.safe_load(f)
-            pm, wfd = prepare_training_resume(join(args.train_dir, args.checkpoint),
-                                              local_settings['device'])
+            pm, wfd = prepare_training_resume(
+                join(args.train_dir, args.checkpoint), local_settings["device"]
+            )
 
         complete = train_stages(pm, wfd, args.train_dir, local_settings)
 
@@ -115,10 +117,7 @@ def train_condor():
             sys.exit()
 
         else:
-            kwargs_dict = {
-                "train_dir": args.train_dir,
-                "checkpoint": "model_latest.py",
-            }
+            condor_arguments = f"--train_dir {args.train_dir}"
 
     else:
 
@@ -126,17 +125,18 @@ def train_condor():
         # PREPARE FIRST SUBMISSION
         #
 
-        kwargs_dict = {
-            "train_dir": args.train_dir,
-            "checkpoint": args.checkpoint,
-        }
+        condor_arguments = f"--train_dir {args.train_dir}"
+        if args.checkpoint != "model_latest.pt":
+            condor_arguments += f" --checkpoint {args.checkpoint}"
 
     submission_file = "submission_file.sub"
     with open(join(args.train_dir, "train_settings.yaml"), "r") as f:
         condor_settings = yaml.safe_load(f)["local"]["condor"]
-    create_submission_file(
-        args.train_dir, condor_settings, kwargs_dict, filename=submission_file
+    condor_settings["arguments"] = condor_arguments
+    condor_settings["executable"] = join(
+        os.path.dirname(sys.executable), "dingo_train_condor"
     )
+    create_submission_file(args.train_dir, condor_settings, submission_file)
 
     #
     # SUBMIT NEXT CONDOR JOB
@@ -145,3 +145,7 @@ def train_condor():
     # There was no 'bid' in the sample settings file.
     bid = condor_settings.get("bid", "")
     os.system(f"condor_submit_bid {bid} " f"{join(args.train_dir, submission_file)}")
+
+
+if __name__ == "__main__":
+    train_condor()
