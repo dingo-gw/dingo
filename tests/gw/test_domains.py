@@ -145,10 +145,8 @@ def test_FD_window_factor(uniform_FD_params, window_setup):
     domain = FrequencyDomain(**p)
     _, window_factor = window_setup
     assert window_factor == 0.9374713897717841
-    # check that window_factor is initially not set
-    assert domain._window_factor is None
-    with pytest.raises(ValueError):
-        noise_std = domain.noise_std
+    # check that window_factor is initially set to 1
+    assert domain._window_factor == 1.0
     # set new window_factor
     domain.window_factor = window_factor
     assert domain._window_factor == domain.window_factor == window_factor
