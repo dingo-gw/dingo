@@ -57,16 +57,16 @@ model:
     dropout: 0.0
     batch_norm: True
     svd:
-      num_training_samples: 20000
-      num_validation_samples: 5000
-      size: 200
+      num_training_samples: 10000
+      num_validation_samples: 1000
+      size: 100
     # added_context = True for concatenation of GNPE proxies to enet output
 #      added_context: False # True
 
 # Training is divided in stages. They each require all settings as indicated below.
 training:
   stage_0:
-    epochs: 300
+    epochs: 3
     asd_dataset_path: ./asds_O2.hdf5 #/home/jonas/Desktop/dingo-devel/tutorials/02_gwpe/datasets/ASDs/asds_O2.hdf5
     freeze_rb_layer: True
     optimizer:
@@ -74,11 +74,11 @@ training:
       lr: 0.0001
     scheduler:
       type: cosine
-      T_max: 300
+      T_max: 3
     batch_size: 64
 
   stage_1:
-    epochs: 150
+    epochs: 2
     asd_dataset_path: ./asds_O2.hdf5 #/home/jonas/Desktop/dingo-devel/tutorials/02_gwpe/datasets/ASDs/asds_O2.hdf5
     freeze_rb_layer: False
     optimizer:
@@ -86,12 +86,12 @@ training:
       lr: 0.00001
     scheduler:
       type: cosine
-      T_max: 150
+      T_max: 2
     batch_size: 64
 
 # Local settings for training that have no impact on the final trained network.
 local:
-  device: cuda
+  device: cpu
   num_workers: 0 # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
   runtime_limits:
     max_time_per_run: 36000

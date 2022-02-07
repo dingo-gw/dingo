@@ -86,16 +86,17 @@ class RepackageStrainsAndASDS(object):
         i = 1: strain.imag
         i = 2: 1 / (asd * 1e23)
     """
-    def __init__(self, ifos):
+    def __init__(self, ifos, first_index=0):
         self.ifos = ifos
+        self.first_index = first_index
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
-        strains = np.empty((len(self.ifos),3,len(sample['asds'][self.ifos[0]])))
+        strains = np.empty((len(self.ifos),3,len(sample['asds'][self.ifos[0]])-self.first_index))
         for idx_ifo, ifo in enumerate(self.ifos):
-            strains[idx_ifo,0] = sample['waveform'][ifo].real
-            strains[idx_ifo,1] = sample['waveform'][ifo].imag
-            strains[idx_ifo,2] = 1 / (sample['asds'][ifo] * 1e23)
+            strains[idx_ifo,0] = sample['waveform'][ifo][self.first_index:].real
+            strains[idx_ifo,1] = sample['waveform'][ifo][self.first_index:].imag
+            strains[idx_ifo,2] = 1 / (sample['asds'][ifo][self.first_index:] * 1e23)
         sample['waveform'] = strains
         return sample
 

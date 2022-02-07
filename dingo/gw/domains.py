@@ -54,6 +54,16 @@ class Domain(ABC):
 
     @property
     @abstractmethod
+    def min_idx(self) -> int:
+        pass
+
+    @property
+    @abstractmethod
+    def max_idx(self) -> int:
+        pass
+
+    @property
+    @abstractmethod
     def domain_dict(self):
         """Enables to rebuild the domain via calling build_domain(domain_dict)."""
         pass
@@ -141,11 +151,11 @@ class FrequencyDomain(Domain):
         sl = [slice(None)] * data.ndim
 
         # First truncate beyond f_max.
-        sl[axis] = slice(0, self.f_max_idx + 1)
+        sl[axis] = slice(0, self.max_idx + 1)
         data = data[tuple(sl)]
 
         # Set data value below f_min to low_value.
-        sl[axis] = slice(0, self.f_min_idx)
+        sl[axis] = slice(0, self.min_idx)
         data[tuple(sl)] = low_value
 
         return data
@@ -160,7 +170,7 @@ class FrequencyDomain(Domain):
         set allow_for_flexible_upper_bound = True.
         """
         sl = [slice(None)] * data.ndim
-        sl[axis] = slice(self.f_min_idx, self.f_max_idx + 1)
+        sl[axis] = slice(self.min_idx, self.max_idx + 1)
         return data[tuple(sl)]
 
         # Why do we need separate cases here? I believe I unified them above.
@@ -247,17 +257,17 @@ class FrequencyDomain(Domain):
         return len(np.flatnonzero(np.asarray(mask)))
 
     @property
-    def f_min_idx(self):
+    def min_idx(self):
         return round(self._f_min / self._delta_f)
 
     @property
-    def f_max_idx(self):
+    def max_idx(self):
         return round(self._f_max / self._delta_f)
 
     @property
     @lru_cache()
     def sample_frequencies_truncated(self):
-        return self.sample_frequencies[self.f_min_idx :]
+        return self.sample_frequencies[self.min_idx:]
 
     @property
     def len_truncated(self):

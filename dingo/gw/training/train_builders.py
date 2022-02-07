@@ -147,7 +147,8 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     transforms.append(WhitenAndScaleStrain(domain.noise_std))
     transforms.append(AddWhiteNoiseComplex())
     transforms.append(SelectStandardizeRepackageParameters(standardization_dict))
-    transforms.append(RepackageStrainsAndASDS(data_settings["detectors"]))
+    transforms.append(RepackageStrainsAndASDS(data_settings["detectors"],
+                                              first_index=domain.min_idx))
     if gnpe_proxy_dim == 0:
         selected_keys = ["parameters", "waveform"]
     else:
@@ -318,5 +319,13 @@ def build_svd_for_embedding_network(
             )
     print("Done")
 
-    # Return V matrices in standard order.
-    return [basis_dict[ifo].V for ifo in data_settings["detectors"]]
+    # Return V matrices in standard order. Drop the elements below domain.min_idx,
+    # since the neural network expects data truncated below these.
+    print(f"Truncating SVD matrices below index {wfd.domain.min_idx}.")
+    V_rb_list = [basis_dict[ifo].V[wfd.domain.min_idx:] for ifo in data_settings[
+        "detectors"]]
+    print('...V matrix shapes:')
+    for v in V_rb_list:
+        print('      ' + v.shape)
+    print('\n')
+    return V_rb_list
