@@ -1,3 +1,5 @@
+import copy
+
 import h5py
 import numpy as np
 from scipy.signal import tukey
@@ -5,6 +7,8 @@ import ast
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import *
 from dingo.gw.dataset import DingoDataset
+
+HIGH_ASD_VALUE = 1.0
 
 
 class ASDDataset(DingoDataset):
@@ -14,7 +18,7 @@ class ASDDataset(DingoDataset):
     neural density estimator.
     """
 
-    def __init__(self, file_name=None, dictionary=None, ifos=None):
+    def __init__(self, file_name=None, dictionary=None, ifos=None, domain_update=None):
         """
         Parameters
         ----------
@@ -40,7 +44,29 @@ class ASDDataset(DingoDataset):
                     self.asds.pop(ifo)
 
         self.domain = build_domain(self.settings["domain_dict"])
+        if domain_update is not None:
+            self.update_domain(domain_update)
+
         self.is_truncated = False
+
+    def update_domain(self, domain_update):
+        len_domain_original = len(self.domain)
+        self.domain.update(domain_update)
+        self.settings['domain'] = copy.deepcopy(self.domain.domain_dict)
+
+        # truncate the dataset
+        for ifo, asds in self.asds.items():
+
+            # Is there a reason this check is needed? I would think that a dataset
+            # should never be saved with this not matching.
+            assert asds.shape[-1] == len_domain_original, (
+                f"ASDs with shape {asds.shape[-1]} are not compatible"
+                f"with the domain of length {len_domain_original}."
+            )
+            self.asds[ifo] = self.domain.adjust_data_range(
+                asds,
+                low_value=HIGH_ASD_VALUE,
+            )
 
     def truncate_dataset_domain(self, new_range=None):
         """
