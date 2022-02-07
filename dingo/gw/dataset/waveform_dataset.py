@@ -43,6 +43,8 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             Transform to be applied to dataset samples when accessed through __getitem__
         precision : str ('single', 'double')
             If provided, changes precision of loaded dataset.
+        domain_update : dict
+            If provided, update domain from existing domain using new settings.
         """
         self.domain = None
         self.is_truncated = False
@@ -67,6 +69,11 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
 
         Creates (and possibly updates) domain, updates dtypes, and initializes any
         decompression transform. Also zeros data below f_min, and truncates above f_max.
+
+        Parameters
+        ----------
+        domain_update : dict
+            If provided, update domain from existing domain using new settings.
         """
         self.domain = build_domain(self.settings["domain"])
         if domain_update is not None:
@@ -93,7 +100,26 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         if self.settings["compression"] is not None:
             self.initialize_decompression()
 
-    def update_domain(self, domain_update):
+    def update_domain(self, domain_update: dict):
+        """
+        Update the domain based on new configuration. Also adjust data arrays to match
+        the new domain.
+
+        The waveform dataset provides waveform polarizations in a particular domain. In
+        Frequency domain, this is [0, domain._f_max]. Furthermore, data is set to 0 below
+        domain._f_min. In practice one may want to train a network based on  slightly
+        different domain settings, which corresponds to truncating the likelihood
+        integral.
+
+        This method provides functionality for that. It truncates and/or zeroes the
+        dataset to the range specified by the domain, by calling domain.adjust_data_range.
+
+        Parameters
+        ----------
+        domain_update : dict
+            Settings dictionary. Must contain a subset of the keys contained in
+            domain_dict.
+        """
         self.domain.update(domain_update)
         self.settings['domain'] = copy.deepcopy(self.domain.domain_dict)
 

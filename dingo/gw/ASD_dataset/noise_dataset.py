@@ -30,6 +30,8 @@ class ASDDataset(DingoDataset):
         ifos : List[str]
             List of detectors used for dataset, e.g. ['H1', 'L1'].
             If not set, all available ones in the dataset are used.
+        domain_update : dict
+            If provided, update domain from existing domain using new settings.
         """
 
         super().__init__(
@@ -50,6 +52,24 @@ class ASDDataset(DingoDataset):
         self.is_truncated = False
 
     def update_domain(self, domain_update):
+        """
+        Update the domain based on new configuration. Also adjust data arrays to match
+        the new domain.
+
+        The ASD dataset provides ASDs in a particular domain. In Frequency domain,
+        this is [0, domain._f_max]. In practice one may want to train a network based on
+        slightly different domain settings, which corresponds to truncating the likelihood
+        integral.
+
+        This method provides functionality for that. It truncates the data below a
+        new f_max, and sets the ASD below f_min to a large but finite value.
+
+        Parameters
+        ----------
+        domain_update : dict
+            Settings dictionary. Must contain a subset of the keys contained in
+            domain_dict.
+        """
         len_domain_original = len(self.domain)
         self.domain.update(domain_update)
         self.settings['domain'] = copy.deepcopy(self.domain.domain_dict)

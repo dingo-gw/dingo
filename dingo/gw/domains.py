@@ -103,7 +103,18 @@ class FrequencyDomain(Domain):
         FrequencyDomain.frequency_mask.fget.cache_clear()
         FrequencyDomain.noise_std.fget.cache_clear()
 
-    def update(self, new_settings):
+    def update(self, new_settings: dict):
+        """
+        Update the domain with new settings. This is only allowed if the new settings
+        are "compatible" with the old ones. E.g., f_min should be larger than the
+        existing f_min.
+
+        Parameters
+        ----------
+        new_settings : dict
+            Settings dictionary. Must contain a subset of the keys contained in
+            domain_dict.
+        """
         new_settings = new_settings.copy()
         if "type" in new_settings and new_settings.pop("type") not in [
             "FrequencyDomain",
@@ -111,14 +122,15 @@ class FrequencyDomain(Domain):
         ]:
             raise ValueError("Cannot update domain to type other than FrequencyDomain.")
         for k, v in new_settings.items():
-            if k not in ['f_min', 'f_max', 'delta_f', 'window_factor']:
-                raise KeyError(f'Invalid key for domain update: {k}.')
-            if k == 'window_factor' and v != self._window_factor:
-                raise ValueError('Cannot update window_factor.')
-            if k == 'delta_f' and v != self._delta_f:
-                raise ValueError('Cannot update delta_f.')
-        self.set_new_range(f_min=new_settings.get('f_min', None),
-                           f_max=new_settings.get('f_max', None))
+            if k not in ["f_min", "f_max", "delta_f", "window_factor"]:
+                raise KeyError(f"Invalid key for domain update: {k}.")
+            if k == "window_factor" and v != self._window_factor:
+                raise ValueError("Cannot update window_factor.")
+            if k == "delta_f" and v != self._delta_f:
+                raise ValueError("Cannot update delta_f.")
+        self.set_new_range(
+            f_min=new_settings.get("f_min", None), f_max=new_settings.get("f_max", None)
+        )
 
     def set_new_range(self, f_min: float = None, f_max: float = None):
         """
@@ -147,7 +159,30 @@ class FrequencyDomain(Domain):
         # instead of using the old (incorrect) ones.
         self.clear_cache_for_all_instances()
 
-    def adjust_data_range(self, data, axis=-1, low_value=0.0):
+    def adjust_data_range(
+        self, data: np.ndarray, axis: int = -1, low_value: float = 0.0
+    ):
+        """
+        Adjusts data to be compatible with the domain:
+
+            * Below f_min, it sets the data to low_value (typically 0.0 for a waveform,
+            but for a PSD this might be a large value).
+            * Above f_max, it truncates the data array.
+
+        Parameters
+        ----------
+        data : np.ndarray
+            Data array
+        axis : int
+            Which data axis to apply the adjustment along.
+        low_value : float
+            Below f_min, set the data to this value.
+
+        Returns
+        -------
+        np.ndarray
+            The new data array.
+        """
         sl = [slice(None)] * data.ndim
 
         # First truncate beyond f_max.
@@ -267,7 +302,7 @@ class FrequencyDomain(Domain):
     @property
     @lru_cache()
     def sample_frequencies_truncated(self):
-        return self.sample_frequencies[self.min_idx:]
+        return self.sample_frequencies[self.min_idx :]
 
     @property
     def len_truncated(self):
