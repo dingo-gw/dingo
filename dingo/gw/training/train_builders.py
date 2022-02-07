@@ -135,7 +135,7 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         d = data_settings["gnpe_chirp_mass"]
         transforms.append(
             GNPEChirpMass(
-                domain.sample_frequencies_truncated,
+                domain.sample_frequencies,
                 d["kernel_kwargs"],
                 mean=standardization_dict["std"]["chirp_mass"],
                 std=standardization_dict["std"]["chirp_mass"],

@@ -403,6 +403,14 @@ class TimeDomain(Domain):
         return self._sampling_rate
 
     @property
+    def min_idx(self) -> int:
+        return 0
+
+    @property
+    def max_idx(self) -> int:
+        return round(self._time_duration * self._sampling_rate)
+
+    @property
     def domain_dict(self):
         """Enables to rebuild the domain via calling build_domain(domain_dict)."""
         return {
