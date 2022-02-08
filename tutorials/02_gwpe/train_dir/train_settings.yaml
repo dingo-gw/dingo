@@ -56,16 +56,14 @@ model:
     dropout: 0.0
     batch_norm: True
     svd:
-      num_training_samples: 10000
-      num_validation_samples: 1000
-      size: 100
-    # added_context = True for concatenation of GNPE proxies to enet output
-#      added_context: False # True
+      num_training_samples: 20000
+      num_validation_samples: 5000
+      size: 200
 
 # Training is divided in stages. They each require all settings as indicated below.
 training:
   stage_0:
-    epochs: 3
+    epochs: 300
     asd_dataset_path: ./asds_O2.hdf5 #/home/jonas/Desktop/dingo-devel/tutorials/02_gwpe/datasets/ASDs/asds_O2.hdf5
     freeze_rb_layer: True
     optimizer:
@@ -73,11 +71,11 @@ training:
       lr: 0.0001
     scheduler:
       type: cosine
-      T_max: 3
+      T_max: 300
     batch_size: 64
 
   stage_1:
-    epochs: 2
+    epochs: 150
     asd_dataset_path: ./asds_O2.hdf5 #/home/jonas/Desktop/dingo-devel/tutorials/02_gwpe/datasets/ASDs/asds_O2.hdf5
     freeze_rb_layer: False
     optimizer:
@@ -85,21 +83,20 @@ training:
       lr: 0.00001
     scheduler:
       type: cosine
-      T_max: 2
+      T_max: 150
     batch_size: 64
 
 # Local settings for training that have no impact on the final trained network.
 local:
-  device: cpu
+  device: cuda
   num_workers: 0 # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
   runtime_limits:
     max_time_per_run: 36000
     max_epochs_per_run: 2
   checkpoint_epochs: 1
   condor:
-    python: /home/jonas/Desktop/dingo-devel/venv/bin/python
+    bid: 100
     num_cpus: 16
     memory_cpus: 128000
     num_gpus: 1
     memory_gpus: 8000
-    train_script: /home/jonas/Desktop/dingo-devel/venv/bin/dingo_train_condor  # I'm not sure if this is quite right

@@ -81,7 +81,7 @@ class FrequencyDomain(Domain):
     """
 
     def __init__(
-        self, f_min: float, f_max: float, delta_f: float, window_factor: float = None
+        self, f_min: float, f_max: float, delta_f: float, window_factor: float = 1.0
     ):
         self._f_min = f_min
         self._f_max = f_max
