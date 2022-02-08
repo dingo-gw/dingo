@@ -73,9 +73,8 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
 
     print(f"Setting train transforms. Omitting {omit_transforms}.")
 
-    domain_update = data_settings.get('domain_update', None)
     asd_dataset = ASDDataset(asd_dataset_path, ifos=data_settings["detectors"],
-                             domain_update=domain_update)
+                             domain_update=wfd.domain.domain_dict)
     # asd_dataset.truncate_dataset_domain(
     #     data_settings["conditioning"]["frequency_range"]
     # )
