@@ -57,8 +57,6 @@ model:
       num_training_samples: 20000
       num_validation_samples: 5000
       size: 200
-    # added_context = True for concatenation of GNPE proxies to enet output
-#      added_context: False # True
 
 # Training is divided in stages. They each require all settings as indicated below.
 training:
@@ -95,9 +93,8 @@ local:
     max_epochs_per_run: 2
   checkpoint_epochs: 1
   condor:
-    python: /home/jonas/Desktop/dingo-devel/venv/bin/python
+    bid: 100
     num_cpus: 16
     memory_cpus: 128000
     num_gpus: 1
     memory_gpus: 8000
-    train_script: /home/jonas/Desktop/dingo-devel/venv/bin/dingo_train_condor  # I'm not sure if this is quite right

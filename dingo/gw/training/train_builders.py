@@ -68,7 +68,9 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         List of sub-transforms to omit from the full composition.
     """
 
-    print(f"Setting train transforms. Omitting {omit_transforms}.")
+    print(f"Setting train transforms.")
+    if omit_transforms is not None:
+        print("Omitting \n\t" + "\n\t".join([t.__name__ for t in omit_transforms]))
 
     asd_dataset = ASDDataset(asd_dataset_path, ifos=data_settings["detectors"])
     asd_dataset.truncate_dataset_domain(
