@@ -54,7 +54,6 @@ def build_dataset(data_settings):
         precision="single",
         domain_update=domain_update,
     )
-    # wfd.truncate_dataset_domain(data_settings["conditioning"]["frequency_range"])
     return wfd
 
 
@@ -81,14 +80,15 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     if omit_transforms is not None:
         print("Omitting \n\t" + "\n\t".join([t.__name__ for t in omit_transforms]))
 
+    # By passing the wfd domain when instantiating the noise dataset, this ensures the
+    # domains will match. In particular, it truncates the ASD dataset beyond the new
+    # f_max, and sets it to 1 below f_min.
     asd_dataset = ASDDataset(
         asd_dataset_path,
         ifos=data_settings["detectors"],
         domain_update=wfd.domain.domain_dict,
     )
-    # asd_dataset.truncate_dataset_domain(
-    #     data_settings["conditioning"]["frequency_range"]
-    # )
+
     # check compatibility of datasets
     if wfd.domain.domain_dict != asd_dataset.domain.domain_dict:
         raise ValueError(
