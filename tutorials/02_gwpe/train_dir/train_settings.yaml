@@ -93,6 +93,7 @@ local:
     max_epochs_per_run: 2
   checkpoint_epochs: 1
   condor:
+    bid: 100
     num_cpus: 16
     memory_cpus: 128000
     num_gpus: 1
