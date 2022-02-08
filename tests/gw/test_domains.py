@@ -132,10 +132,6 @@ def test_FD_time_translation(uniform_FD_params):
     b_dt = domain.time_translate_data(a, dt)
     assert np.allclose(a_dt, b_dt)
     assert not np.allclose(a_dt, domain.time_translate_data(a, 1.01 * dt))
-    # test that time translation and truncation commute
-    b_dt_tr = domain.truncate_data(b_dt)
-    b_tr_dt = domain.time_translate_data(domain.truncate_data(a), dt)
-    assert np.allclose(b_dt_tr, b_tr_dt)
     # test that time translation can be undone
     assert np.allclose(a, domain.time_translate_data(a_dt, -dt))
     assert not np.allclose(a, domain.time_translate_data(a_dt, -1.01 * dt))

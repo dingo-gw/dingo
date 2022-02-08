@@ -99,7 +99,6 @@ class FrequencyDomain(Domain):
         class instances.
         """
         FrequencyDomain.sample_frequencies.fget.cache_clear()
-        FrequencyDomain.sample_frequencies_truncated.fget.cache_clear()
         FrequencyDomain.frequency_mask.fget.cache_clear()
         FrequencyDomain.noise_std.fget.cache_clear()
 
@@ -195,30 +194,6 @@ class FrequencyDomain(Domain):
 
         return data
 
-    def truncate_data(self, data, axis=-1, allow_for_flexible_upper_bound=False):
-        """Truncate data from to [self._f_min, self._f_max]. By convention,
-        the last axis is the frequency axis.
-
-        By default, the input data is in the range [0, self._f_max] before
-        truncation. In some use cases, the input data has a different range,
-        [0, f_max], where f_max > self._f_max. To truncate such data,
-        set allow_for_flexible_upper_bound = True.
-        """
-        sl = [slice(None)] * data.ndim
-        sl[axis] = slice(self.min_idx, self.max_idx + 1)
-        return data[tuple(sl)]
-
-        # Why do we need separate cases here? I believe I unified them above.
-        # I also removed a test that tests for this special case.
-
-        # if allow_for_flexible_upper_bound:
-        #     return data[...,self.f_min_idx:self.f_max_idx+1]
-        # else:
-        #     if data.shape[-1] != len(self):
-        #         raise ValueError(f'Expected {len(self)} bins in frequency axis -1, '
-        #                          f'but got {data.shape[-1]}.')
-        #     return data[...,self.f_min_idx:]
-
     def time_translate_data(self, data, dt):
         """Time translate complex frequency domain data by dt [in seconds]."""
         if not isinstance(data, np.ndarray):
@@ -229,17 +204,7 @@ class FrequencyDomain(Domain):
             raise ValueError(
                 "Method expects complex frequency domain data, got real array."
             )
-        # find out whether data is truncated or not
-        if data.shape[-1] == len(self):
-            f = self.__call__()
-        elif data.shape[-1] == self.len_truncated:
-            f = self.sample_frequencies_truncated
-        else:
-            raise ValueError(
-                f"Expected {len(self)} or {self.len_truncated} "
-                f"bins in frequency axis -1, but got "
-                f"{data.shape[-1]}."
-            )
+        f = self.sample_frequencies
         # shift data
         return data * np.exp(-2j * np.pi * dt * f)
 
@@ -298,15 +263,6 @@ class FrequencyDomain(Domain):
     @property
     def max_idx(self):
         return round(self._f_max / self._delta_f)
-
-    @property
-    @lru_cache()
-    def sample_frequencies_truncated(self):
-        return self.sample_frequencies[self.min_idx :]
-
-    @property
-    def len_truncated(self):
-        return len(self.sample_frequencies_truncated)
 
     @property
     def window_factor(self):

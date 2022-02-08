@@ -47,7 +47,6 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             If provided, update domain from existing domain using new settings.
         """
         self.domain = None
-        self.is_truncated = False
         self.transform = transform
         self.decompression_transform = None
         self.precision = precision
@@ -76,8 +75,11 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             If provided, update domain from existing domain using new settings.
         """
         self.domain = build_domain(self.settings["domain"])
-        if domain_update is not None:
-            self.update_domain(domain_update)
+
+        # We always call update_domain() (even if domain_update is None) because we
+        # want to be sure that the data are consistent with the saved settings. In
+        # particular, this zeroes the waveforms for f < f_min.
+        self.update_domain(domain_update)
 
         # Update dtypes if necessary
         if self.precision is not None:
@@ -100,7 +102,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         if self.settings["compression"] is not None:
             self.initialize_decompression()
 
-    def update_domain(self, domain_update: dict):
+    def update_domain(self, domain_update: dict = None):
         """
         Update the domain based on new configuration. Also adjust data arrays to match
         the new domain.
@@ -120,8 +122,9 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             Settings dictionary. Must contain a subset of the keys contained in
             domain_dict.
         """
-        self.domain.update(domain_update)
-        self.settings['domain'] = copy.deepcopy(self.domain.domain_dict)
+        if domain_update is not None:
+            self.domain.update(domain_update)
+            self.settings['domain'] = copy.deepcopy(self.domain.domain_dict)
 
         # Determine where any domain adjustment must be applied. If the dataset is SVD
         # compressed, then adjust the SVD matrices. Otherwise, adjust the dataset
@@ -180,57 +183,3 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         mean = self.parameters.mean().to_dict()
         std = self.parameters.std().to_dict()
         return mean, std
-
-    def truncate_dataset_domain(self, new_range=None):
-        """
-        The waveform dataset provides waveform polarizations in a particular range. In
-        uniform Frequency domain for instance, this range is [0, domain._f_max]. In
-        practice one may want to apply data conditioning different to that of the
-        dataset by specifying a different range, and truncating this dataset
-        accordingly. That corresponds to truncating the likelihood integral.
-
-        This method provides functionality for that. It truncates the dataset to the
-        range specified by the domain, by calling domain.truncate_data. In uniform FD,
-        this corresponds to truncating data in the range [0, domain._f_max] to the
-        range [domain._f_min, domain._f_max].
-
-        Before this truncation step, one may optionally modify the domain, to set a new
-        range. This is done by domain.set_new_range(*new_range), which is called if
-        new_range is not None.
-        """
-        if self.is_truncated:
-            raise ValueError("Dataset is already truncated")
-        # len_domain_original = len(self.domain)
-
-        # Optionally set a new domain range.
-        if new_range is not None:
-            self.domain.set_new_range(*new_range)
-            self.settings["domain"] = copy.deepcopy(self.domain.domain_dict)
-
-        # Determine where the truncation must be applied. If the dataset is SVD
-        # compressed, then truncate the SVD matrices. Otherwise, truncate the dataset
-        # itself.
-        if (
-            self.settings["compression"] is not None
-            and "svd" in self.settings["compression"]
-        ):
-            self.svd_V = self.domain.truncate_data(self.svd_V, axis=0)
-            self.initialize_decompression()
-        else:
-            for k, v in self.polarizations.items():
-                self.polarizations[k] = self.domain.truncate_data(v)
-
-        # # truncate the dataset
-        # if self._Vh is not None:
-        #     assert self._Vh.shape[-1] == len_domain_original, \
-        #         f'Compression matrix Vh with shape {self._Vh.shape} is not ' \
-        #         f'compatible with the domain of length {len_domain_original}.'
-        #     self._Vh = self.domain.truncate_data(
-        #         self._Vh, allow_for_flexible_upper_bound=(new_range is not
-        #                                                   None))
-        # else:
-        #     raise NotImplementedError('Truncation of the dataset is currently '
-        #                               'only implemented for compressed '
-        #                               'polarization data.')
-
-        self.is_truncated = True
