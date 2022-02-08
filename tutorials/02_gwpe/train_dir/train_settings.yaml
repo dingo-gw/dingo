@@ -4,7 +4,6 @@ data:
   train_fraction: 0.95
   # data conditioning for inference
   conditioning:
-    # frequency_range: [ 20, 1024 ]
     window_kwargs:
       window_type: tukey
       f_s: 4096

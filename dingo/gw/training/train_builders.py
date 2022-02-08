@@ -326,6 +326,6 @@ def build_svd_for_embedding_network(
         "detectors"]]
     print('...V matrix shapes:')
     for v in V_rb_list:
-        print('      ' + v.shape)
+        print('      ' + str(v.shape))
     print('\n')
     return V_rb_list
