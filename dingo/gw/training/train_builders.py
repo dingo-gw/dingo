@@ -41,6 +41,12 @@ def build_dataset(data_settings):
     -------
     WaveformDataset
     """
+    # Make sure domain update is specified in the right place
+    if 'frequency_range' in data_settings['conditioning']:
+        raise KeyError('Please update data settings (in train_settings.yaml or the '
+                       'saved model checkpoint) to specify domain update in correct '
+                       'location.')
+
     # Build and truncate datasets
     domain_update = data_settings.get("domain_update", None)
     wfd = WaveformDataset(
