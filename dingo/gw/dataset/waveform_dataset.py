@@ -114,7 +114,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         integral.
 
         This method provides functionality for that. It truncates and/or zeroes the
-        dataset to the range specified by the domain, by calling domain.adjust_data_range.
+        dataset to the range specified by the domain, by calling domain.update_data.
 
         Parameters
         ----------
@@ -133,10 +133,10 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                 self.settings["compression"] is not None
                 and "svd" in self.settings["compression"]
         ):
-            self.svd_V = self.domain.adjust_data_range(self.svd_V, axis=0)
+            self.svd_V = self.domain.update_data(self.svd_V, axis=0)
         else:
             for k, v in self.polarizations.items():
-                self.polarizations[k] = self.domain.adjust_data_range(v)
+                self.polarizations[k] = self.domain.update_data(v)
 
     def initialize_decompression(self):
         """

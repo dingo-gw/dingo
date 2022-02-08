@@ -61,7 +61,7 @@ def test_FD_domain_dict(uniform_FD_params):
     assert domain.__dict__ == domain2.__dict__
 
 
-def test_FD_adjust_data_range(uniform_FD_params):
+def test_FD_update_data(uniform_FD_params):
     p = uniform_FD_params
     domain = FrequencyDomain(**p)
     n = int(p["f_max"] / p["delta_f"]) + 1
@@ -76,14 +76,14 @@ def test_FD_adjust_data_range(uniform_FD_params):
     )
     # Test that data range adjustment works specifying different axis
     a = np.random.rand(10, n, 20)
-    b = domain.adjust_data_range(a, axis=1)
+    b = domain.update_data(a, axis=1)
     assert np.all(b[:, : domain.min_idx, :] == 0.0)
     assert np.all(b[:, domain.min_idx : n + 1, :] == a[:, domain.min_idx :, :])
     # Test that data range adjustment works as intended with nonzero low_value
     a = np.random.random(n)
-    assert np.all(domain.adjust_data_range(a) == a * domain.frequency_mask)
+    assert np.all(domain.update_data(a) == a * domain.frequency_mask)
     assert np.all(
-        domain.adjust_data_range(a, low_value=5.0)[: domain.min_idx]
+        domain.update_data(a, low_value=5.0)[: domain.min_idx]
         == 5.0 * np.ones(round(p["f_min"] / p["delta_f"]))
     )
 
@@ -113,9 +113,9 @@ def test_FD_set_new_range(uniform_FD_params):
     assert np.all(domain.frequency_mask == mask)
     # Test that data range adjustment works as intended when setting new fmin, fmax
     a = np.random.random(n)
-    assert np.all(domain.adjust_data_range(a) == a * domain.frequency_mask)
+    assert np.all(domain.update_data(a) == a * domain.frequency_mask)
     assert np.all(
-        domain.adjust_data_range(a, low_value=5.0)[: domain.min_idx]
+        domain.update_data(a, low_value=5.0)[: domain.min_idx]
         == 5.0 * np.ones(round(f_min_new / p["delta_f"]))
     )
 

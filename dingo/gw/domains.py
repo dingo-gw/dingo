@@ -158,7 +158,7 @@ class FrequencyDomain(Domain):
         # instead of using the old (incorrect) ones.
         self.clear_cache_for_all_instances()
 
-    def adjust_data_range(
+    def update_data(
         self, data: np.ndarray, axis: int = -1, low_value: float = 0.0
     ):
         """
