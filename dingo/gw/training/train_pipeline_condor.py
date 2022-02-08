@@ -143,7 +143,7 @@ def train_condor():
     #
 
     # There was no 'bid' in the sample settings file.
-    bid = condor_settings.get("bid", "")
+    bid = condor_settings["bid"]
     os.system(f"condor_submit_bid {bid} " f"{join(args.train_dir, submission_file)}")
 
 
