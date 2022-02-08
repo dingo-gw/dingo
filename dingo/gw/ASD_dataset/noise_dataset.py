@@ -81,7 +81,7 @@ class ASDDataset(DingoDataset):
                 f"ASDs with shape {asds.shape[-1]} are not compatible"
                 f"with the domain of length {len_domain_original}."
             )
-            self.asds[ifo] = self.domain.adjust_data_range(
+            self.asds[ifo] = self.domain.update_data(
                 asds,
                 low_value=HIGH_ASD_VALUE,
             )
