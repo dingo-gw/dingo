@@ -41,11 +41,19 @@ def build_dataset(data_settings):
     -------
     WaveformDataset
     """
+    # Make sure domain update is specified in the right place
+    if 'frequency_range' in data_settings['conditioning']:
+        raise KeyError('Please update data settings (in train_settings.yaml or the '
+                       'saved model checkpoint) to specify domain update in correct '
+                       'location.')
+
     # Build and truncate datasets
+    domain_update = data_settings.get("domain_update", None)
     wfd = WaveformDataset(
-        file_name=data_settings["waveform_dataset_path"], precision="single"
+        file_name=data_settings["waveform_dataset_path"],
+        precision="single",
+        domain_update=domain_update,
     )
-    wfd.truncate_dataset_domain(data_settings["conditioning"]["frequency_range"])
     return wfd
 
 
@@ -72,14 +80,21 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     if omit_transforms is not None:
         print("Omitting \n\t" + "\n\t".join([t.__name__ for t in omit_transforms]))
 
-    asd_dataset = ASDDataset(asd_dataset_path, ifos=data_settings["detectors"])
-    asd_dataset.truncate_dataset_domain(
-        data_settings["conditioning"]["frequency_range"]
+    # By passing the wfd domain when instantiating the noise dataset, this ensures the
+    # domains will match. In particular, it truncates the ASD dataset beyond the new
+    # f_max, and sets it to 1 below f_min.
+    asd_dataset = ASDDataset(
+        asd_dataset_path,
+        ifos=data_settings["detectors"],
+        domain_update=wfd.domain.domain_dict,
     )
+
     # check compatibility of datasets
     if wfd.domain.domain_dict != asd_dataset.domain.domain_dict:
-        raise ValueError(f'wfd.domain: {wfd.domain.domain_dict} \n!= '
-                         f'asd_dataset.domain: {asd_dataset.domain.domain_dict}')
+        raise ValueError(
+            f"wfd.domain: {wfd.domain.domain_dict} \n!= "
+            f"asd_dataset.domain: {asd_dataset.domain.domain_dict}"
+        )
 
     # Add window factor to domain. Can this just be added directly rather than
     # using a second domain instance?
@@ -132,7 +147,7 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         d = data_settings["gnpe_chirp_mass"]
         transforms.append(
             GNPEChirpMass(
-                domain.sample_frequencies_truncated,
+                domain.sample_frequencies,
                 d["kernel_kwargs"],
                 mean=standardization_dict["std"]["chirp_mass"],
                 std=standardization_dict["std"]["chirp_mass"],
@@ -144,7 +159,9 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     transforms.append(WhitenAndScaleStrain(domain.noise_std))
     transforms.append(AddWhiteNoiseComplex())
     transforms.append(SelectStandardizeRepackageParameters(standardization_dict))
-    transforms.append(RepackageStrainsAndASDS(data_settings["detectors"]))
+    transforms.append(
+        RepackageStrainsAndASDS(data_settings["detectors"], first_index=domain.min_idx)
+    )
     if gnpe_proxy_dim == 0:
         selected_keys = ["parameters", "waveform"]
     else:
@@ -315,5 +332,17 @@ def build_svd_for_embedding_network(
             )
     print("Done")
 
-    # Return V matrices in standard order.
-    return [basis_dict[ifo].V for ifo in data_settings["detectors"]]
+    # Return V matrices in standard order. Drop the elements below domain.min_idx,
+    # since the neural network expects data truncated below these. The dropped elements
+    # should be 0.
+    print(f"Truncating SVD matrices below index {wfd.domain.min_idx}.")
+    print("...V matrix shapes:")
+    V_rb_list = []
+    for ifo in data_settings["detectors"]:
+        V = basis_dict[ifo].V
+        assert np.all(V[: wfd.domain.min_idx]) == 0.0
+        V = V[wfd.domain.min_idx:]
+        print("      " + str(V.shape))
+        V_rb_list.append(V)
+    print("\n")
+    return V_rb_list

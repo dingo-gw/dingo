@@ -4,13 +4,15 @@ data:
   train_fraction: 0.95
   # data conditioning for inference
   conditioning:
-    frequency_range: [ 20, 1024 ]
     window_kwargs:
       window_type: tukey
       f_s: 4096
       T: 8.0
       roll_off: 0.4
   #  0.9374713897717841
+  domain_update:
+    f_min: 25
+    f_max: 512
   detectors:
     - H1
     - L1
