@@ -253,7 +253,7 @@ def train_stages(pm, wfd, train_dir, local_settings):
             print(f"Training stage complete. Saving to {save_file}.")
             pm.save_model(save_file, save_training_info=True)
         if runtime_limits.local_limits_exceeded(pm.epoch):
-            print('Local runtime limits reached. Ending program.')
+            print("Local runtime limits reached. Ending program.")
             break
 
     if pm.epoch == end_epochs[-1]:

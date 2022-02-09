@@ -72,7 +72,7 @@ def generate_dataset(settings, num_processes):
         settings["waveform_generator"]["f_ref"],
     )
 
-    dataset_dict = {'settings': settings}
+    dataset_dict = {"settings": settings}
 
     if "compression" in settings:
         compression_transforms = []
@@ -100,7 +100,7 @@ def generate_dataset(settings, num_processes):
                 basis.generate_basis(train_data, svd_settings["size"])
 
             compression_transforms.append(ApplySVD(basis))
-            dataset_dict['svd_V'] = basis.V
+            dataset_dict["svd_V"] = basis.V
 
         waveform_generator.transform = Compose(compression_transforms)
 
