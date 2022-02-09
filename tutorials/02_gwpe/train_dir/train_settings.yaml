@@ -3,12 +3,11 @@ data:
   waveform_dataset_path: ./waveform_dataset.hdf5  # Contains intrinsic waveforms
   train_fraction: 0.95
   # data conditioning for inference
-  conditioning:
-    window_kwargs:
-      window_type: tukey
-      f_s: 4096
-      T: 8.0
-      roll_off: 0.4
+  window:
+    type: tukey
+    f_s: 4096
+    T: 8.0
+    roll_off: 0.4
   #  0.9374713897717841
   domain_update:
     f_min: 25

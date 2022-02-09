@@ -14,12 +14,12 @@ def uniform_FD_params():
 
 @pytest.fixture
 def window_setup():
-    window_type = "tukey"
+    type = "tukey"
     f_s = 4096
     T = 8.0
     roll_off = 0.4
     window_kwargs = {
-        "window_type": window_type,
+        "type": type,
         "f_s": f_s,
         "T": T,
         "roll_off": roll_off,

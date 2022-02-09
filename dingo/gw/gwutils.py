@@ -8,14 +8,19 @@ def find_axis(array, dim):
     """Looks for axis with dimension dim in array, and returns its index."""
     indices = np.where(np.array(array.shape) == dim)[0]
     if len(indices) > 1:
-        raise ValueError(f'Automatic axis detection ambiguous. Array of shape '
-                         f'{array.shape} has {len(indices)} axes of dimension '
-                         f'{dim}.')
+        raise ValueError(
+            f"Automatic axis detection ambiguous. Array of shape "
+            f"{array.shape} has {len(indices)} axes of dimension "
+            f"{dim}."
+        )
     if len(indices) < 1:
-        raise ValueError(f'Automatic axis detection failed. Array of shape '
-                         f'{array.shape} has no axis of dimension {dim}.')
+        raise ValueError(
+            f"Automatic axis detection failed. Array of shape "
+            f"{array.shape} has no axis of dimension {dim}."
+        )
     else:
         return indices[0]
+
 
 def truncate_array(array, axis, lower, upper):
     """Truncate array to [lower:upper] along selected axis."""
@@ -26,15 +31,19 @@ def truncate_array(array, axis, lower, upper):
 
 def get_window(window_kwargs):
     """Compute window from window_kwargs."""
-    window_type = window_kwargs['window_type']
-    if window_type == 'tukey':
-        roll_off, T, f_s = window_kwargs['roll_off'], window_kwargs['T'], \
-                           window_kwargs['f_s']
+    type = window_kwargs["type"]
+    if type == "tukey":
+        roll_off, T, f_s = (
+            window_kwargs["roll_off"],
+            window_kwargs["T"],
+            window_kwargs["f_s"],
+        )
         alpha = 2 * roll_off / T
         w = tukey(int(T * f_s), alpha)
         return w
     else:
-        raise NotImplementedError(f'Unknown window type {window_type}.')
+        raise NotImplementedError(f"Unknown window type {type}.")
+
 
 def get_window_factor(window):
     """
@@ -52,15 +61,17 @@ def get_window_factor(window):
         window = get_window(window)
     return np.sum(window ** 2) / len(window)
 
+
 def get_extrinsic_prior_dict(extrinsic_prior):
     """Build dict for extrinsic prior by starting with
     default_extrinsic_dict, and overwriting every element for which
     extrinsic_prior is not default."""
     extrinsic_prior_dict = default_extrinsic_dict.copy()
     for k, v in extrinsic_prior.items():
-        if v.lower() != 'default':
+        if v.lower() != "default":
             extrinsic_prior_dict[k] = v
     return extrinsic_prior_dict
+
 
 def get_standardization_dict(extrinsic_prior_dict, wfd, selected_parameters):
     # get mean and std for extrinsic prior
@@ -81,6 +92,8 @@ def get_standardization_dict(extrinsic_prior_dict, wfd, selected_parameters):
     mean = {**mean_intrinsic, **mean_extrinsic}
     std = {**std_intrinsic, **std_extrinsic}
     # return standardization dict
-    standardization_dict = {'mean': {k: mean[k] for k in selected_parameters},
-                            'std': {k: std[k] for k in selected_parameters}}
+    standardization_dict = {
+        "mean": {k: mean[k] for k in selected_parameters},
+        "std": {k: std[k] for k in selected_parameters},
+    }
     return standardization_dict
