@@ -99,9 +99,7 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     # Add window factor to domain. Can this just be added directly rather than
     # using a second domain instance?
     domain = build_domain(wfd.domain.domain_dict)
-    domain.window_factor = get_window_factor(
-        data_settings["conditioning"]["window_kwargs"]
-    )
+    domain.window_factor = get_window_factor(data_settings["window"])
 
     extrinsic_prior_dict = get_extrinsic_prior_dict(data_settings["extrinsic_prior"])
     if data_settings["selected_parameters"] == "default":

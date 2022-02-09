@@ -70,7 +70,7 @@ class ASDDataset(DingoDataset):
         """
         len_domain_original = len(self.domain)
         self.domain.update(domain_update)
-        self.settings['domain'] = copy.deepcopy(self.domain.domain_dict)
+        self.settings["domain"] = copy.deepcopy(self.domain.domain_dict)
 
         # truncate the dataset
         for ifo, asds in self.asds.items():
@@ -119,7 +119,7 @@ class ASDDataset(DingoDataset):
 #                                'kwargs': {'f_min': f_min, 'f_max': f_max,
 #                                           'delta_f': delta_f}})
 #         settings['domain_dict'] = domain.domain_dict
-#         # settings['window'] = {'window_type': 'tukey', **meta['tukey_window']}
+#         # settings['window'] = {'type': 'tukey', **meta['tukey_window']}
 #         f.create_dataset(f'asds_{ifo}', data=asds[:num_psds_max])
 #         gps_times[ifo] = meta['start_times'][:num_psds_max]
 #
@@ -129,7 +129,7 @@ class ASDDataset(DingoDataset):
 #     asd_dataset = ASDDataset(join(data_dir, f'asds_{run}.hdf5'))
 #     asd_samples = asd_dataset.sample_random_asds()
 #
-#     window_factor = get_window_factor({'window_type': 'tukey',
+#     window_factor = get_window_factor({'type': 'tukey',
 #                                        **meta['tukey_window']})
 #
 #     noise_std = np.sqrt(window_factor) / \
