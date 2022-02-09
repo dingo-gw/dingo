@@ -1,12 +1,5 @@
-# set number of threads to 1
 import os
-import sys
 
-if "numpy" in sys.modules:
-    raise RuntimeError(
-        "Numpy is already imported, can't set num_threads. "
-        "Make sure to set num_threads before importing numpy."
-    )
 os.environ["OMP_NUM_THREADS"] = str(1)
 os.environ["MKL_NUM_THREADS"] = str(1)
 
