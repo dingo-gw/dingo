@@ -332,7 +332,7 @@ def build_svd_for_embedding_network(
     V_rb_list = []
     for ifo in data_settings["detectors"]:
         V = basis_dict[ifo].V
-        assert np.all(V[: wfd.domain.min_idx]) == 0.0
+        assert np.allclose(V[: wfd.domain.min_idx], 0)
         V = V[wfd.domain.min_idx:]
         print("      " + str(V.shape))
         V_rb_list.append(V)
