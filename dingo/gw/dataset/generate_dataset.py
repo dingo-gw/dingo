@@ -11,11 +11,11 @@ import pandas as pd
 import numpy as np
 
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
-from ..prior import build_prior_with_defaults
-from ..domains import build_domain
-from ..waveform_generator import WaveformGenerator, generate_waveforms_parallel
+from dingo.gw.prior import build_prior_with_defaults
+from dingo.gw.domains import build_domain
+from dingo.gw.waveform_generator import WaveformGenerator, generate_waveforms_parallel
 from torchvision.transforms import Compose
-from ..SVD import SVDBasis, ApplySVD
+from dingo.gw.SVD import SVDBasis, ApplySVD
 
 
 def generate_parameters_and_polarizations(
