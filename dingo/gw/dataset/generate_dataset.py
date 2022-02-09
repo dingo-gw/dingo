@@ -1,21 +1,17 @@
-import os
-
-os.environ["OMP_NUM_THREADS"] = str(1)
-os.environ["MKL_NUM_THREADS"] = str(1)
-
 import textwrap
 import yaml
 import argparse
 from multiprocessing import Pool
 import pandas as pd
 import numpy as np
+from threadpoolctl import threadpool_limits
 
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
-from ..prior import build_prior_with_defaults
-from ..domains import build_domain
-from ..waveform_generator import WaveformGenerator, generate_waveforms_parallel
+from dingo.gw.prior import build_prior_with_defaults
+from dingo.gw.domains import build_domain
+from dingo.gw.waveform_generator import WaveformGenerator, generate_waveforms_parallel
 from torchvision.transforms import Compose
-from ..SVD import SVDBasis, ApplySVD
+from dingo.gw.SVD import SVDBasis, ApplySVD
 
 
 def generate_parameters_and_polarizations(
@@ -72,7 +68,7 @@ def generate_dataset(settings, num_processes):
         settings["waveform_generator"]["f_ref"],
     )
 
-    dataset_dict = {'settings': settings}
+    dataset_dict = {"settings": settings}
 
     if "compression" in settings:
         compression_transforms = []
@@ -88,26 +84,28 @@ def generate_dataset(settings, num_processes):
 
             # Otherwise, generate the basis based on simulated waveforms.
             else:
-                parameters, polarizations = generate_parameters_and_polarizations(
-                    waveform_generator,
-                    prior,
-                    svd_settings["num_training_samples"],
-                    num_processes,
-                )
+                with threadpool_limits(limits=1, user_api="blas"):
+                    parameters, polarizations = generate_parameters_and_polarizations(
+                        waveform_generator,
+                        prior,
+                        svd_settings["num_training_samples"],
+                        num_processes,
+                    )
                 train_data = np.vstack(list(polarizations.values()))
                 print("Building SVD basis.")
                 basis = SVDBasis()
                 basis.generate_basis(train_data, svd_settings["size"])
 
             compression_transforms.append(ApplySVD(basis))
-            dataset_dict['svd_V'] = basis.V
+            dataset_dict["svd_V"] = basis.V
 
         waveform_generator.transform = Compose(compression_transforms)
 
     # Generate main dataset
-    parameters, polarizations = generate_parameters_and_polarizations(
-        waveform_generator, prior, settings["num_samples"], num_processes
-    )
+    with threadpool_limits(limits=1, user_api="blas"):
+        parameters, polarizations = generate_parameters_and_polarizations(
+            waveform_generator, prior, settings["num_samples"], num_processes
+        )
     dataset_dict["parameters"] = parameters
     dataset_dict["polarizations"] = polarizations
 

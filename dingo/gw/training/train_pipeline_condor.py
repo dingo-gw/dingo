@@ -1,8 +1,4 @@
 import os
-
-os.environ["OMP_NUM_THREADS"] = str(1)
-os.environ["MKL_NUM_THREADS"] = str(1)
-
 import sys
 from os.path import join, isfile
 import yaml
@@ -88,18 +84,21 @@ def train_condor():
             # This file can later be modified, and the settings take effect immediately
             # upon resuming.
 
-            local_settings = train_settings.pop('local')
+            local_settings = train_settings.pop("local")
             with open(os.path.join(args.train_dir, "local_settings.yaml"), "w") as f:
                 yaml.dump(local_settings, f, default_flow_style=False, sort_keys=False)
 
-            pm, wfd = prepare_training_new(train_settings, args.train_dir, local_settings)
+            pm, wfd = prepare_training_new(
+                train_settings, args.train_dir, local_settings
+            )
 
         else:
             print("Resuming training run.")
-            with open(os.path.join(args.train_dir, 'local_settings.yaml'), 'r') as f:
+            with open(os.path.join(args.train_dir, "local_settings.yaml"), "r") as f:
                 local_settings = yaml.safe_load(f)
-            pm, wfd = prepare_training_resume(join(args.train_dir, args.checkpoint),
-                                              local_settings['device'])
+            pm, wfd = prepare_training_resume(
+                join(args.train_dir, args.checkpoint), local_settings["device"]
+            )
 
         complete = train_stages(pm, wfd, args.train_dir, local_settings)
 

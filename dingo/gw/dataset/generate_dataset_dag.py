@@ -1,8 +1,4 @@
 import os
-
-os.environ["OMP_NUM_THREADS"] = str(1)
-os.environ["MKL_NUM_THREADS"] = str(1)
-
 import argparse
 from typing import Dict
 from pycondor import Job, Dagman

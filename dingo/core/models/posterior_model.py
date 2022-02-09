@@ -7,7 +7,7 @@ import torch
 import dingo.core.utils as utils
 from torch.utils.data import Dataset, DataLoader
 import time
-
+from threadpoolctl import threadpool_limits
 import dingo.core.utils.trainutils
 
 import pdb
@@ -240,23 +240,24 @@ class PosteriorModel:
             lr = utils.get_lr(self.optimizer)
             print(f"\nStart training epoch {self.epoch} with lr {lr}")
             time_start = time.time()
-            train_loss = train_epoch(self, train_loader)
-            print(
-                "Done. This took {:2.0f}:{:2.0f} min.".format(
-                    *divmod(time.time() - time_start, 60)
+            with threadpool_limits(limits=1, user_api="blas"):
+                train_loss = train_epoch(self, train_loader)
+                print(
+                    "Done. This took {:2.0f}:{:2.0f} min.".format(
+                        *divmod(time.time() - time_start, 60)
+                    )
                 )
-            )
 
-            # Testing
-            print(f"Start testing epoch {self.epoch}")
-            time_start = time.time()
-            test_loss = test_epoch(self, test_loader)
+                # Testing
+                print(f"Start testing epoch {self.epoch}")
+                time_start = time.time()
+                test_loss = test_epoch(self, test_loader)
 
-            print(
-                "Done. This took {:2.0f}:{:2.0f} min.".format(
-                    *divmod(time.time() - time_start, 60)
+                print(
+                    "Done. This took {:2.0f}:{:2.0f} min.".format(
+                        *divmod(time.time() - time_start, 60)
+                    )
                 )
-            )
 
             utils.write_history(train_dir, self.epoch, train_loss, test_loss, lr)
             utils.save_model(self, train_dir, checkpoint_epochs=checkpoint_epochs)
