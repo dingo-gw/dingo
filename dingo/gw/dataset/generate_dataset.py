@@ -1,5 +1,12 @@
+# set number of threads to 1
 import os
+import sys
 
+if "numpy" in sys.modules:
+    raise RuntimeError(
+        "Numpy is already imported, can't set num_threads. "
+        "Make sure to set num_threads before importing numpy."
+    )
 os.environ["OMP_NUM_THREADS"] = str(1)
 os.environ["MKL_NUM_THREADS"] = str(1)
 
@@ -72,7 +79,7 @@ def generate_dataset(settings, num_processes):
         settings["waveform_generator"]["f_ref"],
     )
 
-    dataset_dict = {'settings': settings}
+    dataset_dict = {"settings": settings}
 
     if "compression" in settings:
         compression_transforms = []
@@ -100,7 +107,7 @@ def generate_dataset(settings, num_processes):
                 basis.generate_basis(train_data, svd_settings["size"])
 
             compression_transforms.append(ApplySVD(basis))
-            dataset_dict['svd_V'] = basis.V
+            dataset_dict["svd_V"] = basis.V
 
         waveform_generator.transform = Compose(compression_transforms)
 

@@ -1,7 +1,15 @@
+# set number of threads to 1
 import os
+import sys
 
+if "numpy" in sys.modules:
+    raise RuntimeError(
+        "Numpy is already imported, can't set num_threads. "
+        "Make sure to set num_threads before importing numpy."
+    )
 os.environ["OMP_NUM_THREADS"] = str(1)
 os.environ["MKL_NUM_THREADS"] = str(1)
+
 import numpy as np
 import yaml
 from os.path import join
@@ -19,7 +27,9 @@ def generate_dataset(data_dir, settings, run: str, ifos: List[str], verbose=Fals
 
     for ifo in ifos:
         print(f"Downloading PSD data for observing run {run} and detector {ifo}")
-        download_and_estimate_PSDs(data_dir, run, ifo, settings['dataset_settings'], verbose=verbose)
+        download_and_estimate_PSDs(
+            data_dir, run, ifo, settings["dataset_settings"], verbose=verbose
+        )
 
     create_dataset_from_files(data_dir, run, ifos, settings["dataset_settings"])
 
@@ -48,7 +58,7 @@ def parse_args():
     parser.add_argument(
         "--detectors",
         type=str,
-        nargs='+',
+        nargs="+",
         default=["H1", "L1"],
         help="Detectors for which to generate the dataset",
     )
