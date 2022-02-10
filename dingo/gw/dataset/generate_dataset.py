@@ -34,11 +34,13 @@ def generate_parameters_and_polarizations(
     """
     print("Generating dataset of size " + str(num_samples))
     parameters = pd.DataFrame(prior.sample(num_samples))
+
     if num_processes > 1:
-        with Pool(processes=num_processes) as pool:
-            polarizations = generate_waveforms_parallel(
-                waveform_generator, parameters, pool
-            )
+        with threadpool_limits(limits=1, user_api="blas"):
+            with Pool(processes=num_processes) as pool:
+                polarizations = generate_waveforms_parallel(
+                    waveform_generator, parameters, pool
+                )
     else:
         polarizations = generate_waveforms_parallel(waveform_generator, parameters)
     return parameters, polarizations
@@ -84,13 +86,13 @@ def generate_dataset(settings, num_processes):
 
             # Otherwise, generate the basis based on simulated waveforms.
             else:
-                with threadpool_limits(limits=1, user_api="blas"):
-                    parameters, polarizations = generate_parameters_and_polarizations(
-                        waveform_generator,
-                        prior,
-                        svd_settings["num_training_samples"],
-                        num_processes,
-                    )
+
+                parameters, polarizations = generate_parameters_and_polarizations(
+                    waveform_generator,
+                    prior,
+                    svd_settings["num_training_samples"],
+                    num_processes,
+                )
                 train_data = np.vstack(list(polarizations.values()))
                 print("Building SVD basis.")
                 basis = SVDBasis()
@@ -102,10 +104,9 @@ def generate_dataset(settings, num_processes):
         waveform_generator.transform = Compose(compression_transforms)
 
     # Generate main dataset
-    with threadpool_limits(limits=1, user_api="blas"):
-        parameters, polarizations = generate_parameters_and_polarizations(
-            waveform_generator, prior, settings["num_samples"], num_processes
-        )
+    parameters, polarizations = generate_parameters_and_polarizations(
+        waveform_generator, prior, settings["num_samples"], num_processes
+    )
     dataset_dict["parameters"] = parameters
     dataset_dict["polarizations"] = polarizations
 
