@@ -1,8 +1,4 @@
 import os
-
-os.environ["OMP_NUM_THREADS"] = str(1)
-os.environ["MKL_NUM_THREADS"] = str(1)
-
 import sys
 from os.path import join, isfile, dirname
 import yaml

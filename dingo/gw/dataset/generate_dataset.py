@@ -1,14 +1,10 @@
-import os
-
-os.environ["OMP_NUM_THREADS"] = str(1)
-os.environ["MKL_NUM_THREADS"] = str(1)
-
 import textwrap
 import yaml
 import argparse
 from multiprocessing import Pool
 import pandas as pd
 import numpy as np
+from threadpoolctl import threadpool_limits
 
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.gw.prior import build_prior_with_defaults
@@ -38,11 +34,13 @@ def generate_parameters_and_polarizations(
     """
     print("Generating dataset of size " + str(num_samples))
     parameters = pd.DataFrame(prior.sample(num_samples))
+
     if num_processes > 1:
-        with Pool(processes=num_processes) as pool:
-            polarizations = generate_waveforms_parallel(
-                waveform_generator, parameters, pool
-            )
+        with threadpool_limits(limits=1, user_api="blas"):
+            with Pool(processes=num_processes) as pool:
+                polarizations = generate_waveforms_parallel(
+                    waveform_generator, parameters, pool
+                )
     else:
         polarizations = generate_waveforms_parallel(waveform_generator, parameters)
     return parameters, polarizations
@@ -88,6 +86,7 @@ def generate_dataset(settings, num_processes):
 
             # Otherwise, generate the basis based on simulated waveforms.
             else:
+
                 parameters, polarizations = generate_parameters_and_polarizations(
                     waveform_generator,
                     prior,
