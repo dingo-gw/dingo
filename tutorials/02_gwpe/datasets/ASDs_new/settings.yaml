@@ -4,7 +4,7 @@ dataset_settings:
   T: 8
   window:
     roll_off: 0.4
-    window_type: tukey
+    type: tukey
   T_gap: 0
   num_psds_max: 10
 

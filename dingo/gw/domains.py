@@ -54,6 +54,16 @@ class Domain(ABC):
 
     @property
     @abstractmethod
+    def min_idx(self) -> int:
+        pass
+
+    @property
+    @abstractmethod
+    def max_idx(self) -> int:
+        pass
+
+    @property
+    @abstractmethod
     def domain_dict(self):
         """Enables to rebuild the domain via calling build_domain(domain_dict)."""
         pass
@@ -71,7 +81,7 @@ class FrequencyDomain(Domain):
     """
 
     def __init__(
-        self, f_min: float, f_max: float, delta_f: float, window_factor: float = None
+        self, f_min: float, f_max: float, delta_f: float, window_factor: float = 1.0
     ):
         self._f_min = f_min
         self._f_max = f_max
@@ -89,9 +99,37 @@ class FrequencyDomain(Domain):
         class instances.
         """
         FrequencyDomain.sample_frequencies.fget.cache_clear()
-        FrequencyDomain.sample_frequencies_truncated.fget.cache_clear()
         FrequencyDomain.frequency_mask.fget.cache_clear()
         FrequencyDomain.noise_std.fget.cache_clear()
+
+    def update(self, new_settings: dict):
+        """
+        Update the domain with new settings. This is only allowed if the new settings
+        are "compatible" with the old ones. E.g., f_min should be larger than the
+        existing f_min.
+
+        Parameters
+        ----------
+        new_settings : dict
+            Settings dictionary. Must contain a subset of the keys contained in
+            domain_dict.
+        """
+        new_settings = new_settings.copy()
+        if "type" in new_settings and new_settings.pop("type") not in [
+            "FrequencyDomain",
+            "FD",
+        ]:
+            raise ValueError("Cannot update domain to type other than FrequencyDomain.")
+        for k, v in new_settings.items():
+            if k not in ["f_min", "f_max", "delta_f", "window_factor"]:
+                raise KeyError(f"Invalid key for domain update: {k}.")
+            if k == "window_factor" and v != self._window_factor:
+                raise ValueError("Cannot update window_factor.")
+            if k == "delta_f" and v != self._delta_f:
+                raise ValueError("Cannot update delta_f.")
+        self.set_new_range(
+            f_min=new_settings.get("f_min", None), f_max=new_settings.get("f_max", None)
+        )
 
     def set_new_range(self, f_min: float = None, f_max: float = None):
         """
@@ -120,29 +158,41 @@ class FrequencyDomain(Domain):
         # instead of using the old (incorrect) ones.
         self.clear_cache_for_all_instances()
 
-    def truncate_data(self, data, axis=-1, allow_for_flexible_upper_bound=False):
-        """Truncate data from to [self._f_min, self._f_max]. By convention,
-        the last axis is the frequency axis.
+    def update_data(
+        self, data: np.ndarray, axis: int = -1, low_value: float = 0.0
+    ):
+        """
+        Adjusts data to be compatible with the domain:
 
-        By default, the input data is in the range [0, self._f_max] before
-        truncation. In some use cases, the input data has a different range,
-        [0, f_max], where f_max > self._f_max. To truncate such data,
-        set allow_for_flexible_upper_bound = True.
+            * Below f_min, it sets the data to low_value (typically 0.0 for a waveform,
+            but for a PSD this might be a large value).
+            * Above f_max, it truncates the data array.
+
+        Parameters
+        ----------
+        data : np.ndarray
+            Data array
+        axis : int
+            Which data axis to apply the adjustment along.
+        low_value : float
+            Below f_min, set the data to this value.
+
+        Returns
+        -------
+        np.ndarray
+            The new data array.
         """
         sl = [slice(None)] * data.ndim
-        sl[axis] = slice(self.f_min_idx, self.f_max_idx + 1)
-        return data[tuple(sl)]
 
-        # Why do we need separate cases here? I believe I unified them above.
-        # I also removed a test that tests for this special case.
+        # First truncate beyond f_max.
+        sl[axis] = slice(0, self.max_idx + 1)
+        data = data[tuple(sl)]
 
-        # if allow_for_flexible_upper_bound:
-        #     return data[...,self.f_min_idx:self.f_max_idx+1]
-        # else:
-        #     if data.shape[-1] != len(self):
-        #         raise ValueError(f'Expected {len(self)} bins in frequency axis -1, '
-        #                          f'but got {data.shape[-1]}.')
-        #     return data[...,self.f_min_idx:]
+        # Set data value below f_min to low_value.
+        sl[axis] = slice(0, self.min_idx)
+        data[tuple(sl)] = low_value
+
+        return data
 
     def time_translate_data(self, data, dt):
         """Time translate complex frequency domain data by dt [in seconds]."""
@@ -154,17 +204,7 @@ class FrequencyDomain(Domain):
             raise ValueError(
                 "Method expects complex frequency domain data, got real array."
             )
-        # find out whether data is truncated or not
-        if data.shape[-1] == len(self):
-            f = self.__call__()
-        elif data.shape[-1] == self.len_truncated:
-            f = self.sample_frequencies_truncated
-        else:
-            raise ValueError(
-                f"Expected {len(self)} or {self.len_truncated} "
-                f"bins in frequency axis -1, but got "
-                f"{data.shape[-1]}."
-            )
+        f = self.sample_frequencies
         # shift data
         return data * np.exp(-2j * np.pi * dt * f)
 
@@ -217,21 +257,12 @@ class FrequencyDomain(Domain):
         return len(np.flatnonzero(np.asarray(mask)))
 
     @property
-    def f_min_idx(self):
+    def min_idx(self):
         return round(self._f_min / self._delta_f)
 
     @property
-    def f_max_idx(self):
+    def max_idx(self):
         return round(self._f_max / self._delta_f)
-
-    @property
-    @lru_cache()
-    def sample_frequencies_truncated(self):
-        return self.sample_frequencies[self.f_min_idx :]
-
-    @property
-    def len_truncated(self):
-        return len(self.sample_frequencies_truncated)
 
     @property
     def window_factor(self):
@@ -361,6 +392,14 @@ class TimeDomain(Domain):
     @property
     def sampling_rate(self) -> float:
         return self._sampling_rate
+
+    @property
+    def min_idx(self) -> int:
+        return 0
+
+    @property
+    def max_idx(self) -> int:
+        return round(self._time_duration * self._sampling_rate)
 
     @property
     def domain_dict(self):

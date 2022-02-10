@@ -3,14 +3,15 @@ data:
   waveform_dataset_path: ./waveform_dataset.hdf5  # Contains intrinsic waveforms
   train_fraction: 0.95
   # data conditioning for inference
-  conditioning:
-    frequency_range: [ 20, 1024 ]
-    window_kwargs:
-      window_type: tukey
-      f_s: 4096
-      T: 8.0
-      roll_off: 0.4
+  window:
+    type: tukey
+    f_s: 4096
+    T: 8.0
+    roll_off: 0.4
   #  0.9374713897717841
+  domain_update:
+    f_min: 25
+    f_max: 512
   detectors:
     - H1
     - L1
@@ -57,8 +58,6 @@ model:
       num_training_samples: 20000
       num_validation_samples: 5000
       size: 200
-    # added_context = True for concatenation of GNPE proxies to enet output
-#      added_context: False # True
 
 # Training is divided in stages. They each require all settings as indicated below.
 training:
@@ -95,9 +94,8 @@ local:
     max_epochs_per_run: 2
   checkpoint_epochs: 1
   condor:
-    python: /home/jonas/Desktop/dingo-devel/venv/bin/python
+    bid: 100
     num_cpus: 16
     memory_cpus: 128000
     num_gpus: 1
     memory_gpus: 8000
-    train_script: /home/jonas/Desktop/dingo-devel/venv/bin/dingo_train_condor  # I'm not sure if this is quite right

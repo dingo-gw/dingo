@@ -131,35 +131,31 @@ def test_load_waveform_dataset(generate_waveform_dataset_small):
     f_max = wd.domain.f_max
     delta_f = wd.domain._delta_f
 
-    # check basic truncation without setting new range
-    wd.truncate_dataset_domain()
-    for pol in ['h_cross', 'h_plus']:
-        a = el['waveform'][pol][int(f_min/delta_f):int(f_max/delta_f)+1]
-        b = wd[0]['waveform'][pol]
-        scale_factor = np.max(np.abs(a))
-        assert np.allclose(b / scale_factor, a / scale_factor)
-        assert not np.allclose(b / scale_factor, np.roll(a, 1) / scale_factor)
-    # check that ValueError is raised if one tries to truncate again
-    with pytest.raises(ValueError):
-        wd.truncate_dataset_domain()
-
     # check that truncation works as intended when setting new range
-    wd2 = WaveformDataset(path)
-    assert len(wd2.domain) == len(wd2.domain())
     f_min_new = 20
     f_max_new = 100
-    wd2.truncate_dataset_domain(new_range=(f_min_new, f_max_new))
+    wd2 = WaveformDataset(path, domain_update={'f_min': f_min_new, 'f_max': f_max_new})
+    assert len(wd2.domain) == len(wd2.domain())
     # check that new domain settings are correctly adapted
     assert wd2.domain.f_min == f_min_new
     assert wd2.domain.f_max == f_max_new
     assert wd2.domain._delta_f == wd.domain._delta_f
     # check that truncation works as intended
     for pol in ['h_cross', 'h_plus']:
+        # f_min_new to f_max_new check
         a = el['waveform'][pol][int(f_min_new/delta_f):int(f_max_new/delta_f)+1]
-        b = wd2[0]['waveform'][pol]
+        b = wd2[0]['waveform'][pol][int(f_min_new/delta_f):]
         scale_factor = np.max(np.abs(a))
         assert len(a) == f_max_new / delta_f + 1 - f_min_new / delta_f
         assert np.allclose(b / scale_factor, a / scale_factor)
         assert not np.allclose(b / scale_factor, np.roll(a, 1) / scale_factor)
+
+        # f_min to f_min_new check
+        a = el['waveform'][pol][int(f_min / delta_f):int(f_min_new / delta_f)]
+        b = wd2[0]['waveform'][pol][int(f_min / delta_f):int(f_min_new / delta_f)]
+        assert not np.allclose(b / scale_factor, a / scale_factor)
+
+        # below f_min_new check
+        assert np.all(wd2[0]['waveform'][pol][:int(f_min_new)] == 0.0)
     assert len(wd2.domain) == f_max_new / delta_f + 1
     assert len(wd2.domain) == len(wd2.domain())

@@ -157,7 +157,7 @@ def download_and_estimate_PSDs(
     window_kwargs = {
         "f_s": f_s,
         "roll_off": settings["window"]["roll_off"],
-        "window_type": settings["window"]["window_type"],
+        "type": settings["window"]["type"],
         "T": T,
     }
     w = get_window(window_kwargs)

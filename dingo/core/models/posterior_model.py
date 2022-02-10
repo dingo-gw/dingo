@@ -218,7 +218,7 @@ class PosteriorModel:
         train_loader: torch.utils.data.DataLoader,
         test_loader: torch.utils.data.DataLoader,
         train_dir: str,
-        runtime_limits_kwargs: dict = None,
+        runtime_limits: object = None,
         checkpoint_epochs: int = None,
     ):
         """
@@ -226,14 +226,11 @@ class PosteriorModel:
         :param train_loader:
         :param test_loader:
         :param train_dir:
-        :param runtime_limits_kwargs:
+        :param runtime_limits:
         :return:
         """
-        runtime_limits = dingo.core.utils.trainutils.RuntimeLimits(
-            **runtime_limits_kwargs, epoch_start=self.epoch
-        )
 
-        while not runtime_limits.runtime_limits_exceeded(self.epoch):
+        while not runtime_limits.limits_exceeded(self.epoch):
             self.epoch += 1
 
             # Training
@@ -259,11 +256,12 @@ class PosteriorModel:
                     )
                 )
 
-            utils.write_history(train_dir, self.epoch, train_loss, test_loss, lr)
-            utils.save_model(self, train_dir, checkpoint_epochs=checkpoint_epochs)
-
             # scheduler step for learning rate
             utils.perform_scheduler_step(self.scheduler, test_loss)
+
+            # write history and save model
+            utils.write_history(train_dir, self.epoch, train_loss, test_loss, lr)
+            utils.save_model(self, train_dir, checkpoint_epochs=checkpoint_epochs)
 
             print(f"Finished training epoch {self.epoch}.\n")
 
