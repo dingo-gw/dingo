@@ -98,6 +98,8 @@ def generate_dataset(settings, num_processes):
                 basis = SVDBasis()
                 basis.generate_basis(train_data, svd_settings["size"])
 
+                del parameters, polarizations, train_data
+
             compression_transforms.append(ApplySVD(basis))
             dataset_dict["svd_V"] = basis.V
 
