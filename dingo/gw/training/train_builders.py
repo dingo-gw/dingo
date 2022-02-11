@@ -1,5 +1,6 @@
 import copy
 import torchvision
+from threadpoolctl import threadpool_limits
 from torch.utils.data import DataLoader
 from bilby.gw.detector import InterferometerList
 
@@ -295,14 +296,15 @@ def build_svd_for_embedding_network(
             int(torch.initial_seed()) % (2 ** 32 - 1)
         ),
     )
-    for idx, data in enumerate(loader):
-        strain_data = data["waveform"]
-        lower = idx * batch_size
-        n = min(batch_size, num_waveforms - lower)
-        for ifo, strains in strain_data.items():
-            waveforms[ifo][lower : lower + n] = strains[:n]
-        if lower + n == num_waveforms:
-            break
+    with threadpool_limits(limits=1, user_api="blas"):
+        for idx, data in enumerate(loader):
+            strain_data = data["waveform"]
+            lower = idx * batch_size
+            n = min(batch_size, num_waveforms - lower)
+            for ifo, strains in strain_data.items():
+                waveforms[ifo][lower : lower + n] = strains[:n]
+            if lower + n == num_waveforms:
+                break
     print(f"...done. This took {time.time() - time_start:.0f} s.")
 
     print("Generating SVD basis for ifo:")
