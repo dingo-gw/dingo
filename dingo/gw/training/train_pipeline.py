@@ -4,6 +4,8 @@ import yaml
 import argparse
 import textwrap
 
+from threadpoolctl import threadpool_limits
+
 from dingo.core.nn.nsf import autocomplete_model_kwargs_nsf
 from dingo.gw.training.train_builders import (
     build_dataset,
@@ -323,7 +325,8 @@ def train_local():
             local_settings = yaml.safe_load(f)
         pm, wfd = prepare_training_resume(args.checkpoint, local_settings["device"])
 
-    complete = train_stages(pm, wfd, args.train_dir, local_settings)
+    with threadpool_limits(limits=1, user_api="blas"):
+        complete = train_stages(pm, wfd, args.train_dir, local_settings)
 
     if complete:
         print("All training stages complete.")
