@@ -18,7 +18,14 @@ class ASDDataset(DingoDataset):
     neural density estimator.
     """
 
-    def __init__(self, file_name=None, dictionary=None, ifos=None, domain_update=None):
+    def __init__(
+        self,
+        file_name=None,
+        dictionary=None,
+        ifos=None,
+        precision=None,
+        domain_update=None,
+    ):
         """
         Parameters
         ----------
@@ -30,10 +37,12 @@ class ASDDataset(DingoDataset):
         ifos : List[str]
             List of detectors used for dataset, e.g. ['H1', 'L1'].
             If not set, all available ones in the dataset are used.
+        precision : str ('single', 'double')
+            If provided, changes precision of loaded dataset.
         domain_update : dict
             If provided, update domain from existing domain using new settings.
         """
-
+        self.precision = precision
         super().__init__(
             file_name=file_name,
             dictionary=dictionary,
@@ -48,6 +57,19 @@ class ASDDataset(DingoDataset):
         self.domain = build_domain(self.settings["domain_dict"])
         if domain_update is not None:
             self.update_domain(domain_update)
+
+        # Update dtypes if necessary
+        if self.precision is not None:
+            if self.precision == 'single':
+                for ifo, asd in self.asds.items():
+                    self.asds[ifo] = asd.astype(np.float32, copy=False)
+            elif self.precision == 'double':
+                for ifo, asd in self.asds.items():
+                    self.asds[ifo] = asd.astype(np.float64, copy=False)
+            else:
+                raise TypeError(
+                    'precision can only be changed to "single" or "double".'
+                )
 
     def update_domain(self, domain_update):
         """
