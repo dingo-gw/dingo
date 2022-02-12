@@ -286,7 +286,7 @@ def train_epoch(pm, dataloader):
     for batch_idx, data in enumerate(dataloader):
         pm.optimizer.zero_grad()
         # data to device
-        data = [d.float().to(pm.device, non_blocking=True) for d in data]
+        data = [d.to(pm.device, non_blocking=True) for d in data]
         # compute loss
         loss = -pm.model(data[0], *data[1:]).mean()
         # update loss for history and logging
@@ -312,7 +312,7 @@ def test_epoch(pm, dataloader):
 
         for batch_idx, data in enumerate(dataloader):
             # data to device
-            data = [d.float().to(pm.device, non_blocking=True) for d in data]
+            data = [d.to(pm.device, non_blocking=True) for d in data]
             # compute loss
             loss = -pm.model(data[0], *data[1:]).mean()
             # update loss for history and logging
