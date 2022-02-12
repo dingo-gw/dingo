@@ -92,7 +92,8 @@ class RepackageStrainsAndASDS(object):
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
-        strains = np.empty((len(self.ifos),3,len(sample['asds'][self.ifos[0]])-self.first_index))
+        strains = np.empty((len(self.ifos),3,len(sample['asds'][self.ifos[0]])-self.first_index),
+                           dtype=np.float32)
         for idx_ifo, ifo in enumerate(self.ifos):
             strains[idx_ifo,0] = sample['waveform'][ifo][self.first_index:].real
             strains[idx_ifo,1] = sample['waveform'][ifo][self.first_index:].imag
