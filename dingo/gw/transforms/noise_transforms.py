@@ -1,4 +1,6 @@
 import numpy as np
+import torch
+
 
 class SampleNoiseASD(object):
     """
@@ -61,17 +63,15 @@ class AddWhiteNoiseComplex(object):
     Adds white noise with a standard deviation determined by self.scale to the
     complex strain data.
     """
-    def __init__(self, scale = 1.0):
-        self.scale = scale
+    def __init__(self):
+        pass
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
         noisy_strains = {}
         for ifo, pure_strain in sample['waveform'].items():
-            noise = \
-                (np.random.normal(scale=self.scale, size=len(pure_strain))
-                + np.random.normal(scale=self.scale, size=len(pure_strain)) *1j)
-            noise = noise.astype(np.complex64)
+            noise = torch.randn(len(pure_strain)) + torch.randn(len(pure_strain))*1j
+            noise = noise.numpy()
             noisy_strains[ifo] = pure_strain + noise
         sample['waveform'] = noisy_strains
         return sample
