@@ -70,7 +70,8 @@ class AddWhiteNoiseComplex(object):
         sample = input_sample.copy()
         noisy_strains = {}
         for ifo, pure_strain in sample['waveform'].items():
-            noise = torch.randn(len(pure_strain)) + torch.randn(len(pure_strain))*1j
+            noise = (torch.randn(len(pure_strain), device=torch.device('cpu'))
+                     + torch.randn(len(pure_strain), device=torch.device('cpu'))*1j)
             noise = noise.numpy()
             noisy_strains[ifo] = pure_strain + noise
         sample['waveform'] = noisy_strains
