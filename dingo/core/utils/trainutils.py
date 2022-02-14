@@ -6,38 +6,45 @@ import csv
 
 class AvgTracker:
     def __init__(self):
-        self.x = 0
+        self.sum = 0
         self.N = 0
+        self.x = None
 
-    def update(self, x, n):
-        self.x += x
+    def update(self, x, n=1):
+        self.sum += x
         self.N += n
+        self.x = x
 
     def get_avg(self):
         if self.N == 0:
             return float("nan")
-        return self.x / self.N
+        return self.sum / self.N
 
 
 class LossInfo:
     def __init__(self, epoch, len_dataset, batch_size, mode="Train", print_freq=1):
+        # data for print statements
         self.epoch = epoch
         self.len_dataset = len_dataset
         self.batch_size = batch_size
         self.mode = mode
         self.print_freq = print_freq
-        self.start_time = time.time()
-        self.time_last = time.time()
-        self.avg_tracker = AvgTracker()
+        # track loss
+        self.loss_tracker = AvgTracker()
+        # track computation times
+        self.times = {"Dataloader": AvgTracker(), "Network": AvgTracker()}
+        self.t = time.time()
+
+    def update_timer(self, timer_mode="Dataloader"):
+        self.times[timer_mode].update(time.time() - self.t)
+        self.t = time.time()
 
     def update(self, x, n):
-        self.avg_tracker.update(x, n)
-        t = time.time()
-        self.dt = t - self.time_last
-        self.time_last = t
+        self.loss_tracker.update(x, n)
+        self.update_timer(timer_mode="Network")
 
     def get_avg(self):
-        return self.avg_tracker.get_avg()
+        return self.loss_tracker.get_avg()
 
     def print_info(self, batch_idx, loss):
         if batch_idx % self.print_freq == 0:
@@ -51,14 +58,13 @@ class LossInfo:
                 ),
                 end="\t\t",
             )
-            print(
-                "Loss (avg): {:.3f} ({:.3f})".format(loss, self.get_avg()), end="\t\t"
-            )
-            print(
-                "Time per batch [s] (avg): {:.3f} ({:.3f})".format(
-                    self.dt, (time.time() - self.start_time) / (batch_idx + 1)
-                )
-            )
+            # print loss
+            print(f"Loss: {loss:.3f} ({self.get_avg():.3f})", end="\t\t")
+            # print computation times
+            td, td_avg = self.times["Dataloader"].x, self.times["Dataloader"].get_avg()
+            tn, tn_avg = self.times["Network"].x, self.times["Network"].get_avg()
+            print(f"Time Dataloader: {td:.3f} ({td_avg:.3f})", end="\t\t")
+            print(f"Time Network: {tn:.3f} ({tn_avg:.3f})")
 
 
 class RuntimeLimits:
