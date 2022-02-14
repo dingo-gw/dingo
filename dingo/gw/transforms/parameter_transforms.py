@@ -37,7 +37,7 @@ class SelectStandardizeRepackageParameters(object):
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
-        parameters = np.empty(self.N)
+        parameters = np.empty(self.N, dtype=np.float32)
         for idx, par in enumerate(self.selected_parameters):
             parameters[idx] = \
                 (sample['parameters'][par] - self.mean[par]) / self.std[par]

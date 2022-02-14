@@ -72,7 +72,8 @@ class GNPEDetectorTimes(object):
         sample['extrinsic_parameters'] = ext_params
         # store standardized proxies in sample
         proxies_array = \
-            (np.array([proxies[k] for k in proxies]) - self.mean) / self.std
+            (np.array([proxies[k] for k in proxies], dtype=np.float32)
+             - self.mean) / self.std
         if 'gnpe_proxies' in sample:
             sample['gnpe_proxies'] = np.concatenate(
                 (sample['gnpe_proxies'], proxies_array))
