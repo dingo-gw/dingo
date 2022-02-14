@@ -303,7 +303,7 @@ def build_svd_for_embedding_network(
             lower = idx * batch_size
             n = min(batch_size, num_waveforms - lower)
             for ifo, strains in strain_data.items():
-                waveforms[ifo][lower : lower + n] = strains[:n]
+                waveforms[ifo][lower: lower + n] = copy.deepcopy(strains[:n])
             if lower + n == num_waveforms:
                 break
     print(f"...done. This took {time.time() - time_start:.0f} s.")
