@@ -284,17 +284,18 @@ def train_epoch(pm, dataloader):
     )
 
     for batch_idx, data in enumerate(dataloader):
+        loss_info.update_timer()
         pm.optimizer.zero_grad()
         # data to device
         data = [d.to(pm.device, non_blocking=True) for d in data]
         # compute loss
         loss = -pm.model(data[0], *data[1:]).mean()
-        # update loss for history and logging
-        loss_info.update(loss.detach().item() * len(data[0]), len(data[0]))
-        loss_info.print_info(batch_idx, loss.item())
         # backward pass and optimizer step
         loss.backward()
         pm.optimizer.step()
+        # update loss for history and logging
+        loss_info.update(loss.detach().item(), len(data[0]))
+        loss_info.print_info(batch_idx)
 
     return loss_info.get_avg()
 
@@ -311,12 +312,13 @@ def test_epoch(pm, dataloader):
         )
 
         for batch_idx, data in enumerate(dataloader):
+            loss_info.update_timer()
             # data to device
             data = [d.to(pm.device, non_blocking=True) for d in data]
             # compute loss
             loss = -pm.model(data[0], *data[1:]).mean()
             # update loss for history and logging
-            loss_info.update(loss.detach().item() * len(data[0]), len(data[0]))
-            loss_info.print_info(batch_idx, loss.item())
+            loss_info.update(loss.detach().item(), len(data[0]))
+            loss_info.print_info(batch_idx)
 
         return loss_info.get_avg()
