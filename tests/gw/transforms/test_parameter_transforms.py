@@ -30,4 +30,5 @@ def test_SelectStandardizeRepackageParameters():
         m, std = standardization_dict['mean'][k], standardization_dict['std'][k]
         par_in = sample['parameters'][k]
         par_out = sample_out['parameters'][idx]
-        assert par_out == (par_in - m) / std
+        # standardization changes dtype to float32
+        assert par_out == np.float32((par_in - m) / std)
