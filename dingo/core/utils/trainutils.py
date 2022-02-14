@@ -31,6 +31,7 @@ class LossInfo:
         self.print_freq = print_freq
         # track loss
         self.loss_tracker = AvgTracker()
+        self.loss = None
         # track computation times
         self.times = {"Dataloader": AvgTracker(), "Network": AvgTracker()}
         self.t = time.time()
@@ -39,8 +40,9 @@ class LossInfo:
         self.times[timer_mode].update(time.time() - self.t)
         self.t = time.time()
 
-    def update(self, x, n):
-        self.loss_tracker.update(x, n)
+    def update(self, loss, n):
+        self.loss = loss
+        self.loss_tracker.update(loss * n, n)
         self.update_timer(timer_mode="Network")
 
     def get_avg(self):
@@ -59,7 +61,7 @@ class LossInfo:
                 end="\t\t",
             )
             # print loss
-            print(f"Loss: {self.loss_tracker.x:.3f} ({self.get_avg():.3f})", end="\t\t")
+            print(f"Loss: {self.loss:.3f} ({self.get_avg():.3f})", end="\t\t")
             # print computation times
             td, td_avg = self.times["Dataloader"].x, self.times["Dataloader"].get_avg()
             tn, tn_avg = self.times["Network"].x, self.times["Network"].get_avg()

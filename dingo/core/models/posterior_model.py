@@ -294,7 +294,7 @@ def train_epoch(pm, dataloader):
         loss.backward()
         pm.optimizer.step()
         # update loss for history and logging
-        loss_info.update(loss.detach().item() * len(data[0]), len(data[0]))
+        loss_info.update(loss.detach().item(), len(data[0]))
         loss_info.print_info(batch_idx)
 
     return loss_info.get_avg()
@@ -318,7 +318,7 @@ def test_epoch(pm, dataloader):
             # compute loss
             loss = -pm.model(data[0], *data[1:]).mean()
             # update loss for history and logging
-            loss_info.update(loss.detach().item() * len(data[0]), len(data[0]))
-            loss_info.print_info(batch_idx, loss.item())
+            loss_info.update(loss.detach().item(), len(data[0]))
+            loss_info.print_info(batch_idx)
 
         return loss_info.get_avg()
