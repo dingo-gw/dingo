@@ -6,31 +6,38 @@ class SampleNoiseASD(object):
     """
     Sample a random asds for each detector and add them to sample['asds'].
     """
+
     def __init__(self, asd_dataset):
         self.asd_dataset = asd_dataset
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
-        sample['asds'] = self.asd_dataset.sample_random_asds()
+        sample["asds"] = self.asd_dataset.sample_random_asds()
         return sample
+
 
 class WhitenStrain(object):
     """
     Whiten the strain data by dividing w.r.t. the corresponding asds.
     """
+
     def __init__(self):
         pass
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
-        ifos = sample['waveform'].keys()
-        if ifos != sample['asds'].keys():
-            raise ValueError(f'Detectors of strain data, {ifos}, do not match '
-                             f'those of asds, {sample["asds"].keys()}.')
-        whitened_strains = \
-            {ifo: sample['waveform'][ifo] / sample['asds'][ifo] for ifo in ifos}
-        sample['waveform'] = whitened_strains
+        ifos = sample["waveform"].keys()
+        if ifos != sample["asds"].keys():
+            raise ValueError(
+                f"Detectors of strain data, {ifos}, do not match "
+                f'those of asds, {sample["asds"].keys()}.'
+            )
+        whitened_strains = {
+            ifo: sample["waveform"][ifo] / sample["asds"][ifo] for ifo in ifos
+        }
+        sample["waveform"] = whitened_strains
         return sample
+
 
 class WhitenAndScaleStrain(object):
     """
@@ -43,38 +50,48 @@ class WhitenAndScaleStrain(object):
         (*) the denominator accounts for frequency binning
         (*) dividing by window factor accounts for windowing of strain data
     """
+
     def __init__(self, scale_factor):
         self.scale_factor = scale_factor
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
-        ifos = sample['waveform'].keys()
-        if ifos != sample['asds'].keys():
-            raise ValueError(f'Detectors of strain data, {ifos}, do not match '
-                             f'those of asds, {sample["asds"].keys()}.')
-        whitened_strains = \
-            {ifo: sample['waveform'][ifo] /
-                  (sample['asds'][ifo] * self.scale_factor) for ifo in ifos}
-        sample['waveform'] = whitened_strains
+        ifos = sample["waveform"].keys()
+        if ifos != sample["asds"].keys():
+            raise ValueError(
+                f"Detectors of strain data, {ifos}, do not match "
+                f'those of asds, {sample["asds"].keys()}.'
+            )
+        whitened_strains = {
+            ifo: sample["waveform"][ifo] / (sample["asds"][ifo] * self.scale_factor)
+            for ifo in ifos
+        }
+        sample["waveform"] = whitened_strains
         return sample
+
 
 class AddWhiteNoiseComplex(object):
     """
     Adds white noise with a standard deviation determined by self.scale to the
     complex strain data.
     """
+
     def __init__(self):
         pass
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
         noisy_strains = {}
-        for ifo, pure_strain in sample['waveform'].items():
-            noise = (torch.randn(len(pure_strain), device=torch.device('cpu'))
-                     + torch.randn(len(pure_strain), device=torch.device('cpu'))*1j)
+        for ifo, pure_strain in sample["waveform"].items():
+            # use torch rng and convert to numpy, which is slightly faster than using
+            # numpy directly
+            noise = (
+                torch.randn(len(pure_strain), device=torch.device("cpu"))
+                + torch.randn(len(pure_strain), device=torch.device("cpu")) * 1j
+            )
             noise = noise.numpy()
             noisy_strains[ifo] = pure_strain + noise
-        sample['waveform'] = noisy_strains
+        sample["waveform"] = noisy_strains
         return sample
 
 
@@ -87,21 +104,25 @@ class RepackageStrainsAndASDS(object):
         i = 1: strain.imag
         i = 2: 1 / (asd * 1e23)
     """
+
     def __init__(self, ifos, first_index=0):
         self.ifos = ifos
         self.first_index = first_index
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
-        strains = np.empty((len(self.ifos),3,len(sample['asds'][self.ifos[0]])-self.first_index),
-                           dtype=np.float32)
+        strains = np.empty(
+            (len(self.ifos), 3, len(sample["asds"][self.ifos[0]]) - self.first_index),
+            dtype=np.float32,
+        )
         for idx_ifo, ifo in enumerate(self.ifos):
-            strains[idx_ifo,0] = sample['waveform'][ifo][self.first_index:].real
-            strains[idx_ifo,1] = sample['waveform'][ifo][self.first_index:].imag
-            strains[idx_ifo,2] = 1 / (sample['asds'][ifo][self.first_index:] * 1e23)
-        sample['waveform'] = strains
+            strains[idx_ifo, 0] = sample["waveform"][ifo][self.first_index :].real
+            strains[idx_ifo, 1] = sample["waveform"][ifo][self.first_index :].imag
+            strains[idx_ifo, 2] = 1 / (sample["asds"][ifo][self.first_index :] * 1e23)
+        sample["waveform"] = strains
         return sample
 
-if __name__ == '__main__':
-    AD = ASDDataset('../../../data/PSDs/asds_O1.hdf5')
+
+if __name__ == "__main__":
+    AD = ASDDataset("../../../data/PSDs/asds_O1.hdf5")
     asd_samples = AD.sample_random_asds()
