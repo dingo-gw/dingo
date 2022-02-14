@@ -295,7 +295,7 @@ def train_epoch(pm, dataloader):
         pm.optimizer.step()
         # update loss for history and logging
         loss_info.update(loss.detach().item() * len(data[0]), len(data[0]))
-        loss_info.print_info(batch_idx, loss.item())
+        loss_info.print_info(batch_idx)
 
     return loss_info.get_avg()
 

@@ -46,7 +46,7 @@ class LossInfo:
     def get_avg(self):
         return self.loss_tracker.get_avg()
 
-    def print_info(self, batch_idx, loss):
+    def print_info(self, batch_idx):
         if batch_idx % self.print_freq == 0:
             print(
                 "{} Epoch: {} [{}/{} ({:.0f}%)]".format(
@@ -59,7 +59,7 @@ class LossInfo:
                 end="\t\t",
             )
             # print loss
-            print(f"Loss: {loss:.3f} ({self.get_avg():.3f})", end="\t\t")
+            print(f"Loss: {self.loss_tracker.x:.3f} ({self.get_avg():.3f})", end="\t\t")
             # print computation times
             td, td_avg = self.times["Dataloader"].x, self.times["Dataloader"].get_avg()
             tn, tn_avg = self.times["Network"].x, self.times["Network"].get_avg()
