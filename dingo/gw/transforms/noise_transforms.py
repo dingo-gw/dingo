@@ -83,8 +83,12 @@ class AddWhiteNoiseComplex(object):
         sample = input_sample.copy()
         noisy_strains = {}
         for ifo, pure_strain in sample["waveform"].items():
-            # use torch rng and convert to numpy, which is slightly faster than using
-            # numpy directly
+            # Use torch rng and convert to numpy, which is slightly faster than using
+            # numpy directly. Using torch.randn gives single-precision floats by default
+            # (which we want)  whereas np.random.random gives double precision (and
+            # must subsequently  be cast to single precision).
+            # np.random.default_rng().standard_normal() can be set to output single
+            # precision, but in testing this is slightly slower than the torch call.
             noise = (
                 torch.randn(len(pure_strain), device=torch.device("cpu"))
                 + torch.randn(len(pure_strain), device=torch.device("cpu")) * 1j
