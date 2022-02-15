@@ -1,0 +1,20 @@
+
+
+01:
+  training:
+    stage_0:
+      epochs: 200
+      optimizer:
+        lr: 0.0001
+      scheduler:
+        T_max: 200
+      batch_size: 128
+
+02: null
+03: 
+  model:
+    embedding_net_kwargs:
+      output_dim: 129
+      hidden_dims:
+        - 1024
+        - 512
