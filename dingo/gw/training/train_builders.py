@@ -81,7 +81,7 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     asd_dataset = ASDDataset(
         asd_dataset_path,
         ifos=data_settings["detectors"],
-        precision='single',
+        precision="single",
         domain_update=wfd.domain.domain_dict,
     )
 
@@ -101,6 +101,10 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     if data_settings["selected_parameters"] == "default":
         data_settings["selected_parameters"] = default_params
 
+    ref_time = data_settings["ref_time"]
+    # Build detector objects
+    ifo_list = InterferometerList(data_settings["detectors"])
+
     # If the standardization factors have already been set, use those. Otherwise,
     # calculate them, and save them within the data settings. Note that the order that
     # parameters appear in standardization_dict is the same as the order in the neural
@@ -111,13 +115,13 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     except KeyError:
         print("Calculating new parameter standardizations.")
         standardization_dict = get_standardization_dict(
-            extrinsic_prior_dict, wfd, data_settings["selected_parameters"]
+            extrinsic_prior_dict,
+            wfd,
+            data_settings["selected_parameters"],
+            ifo_list,
+            ref_time,
         )
         data_settings["standardization"] = standardization_dict
-
-    ref_time = data_settings["ref_time"]
-    # Build detector objects
-    ifo_list = InterferometerList(data_settings["detectors"])
 
     # Build transforms.
     gnpe_proxy_dim = 0
@@ -336,7 +340,7 @@ def build_svd_for_embedding_network(
     for ifo in data_settings["detectors"]:
         V = basis_dict[ifo].V
         assert np.allclose(V[: wfd.domain.min_idx], 0)
-        V = V[wfd.domain.min_idx:]
+        V = V[wfd.domain.min_idx :]
         print("      " + str(V.shape))
         V_rb_list.append(V)
     print("\n")
