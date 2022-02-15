@@ -263,6 +263,10 @@ def build_svd_for_embedding_network(
     # dictionary.
     data_settings = copy.deepcopy(data_settings)
 
+    # This is needed to prevent an occasional error when loading a large dataset into
+    # memory using a dataloader. This removes a limitation on the number of "open files".
+    torch.multiprocessing.set_sharing_strategy('file_system')
+
     # Fix the luminosity distance to a standard value, just in order to generate the SVD.
     data_settings["extrinsic_prior"]["luminosity_distance"] = "100.0"
 
@@ -303,10 +307,13 @@ def build_svd_for_embedding_network(
             lower = idx * batch_size
             n = min(batch_size, num_waveforms - lower)
             for ifo, strains in strain_data.items():
-                waveforms[ifo][lower : lower + n] = strains[:n]
+                waveforms[ifo][lower: lower + n] = strains[:n]
             if lower + n == num_waveforms:
                 break
     print(f"...done. This took {time.time() - time_start:.0f} s.")
+
+    # Reset the standard sharing strategy.
+    torch.multiprocessing.set_sharing_strategy('file_descriptor')
 
     print("Generating SVD basis for ifo:")
     time_start = time.time()
