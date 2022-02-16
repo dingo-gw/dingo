@@ -1,5 +1,6 @@
 from functools import partial
 from multiprocessing import Pool
+from math import isclose
 
 import numpy as np
 from typing import Dict, List, Tuple, Union, Any
@@ -236,9 +237,15 @@ class WaveformGenerator:
         hp, hc = LS.SimInspiralFD(*parameters_lal)
 
         # Ensure that the waveform agrees with the frequency grid defined in the domain.
+        if not isclose(self.domain.delta_f, hp.deltaF, rel_tol=1e-6):
+            raise ValueError(f'Waveform delta_f is inconsistent with domain: {hp.deltaF} vs {self.domain.delta_f}!'
+                             f'To avoid this, ensure that f_max = {self.domain.f_max} is a power of two'
+                             'when you are using a native time-domain waveform model.')
+
         frequency_array = self.domain()
         h_plus = np.zeros_like(frequency_array, dtype=complex)
         h_cross = np.zeros_like(frequency_array, dtype=complex)
+        # Ensure that length of wf agrees with length of domain. Enforce by truncating frequencies beyond f_max
         if len(hp.data.data) > len(frequency_array):
             warnings.warn("LALsimulation waveform longer than domain's `frequency_array`"
                           f"({len(hp.data.data)} vs {len(frequency_array)}). Truncating lalsim array.")
@@ -247,8 +254,6 @@ class WaveformGenerator:
         else:
             h_plus[:len(hp.data.data)] = hp.data.data
             h_cross[:len(hc.data.data)] = hc.data.data
-
-        # TODO: ensure that length of wf agrees with length of domain! Enforce by truncating frequencies beyond f_max
 
         # Undo the time shift done in SimInspiralFD to the waveform
         dt = 1 / hp.deltaF + (hp.epoch.gpsSeconds + hp.epoch.gpsNanoSeconds * 1e-9)

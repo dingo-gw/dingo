@@ -48,6 +48,41 @@ def test_waveform_generator_FD(uniform_fd_domain, wf_parameters):
     assert domain()[domain.frequency_mask][0] == domain.f_min
 
 
+def test_waveform_generator_FD_f_max_failure(precessing_spin_wf_parameters):
+    """Specialized checks for time-domain waveforms.
+
+    When f_max != 2**n, and a TD waveform model is being used the waveform
+    can be generated, but the frequency spacing is then not consistent with
+    between the value stored in the domain object and the value returned by LAL.
+
+    In this case SimInspiralFD will return a **different delta_f** than used to
+    define the domain due to automatically adjusting the sampling rate and this
+    will trigger an exception in dingo's waveform_generator class.
+    """
+    # Common parameters
+    parameters, f_ref, approximant = precessing_spin_wf_parameters
+    approximant = 'SEOBNRv4PHM'
+
+
+    # (1)
+    # Check that generating this waveform **fails** as expected
+    # due to the choice of f_max and using a TD waveform.
+    p_FAIL = {'f_min': 20.0, 'f_max': 896.0, 'delta_f': 1.0/8.0}
+    domain_FAIL = FrequencyDomain(**p_FAIL)
+
+    with pytest.raises(ValueError):
+        wf_gen = WaveformGenerator(approximant, domain_FAIL, f_ref)
+        wf_dict = wf_gen.generate_hplus_hcross(parameters)
+
+    # (2)
+    # Check that generating this waveform **succeeds** as expected.
+    p_OK = {'f_min': 20.0, 'f_max': 1024.0, 'delta_f': 1.0/8.0}
+    domain_OK = FrequencyDomain(**p_OK)
+
+    wf_gen = WaveformGenerator(approximant, domain_OK, f_ref)
+    wf_dict = wf_gen.generate_hplus_hcross(parameters)
+
+
 def test_standardize_parameters_on_distribution():
     """Check standardization of samples from a multi-normal distribution."""
     mean_ = torch.tensor([3.0, 2.0, 8.0])
