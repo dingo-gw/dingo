@@ -1,4 +1,5 @@
 import ast
+from os.path import isfile
 import h5py
 import numpy as np
 import pandas as pd
@@ -96,6 +97,56 @@ class DingoDataset:
             self.settings = None  # Is this necessary?
         f.close()
 
+    def append_to_file(self, file_name):
+        """
+        Appends the dataset to a file.
+        * If isfile(file_name):
+            -> check that settings are identical (if not: raise ValueError)
+            -> check that keys between dataset and saved file don't overlap
+               (if not: raise Exception)
+            -> append dataset
+        * If not isfile(file_name):
+            -> write dataset to new file
+
+        Parameters
+        ----------
+        file_name: str
+            name of the dataset file
+        """
+        if not isfile(file_name):
+            self.to_file(file_name)
+
+        else:
+            # perform checks
+            with h5py.File(file_name, "r") as f:
+                # check that self.settings is identical to saved settings
+                try:
+                    saved_settings = ast.literal_eval(f.attrs["settings"])
+                except KeyError:
+                    saved_settings = None
+                if self.settings != saved_settings:
+                    raise ValueError(
+                        f"Settings incompatible with saved settings, "
+                        f"{self.settings} != {saved_settings}."
+                    )
+
+                # check that keys don't overlap
+                if len(set(self._data_keys) & set(f.keys())) > 0:
+                    raise Exception(
+                        f"Overlapping keys between dataset and saved file: "
+                        f"{set(self._data_keys) & set(f.files)}."
+                    )
+
+            # append dataset to save file
+            with h5py.File(file_name, "a") as f:
+                print(f"Appending dataset to {file_name}")
+                save_dict = {
+                    k: v
+                    for k, v in vars(self).items()
+                    if k in self._data_keys and v is not None
+                }
+                recursive_hdf5_save(f, save_dict)
+
     def to_dictionary(self):
         dictionary = {
             k: v
@@ -108,3 +159,33 @@ class DingoDataset:
         for k, v in dictionary.items():
             if k in self._data_keys or k == "settings":
                 vars(self)[k] = v
+
+
+def load_data_from_file(file_name, data_key):
+    """
+    Loads data from a file.
+
+    * If isfile(file_name):
+        -> load file as DingoDataset
+        -> return vars(dataset)[data_key] (which is None, if the key does not match)
+    * else:
+        -> return None
+
+    Parameters
+    ----------
+    file_name: str
+        name of the dataset file
+
+    data_key:
+        key for data in dataset file
+
+    Returns
+    -------
+
+    """
+    if not isfile(file_name):
+        return None
+
+    else:
+        dataset = DingoDataset(file_name=file_name, data_keys=[data_key])
+        return vars(dataset)[data_key]
