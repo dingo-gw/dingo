@@ -99,43 +99,13 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     # Build detector objects
     ifo_list = InterferometerList(data_settings["detectors"])
 
-    # Determine context parameters
-    if 'context_parameters' not in data_settings:
-        data_settings['context_parameters'] = []
-    extra_context_parameters = []
-    if 'gnpe_time_shifts' in data_settings:
-        extra_context_parameters += get_gnpe_time_shift_context(
-            ifo_list,
-            data_settings['gnpe_time_shifts']['exact_global_equiv'],
-        )
-    if 'gnpe_chirp_mass' in data_settings:
-        extra_context_parameters.append('chirp_mass_hat')
-    for p in extra_context_parameters:
-        if p not in data_settings['context_parameters']:
-            data_settings['context_parameters'].append(p)
-
-    # If the standardization factors have already been set, use those. Otherwise,
-    # calculate them, and save them within the data settings.
-    try:
-        standardization_dict = data_settings["standardization"]
-        print("Using previously-calculated parameter standardizations.")
-    except KeyError:
-        print("Calculating new parameter standardizations.")
-        standardization_dict = get_standardization_dict(
-            extrinsic_prior_dict,
-            wfd,
-            data_settings["regression_parameters"],
-            ifo_list,
-            ref_time,
-        )
-        data_settings["standardization"] = standardization_dict
-
     # Build transforms.
     gnpe_proxy_dim = 0
     transforms = []
     transforms.append(SampleExtrinsicParameters(extrinsic_prior_dict))
     transforms.append(GetDetectorTimes(ifo_list, ref_time))
-    # gnpe time shifts
+
+    extra_context_parameters = []
     if "gnpe_time_shifts" in data_settings:
         d = data_settings["gnpe_time_shifts"]
         transforms.append(
@@ -145,19 +115,47 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
                 d["exact_equiv"],
             )
         )
+        extra_context_parameters += transforms[-1].get_context_parameters()
         gnpe_proxy_dim += transforms[-1].gnpe_proxy_dim
-    # gnpe chirp mass
     if "gnpe_chirp_mass" in data_settings:
         d = data_settings["gnpe_chirp_mass"]
         transforms.append(
             GNPEChirpMass(
                 domain.sample_frequencies,
                 d["kernel_kwargs"],
-                mean=standardization_dict["std"]["chirp_mass"],
-                std=standardization_dict["std"]["chirp_mass"],
             )
         )
         gnpe_proxy_dim += transforms[-1].gnpe_proxy_dim
+        extra_context_parameters.append('chirp_mass_proxy')
+
+    # Add the GNPE proxies to context_parameters the first time the transforms are
+    # constructed. We do not want to overwrite the ordering of the parameters in
+    # subsequent runs.
+    if 'context_parameters' not in data_settings:
+        data_settings['context_parameters'] = []
+    for p in extra_context_parameters:
+        if p not in data_settings['context_parameters']:
+            data_settings['context_parameters'].append(p)
+
+    # If the standardization factors have already been set, use those. Otherwise,
+    # calculate them, and save them within the data settings.
+    #
+    # Standardizations are calculated at this point because the present set of
+    # transforms is sufficient for generating samples of all regression and context
+    # parameters.
+    try:
+        standardization_dict = data_settings["standardization"]
+        print("Using previously-calculated parameter standardizations.")
+    except KeyError:
+        print("Calculating new parameter standardizations.")
+        standardization_dict = get_standardization_dict(
+            extrinsic_prior_dict,
+            wfd,
+            data_settings["regression_parameters"] + data_settings['context_parameters'],
+            torchvision.transforms.Compose(transforms),
+        )
+        data_settings["standardization"] = standardization_dict
+
     transforms.append(ProjectOntoDetectors(ifo_list, domain, ref_time))
     transforms.append(SampleNoiseASD(asd_dataset))
     transforms.append(WhitenAndScaleStrain(domain.noise_std))

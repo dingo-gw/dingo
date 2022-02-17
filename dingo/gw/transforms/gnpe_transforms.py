@@ -3,34 +3,6 @@ import lal
 from bilby.core.prior import PriorDict
 
 
-def get_gnpe_time_shift_context(ifo_list, exact_global_equivariance=True):
-    """
-    Provides a list of parameters on which the GNPE posterior should be conditioned.
-    These are the blurred coalescence times in each detector, e.g.,
-
-    ['H1_time_hat', 'L1_time_hat', 'V1_time_hat']
-
-    If we enforce an exact time translation symmetry (typical use case), then the first
-    interferometer is dropped.
-
-    Parameters
-    ----------
-    ifo_list : InterferometerList
-    exact_global_equivariance : bool
-        Whether to enforce an exact equivariance of global time shifts.
-
-    Returns
-    -------
-    list[str]
-        The parameter names.
-    """
-    proxy_list = [f"{ifo.name}_time_hat" for ifo in ifo_list]
-    if exact_global_equivariance:
-        return proxy_list[1:]
-    else:
-        return proxy_list
-
-
 class GNPEShiftDetectorTimes(object):
     """
     GNPE [1] Transformation for detector times.
@@ -112,6 +84,30 @@ class GNPEShiftDetectorTimes(object):
     def set_kernel(self, kernel_str):
         prior_dict = {ifo: kernel_str for ifo in self.ifo_names}
         self.kernel = PriorDict(prior_dict)
+
+    def get_context_parameters(self):
+        """
+        Provides a list of parameters on which the GNPE posterior should be conditioned.
+        These are the blurred coalescence times in each detector, e.g.,
+
+        ['H1_time_proxy', 'L1_time_proxy', 'V1_time_proxy']
+
+        If we enforce an exact time translation symmetry (typical use case), then the first
+        interferometer is dropped.
+
+        This function is useful in determining the list of proxies outside of constructing
+        the transform.
+
+        Returns
+        -------
+        list[str]
+            The parameter names.
+        """
+        proxy_list = [f"{name}_time_proxy" for name in self.ifo_names]
+        if self.exact_global_equivariance:
+            return proxy_list[1:]
+        else:
+            return proxy_list
 
 
 class GNPEDetectorTimes(object):
@@ -207,7 +203,7 @@ class GNPEChirpMass(object):
     [1]: arxiv.org/abs/2111.13139
     """
 
-    def __init__(self, frequencies, kernel_kwargs, mean=0, std=1):
+    def __init__(self, frequencies, kernel_kwargs):
         """
         :param frequencies: np.array
             sample frequencies of strain data
@@ -220,12 +216,12 @@ class GNPEChirpMass(object):
         """
         self.f = frequencies
         self.kernel = get_gnpe_kernel(kernel_kwargs)
-        self.gnpe_proxy_dim = 1
-        self.mean = mean
-        self.std = std
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
+        # Copy extrinsic parameters to not overwrite input_sample. Does this really
+        # matter?
+        extrinsic_parameters = sample["extrinsic_parameters"].copy()
 
         # get proxy by adding perturbation from kernel to Mc
         Mc_hat = sample["parameters"]["chirp_mass"] + self.kernel()
@@ -241,13 +237,16 @@ class GNPEChirpMass(object):
         hp = sample["waveform"]["h_plus"] * rescaling
         sample["waveform"] = {"h_cross": hc, "h_plus": hp}
 
-        proxies_array = (np.array([Mc_hat]) - self.mean) / self.std
-        if "gnpe_proxies" in sample:
-            sample["gnpe_proxies"] = np.concatenate(
-                (sample["gnpe_proxies"], proxies_array)
-            )
-        else:
-            sample["gnpe_proxies"] = proxies_array
+        extrinsic_parameters.update({'chirp_mass_proxy': Mc_hat})
+        sample['extrinsic_parameters'] = extrinsic_parameters
+
+        # proxies_array = (np.array([Mc_hat]) - self.mean) / self.std
+        # if "gnpe_proxies" in sample:
+        #     sample["gnpe_proxies"] = np.concatenate(
+        #         (sample["gnpe_proxies"], proxies_array)
+        #     )
+        # else:
+        #     sample["gnpe_proxies"] = proxies_array
         return sample
 
 
