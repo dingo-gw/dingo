@@ -129,8 +129,8 @@ def get_standardization_dict(
                 # extrinsic_parameters. We have set it up so this is the case for the
                 # GNPE proxies and the detector coalescence times.
                 samples[p][n] = sample["extrinsic_parameters"][p]
-        mean_additional = {p: np.mean(samples[p]) for p in additional_parameters}
-        std_additional = {p: np.std(samples[p]) for p in additional_parameters}
+        mean_additional = {p: np.mean(samples[p]).item() for p in additional_parameters}
+        std_additional = {p: np.std(samples[p]).item() for p in additional_parameters}
 
         mean.update(mean_additional)
         std.update(std_additional)

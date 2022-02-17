@@ -80,6 +80,7 @@ class GNPEShiftDetectorTimes(object):
         # unique names (ending in "_proxy") so they will not be confused.
         extrinsic_parameters.update(proxies)
         sample["extrinsic_parameters"] = extrinsic_parameters
+        return sample
 
     def set_kernel(self, kernel_str):
         prior_dict = {ifo: kernel_str for ifo in self.ifo_names}

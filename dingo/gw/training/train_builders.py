@@ -1,4 +1,6 @@
 import copy
+
+import torch.multiprocessing
 import torchvision
 from threadpoolctl import threadpool_limits
 from torch.utils.data import DataLoader
@@ -20,7 +22,7 @@ from dingo.gw.transforms import (
     RepackageStrainsAndASDS,
     UnpackDict,
     GNPEDetectorTimes,
-    GNPEChirpMass, get_gnpe_time_shift_context, GNPEShiftDetectorTimes,
+    GNPEChirpMass, GNPEShiftDetectorTimes,
 )
 from dingo.gw.ASD_dataset.noise_dataset import ASDDataset
 from dingo.gw.prior import default_regression_parameters
@@ -100,7 +102,6 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     ifo_list = InterferometerList(data_settings["detectors"])
 
     # Build transforms.
-    gnpe_proxy_dim = 0
     transforms = []
     transforms.append(SampleExtrinsicParameters(extrinsic_prior_dict))
     transforms.append(GetDetectorTimes(ifo_list, ref_time))
@@ -116,7 +117,6 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
             )
         )
         extra_context_parameters += transforms[-1].get_context_parameters()
-        gnpe_proxy_dim += transforms[-1].gnpe_proxy_dim
     if "gnpe_chirp_mass" in data_settings:
         d = data_settings["gnpe_chirp_mass"]
         transforms.append(
@@ -125,7 +125,6 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
                 d["kernel_kwargs"],
             )
         )
-        gnpe_proxy_dim += transforms[-1].gnpe_proxy_dim
         extra_context_parameters.append('chirp_mass_proxy')
 
     # Add the GNPE proxies to context_parameters the first time the transforms are
@@ -277,6 +276,7 @@ def build_svd_for_embedding_network(
 
     # This is needed to prevent an occasional error when loading a large dataset into
     # memory using a dataloader. This removes a limitation on the number of "open files".
+    old_sharing_strategy = torch.multiprocessing.get_sharing_strategy()
     torch.multiprocessing.set_sharing_strategy('file_system')
 
     # Fix the luminosity distance to a standard value, just in order to generate the SVD.
@@ -325,7 +325,7 @@ def build_svd_for_embedding_network(
     print(f"...done. This took {time.time() - time_start:.0f} s.")
 
     # Reset the standard sharing strategy.
-    torch.multiprocessing.set_sharing_strategy('file_descriptor')
+    torch.multiprocessing.set_sharing_strategy(old_sharing_strategy)
 
     print("Generating SVD basis for ifo:")
     time_start = time.time()
