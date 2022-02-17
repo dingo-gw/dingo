@@ -20,7 +20,7 @@ from dingo.gw.transforms import (
     RepackageStrainsAndASDS,
     UnpackDict,
     GNPEDetectorTimes,
-    GNPEChirpMass,
+    GNPEChirpMass, get_gnpe_time_shift_context, GNPEShiftDetectorTimes,
 )
 from dingo.gw.ASD_dataset.noise_dataset import ASDDataset
 from dingo.gw.prior import default_regression_parameters
@@ -84,13 +84,7 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         precision="single",
         domain_update=wfd.domain.domain_dict,
     )
-
-    # check compatibility of datasets
-    if wfd.domain.domain_dict != asd_dataset.domain.domain_dict:
-        raise ValueError(
-            f"wfd.domain: {wfd.domain.domain_dict} \n!= "
-            f"asd_dataset.domain: {asd_dataset.domain.domain_dict}"
-        )
+    assert wfd.domain.domain_dict == asd_dataset.domain.domain_dict
 
     # Add window factor to domain. Can this just be added directly rather than
     # using a second domain instance?
@@ -105,10 +99,23 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     # Build detector objects
     ifo_list = InterferometerList(data_settings["detectors"])
 
+    # Determine context parameters
+    if 'context_parameters' not in data_settings:
+        data_settings['context_parameters'] = []
+    extra_context_parameters = []
+    if 'gnpe_time_shifts' in data_settings:
+        extra_context_parameters += get_gnpe_time_shift_context(
+            ifo_list,
+            data_settings['gnpe_time_shifts']['exact_global_equiv'],
+        )
+    if 'gnpe_chirp_mass' in data_settings:
+        extra_context_parameters.append('chirp_mass_hat')
+    for p in extra_context_parameters:
+        if p not in data_settings['context_parameters']:
+            data_settings['context_parameters'].append(p)
+
     # If the standardization factors have already been set, use those. Otherwise,
-    # calculate them, and save them within the data settings. Note that the order that
-    # parameters appear in standardization_dict is the same as the order in the neural
-    # network.
+    # calculate them, and save them within the data settings.
     try:
         standardization_dict = data_settings["standardization"]
         print("Using previously-calculated parameter standardizations.")
@@ -132,11 +139,10 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     if "gnpe_time_shifts" in data_settings:
         d = data_settings["gnpe_time_shifts"]
         transforms.append(
-            GNPEDetectorTimes(
+            GNPEShiftDetectorTimes(
                 ifo_list,
-                d["kernel_kwargs"],
+                d["kernel"],
                 d["exact_equiv"],
-                std=standardization_dict["std"]["geocent_time"],
             )
         )
         gnpe_proxy_dim += transforms[-1].gnpe_proxy_dim
