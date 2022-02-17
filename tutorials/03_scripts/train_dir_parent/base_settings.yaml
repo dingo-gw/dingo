@@ -27,7 +27,7 @@ data:
     exact_equiv: True
 #  gnpe_chirp_mass:
 #    kernel_kwargs: {type: uniform, low: -0.1, high: 0.1}
-  selected_parameters: default # [chirp_mass, mass_ratio,  luminosity_distance, dec]
+  regression_parameters: default # [chirp_mass, mass_ratio,  luminosity_distance, dec]
 
 # Model architecture
 model:

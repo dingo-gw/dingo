@@ -31,14 +31,14 @@ class SelectStandardizeRepackageParameters(object):
         self.mean = standardization_dict['mean']
         self.std = standardization_dict['std']
         self.N = len(self.mean.keys())
-        self.selected_parameters = list(self.mean.keys())
+        self.regression_parameters = list(self.mean.keys())
         if self.mean.keys() != self.std.keys():
             raise ValueError('Keys of means and stds do not match.')
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
         parameters = np.empty(self.N, dtype=np.float32)
-        for idx, par in enumerate(self.selected_parameters):
+        for idx, par in enumerate(self.regression_parameters):
             parameters[idx] = \
                 (sample['parameters'][par] - self.mean[par]) / self.std[par]
         sample['parameters'] = parameters

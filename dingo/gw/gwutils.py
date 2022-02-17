@@ -76,7 +76,7 @@ def get_extrinsic_prior_dict(extrinsic_prior):
 
 
 def get_detectortimes_mean_std(
-    selected_parameters,
+    regression_parameters,
     extrinsic_prior_dict,
     ifo_list,
     ref_time,
@@ -88,7 +88,7 @@ def get_detectortimes_mean_std(
 
     Parameters
     ----------
-    selected_parameters:
+    regression_parameters:
         list of selected parameters to determine which detectortimes are required
     extrinsic_prior_dict:
         dict with extrinsic prior
@@ -104,7 +104,7 @@ def get_detectortimes_mean_std(
     """
     detector_times = [
         p
-        for p in selected_parameters
+        for p in regression_parameters
         if p.endswith("_time") and not p[:-5] == "geocent"
     ]
 
@@ -139,7 +139,7 @@ def get_detectortimes_mean_std(
 
 
 def get_standardization_dict(
-    extrinsic_prior_dict, wfd, selected_parameters, ifo_list=None, ref_time=None
+    extrinsic_prior_dict, wfd, regression_parameters, ifo_list=None, ref_time=None
 ):
     # get mean and std for extrinsic prior
     ext_prior = BBHExtrinsicPriorDict(extrinsic_prior_dict)
@@ -158,7 +158,7 @@ def get_standardization_dict(
     # if detector times are in selected parameters, the standardizations for these are
     # computed numerically
     mean_detectortimes, std_detectortimes = get_detectortimes_mean_std(
-        selected_parameters, extrinsic_prior_dict, ifo_list, ref_time
+        regression_parameters, extrinsic_prior_dict, ifo_list, ref_time
     )
 
     # merge dicts, overwriting fiducial values for parameters (e.g.,
@@ -168,7 +168,7 @@ def get_standardization_dict(
 
     # return standardization dict
     standardization_dict = {
-        "mean": {k: mean[k] for k in selected_parameters},
-        "std": {k: std[k] for k in selected_parameters},
+        "mean": {k: mean[k] for k in regression_parameters},
+        "std": {k: std[k] for k in regression_parameters},
     }
     return standardization_dict

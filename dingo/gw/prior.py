@@ -117,7 +117,7 @@ default_intrinsic_dict = {
     'geocent_time': 0.0,
 }
 
-default_params = ['mass_ratio', 'chirp_mass', 'phase', 'a_1', 'a_2',
+default_regression_parameters = ['mass_ratio', 'chirp_mass', 'phase', 'a_1', 'a_2',
                   'tilt_1', 'tilt_2', 'phi_12', 'phi_jl', 'theta_jn',
                   'luminosity_distance', 'geocent_time', 'ra', 'dec', 'psi']
 

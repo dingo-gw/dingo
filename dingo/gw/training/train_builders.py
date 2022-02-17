@@ -23,7 +23,7 @@ from dingo.gw.transforms import (
     GNPEChirpMass,
 )
 from dingo.gw.ASD_dataset.noise_dataset import ASDDataset
-from dingo.gw.prior import default_params
+from dingo.gw.prior import default_regression_parameters
 from dingo.gw.gwutils import *
 from dingo.core.utils import *
 
@@ -98,8 +98,8 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     domain.window_factor = get_window_factor(data_settings["window"])
 
     extrinsic_prior_dict = get_extrinsic_prior_dict(data_settings["extrinsic_prior"])
-    if data_settings["selected_parameters"] == "default":
-        data_settings["selected_parameters"] = default_params
+    if data_settings["regression_parameters"] == "default":
+        data_settings["regression_parameters"] = default_regression_parameters
 
     ref_time = data_settings["ref_time"]
     # Build detector objects
@@ -117,7 +117,7 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         standardization_dict = get_standardization_dict(
             extrinsic_prior_dict,
             wfd,
-            data_settings["selected_parameters"],
+            data_settings["regression_parameters"],
             ifo_list,
             ref_time,
         )

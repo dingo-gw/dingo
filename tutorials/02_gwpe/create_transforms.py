@@ -10,7 +10,7 @@ from dingo.gw.transforms import SampleExtrinsicParameters,\
     SelectStandardizeRepackageParameters, RepackageStrainsAndASDS, UnpackDict, \
     GNPEDetectorTimes, GNPEChirpMass
 from dingo.gw.noise_dataset import ASDDataset
-from dingo.gw.prior import default_params
+from dingo.gw.prior import default_regression_parameters
 from dingo.gw.gwutils import *
 
 import numpy as np
@@ -39,11 +39,11 @@ assert domain.noise_std == 1.3692854996470123
 
 extrinsic_prior_dict = get_extrinsic_prior_dict(
     train_settings['transform_settings']['extrinsic_prior'])
-if train_settings['transform_settings']['selected_parameters'] == 'default':
-    train_settings['transform_settings']['selected_parameters'] = default_params
+if train_settings['transform_settings']['regression_parameters'] == 'default':
+    train_settings['transform_settings']['regression_parameters'] = default_regression_parameters
 standardization_dict = get_standardization_dict(
     extrinsic_prior_dict, wfd,
-    train_settings['transform_settings']['selected_parameters'])
+    train_settings['transform_settings']['regression_parameters'])
 ref_time = train_settings['transform_settings']['ref_time']
 window_factor = get_window_factor(
     train_settings['data_conditioning']['window_kwargs'])

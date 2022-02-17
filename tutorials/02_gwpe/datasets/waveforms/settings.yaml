@@ -1,44 +1,41 @@
-# settings for domain of waveforms
 domain:
   type: FrequencyDomain
-  f_min: 10.0
+  f_min: 20.0
   f_max: 1024.0
   delta_f: 0.125  # Expressions like 1.0/8.0 would require eval and are not supported
-  window_factor: 1.0 # This should maybe be in noise settings? It is not used for the generation of waveform polarizations
+  window_factor: 1.0
 
-# settings for waveform generator
 waveform_generator:
-  approximant: IMRPhenomPv2  # SEOBNRv4PHM
-  f_ref: 20.0  # Hz
+  approximant: IMRPhenomXPHM  # SEOBNRv4PHM
+  f_ref: 20.0
 
-# settings for intrinsic prior over parameters
+# Dataset only samples over intrinsic parameters. Extrinsic parameters are chosen at train time.
 intrinsic_prior:
-  # prior for non-fixed parameters
   mass_1: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)
   mass_2: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)
   mass_ratio: bilby.core.prior.Uniform(minimum=0.125, maximum=1.0)
   chirp_mass: bilby.core.prior.Uniform(minimum=25.0, maximum=100.0)
   phase: default
-  a_1: bilby.core.prior.Uniform(minimum=0.0, maximum=0.88)
-  a_2: bilby.core.prior.Uniform(minimum=0.0, maximum=0.88)
+  a_1: bilby.core.prior.Uniform(minimum=0.0, maximum=0.99)
+  a_2: bilby.core.prior.Uniform(minimum=0.0, maximum=0.99)
   tilt_1: default
   tilt_2: default
   phi_12: default
   phi_jl: default
   theta_jn: default
-  # reference values for fixed (extrinsic) parameters
-  luminosity_distance: 100.0 # Mpc
-  geocent_time: 0.0 # s
+  # Reference values for fixed (extrinsic) parameters. These are needed to generate a waveform.
+  luminosity_distance: 100.0  # Mpc
+  geocent_time: 0.0  # s
 
-# Number of samples in the dataset
-num_samples: 50000
+# Dataset size
+num_samples: 50000000
 
 # Save a compressed representation of the dataset
 compression:
-  # whitening: aLIGOZeroDetuned  # PSD (not yet implemented)
-  # single_precision: True  # (not yet implemented) be careful if using without whitening.
   svd:
-    num_training_samples: 10000
-    # num_validation_samples: 500  # (not yet implemented)
     # Truncate the SVD basis at this size. No truncation if zero.
-    size: 100
+    size: 200
+    num_training_samples: 50000
+    # num_validation_samples: 500  # (not yet implemented)
+    # whitening: aLIGOZeroDetuned  # PSD (not yet implemented)
+    # single_precision: True  # (not yet implemented) be careful if using without whitening.
