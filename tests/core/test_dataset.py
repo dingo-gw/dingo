@@ -57,12 +57,12 @@ def test_dataset_for_event_data(inference_setup):
     assert loaded_data is None
 
     if loaded_data is None:
-        # for real inference one would download the event data here
+        # for inference one would download the event data here
         data = d.data[event]
-        # save the data to file
         dataset = DingoDataset(
             dictionary={event: data, "settings": d.settings}, data_keys=[event]
         )
+        # save the data to file
         dataset.to_file(file_name=d.file_name, mode="a")
 
     # check that dataset saved correctly
@@ -71,26 +71,20 @@ def test_dataset_for_event_data(inference_setup):
     loaded_data = load_data_from_file(d.file_name, event)
     assert recursive_check_dicts_are_equal(loaded_data, data)
 
-    # # check that error is raised if one tries to append the dataset again to the file
-    # with pytest.raises(Exception):
-    #     dataset.to_file(file_name=d.file_name, mode="a")
-
     event = events[1]
     loaded_data = load_data_from_file(d.file_name, event)
     assert loaded_data is None
 
     if loaded_data is None:
-        # for real inference one would download the event data here
+        # for inference one would download the event data here
         data = d.data[event]
-        dataset = DingoDataset(dictionary={event: data}, data_keys=[event])
-        # check that ValueError is raised if settings are off (they are None here)
-        # with pytest.raises(ValueError):
-        #     dataset.append_to_file(file_name=d.file_name)
+        dataset = DingoDataset(
+            dictionary={event: data, "settings": d.settings}, data_keys=[event]
+        )
         # save the data to file
-        dataset.settings = d.settings
         dataset.to_file(file_name=d.file_name, mode="a")
 
     # check that dataset saved correctly
     for idx in range(2):
-        loaded_data = load_data_from_file(d.file_name, events[0])
-        assert recursive_check_dicts_are_equal(loaded_data, d.data[events[0]])
+        loaded_data = load_data_from_file(d.file_name, events[idx])
+        assert recursive_check_dicts_are_equal(loaded_data, d.data[events[idx]])
