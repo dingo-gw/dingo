@@ -18,6 +18,29 @@ def recursive_hdf5_save(group, d):
             raise TypeError("Cannot save datatype {} as hdf5 dataset.".format(type(v)))
 
 
+# def split_of_next_key(key, separator="/"):
+#     a, *b = key.split(separator, 1)
+#     return a, b or None
+#
+#
+# def recursive_hdf5_load_(group, keys=None):
+#     d = {}
+#     if keys is None:
+#         keys = group.keys()
+#     for key in keys:
+#         k, remainder = split_of_next_key(key)
+#         v = group[k]
+#         if isinstance(v, h5py.Group):
+#             d[k] = recursive_hdf5_load(v, remainder)
+#         else:
+#             d[k] = v[...]
+#             # If the array has column names, load it as a pandas DataFrame
+#             if d[k].dtype.names is not None:
+#                 d[k] = pd.DataFrame(d[k])
+#
+#     return d
+#
+#
 def recursive_hdf5_load(group, keys=None):
     d = {}
     for k, v in group.items():
@@ -72,81 +95,79 @@ class DingoDataset:
         elif dictionary is not None:
             self.from_dictionary(dictionary)
 
-    def to_file(self, file_name):
+    def to_file(self, file_name, mode="w"):
         print("Saving dataset to " + file_name)
         save_dict = {
             k: v
             for k, v in vars(self).items()
             if k in self._data_keys and v is not None
         }
-        f = h5py.File(file_name, "w")
-        recursive_hdf5_save(f, save_dict)
-        f.attrs["settings"] = str(self.settings)
-        f.close()
+        with h5py.File(file_name, mode) as f:
+            recursive_hdf5_save(f, save_dict)
+            f.attrs["settings"] = str(self.settings)
 
     def from_file(self, file_name):
         print("\nLoading dataset from " + file_name + ".")
-        f = h5py.File(file_name, "r")
-        # Load only the keys that the class expects
-        loaded_dict = recursive_hdf5_load(f, keys=self._data_keys)
-        for k, v in loaded_dict.items():
-            assert k in self._data_keys
-            vars(self)[k] = v
-        try:
-            self.settings = ast.literal_eval(f.attrs["settings"])
-        except KeyError:
-            self.settings = None  # Is this necessary?
-        f.close()
+        with h5py.File(file_name, "r") as f:
+            # Load only the keys that the class expects
+            loaded_dict = recursive_hdf5_load(f, keys=self._data_keys)
+            for k, v in loaded_dict.items():
+                assert k in self._data_keys
+                vars(self)[k] = v
+            try:
+                self.settings = ast.literal_eval(f.attrs["settings"])
+            except KeyError:
+                self.settings = None  # Is this necessary?
 
-    def append_to_file(self, file_name):
-        """
-        Appends the dataset to a file.
-        * If isfile(file_name):
-            -> check that settings are identical (if not: raise ValueError)
-            -> check that keys between dataset and saved file don't overlap
-               (if not: raise Exception)
-            -> append dataset
-        * If not isfile(file_name):
-            -> write dataset to new file
-
-        Parameters
-        ----------
-        file_name: str
-            name of the dataset file
-        """
-        if not isfile(file_name):
-            self.to_file(file_name)
-
-        else:
-            # perform checks
-            with h5py.File(file_name, "r") as f:
-                # check that self.settings is identical to saved settings
-                try:
-                    saved_settings = ast.literal_eval(f.attrs["settings"])
-                except KeyError:
-                    saved_settings = None
-                if self.settings != saved_settings:
-                    raise ValueError(
-                        f"Settings incompatible with saved settings, "
-                        f"{self.settings} != {saved_settings}."
-                    )
-
-                # check that keys don't overlap
-                if len(set(self._data_keys) & set(f.keys())) > 0:
-                    raise Exception(
-                        f"Overlapping keys between dataset and saved file: "
-                        f"{set(self._data_keys) & set(f.files)}."
-                    )
-
-            # append dataset to save file
-            with h5py.File(file_name, "a") as f:
-                print(f"Appending dataset to {file_name}")
-                save_dict = {
-                    k: v
-                    for k, v in vars(self).items()
-                    if k in self._data_keys and v is not None
-                }
-                recursive_hdf5_save(f, save_dict)
+    # def append_to_file(self, file_name):
+    #     """
+    #     Appends the dataset to a file.
+    #     * If isfile(file_name):
+    #         -> check that settings are identical (if not: raise ValueError)
+    #         -> check that keys between dataset and saved file don't overlap
+    #            (if not: raise Exception)
+    #         -> append dataset
+    #     * If not isfile(file_name):
+    #         -> write dataset to new file
+    #
+    #     Parameters
+    #     ----------
+    #     file_name: str
+    #         name of the dataset file
+    #     """
+    #     if not isfile(file_name):
+    #         self.to_file(file_name)
+    #
+    #     else:
+    #         # perform checks
+    #         with h5py.File(file_name, "r") as f:
+    #             # check that self.settings is identical to saved settings
+    #             try:
+    #                 saved_settings = ast.literal_eval(f.attrs["settings"])
+    #             except KeyError:
+    #                 saved_settings = None
+    #             if self.settings != saved_settings:
+    #                 raise ValueError(
+    #                     f"Settings incompatible with saved settings, "
+    #                     f"{self.settings} != {saved_settings}."
+    #                 )
+    #
+    #             # check that keys don't overlap
+    #             if len(set(self._data_keys) & set(f.keys())) > 0:
+    #                 raise Exception(
+    #                     f"Overlapping keys between dataset and saved file: "
+    #                     f"{set(self._data_keys) & set(f.files)}."
+    #                 )
+    #
+    #         # append dataset to save file
+    #         with h5py.File(file_name, "a") as f:
+    #             print(f"Appending dataset to {file_name}")
+    #             save_dict = {
+    #                 k: v
+    #                 for k, v in vars(self).items()
+    #                 if k in self._data_keys and v is not None
+    #             }
+    #             recursive_hdf5_save(f, save_dict)
 
     def to_dictionary(self):
         dictionary = {
