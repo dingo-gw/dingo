@@ -4,7 +4,8 @@ from os.path import join, isfile
 import types
 import pytest
 
-from dingo.core.dataset import DingoDataset, load_data_from_file
+from dingo.core.dataset import DingoDataset
+from dingo.core.utils import recursive_check_dicts_are_equal, load_data_from_file
 
 
 @pytest.fixture()
@@ -29,22 +30,6 @@ def inference_setup():
     return d
 
 
-def recursive_check_dicts_are_equal(dict_a, dict_b):
-    if dict_a.keys() != dict_b.keys():
-        return False
-    else:
-        for k, v_a in dict_a.items():
-            v_b = dict_b[k]
-            if type(v_a) != type(v_b):
-                return False
-            if type(v_a) == dict:
-                if not recursive_check_dicts_are_equal(v_a, v_b):
-                    return False
-            elif not np.all(v_a == v_b):
-                return False
-    return True
-
-
 def test_dataset_for_event_data(inference_setup):
     d = inference_setup
     events = list(d.data.keys())
@@ -53,7 +38,7 @@ def test_dataset_for_event_data(inference_setup):
 
     # first try to load data from dataset
     # this should return None as we have not saved anything to the dataset yet
-    loaded_data = load_data_from_file(d.file_name, event)
+    loaded_data = load_data_from_file(d.file_name, event, settings=d.settings)
     assert loaded_data is None
 
     if loaded_data is None:
@@ -68,8 +53,10 @@ def test_dataset_for_event_data(inference_setup):
     # check that dataset saved correctly
     dataset = DingoDataset(file_name=d.file_name, data_keys=[event])
     assert recursive_check_dicts_are_equal(vars(dataset)[event], data)
-    loaded_data = load_data_from_file(d.file_name, event)
+    loaded_data = load_data_from_file(d.file_name, event, settings=d.settings)
     assert recursive_check_dicts_are_equal(loaded_data, data)
+    with pytest.raises(ValueError):
+        _ = load_data_from_file(d.file_name, event, settings={"bad_settings": 1})
 
     event = events[1]
     loaded_data = load_data_from_file(d.file_name, event)

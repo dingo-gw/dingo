@@ -1,5 +1,4 @@
 import ast
-from os.path import isfile
 import h5py
 import numpy as np
 import pandas as pd
@@ -108,33 +107,3 @@ class DingoDataset:
         for k, v in dictionary.items():
             if k in self._data_keys or k == "settings":
                 vars(self)[k] = v
-
-
-def load_data_from_file(file_name, data_key):
-    """
-    Loads data from a file.
-
-    * If isfile(file_name):
-        -> load file as DingoDataset
-        -> return vars(dataset)[data_key] (which is None, if the key does not match)
-    * else:
-        -> return None
-
-    Parameters
-    ----------
-    file_name: str
-        name of the dataset file
-
-    data_key:
-        key for data in dataset file
-
-    Returns
-    -------
-
-    """
-    if not isfile(file_name):
-        return None
-
-    else:
-        dataset = DingoDataset(file_name=file_name, data_keys=[data_key])
-        return vars(dataset)[data_key]
