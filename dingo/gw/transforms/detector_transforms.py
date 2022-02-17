@@ -48,19 +48,20 @@ class ProjectOntoDetectors(object):
         # the line below is required as sample is a shallow copy of
         # input_sample, and we don't want to modify input_sample
         parameters = sample["parameters"].copy()
+        extrinsic_parameters = sample["extrinsic_parameters"].copy()
         try:
             d_ref = parameters["luminosity_distance"]
-            d_new = sample["extrinsic_parameters"]["luminosity_distance"]
-            ra = sample["extrinsic_parameters"]["ra"]
-            dec = sample["extrinsic_parameters"]["dec"]
-            psi = sample["extrinsic_parameters"]["psi"]
+            d_new = extrinsic_parameters.pop("luminosity_distance")
+            ra = extrinsic_parameters.pop("ra")
+            dec = extrinsic_parameters.pop("dec")
+            psi = extrinsic_parameters.pop("psi")
             tc_ref = parameters["geocent_time"]
             assert tc_ref == 0, (
                 "This should always be 0. If for some reason "
                 "you want to save time shifted polarizations,"
                 " then remove this assert statement."
             )
-            tc_new = sample["extrinsic_parameters"]["geocent_time"]
+            tc_new = extrinsic_parameters.pop("geocent_time")
         except:
             raise ValueError("Missing parameters.")
 
@@ -78,20 +79,22 @@ class ProjectOntoDetectors(object):
 
             # (3) time shift the strain. If polarizations are timeshifted by
             #     tc_ref != 0, undo this here by subtracting it from dt.
-            dt = sample["extrinsic_parameters"][f"{ifo.name}_time"] - tc_ref
+            dt = extrinsic_parameters[f"{ifo.name}_time"] - tc_ref
             strains[ifo.name] = self.domain.time_translate_data(strain, dt)
 
-        # add extrinsic extrinsic parameter corresponding to the
-        # transformations applied in the loop above to parameters
+        # Add extrinsic extrinsic parameters corresponding to the transformations
+        # applied in the loop above to parameters. These have all been popped off of
+        # extrinsic_parameters, so they only live one place.
         parameters["ra"] = ra
         parameters["dec"] = dec
         parameters["psi"] = psi
         parameters["geocent_time"] = tc_new
         for ifo in self.ifo_list:
             param_name = f"{ifo.name}_time"
-            parameters[param_name] = sample["extrinsic_parameters"][param_name]
+            parameters[param_name] = extrinsic_parameters.pop(param_name)
 
         sample["waveform"] = strains
         sample["parameters"] = parameters
+        sample["extrinsic_parameters"] = extrinsic_parameters
 
         return sample

@@ -27,7 +27,8 @@ class SelectStandardizeRepackageParameters(object):
     normalizes them by setting p = (p - mean) / std, and repackages the
     selected parameters to a numpy array.
     """
-    def __init__(self, standardization_dict):
+    def __init__(self, parameters_dict, standardization_dict):
+        self.parameters_dict = parameters_dict
         self.mean = standardization_dict['mean']
         self.std = standardization_dict['std']
         self.N = len(self.mean.keys())
@@ -36,12 +37,18 @@ class SelectStandardizeRepackageParameters(object):
             raise ValueError('Keys of means and stds do not match.')
 
     def __call__(self, input_sample):
+
+        # Look for parameters in either the parameters dict, or the
+        # extrinsic_parameters dict. extrinsic_parameters supersedes.
+        full_parameters = {**input_sample['parameters'], **input_sample[
+            'extrinsic_parameters']}
         sample = input_sample.copy()
-        parameters = np.empty(self.N, dtype=np.float32)
-        for idx, par in enumerate(self.regression_parameters):
-            parameters[idx] = \
-                (sample['parameters'][par] - self.mean[par]) / self.std[par]
-        sample['parameters'] = parameters
+        for k, v in self.parameters_dict.items():
+            standardized = np.empty(len(v), dtype=np.float32)
+            for idx, par in enumerate(v):
+                standardized[idx] = (full_parameters[par] - self.mean[par]) / self.std[
+                    par]
+            sample[k] = standardized
         return sample
 
 

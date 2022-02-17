@@ -160,14 +160,18 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     transforms.append(SampleNoiseASD(asd_dataset))
     transforms.append(WhitenAndScaleStrain(domain.noise_std))
     transforms.append(AddWhiteNoiseComplex())
-    transforms.append(SelectStandardizeRepackageParameters(standardization_dict))
+    transforms.append(SelectStandardizeRepackageParameters(
+        {k: data_settings[k] for k in ['regression_parameters', 'context_parameters']},
+        standardization_dict,
+    ))
     transforms.append(
         RepackageStrainsAndASDS(data_settings["detectors"], first_index=domain.min_idx)
     )
-    if gnpe_proxy_dim == 0:
-        selected_keys = ["parameters", "waveform"]
+    if data_settings['context_parameters']:
+        selected_keys = ["regression_parameters", "waveform", "context_parameters"]
     else:
-        selected_keys = ["parameters", "waveform", "gnpe_proxies"]
+        selected_keys = ["regression_parameters", "waveform"]
+
     transforms.append(UnpackDict(selected_keys=selected_keys))
 
     # Drop transforms that are not desired. This is useful for generating, e.g.,
