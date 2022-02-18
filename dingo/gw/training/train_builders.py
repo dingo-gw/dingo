@@ -21,7 +21,6 @@ from dingo.gw.transforms import (
     SelectStandardizeRepackageParameters,
     RepackageStrainsAndASDS,
     UnpackDict,
-    GNPEDetectorTimes,
     GNPEChirpMass, GNPEShiftDetectorTimes,
 )
 from dingo.gw.ASD_dataset.noise_dataset import ASDDataset

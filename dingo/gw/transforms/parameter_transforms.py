@@ -40,8 +40,12 @@ class SelectStandardizeRepackageParameters(object):
 
         # Look for parameters in either the parameters dict, or the
         # extrinsic_parameters dict. extrinsic_parameters supersedes.
-        full_parameters = {**input_sample['parameters'], **input_sample[
-            'extrinsic_parameters']}
+        if 'extrinsic_parameters' in input_sample:
+            full_parameters = {**input_sample['parameters'], **input_sample[
+                'extrinsic_parameters']}
+        else:
+            full_parameters = input_sample['parameters']
+
         sample = input_sample.copy()
         for k, v in self.parameters_dict.items():
             standardized = np.empty(len(v), dtype=np.float32)
