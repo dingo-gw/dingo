@@ -83,6 +83,16 @@ class GNPEShiftDetectorTimes(object):
         return sample
 
     def set_kernel(self, kernel_str):
+        """
+        Set the GNPE kernel based on a Bilby prior string. This uses the same kernel
+        for each interferometers.
+
+        Parameters
+        ----------
+        kernel_str : str
+            Defines a bilby prior, e.g.,
+            'bilby.core.prior.Uniform(minimum=-0.001, maximum=0.001)'
+        """
         prior_dict = {ifo: kernel_str for ifo in self.ifo_names}
         self.kernel = PriorDict(prior_dict)
 
@@ -154,8 +164,8 @@ class GNPEChirpMass(object):
         hp = sample["waveform"]["h_plus"] * rescaling
         sample["waveform"] = {"h_cross": hc, "h_plus": hp}
 
-        extrinsic_parameters.update({'chirp_mass_proxy': Mc_hat})
-        sample['extrinsic_parameters'] = extrinsic_parameters
+        extrinsic_parameters.update({"chirp_mass_proxy": Mc_hat})
+        sample["extrinsic_parameters"] = extrinsic_parameters
 
         # proxies_array = (np.array([Mc_hat]) - self.mean) / self.std
         # if "gnpe_proxies" in sample:

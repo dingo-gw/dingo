@@ -7,13 +7,10 @@ from torch.utils.data import DataLoader
 from bilby.gw.detector import InterferometerList
 
 from dingo.gw.SVD import SVDBasis
-from dingo.gw.dataset import WaveformDataset
 
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.gw.domains import build_domain
 from dingo.gw.transforms import (
-    SampleExtrinsicParameters,
-    GetDetectorTimes,
     ProjectOntoDetectors,
     SampleNoiseASD,
     WhitenAndScaleStrain,
@@ -21,7 +18,10 @@ from dingo.gw.transforms import (
     SelectStandardizeRepackageParameters,
     RepackageStrainsAndASDS,
     UnpackDict,
-    GNPEChirpMass, GNPEShiftDetectorTimes,
+    GNPEChirpMass,
+    GNPEShiftDetectorTimes,
+    SampleExtrinsicParameters,
+    GetDetectorTimes,
 )
 from dingo.gw.ASD_dataset.noise_dataset import ASDDataset
 from dingo.gw.prior import default_inference_parameters
@@ -124,16 +124,16 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
                 d["kernel_kwargs"],
             )
         )
-        extra_context_parameters.append('chirp_mass_proxy')
+        extra_context_parameters.append("chirp_mass_proxy")
 
     # Add the GNPE proxies to context_parameters the first time the transforms are
     # constructed. We do not want to overwrite the ordering of the parameters in
     # subsequent runs.
-    if 'context_parameters' not in data_settings:
-        data_settings['context_parameters'] = []
+    if "context_parameters" not in data_settings:
+        data_settings["context_parameters"] = []
     for p in extra_context_parameters:
-        if p not in data_settings['context_parameters']:
-            data_settings['context_parameters'].append(p)
+        if p not in data_settings["context_parameters"]:
+            data_settings["context_parameters"].append(p)
 
     # If the standardization factors have already been set, use those. Otherwise,
     # calculate them, and save them within the data settings.
@@ -149,7 +149,7 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         standardization_dict = get_standardization_dict(
             extrinsic_prior_dict,
             wfd,
-            data_settings["inference_parameters"] + data_settings['context_parameters'],
+            data_settings["inference_parameters"] + data_settings["context_parameters"],
             torchvision.transforms.Compose(transforms),
         )
         data_settings["standardization"] = standardization_dict
@@ -158,14 +158,19 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     transforms.append(SampleNoiseASD(asd_dataset))
     transforms.append(WhitenAndScaleStrain(domain.noise_std))
     transforms.append(AddWhiteNoiseComplex())
-    transforms.append(SelectStandardizeRepackageParameters(
-        {k: data_settings[k] for k in ['inference_parameters', 'context_parameters']},
-        standardization_dict,
-    ))
+    transforms.append(
+        SelectStandardizeRepackageParameters(
+            {
+                k: data_settings[k]
+                for k in ["inference_parameters", "context_parameters"]
+            },
+            standardization_dict,
+        )
+    )
     transforms.append(
         RepackageStrainsAndASDS(data_settings["detectors"], first_index=domain.min_idx)
     )
-    if data_settings['context_parameters']:
+    if data_settings["context_parameters"]:
         selected_keys = ["inference_parameters", "waveform", "context_parameters"]
     else:
         selected_keys = ["inference_parameters", "waveform"]
@@ -276,7 +281,7 @@ def build_svd_for_embedding_network(
     # This is needed to prevent an occasional error when loading a large dataset into
     # memory using a dataloader. This removes a limitation on the number of "open files".
     old_sharing_strategy = torch.multiprocessing.get_sharing_strategy()
-    torch.multiprocessing.set_sharing_strategy('file_system')
+    torch.multiprocessing.set_sharing_strategy("file_system")
 
     # Fix the luminosity distance to a standard value, just in order to generate the SVD.
     data_settings["extrinsic_prior"]["luminosity_distance"] = "100.0"
@@ -318,7 +323,7 @@ def build_svd_for_embedding_network(
             lower = idx * batch_size
             n = min(batch_size, num_waveforms - lower)
             for ifo, strains in strain_data.items():
-                waveforms[ifo][lower: lower + n] = strains[:n]
+                waveforms[ifo][lower : lower + n] = strains[:n]
             if lower + n == num_waveforms:
                 break
     print(f"...done. This took {time.time() - time_start:.0f} s.")

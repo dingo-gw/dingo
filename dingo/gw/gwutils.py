@@ -1,9 +1,8 @@
 import numpy as np
 from scipy.signal import tukey
-from torchvision.transforms import Compose
 from dingo.gw.prior import default_extrinsic_dict
 from dingo.gw.prior import BBHExtrinsicPriorDict
-from dingo.gw.transforms import SampleExtrinsicParameters, GetDetectorTimes
+
 
 
 def find_axis(array, dim):
