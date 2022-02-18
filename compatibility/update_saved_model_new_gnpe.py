@@ -42,7 +42,7 @@ def main():
                 "standardization"
             ]["std"]["geocent_time"]
 
-    data_settings["regression_parameters"] = data_settings["selected_parameters"]
+    data_settings["inference_parameters"] = data_settings["selected_parameters"]
     del data_settings["selected_parameters"]
 
     print("New data_settings:")

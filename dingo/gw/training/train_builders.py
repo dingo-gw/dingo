@@ -24,7 +24,7 @@ from dingo.gw.transforms import (
     GNPEChirpMass, GNPEShiftDetectorTimes,
 )
 from dingo.gw.ASD_dataset.noise_dataset import ASDDataset
-from dingo.gw.prior import default_regression_parameters
+from dingo.gw.prior import default_inference_parameters
 from dingo.gw.gwutils import *
 from dingo.core.utils import *
 
@@ -93,8 +93,8 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     domain.window_factor = get_window_factor(data_settings["window"])
 
     extrinsic_prior_dict = get_extrinsic_prior_dict(data_settings["extrinsic_prior"])
-    if data_settings["regression_parameters"] == "default":
-        data_settings["regression_parameters"] = default_regression_parameters
+    if data_settings["inference_parameters"] == "default":
+        data_settings["inference_parameters"] = default_inference_parameters
 
     ref_time = data_settings["ref_time"]
     # Build detector objects
@@ -149,7 +149,7 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         standardization_dict = get_standardization_dict(
             extrinsic_prior_dict,
             wfd,
-            data_settings["regression_parameters"] + data_settings['context_parameters'],
+            data_settings["inference_parameters"] + data_settings['context_parameters'],
             torchvision.transforms.Compose(transforms),
         )
         data_settings["standardization"] = standardization_dict
@@ -159,16 +159,16 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     transforms.append(WhitenAndScaleStrain(domain.noise_std))
     transforms.append(AddWhiteNoiseComplex())
     transforms.append(SelectStandardizeRepackageParameters(
-        {k: data_settings[k] for k in ['regression_parameters', 'context_parameters']},
+        {k: data_settings[k] for k in ['inference_parameters', 'context_parameters']},
         standardization_dict,
     ))
     transforms.append(
         RepackageStrainsAndASDS(data_settings["detectors"], first_index=domain.min_idx)
     )
     if data_settings['context_parameters']:
-        selected_keys = ["regression_parameters", "waveform", "context_parameters"]
+        selected_keys = ["inference_parameters", "waveform", "context_parameters"]
     else:
-        selected_keys = ["regression_parameters", "waveform"]
+        selected_keys = ["inference_parameters", "waveform"]
 
     transforms.append(UnpackDict(selected_keys=selected_keys))
 

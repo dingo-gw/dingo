@@ -32,7 +32,7 @@ class SelectStandardizeRepackageParameters(object):
         self.mean = standardization_dict['mean']
         self.std = standardization_dict['std']
         self.N = len(self.mean.keys())
-        self.regression_parameters = list(self.mean.keys())
+        self.inference_parameters = list(self.mean.keys())
         if self.mean.keys() != self.std.keys():
             raise ValueError('Keys of means and stds do not match.')
 
