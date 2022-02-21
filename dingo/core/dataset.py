@@ -17,16 +17,17 @@ def recursive_hdf5_save(group, d):
             raise TypeError("Cannot save datatype {} as hdf5 dataset.".format(type(v)))
 
 
-def recursive_hdf5_load(group):
+def recursive_hdf5_load(group, keys=None):
     d = {}
     for k, v in group.items():
-        if isinstance(v, h5py.Group):
-            d[k] = recursive_hdf5_load(v)
-        else:
-            d[k] = v[...]
-            # If the array has column names, load it as a pandas DataFrame
-            if d[k].dtype.names is not None:
-                d[k] = pd.DataFrame(d[k])
+        if keys is None or k in keys:
+            if isinstance(v, h5py.Group):
+                d[k] = recursive_hdf5_load(v)
+            else:
+                d[k] = v[...]
+                # If the array has column names, load it as a pandas DataFrame
+                if d[k].dtype.names is not None:
+                    d[k] = pd.DataFrame(d[k])
     return d
 
 
@@ -70,31 +71,29 @@ class DingoDataset:
         elif dictionary is not None:
             self.from_dictionary(dictionary)
 
-    def to_file(self, file_name):
+    def to_file(self, file_name, mode="w"):
         print("Saving dataset to " + file_name)
         save_dict = {
             k: v
             for k, v in vars(self).items()
             if k in self._data_keys and v is not None
         }
-        f = h5py.File(file_name, "w")
-        recursive_hdf5_save(f, save_dict)
-        f.attrs["settings"] = str(self.settings)
-        f.close()
+        with h5py.File(file_name, mode) as f:
+            recursive_hdf5_save(f, save_dict)
+            f.attrs["settings"] = str(self.settings)
 
     def from_file(self, file_name):
         print("\nLoading dataset from " + file_name + ".")
-        f = h5py.File(file_name, "r")
-        loaded_dict = recursive_hdf5_load(f)
-        for k, v in loaded_dict.items():
-            if k in self._data_keys:  # Load only the keys that the class expects
-                # print("  " + k)
+        with h5py.File(file_name, "r") as f:
+            # Load only the keys that the class expects
+            loaded_dict = recursive_hdf5_load(f, keys=self._data_keys)
+            for k, v in loaded_dict.items():
+                assert k in self._data_keys
                 vars(self)[k] = v
-        try:
-            self.settings = ast.literal_eval(f.attrs["settings"])
-        except KeyError:
-            self.settings = None  # Is this necessary?
-        f.close()
+            try:
+                self.settings = ast.literal_eval(f.attrs["settings"])
+            except KeyError:
+                self.settings = None  # Is this necessary?
 
     def to_dictionary(self):
         dictionary = {

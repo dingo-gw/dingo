@@ -15,7 +15,8 @@ from io import StringIO
 from tqdm import trange
 
 from dingo.core.dataset import recursive_hdf5_save
-from dingo.gw.download_strain_data import get_window, download_psd
+from dingo.gw.gwutils import get_window
+from dingo.gw.download_strain_data import download_psd
 
 """
 Contains links for PSD segment lists with quality label BURST_CAT2 from the Gravitationa Wave Open Science Center.
