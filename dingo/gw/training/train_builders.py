@@ -1,17 +1,16 @@
 import copy
+
+import torch.multiprocessing
 import torchvision
 from threadpoolctl import threadpool_limits
 from torch.utils.data import DataLoader
 from bilby.gw.detector import InterferometerList
 
 from dingo.gw.SVD import SVDBasis
-from dingo.gw.dataset import WaveformDataset
 
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.gw.domains import build_domain
 from dingo.gw.transforms import (
-    SampleExtrinsicParameters,
-    GetDetectorTimes,
     ProjectOntoDetectors,
     SampleNoiseASD,
     WhitenAndScaleStrain,
@@ -19,11 +18,13 @@ from dingo.gw.transforms import (
     SelectStandardizeRepackageParameters,
     RepackageStrainsAndASDS,
     UnpackDict,
-    GNPEDetectorTimes,
     GNPEChirpMass,
+    GNPEShiftDetectorTimes,
+    SampleExtrinsicParameters,
+    GetDetectorTimes,
 )
 from dingo.gw.ASD_dataset.noise_dataset import ASDDataset
-from dingo.gw.prior import default_params
+from dingo.gw.prior import default_inference_parameters
 from dingo.gw.gwutils import *
 from dingo.core.utils import *
 
@@ -84,13 +85,7 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         precision="single",
         domain_update=wfd.domain.domain_dict,
     )
-
-    # check compatibility of datasets
-    if wfd.domain.domain_dict != asd_dataset.domain.domain_dict:
-        raise ValueError(
-            f"wfd.domain: {wfd.domain.domain_dict} \n!= "
-            f"asd_dataset.domain: {asd_dataset.domain.domain_dict}"
-        )
+    assert wfd.domain.domain_dict == asd_dataset.domain.domain_dict
 
     # Add window factor to domain. Can this just be added directly rather than
     # using a second domain instance?
@@ -98,17 +93,54 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     domain.window_factor = get_window_factor(data_settings["window"])
 
     extrinsic_prior_dict = get_extrinsic_prior_dict(data_settings["extrinsic_prior"])
-    if data_settings["selected_parameters"] == "default":
-        data_settings["selected_parameters"] = default_params
+    if data_settings["inference_parameters"] == "default":
+        data_settings["inference_parameters"] = default_inference_parameters
 
     ref_time = data_settings["ref_time"]
     # Build detector objects
     ifo_list = InterferometerList(data_settings["detectors"])
 
+    # Build transforms.
+    transforms = []
+    transforms.append(SampleExtrinsicParameters(extrinsic_prior_dict))
+    transforms.append(GetDetectorTimes(ifo_list, ref_time))
+
+    extra_context_parameters = []
+    if "gnpe_time_shifts" in data_settings:
+        d = data_settings["gnpe_time_shifts"]
+        transforms.append(
+            GNPEShiftDetectorTimes(
+                ifo_list,
+                d["kernel"],
+                d["exact_equiv"],
+            )
+        )
+        extra_context_parameters += transforms[-1].get_context_parameters()
+    if "gnpe_chirp_mass" in data_settings:
+        d = data_settings["gnpe_chirp_mass"]
+        transforms.append(
+            GNPEChirpMass(
+                domain.sample_frequencies,
+                d["kernel_kwargs"],
+            )
+        )
+        extra_context_parameters.append("chirp_mass_proxy")
+
+    # Add the GNPE proxies to context_parameters the first time the transforms are
+    # constructed. We do not want to overwrite the ordering of the parameters in
+    # subsequent runs.
+    if "context_parameters" not in data_settings:
+        data_settings["context_parameters"] = []
+    for p in extra_context_parameters:
+        if p not in data_settings["context_parameters"]:
+            data_settings["context_parameters"].append(p)
+
     # If the standardization factors have already been set, use those. Otherwise,
-    # calculate them, and save them within the data settings. Note that the order that
-    # parameters appear in standardization_dict is the same as the order in the neural
-    # network.
+    # calculate them, and save them within the data settings.
+    #
+    # Standardizations are calculated at this point because the present set of
+    # transforms is sufficient for generating samples of all regression and context
+    # parameters.
     try:
         standardization_dict = data_settings["standardization"]
         print("Using previously-calculated parameter standardizations.")
@@ -117,53 +149,32 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         standardization_dict = get_standardization_dict(
             extrinsic_prior_dict,
             wfd,
-            data_settings["selected_parameters"],
-            ifo_list,
-            ref_time,
+            data_settings["inference_parameters"] + data_settings["context_parameters"],
+            torchvision.transforms.Compose(transforms),
         )
         data_settings["standardization"] = standardization_dict
 
-    # Build transforms.
-    gnpe_proxy_dim = 0
-    transforms = []
-    transforms.append(SampleExtrinsicParameters(extrinsic_prior_dict))
-    transforms.append(GetDetectorTimes(ifo_list, ref_time))
-    # gnpe time shifts
-    if "gnpe_time_shifts" in data_settings:
-        d = data_settings["gnpe_time_shifts"]
-        transforms.append(
-            GNPEDetectorTimes(
-                ifo_list,
-                d["kernel_kwargs"],
-                d["exact_equiv"],
-                std=standardization_dict["std"]["geocent_time"],
-            )
-        )
-        gnpe_proxy_dim += transforms[-1].gnpe_proxy_dim
-    # gnpe chirp mass
-    if "gnpe_chirp_mass" in data_settings:
-        d = data_settings["gnpe_chirp_mass"]
-        transforms.append(
-            GNPEChirpMass(
-                domain.sample_frequencies,
-                d["kernel_kwargs"],
-                mean=standardization_dict["std"]["chirp_mass"],
-                std=standardization_dict["std"]["chirp_mass"],
-            )
-        )
-        gnpe_proxy_dim += transforms[-1].gnpe_proxy_dim
     transforms.append(ProjectOntoDetectors(ifo_list, domain, ref_time))
     transforms.append(SampleNoiseASD(asd_dataset))
     transforms.append(WhitenAndScaleStrain(domain.noise_std))
     transforms.append(AddWhiteNoiseComplex())
-    transforms.append(SelectStandardizeRepackageParameters(standardization_dict))
+    transforms.append(
+        SelectStandardizeRepackageParameters(
+            {
+                k: data_settings[k]
+                for k in ["inference_parameters", "context_parameters"]
+            },
+            standardization_dict,
+        )
+    )
     transforms.append(
         RepackageStrainsAndASDS(data_settings["detectors"], first_index=domain.min_idx)
     )
-    if gnpe_proxy_dim == 0:
-        selected_keys = ["parameters", "waveform"]
+    if data_settings["context_parameters"]:
+        selected_keys = ["inference_parameters", "waveform", "context_parameters"]
     else:
-        selected_keys = ["parameters", "waveform", "gnpe_proxies"]
+        selected_keys = ["inference_parameters", "waveform"]
+
     transforms.append(UnpackDict(selected_keys=selected_keys))
 
     # Drop transforms that are not desired. This is useful for generating, e.g.,
@@ -269,7 +280,8 @@ def build_svd_for_embedding_network(
 
     # This is needed to prevent an occasional error when loading a large dataset into
     # memory using a dataloader. This removes a limitation on the number of "open files".
-    torch.multiprocessing.set_sharing_strategy('file_system')
+    old_sharing_strategy = torch.multiprocessing.get_sharing_strategy()
+    torch.multiprocessing.set_sharing_strategy("file_system")
 
     # Fix the luminosity distance to a standard value, just in order to generate the SVD.
     data_settings["extrinsic_prior"]["luminosity_distance"] = "100.0"
@@ -311,13 +323,13 @@ def build_svd_for_embedding_network(
             lower = idx * batch_size
             n = min(batch_size, num_waveforms - lower)
             for ifo, strains in strain_data.items():
-                waveforms[ifo][lower: lower + n] = strains[:n]
+                waveforms[ifo][lower : lower + n] = strains[:n]
             if lower + n == num_waveforms:
                 break
     print(f"...done. This took {time.time() - time_start:.0f} s.")
 
     # Reset the standard sharing strategy.
-    torch.multiprocessing.set_sharing_strategy('file_descriptor')
+    torch.multiprocessing.set_sharing_strategy(old_sharing_strategy)
 
     print("Generating SVD basis for ifo:")
     time_start = time.time()

@@ -1,7 +1,9 @@
 import numpy as np
 import lal
+from bilby.core.prior import PriorDict
 
-class GNPEDetectorTimes(object):
+
+class GNPEShiftDetectorTimes(object):
     """
     GNPE [1] Transformation for detector times.
 
@@ -23,63 +25,100 @@ class GNPEDetectorTimes(object):
 
     [1]: arxiv.org/abs/2111.13139
     """
-    def __init__(self, ifo_list, kernel_kwargs, exact_global_equivariance=True,
-                 mean=0, std=1):
+
+    def __init__(self, ifo_list, kernel, exact_global_equivariance=True):
         """
-        :param ifo_list: bilby.gw.detector.InterferometerList
-            list of detectors
-        :param kernel_kwargs: dict
-            kwargs for gnpe kernel
-        :param exact_global_equivariance: bool = True
-            flag whether exact equivariance under global time translations is
-        :param mean: float = 0
-            mean for standardization of proxies
-        :param std: float = 1
-            standard deviation for standardization of proxies
+        ifo_list : bilby.gw.detector.InterferometerList
+            List of interferometers.
+        kernel : str
+            Defines a Bilby prior.
+        exact_global_equivariance : bool
+            Whether to impose the exact global time translation symmetry.
+            (Default True)
         """
         self.ifo_names = [ifo.name for ifo in ifo_list]
-        self.kernel = get_gnpe_kernel(kernel_kwargs)
+        self.kernel = None
+        self.set_kernel(kernel)
         self.exact_global_equivariance = exact_global_equivariance
-        # one proxy for each ifo; one less, if exact equivariance under
-        # global time translations is enforced
-        self.gnpe_proxy_dim = len(ifo_list) - int(exact_global_equivariance)
-        self.mean = mean
-        self.std = std
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
-        # copy extrinsic parameters to not overwrite input_sample
-        ext_params = sample['extrinsic_parameters'].copy()
+        # Copy extrinsic parameters to not overwrite input_sample. Does this really
+        # matter?
+        extrinsic_parameters = sample["extrinsic_parameters"].copy()
+
         proxies = {}
-        # sample kernel for each ifo
+        epsilon = self.kernel.sample()
         for ifo_name in self.ifo_names:
-            t = ext_params[f'{ifo_name}_time']
-            t_hat = t + self.kernel()
-            proxies[f'{ifo_name}_time_proxy'] = t_hat
-            ext_params[f'{ifo_name}_time'] -= t_hat
-        # potentially enforce exact global equivariance by subtracting the
-        # first proxy from all proxies, and from geocent_time
+            t = extrinsic_parameters[f"{ifo_name}_time"]
+            t_hat = t + epsilon[ifo_name]
+            proxies[f"{ifo_name}_time_proxy"] = t_hat
+            extrinsic_parameters[f"{ifo_name}_time"] -= t_hat
+
+        # If we are imposing the global time shift symmetry, then we treat the first
+        # proxy as "preferred", in the sense that it defines the global time shift.
+        # This symmetry is enforced as follows:
+        #
+        #    1) Do not explicitly condition the model on the preferred proxy
+        #    2) Subtract the preferred proxy from geocent_time (assumed to be a regression
+        #    parameter). Note that this must be undone at inference time.
+        #    3) Subtract the preferred proxy from the remaining proxies. These remaining
+        #    proxies then define time shifts relative to the global time shift.
+        #
+        # Imposing the global time shift does not impact the transformation of the
+        # data: we do not change the values of the true detector coalescence times
+        # stored in extrinsic_parameters, only the proxies.
+
         if self.exact_global_equivariance:
-            # get first proxy
-            dt = proxies.pop(f'{self.ifo_names[0]}_time_proxy')
-            # subtract it from geocent_time
-            if 'geocent_time' in ext_params:
-                ext_params['geocent_time'] -= dt
-            # subtract it from remaining proxies
+            dt = proxies.pop(f"{self.ifo_names[0]}_time_proxy")
+            if "geocent_time" in extrinsic_parameters:
+                extrinsic_parameters["geocent_time"] -= dt
             for ifo_name in proxies.keys():
                 proxies[ifo_name] -= dt
-        # update extrinsic parameters with shifted times,
-        sample['extrinsic_parameters'] = ext_params
-        # store standardized proxies in sample
-        proxies_array = \
-            (np.array([proxies[k] for k in proxies], dtype=np.float32)
-             - self.mean) / self.std
-        if 'gnpe_proxies' in sample:
-            sample['gnpe_proxies'] = np.concatenate(
-                (sample['gnpe_proxies'], proxies_array))
-        else:
-            sample['gnpe_proxies'] = proxies_array
+
+        # Include the proxy variables along with the extrinsic parameters; they have
+        # unique names (ending in "_proxy") so they will not be confused.
+        extrinsic_parameters.update(proxies)
+        sample["extrinsic_parameters"] = extrinsic_parameters
         return sample
+
+    def set_kernel(self, kernel_str):
+        """
+        Set the GNPE kernel based on a Bilby prior string. This uses the same kernel
+        for each interferometers.
+
+        Parameters
+        ----------
+        kernel_str : str
+            Defines a bilby prior, e.g.,
+            'bilby.core.prior.Uniform(minimum=-0.001, maximum=0.001)'
+        """
+        prior_dict = {ifo: kernel_str for ifo in self.ifo_names}
+        self.kernel = PriorDict(prior_dict)
+
+    def get_context_parameters(self):
+        """
+        Provides a list of parameters on which the GNPE posterior should be conditioned.
+        These are the blurred coalescence times in each detector, e.g.,
+
+        ['H1_time_proxy', 'L1_time_proxy', 'V1_time_proxy']
+
+        If we enforce an exact time translation symmetry (typical use case), then the first
+        interferometer is dropped.
+
+        This function is useful in determining the list of proxies outside of constructing
+        the transform.
+
+        Returns
+        -------
+        list[str]
+            The parameter names.
+        """
+        proxy_list = [f"{name}_time_proxy" for name in self.ifo_names]
+        if self.exact_global_equivariance:
+            return proxy_list[1:]
+        else:
+            return proxy_list
 
 
 class GNPEChirpMass(object):
@@ -90,7 +129,8 @@ class GNPEChirpMass(object):
 
     [1]: arxiv.org/abs/2111.13139
     """
-    def __init__(self, frequencies, kernel_kwargs, mean=0, std=1):
+
+    def __init__(self, frequencies, kernel_kwargs):
         """
         :param frequencies: np.array
             sample frequencies of strain data
@@ -103,30 +143,37 @@ class GNPEChirpMass(object):
         """
         self.f = frequencies
         self.kernel = get_gnpe_kernel(kernel_kwargs)
-        self.gnpe_proxy_dim = 1
-        self.mean = mean
-        self.std = std
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
+        # Copy extrinsic parameters to not overwrite input_sample. Does this really
+        # matter?
+        extrinsic_parameters = sample["extrinsic_parameters"].copy()
 
         # get proxy by adding perturbation from kernel to Mc
-        Mc_hat = sample['parameters']['chirp_mass'] + self.kernel()
+        Mc_hat = sample["parameters"]["chirp_mass"] + self.kernel()
         # convert to SI units
         Mc_SI_hat = Mc_hat * lal.GMSUN_SI
 
-        rescaling = np.exp(1j * (3 / 4) * (
-                8 * np.pi * self.f * (Mc_SI_hat / lal.C_SI ** 3)) ** (-5 / 3))
-        hc = sample['waveform']['h_cross'] * rescaling
-        hp = sample['waveform']['h_plus'] * rescaling
-        sample['waveform'] = {'h_cross': hc, 'h_plus': hp}
+        rescaling = np.exp(
+            1j
+            * (3 / 4)
+            * (8 * np.pi * self.f * (Mc_SI_hat / lal.C_SI ** 3)) ** (-5 / 3)
+        )
+        hc = sample["waveform"]["h_cross"] * rescaling
+        hp = sample["waveform"]["h_plus"] * rescaling
+        sample["waveform"] = {"h_cross": hc, "h_plus": hp}
 
-        proxies_array = (np.array([Mc_hat]) - self.mean) / self.std
-        if 'gnpe_proxies' in sample:
-            sample['gnpe_proxies'] = np.concatenate(
-                (sample['gnpe_proxies'], proxies_array))
-        else:
-            sample['gnpe_proxies'] = proxies_array
+        extrinsic_parameters.update({"chirp_mass_proxy": Mc_hat})
+        sample["extrinsic_parameters"] = extrinsic_parameters
+
+        # proxies_array = (np.array([Mc_hat]) - self.mean) / self.std
+        # if "gnpe_proxies" in sample:
+        #     sample["gnpe_proxies"] = np.concatenate(
+        #         (sample["gnpe_proxies"], proxies_array)
+        #     )
+        # else:
+        #     sample["gnpe_proxies"] = proxies_array
         return sample
 
 
@@ -141,15 +188,19 @@ def get_gnpe_kernel(kernel_kwargs):
     :return: kernel
     """
     # kernel_type = kernel_kwargs.pop('type')
-    kernel_type = kernel_kwargs['type']
-    kernel_kwargs = {k: v for k, v in kernel_kwargs.items() if k != 'type'}
-    if kernel_type == 'uniform':
+    kernel_type = kernel_kwargs["type"]
+    kernel_kwargs = {k: v for k, v in kernel_kwargs.items() if k != "type"}
+    if kernel_type == "uniform":
+
         def kernel():
             return np.random.uniform(**kernel_kwargs)
+
         return kernel
-    elif kernel_type == 'normal':
+    elif kernel_type == "normal":
+
         def kernel():
             return np.random.normal(**kernel_kwargs)
+
         return kernel
     else:
-        raise NotImplementedError(f'Unknown kernel type {kernel_type}.')
+        raise NotImplementedError(f"Unknown kernel type {kernel_type}.")
