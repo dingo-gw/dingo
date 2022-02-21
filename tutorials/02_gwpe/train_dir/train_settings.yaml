@@ -1,5 +1,5 @@
 data:
-  waveform_dataset_path: ./waveform_dataset.hdf5  # Contains intrinsic waveforms
+  waveform_dataset_path: /home/jwildberger/Desktop/dingo-devel/tutorials/02_gwpe/datasets/waveforms/waveform_dataset.hdf5  # Contains intrinsic waveforms
   train_fraction: 0.95
   window:  # Needed to calculate window factor for simulated data
     type: tukey
@@ -22,7 +22,7 @@ data:
   gnpe_time_shifts:
     kernel: bilby.core.prior.Uniform(minimum=-0.001, maximum=0.001)
     exact_equiv: True
-#  gnpe_chirp_mass:
+#   gnpe_chirp_mass:
 #    kernel_kwargs: {type: uniform, low: -0.1, high: 0.1}
   inference_parameters: default # [chirp_mass, mass_ratio,  luminosity_distance, dec]
 
@@ -60,7 +60,7 @@ model:
 training:
   stage_0:
     epochs: 300
-    asd_dataset_path: ./asds_O3_fiducial.hdf5
+    asd_dataset_path: /home/jwildberger/Desktop/dingo-devel/tutorials/02_gwpe/datasets/ASDs_new/asds_O3_fiducial.hdf5
     freeze_rb_layer: True
     optimizer:
       type: adam
@@ -84,8 +84,8 @@ training:
 
 # Local settings for training that have no impact on the final trained network.
 local:
-  device: cuda
-  num_workers: 16  # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
+  device: cpu
+  num_workers: 6  # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
   runtime_limits:
     max_time_per_run: 36000
     max_epochs_per_run: 500
