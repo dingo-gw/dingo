@@ -1,3 +1,7 @@
+import numpy as np
+import torch
+
+
 class GetDetectorTimes(object):
     """
     Compute the time shifts in the individual detectors based on the sky
@@ -82,7 +86,7 @@ class ProjectOntoDetectors(object):
             dt = extrinsic_parameters[f"{ifo.name}_time"] - tc_ref
             strains[ifo.name] = self.domain.time_translate_data(strain, dt)
 
-        # Add extrinsic extrinsic parameters corresponding to the transformations
+        # Add extrinsic parameters corresponding to the transformations
         # applied in the loop above to parameters. These have all been popped off of
         # extrinsic_parameters, so they only live one place.
         parameters["ra"] = ra
@@ -95,6 +99,46 @@ class ProjectOntoDetectors(object):
 
         sample["waveform"] = strains
         sample["parameters"] = parameters
+        sample["extrinsic_parameters"] = extrinsic_parameters
+
+        return sample
+
+
+class TimeShiftStrain(object):
+    """
+    Time shift the strains in the individual detectors according to the
+    times <ifo.name>_time provided in the extrinsic parameters.
+    """
+
+    def __init__(self, ifo_list, domain):
+        self.ifo_list = ifo_list
+        self.domain = domain
+
+    def __call__(self, input_sample):
+        sample = input_sample.copy()
+        extrinsic_parameters = input_sample["extrinsic_parameters"].copy()
+
+        strains = {}
+
+        if isinstance(input_sample["waveform"], dict):
+            for ifo in self.ifo_list:
+                # time shift the strain
+                strain = input_sample["waveform"][ifo.name]
+                dt = extrinsic_parameters.pop(f"{ifo.name}_time")
+                strains[ifo.name] = self.domain.time_translate_data(strain, dt)
+
+        elif isinstance(input_sample["waveform"], torch.Tensor):
+            strains = input_sample["waveform"]
+            dt = [extrinsic_parameters.pop(f"{ifo.name}_time") for ifo in self.ifo_list]
+            strains = self.domain.time_translate_data(strains, dt)
+
+        else:
+            raise NotImplementedError(
+                f"Unexpected type {type(input_sample['waveform'])}, expected dict or "
+                f"torch.Tensor"
+            )
+
+        sample["waveform"] = strains
         sample["extrinsic_parameters"] = extrinsic_parameters
 
         return sample

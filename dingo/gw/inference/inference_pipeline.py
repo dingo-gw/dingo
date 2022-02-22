@@ -1,11 +1,31 @@
 import numpy as np
+import torch
+from torchvision.transforms import Compose
 from gwpy.timeseries import TimeSeries
+from bilby.gw.detector.networks import InterferometerList
+
+import matplotlib
+
+matplotlib.use("module://backend_interagg")
+import matplotlib.pyplot as plt
 
 from dingo.core.models import PosteriorModel
 from dingo.core.dataset import DingoDataset
 from dingo.core.utils import load_data_from_file
 from dingo.gw.inference.data_download import download_raw_data
-from dingo.gw.gwutils import get_window
+from dingo.gw.gwutils import get_window, get_window_factor
+from dingo.gw.domains import build_domain, FrequencyDomain
+from dingo.gw.transforms import (
+    WhitenAndScaleStrain,
+    RepackageStrainsAndASDS,
+    SelectStandardizeRepackageParameters,
+    GNPEShiftDetectorTimes,
+    TimeShiftStrain,
+    UnpackDict,
+    PostCorrectGeocentTime,
+    GetDetectorTimes,
+    CopyToExtrinsicParameters,
+)
 
 
 def load_raw_data(time_event, settings, file_name=None):
@@ -72,7 +92,7 @@ def parse_settings_for_raw_data(model_metadata, time_psd, time_buffer):
     return settings
 
 
-def data_to_domain(raw_data, settings_raw_data, model_metadata):
+def data_to_domain(raw_data, settings_raw_data, domain, **kwargs):
     """
 
     Parameters
@@ -87,10 +107,9 @@ def data_to_domain(raw_data, settings_raw_data, model_metadata):
         dict with domain_data
 
     """
-    domain_type = model_metadata["dataset_settings"]["domain"]["type"]
 
-    if domain_type == "FrequencyDomain":
-        window = get_window(model_metadata["train_settings"]["data"]["window"])
+    if type(domain) == FrequencyDomain:
+        window = get_window(kwargs["window"])
         data = {"waveform": {}, "asds": {}}
         # convert event strains to frequency domain
         for det, event_strain in raw_data["strain"].items():
@@ -100,29 +119,60 @@ def data_to_domain(raw_data, settings_raw_data, model_metadata):
             event_strain = event_strain.cyclic_time_shift(
                 settings_raw_data["time_buffer"]
             )
-            data["waveform"][det] = np.array(event_strain)
+            event_strain = domain.update_data(np.array(event_strain))
+            data["waveform"][det] = event_strain
 
         # convert psds to asds
         for det, psd in raw_data["psd"].items():
-            data["asds"][det] = psd ** 0.5
+            asd = psd ** 0.5
+            asd = domain.update_data(asd, low_value=1.0)
+            data["asds"][det] = asd
 
         return data
 
     else:
-        raise NotImplementedError(f"Unknown domain type {domain_type}")
+        raise NotImplementedError(f"Unknown domain type {type(domain)}")
 
 
 def inference(
     time_event,
     model,
-    model_pose=None,
     file_name=None,
     time_buffer=2.0,
     time_psd=1024,
     device="cpu",
+    num_samples=10_000,
+    init_context_parameters=None,
+    num_gnpe_iterations=30,
 ):
     # load model
     model = PosteriorModel(model, device=device)
+    domain = build_domain(model.metadata["dataset_settings"]["domain"])
+    data_settings = model.metadata["train_settings"]["data"]
+    domain.update(data_settings["domain_update"])
+    domain.window_factor = get_window_factor(data_settings["window"])
+    detectors = data_settings["detectors"]
+    # standardization = {
+    #     k: {kk: np.float32(vv) for kk, vv in v.items()}
+    #     for k, v in data_settings["standardization"].items()
+    # }
+    # correct loaded model
+    # data_settings["inference_parameters"] = \
+    #     data_settings["selected_parameters"]
+
+    inference_parameters = data_settings["inference_parameters"]
+
+    # check if is_gnpe
+    if "gnpe_time_shifts" in data_settings:
+        gnpe = True
+        try:
+            del data_settings["gnpe_time_shifts"]["kernel_kwargs"]
+        except:
+            pass
+        # model.metadata["train_settings"]["data"]["gnpe_time_shifts"]["kernel"] = \
+        #     "bilby.core.prior.Uniform(minimum=-0.001, maximum=0.001)"
+    else:
+        gnpe = False
 
     # step 1: download raw event data
     settings_raw_data = parse_settings_for_raw_data(
@@ -133,36 +183,192 @@ def inference(
     )
 
     # step 2: prepare the data for the network domain
-    domain_data = data_to_domain(raw_data, settings_raw_data, model.metadata)
-
-    import h5py
-    ref_strains = h5py.File(
-        "/Users/maxdax/Documents/Projects/GW-Inference/dingo/dingo-devel/tutorials"
-        "/02_gwpe/datasets/strain_data/old_data/strain_FD_whitened.hdf5", "r"
+    domain_data = data_to_domain(
+        raw_data,
+        settings_raw_data,
+        domain,
+        window=model.metadata["train_settings"]["data"]["window"],
     )
 
-    det = "H1"
-    a = ref_strains[det][:]
-    b = domain_data["waveform"][det] / domain_data["asds"][det]
-    b = b[:8193]
-    assert np.all(np.abs(((a/b)[160:]).imag) < 1e-8)
-    assert np.all(np.abs(((a/b)[160:]).real - 1) < 1e-8)
-    print("done")
+    # if False:
+    #     import h5py
+    #     ref_strains = h5py.File(
+    #         "/Users/maxdax/Documents/Projects/GW-Inference/dingo/dingo-devel/tutorials"
+    #         "/02_gwpe/datasets/strain_data/old_data/strain_FD_whitened.hdf5",
+    #         "r",
+    #     )
+    #     det = "H1"
+    #     a = ref_strains[det][:]
+    #     b = domain_data["waveform"][det] / domain_data["asds"][det]
+    #     a = domain.update_data(a)
+    #     a, b = a[domain.min_idx :], b[domain.min_idx :]
+    #     assert np.all(np.abs((a / b).imag) < 1e-8)
+    #     assert np.all(np.abs((a / b).real - 1) < 1e-8)
+
     # step 3: prepare the data for neural network
     # this includes whitening, repackaging and
+    transforms = Compose(
+        [
+            WhitenAndScaleStrain(domain.noise_std),
+            RepackageStrainsAndASDS(detectors, first_index=domain.min_idx),
+            # UnpackDict(selected_keys=["waveform"]),
+        ]
+    )
+    nn_data = transforms(domain_data)
+
+    x_ = torch.from_numpy(nn_data["waveform"])
+    model.model.eval()
+
+    post_transform = SelectStandardizeRepackageParameters(
+        {"inference_parameters": inference_parameters},
+        data_settings["standardization"],
+        inverse=True,
+        as_type="dict",
+    )
+
+    if not gnpe:
+        # print(torch.std(x[..., :2, :]))
+        # print(torch.mean(x[..., :2, :]))
+
+        # add batch dimension
+        x = x_[None, :]
+        y = model.model.sample(x, num_samples=num_samples).detach()
+        samples = post_transform({"parameters": y})
+
+    else:
+        """
+        a) get proxies
+        b) shift by time
+        c) preprocessing exact equiv
+        d) get samples
+        e) post processing tc
+        f) get H1_time, L1_time
+        """
+        ifo_list = InterferometerList(detectors)
+        gnpe_settings = model.metadata["train_settings"]["data"]["gnpe_time_shifts"]
+
+        pre_transforms = []
+
+        pre_transforms.append(
+            GNPEShiftDetectorTimes(
+                ifo_list,
+                gnpe_settings["kernel"],
+                gnpe_settings["exact_equiv"],
+                inference=True,
+            )
+        )
+        pre_transforms.append(TimeShiftStrain(ifo_list, domain))
+        pre_transforms.append(
+            SelectStandardizeRepackageParameters(
+                {"context_parameters": data_settings["context_parameters"]},
+                data_settings["standardization"],
+            )
+        )
+        pre_transforms.append(
+            UnpackDict(
+                selected_keys=["extrinsic_parameters", "waveform", "context_parameters"]
+            )
+        )
+        pre_transforms = Compose(pre_transforms)
+
+        num_samples = len(list(init_context_parameters.values())[0])
+
+        x_ = x_.expand(num_samples, *x_.shape)
+
+        #################
+        # Loop
+        #################
+        extrinsic_parameters = init_context_parameters
+        extrinsic_parameters_ = init_context_parameters
+        for i in range(num_gnpe_iterations):
+
+            sample = {
+                "parameters": {},
+                "extrinsic_parameters": {**extrinsic_parameters, "geocent_time": 0},
+                "waveform": x_,
+            }
+            extrinsic_parameters, *x = pre_transforms(sample)
+
+            y = model.model.sample(*x, num_samples=1).detach()
+
+            post_transforms = Compose(
+                [
+                    SelectStandardizeRepackageParameters(
+                        {"inference_parameters": inference_parameters},
+                        data_settings["standardization"],
+                        inverse=True,
+                        as_type="dict",
+                    ),
+                    PostCorrectGeocentTime(),
+                    CopyToExtrinsicParameters("ra", "dec", "geocent_time"),
+                    GetDetectorTimes(ifo_list, data_settings["ref_time"]),
+                ]
+            )
+
+            samples = post_transforms(
+                {"parameters": y, "extrinsic_parameters": extrinsic_parameters}
+            )
+            extrinsic_parameters = {
+                k: samples["extrinsic_parameters"][k]
+                for k in init_context_parameters.keys()
+            }
+
+            delta = np.array(
+                samples["extrinsic_parameters"]["H1_time"]
+                - extrinsic_parameters_["H1_time"]
+            )
+            extrinsic_parameters_ = extrinsic_parameters
+            print(f"99th percentile: {np.percentile(np.abs(delta), 99)*1000:.2f} ms")
+
+    return samples["parameters"]
 
 
 if __name__ == "__main__":
+    from os.path import join
+    import pandas as pd
+    from chainconsumer import ChainConsumer
+
+    model = "Pv2"
+    model = "XPHM"
     event = "GW150914"
     time_event = 1126259462.4
-    model_name = (
-        "/Users/maxdax/Documents/Projects/GW-Inference/dingo/dingo-devel"
-        "/tutorials/02_gwpe/train_dir_max/model_latest.pt"
-    )
+    # time_event = 1126259462.4
+    dir = "/Users/maxdax/Documents/Projects/GW-Inference/dingo/dingo-devel/tutorials/" \
+          "02_gwpe/train_dir_max/cluster_models/"
+    # model_name = (
+    #     "/Users/maxdax/Documents/Projects/GW-Inference/dingo/dingo-devel"
+    #     "/tutorials/02_gwpe/train_dir_max/model_latest.pt"
+    # )
+    model_name_init = join(dir, f"model_{model}_init.pt")
+    model_name = join(dir, f"model_{model}.pt")
+
     events_file = (
         "/Users/maxdax/Documents/Projects/GW-Inference/dingo/dingo-devel/"
         "tutorials/02_gwpe/datasets/strain_data/events_dataset.hdf5"
     )
-    inference(
-        time_event=time_event, model=model_name, time_psd=1024, file_name=events_file
+    init_samples = inference(
+        time_event=time_event,
+        time_psd=1024,
+        file_name=events_file,
+        model=model_name_init,
+        num_samples=10_000,
     )
+
+    samples = inference(
+        time_event=time_event,
+        time_psd=1024,
+        file_name=events_file,
+        model=model_name,
+        init_context_parameters=init_samples,
+    )
+
+    pd.DataFrame(samples).to_pickle(join(dir, f"dingo_{model}.pkl"))
+
+    c = ChainConsumer()
+    c.add_chain(pd.DataFrame(samples))
+    c.configure(usetex=False)
+    fig = c.plotter.plot(filename=join(dir, f"{model}.pdf"))
+
+
+
+    print("done")
