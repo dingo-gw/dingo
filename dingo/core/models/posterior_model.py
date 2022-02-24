@@ -243,9 +243,11 @@ class PosteriorModel:
                 train_loss = train_epoch(self, train_loader)
                 train_time = time.time() - time_start
 
-                print("Done. This took {:2.0f}:{:2.0f} min.".format(
-                    *divmod(train_time, 60)
-                ))
+                print(
+                    "Done. This took {:2.0f}:{:2.0f} min.".format(
+                        *divmod(train_time, 60)
+                    )
+                )
 
                 # Testing
                 print(f"Start testing epoch {self.epoch}")
@@ -253,9 +255,11 @@ class PosteriorModel:
                 test_loss = test_epoch(self, test_loader)
                 test_time = time.time() - time_start
 
-                print("Done. This took {:2.0f}:{:2.0f} min.".format(
-                    *divmod(time.time() - time_start, 60)
-                ))
+                print(
+                    "Done. This took {:2.0f}:{:2.0f} min.".format(
+                        *divmod(time.time() - time_start, 60)
+                    )
+                )
 
             # scheduler step for learning rate
             utils.perform_scheduler_step(self.scheduler, test_loss)
@@ -272,7 +276,6 @@ class PosteriorModel:
                         "test_loss": test_loss,
                         "training_time": train_time,
                         "testing_time": test_time,
-
                     }
                 )
             print(f"Finished training epoch {self.epoch}.\n")

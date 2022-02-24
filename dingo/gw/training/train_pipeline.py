@@ -1,5 +1,6 @@
 import os
-os.environ['WANDB_API_KEY'] = 'd6f39b6260188c635fcc3a1aa8e0854c223f281b'
+
+os.environ["WANDB_API_KEY"] = "insert here"
 import numpy as np
 import yaml
 import argparse
@@ -98,7 +99,13 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
 
     if local_settings["use_wandb"]:
         run_id = local_settings["wandb_run_id"]
-        wandb.init(project="dingo-devel", id=run_id, config=full_settings, group="hyperparameter_tuning", dir=train_dir)
+        wandb.init(
+            project="dingo-devel",
+            id=run_id,
+            config=full_settings,
+            group="hyperparameter_tuning",
+            dir=train_dir,
+        )
 
     return pm, wfd
 
@@ -127,9 +134,17 @@ def prepare_training_resume(checkpoint_name, local_settings, train_dir):
     if local_settings["use_wandb"]:
 
         try:
-            wandb.init(project="dingo-devel", id=local_settings["wandb_run_id"], group="hyperparameter_tuning", resume="must", dir=train_dir)
+            wandb.init(
+                project="dingo-devel",
+                id=local_settings["wandb_run_id"],
+                group="hyperparameter_tuning",
+                resume="must",
+                dir=train_dir,
+            )
         except KeyError:
-            print("WandB is enabled but no run_id has been provided for resuming the run.")
+            print(
+                "WandB is enabled but no run_id has been provided for resuming the run."
+            )
 
     return pm, wfd
 
@@ -257,7 +272,7 @@ def train_stages(pm, wfd, train_dir, local_settings):
             train_dir=train_dir,
             runtime_limits=runtime_limits,
             checkpoint_epochs=local_settings["checkpoint_epochs"],
-            use_wandb=local_settings["use_wandb"]
+            use_wandb=local_settings["use_wandb"],
         )
 
         if pm.epoch == end_epochs[n]:
@@ -330,7 +345,10 @@ def train_local():
         local_settings = train_settings.pop("local")
         with open(os.path.join(args.train_dir, "local_settings.yaml"), "w") as f:
 
-            if local_settings["use_wandb"] and "wandb_run_id" not in local_settings.keys():
+            if (
+                local_settings["use_wandb"]
+                and "wandb_run_id" not in local_settings.keys()
+            ):
                 local_settings["wandb_run_id"] = wandb.util.generate_id()
             yaml.dump(local_settings, f, default_flow_style=False, sort_keys=False)
 
@@ -340,7 +358,9 @@ def train_local():
         print("Resuming training run.")
         with open(os.path.join(args.train_dir, "local_settings.yaml"), "r") as f:
             local_settings = yaml.safe_load(f)
-        pm, wfd = prepare_training_resume(args.checkpoint, local_settings, args.train_dir)
+        pm, wfd = prepare_training_resume(
+            args.checkpoint, local_settings, args.train_dir
+        )
 
     with threadpool_limits(limits=1, user_api="blas"):
         complete = train_stages(pm, wfd, args.train_dir, local_settings)
