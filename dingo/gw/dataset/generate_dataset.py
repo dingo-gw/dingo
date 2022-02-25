@@ -43,6 +43,21 @@ def generate_parameters_and_polarizations(
                 )
     else:
         polarizations = generate_waveforms_parallel(waveform_generator, parameters)
+
+    # Find cases where waveform generation failed and only return data for successful ones
+    wf_failed = np.any(np.isnan(polarizations['h_plus']), axis=1)
+    if wf_failed.any():
+        idx_failed = np.where(wf_failed)[0]
+        idx_ok = np.where(~wf_failed)[0]
+        polarizations_ok = {k: v[idx_ok] for k, v in polarizations.items()}
+        parameters_ok = parameters.iloc[idx_ok]
+        failed_percent = 100 * len(idx_failed) / len(parameters)
+        print(f'{len(idx_failed)} out of {len(parameters)} configuration ({failed_percent:.1f}%) failed to generate.')
+        with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+            print(parameters.iloc[idx_failed])
+        print(f'Only returning the {len(idx_ok)} successfully generated configurations.')
+        return parameters_ok, polarizations_ok
+
     return parameters, polarizations
 
 
