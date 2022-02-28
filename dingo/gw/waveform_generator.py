@@ -59,7 +59,6 @@ class WaveformGenerator:
 
         self.transform = transform
 
-
     def generate_hplus_hcross(self, parameters: Dict[str, float],
                               catch_waveform_errors=True) -> Dict[str, np.ndarray]:
         """Generate GW polarizations (h_plus, h_cross).
@@ -132,7 +131,7 @@ class WaveformGenerator:
                     warnings.warn(f"Evaluating the waveform failed with error: {e}\n"
                                   f"The parameters were {parameters_lal}\n")
                     pol_nan = np.ones(len(self.domain)) * np.nan
-                    return {'h_plus': pol_nan, 'h_cross': pol_nan}
+                    wf_dict = {'h_plus': pol_nan, 'h_cross': pol_nan}
                 else:
                     raise
 
