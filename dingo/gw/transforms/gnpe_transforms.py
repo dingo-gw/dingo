@@ -26,7 +26,9 @@ class GNPEShiftDetectorTimes(object):
     [1]: arxiv.org/abs/2111.13139
     """
 
-    def __init__(self, ifo_list, kernel, exact_global_equivariance=True, inference=True):
+    def __init__(
+        self, ifo_list, kernel, exact_global_equivariance=True, inference=True
+    ):
         """
         ifo_list : bilby.gw.detector.InterferometerList
             List of interferometers.
@@ -69,8 +71,7 @@ class GNPEShiftDetectorTimes(object):
             else:
                 # at inference time, the data is already projected onto the detector,
                 # so only the gnpe time shift by - t_hat needs to be applied
-                extrinsic_parameters[f"{ifo_name}_time"] = - t_hat
-
+                extrinsic_parameters[f"{ifo_name}_time"] = -t_hat
 
         # If we are imposing the global time shift symmetry, then we treat the first
         # proxy as "preferred", in the sense that it defines the global time shift.
@@ -90,6 +91,8 @@ class GNPEShiftDetectorTimes(object):
             dt = proxies.pop(f"{self.ifo_names[0]}_time_proxy")
             if "geocent_time" in extrinsic_parameters:
                 extrinsic_parameters["geocent_time"] -= dt
+            else:
+                extrinsic_parameters["geocent_time"] = -dt  # for gnpe inference
             for ifo_name in proxies.keys():
                 proxies[ifo_name] -= dt
 

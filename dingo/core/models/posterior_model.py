@@ -13,6 +13,8 @@ import dingo.core.utils.trainutils
 import pdb
 
 from dingo.core.nn.nsf import create_nsf_with_rb_projection_embedding_net
+from dingo.gw.domains import build_domain
+from dingo.gw.gwutils import get_window_factor
 
 
 class PosteriorModel:
@@ -43,7 +45,7 @@ class PosteriorModel:
         model_filename: str = None,
         metadata: dict = None,
         initial_weights: dict = None,
-        device: str = 'cuda',
+        device: str = "cuda",
     ):
         """
 
@@ -129,6 +131,22 @@ class PosteriorModel:
                 self.optimizer, **self.scheduler_kwargs
             )
 
+    def build_domain(self):
+        """
+        Builds model domain based on its metadata.
+
+        Returns
+        -------
+        domain
+        """
+        domain = build_domain(self.metadata["dataset_settings"]["domain"])
+        if "domain_update" in self.metadata["train_settings"]["data"]:
+            domain.update(self.metadata["train_settings"]["data"]["domain_update"])
+        domain.window_factor = get_window_factor(
+            self.metadata["train_settings"]["data"]["window"]
+        )
+        return domain
+
     def save_model(
         self,
         model_filename: str,
@@ -170,7 +188,7 @@ class PosteriorModel:
         self,
         model_filename: str,
         load_training_info: bool = True,
-        device: str = 'cuda',
+        device: str = "cuda",
     ):
         """
         Load a posterior model from the disk.

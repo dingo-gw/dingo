@@ -104,7 +104,7 @@ class SelectStandardizeRepackageParameters(object):
                 f"({inference_parameters}), but got {parameters.shape[-1]}."
             )
 
-            # normalize parameters
+            # de-normalize parameters
             for idx, par in enumerate(inference_parameters):
                 parameters[..., idx] = (
                     parameters[..., idx] * self.std[par] + self.mean[par]
