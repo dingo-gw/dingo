@@ -12,11 +12,12 @@ class SVDBasis(DingoDataset):
     ):
         self.V = None
         self.Vh = None
+        self.s = None
         self.n = None
         super().__init__(
             file_name=file_name,
             dictionary=dictionary,
-            data_keys=["V"],
+            data_keys=["V", "s"],
         )
 
     def generate_basis(self, training_data: np.ndarray, n: int, method: str = "random"):
@@ -136,35 +137,43 @@ class SVDBasis(DingoDataset):
         """
         return fseries @ self.V
 
-    def from_file(self, filename: str):
-        """
-        Load basis matrix V from a file.
+    # def from_file(self, filename: str):
+    #     """
+    #     Load basis matrix V from a file.
+    #
+    #     Parameters
+    #     ----------
+    #     filename:
+    #         File in .npy format
+    #     """
+    #     self.V = np.load(filename)
+    #     self.Vh = self.V.T.conj()
+    #     self.n = self.V.shape[1]
 
-        Parameters
-        ----------
-        filename:
-            File in .npy format
-        """
-        self.V = np.load(filename)
-        self.Vh = self.V.T.conj()
+    def from_file(self, filename):
+        super().from_file(filename)
         self.n = self.V.shape[1]
 
-    def from_V(self, V):
-        self.V = V
-        self.Vh = self.V.T.conj()
+    def from_dictionary(self, dictionary: dict):
+        super().from_dictionary(dictionary)
         self.n = self.V.shape[1]
 
-    def to_file(self, filename: str):
-        """
-        Save basis matrix V to a file.
+    # def from_V(self, V):
+    #     self.V = V
+    #     self.Vh = self.V.T.conj()
+    #     self.n = self.V.shape[1]
 
-        Parameters
-        ----------
-        filename:
-            File in .npy format
-        """
-        if self.V is not None:
-            np.save(filename, self.V)
+    # def to_file(self, filename: str):
+    #     """
+    #     Save basis matrix V to a file.
+    #
+    #     Parameters
+    #     ----------
+    #     filename:
+    #         File in .npy format
+    #     """
+    #     if self.V is not None:
+    #         np.save(filename, self.V)
 
 
 class ApplySVD(object):

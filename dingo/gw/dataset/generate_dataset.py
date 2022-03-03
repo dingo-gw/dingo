@@ -101,7 +101,7 @@ def generate_dataset(settings, num_processes):
                 del parameters, polarizations, train_data
 
             compression_transforms.append(ApplySVD(basis))
-            dataset_dict["svd_V"] = basis.V
+            dataset_dict["svd"] = basis.to_dictionary()
 
         waveform_generator.transform = Compose(compression_transforms)
 

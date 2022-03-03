@@ -6,7 +6,7 @@ import yaml
 import copy
 
 # Fixed file names
-svd_fn = "svd.npy"
+svd_fn = "svd.hdf5"
 settings_part_fn = "settings_part.yaml"
 settings_svd_part_fn = "settings_svd_part.yaml"
 svd_dataset_part_prefix = "svd_dataset_part_"
