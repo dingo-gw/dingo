@@ -5,7 +5,7 @@ import torch.utils.data
 from torchvision.transforms import Compose
 
 from dingo.core.dataset import DingoDataset
-from dingo.gw.SVD import SVDBasis, UndoSVD
+from dingo.gw.SVD import SVDBasis, ApplySVD
 from dingo.gw.domains import build_domain
 
 
@@ -149,7 +149,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             assert self.svd_V is not None
             svd_basis = SVDBasis()
             svd_basis.from_V(self.svd_V)
-            decompression_transform_list.append(UndoSVD(svd_basis))
+            decompression_transform_list.append(ApplySVD(svd_basis, inverse=True))
 
         self.decompression_transform = Compose(decompression_transform_list)
 

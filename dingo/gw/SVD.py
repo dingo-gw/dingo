@@ -1,18 +1,23 @@
-import time
-from os.path import join
-
 import numpy as np
 import scipy
 from sklearn.utils.extmath import randomized_svd
-from torch.utils.data import DataLoader
-from torchvision.transforms import Compose
+from dingo.core.dataset import DingoDataset
 
 
-class SVDBasis:
-    def __init__(self):
+class SVDBasis(DingoDataset):
+    def __init__(
+        self,
+        file_name=None,
+        dictionary=None,
+    ):
         self.V = None
         self.Vh = None
         self.n = None
+        super().__init__(
+            file_name=file_name,
+            dictionary=dictionary,
+            data_keys=["V"],
+        )
 
     def generate_basis(self, training_data: np.ndarray, n: int, method: str = "random"):
         """Generate the SVD basis from training data and store it.
@@ -109,7 +114,7 @@ class SVDBasis:
         if outfile is not None:
             np.save(outfile, test_stats, allow_pickle=True)
 
-    def basis_coefficients_to_fseries(self, coefficients: np.ndarray):
+    def decompress(self, coefficients: np.ndarray):
         """
         Convert from basis coefficients to frequency series.
 
@@ -120,7 +125,7 @@ class SVDBasis:
         """
         return coefficients @ self.Vh
 
-    def fseries_to_basis_coefficients(self, fseries: np.ndarray):
+    def compress(self, fseries: np.ndarray):
         """
         Convert from frequency series to basis coefficients.
 
@@ -163,24 +168,34 @@ class SVDBasis:
 
 
 class ApplySVD(object):
-    def __init__(self, svd_basis: SVDBasis):
+    """Transform operator for applying an SVD compression / decompression.
+    """
+    def __init__(self, svd_basis: SVDBasis, inverse: bool = False):
+        """
+        Parameters
+        ----------
+        svd_basis : SVDBasis
+        inverse : bool
+            Whether to apply for the forward (compression) or inverse (decompression)
+            transform. Default: False.
+        """
         self.svd_basis = svd_basis
+        self.inverse = inverse
 
-    def __call__(self, uncompressed_waveform: dict):
-        compressed_waveform = {
-            k: self.svd_basis.fseries_to_basis_coefficients(v)
-            for k, v in uncompressed_waveform.items()
-        }
-        return compressed_waveform
+    def __call__(self, waveform: dict):
+        """
+        Parameters
+        ----------
+        waveform : dict
+            Values should be arrays containing waveforms to be transformed.
 
+        Returns
+        -------
+        dict of the same form as the input, but with transformed waveforms.
+        """
+        if not self.inverse:
+            func = self.svd_basis.compress
+        else:
+            func = self.svd_basis.decompress
+        return {k: func(v) for k, v in waveform.items()}
 
-class UndoSVD(object):
-    def __init__(self, svd_basis: SVDBasis):
-        self.svd_basis = svd_basis
-
-    def __call__(self, compressed_waveform: dict):
-        uncompressed_waveform = {
-            k: self.svd_basis.basis_coefficients_to_fseries(v)
-            for k, v in compressed_waveform.items()
-        }
-        return uncompressed_waveform
