@@ -123,6 +123,10 @@ class SVDBasis(DingoDataset):
         ----------
         coefficients : np.ndarray
             Array of basis coefficients
+
+        Returns
+        -------
+        array of decompressed data
         """
         return coefficients @ self.Vh
 
@@ -134,6 +138,10 @@ class SVDBasis(DingoDataset):
         Parameters
         ----------
         data : np.ndarray
+
+        Returns
+        -------
+        array of basis coefficients
         """
         return data @ self.V
 

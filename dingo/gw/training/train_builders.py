@@ -337,6 +337,7 @@ def build_svd_for_embedding_network(
     for ifo in ifos:
         basis = SVDBasis()
         basis.generate_basis(waveforms[ifo][:num_training_samples], size)
+        basis.to_file(os.path.join(out_dir, f"svd_{ifo}.hdf5"))
         basis_dict[ifo] = basis
         print(f"...{ifo} done.")
     print(f"...this took {time.time() - time_start:.0f} s.")
