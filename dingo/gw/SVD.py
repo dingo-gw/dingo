@@ -117,63 +117,50 @@ class SVDBasis(DingoDataset):
 
     def decompress(self, coefficients: np.ndarray):
         """
-        Convert from basis coefficients to frequency series.
+        Convert from basis coefficients back to raw data representation.
 
         Parameters
         ----------
-        coefficients:
+        coefficients : np.ndarray
             Array of basis coefficients
         """
         return coefficients @ self.Vh
 
-    def compress(self, fseries: np.ndarray):
+    def compress(self, data: np.ndarray):
         """
-        Convert from frequency series to basis coefficients.
+        Convert from data (e.g., frequency series) to compressed representation in
+        terms of basis coefficients.
 
         Parameters
         ----------
-        fseries:
-            Array of frequency series
+        data : np.ndarray
         """
-        return fseries @ self.V
-
-    # def from_file(self, filename: str):
-    #     """
-    #     Load basis matrix V from a file.
-    #
-    #     Parameters
-    #     ----------
-    #     filename:
-    #         File in .npy format
-    #     """
-    #     self.V = np.load(filename)
-    #     self.Vh = self.V.T.conj()
-    #     self.n = self.V.shape[1]
+        return data @ self.V
 
     def from_file(self, filename):
+        """
+        Load the SVD basis from a HDF5 file.
+
+        Parameters
+        ----------
+        filename : str
+        """
         super().from_file(filename)
+        self.Vh = self.V.T.conj()
         self.n = self.V.shape[1]
 
     def from_dictionary(self, dictionary: dict):
+        """
+        Load the SVD basis from a dictionary.
+
+        Parameters
+        ----------
+        dictionary : dict
+            The dictionary should contain at least a 'V' key, and optionally an 's' key.
+        """
         super().from_dictionary(dictionary)
+        self.Vh = self.V.T.conj()
         self.n = self.V.shape[1]
-
-    # def from_V(self, V):
-    #     self.V = V
-    #     self.Vh = self.V.T.conj()
-    #     self.n = self.V.shape[1]
-
-    # def to_file(self, filename: str):
-    #     """
-    #     Save basis matrix V to a file.
-    #
-    #     Parameters
-    #     ----------
-    #     filename:
-    #         File in .npy format
-    #     """
-    #     if self.V is not None:
-    #         np.save(filename, self.V)
 
 
 class ApplySVD(object):
