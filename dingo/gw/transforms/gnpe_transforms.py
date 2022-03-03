@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 import lal
 from bilby.core.prior import PriorDict
 
@@ -58,7 +59,11 @@ class GNPEShiftDetectorTimes(object):
         epsilon = self.kernel.sample(num_samples)
         for ifo_name in self.ifo_names:
             t = extrinsic_parameters[f"{ifo_name}_time"]
-            t_hat = t + np.float32(epsilon[ifo_name])
+            if type(t) == torch.Tensor:
+                eps = torch.tensor(epsilon[ifo_name], dtype=t.dtype, device=t.device)
+            else:
+                eps = np.float32(epsilon[ifo_name])
+            t_hat = t + eps
             proxies[f"{ifo_name}_time_proxy"] = t_hat
             # time shifts to the strain data are applied in a following transformation,
             # store the time shifts in extrinsic_parameters[f"{ifo_name}_time"]
