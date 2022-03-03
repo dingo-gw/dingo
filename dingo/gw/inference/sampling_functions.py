@@ -1,4 +1,3 @@
-import pandas as pd
 import torch
 from torchvision.transforms import Compose
 from bilby.gw.detector.networks import InterferometerList
@@ -15,6 +14,12 @@ from dingo.gw.transforms import (
     ExpandStrain,
     ToTorch,
     ResetSample,
+)
+from dingo.core.models import PosteriorModel
+from dingo.gw.inference.data_preparation import (
+    parse_settings_for_raw_data,
+    load_raw_data,
+    data_to_domain,
 )
 
 
@@ -139,7 +144,8 @@ def sample_with_gnpe(
 
     # get transformations for gnpe loop
     gnpe_transforms_pre, gnpe_transforms_post = get_transforms_for_gnpe_time(
-        model, init_parameters=samples_init["parameters"].keys(),
+        model,
+        init_parameters=samples_init["parameters"].keys(),
     )
 
     model.model.eval()
@@ -154,4 +160,72 @@ def sample_with_gnpe(
         print(torch.mean(Mc), torch.std(Mc))
 
     samples = data["parameters"]
+    return samples
+
+
+def sample_posterior_of_event(
+    time_event,
+    model,
+    model_init=None,
+    event_dataset=None,
+    event_dataset_init=None,
+    time_buffer=2.0,
+    time_psd=1024,
+    device="cpu",
+    num_samples=50_000,
+    samples_init=None,
+    num_gnpe_iterations=30,
+):
+    # get init_samples if requested (typically for gnpe)
+    if model_init is not None:
+        # use event_dataset if no separate one is provided for initialization;
+        # in that case, the data settings of model and model_init need to be compatible
+        if event_dataset_init is None:
+            event_dataset_init = event_dataset
+        samples_init = sample_posterior_of_event(
+            time_event,
+            model_init,
+            event_dataset=event_dataset_init,
+            time_buffer=time_buffer,
+            time_psd=time_psd,
+            device=device,
+            num_samples=num_samples,
+        )
+
+    # load model
+    if not type(model) == PosteriorModel:
+        model = PosteriorModel(model, device=device, load_training_info=False)
+    # currently gnpe only implemented for time shifts
+    gnpe = "gnpe_time_shifts" in model.metadata["train_settings"]["data"]
+
+    # step 1: download raw event data
+    settings_raw_data = parse_settings_for_raw_data(
+        model.metadata, time_psd, time_buffer
+    )
+    raw_data = load_raw_data(
+        time_event, settings=settings_raw_data, event_dataset=event_dataset
+    )
+
+    # step 2: prepare the data for the network domain
+    domain_data = data_to_domain(
+        raw_data,
+        settings_raw_data,
+        model.build_domain(),
+        window=model.metadata["train_settings"]["data"]["window"],
+    )
+
+    if not gnpe:
+        assert samples_init is None, "samples_init can only be used for gnpe."
+        samples = sample_with_npe(domain_data, model, num_samples)
+
+    else:
+        samples = sample_with_gnpe(
+            domain_data,
+            model,
+            samples_init,
+            num_gnpe_iterations=num_gnpe_iterations,
+        )
+
+    # TODO: apply post correction of sky position here
+
     return samples
