@@ -56,6 +56,7 @@ setup(
             "dingo_train=dingo.gw.training:train_local",
             "dingo_train_condor=dingo.gw.training.train_pipeline_condor:train_condor",
             "dingo_append_training_stage=dingo.gw.training:append_stage",
+            "dingo_analyze_event=dingo.gw.inference:analyze_event",
         ]
     },
     classifiers=[

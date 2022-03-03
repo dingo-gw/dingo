@@ -126,7 +126,6 @@ def sample_with_gnpe(
     model,
     samples_init,
     num_gnpe_iterations=None,
-    as_type="dict",
 ):
     # prepare data for inference network, and add initial samples as extrinsic parameters
     transforms_pre, _ = get_transforms_for_npe(
@@ -155,10 +154,4 @@ def sample_with_gnpe(
         print(torch.mean(Mc), torch.std(Mc))
 
     samples = data["parameters"]
-
-    if as_type == "dict":
-        return samples
-    elif as_type == "pandas":
-        return pd.DataFrame(samples)
-    else:
-        raise NotImplementedError(f"Type {as_type} not supported.")
+    return samples

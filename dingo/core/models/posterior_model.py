@@ -46,6 +46,7 @@ class PosteriorModel:
         metadata: dict = None,
         initial_weights: dict = None,
         device: str = "cuda",
+        load_training_info: bool = True,
     ):
         """
 
@@ -86,7 +87,9 @@ class PosteriorModel:
 
         # build model
         if model_filename is not None:
-            self.load_model(model_filename, load_training_info=True, device=device)
+            self.load_model(
+                model_filename, load_training_info=load_training_info, device=device
+            )
         else:
             self.initialize_model()
             self.model_to_device(device)
@@ -217,7 +220,6 @@ class PosteriorModel:
 
         self.model_to_device(device)
 
-        # I think this should probably not be optional...
         if load_training_info:
             if "optimizer_kwargs" in d:
                 self.optimizer_kwargs = d["optimizer_kwargs"]
@@ -230,6 +232,9 @@ class PosteriorModel:
                 self.optimizer.load_state_dict(d["optimizer_state_dict"])
             if "scheduler_state_dict" in d:
                 self.scheduler.load_state_dict(d["scheduler_state_dict"])
+        else:
+            # put model in evaluation mode
+            self.model.eval()
 
     def train(
         self,
