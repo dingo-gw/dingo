@@ -101,6 +101,7 @@ def get_transforms_for_gnpe_time(model, init_parameters, as_type="dict"):
             SelectStandardizeRepackageParameters(
                 {"context_parameters": data_settings["context_parameters"]},
                 data_settings["standardization"],
+                device=model.device,
             ),
         ]
     )

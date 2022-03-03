@@ -213,8 +213,8 @@ class FrequencyDomain(Domain):
             # The third axis contains strain.real and strain.imag in channel 0 and 1,
             # and optionally additional channels (e.g., ASD).
             batch_size, Nd, Nc, Nf = data.shape
-            cos_txf = torch.empty((batch_size, Nd, Nf))
-            sin_txf = torch.empty((batch_size, Nd, Nf))
+            cos_txf = torch.empty((batch_size, Nd, Nf), device=data.device)
+            sin_txf = torch.empty((batch_size, Nd, Nf), device=data.device)
             if data.is_cuda:
                 f = self.sample_frequencies_torch_cuda[self.min_idx:]
             else:
@@ -229,7 +229,7 @@ class FrequencyDomain(Domain):
                 cos_txf[:, idx, ...] = cos_txf_det[...]
                 sin_txf[:, idx, ...] = sin_txf_det[...]
 
-            x = torch.empty(*data.shape)
+            x = torch.empty(*data.shape, device=data.device)
             x[:, :, 0, ...] = cos_txf * data[:, :, 0, :] - sin_txf * data[:, :, 1, :]
             x[:, :, 1, ...] = sin_txf * data[:, :, 0, :] + cos_txf * data[:, :, 1, :]
             x[:, :, 2:, ...] = data[:, :, 2:, :]

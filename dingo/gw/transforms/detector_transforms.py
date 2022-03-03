@@ -21,7 +21,13 @@ class GetDetectorTimes(object):
         dec = extrinsic_parameters["dec"]
         geocent_time = extrinsic_parameters["geocent_time"]
         for ifo in self.ifo_list:
+            if type(ra) == torch.Tensor:
+                # computation does not work on gpu, so do it on cpu
+                ra = ra.cpu()
+                dec = dec.cpu()
             dt = ifo.time_delay_from_geocenter(ra, dec, self.ref_time)
+            if type(dt) == torch.Tensor:
+                dt = dt.to(geocent_time.device)
             ifo_time = geocent_time + dt
             extrinsic_parameters[f"{ifo.name}_time"] = ifo_time
         sample["extrinsic_parameters"] = extrinsic_parameters

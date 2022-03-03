@@ -38,7 +38,7 @@ class SelectStandardizeRepackageParameters(object):
     """
 
     def __init__(
-        self, parameters_dict, standardization_dict, inverse=False, as_type=None
+        self, parameters_dict, standardization_dict, inverse=False, as_type=None, device="cpu",
     ):
         self.parameters_dict = parameters_dict
         self.mean = standardization_dict["mean"]
@@ -48,6 +48,7 @@ class SelectStandardizeRepackageParameters(object):
             raise ValueError("Keys of means and stds do not match.")
         self.inverse = inverse
         self.as_type = as_type
+        self.device = device
 
     def __call__(self, input_sample, as_type=None):
         """
@@ -84,7 +85,7 @@ class SelectStandardizeRepackageParameters(object):
             for k, v in self.parameters_dict.items():
                 if isinstance(full_parameters[v[0]], torch.Tensor):
                     standardized = torch.empty(
-                        (*full_parameters[v[0]].shape, len(v)), dtype=torch.float32
+                        (*full_parameters[v[0]].shape, len(v)), dtype=torch.float32, device=self.device,
                     )
                 else:
                     standardized = np.empty(len(v), dtype=np.float32)

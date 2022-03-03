@@ -133,6 +133,7 @@ def analyze_event():
             num_gnpe_iterations=args.num_gnpe_iterations,
             device=device,
         )
+        samples = {k: v.cpu() for k, v in samples.items()}
 
         # if no reference samples are available, simply save the dingo samples
         if ref is None or time_event not in ref:
