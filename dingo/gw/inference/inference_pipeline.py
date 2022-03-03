@@ -131,6 +131,7 @@ def analyze_event():
             event_dataset_init=args.event_dataset_init,
             num_samples=args.num_samples,
             num_gnpe_iterations=args.num_gnpe_iterations,
+            device=device,
         )
 
         # if no reference samples are available, simply save the dingo samples

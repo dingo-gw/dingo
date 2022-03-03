@@ -38,6 +38,7 @@ setup(
         "pycbc",
         "pandas",
         "threadpoolctl",
+        "chainconsumer",
     ],
     extras_require={
         "dev": [
