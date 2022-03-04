@@ -55,18 +55,14 @@ class GNPEShiftDetectorTimes(object):
         extrinsic_parameters = sample["extrinsic_parameters"].copy()
 
         proxies = {}
-        if type(extrinsic_parameters[f"{self.ifo_names[0]}_time"]) == torch.Tensor:
-            num_samples = len(extrinsic_parameters[f"{self.ifo_names[0]}_time"])
-        else:
-            num_samples = 1
-        epsilon = self.kernel.sample(num_samples)
+
+        epsilon = self.sample_from_kernel(
+            extrinsic_parameters[f"{self.ifo_names[0]}_time"]
+        )
+
         for ifo_name in self.ifo_names:
             t = extrinsic_parameters[f"{ifo_name}_time"]
-            if type(t) == torch.Tensor:
-                eps = torch.tensor(epsilon[ifo_name], dtype=t.dtype, device=t.device)
-            else:
-                eps = np.float32(epsilon[ifo_name])
-            t_hat = t + eps
+            t_hat = t + epsilon[ifo_name]
             proxies[f"{ifo_name}_time_proxy"] = t_hat
             # time shifts to the strain data are applied in a following transformation,
             # store the time shifts in extrinsic_parameters[f"{ifo_name}_time"]
@@ -123,6 +119,33 @@ class GNPEShiftDetectorTimes(object):
         """
         prior_dict = {ifo: kernel_str for ifo in self.ifo_names}
         self.kernel = PriorDict(prior_dict)
+
+    def sample_from_kernel(self, t):
+        """
+        Sample perturbations from the gnpe kernel. These will be added to the detector
+        times to obtain the proxies.
+
+        Parameters
+        ----------
+        t:
+            Example data for the detector times. Used to determine datatype and device
+            of the samples.
+
+        Returns
+        -------
+        epsilon: dict
+            dict with perturbations
+        """
+        if type(t) == torch.Tensor:
+            epsilon = self.kernel.sample(len(t))
+            epsilon = {
+                ifo_name: torch.tensor(eps, dtype=t.dtype, device=t.device)
+                for ifo_name, eps in epsilon.items()
+            }
+        else:
+            epsilon = self.kernel.sample()
+            epsilon = {ifo_name: np.float32(eps) for ifo_name, eps in epsilon.items()}
+        return epsilon
 
     def get_context_parameters(self):
         """
