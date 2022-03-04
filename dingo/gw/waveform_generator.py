@@ -3,7 +3,8 @@ from multiprocessing import Pool
 from math import isclose
 
 import numpy as np
-from typing import Dict, List, Tuple, Union, Any
+from typing import Dict, List, Tuple, Union
+from numbers import Number
 import warnings
 import lal
 import lalsimulation as LS
@@ -66,6 +67,9 @@ class WaveformGenerator:
         If the generation of the lalsimulation waveform fails with an
         "Input domain error", we return NaN polarizations.
 
+        Use the domain, approximant, and mode_list specified in the constructor
+        along with the waveform parameters to generate the waveform polarizations.
+
 
         Parameters
         ----------
@@ -98,8 +102,10 @@ class WaveformGenerator:
         catch_waveform_errors: bool
             Whether to catch lalsimulation errors
 
-        Use the domain, approximant, and mode_list specified in the constructor
-        along with the waveform parameters to generate the waveform polarizations.
+        Returns
+        -------
+        wf_dict:
+            A dictionary of generated waveform polarizations
         """
         if not isinstance(parameters, dict):
             raise ValueError('parameters should be a dictionary, but got', parameters)
@@ -140,8 +146,19 @@ class WaveformGenerator:
         else:
             return wf_dict
 
-    def _convert_to_scalar(self, x: Union[np.ndarray, float]):
-        """Convert a single element array to a number."""
+    def _convert_to_scalar(self, x: Union[np.ndarray, float]) -> Number:
+        """
+        Convert a single element array to a number.
+
+        Parameters
+        ----------
+        x:
+            Array or number
+
+        Returns
+        -------
+        A number
+        """
         if isinstance(x, np.ndarray):
             if x.shape == () or x.shape == (1, ):
                 return x.item()
@@ -150,7 +167,7 @@ class WaveformGenerator:
         else:
             return x
 
-    def _convert_parameters_to_lal_frame(self, parameter_dict: Dict, lal_params=None):
+    def _convert_parameters_to_lal_frame(self, parameter_dict: Dict, lal_params=None) -> Tuple:
         """Convert to lal source frame parameters
 
         Parameters
@@ -160,6 +177,11 @@ class WaveformGenerator:
             objects. If None, we use a default binary black hole prior.
         lal_params : (None, or Swig Object of type 'tagLALDict *')
             Extra parameters which can be passed to lalsimulation calls.
+
+        Returns
+        -------
+        lal_parameter_tuple:
+            A tuple of parameters for the lalsimulation waveform generator
         """
         # Transform mass, spin, and distance parameters
         p, _ = convert_to_lal_binary_black_hole_parameters(parameter_dict)
@@ -198,14 +220,18 @@ class WaveformGenerator:
                               domain_pars + (lal_params, self.approximant)
         return lal_parameter_tuple
 
-
-    def setup_mode_array(self, mode_list : List[Tuple]):
+    def setup_mode_array(self, mode_list: List[Tuple]) -> lal.Dict:
         """Define a mode array to select waveform modes
         to include in the polarizations from a list of modes.
 
         Parameters
         ----------
         mode_list : a list of (ell, m) modes
+
+        Returns
+        -------
+        lal_params:
+            A lal parameter dictionary
         """
         lal_params = lal.CreateDict()
         ma = LS.SimInspiralCreateModeArray()
@@ -215,10 +241,20 @@ class WaveformGenerator:
         LS.SimInspiralWaveformParamsInsertModeArray(lal_params, ma)
         return lal_params
 
+    def generate_FD_waveform(self, parameters_lal: Tuple) -> Dict[str, np.ndarray]:
+        """
+        Generate Fourier domain GW polarizations (h_plus, h_cross).
 
-    def generate_FD_waveform(self, parameters_lal) -> Dict[str, np.ndarray]:
-        """Generate Fourier domain GW polarizations (h_plus, h_cross)."""
+        Parameters
+        ----------
+        parameters_lal:
+            A tuple of parameters for the lalsimulation waveform generator
 
+        Returns
+        -------
+        pol_dict:
+            A dictionary of generated waveform polarizations
+        """
         # Note: SEOBNRv4PHM does not support the specification of spins at a
         # reference frequency different from the starting frequency. In addition,
         # waveform generation will fail if the orbital distance is smaller than ~ 10M.
@@ -275,12 +311,24 @@ class WaveformGenerator:
         time_shift = np.exp(-1j * 2 * np.pi * dt * frequency_array)
         h_plus *= time_shift
         h_cross *= time_shift
-        return {'h_plus': h_plus, 'h_cross': h_cross}
+        pol_dict = {'h_plus': h_plus, 'h_cross': h_cross}
+        return pol_dict
 
 
-    def generate_TD_waveform(self, parameters_lal) -> Dict[str, np.ndarray]:
-        """Generate time domain GW polarizations (h_plus, h_cross)"""
+    def generate_TD_waveform(self, parameters_lal: Tuple) -> Dict[str, np.ndarray]:
+        """
+        Generate time domain GW polarizations (h_plus, h_cross)
 
+        Parameters
+        ----------
+        parameters_lal:
+            A tuple of parameters for the lalsimulation waveform generator
+
+        Returns
+        -------
+        pol_dict:
+            A dictionary of generated waveform polarizations
+        """
         # Note: XLALSimInspiralTD() now calls XLALSimInspiralChooseTDWaveform()
         # for models such as SEOBNRv4PHM where the reference frequency is equal
         # to the starting frequency and thus leaves our choice of starting
@@ -296,13 +344,19 @@ class WaveformGenerator:
         hp, hc = LS.SimInspiralTD(*parameters_lal)
         h_plus = hp.data.data,
         h_cross = hc.data.data
-        return {'h_plus': h_plus, 'h_cross': h_cross}
+        pol_dict = {'h_plus': h_plus, 'h_cross': h_cross}
+        return pol_dict
 
 
 def SEOBNRv4PHM_maximum_starting_frequency(total_mass: float, fudge: float = 0.99) -> float:
     """
     Given a total mass return the largest possible starting frequency allowed
     for SEOBNRv4PHM and similar effective-one-body models.
+
+    The intended use for this function is at the stage of designing
+    a data set: after choosing a mass prior one can use it to figure out
+    which prior samples would run into an issue when generating an EOB waveform,
+    and tweak the parameters to reduce the number of failing configurations.
 
     Parameters
     ----------
@@ -323,7 +377,7 @@ def SEOBNRv4PHM_maximum_starting_frequency(total_mass: float, fudge: float = 0.9
 
 def generate_waveforms_task_func(
     args: Tuple, waveform_generator: WaveformGenerator = None
-):
+) -> Dict[str, np.ndarray]:
     """
     Picklable wrapper function for parallel waveform generation.
 
@@ -333,6 +387,10 @@ def generate_waveforms_task_func(
         A tuple of (index, pandas.core.series.Series)
     waveform_generator:
         A WaveformGenerator instance
+
+    Returns
+    -------
+    The generated waveform polarization dictionary
     """
     parameters = args[1].to_dict()
     return waveform_generator.generate_hplus_hcross(parameters)
@@ -342,7 +400,7 @@ def generate_waveforms_parallel(
     waveform_generator: WaveformGenerator,
     parameter_samples: pd.DataFrame,
     pool: Pool = None,
-):
+) -> Dict[str, np.ndarray]:
     """Generate a waveform dataset, optionally in parallel.
 
     Parameters
@@ -353,6 +411,11 @@ def generate_waveforms_parallel(
         Intrinsic parameter samples
     pool: multiprocessing.Pool
         Optional pool of workers for parallel generation
+
+    Returns
+    -------
+    polarizations:
+        A dictionary of all generated polarizations stacked together
     """
     # logger.info('Generating waveform polarizations ...')
 
