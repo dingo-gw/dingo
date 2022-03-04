@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import scipy
 from sklearn.utils.extmath import randomized_svd
 from dingo.core.dataset import DingoDataset
@@ -14,10 +15,11 @@ class SVDBasis(DingoDataset):
         self.Vh = None
         self.s = None
         self.n = None
+        self.mismatches = None
         super().__init__(
             file_name=file_name,
             dictionary=dictionary,
-            data_keys=["V", "s"],
+            data_keys=["V", "s", "mismatches"],
         )
 
     def generate_basis(self, training_data: np.ndarray, n: int, method: str = "random"):
@@ -67,50 +69,72 @@ class SVDBasis(DingoDataset):
         else:
             raise ValueError(f"Unsupported SVD method: {method}.")
 
-    def test_basis(
-        self, test_data, n_values=(50, 100, 128, 200, 300, 500, 600), outfile=None
+    def compute_test_mismatches(
+        self,
+        data: np.ndarray,
+        parameters: pd.DataFrame = None,
+        increment: int = 50,
+        verbose: bool = False,
     ):
         """
-        Test basis by computing mismatches of original waveforms in test_data
-        with reconstructed waveforms.
+        Test SVD basis by computing mismatches of compressed / decompressed data
+        against original data. Results are saved as a DataFrame.
 
         Parameters
         ----------
-        test_data:
-            Array with test_data
-        n_values:
-            Iterable with values for n used to test reduced basis
-        outfile:
-            Save test_stats to outfile if not None
+        data : np.ndarray
+            Array of data sets to validate against.
+        parameters : pd.DataFrame
+            Optional labels for the data sets. This is useful for checking performance on
+            particular regions of the parameter space.
+        increment : int
+            Specifies SVD truncations for computing mismatches. E.g., increment = 50
+            means that the SVD will be truncated at size [50, 100, 150, ..., len(data)].
+        verbose : bool
+            Whether to print summary statistics.
         """
-        test_stats = {"s": self.s, "mismatches": {}, "max_deviations": {}}
-        for n in n_values:
-            if n > self.n:
-                continue
-            matches = []
-            max_deviations = []
-            for h_test in test_data:
-                h_RB = h_test @ self.V[:, :n]
-                h_reconstructed = h_RB @ self.Vh[:n]
-                norm1 = np.mean(np.abs(h_test) ** 2)
-                norm2 = np.mean(np.abs(h_reconstructed) ** 2)
-                inner = np.mean(h_test.conj() * h_reconstructed).real
-                matches.append(inner / np.sqrt(norm1 * norm2))
-                max_deviations.append(np.max(np.abs(h_test - h_reconstructed)))
-            mismatches = 1 - np.array(matches)
+        if len(data) != len(parameters):
+            raise ValueError(
+                f"Incompatible data: len(data) == {len(data)} and len("
+                f"parameters) == {len(parameters)} do not match."
+            )
+        if parameters is not None:
+            self.mismatches = parameters.copy()
+        else:
+            self.mismatches = pd.DataFrame()
 
-            test_stats["mismatches"][n] = mismatches
-            test_stats["max_deviations"][n] = max_deviations
+        for n in np.append(np.arange(increment, self.n, increment), self.n):
+            mismatches = np.empty(len(data))
+            for i, d in enumerate(data):
+                compressed = d @ self.V[:, :n]
+                reconstructed = compressed @ self.Vh[:n]
+                norm1 = np.sqrt(np.sum(np.abs(d) ** 2))
+                norm2 = np.sqrt(np.sum(np.abs(reconstructed) ** 2))
+                inner = np.sum(d.conj() * reconstructed).real
+                mismatches[i] = 1 - inner / (norm1 * norm2)
+            self.mismatches[f'mismatch n={n}'] = mismatches
 
-            print(f"n = {n}")
-            print("  Mean mismatch = {}".format(np.mean(mismatches)))
-            print("  Standard deviation = {}".format(np.std(mismatches)))
-            print("  Max mismatch = {}".format(np.max(mismatches)))
-            print("  Median mismatch = {}".format(np.median(mismatches)))
-            print("  Percentiles:")
-            print("    99    -> {}".format(np.percentile(mismatches, 99)))
-            print("    99.9  -> {}".format(np.percentile(mismatches, 99.9)))
-            print("    99.99 -> {}".format(np.percentile(mismatches, 99.99)))
+        if verbose:
+            self.print_validation_summary()
+
+    def print_validation_summary(self):
+        """
+        Print a summary of the validation mismatches.
+        """
+        if self.mismatches is not None:
+            for col in self.mismatches:
+                if 'mismatch' in col:
+                    n = int(col.split(sep='=')[-1])
+                    mismatches = self.mismatches[col]
+                    print(f"n = {n}")
+                    print("  Mean mismatch = {}".format(np.mean(mismatches)))
+                    print("  Standard deviation = {}".format(np.std(mismatches)))
+                    print("  Max mismatch = {}".format(np.max(mismatches)))
+                    print("  Median mismatch = {}".format(np.median(mismatches)))
+                    print("  Percentiles:")
+                    print("    99    -> {}".format(np.percentile(mismatches, 99)))
+                    print("    99.9  -> {}".format(np.percentile(mismatches, 99.9)))
+                    print("    99.99 -> {}".format(np.percentile(mismatches, 99.99)))
 
         if outfile is not None:
             np.save(outfile, test_stats, allow_pickle=True)
@@ -172,8 +196,8 @@ class SVDBasis(DingoDataset):
 
 
 class ApplySVD(object):
-    """Transform operator for applying an SVD compression / decompression.
-    """
+    """Transform operator for applying an SVD compression / decompression."""
+
     def __init__(self, svd_basis: SVDBasis, inverse: bool = False):
         """
         Parameters
@@ -202,4 +226,3 @@ class ApplySVD(object):
         else:
             func = self.svd_basis.decompress
         return {k: func(v) for k, v in waveform.items()}
-
