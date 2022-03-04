@@ -55,7 +55,10 @@ class GNPEShiftDetectorTimes(object):
         extrinsic_parameters = sample["extrinsic_parameters"].copy()
 
         proxies = {}
-        num_samples = len(extrinsic_parameters[f"{self.ifo_names[0]}_time"])
+        if type(extrinsic_parameters[f"{self.ifo_names[0]}_time"]) == torch.Tensor:
+            num_samples = len(extrinsic_parameters[f"{self.ifo_names[0]}_time"])
+        else:
+            num_samples = 1
         epsilon = self.kernel.sample(num_samples)
         for ifo_name in self.ifo_names:
             t = extrinsic_parameters[f"{ifo_name}_time"]
