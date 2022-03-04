@@ -299,6 +299,28 @@ class WaveformGenerator:
         return {'h_plus': h_plus, 'h_cross': h_cross}
 
 
+def SEOBNRv4PHM_maximum_starting_frequency(total_mass: float, fudge: float = 0.99) -> float:
+    """
+    Given a total mass return the largest possible starting frequency allowed
+    for SEOBNRv4PHM and similar effective-one-body models.
+
+    Parameters
+    ----------
+    total_mass:
+        Total mass in units of solar masses
+    fudge:
+        A fudge factor
+
+    Returns
+    -------
+    f_max_Hz:
+        The largest possible starting frequency in Hz
+    """
+    total_mass_sec = total_mass * lal.MTSUN_SI
+    f_max_Hz = fudge * 10.5 ** (-1.5) / (np.pi * total_mass_sec)
+    return f_max_Hz
+
+
 def generate_waveforms_task_func(
     args: Tuple, waveform_generator: WaveformGenerator = None
 ):
