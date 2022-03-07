@@ -46,6 +46,64 @@ def generate_parameters_and_polarizations(
     return parameters, polarizations
 
 
+def train_svd_basis(parameters, polarizations, size, n_train):
+    """
+    Train (and optionally validate) an SVD basis.
+
+    Parameters
+    ----------
+    parameters : DataFrame
+    polarizations : dict
+        {ifo: np.array} dictionary containing waveforms
+    size : int
+        Number of elements to keep for the SVD basis.
+    n_train : int
+        Number of training waveforms to use. Remaining are used for validation. Note
+        that the actual number of training waveforms is n_train * len(polarizations),
+        since there is one waveform used for each polarization.
+
+    Returns
+    -------
+    SVDBasis, n_train, n_test
+        Since EOB waveforms can fail to generate, provide also the number used in
+        training and validation.
+    """
+    # Prepare data for training and validation.
+    train_data = np.vstack([val[:n_train] for val in polarizations.values()])
+    test_data = np.vstack([val[n_train:] for val in polarizations.values()])
+    test_parameters = pd.concat(
+        [
+            # I would like to save the polarization, but saving the dataframe with
+            # string columns causes problems. Fix this later.
+            # parameters[n_train:].assign(polarization=pol)
+            parameters[n_train:]
+            for pol in polarizations
+        ]
+    )
+    test_parameters.reset_index(drop=True, inplace=True)
+
+    print("Building SVD basis.")
+    basis = SVDBasis()
+    basis.generate_basis(train_data, size)
+
+    # Since there is a possibility that the size of the dataset returned by
+    # generate_parameters_and_polarizations is smaller than requested, we don't assume
+    # that there are n_test samples. Instead we just look at the size of the test
+    # dataset.
+    if test_data.size != 0:
+        basis.compute_test_mismatches(
+            test_data, parameters=test_parameters, verbose=True
+        )
+
+    # Return also the true number of samples. Some EOB waveforms may have failed to
+    # generate, so this could be smaller than the number requested.
+    n_ifos = len(polarizations)
+    n_train = len(train_data) // n_ifos
+    n_test = len(test_data) // n_ifos
+
+    return basis, n_train, n_test
+
+
 def generate_dataset(settings, num_processes):
     """
     Generate a waveform dataset.
@@ -92,41 +150,13 @@ def generate_dataset(settings, num_processes):
                     n_train + n_test,
                     num_processes,
                 )
-                train_data = np.vstack(
-                    [val[:n_train] for val in polarizations.values()]
+                basis, n_train, n_test = train_svd_basis(
+                    parameters, polarizations, svd_settings["size"], n_train
                 )
-                test_data = np.vstack([val[n_train:] for val in polarizations.values()])
-                test_parameters = pd.concat(
-                    [
-                        # I would like to save the polarization, but saving the
-                        # dataframe with string columns causes problems.
-                        # parameters[n_train:].assign(polarization=pol)
-                        parameters[n_train:]
-                        for pol in polarizations
-                    ]
-                )
-                test_parameters.reset_index(drop=True, inplace=True)
-
-                print("Building SVD basis.")
-                basis = SVDBasis()
-                basis.generate_basis(train_data, svd_settings["size"])
-
-                # Since there is a possibility that the size of the dataset returned by
-                # generate_parameters_and_polarizations is smaller than requested,
-                # we don't assume that there are n_test samples. Instead we just look
-                # at the size of the test dataset.
-                if test_data.size != 0:
-                    basis.compute_test_mismatches(
-                        test_data, parameters=test_parameters, verbose=True
-                    )
-
                 # Reset the true number of samples, in case this has changed due to
                 # failure to generate some EOB waveforms.
-                n_ifos = len(polarizations)
-                svd_settings["num_training_samples"] = len(train_data) // n_ifos
-                svd_settings["num_validation_samples"] = len(test_data) // n_ifos
-
-                del parameters, polarizations, train_data, test_data, test_parameters
+                svd_settings["num_training_samples"] = n_train
+                svd_settings["num_validation_samples"] = n_test
 
             compression_transforms.append(ApplySVD(basis))
             dataset_dict["svd"] = basis.to_dictionary()

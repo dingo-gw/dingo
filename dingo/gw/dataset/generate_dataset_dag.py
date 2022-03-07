@@ -102,8 +102,14 @@ def configure_runs(settings, num_jobs, temp_dir):
             # SVD. These should be uncompressed waveforms.
             settings_svd_part = copy.deepcopy(settings)
             num_samples = settings["compression"]["svd"]["num_training_samples"]
+            num_samples += settings["compression"]["svd"].get(
+                "num_validation_samples", 0
+            )
             modulus_check(
-                num_samples, num_jobs, "(number of SVD training samples)", "num_jobs"
+                num_samples,
+                num_jobs,
+                "(number of SVD training + validation samples)",
+                "num_jobs",
             )
             settings_svd_part["num_samples"] = num_samples // num_jobs
             del settings_svd_part["compression"]["svd"]
@@ -192,6 +198,7 @@ def create_dag(args, settings):
                 "dataset_file": os.path.join(temp_dir, svd_dataset_fn),
                 "size": settings["compression"]["svd"]["size"],
                 "out_file": os.path.join(temp_dir, svd_fn),
+                "num_train": settings["compression"]["svd"]["num_training_samples"],
             }
             args_str = create_args_string(args_dict)
             build_svd = Job(

@@ -36,6 +36,6 @@ compression:
     # Truncate the SVD basis at this size. No truncation if zero.
     size: 200
     num_training_samples: 50000
-    num_validation_samples: 500
+    num_validation_samples: 10000
     # whitening: aLIGOZeroDetuned  # PSD (not yet implemented)
     # single_precision: True  # (not yet implemented) be careful if using without whitening.
