@@ -68,6 +68,12 @@ def parse_args():
         help="Number of gnpe iterations.",
     )
     parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=None,
+        help="Batch size for sampling.",
+    )
+    parser.add_argument(
         "--reference_file",
         type=str,
         default=None,
