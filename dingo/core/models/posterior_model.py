@@ -381,7 +381,7 @@ def test_epoch(pm, dataloader):
             # compute loss
             loss = -pm.model(data[0], *data[1:]).mean()
             # update loss for history and logging
-            loss_info.update(loss.detach().item(), len(data[0]))
+            loss_info.update(loss.item(), len(data[0]))
             loss_info.print_info(batch_idx)
 
         return loss_info.get_avg()
