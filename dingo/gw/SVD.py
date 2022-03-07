@@ -35,7 +35,6 @@ class SVDBasis(DingoDataset):
         ----------
         training_data: np.ndarray
             Array of waveform data on the physical domain
-
         n: int
             Number of basis elements to keep.
             n=0 keeps all basis elements.
@@ -112,7 +111,7 @@ class SVDBasis(DingoDataset):
                 norm2 = np.sqrt(np.sum(np.abs(reconstructed) ** 2))
                 inner = np.sum(d.conj() * reconstructed).real
                 mismatches[i] = 1 - inner / (norm1 * norm2)
-            self.mismatches[f'mismatch n={n}'] = mismatches
+            self.mismatches[f"mismatch n={n}"] = mismatches
 
         if verbose:
             self.print_validation_summary()
@@ -123,8 +122,8 @@ class SVDBasis(DingoDataset):
         """
         if self.mismatches is not None:
             for col in self.mismatches:
-                if 'mismatch' in col:
-                    n = int(col.split(sep='=')[-1])
+                if "mismatch" in col:
+                    n = int(col.split(sep="=")[-1])
                     mismatches = self.mismatches[col]
                     print(f"n = {n}")
                     print("  Mean mismatch = {}".format(np.mean(mismatches)))
@@ -135,9 +134,6 @@ class SVDBasis(DingoDataset):
                     print("    99    -> {}".format(np.percentile(mismatches, 99)))
                     print("    99.9  -> {}".format(np.percentile(mismatches, 99.9)))
                     print("    99.99 -> {}".format(np.percentile(mismatches, 99.99)))
-
-        if outfile is not None:
-            np.save(outfile, test_stats, allow_pickle=True)
 
     def decompress(self, coefficients: np.ndarray):
         """

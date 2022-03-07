@@ -80,25 +80,53 @@ def generate_dataset(settings, num_processes):
 
             # Load an SVD basis from file, if specified.
             if "file" in svd_settings:
-                print("Loading SVD basis from " + svd_settings["file"])
-                basis = SVDBasis()
-                basis.from_file(svd_settings["file"])
+                basis = SVDBasis(file_name=svd_settings["file"])
 
             # Otherwise, generate the basis based on simulated waveforms.
             else:
-
+                n_train = svd_settings["num_training_samples"]
+                n_test = svd_settings.get("num_validation_samples", 0)
                 parameters, polarizations = generate_parameters_and_polarizations(
                     waveform_generator,
                     prior,
-                    svd_settings["num_training_samples"],
+                    n_train + n_test,
                     num_processes,
                 )
-                train_data = np.vstack(list(polarizations.values()))
+                train_data = np.vstack(
+                    [val[:n_train] for val in polarizations.values()]
+                )
+                test_data = np.vstack([val[n_train:] for val in polarizations.values()])
+                test_parameters = pd.concat(
+                    [
+                        # I would like to save the polarization, but saving the
+                        # dataframe with string columns causes problems.
+                        # parameters[n_train:].assign(polarization=pol)
+                        parameters[n_train:]
+                        for pol in polarizations
+                    ]
+                )
+                test_parameters.reset_index(drop=True, inplace=True)
+
                 print("Building SVD basis.")
                 basis = SVDBasis()
                 basis.generate_basis(train_data, svd_settings["size"])
 
-                del parameters, polarizations, train_data
+                # Since there is a possibility that the size of the dataset returned by
+                # generate_parameters_and_polarizations is smaller than requested,
+                # we don't assume that there are n_test samples. Instead we just look
+                # at the size of the test dataset.
+                if test_data.size != 0:
+                    basis.compute_test_mismatches(
+                        test_data, parameters=test_parameters, verbose=True
+                    )
+
+                # Reset the true number of samples, in case this has changed due to
+                # failure to generate some EOB waveforms.
+                n_ifos = len(polarizations)
+                svd_settings["num_training_samples"] = len(train_data) // n_ifos
+                svd_settings["num_validation_samples"] = len(test_data) // n_ifos
+
+                del parameters, polarizations, train_data, test_data, test_parameters
 
             compression_transforms.append(ApplySVD(basis))
             dataset_dict["svd"] = basis.to_dictionary()
