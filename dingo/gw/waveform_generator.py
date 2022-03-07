@@ -176,7 +176,7 @@ class WaveformGenerator:
         # Construct argument list for FD and TD lal waveform generator wrappers
         spins_cartesian = s1x, s1y, s1z, s2x, s2y, s2z
         masses = (p['mass_1'], p['mass_2'])
-        extra_params = (p['luminosity_distance'], p['theta_jn'], p['phase'])
+        extra_params = (p['luminosity_distance'], iota, p['phase'])
         ecc_params = (0.0, 0.0, 0.0)  # longAscNodes, eccentricity, meanPerAno
 
         D = self.domain
