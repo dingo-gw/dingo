@@ -9,6 +9,7 @@ from torch.utils.data import Dataset, DataLoader
 import time
 from threadpoolctl import threadpool_limits
 import dingo.core.utils.trainutils
+import math
 
 import pdb
 
@@ -288,6 +289,45 @@ class PosteriorModel:
 
             print(f"Finished training epoch {self.epoch}.\n")
 
+    def sample(
+        self,
+        *x,
+        batch_size=None,
+    ):
+        """
+        Sample from posterior model, conditioned on context x. x is expected to have a
+        batch dimension, i.e., to obtain N samples with additional context requires
+        x = x_.expand(N, *x_.shape).
+
+        This method takes care of the batching, makes sure that self.model is in
+        evaluation mode and disables gradient computation.
+
+        Parameters
+        ----------
+        *x:
+            input context to the neural network; has potentially multiple elements for,
+            e.g., gnpe proxies
+        batch_size: int = None
+            batch size for sampling
+
+        Returns
+        -------
+        samples: torch.Tensor
+            samples from posterior model
+        """
+        self.model.eval()
+        with torch.no_grad():
+            if batch_size is None:
+                samples = self.model.sample(*x)
+            else:
+                samples = []
+                num_batches = math.ceil(len(x[0]) / batch_size)
+                for idx_batch in range(num_batches):
+                    lower, upper = idx_batch * batch_size, (idx_batch + 1) * batch_size
+                    x_batch = [xi[lower:upper] for xi in x]
+                    samples.append(self.model.sample(*x_batch, num_samples=1))
+                samples = torch.cat(samples, dim=0)
+        return samples
 
 def get_model_callable(model_type: str):
     if model_type == "nsf+embedding":

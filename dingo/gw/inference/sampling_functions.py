@@ -57,7 +57,7 @@ def get_transforms_for_npe(model, num_samples, as_type="dict"):
     return transforms_pre, transforms_post
 
 
-def sample_with_npe(domain_data, model, num_samples, as_type="dict"):
+def sample_with_npe(domain_data, model, num_samples, as_type="dict", batch_size=None):
     # get transformations for preprocessing
     transforms_pre, transforms_post = get_transforms_for_npe(
         model, num_samples, as_type
@@ -68,7 +68,7 @@ def sample_with_npe(domain_data, model, num_samples, as_type="dict"):
 
     # sample from inference network
     model.model.eval()
-    y = model.model.sample(x).detach()
+    y = model.sample(x, batch_size=batch_size)
 
     # post process samples
     samples = transforms_post({"parameters": y})
@@ -132,6 +132,7 @@ def sample_with_gnpe(
     model,
     samples_init,
     num_gnpe_iterations=None,
+    batch_size=None,
 ):
     # prepare data for inference network, and add initial samples as extrinsic parameters
     transforms_pre, _ = get_transforms_for_npe(
@@ -154,7 +155,7 @@ def sample_with_gnpe(
     for idx in range(num_gnpe_iterations):
         data = gnpe_transforms_pre(data)
         x = [data["waveform"], data["context_parameters"]]
-        data["parameters"] = model.model.sample(*x, num_samples=1).detach()
+        data["parameters"] = model.sample(*x, batch_size=batch_size)
         data = gnpe_transforms_post(data)
 
         Mc = data["parameters"]["chirp_mass"]
@@ -176,6 +177,7 @@ def sample_posterior_of_event(
     num_samples=50_000,
     samples_init=None,
     num_gnpe_iterations=30,
+    batch_size=None,
 ):
     # get init_samples if requested (typically for gnpe)
     if model_init is not None:
@@ -191,6 +193,7 @@ def sample_posterior_of_event(
             time_psd=time_psd,
             device=device,
             num_samples=num_samples,
+            batch_size=batch_size,
         )
 
     # load model
@@ -217,7 +220,9 @@ def sample_posterior_of_event(
 
     if not gnpe:
         assert samples_init is None, "samples_init can only be used for gnpe."
-        samples = sample_with_npe(domain_data, model, num_samples)
+        samples = sample_with_npe(
+            domain_data, model, num_samples, batch_size=batch_size
+        )
 
     else:
         samples = sample_with_gnpe(
@@ -225,6 +230,7 @@ def sample_posterior_of_event(
             model,
             samples_init,
             num_gnpe_iterations=num_gnpe_iterations,
+            batch_size=batch_size,
         )
 
     # TODO: apply post correction of sky position here
