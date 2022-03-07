@@ -75,8 +75,8 @@ def train_svd_basis(parameters, polarizations, size, n_train):
         [
             # I would like to save the polarization, but saving the dataframe with
             # string columns causes problems. Fix this later.
-            # parameters[n_train:].assign(polarization=pol)
-            parameters[n_train:]
+            # parameters.iloc[n_train:].assign(polarization=pol)
+            parameters.iloc[n_train:]
             for pol in polarizations
         ]
     )
