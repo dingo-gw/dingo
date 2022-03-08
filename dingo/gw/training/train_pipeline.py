@@ -1,6 +1,4 @@
 import os
-
-os.environ["WANDB_API_KEY"] = "insert here"
 import numpy as np
 import yaml
 import argparse
@@ -345,6 +343,8 @@ def train_local():
         local_settings = train_settings.pop("local")
         with open(os.path.join(args.train_dir, "local_settings.yaml"), "w") as f:
 
+            if "WANDB_API_KEY" not in os.environ.keys():
+                os.environ["WANDB_API_KEY"] = local_settings["wandb_api_key"]
             if (
                 local_settings["use_wandb"]
                 and "wandb_run_id" not in local_settings.keys()

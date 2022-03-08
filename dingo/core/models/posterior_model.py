@@ -274,8 +274,8 @@ class PosteriorModel:
                         "learning_rate": lr[0],
                         "train_loss": train_loss,
                         "test_loss": test_loss,
-                        "training_time": train_time,
-                        "testing_time": test_time,
+                        "train_time": train_time,
+                        "test_time": test_time,
                     }
                 )
             print(f"Finished training epoch {self.epoch}.\n")
