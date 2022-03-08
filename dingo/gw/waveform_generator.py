@@ -56,6 +56,17 @@ class WaveformGenerator:
         self.lal_params = None
         if mode_list is not None:
             self.lal_params = self.setup_mode_array(mode_list)
+        # turn off multibanding for IMRPhenomXPHM; this caused a rare issue where
+        # waveforms for particular parameters would have huge spikes
+        if self.approximant == 101:
+            if self.lal_params is None:
+                self.lal_params = lal.CreateDict()
+            LS.SimInspiralWaveformParamsInsertPhenomXHMThresholdMband(
+                self.lal_params, 0
+            )
+            LS.SimInspiralWaveformParamsInsertPhenomXPHMThresholdMband(
+                self.lal_params, 0
+            )
 
         self.transform = transform
 
@@ -329,9 +340,48 @@ def generate_waveforms_parallel(
 
 
 if __name__ == "__main__":
-    """A visual test."""
-    from dingo.gw.domains import Domain, FrequencyDomain
-    import matplotlib.pyplot as plt
+    import pandas as pd
+    import numpy as np
+    from dingo.gw.domains import build_domain
+
+    domain_settings = {
+        'type': 'FrequencyDomain',
+        'f_min': 10.0,
+        'f_max': 1024.0,
+        'delta_f': 0.125
+    }
+    domain = build_domain(domain_settings)
+    waveform_generator = WaveformGenerator(
+        'IMRPhenomXPHM',
+        domain,
+        20.0,
+    )
+
+    parameters = {
+        'mass_1': {0: 60.29442201204798},
+        'mass_2': {0: 25.460299253933126},
+        'phase': {0: 2.346269257440926},
+        'a_1': {0: 0.07104636316747037},
+        'a_2': {0: 0.7853578509086726},
+        'tilt_1': {0: 1.8173336549500292},
+        'tilt_2': {0: 0.4380213394743055},
+        'phi_12': {0: 5.892609139936818},
+        'phi_jl': {0: 1.6975651971466297},
+        'theta_jn': {0: 1.0724395559873239},
+        'luminosity_distance': {0: 100.0},
+        'geocent_time': {0: 0.0}
+    }
+    parameters = pd.DataFrame(parameters)
+    pols1 = generate_waveforms_parallel(waveform_generator, parameters)
+    pols2 = generate_waveforms_parallel(waveform_generator, parameters*1.000001)
+    hp1 = pols1['h_plus'][0]
+    hp2 = pols2['h_plus'][0]
+    print(np.max(np.abs(hp1)))
+    print(np.max(np.abs(hp2)))
+
+    # """A visual test."""
+    # from dingo.gw.domains import Domain, FrequencyDomain
+    # import matplotlib.pyplot as plt
 
     # approximant = 'IMRPhenomPv2'
     # f_min = 20.0
