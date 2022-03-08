@@ -56,17 +56,6 @@ class WaveformGenerator:
         self.lal_params = None
         if mode_list is not None:
             self.lal_params = self.setup_mode_array(mode_list)
-        # turn off multibanding for IMRPhenomXPHM; this caused a rare issue where
-        # waveforms for particular parameters would have huge spikes
-        if self.approximant == 101:
-            if self.lal_params is None:
-                self.lal_params = lal.CreateDict()
-            LS.SimInspiralWaveformParamsInsertPhenomXHMThresholdMband(
-                self.lal_params, 0
-            )
-            LS.SimInspiralWaveformParamsInsertPhenomXPHMThresholdMband(
-                self.lal_params, 0
-            )
 
         self.transform = transform
 
