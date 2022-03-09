@@ -1,3 +1,4 @@
+import copy
 import textwrap
 import yaml
 import argparse
@@ -46,15 +47,14 @@ def generate_parameters_and_polarizations(
     return parameters, polarizations
 
 
-def train_svd_basis(parameters, polarizations, size, n_train):
+def train_svd_basis(dataset: WaveformDataset, size: int, n_train: int):
     """
     Train (and optionally validate) an SVD basis.
 
     Parameters
     ----------
-    parameters : DataFrame
-    polarizations : dict
-        {ifo: np.array} dictionary containing waveforms
+    dataset : WaveformDataset
+        Contains waveforms to be used for building SVD.
     size : int
         Number of elements to keep for the SVD basis.
     n_train : int
@@ -69,15 +69,15 @@ def train_svd_basis(parameters, polarizations, size, n_train):
         training and validation.
     """
     # Prepare data for training and validation.
-    train_data = np.vstack([val[:n_train] for val in polarizations.values()])
-    test_data = np.vstack([val[n_train:] for val in polarizations.values()])
+    train_data = np.vstack([val[:n_train] for val in dataset.polarizations.values()])
+    test_data = np.vstack([val[n_train:] for val in dataset.polarizations.values()])
     test_parameters = pd.concat(
         [
             # I would like to save the polarization, but saving the dataframe with
             # string columns causes problems. Fix this later.
-            # parameters.iloc[n_train:].assign(polarization=pol)
-            parameters.iloc[n_train:]
-            for pol in polarizations
+            # dataset.parameters.iloc[n_train:].assign(polarization=pol)
+            dataset.parameters.iloc[n_train:]
+            for pol in dataset.polarizations
         ]
     )
     test_parameters.reset_index(drop=True, inplace=True)
@@ -97,7 +97,7 @@ def train_svd_basis(parameters, polarizations, size, n_train):
 
     # Return also the true number of samples. Some EOB waveforms may have failed to
     # generate, so this could be smaller than the number requested.
-    n_ifos = len(polarizations)
+    n_ifos = len(dataset.polarizations)
     n_train = len(train_data) // n_ifos
     n_test = len(test_data) // n_ifos
 
@@ -150,8 +150,26 @@ def generate_dataset(settings, num_processes):
                     n_train + n_test,
                     num_processes,
                 )
+                svd_dataset_settings = copy.deepcopy(settings)
+                svd_dataset_settings["num_samples"] = len(parameters)
+                del svd_dataset_settings["compression"]["svd"]
+
+                # We build a WaveformDataset containing the SVD-training waveforms
+                # because when constructed, it will automatically zero the waveforms
+                # below f_min. This is useful for EOB waveforms, which are Fourier
+                # transformed from time domain, and hence are nonzero below f_min. The
+                # waveforms need to be zeroed below f_min because this corresponds to
+                # setting the lower bound of the likelihood integral.
+
+                svd_dataset = WaveformDataset(
+                    dictionary={
+                        "parameters": parameters,
+                        "polarizations": polarizations,
+                        "settings": svd_dataset_settings,
+                    }
+                )
                 basis, n_train, n_test = train_svd_basis(
-                    parameters, polarizations, svd_settings["size"], n_train
+                    svd_dataset, svd_settings["size"], n_train
                 )
                 # Reset the true number of samples, in case this has changed due to
                 # failure to generate some EOB waveforms.

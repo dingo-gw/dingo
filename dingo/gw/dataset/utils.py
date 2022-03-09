@@ -144,9 +144,7 @@ def build_svd_cli():
     else:
         n_train = args.num_train
 
-    basis, n_train, n_test = train_svd_basis(
-        dataset.parameters, dataset.polarizations, args.size, n_train
-    )
+    basis, n_train, n_test = train_svd_basis(dataset, args.size, n_train)
     # FIXME: This is not an ideal treatment. We should update the waveform generation
     #  to always provide the requested number of waveforms.
     print(
