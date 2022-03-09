@@ -1,18 +1,26 @@
-import time
-from os.path import join
-
 import numpy as np
+import pandas as pd
 import scipy
 from sklearn.utils.extmath import randomized_svd
-from torch.utils.data import DataLoader
-from torchvision.transforms import Compose
+from dingo.core.dataset import DingoDataset
 
 
-class SVDBasis:
-    def __init__(self):
+class SVDBasis(DingoDataset):
+    def __init__(
+        self,
+        file_name=None,
+        dictionary=None,
+    ):
         self.V = None
         self.Vh = None
+        self.s = None
         self.n = None
+        self.mismatches = None
+        super().__init__(
+            file_name=file_name,
+            dictionary=dictionary,
+            data_keys=["V", "s", "mismatches"],
+        )
 
     def generate_basis(self, training_data: np.ndarray, n: int, method: str = "random"):
         """Generate the SVD basis from training data and store it.
@@ -27,7 +35,6 @@ class SVDBasis:
         ----------
         training_data: np.ndarray
             Array of waveform data on the physical domain
-
         n: int
             Number of basis elements to keep.
             n=0 keeps all basis elements.
@@ -61,126 +68,157 @@ class SVDBasis:
         else:
             raise ValueError(f"Unsupported SVD method: {method}.")
 
-    def test_basis(
-        self, test_data, n_values=(50, 100, 128, 200, 300, 500, 600), outfile=None
+    def compute_test_mismatches(
+        self,
+        data: np.ndarray,
+        parameters: pd.DataFrame = None,
+        increment: int = 50,
+        verbose: bool = False,
     ):
         """
-        Test basis by computing mismatches of original waveforms in test_data
-        with reconstructed waveforms.
+        Test SVD basis by computing mismatches of compressed / decompressed data
+        against original data. Results are saved as a DataFrame.
 
         Parameters
         ----------
-        test_data:
-            Array with test_data
-        n_values:
-            Iterable with values for n used to test reduced basis
-        outfile:
-            Save test_stats to outfile if not None
+        data : np.ndarray
+            Array of data sets to validate against.
+        parameters : pd.DataFrame
+            Optional labels for the data sets. This is useful for checking performance on
+            particular regions of the parameter space.
+        increment : int
+            Specifies SVD truncations for computing mismatches. E.g., increment = 50
+            means that the SVD will be truncated at size [50, 100, 150, ..., len(data)].
+        verbose : bool
+            Whether to print summary statistics.
         """
-        test_stats = {"s": self.s, "mismatches": {}, "max_deviations": {}}
-        for n in n_values:
-            if n > self.n:
-                continue
-            matches = []
-            max_deviations = []
-            for h_test in test_data:
-                h_RB = h_test @ self.V[:, :n]
-                h_reconstructed = h_RB @ self.Vh[:n]
-                norm1 = np.mean(np.abs(h_test) ** 2)
-                norm2 = np.mean(np.abs(h_reconstructed) ** 2)
-                inner = np.mean(h_test.conj() * h_reconstructed).real
-                matches.append(inner / np.sqrt(norm1 * norm2))
-                max_deviations.append(np.max(np.abs(h_test - h_reconstructed)))
-            mismatches = 1 - np.array(matches)
+        if len(data) != len(parameters):
+            raise ValueError(
+                f"Incompatible data: len(data) == {len(data)} and len("
+                f"parameters) == {len(parameters)} do not match."
+            )
+        if parameters is not None:
+            self.mismatches = parameters.copy()
+        else:
+            self.mismatches = pd.DataFrame()
 
-            test_stats["mismatches"][n] = mismatches
-            test_stats["max_deviations"][n] = max_deviations
+        for n in np.append(np.arange(increment, self.n, increment), self.n):
+            mismatches = np.empty(len(data))
+            for i, d in enumerate(data):
+                compressed = d @ self.V[:, :n]
+                reconstructed = compressed @ self.Vh[:n]
+                norm1 = np.sqrt(np.sum(np.abs(d) ** 2))
+                norm2 = np.sqrt(np.sum(np.abs(reconstructed) ** 2))
+                inner = np.sum(d.conj() * reconstructed).real
+                mismatches[i] = 1 - inner / (norm1 * norm2)
+            self.mismatches[f"mismatch n={n}"] = mismatches
 
-            print(f"n = {n}")
-            print("  Mean mismatch = {}".format(np.mean(mismatches)))
-            print("  Standard deviation = {}".format(np.std(mismatches)))
-            print("  Max mismatch = {}".format(np.max(mismatches)))
-            print("  Median mismatch = {}".format(np.median(mismatches)))
-            print("  Percentiles:")
-            print("    99    -> {}".format(np.percentile(mismatches, 99)))
-            print("    99.9  -> {}".format(np.percentile(mismatches, 99.9)))
-            print("    99.99 -> {}".format(np.percentile(mismatches, 99.99)))
+        if verbose:
+            self.print_validation_summary()
 
-        if outfile is not None:
-            np.save(outfile, test_stats, allow_pickle=True)
-
-    def basis_coefficients_to_fseries(self, coefficients: np.ndarray):
+    def print_validation_summary(self):
         """
-        Convert from basis coefficients to frequency series.
+        Print a summary of the validation mismatches.
+        """
+        if self.mismatches is not None:
+            for col in self.mismatches:
+                if "mismatch" in col:
+                    n = int(col.split(sep="=")[-1])
+                    mismatches = self.mismatches[col]
+                    print(f"n = {n}")
+                    print("  Mean mismatch = {}".format(np.mean(mismatches)))
+                    print("  Standard deviation = {}".format(np.std(mismatches)))
+                    print("  Max mismatch = {}".format(np.max(mismatches)))
+                    print("  Median mismatch = {}".format(np.median(mismatches)))
+                    print("  Percentiles:")
+                    print("    99    -> {}".format(np.percentile(mismatches, 99)))
+                    print("    99.9  -> {}".format(np.percentile(mismatches, 99.9)))
+                    print("    99.99 -> {}".format(np.percentile(mismatches, 99.99)))
+
+    def decompress(self, coefficients: np.ndarray):
+        """
+        Convert from basis coefficients back to raw data representation.
 
         Parameters
         ----------
-        coefficients:
+        coefficients : np.ndarray
             Array of basis coefficients
+
+        Returns
+        -------
+        array of decompressed data
         """
         return coefficients @ self.Vh
 
-    def fseries_to_basis_coefficients(self, fseries: np.ndarray):
+    def compress(self, data: np.ndarray):
         """
-        Convert from frequency series to basis coefficients.
+        Convert from data (e.g., frequency series) to compressed representation in
+        terms of basis coefficients.
 
         Parameters
         ----------
-        fseries:
-            Array of frequency series
-        """
-        return fseries @ self.V
+        data : np.ndarray
 
-    def from_file(self, filename: str):
+        Returns
+        -------
+        array of basis coefficients
         """
-        Load basis matrix V from a file.
+        return data @ self.V
+
+    def from_file(self, filename):
+        """
+        Load the SVD basis from a HDF5 file.
 
         Parameters
         ----------
-        filename:
-            File in .npy format
+        filename : str
         """
-        self.V = np.load(filename)
+        super().from_file(filename)
         self.Vh = self.V.T.conj()
         self.n = self.V.shape[1]
 
-    def from_V(self, V):
-        self.V = V
-        self.Vh = self.V.T.conj()
-        self.n = self.V.shape[1]
-
-    def to_file(self, filename: str):
+    def from_dictionary(self, dictionary: dict):
         """
-        Save basis matrix V to a file.
+        Load the SVD basis from a dictionary.
 
         Parameters
         ----------
-        filename:
-            File in .npy format
+        dictionary : dict
+            The dictionary should contain at least a 'V' key, and optionally an 's' key.
         """
-        if self.V is not None:
-            np.save(filename, self.V)
+        super().from_dictionary(dictionary)
+        self.Vh = self.V.T.conj()
+        self.n = self.V.shape[1]
 
 
 class ApplySVD(object):
-    def __init__(self, svd_basis: SVDBasis):
+    """Transform operator for applying an SVD compression / decompression."""
+
+    def __init__(self, svd_basis: SVDBasis, inverse: bool = False):
+        """
+        Parameters
+        ----------
+        svd_basis : SVDBasis
+        inverse : bool
+            Whether to apply for the forward (compression) or inverse (decompression)
+            transform. Default: False.
+        """
         self.svd_basis = svd_basis
+        self.inverse = inverse
 
-    def __call__(self, uncompressed_waveform: dict):
-        compressed_waveform = {
-            k: self.svd_basis.fseries_to_basis_coefficients(v)
-            for k, v in uncompressed_waveform.items()
-        }
-        return compressed_waveform
+    def __call__(self, waveform: dict):
+        """
+        Parameters
+        ----------
+        waveform : dict
+            Values should be arrays containing waveforms to be transformed.
 
-
-class UndoSVD(object):
-    def __init__(self, svd_basis: SVDBasis):
-        self.svd_basis = svd_basis
-
-    def __call__(self, compressed_waveform: dict):
-        uncompressed_waveform = {
-            k: self.svd_basis.basis_coefficients_to_fseries(v)
-            for k, v in compressed_waveform.items()
-        }
-        return uncompressed_waveform
+        Returns
+        -------
+        dict of the same form as the input, but with transformed waveforms.
+        """
+        if not self.inverse:
+            func = self.svd_basis.compress
+        else:
+            func = self.svd_basis.decompress
+        return {k: func(v) for k, v in waveform.items()}

@@ -1,5 +1,6 @@
 import copy
 
+import pandas as pd
 import torch.multiprocessing
 import torchvision
 from threadpoolctl import threadpool_limits
@@ -309,6 +310,8 @@ def build_svd_for_embedding_network(
         ifo: np.empty((num_waveforms, waveform_len), dtype=np.complex128)
         for ifo in ifos
     }
+    parameters = pd.DataFrame()
+
     loader = DataLoader(
         wfd,
         batch_size=batch_size,
@@ -319,9 +322,17 @@ def build_svd_for_embedding_network(
     )
     with threadpool_limits(limits=1, user_api="blas"):
         for idx, data in enumerate(loader):
-            strain_data = data["waveform"]
+
+            # This is for handling the last batch, which may otherwise push the total
+            # number of samples above the number requested.
             lower = idx * batch_size
             n = min(batch_size, num_waveforms - lower)
+
+            parameters = pd.concat(
+                [parameters, pd.DataFrame(data["parameters"]).iloc[:n]],
+                ignore_index=True,
+            )
+            strain_data = data["waveform"]
             for ifo, strains in strain_data.items():
                 waveforms[ifo][lower : lower + n] = strains[:n]
             if lower + n == num_waveforms:
@@ -342,12 +353,17 @@ def build_svd_for_embedding_network(
     print(f"...this took {time.time() - time_start:.0f} s.")
 
     if out_dir is not None:
-        print(f"Testing SVD basis matrices, saving stats to {out_dir}")
+        print(f"Testing SVD basis matrices.")
         for ifo, basis in basis_dict.items():
-            basis.test_basis(
+            print(f"...{ifo}:")
+            basis.compute_test_mismatches(
                 waveforms[ifo][num_training_samples:],
-                outfile=os.path.join(out_dir, f"SVD_{ifo}_stats.npy"),
+                parameters=parameters.iloc[num_training_samples:].reset_index(
+                    drop=True
+                ),
+                verbose=True,
             )
+            basis.to_file(os.path.join(out_dir, f"svd_{ifo}.hdf5"))
     print("Done")
 
     # Return V matrices in standard order. Drop the elements below domain.min_idx,
