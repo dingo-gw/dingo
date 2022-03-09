@@ -429,7 +429,7 @@ if __name__ == "__main__":
     domain_kwargs = {'f_min': 20.0, 'f_max': 4096.0, 'delta_f': 1.0 / 4.0, 'window_factor': 1.0}
     parameter_prior_dict = generate_default_prior_dictionary()
     prior_kwargs = {'parameter_prior_dict': parameter_prior_dict, 'geocent_time_ref': 1126259642.413,
-                    'luminosity_distance_ref': 500.0, 'reference_frequency': 20.0}
+                    'luminosity_distance_ref': 500.0, 'f_ref': 20.0}
     ifo_list = ["H1", "L1"]
 
     F = WaveformTransformationTraining(
