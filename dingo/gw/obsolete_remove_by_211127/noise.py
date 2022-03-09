@@ -217,7 +217,7 @@ if __name__ == "__main__":
     domain_kwargs = {'f_min': 20.0, 'f_max': 4096.0, 'delta_f': 1.0 / 8.0, 'window_factor': 1.0}
     domain = FrequencyDomain(**domain_kwargs)
     # priors = GWPriorDict(geocent_time_ref=1126259642.413, luminosity_distance_ref=500.0,
-    #                      reference_frequency=20.0)
+    #                      f_ref=20.0)
     # approximant = 'IMRPhenomXPHM'
     # waveform_generator = WaveformGenerator(approximant, domain)
 

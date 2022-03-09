@@ -3,21 +3,25 @@ import textwrap
 import yaml
 import argparse
 from multiprocessing import Pool
-import pandas as pd
+
 import numpy as np
+import pandas as pd
+from typing import Tuple, Dict
 from threadpoolctl import threadpool_limits
+from torchvision.transforms import Compose
+from bilby.gw.prior import BBHPriorDict
 
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.domains import build_domain
 from dingo.gw.waveform_generator import WaveformGenerator, generate_waveforms_parallel
-from torchvision.transforms import Compose
 from dingo.gw.SVD import SVDBasis, ApplySVD
 
 
 def generate_parameters_and_polarizations(
-    waveform_generator, prior, num_samples, num_processes
-):
+        waveform_generator: WaveformGenerator, prior: BBHPriorDict,
+        num_samples: int, num_processes: int
+) -> Tuple[pd.DataFrame, Dict[str, np.ndarray]]:
     """
     Generate a dataset of waveforms based on parameters drawn from the prior.
 
@@ -44,6 +48,21 @@ def generate_parameters_and_polarizations(
                 )
     else:
         polarizations = generate_waveforms_parallel(waveform_generator, parameters)
+
+    # Find cases where waveform generation failed and only return data for successful ones
+    wf_failed = np.any(np.isnan(polarizations['h_plus']), axis=1)
+    if wf_failed.any():
+        idx_failed = np.where(wf_failed)[0]
+        idx_ok = np.where(~wf_failed)[0]
+        polarizations_ok = {k: v[idx_ok] for k, v in polarizations.items()}
+        parameters_ok = parameters.iloc[idx_ok]
+        failed_percent = 100 * len(idx_failed) / len(parameters)
+        print(f'{len(idx_failed)} out of {len(parameters)} configuration ({failed_percent:.1f}%) failed to generate.')
+        with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+            print(parameters.iloc[idx_failed])
+        print(f'Only returning the {len(idx_ok)} successfully generated configurations.')
+        return parameters_ok, polarizations_ok
+
     return parameters, polarizations
 
 
@@ -104,7 +123,7 @@ def train_svd_basis(dataset: WaveformDataset, size: int, n_train: int):
     return basis, n_train, n_test
 
 
-def generate_dataset(settings, num_processes):
+def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
     """
     Generate a waveform dataset.
 
@@ -126,6 +145,7 @@ def generate_dataset(settings, num_processes):
         settings["waveform_generator"]["approximant"],
         domain,
         settings["waveform_generator"]["f_ref"],
+        settings["waveform_generator"].get("f_start", None),
     )
 
     dataset_dict = {"settings": settings}
@@ -187,6 +207,8 @@ def generate_dataset(settings, num_processes):
     )
     dataset_dict["parameters"] = parameters
     dataset_dict["polarizations"] = polarizations
+    # Update to take into account potentially failed configurations
+    dataset_dict[settings['num_samples']] = len(parameters)
 
     dataset = WaveformDataset(dictionary=dataset_dict)
     return dataset
