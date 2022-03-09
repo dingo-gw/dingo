@@ -87,6 +87,7 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
         settings["waveform_generator"]["approximant"],
         domain,
         settings["waveform_generator"]["f_ref"],
+        settings["waveform_generator"].get("f_start", None),
     )
 
     dataset_dict = {"settings": settings}

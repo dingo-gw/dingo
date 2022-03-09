@@ -23,6 +23,7 @@ class WaveformGenerator:
                  approximant: str,
                  domain: Domain,
                  reference_frequency: float,
+                 starting_frequency: float = None,
                  mode_list: List[Tuple] = None,
                  transform=None):
         """
@@ -37,6 +38,10 @@ class WaveformGenerator:
             domain, time domain.
         reference_frequency : float
             Reference frequency for the waveforms
+        starting_frequency : float
+            Starting frequency for waveform generation. This is optional, and if not
+            included, the starting frequency will be set to f_min. This exists so that
+            EOB waveforms can be generated starting from a lower frequency than f_min.
         mode_list : List[Tuple]
             A list of waveform (ell, m) modes to include when generating
             the polarizations.
@@ -53,6 +58,7 @@ class WaveformGenerator:
             self.domain = domain
 
         self.reference_frequency = reference_frequency
+        self.starting_frequency = starting_frequency
 
         self.lal_params = None
         if mode_list is not None:
@@ -207,7 +213,10 @@ class WaveformGenerator:
 
         D = self.domain
         if isinstance(D, FrequencyDomain):
-            domain_pars = (D.delta_f, D.f_min, D.f_max, p['f_ref'])
+            if self.starting_frequency is not None:
+                domain_pars = (D.delta_f, self.starting_frequency, D.f_max, p['f_ref'])
+            else:
+                domain_pars = (D.delta_f, D.f_min, D.f_max, p['f_ref'])
         elif isinstance(D, TimeDomain):
             # FIXME: compute f_min from duration or specify it if SimInspiralTD
             #  is used for a native FD waveform
