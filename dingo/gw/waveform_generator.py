@@ -22,8 +22,8 @@ class WaveformGenerator:
     def __init__(self,
                  approximant: str,
                  domain: Domain,
-                 reference_frequency: float,
-                 starting_frequency: float = None,
+                 f_ref: float,
+                 f_start: float = None,
                  mode_list: List[Tuple] = None,
                  transform=None):
         """
@@ -36,9 +36,9 @@ class WaveformGenerator:
             Domain object that specifies on which physical domain the
             waveform polarizations will be generated, e.g. Fourier
             domain, time domain.
-        reference_frequency : float
+        f_ref : float
             Reference frequency for the waveforms
-        starting_frequency : float
+        f_start : float
             Starting frequency for waveform generation. This is optional, and if not
             included, the starting frequency will be set to f_min. This exists so that
             EOB waveforms can be generated starting from a lower frequency than f_min.
@@ -57,8 +57,8 @@ class WaveformGenerator:
         else:
             self.domain = domain
 
-        self.reference_frequency = reference_frequency
-        self.starting_frequency = starting_frequency
+        self.f_ref = f_ref
+        self.f_start = f_start
 
         self.lal_params = None
         if mode_list is not None:
@@ -119,7 +119,7 @@ class WaveformGenerator:
             raise ValueError('parameters dictionary must contain floats', parameters)
 
         # Include reference frequency with the parameters
-        parameters['f_ref'] = self.reference_frequency
+        parameters['f_ref'] = self.f_ref
 
         # Convert to lalsimulation parameters according to the specified domain
         parameters_lal = self._convert_parameters_to_lal_frame(parameters, self.lal_params)
@@ -213,8 +213,8 @@ class WaveformGenerator:
 
         D = self.domain
         if isinstance(D, FrequencyDomain):
-            if self.starting_frequency is not None:
-                domain_pars = (D.delta_f, self.starting_frequency, D.f_max, p['f_ref'])
+            if self.f_start is not None:
+                domain_pars = (D.delta_f, self.f_start, D.f_max, p['f_ref'])
             else:
                 domain_pars = (D.delta_f, D.f_min, D.f_max, p['f_ref'])
         elif isinstance(D, TimeDomain):

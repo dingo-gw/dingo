@@ -44,7 +44,7 @@ def setup(settings_file: str) -> WaveformGenerator:
     domain = build_domain(settings['domain_settings'])
     waveform_generator = WaveformGenerator(settings['waveform_generator_settings']['approximant'],
                                            domain,
-                                           settings['reference_frequency'])
+                                           settings['f_ref'])
     return waveform_generator
 
 
