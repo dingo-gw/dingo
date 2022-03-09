@@ -87,7 +87,7 @@ local:
   device: cpu
   num_workers: 6  # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
   use_wandb: True
-  wandb_api_key: insert_here
+  wandb_api_key: # insert_here. Can be obtained from https://wandb.ai/settings
   runtime_limits:
     max_time_per_run: 36000
     max_epochs_per_run: 500
