@@ -38,6 +38,7 @@ setup(
         "pycbc",
         "pandas",
         "threadpoolctl",
+        "wandb"
     ],
     extras_require={
         "dev": [

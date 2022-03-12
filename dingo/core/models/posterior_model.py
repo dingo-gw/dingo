@@ -9,7 +9,7 @@ from torch.utils.data import Dataset, DataLoader
 import time
 from threadpoolctl import threadpool_limits
 import dingo.core.utils.trainutils
-
+import wandb
 import pdb
 
 from dingo.core.nn.nsf import create_nsf_with_rb_projection_embedding_net
@@ -43,7 +43,7 @@ class PosteriorModel:
         model_filename: str = None,
         metadata: dict = None,
         initial_weights: dict = None,
-        device: str = 'cuda',
+        device: str = "cuda",
     ):
         """
 
@@ -170,7 +170,7 @@ class PosteriorModel:
         self,
         model_filename: str,
         load_training_info: bool = True,
-        device: str = 'cuda',
+        device: str = "cuda",
     ):
         """
         Load a posterior model from the disk.
@@ -220,6 +220,7 @@ class PosteriorModel:
         train_dir: str,
         runtime_limits: object = None,
         checkpoint_epochs: int = None,
+        use_wandb=False,
     ):
         """
 
@@ -229,7 +230,8 @@ class PosteriorModel:
         :param runtime_limits:
         :return:
         """
-
+        # if use_wandb:
+        #     wandb.watch(self.model, log="all", log_freq=10)
         while not runtime_limits.limits_exceeded(self.epoch):
             self.epoch += 1
 
@@ -239,9 +241,11 @@ class PosteriorModel:
             time_start = time.time()
             with threadpool_limits(limits=1, user_api="blas"):
                 train_loss = train_epoch(self, train_loader)
+                train_time = time.time() - time_start
+
                 print(
                     "Done. This took {:2.0f}:{:2.0f} min.".format(
-                        *divmod(time.time() - time_start, 60)
+                        *divmod(train_time, 60)
                     )
                 )
 
@@ -249,6 +253,7 @@ class PosteriorModel:
                 print(f"Start testing epoch {self.epoch}")
                 time_start = time.time()
                 test_loss = test_epoch(self, test_loader)
+                test_time = time.time() - time_start
 
                 print(
                     "Done. This took {:2.0f}:{:2.0f} min.".format(
@@ -262,7 +267,17 @@ class PosteriorModel:
             # write history and save model
             utils.write_history(train_dir, self.epoch, train_loss, test_loss, lr)
             utils.save_model(self, train_dir, checkpoint_epochs=checkpoint_epochs)
-
+            if use_wandb:
+                wandb.log(
+                    {
+                        "epoch": self.epoch,
+                        "learning_rate": lr[0],
+                        "train_loss": train_loss,
+                        "test_loss": test_loss,
+                        "train_time": train_time,
+                        "test_time": test_time,
+                    }
+                )
             print(f"Finished training epoch {self.epoch}.\n")
 
 
