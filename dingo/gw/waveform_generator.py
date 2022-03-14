@@ -295,6 +295,14 @@ class WaveformGenerator:
 
         # Depending on whether the domain is uniform or non-uniform call the appropriate wf generator
         hp, hc = LS.SimInspiralFD(*parameters_lal)
+        # The check below filters for unphysical waveforms:
+        # For IMRPhenomXPHM, the LS.SimInspiralFD result is numerically instable
+        # for rare parameter configurations (~1 in 1M), leading to bins with very 
+        # numbers if multibanding is used. As a preliminary fix, we slightly perturb 
+        # the parameters.
+        if max(np.max(np.abs(hp.data.data)), np.max(np.abs(hc.data.data))) > 1e-17:
+            print(f'Perturbing parameters {parameters_lal} due to instability.')
+            hp, hc = LS.SimInspiralFD(parameters_lal[0] * 1.0000001, *parameters_lal[1:])
 
         # Ensure that the waveform agrees with the frequency grid defined in the domain.
         if not isclose(self.domain.delta_f, hp.deltaF, rel_tol=1e-6):
