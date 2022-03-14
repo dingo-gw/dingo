@@ -158,8 +158,8 @@ def sample_with_gnpe(
         data["parameters"] = model.sample(*x, batch_size=batch_size)
         data = gnpe_transforms_post(data)
 
-        Mc = data["parameters"]["chirp_mass"]
-        print(torch.mean(Mc), torch.std(Mc))
+        p0 = list(data["parameters"].values())[0]
+        print(torch.mean(p0), torch.std(p0))
 
     samples = data["parameters"]
     return samples
