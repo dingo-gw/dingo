@@ -192,6 +192,11 @@ class WaveformGenerator:
         # Transform mass, spin, and distance parameters
         p, _ = convert_to_lal_binary_black_hole_parameters(parameter_dict)
 
+        # Convert to SI units
+        p['mass_1'] *= lal.MSUN_SI
+        p['mass_2'] *= lal.MSUN_SI
+        p['luminosity_distance'] *= 1e6 * lal.PC_SI
+
         # Transform to lal source frame: iota and Cartesian spin components
         param_keys_in = ('theta_jn', 'phi_jl', 'tilt_1', 'tilt_2', 'phi_12',
                          'a_1', 'a_2', 'mass_1', 'mass_2', 'f_ref', 'phase')
@@ -199,11 +204,6 @@ class WaveformGenerator:
         iota_and_cart_spins = bilby_to_lalsimulation_spins(*param_values_in)
         iota, s1x, s1y, s1z, s2x, s2y, s2z = \
             [float(self._convert_to_scalar(x)) for x in iota_and_cart_spins]
-
-        # Convert to SI units
-        p['mass_1'] *= lal.MSUN_SI
-        p['mass_2'] *= lal.MSUN_SI
-        p['luminosity_distance'] *= 1e6 * lal.PC_SI
 
         # Construct argument list for FD and TD lal waveform generator wrappers
         spins_cartesian = s1x, s1y, s1z, s2x, s2y, s2z
