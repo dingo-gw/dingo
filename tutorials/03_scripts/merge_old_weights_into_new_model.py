@@ -1,5 +1,6 @@
 import torch
 import h5py
+from os.path import join, dirname
 import argparse
 
 DEFAULT_PARAMS = [
@@ -47,10 +48,14 @@ def parse_args():
     parser.add_argument(
         "--PRL_wf_supp",
         type=str,
-        required=True,
+        default=None,
         help="PRL waveforms supplementary with standardizations.",
     )
     args = parser.parse_args()
+
+    if args.PRL_wf_supp is None:
+        args.PRL_wf_supp = join(dirname(args.model_PRL), "waveforms_supplementary.hdf5")
+
     return args
 
 
