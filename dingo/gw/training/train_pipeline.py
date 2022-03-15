@@ -95,7 +95,7 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
         device=local_settings["device"],
     )
 
-    if local_settings["use_wandb"]:
+    if local_settings.get("use_wandb", False):
         run_id = local_settings["wandb_run_id"]
         wandb.init(
             project="dingo-devel",
@@ -129,7 +129,7 @@ def prepare_training_resume(checkpoint_name, local_settings, train_dir):
     pm = PosteriorModel(model_filename=checkpoint_name, device=local_settings["device"])
     wfd = build_dataset(pm.metadata["train_settings"]["data"])
 
-    if local_settings["use_wandb"]:
+    if local_settings.get("use_wandb", False):
 
         try:
             wandb.init(
@@ -270,8 +270,12 @@ def train_stages(pm, wfd, train_dir, local_settings):
             train_dir=train_dir,
             runtime_limits=runtime_limits,
             checkpoint_epochs=local_settings["checkpoint_epochs"],
-            use_wandb=local_settings["use_wandb"],
+            use_wandb=local_settings.get("use_wandb", False),
+            test_only=local_settings.get("test_only", False),
         )
+        # if test_only, model should not be saved, and run is complete
+        if local_settings.get("test_only", False):
+            return True
 
         if pm.epoch == end_epochs[n]:
             save_file = os.path.join(train_dir, f"model_stage_{n}.pt")
