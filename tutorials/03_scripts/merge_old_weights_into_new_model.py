@@ -61,8 +61,8 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    model_PRL = torch.load(args.model_PRL)
-    model_dingo = torch.load(args.model_dingo)
+    model_PRL = torch.load(args.model_PRL, map_location=torch.device('cpu'))
+    model_dingo = torch.load(args.model_dingo, map_location=torch.device('cpu'))
     keys_PRL = model_dingo["model_state_dict"].keys()
     keys_dingo = model_PRL["model_state_dict"].keys()
     assert len(keys_PRL) == len(keys_dingo)
