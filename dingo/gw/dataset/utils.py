@@ -36,7 +36,8 @@ def merge_datasets(dataset_list: List[WaveformDataset]) -> WaveformDataset:
 
     merged_dict["parameters"] = pd.concat([d.parameters for d in dataset_list])
     merged_dict["polarizations"] = {}
-    for pol in dataset_list[0].polarizations:
+    polarizations = list(dataset_list[0].polarizations.keys())
+    for pol in polarizations:
         # We pop the data array off of each of the polarizations dicts to save memory.
         # Otherwise this operation doubles the total amount of memory used. This is
         # destructive to the original datasets.
