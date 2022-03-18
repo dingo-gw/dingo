@@ -1,6 +1,7 @@
 import torch
 from torchvision.transforms import Compose
 from bilby.gw.detector.networks import InterferometerList
+import time
 
 from dingo.gw.transforms import (
     WhitenAndScaleStrain,
@@ -153,14 +154,21 @@ def sample_with_gnpe(
 
     model.model.eval()
 
+    print("iteration / network time / processing time")
     for idx in range(num_gnpe_iterations):
+        time_start = time.time()
+
         data = gnpe_transforms_pre(data)
         x = [data["waveform"], data["context_parameters"]]
+
+        time_network_start = time.time()
         data["parameters"] = model.sample(*x, batch_size=batch_size)
+        time_network = time.time() - time_network_start
+
         data = gnpe_transforms_post(data)
 
-        p0 = list(data["parameters"].values())[0]
-        print(torch.mean(p0), torch.std(p0))
+        time_processing = time.time() - time_start - time_network
+        print(f"{idx:03d}  /  {time_network:.2f} s  /  {time_processing:.2f} s")
 
     samples = data["parameters"]
     return samples
