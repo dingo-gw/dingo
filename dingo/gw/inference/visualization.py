@@ -26,7 +26,7 @@ def generate_cornerplot(*sample_sets, filename=None):
         tick_font_size=10,
         usetex=False,
         legend_kwargs={"fontsize": 30},
-        kde=False,
+        kde=0.7,
     )
     c.plotter.plot(filename=filename)
 
