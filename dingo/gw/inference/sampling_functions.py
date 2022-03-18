@@ -220,7 +220,8 @@ def sample_posterior_of_event(
     )
 
     if not gnpe:
-        assert samples_init is None, "samples_init can only be used for gnpe."
+        if samples_init is not None:
+            raise ValueError("samples_init can only be used for gnpe.")
         samples = sample_with_npe(
             domain_data, model, num_samples, batch_size=batch_size
         )
