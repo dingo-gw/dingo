@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 import torch
 
 from dingo.gw.gwutils import *
+from dingo.core.models import PosteriorModel
 
 
 class Domain(ABC):
@@ -207,7 +208,7 @@ class FrequencyDomain(Domain):
             # add batch dimension if not present
             omit_batch_dimension = False
             if len(data.shape) == 3:
-                data = data[None,...]
+                data = data[None, ...]
                 omit_batch_dimension = True
             # expected shape: (batch_size, num_detectors, num_channels, num_fbins).
             # The third axis contains strain.real and strain.imag in channel 0 and 1,
@@ -216,9 +217,9 @@ class FrequencyDomain(Domain):
             cos_txf = torch.empty((batch_size, Nd, Nf), device=data.device)
             sin_txf = torch.empty((batch_size, Nd, Nf), device=data.device)
             if data.is_cuda:
-                f = self.sample_frequencies_torch_cuda[self.min_idx:]
+                f = self.sample_frequencies_torch_cuda[self.min_idx :]
             else:
-                f = self.sample_frequencies_torch[self.min_idx:]
+                f = self.sample_frequencies_torch[self.min_idx :]
             assert Nd == len(dt), "Number of detectors does not match."
             assert len(f) == Nf, "Number of frequency bins does not match"
             for idx in range(Nd):
@@ -282,9 +283,7 @@ class FrequencyDomain(Domain):
     @lru_cache()
     def sample_frequencies_torch(self):
         num_bins = self.__len__()
-        return torch.linspace(
-            0.0, self._f_max, steps=num_bins, dtype=torch.float32
-        )
+        return torch.linspace(0.0, self._f_max, steps=num_bins, dtype=torch.float32)
 
     @property
     @lru_cache()
@@ -509,6 +508,28 @@ def build_domain(settings: Dict) -> Domain:
         return TimeDomain(**kwargs)
     else:
         raise NotImplementedError(f'Domain {settings["name"]} not implemented.')
+
+
+def build_domain_for_model(model: PosteriorModel) -> Domain:
+    """
+    Instantiate a domain class from settings of model.
+
+    Parameters
+    ----------
+    model: PosteriorModel
+        model containing metadata to build the domain
+
+    Returns
+    -------
+    A Domain instance of the correct type.
+    """
+    domain = build_domain(model.metadata["dataset_settings"]["domain"])
+    if "domain_update" in model.metadata["train_settings"]["data"]:
+        domain.update(model.metadata["train_settings"]["data"]["domain_update"])
+    domain.window_factor = get_window_factor(
+        model.metadata["train_settings"]["data"]["window"]
+    )
+    return domain
 
 
 if __name__ == "__main__":

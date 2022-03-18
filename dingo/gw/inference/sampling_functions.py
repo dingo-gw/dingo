@@ -21,10 +21,11 @@ from dingo.gw.inference.data_preparation import (
     load_raw_data,
     data_to_domain,
 )
+from dingo.gw.domains import build_domain_for_model
 
 
 def get_transforms_for_npe(model, num_samples, as_type="dict"):
-    domain = model.build_domain()
+    domain = build_domain_for_model(model)
 
     # preprocessing transforms:
     #   * whiten and scale strain (since the inference network expects standardized data)
@@ -97,7 +98,7 @@ def get_transforms_for_gnpe_time(model, init_parameters, as_type="dict"):
                 gnpe_settings["exact_equiv"],
                 inference=True,
             ),
-            TimeShiftStrain(ifo_list, model.build_domain()),
+            TimeShiftStrain(ifo_list, build_domain_for_model(model)),
             SelectStandardizeRepackageParameters(
                 {"context_parameters": data_settings["context_parameters"]},
                 data_settings["standardization"],
@@ -214,7 +215,7 @@ def sample_posterior_of_event(
     domain_data = data_to_domain(
         raw_data,
         settings_raw_data,
-        model.build_domain(),
+        build_domain_for_model(model),
         window=model.metadata["train_settings"]["data"]["window"],
     )
 

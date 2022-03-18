@@ -14,8 +14,6 @@ import math
 import pdb
 
 from dingo.core.nn.nsf import create_nsf_with_rb_projection_embedding_net
-from dingo.gw.domains import build_domain
-from dingo.gw.gwutils import get_window_factor
 
 
 class PosteriorModel:
@@ -134,22 +132,6 @@ class PosteriorModel:
             self.scheduler = utils.get_scheduler_from_kwargs(
                 self.optimizer, **self.scheduler_kwargs
             )
-
-    def build_domain(self):
-        """
-        Builds model domain based on its metadata.
-
-        Returns
-        -------
-        domain
-        """
-        domain = build_domain(self.metadata["dataset_settings"]["domain"])
-        if "domain_update" in self.metadata["train_settings"]["data"]:
-            domain.update(self.metadata["train_settings"]["data"]["domain_update"])
-        domain.window_factor = get_window_factor(
-            self.metadata["train_settings"]["data"]["window"]
-        )
-        return domain
 
     def save_model(
         self,
@@ -328,6 +310,7 @@ class PosteriorModel:
                     samples.append(self.model.sample(*x_batch, num_samples=1))
                 samples = torch.cat(samples, dim=0)
         return samples
+
 
 def get_model_callable(model_type: str):
     if model_type == "nsf+embedding":
