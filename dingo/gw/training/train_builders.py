@@ -219,7 +219,7 @@ def build_train_and_test_loaders(
         pin_memory=True,
         num_workers=num_workers,
         worker_init_fn=lambda _: np.random.seed(
-            int(torch.initial_seed()) % (2**32 - 1)
+            int(torch.initial_seed()) % (2 ** 32 - 1)
         ),
     )
     test_loader = DataLoader(
@@ -229,7 +229,7 @@ def build_train_and_test_loaders(
         pin_memory=True,
         num_workers=num_workers,
         worker_init_fn=lambda _: np.random.seed(
-            int(torch.initial_seed()) % (2**32 - 1)
+            int(torch.initial_seed()) % (2 ** 32 - 1)
         ),
     )
 
@@ -318,7 +318,7 @@ def build_svd_for_embedding_network(
         batch_size=batch_size,
         num_workers=num_workers,
         worker_init_fn=lambda _: np.random.seed(
-            int(torch.initial_seed()) % (2**32 - 1)
+            int(torch.initial_seed()) % (2 ** 32 - 1)
         ),
     )
     with threadpool_limits(limits=1, user_api="blas"):
