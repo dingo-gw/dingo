@@ -9,6 +9,7 @@ from torch.utils.data import Dataset
 import time
 from threadpoolctl import threadpool_limits
 import dingo.core.utils.trainutils
+import math
 import wandb
 
 from dingo.core.nn.nsf import create_nsf_with_rb_projection_embedding_net
@@ -43,6 +44,7 @@ class PosteriorModel:
         metadata: dict = None,
         initial_weights: dict = None,
         device: str = "cuda",
+        load_training_info: bool = True,
     ):
         """
 
@@ -83,7 +85,9 @@ class PosteriorModel:
 
         # build model
         if model_filename is not None:
-            self.load_model(model_filename, load_training_info=True, device=device)
+            self.load_model(
+                model_filename, load_training_info=load_training_info, device=device
+            )
         else:
             self.initialize_model()
             self.model_to_device(device)
@@ -198,7 +202,6 @@ class PosteriorModel:
 
         self.model_to_device(device)
 
-        # I think this should probably not be optional...
         if load_training_info:
             if "optimizer_kwargs" in d:
                 self.optimizer_kwargs = d["optimizer_kwargs"]
@@ -211,6 +214,9 @@ class PosteriorModel:
                 self.optimizer.load_state_dict(d["optimizer_state_dict"])
             if "scheduler_state_dict" in d:
                 self.scheduler.load_state_dict(d["scheduler_state_dict"])
+        else:
+            # put model in evaluation mode
+            self.model.eval()
 
     def train(
         self,
@@ -294,6 +300,46 @@ class PosteriorModel:
                     )
                 print(f"Finished training epoch {self.epoch}.\n")
 
+    def sample(
+        self,
+        *x,
+        batch_size=None,
+    ):
+        """
+        Sample from posterior model, conditioned on context x. x is expected to have a
+        batch dimension, i.e., to obtain N samples with additional context requires
+        x = x_.expand(N, *x_.shape).
+
+        This method takes care of the batching, makes sure that self.model is in
+        evaluation mode and disables gradient computation.
+
+        Parameters
+        ----------
+        *x:
+            input context to the neural network; has potentially multiple elements for,
+            e.g., gnpe proxies
+        batch_size: int = None
+            batch size for sampling
+
+        Returns
+        -------
+        samples: torch.Tensor
+            samples from posterior model
+        """
+        self.model.eval()
+        with torch.no_grad():
+            if batch_size is None:
+                samples = self.model.sample(*x)
+            else:
+                samples = []
+                num_batches = math.ceil(len(x[0]) / batch_size)
+                for idx_batch in range(num_batches):
+                    lower, upper = idx_batch * batch_size, (idx_batch + 1) * batch_size
+                    x_batch = [xi[lower:upper] for xi in x]
+                    samples.append(self.model.sample(*x_batch, num_samples=1))
+                samples = torch.cat(samples, dim=0)
+        return samples
+
 
 def get_model_callable(model_type: str):
     if model_type == "nsf+embedding":
@@ -347,7 +393,7 @@ def test_epoch(pm, dataloader):
             # compute loss
             loss = -pm.model(data[0], *data[1:]).mean()
             # update loss for history and logging
-            loss_info.update(loss.detach().item(), len(data[0]))
+            loss_info.update(loss.item(), len(data[0]))
             loss_info.print_info(batch_idx)
 
         return loss_info.get_avg()

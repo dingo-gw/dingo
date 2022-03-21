@@ -2,7 +2,11 @@ from typing import Dict
 
 from functools import lru_cache
 from abc import ABC, abstractmethod
+
+import torch
+
 from dingo.gw.gwutils import *
+from dingo.core.models import PosteriorModel
 
 
 class Domain(ABC):
@@ -99,6 +103,8 @@ class FrequencyDomain(Domain):
         class instances.
         """
         FrequencyDomain.sample_frequencies.fget.cache_clear()
+        FrequencyDomain.sample_frequencies_torch.fget.cache_clear()
+        FrequencyDomain.sample_frequencies_torch_cuda.fget.cache_clear()
         FrequencyDomain.frequency_mask.fget.cache_clear()
         FrequencyDomain.noise_std.fget.cache_clear()
 
@@ -158,9 +164,7 @@ class FrequencyDomain(Domain):
         # instead of using the old (incorrect) ones.
         self.clear_cache_for_all_instances()
 
-    def update_data(
-        self, data: np.ndarray, axis: int = -1, low_value: float = 0.0
-    ):
+    def update_data(self, data: np.ndarray, axis: int = -1, low_value: float = 0.0):
         """
         Adjusts data to be compatible with the domain:
 
@@ -196,17 +200,49 @@ class FrequencyDomain(Domain):
 
     def time_translate_data(self, data, dt):
         """Time translate complex frequency domain data by dt [in seconds]."""
-        if not isinstance(data, np.ndarray):
-            raise NotImplementedError(
-                f"Only implemented for numpy arrays, got {type(data)}."
-            )
-        if not np.iscomplexobj(data):
-            raise ValueError(
-                "Method expects complex frequency domain data, got real array."
-            )
-        f = self.sample_frequencies
-        # shift data
-        return data * np.exp(-2j * np.pi * dt * f)
+        if isinstance(data, np.ndarray) and np.iscomplexobj(data):
+            f = self.sample_frequencies
+            return data * np.exp(-2j * np.pi * dt * f)
+
+        elif isinstance(data, torch.Tensor) and not torch.is_complex(data):
+            # add batch dimension if not present
+            omit_batch_dimension = False
+            if len(data.shape) == 3:
+                data = data[None, ...]
+                omit_batch_dimension = True
+            # expected shape: (batch_size, num_detectors, num_channels, num_fbins).
+            # The third axis contains strain.real and strain.imag in channel 0 and 1,
+            # and optionally additional channels (e.g., ASD).
+            batch_size, Nd, Nc, Nf = data.shape
+            cos_txf = torch.empty((batch_size, Nd, Nf), device=data.device)
+            sin_txf = torch.empty((batch_size, Nd, Nf), device=data.device)
+            if data.is_cuda:
+                f = self.sample_frequencies_torch_cuda[self.min_idx :]
+            else:
+                f = self.sample_frequencies_torch[self.min_idx :]
+            assert Nd == len(dt), "Number of detectors does not match."
+            assert len(f) == Nf, "Number of frequency bins does not match"
+            for idx in range(Nd):
+                # get local phases
+                txf_det = torch.outer(dt[idx], f)
+                cos_txf_det = torch.cos(-2 * np.pi * txf_det)
+                sin_txf_det = torch.sin(-2 * np.pi * txf_det)
+                cos_txf[:, idx, ...] = cos_txf_det[...]
+                sin_txf[:, idx, ...] = sin_txf_det[...]
+
+            x = torch.empty(*data.shape, device=data.device)
+            x[:, :, 0, :] = cos_txf * data[:, :, 0, :] - sin_txf * data[:, :, 1, :]
+            x[:, :, 1, :] = sin_txf * data[:, :, 0, :] + cos_txf * data[:, :, 1, :]
+            x[:, :, 2:, :] = data[:, :, 2:, :]
+
+            if omit_batch_dimension:
+                assert x.shape[0] == 1
+                x = x[0]
+
+            return x
+
+        else:
+            raise NotImplementedError()
 
     # def time_translate_batch(self, data, dt, axis=None):
     #     # h_d * np.exp(- 2j * np.pi * time_shift * self.sample_frequencies)
@@ -242,6 +278,17 @@ class FrequencyDomain(Domain):
         return np.linspace(
             0.0, self._f_max, num=num_bins, endpoint=True, dtype=np.float32
         )
+
+    @property
+    @lru_cache()
+    def sample_frequencies_torch(self):
+        num_bins = self.__len__()
+        return torch.linspace(0.0, self._f_max, steps=num_bins, dtype=torch.float32)
+
+    @property
+    @lru_cache()
+    def sample_frequencies_torch_cuda(self):
+        return self.sample_frequencies_torch.to("cuda")
 
     @property
     @lru_cache()
@@ -461,6 +508,28 @@ def build_domain(settings: Dict) -> Domain:
         return TimeDomain(**kwargs)
     else:
         raise NotImplementedError(f'Domain {settings["name"]} not implemented.')
+
+
+def build_domain_for_model(model: PosteriorModel) -> Domain:
+    """
+    Instantiate a domain class from settings of model.
+
+    Parameters
+    ----------
+    model: PosteriorModel
+        model containing metadata to build the domain
+
+    Returns
+    -------
+    A Domain instance of the correct type.
+    """
+    domain = build_domain(model.metadata["dataset_settings"]["domain"])
+    if "domain_update" in model.metadata["train_settings"]["data"]:
+        domain.update(model.metadata["train_settings"]["data"]["domain_update"])
+    domain.window_factor = get_window_factor(
+        model.metadata["train_settings"]["data"]["window"]
+    )
+    return domain
 
 
 if __name__ == "__main__":
