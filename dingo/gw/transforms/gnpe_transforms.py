@@ -28,7 +28,7 @@ class GNPEShiftDetectorTimes(object):
     """
 
     def __init__(
-        self, ifo_list, kernel, exact_global_equivariance=True, inference=True
+        self, ifo_list, kernel, exact_global_equivariance=True, inference=False
     ):
         """
         ifo_list : bilby.gw.detector.InterferometerList
@@ -39,7 +39,7 @@ class GNPEShiftDetectorTimes(object):
         exact_global_equivariance : bool = True
             Whether to impose the exact global time translation symmetry.
             (Default True)
-        inference: bool = True
+        inference: bool = False
             Whether to use inference mode or not
         """
         self.ifo_names = [ifo.name for ifo in ifo_list]
