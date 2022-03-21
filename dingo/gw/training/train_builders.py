@@ -159,15 +159,12 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     transforms.append(SampleNoiseASD(asd_dataset))
     transforms.append(WhitenAndScaleStrain(domain.noise_std))
     transforms.append(AddWhiteNoiseComplex())
-    # Select parameter groups which we need to standardize.
-    # This will always include inference parameters.
-    # If extra_context_parameters are requested, these also need to be standardized.
-    standardization_keys = ["inference_parameters"] + ["context_parameters"] * (
-        len(extra_context_parameters) > 0
-    )
     transforms.append(
         SelectStandardizeRepackageParameters(
-            {k: data_settings[k] for k in standardization_keys},
+            {
+                 k: data_settings[k]
+                 for k in ["inference_parameters", "context_parameters"]
+             },
             standardization_dict,
         )
     )
