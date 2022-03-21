@@ -3,6 +3,7 @@ import sys
 from os.path import join, isfile, dirname
 import yaml
 import argparse
+import wandb
 
 from dingo.gw.training import (
     prepare_training_new,
@@ -85,6 +86,14 @@ def train_condor():
 
             local_settings = train_settings.pop("local")
             with open(os.path.join(args.train_dir, "local_settings.yaml"), "w") as f:
+                if local_settings.get("use_wandb", False):
+                    if "WANDB_API_KEY" not in os.environ.keys():
+                        os.environ["WANDB_API_KEY"] = local_settings["wandb_api_key"]
+                if (
+                    local_settings.get("use_wandb", False)
+                    and "wandb_run_id" not in local_settings.keys()
+                ):
+                    local_settings["wandb_run_id"] = wandb.util.generate_id()
                 yaml.dump(local_settings, f, default_flow_style=False, sort_keys=False)
 
             pm, wfd = prepare_training_new(
@@ -96,7 +105,9 @@ def train_condor():
             with open(os.path.join(args.train_dir, "local_settings.yaml"), "r") as f:
                 local_settings = yaml.safe_load(f)
             pm, wfd = prepare_training_resume(
-                join(args.train_dir, args.checkpoint), local_settings["device"]
+                join(args.train_dir, args.checkpoint),
+                local_settings,
+                train_dir=args.train_dir,
             )
 
         complete = train_stages(pm, wfd, args.train_dir, local_settings)

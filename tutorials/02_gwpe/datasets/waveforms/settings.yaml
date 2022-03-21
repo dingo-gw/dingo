@@ -8,6 +8,7 @@ domain:
 waveform_generator:
   approximant: IMRPhenomXPHM  # SEOBNRv4PHM
   f_ref: 20.0
+  # f_start: 15.0  # Optional setting useful for EOB waveforms. Overrides f_min when generating waveforms.
 
 # Dataset only samples over intrinsic parameters. Extrinsic parameters are chosen at train time.
 intrinsic_prior:
@@ -36,6 +37,6 @@ compression:
     # Truncate the SVD basis at this size. No truncation if zero.
     size: 200
     num_training_samples: 50000
-    # num_validation_samples: 500  # (not yet implemented)
+    num_validation_samples: 10000
     # whitening: aLIGOZeroDetuned  # PSD (not yet implemented)
     # single_precision: True  # (not yet implemented) be careful if using without whitening.

@@ -5,13 +5,12 @@ TODO: Docstring
 from typing import Callable
 import torch
 import dingo.core.utils as utils
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 import time
 from threadpoolctl import threadpool_limits
 import dingo.core.utils.trainutils
 import math
-
-import pdb
+import wandb
 
 from dingo.core.nn.nsf import create_nsf_with_rb_projection_embedding_net
 
@@ -226,50 +225,80 @@ class PosteriorModel:
         train_dir: str,
         runtime_limits: object = None,
         checkpoint_epochs: int = None,
+        use_wandb=False,
+        test_only=False,
     ):
         """
 
-        :param train_loader:
-        :param test_loader:
-        :param train_dir:
-        :param runtime_limits:
-        :return:
+        Parameters
+        ----------
+        train_loader
+        test_loader
+        train_dir
+        runtime_limits
+        checkpoint_epochs
+        use_wandb
+        test_only: bool = False
+            if True, training is skipped
+
+        Returns
+        -------
+
         """
+        if test_only:
+            test_loss = test_epoch(self, test_loader)
+            print(f"test loss: {test_loss:.3f}")
 
-        while not runtime_limits.limits_exceeded(self.epoch):
-            self.epoch += 1
+        else:
+            # if use_wandb:
+            #     wandb.watch(self.model, log="all", log_freq=10)
+            while not runtime_limits.limits_exceeded(self.epoch):
+                self.epoch += 1
 
-            # Training
-            lr = utils.get_lr(self.optimizer)
-            print(f"\nStart training epoch {self.epoch} with lr {lr}")
-            time_start = time.time()
-            with threadpool_limits(limits=1, user_api="blas"):
-                train_loss = train_epoch(self, train_loader)
-                print(
-                    "Done. This took {:2.0f}:{:2.0f} min.".format(
-                        *divmod(time.time() - time_start, 60)
+                # Training
+                lr = utils.get_lr(self.optimizer)
+                with threadpool_limits(limits=1, user_api="blas"):
+                    print(f"\nStart training epoch {self.epoch} with lr {lr}")
+                    time_start = time.time()
+                    train_loss = train_epoch(self, train_loader)
+                    train_time = time.time() - time_start
+
+                    print(
+                        "Done. This took {:2.0f}:{:2.0f} min.".format(
+                            *divmod(train_time, 60)
+                        )
                     )
-                )
 
-                # Testing
-                print(f"Start testing epoch {self.epoch}")
-                time_start = time.time()
-                test_loss = test_epoch(self, test_loader)
+                    # Testing
+                    print(f"Start testing epoch {self.epoch}")
+                    time_start = time.time()
+                    test_loss = test_epoch(self, test_loader)
+                    test_time = time.time() - time_start
 
-                print(
-                    "Done. This took {:2.0f}:{:2.0f} min.".format(
-                        *divmod(time.time() - time_start, 60)
+                    print(
+                        "Done. This took {:2.0f}:{:2.0f} min.".format(
+                            *divmod(time.time() - time_start, 60)
+                        )
                     )
-                )
 
-            # scheduler step for learning rate
-            utils.perform_scheduler_step(self.scheduler, test_loss)
+                # scheduler step for learning rate
+                utils.perform_scheduler_step(self.scheduler, test_loss)
 
-            # write history and save model
-            utils.write_history(train_dir, self.epoch, train_loss, test_loss, lr)
-            utils.save_model(self, train_dir, checkpoint_epochs=checkpoint_epochs)
-
-            print(f"Finished training epoch {self.epoch}.\n")
+                # write history and save model
+                utils.write_history(train_dir, self.epoch, train_loss, test_loss, lr)
+                utils.save_model(self, train_dir, checkpoint_epochs=checkpoint_epochs)
+                if use_wandb:
+                    wandb.log(
+                        {
+                            "epoch": self.epoch,
+                            "learning_rate": lr[0],
+                            "train_loss": train_loss,
+                            "test_loss": test_loss,
+                            "train_time": train_time,
+                            "test_time": test_time,
+                        }
+                    )
+                print(f"Finished training epoch {self.epoch}.\n")
 
     def sample(
         self,

@@ -5,7 +5,7 @@ import torch.utils.data
 from torchvision.transforms import Compose
 
 from dingo.core.dataset import DingoDataset
-from dingo.gw.SVD import SVDBasis, UndoSVD
+from dingo.gw.SVD import SVDBasis, ApplySVD
 from dingo.gw.domains import build_domain
 
 
@@ -53,7 +53,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         super().__init__(
             file_name=file_name,
             dictionary=dictionary,
-            data_keys=["parameters", "polarizations", "svd_V"],
+            data_keys=["parameters", "polarizations", "svd"],
         )
 
         if (
@@ -96,8 +96,13 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             self.parameters = self.parameters.astype(real_type, copy=False)
             for k, v in self.polarizations.items():
                 self.polarizations[k] = v.astype(complex_type, copy=False)
-            if self.svd_V is not None:
-                self.svd_V = self.svd_V.astype(complex_type, copy=False)
+
+            # This should probably be moved to the SVDBasis class.
+            if self.svd is not None:
+                self.svd["V"] = self.svd["V"].astype(complex_type, copy=False)
+                # For backward compatibility; in future, this will be there.
+                if "s" in self.svd:
+                    self.svd["s"] = self.svd["s"].astype(real_type, copy=False)
 
         if self.settings["compression"] is not None:
             self.initialize_decompression()
@@ -133,7 +138,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                 self.settings["compression"] is not None
                 and "svd" in self.settings["compression"]
         ):
-            self.svd_V = self.domain.update_data(self.svd_V, axis=0)
+            self.svd["V"] = self.domain.update_data(self.svd["V"], axis=0)
         else:
             for k, v in self.polarizations.items():
                 self.polarizations[k] = self.domain.update_data(v)
@@ -146,10 +151,9 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         decompression_transform_list = []
 
         if "svd" in self.settings["compression"]:
-            assert self.svd_V is not None
-            svd_basis = SVDBasis()
-            svd_basis.from_V(self.svd_V)
-            decompression_transform_list.append(UndoSVD(svd_basis))
+            assert self.svd is not None
+            svd_basis = SVDBasis(dictionary=self.svd)
+            decompression_transform_list.append(ApplySVD(svd_basis, inverse=True))
 
         self.decompression_transform = Compose(decompression_transform_list)
 

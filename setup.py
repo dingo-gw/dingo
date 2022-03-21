@@ -39,6 +39,7 @@ setup(
         "pandas",
         "threadpoolctl",
         "chainconsumer",
+        "wandb"
     ],
     extras_require={
         "dev": [

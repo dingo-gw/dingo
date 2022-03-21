@@ -3,6 +3,8 @@ import numpy as np
 import yaml
 import argparse
 import textwrap
+import wandb
+
 
 from threadpoolctl import threadpool_limits
 
@@ -93,10 +95,20 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
         device=local_settings["device"],
     )
 
+    if local_settings.get("use_wandb", False):
+        run_id = local_settings["wandb_run_id"]
+        wandb.init(
+            project="dingo-devel",
+            id=run_id,
+            config=full_settings,
+            group="hyperparameter_tuning",
+            dir=train_dir,
+        )
+
     return pm, wfd
 
 
-def prepare_training_resume(checkpoint_name, device):
+def prepare_training_resume(checkpoint_name, local_settings, train_dir):
     """
     Loads a PosteriorModel from a checkpoint, as well as the corresponding
     WaveformDataset, in order to continue training. It initializes the saved optimizer
@@ -114,9 +126,23 @@ def prepare_training_resume(checkpoint_name, device):
     (PosteriorModel, WaveformDataset)
     """
 
-    pm = PosteriorModel(model_filename=checkpoint_name, device=device)
-
+    pm = PosteriorModel(model_filename=checkpoint_name, device=local_settings["device"])
     wfd = build_dataset(pm.metadata["train_settings"]["data"])
+
+    if local_settings.get("use_wandb", False):
+
+        try:
+            wandb.init(
+                project="dingo-devel",
+                id=local_settings["wandb_run_id"],
+                group="hyperparameter_tuning",
+                resume="must",
+                dir=train_dir,
+            )
+        except KeyError:
+            print(
+                "WandB is enabled but no run_id has been provided for resuming the run."
+            )
 
     return pm, wfd
 
@@ -244,7 +270,12 @@ def train_stages(pm, wfd, train_dir, local_settings):
             train_dir=train_dir,
             runtime_limits=runtime_limits,
             checkpoint_epochs=local_settings["checkpoint_epochs"],
+            use_wandb=local_settings.get("use_wandb", False),
+            test_only=local_settings.get("test_only", False),
         )
+        # if test_only, model should not be saved, and run is complete
+        if local_settings.get("test_only", False):
+            return True
 
         if pm.epoch == end_epochs[n]:
             save_file = os.path.join(train_dir, f"model_stage_{n}.pt")
@@ -315,6 +346,14 @@ def train_local():
 
         local_settings = train_settings.pop("local")
         with open(os.path.join(args.train_dir, "local_settings.yaml"), "w") as f:
+
+            if "WANDB_API_KEY" not in os.environ.keys():
+                os.environ["WANDB_API_KEY"] = local_settings["wandb_api_key"]
+            if (
+                local_settings["use_wandb"]
+                and "wandb_run_id" not in local_settings.keys()
+            ):
+                local_settings["wandb_run_id"] = wandb.util.generate_id()
             yaml.dump(local_settings, f, default_flow_style=False, sort_keys=False)
 
         pm, wfd = prepare_training_new(train_settings, args.train_dir, local_settings)
@@ -323,7 +362,9 @@ def train_local():
         print("Resuming training run.")
         with open(os.path.join(args.train_dir, "local_settings.yaml"), "r") as f:
             local_settings = yaml.safe_load(f)
-        pm, wfd = prepare_training_resume(args.checkpoint, local_settings["device"])
+        pm, wfd = prepare_training_resume(
+            args.checkpoint, local_settings, args.train_dir
+        )
 
     with threadpool_limits(limits=1, user_api="blas"):
         complete = train_stages(pm, wfd, args.train_dir, local_settings)

@@ -44,7 +44,7 @@ def setup(settings_file: str) -> WaveformGenerator:
     domain = build_domain(settings['domain_settings'])
     waveform_generator = WaveformGenerator(settings['waveform_generator_settings']['approximant'],
                                            domain,
-                                           settings['reference_frequency'])
+                                           settings['f_ref'])
     return waveform_generator
 
 
@@ -161,7 +161,7 @@ def save_polarizations(waveform_polarizations: pd.DataFrame, idx: int,
         basis.from_file(basis_file)
         pol_arrays = {k: np.vstack(v.to_numpy().T)
                       for k, v in waveform_polarizations.items()}
-        pol_dict = {k: basis.fseries_to_basis_coefficients(v)
+        pol_dict = {k: basis.compress(v)
                     for k, v in pol_arrays.items()}
         for k, v in pol_dict.items():
             np.save(f'{k}_coeff_{idx}.npy', v)

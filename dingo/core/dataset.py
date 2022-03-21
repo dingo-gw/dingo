@@ -80,7 +80,8 @@ class DingoDataset:
         }
         with h5py.File(file_name, mode) as f:
             recursive_hdf5_save(f, save_dict)
-            f.attrs["settings"] = str(self.settings)
+            if self.settings:
+                f.attrs["settings"] = str(self.settings)
 
     def from_file(self, file_name):
         print("\nLoading dataset from " + file_name + ".")
@@ -103,7 +104,7 @@ class DingoDataset:
         }
         return dictionary
 
-    def from_dictionary(self, dictionary):
+    def from_dictionary(self, dictionary: dict):
         for k, v in dictionary.items():
             if k in self._data_keys or k == "settings":
                 vars(self)[k] = v

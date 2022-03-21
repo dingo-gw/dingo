@@ -7,6 +7,7 @@ import yaml
 from typing import List
 
 from dingo.gw.SVD import SVDBasis
+from dingo.gw.dataset.generate_dataset import train_svd_basis
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
 
 
@@ -129,13 +130,27 @@ def build_svd_cli():
     parser.add_argument(
         "--out_file", type=str, required=True, help="Name of file for saving SVD."
     )
+    parser.add_argument(
+        "--num_train",
+        type=int,
+        help="Number of waveforms to use for training SVD. "
+        "Remainder are used for validation.",
+    )
     args = parser.parse_args()
 
-    # We build the SVD based on all of the polarizations.
     dataset = WaveformDataset(file_name=args.dataset_file)
-    train_data = np.vstack(list(dataset.polarizations.values()))
+    if args.num_train is None:
+        n_train = len(WaveformDataset)
+    else:
+        n_train = args.num_train
 
-    print("Building SVD basis.")
-    basis = SVDBasis()
-    basis.generate_basis(train_data, args.size)
+    basis, n_train, n_test = train_svd_basis(dataset, args.size, n_train)
+    # FIXME: This is not an ideal treatment. We should update the waveform generation
+    #  to always provide the requested number of waveforms.
+    print(
+        f"SVD basis trained based on {n_train} waveforms and validated on {n_test} "
+        f"waveforms. Note that if this differs from number requested, it will not be "
+        f"reflected in the settings file. This is likely due to EOB failure to "
+        f"generate certain waveforms."
+    )
     basis.to_file(args.out_file)
