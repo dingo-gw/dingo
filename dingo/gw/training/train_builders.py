@@ -114,6 +114,7 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
                 ifo_list,
                 d["kernel"],
                 d["exact_equiv"],
+                inference=False,
             )
         )
         extra_context_parameters += transforms[-1].get_context_parameters()
