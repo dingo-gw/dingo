@@ -144,7 +144,7 @@ class GNPEShiftDetectorTimes(object):
             }
         else:
             epsilon = self.kernel.sample()
-            epsilon = {ifo_name: np.float32(eps) for ifo_name, eps in epsilon.items()}
+            epsilon = {ifo_name: eps for ifo_name, eps in epsilon.items()}
         return epsilon
 
     def get_context_parameters(self):
