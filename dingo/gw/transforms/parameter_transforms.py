@@ -38,7 +38,12 @@ class SelectStandardizeRepackageParameters(object):
     """
 
     def __init__(
-        self, parameters_dict, standardization_dict, inverse=False, as_type=None, device="cpu",
+        self,
+        parameters_dict,
+        standardization_dict,
+        inverse=False,
+        as_type=None,
+        device="cpu",
     ):
         self.parameters_dict = parameters_dict
         self.mean = standardization_dict["mean"]
@@ -86,12 +91,14 @@ class SelectStandardizeRepackageParameters(object):
                 if len(v) > 0:
                     if isinstance(full_parameters[v[0]], torch.Tensor):
                         standardized = torch.empty(
-                            (*full_parameters[v[0]].shape, len(v)), dtype=torch.float32, device=self.device,
+                            (*full_parameters[v[0]].shape, len(v)),
+                            dtype=torch.float32,
+                            device=self.device,
                         )
                     else:
                         standardized = np.empty(len(v), dtype=np.float32)
                     for idx, par in enumerate(v):
-                        standardized[...,idx] = (
+                        standardized[..., idx] = (
                             full_parameters[par] - self.mean[par]
                         ) / self.std[par]
                     sample[k] = standardized
