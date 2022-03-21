@@ -159,12 +159,15 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     transforms.append(SampleNoiseASD(asd_dataset))
     transforms.append(WhitenAndScaleStrain(domain.noise_std))
     transforms.append(AddWhiteNoiseComplex())
+    # Select parameter groups which we need to standardize.
+    # This will always include inference parameters.
+    # If extra_context_parameters are requested, these also need to be standardized.
+    standardization_keys = ["inference_parameters"] + ["context_parameters"] * (
+        len(extra_context_parameters) > 0
+    )
     transforms.append(
         SelectStandardizeRepackageParameters(
-            {
-                k: data_settings[k]
-                for k in ["inference_parameters", "context_parameters"]
-            },
+            {k: data_settings[k] for k in standardization_keys},
             standardization_dict,
         )
     )
@@ -218,7 +221,7 @@ def build_train_and_test_loaders(
         pin_memory=True,
         num_workers=num_workers,
         worker_init_fn=lambda _: np.random.seed(
-            int(torch.initial_seed()) % (2**32 - 1)
+            int(torch.initial_seed()) % (2 ** 32 - 1)
         ),
     )
     test_loader = DataLoader(
@@ -228,7 +231,7 @@ def build_train_and_test_loaders(
         pin_memory=True,
         num_workers=num_workers,
         worker_init_fn=lambda _: np.random.seed(
-            int(torch.initial_seed()) % (2**32 - 1)
+            int(torch.initial_seed()) % (2 ** 32 - 1)
         ),
     )
 
@@ -317,7 +320,7 @@ def build_svd_for_embedding_network(
         batch_size=batch_size,
         num_workers=num_workers,
         worker_init_fn=lambda _: np.random.seed(
-            int(torch.initial_seed()) % (2**32 - 1)
+            int(torch.initial_seed()) % (2 ** 32 - 1)
         ),
     )
     with threadpool_limits(limits=1, user_api="blas"):
