@@ -231,9 +231,9 @@ class FrequencyDomain(Domain):
                 sin_txf[:, idx, ...] = sin_txf_det[...]
 
             x = torch.empty(*data.shape, device=data.device)
-            x[:, :, 0, ...] = cos_txf * data[:, :, 0, :] - sin_txf * data[:, :, 1, :]
-            x[:, :, 1, ...] = sin_txf * data[:, :, 0, :] + cos_txf * data[:, :, 1, :]
-            x[:, :, 2:, ...] = data[:, :, 2:, :]
+            x[:, :, 0, :] = cos_txf * data[:, :, 0, :] - sin_txf * data[:, :, 1, :]
+            x[:, :, 1, :] = sin_txf * data[:, :, 0, :] + cos_txf * data[:, :, 1, :]
+            x[:, :, 2:, :] = data[:, :, 2:, :]
 
             if omit_batch_dimension:
                 assert x.shape[0] == 1
