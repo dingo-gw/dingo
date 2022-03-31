@@ -43,8 +43,11 @@ def get_info(train_dir, common_path="", condor_processes=None):
             last_line = f.readlines()[-1].strip("\n").split("\t")
         epoch = int(last_line[0])
         train_loss = float(last_line[1])
+        train_loss = f"{train_loss:.2f}"
         lr = float(last_line[-1])
+        lr = f"{lr:.2e}"
         time_since_last_epoch = time.time() - getmtime(join(train_dir, "history.txt"))
+        time_since_last_epoch = timedelta(seconds=int(time_since_last_epoch))
     except FileNotFoundError:
         epoch = 0
         train_loss = ""
@@ -74,11 +77,11 @@ def get_info(train_dir, common_path="", condor_processes=None):
     return [
         name,
         condor_info,
-        timedelta(seconds=int(time_since_last_epoch)),
+        time_since_last_epoch,
         time_epoch,
         epoch,
-        f"{train_loss:.2f}",
-        f"{lr:.2e}",
+        train_loss,
+        lr,
         error,
     ]
 
