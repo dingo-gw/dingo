@@ -1,0 +1,43 @@
+Train Epoch: 44 [4874240/4900000 (99%)]		Loss: 4.449 (4.371)		Time Dataloader: 0.000 (0.028)		Time Network: 0.421 (0.618)
+Train Epoch: 44 [4878336/4900000 (100%)]		Loss: 4.262 (4.371)		Time Dataloader: 0.000 (0.028)		Time Network: 0.423 (0.618)
+Train Epoch: 44 [4882432/4900000 (100%)]		Loss: 4.423 (4.371)		Time Dataloader: 0.000 (0.028)		Time Network: 0.418 (0.618)
+Train Epoch: 44 [4886528/4900000 (100%)]		Loss: 4.341 (4.371)		Time Dataloader: 0.000 (0.028)		Time Network: 0.429 (0.617)
+Train Epoch: 44 [4890624/4900000 (100%)]		Loss: 4.387 (4.371)		Time Dataloader: 0.000 (0.028)		Time Network: 0.417 (0.617)
+Train Epoch: 44 [4894720/4900000 (100%)]		Loss: 4.453 (4.371)		Time Dataloader: 0.000 (0.028)		Time Network: 0.415 (0.617)
+Train Epoch: 44 [4898816/4900000 (100%)]		Loss: 4.659 (4.371)		Time Dataloader: 0.000 (0.028)		Time Network: 0.354 (0.617)
+Done. This took 12:53 min.
+Start testing epoch 44
+Submitting job(s).
+1 job(s) submitted to cluster 11719784.
+Test Epoch: 44 [0/100000 (0%)]		Loss: 4.534 (4.534)		Time Dataloader: 25.078 (25.078)		Time Network: 0.227 (0.227)
+Test Epoch: 44 [4096/100000 (4%)]		Loss: 4.736 (4.635)		Time Dataloader: 2.008 (13.543)		Time Network: 0.218 (0.222)
+Test Epoch: 44 [8192/100000 (8%)]		Loss: 4.245 (4.505)		Time Dataloader: 0.000 (9.029)		Time Network: 0.219 (0.221)
+Test Epoch: 44 [12288/100000 (12%)]		Loss: 4.575 (4.522)		Time Dataloader: 0.000 (6.772)		Time Network: 0.212 (0.219)
+Test Epoch: 44 [16384/100000 (16%)]		Loss: 4.300 (4.478)		Time Dataloader: 0.000 (5.417)		Time Network: 0.198 (0.215)
+Test Epoch: 44 [20480/100000 (20%)]		Loss: 4.400 (4.465)		Time Dataloader: 0.000 (4.514)		Time Network: 0.190 (0.211)
+Test Epoch: 44 [24576/100000 (25%)]		Loss: 4.380 (4.453)		Time Dataloader: 0.000 (3.870)		Time Network: 0.188 (0.207)
+Test Epoch: 44 [28672/100000 (29%)]		Loss: 4.409 (4.447)		Time Dataloader: 0.000 (3.386)		Time Network: 0.194 (0.206)
+Test Epoch: 44 [32768/100000 (33%)]		Loss: 4.469 (4.450)		Time Dataloader: 0.000 (3.010)		Time Network: 0.193 (0.204)
+Test Epoch: 44 [36864/100000 (37%)]		Loss: 4.291 (4.434)		Time Dataloader: 0.000 (2.709)		Time Network: 0.131 (0.197)
+Test Epoch: 44 [40960/100000 (41%)]		Loss: 4.502 (4.440)		Time Dataloader: 0.000 (2.462)		Time Network: 0.131 (0.191)
+Test Epoch: 44 [45056/100000 (45%)]		Loss: 4.576 (4.451)		Time Dataloader: 0.000 (2.257)		Time Network: 0.131 (0.186)
+Test Epoch: 44 [49152/100000 (49%)]		Loss: 4.372 (4.445)		Time Dataloader: 0.000 (2.084)		Time Network: 0.131 (0.182)
+Test Epoch: 44 [53248/100000 (53%)]		Loss: 4.457 (4.446)		Time Dataloader: 0.000 (1.935)		Time Network: 0.131 (0.178)
+Test Epoch: 44 [57344/100000 (57%)]		Loss: 4.453 (4.447)		Time Dataloader: 0.002 (1.806)		Time Network: 0.134 (0.175)
+Test Epoch: 44 [61440/100000 (61%)]		Loss: 4.425 (4.445)		Time Dataloader: 0.000 (1.693)		Time Network: 0.131 (0.172)
+Test Epoch: 44 [65536/100000 (66%)]		Loss: 4.442 (4.445)		Time Dataloader: 0.000 (1.594)		Time Network: 0.133 (0.170)
+Test Epoch: 44 [69632/100000 (70%)]		Loss: 4.428 (4.444)		Time Dataloader: 0.000 (1.505)		Time Network: 0.131 (0.168)
+Test Epoch: 44 [73728/100000 (74%)]		Loss: 4.567 (4.451)		Time Dataloader: 0.000 (1.426)		Time Network: 0.133 (0.166)
+Test Epoch: 44 [77824/100000 (78%)]		Loss: 4.263 (4.441)		Time Dataloader: 0.000 (1.355)		Time Network: 0.131 (0.164)
+Test Epoch: 44 [81920/100000 (82%)]		Loss: 4.317 (4.435)		Time Dataloader: 0.000 (1.290)		Time Network: 0.134 (0.163)
+Test Epoch: 44 [86016/100000 (86%)]		Loss: 4.523 (4.439)		Time Dataloader: 0.000 (1.231)		Time Network: 0.131 (0.162)
+Test Epoch: 44 [90112/100000 (90%)]		Loss: 4.584 (4.446)		Time Dataloader: 0.000 (1.178)		Time Network: 0.131 (0.160)
+Test Epoch: 44 [94208/100000 (94%)]		Loss: 4.597 (4.452)		Time Dataloader: 0.000 (1.129)		Time Network: 0.132 (0.159)
+Test Epoch: 44 [98304/100000 (98%)]		Loss: 4.738 (4.457)		Time Dataloader: 0.000 (1.084)		Time Network: 0.092 (0.156)
+Done. This took  0:32 min.
+Saving model to /work/mdax/dingo-dev/01_prototyping/08_training/03_XPHM_rop_hp/02_steps_less/model_latest.pt. Done.
+Finished training epoch 44.
+
+Stop run: Time limit of 36000 s exceeded.
+Local runtime limits reached. Ending program.
+Copying log files

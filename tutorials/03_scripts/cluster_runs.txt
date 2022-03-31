@@ -1,0 +1,2 @@
+./example_train_dirs/train_dir_1
+./example_train_dirs/train_dir_2

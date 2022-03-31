@@ -1,0 +1,38 @@
+Train Epoch: 53 [4882432/4900000 (100%)]		Loss: 3.895 (3.637)		Time Dataloader: 0.000 (0.100)		Time Network: 0.927 (1.224)
+Train Epoch: 53 [4886528/4900000 (100%)]		Loss: 3.767 (3.637)		Time Dataloader: 0.000 (0.100)		Time Network: 0.930 (1.224)
+Train Epoch: 53 [4890624/4900000 (100%)]		Loss: 3.744 (3.637)		Time Dataloader: 0.000 (0.100)		Time Network: 0.932 (1.224)
+Train Epoch: 53 [4894720/4900000 (100%)]		Loss: 3.771 (3.638)		Time Dataloader: 0.000 (0.100)		Time Network: 0.928 (1.223)
+Train Epoch: 53 [4898816/4900000 (100%)]		Loss: 3.714 (3.638)		Time Dataloader: 0.000 (0.100)		Time Network: 0.797 (1.223)
+Done. This took 26:24 min.
+Start testing epoch 53
+Test Epoch: 53 [0/100000 (0%)]		Loss: 3.921 (3.921)		Time Dataloader: 76.956 (76.956)		Time Network: 27.804 (27.804)
+Test Epoch: 53 [4096/100000 (4%)]		Loss: 3.783 (3.852)		Time Dataloader: 0.001 (38.478)		Time Network: 0.260 (14.032)
+Test Epoch: 53 [8192/100000 (8%)]		Loss: 3.771 (3.825)		Time Dataloader: 0.000 (25.652)		Time Network: 0.265 (9.443)
+Test Epoch: 53 [12288/100000 (12%)]		Loss: 4.000 (3.869)		Time Dataloader: 0.000 (19.239)		Time Network: 0.263 (7.148)
+Test Epoch: 53 [16384/100000 (16%)]		Loss: 3.824 (3.860)		Time Dataloader: 0.000 (15.391)		Time Network: 0.270 (5.773)
+Test Epoch: 53 [20480/100000 (20%)]		Loss: 3.848 (3.858)		Time Dataloader: 0.000 (12.826)		Time Network: 0.267 (4.855)
+Test Epoch: 53 [24576/100000 (25%)]		Loss: 3.881 (3.861)		Time Dataloader: 0.000 (10.994)		Time Network: 0.263 (4.199)
+Test Epoch: 53 [28672/100000 (29%)]		Loss: 3.653 (3.835)		Time Dataloader: 0.000 (9.620)		Time Network: 0.265 (3.707)
+Test Epoch: 53 [32768/100000 (33%)]		Loss: 3.777 (3.829)		Time Dataloader: 0.000 (8.551)		Time Network: 0.257 (3.324)
+Test Epoch: 53 [36864/100000 (37%)]		Loss: 3.772 (3.823)		Time Dataloader: 0.000 (7.696)		Time Network: 0.257 (3.017)
+Test Epoch: 53 [40960/100000 (41%)]		Loss: 3.647 (3.807)		Time Dataloader: 0.000 (6.996)		Time Network: 0.262 (2.767)
+Test Epoch: 53 [45056/100000 (45%)]		Loss: 3.837 (3.810)		Time Dataloader: 0.000 (6.413)		Time Network: 0.258 (2.558)
+Test Epoch: 53 [49152/100000 (49%)]		Loss: 3.975 (3.822)		Time Dataloader: 0.000 (5.920)		Time Network: 0.257 (2.381)
+Test Epoch: 53 [53248/100000 (53%)]		Loss: 3.670 (3.811)		Time Dataloader: 0.000 (5.497)		Time Network: 0.261 (2.229)
+Test Epoch: 53 [57344/100000 (57%)]		Loss: 3.842 (3.813)		Time Dataloader: 0.004 (5.131)		Time Network: 0.263 (2.098)
+Test Epoch: 53 [61440/100000 (61%)]		Loss: 3.773 (3.811)		Time Dataloader: 0.000 (4.810)		Time Network: 0.273 (1.984)
+Test Epoch: 53 [65536/100000 (66%)]		Loss: 3.921 (3.817)		Time Dataloader: 0.001 (4.527)		Time Network: 0.262 (1.883)
+Test Epoch: 53 [69632/100000 (70%)]		Loss: 3.924 (3.823)		Time Dataloader: 0.000 (4.276)		Time Network: 0.263 (1.793)
+Test Epoch: 53 [73728/100000 (74%)]		Loss: 3.831 (3.824)		Time Dataloader: 0.000 (4.051)		Time Network: 0.257 (1.712)
+Test Epoch: 53 [77824/100000 (78%)]		Loss: 3.632 (3.814)		Time Dataloader: 0.001 (3.848)		Time Network: 0.258 (1.639)
+Test Epoch: 53 [81920/100000 (82%)]		Loss: 3.882 (3.817)		Time Dataloader: 0.000 (3.665)		Time Network: 0.256 (1.573)
+Test Epoch: 53 [86016/100000 (86%)]		Loss: 4.023 (3.827)		Time Dataloader: 0.000 (3.498)		Time Network: 0.262 (1.514)
+Test Epoch: 53 [90112/100000 (90%)]		Loss: 3.803 (3.826)		Time Dataloader: 0.001 (3.346)		Time Network: 0.261 (1.459)
+Test Epoch: 53 [94208/100000 (94%)]		Loss: 3.871 (3.828)		Time Dataloader: 0.000 (3.207)		Time Network: 0.271 (1.410)
+Test Epoch: 53 [98304/100000 (98%)]		Loss: 4.005 (3.831)		Time Dataloader: 0.000 (3.079)		Time Network: 0.208 (1.362)
+Done. This took  1:52 min.
+Saving model to /work/mdax/dingo-dev/01_prototyping/08_training/03_XPHM_rop_hp/02_steps_more/model_latest.pt. Done.
+Finished training epoch 53.
+
+
+Start training epoch 54 with lr [0.0001]
