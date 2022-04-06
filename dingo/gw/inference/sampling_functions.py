@@ -7,7 +7,7 @@ from dingo.gw.transforms import (
     WhitenAndScaleStrain,
     RepackageStrainsAndASDS,
     SelectStandardizeRepackageParameters,
-    GNPEShiftDetectorTimes,
+    GNPECoalescenceTimes,
     TimeShiftStrain,
     PostCorrectGeocentTime,
     GetDetectorTimes,
@@ -93,7 +93,7 @@ def get_transforms_for_gnpe_time(model, init_parameters, as_type="dict"):
     gnpe_transforms_pre = Compose(
         [
             ResetSample(extrinsic_parameters_keys=init_parameters),
-            GNPEShiftDetectorTimes(
+            GNPECoalescenceTimes(
                 ifo_list,
                 gnpe_settings["kernel"],
                 gnpe_settings["exact_equiv"],

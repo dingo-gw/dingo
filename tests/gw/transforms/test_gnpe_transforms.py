@@ -4,7 +4,7 @@ import torch
 from bilby.core.prior import PriorDict
 from bilby.gw.detector import InterferometerList
 
-from dingo.gw.transforms import GNPEShiftDetectorTimes
+from dingo.gw.transforms import GNPECoalescenceTimes
 
 
 @pytest.fixture
@@ -23,7 +23,7 @@ def gnpe_time_setup():
 
 def test_gnpe_time_training(gnpe_time_setup):
     kernel, ifo_list, time_prior = gnpe_time_setup
-    transform = GNPEShiftDetectorTimes(ifo_list, kernel, exact_global_equivariance=True)
+    transform = GNPECoalescenceTimes(ifo_list, kernel, exact_global_equivariance=True)
 
     # During training, the sample is assumed to be *not* batched, just consisting of an
     # array of floats.
@@ -32,7 +32,7 @@ def test_gnpe_time_training(gnpe_time_setup):
     sample_new = transform(sample)
     extrinsic_parameters_new = sample_new["extrinsic_parameters"]
 
-    # The first time proxy should be dropped for exact equivariance
+    # The first time proxy should be dropped for exact equivariance.
     assert "H1_time_proxy" not in extrinsic_parameters_new
     assert "L1_time_proxy" in extrinsic_parameters_new
 
@@ -58,7 +58,7 @@ def test_gnpe_time_training(gnpe_time_setup):
 
 def test_gnpe_time_inference(gnpe_time_setup):
     kernel, ifo_list, time_prior = gnpe_time_setup
-    transform = GNPEShiftDetectorTimes(
+    transform = GNPECoalescenceTimes(
         ifo_list, kernel, exact_global_equivariance=True, inference=True
     )
 
@@ -71,7 +71,7 @@ def test_gnpe_time_inference(gnpe_time_setup):
     sample_new = transform(sample)
     extrinsic_parameters_new = sample_new["extrinsic_parameters"]
 
-    # The first time proxy should be dropped for exact equivariance
+    # The first time proxy should be dropped for exact equivariance.
     assert "H1_time_proxy" not in extrinsic_parameters_new
     assert "L1_time_proxy" in extrinsic_parameters_new
 

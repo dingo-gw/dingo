@@ -20,7 +20,7 @@ from dingo.gw.transforms import (
     RepackageStrainsAndASDS,
     UnpackDict,
     GNPEChirpMass,
-    GNPEShiftDetectorTimes,
+    GNPECoalescenceTimes,
     SampleExtrinsicParameters,
     GetDetectorTimes,
 )
@@ -110,7 +110,7 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     if "gnpe_time_shifts" in data_settings:
         d = data_settings["gnpe_time_shifts"]
         transforms.append(
-            GNPEShiftDetectorTimes(
+            GNPECoalescenceTimes(
                 ifo_list,
                 d["kernel"],
                 d["exact_equiv"],
