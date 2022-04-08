@@ -365,7 +365,7 @@ def train_local():
         pm, wfd = prepare_training_resume(
             args.checkpoint, local_settings, args.train_dir
         )
-    breakpoint()
+
     with threadpool_limits(limits=1, user_api="blas"):
         complete = train_stages(pm, wfd, args.train_dir, local_settings)
 

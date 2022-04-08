@@ -302,31 +302,23 @@ class FrequencyDomain(Domain):
         New array or tensor of the same shape as data.
         """
         if isinstance(data, np.ndarray) and np.iscomplexobj(data):
-            if phase.shape != data.shape:
-                raise IndexError(
-                    f"Array dimensions do not match:" f" {phase.shape}, {data.shape}."
-                )
+            # This case is assumed to only occur during inference, with un-batched data.
             return data * np.exp(-1j * phase)
 
         elif isinstance(data, torch.Tensor):
             if torch.is_complex(data):
-                if phase.shape != data.shape:
-                    raise IndexError(
-                        f"Array dimensions do not match:"
-                        f" {phase.shape}, {data.shape}."
-                    )
+                # Expand the trailing batch dimensions to allow for broadcasting.
+                while phase.dim() < data.dim():
+                    phase = phase[..., None, :]
                 return data * torch.exp(-1j * phase)
             else:
                 # The first two components of the second last index should be the real
-                # and imaginary parts of the data. This allows for additional
-                # components as well, e.g., ASDs.
-                if (data.shape[-2] < 2) or (
-                    data.shape[:-2] + data.shape[-1:] != phase.shape
-                ):
-                    raise IndexError(
-                        f"Array dimensions do not match:"
-                        f" {phase.shape}, {data.shape}."
-                    )
+                # and imaginary parts of the data. Remaining components correspond to,
+                # e.g., the ASD. The "-1" below accounts for this extra dimension when
+                # broadcasting.
+                while phase.dim() < data.dim() - 1:
+                    phase = phase[..., None, :]
+
                 cos_phase = torch.cos(phase)
                 sin_phase = torch.sin(phase)
                 result = torch.empty_like(data)
@@ -342,19 +334,6 @@ class FrequencyDomain(Domain):
 
         else:
             raise TypeError(f"Invalid data type {type(data)}.")
-
-    # def time_translate_batch(self, data, dt, axis=None):
-    #     # h_d * np.exp(- 2j * np.pi * time_shift * self.sample_frequencies)
-    #     if isinstance(data, np.ndarray):
-    #         if np.iscomplexobj(data):
-    #             pass
-    #         else:
-    #             pass
-    #     elif isinstance(data, torch.Tensor):
-    #         pass
-    #     else:
-    #         raise NotImplementedError(f'Method only implemented for np arrays '
-    #                                   f'and torch tensors, got {type(data)}')
 
     def __len__(self):
         """Number of frequency bins in the domain [0, f_max]"""

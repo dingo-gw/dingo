@@ -224,7 +224,13 @@ class GNPEChirpMass(GNPEBase):
     def __call__(self, input_sample):
         sample = input_sample.copy()
         extrinsic_parameters = sample["extrinsic_parameters"].copy()
-        proxies = self.sample_proxies(sample["parameters"])
+
+        # The chirp mass could be in either the intrinsic or extrinsic parameters list.
+        # At inference time, we put all GNPE parameters into the extrinsic parameters
+        # list.
+        proxies = self.sample_proxies(
+            {**sample["parameters"], **sample["extrinsic_parameters"]}
+        )
         extrinsic_parameters.update(proxies)
         sample["extrinsic_parameters"] = extrinsic_parameters
 

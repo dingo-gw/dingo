@@ -15,6 +15,7 @@ from dingo.gw.transforms import (
     ExpandStrain,
     ToTorch,
     ResetSample,
+    GNPEChirpMass,
 )
 from dingo.core.models import PosteriorModel
 from dingo.gw.inference.data_preparation import (
@@ -78,11 +79,23 @@ def sample_with_npe(domain_data, model, num_samples, as_type="dict", batch_size=
     return samples
 
 
-def get_transforms_for_gnpe_time(model, init_parameters, as_type="dict"):
+def get_transforms_for_gnpe(model, init_parameters, as_type="dict"):
     # get model settings
     data_settings = model.metadata["train_settings"]["data"]
     ifo_list = InterferometerList(data_settings["detectors"])
-    gnpe_settings = model.metadata["train_settings"]["data"]["gnpe_time_shifts"]
+    domain = build_domain_for_model(model)
+
+    gnpe_time_settings = model.metadata["train_settings"]["data"].get(
+        "gnpe_time_shifts"
+    )
+    gnpe_chirp_settings = model.metadata["train_settings"]["data"].get(
+        "gnpe_chirp_mass"
+    )
+    if not gnpe_time_settings and not gnpe_chirp_settings:
+        raise KeyError(
+            "GNPE inference requires network trained for either chirp mass "
+            "or coalescence time GNPE."
+        )
 
     # transforms for gnpe loop, to be applied prior to sampling step:
     #   * reset the sample (e.g., clone non-gnpe transformed waveform)
@@ -90,23 +103,28 @@ def get_transforms_for_gnpe_time(model, init_parameters, as_type="dict"):
     #   * shifting the strain by - gnpe proxies
     #   * repackaging & standardizing proxies to sample['context_parameters']
     #     for conditioning of the inference network
-    gnpe_transforms_pre = Compose(
-        [
-            ResetSample(extrinsic_parameters_keys=init_parameters),
+    gnpe_transforms_pre = [ResetSample(extrinsic_parameters_keys=init_parameters)]
+    if gnpe_time_settings:
+        gnpe_transforms_pre.append(
             GNPECoalescenceTimes(
                 ifo_list,
-                gnpe_settings["kernel"],
-                gnpe_settings["exact_equiv"],
+                gnpe_time_settings["kernel"],
+                gnpe_time_settings["exact_equiv"],
                 inference=True,
-            ),
-            TimeShiftStrain(ifo_list, build_domain_for_model(model)),
-            SelectStandardizeRepackageParameters(
-                {"context_parameters": data_settings["context_parameters"]},
-                data_settings["standardization"],
-                device=model.device,
-            ),
-        ]
+            )
+        )
+        gnpe_transforms_pre.append(TimeShiftStrain(ifo_list, domain))
+    if gnpe_chirp_settings:
+        gnpe_transforms_pre.append(GNPEChirpMass(gnpe_chirp_settings["kernel"], domain))
+    gnpe_transforms_pre.append(
+        SelectStandardizeRepackageParameters(
+            {"context_parameters": data_settings["context_parameters"]},
+            data_settings["standardization"],
+            device=model.device,
+        )
     )
+
+    gnpe_transforms_pre = Compose(gnpe_transforms_pre)
 
     # transforms for gnpe loop, to be applied after sampling step:
     #   * de-standardization of parameters
@@ -121,7 +139,7 @@ def get_transforms_for_gnpe_time(model, init_parameters, as_type="dict"):
                 as_type=as_type,
             ),
             PostCorrectGeocentTime(),
-            CopyToExtrinsicParameters("ra", "dec", "geocent_time"),
+            CopyToExtrinsicParameters("ra", "dec", "geocent_time", "chirp_mass"),
             GetDetectorTimes(ifo_list, data_settings["ref_time"]),
         ]
     )
@@ -147,7 +165,7 @@ def sample_with_gnpe(
     }
 
     # get transformations for gnpe loop
-    gnpe_transforms_pre, gnpe_transforms_post = get_transforms_for_gnpe_time(
+    gnpe_transforms_pre, gnpe_transforms_post = get_transforms_for_gnpe(
         model,
         init_parameters=samples_init["parameters"].keys(),
     )
