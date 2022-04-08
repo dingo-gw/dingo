@@ -12,7 +12,10 @@ import dingo.core.utils.trainutils
 import math
 import wandb
 
-from dingo.core.nn.nsf import create_nsf_with_rb_projection_embedding_net
+from dingo.core.nn.nsf import (
+    create_nsf_with_rb_projection_embedding_net,
+    create_nsf_wrapped,
+)
 
 
 class PosteriorModel:
@@ -116,7 +119,9 @@ class PosteriorModel:
         """
         model_builder = get_model_callable(self.model_kwargs["type"])
         model_kwargs = {k: v for k, v in self.model_kwargs.items() if k != "type"}
-        self.model = model_builder(**model_kwargs, initial_weights=self.initial_weights)
+        if self.initial_weights is not None:
+            model_kwargs["initial_weights"] = self.initial_weights
+        self.model = model_builder(**model_kwargs)
 
     def initialize_optimizer_and_scheduler(self):
         """
@@ -344,6 +349,8 @@ class PosteriorModel:
 def get_model_callable(model_type: str):
     if model_type == "nsf+embedding":
         return create_nsf_with_rb_projection_embedding_net
+    elif model_type == "nsf":
+        return create_nsf_wrapped
     else:
         raise KeyError("Invalid model type.")
 
