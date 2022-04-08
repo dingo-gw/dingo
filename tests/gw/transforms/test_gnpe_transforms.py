@@ -25,6 +25,8 @@ def test_gnpe_time_training(gnpe_time_setup):
     kernel, ifo_list, time_prior = gnpe_time_setup
     transform = GNPECoalescenceTimes(ifo_list, kernel, exact_global_equivariance=True)
 
+    assert transform.proxy_list == ['L1_time_proxy']
+
     # During training, the sample is assumed to be *not* batched, just consisting of an
     # array of floats.
     extrinsic_parameters = time_prior.sample()
@@ -43,16 +45,18 @@ def test_gnpe_time_training(gnpe_time_setup):
         assert np.abs(extrinsic_parameters_new[k]) <= 0.001
 
     # Check particular sum rules.
-    assert extrinsic_parameters_new["geocent_time"] == (
+    assert np.isclose(
+        extrinsic_parameters_new["geocent_time"],
         extrinsic_parameters["geocent_time"]
         - extrinsic_parameters["H1_time"]
-        + extrinsic_parameters_new["H1_time"]
+        + extrinsic_parameters_new["H1_time"],
     )
-    assert extrinsic_parameters_new["L1_time_proxy"] == (
+    assert np.isclose(
+        extrinsic_parameters_new["L1_time_proxy"],
         extrinsic_parameters["L1_time"]
         - extrinsic_parameters_new["L1_time"]
         - extrinsic_parameters["H1_time"]
-        + extrinsic_parameters_new["H1_time"]
+        + extrinsic_parameters_new["H1_time"],
     )
 
 

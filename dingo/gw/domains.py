@@ -3,6 +3,7 @@ from typing import Dict
 from functools import lru_cache
 from abc import ABC, abstractmethod
 
+import numpy as np
 import torch
 
 from dingo.gw.gwutils import *
@@ -243,6 +244,104 @@ class FrequencyDomain(Domain):
 
         else:
             raise NotImplementedError()
+
+    def get_sample_frequencies_astype(self, data):
+        """
+        Returns a 1D frequency array compatible with the last index of data array.
+
+        Decides whether array is numpy or torch tensor (and cuda vs cpu), and whether it
+        contains the leading zeros below f_min.
+
+        Parameters
+        ----------
+        data : Union[np.array, torch.Tensor]
+            Sample data
+
+        Returns
+        -------
+        frequency array compatible with last index
+        """
+        # Type
+        if isinstance(data, np.ndarray):
+            f = self.sample_frequencies
+        elif isinstance(data, torch.Tensor):
+            if data.is_cuda:
+                f = self.sample_frequencies_torch_cuda
+            else:
+                f = self.sample_frequencies_torch
+        else:
+            raise TypeError("Invalid data type. Should be np.array or torch.Tensor.")
+
+        # Whether to include zeros below f_min
+        if data.shape[-1] == len(self) - self.min_idx:
+            f = f[self.min_idx:]
+        elif data.shape[-1] != len(self):
+            raise TypeError(
+                f"Data with {data.shape[-1]} frequency bins is "
+                f"incompatible with domain."
+            )
+
+        return f
+
+    @staticmethod
+    def add_phase(data, phase):
+        """
+        Add a (frequency-dependent) phase to a frequency series. Allows for batching,
+        as well as additional channels (such as detectors). Accounts for the fact that
+        the data could be a complex frequency series or real and imaginary parts.
+
+        Convention: the phase phi(f) is defined via exp(- 1j * phi(f)).
+
+        Parameters
+        ----------
+        data : Union[np.array, torch.Tensor]
+        phase : Union[np.array, torch.Tensor]
+
+        Returns
+        -------
+        New array or tensor of the same shape as data.
+        """
+        if isinstance(data, np.ndarray) and np.iscomplexobj(data):
+            if phase.shape != data.shape:
+                raise IndexError(
+                    f"Array dimensions do not match:" f" {phase.shape}, {data.shape}."
+                )
+            return data * np.exp(-1j * phase)
+
+        elif isinstance(data, torch.Tensor):
+            if torch.is_complex(data):
+                if phase.shape != data.shape:
+                    raise IndexError(
+                        f"Array dimensions do not match:"
+                        f" {phase.shape}, {data.shape}."
+                    )
+                return data * torch.exp(-1j * phase)
+            else:
+                # The first two components of the second last index should be the real
+                # and imaginary parts of the data. This allows for additional
+                # components as well, e.g., ASDs.
+                if (data.shape[-2] < 2) or (
+                    data.shape[:-2] + data.shape[-1:] != phase.shape
+                ):
+                    raise IndexError(
+                        f"Array dimensions do not match:"
+                        f" {phase.shape}, {data.shape}."
+                    )
+                cos_phase = torch.cos(phase)
+                sin_phase = torch.sin(phase)
+                result = torch.empty_like(data)
+                result[..., 0, :] = (
+                    data[..., 0, :] * cos_phase + data[..., 1, :] * sin_phase
+                )
+                result[..., 1, :] = (
+                    data[..., 1, :] * cos_phase - data[..., 0, :] * sin_phase
+                )
+                if data.shape[-2] > 2:
+                    result[..., 2:, :] = data[..., 2:, :]
+                return result
+
+        else:
+            raise TypeError(f"Invalid data type {type(data)}.")
 
     # def time_translate_batch(self, data, dt, axis=None):
     #     # h_d * np.exp(- 2j * np.pi * time_shift * self.sample_frequencies)

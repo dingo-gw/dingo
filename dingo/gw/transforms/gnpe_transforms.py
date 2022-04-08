@@ -4,6 +4,8 @@ import lal
 from bilby.core.prior import PriorDict
 from abc import ABC, abstractmethod
 
+from dingo.gw.domains import FrequencyDomain
+
 
 class GNPEBase(ABC):
     """
@@ -18,22 +20,21 @@ class GNPEBase(ABC):
     def __init__(self, kernel_dict, operators):
         self.kernel = PriorDict(kernel_dict)
         self.operators = operators
+        self.proxy_list = [k + "_proxy" for k in kernel_dict.keys()]
 
     @abstractmethod
     def __call__(self, input_sample):
         pass
 
-    def apply_gnpe(self, input_parameters):
+    def sample_proxies(self, input_parameters):
         """
-        Applies a GNPE transformation. Given input parameters, perturbs based on the
+        Given input parameters, perturbs based on the
         kernel to produce "proxy" ("hatted") parameters, i.e., samples
 
             \hat g ~ p(\hat g | g).
 
-        Typically the GNPE NDE will be conditioned on \hat g.
-
-        In addition, the data simplification is achieved by transforming according to
-        (\hat g)^{-1}, so this is provided as well.
+        Typically the GNPE NDE will be conditioned on \hat g. Furthermore, these proxy
+        parameters will be used to transform the data to simplify it.
 
         Parameters:
         -----------
@@ -43,11 +44,9 @@ class GNPEBase(ABC):
 
         Returns
         -------
-        A dict of parameters that includes (a) the proxy parameters, and (b) their
-        inverses (under the original parameter keys), which will subsequently used for
-        transforming the data.
+        A dict of proxy parameters.
         """
-        result = {}
+        proxies = {}
         for k in self.kernel:
             if k not in input_parameters:
                 raise KeyError(
@@ -55,9 +54,8 @@ class GNPEBase(ABC):
                 )
             g = input_parameters[k]
             g_hat = self.perturb(g, k)
-            result[k + "_proxy"] = g_hat
-            result[k] = self.inverse(g_hat, k)
-        return result
+            proxies[k + "_proxy"] = g_hat
+        return proxies
 
     def perturb(self, g, k):
         """
@@ -65,7 +63,7 @@ class GNPEBase(ABC):
 
         Parameters
         ----------
-        g : Union[float, torch.Tensor]
+        g : Union[np.float64, float, torch.Tensor]
             Initial parameter values
         k : str
             Parameter name. This is used to identify the group binary operator.
@@ -82,7 +80,7 @@ class GNPEBase(ABC):
         if type(g) == torch.Tensor:
             epsilon = self.kernel[k].sample(len(g))
             epsilon = torch.tensor(epsilon, dtype=g.dtype, device=g.device)
-        elif type(g) == float:
+        elif type(g) == np.float64 or type(g) == float:
             epsilon = self.kernel[k].sample()
         else:
             raise NotImplementedError(f"Unsupported data type {type(g)}.")
@@ -93,6 +91,8 @@ class GNPEBase(ABC):
         op = self.operators[k]
         if op == "+":
             return a + b
+        elif op == "x":
+            return a * b
         else:
             raise NotImplementedError(
                 f"Unsupported group multiplication operator: {op}"
@@ -102,6 +102,8 @@ class GNPEBase(ABC):
         op = self.operators[k]
         if op == "+":
             return -a
+        elif op == "x":
+            return 1 / a
         else:
             raise NotImplementedError(
                 f"Unsupported group multiplication operator: {op}"
@@ -127,8 +129,12 @@ class GNPECoalescenceTimes(GNPEBase):
     proxies, and from the geocent time, see [1]. This is enabled with the flag
     exact_global_equivariance.
 
+    Note that this transform does not modify the data itself. It only determines the
+    amount by which to time-shift the data.
+
     [1]: arxiv.org/abs/2111.13139
     """
+
     def __init__(
         self, ifo_list, kernel, exact_global_equivariance=True, inference=False
     ):
@@ -151,11 +157,13 @@ class GNPECoalescenceTimes(GNPEBase):
 
         self.inference = inference
         self.exact_global_equivariance = exact_global_equivariance
+        if self.exact_global_equivariance:
+            del self.proxy_list[0]
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
         extrinsic_parameters = sample["extrinsic_parameters"].copy()
-        new_parameters = self.apply_gnpe(extrinsic_parameters)
+        new_parameters = self.sample_proxies(extrinsic_parameters)
 
         # If we are in training mode, we assume that the time shifting due to different
         # arrival times of the signal in individual detectors has not yet been applied
@@ -164,7 +172,13 @@ class GNPECoalescenceTimes(GNPEBase):
         # shifting of the data only has to be done once.
         if not self.inference:
             for k in self.ifo_time_labels:
-                new_parameters[k] = new_parameters[k] + extrinsic_parameters[k]
+                new_parameters[k] = (
+                    -new_parameters[k + "_proxy"] + extrinsic_parameters[k]
+                )
+        # In inference mode, the data are only time shifted by minus the proxy.
+        else:
+            for k in self.ifo_time_labels:
+                new_parameters[k] = -new_parameters[k + "_proxy"]
 
         # If we are imposing the global time shift symmetry, then we treat the first
         # proxy as "preferred", in the sense that it defines the global time shift.
@@ -180,7 +194,7 @@ class GNPECoalescenceTimes(GNPEBase):
         # data: we do not change the values of the true detector coalescence times
         # stored in extrinsic_parameters, only the proxies.
         if self.exact_global_equivariance:
-            dt = new_parameters.pop(self.ifo_time_labels[0] + '_proxy')
+            dt = new_parameters.pop(self.ifo_time_labels[0] + "_proxy")
             if not self.inference:
                 if "geocent_time" not in extrinsic_parameters:
                     raise KeyError(
@@ -200,7 +214,73 @@ class GNPECoalescenceTimes(GNPEBase):
         return sample
 
 
-class GNPEChirpMass(object):
+class GNPEChirpMass(GNPEBase):
+    def __init__(self, kernel, domain):
+        kernel_dict = {"chirp_mass": kernel}
+        operators = {"chirp_mass": "x"}
+        super().__init__(kernel_dict, operators)
+        self.domain = domain
+
+    def __call__(self, input_sample):
+        sample = input_sample.copy()
+        extrinsic_parameters = sample["extrinsic_parameters"].copy()
+        proxies = self.sample_proxies(sample["parameters"])
+        extrinsic_parameters.update(proxies)
+        sample["extrinsic_parameters"] = extrinsic_parameters
+
+        # The only situation where we would expect to not have a waveform to transform
+        # would be when calculating parameter standardizations, since we just want to
+        # draw samples of the parameters at that point, and not prepare any data.
+        if "waveform" in sample:
+            sample["waveform"] = self.factor_fiducial_waveform(
+                proxies["chirp_mass_proxy"], sample["waveform"]
+            )
+
+        return sample
+
+    def factor_fiducial_waveform(self, chirp_mass, data):
+        if isinstance(self.domain, FrequencyDomain):
+            if type(data) == dict:
+                f = self.domain.get_sample_frequencies_astype(list(data.values())[0])
+            else:
+                f = self.domain.get_sample_frequencies_astype(data)
+
+            # Expand across possible batch dimension.
+            if type(chirp_mass) == np.float64 or type(chirp_mass) == float:
+                mf = chirp_mass * f
+                # Avoid taking a negative power of 0 in the first index. This will get
+                # chopped off or multiplied by 0 later anyway.
+                if f[0] == 0.0:
+                    mf[0] = 1.0
+            elif type(chirp_mass) == torch.Tensor:
+                mf = torch.outer(chirp_mass, f)
+                if f[0] == 0.0:
+                    mf[0] = 0.0
+            else:
+                raise TypeError(
+                    f"Invalid type {type(chirp_mass)}. "
+                    f"Only implemented for floats and tensors"
+                )
+
+            # Add higher order corrections to the leading PN order if desired.
+            fiducial_phase = (3 / 128) * (
+                np.pi * mf * lal.GMSUN_SI / lal.C_SI ** 3
+            ) ** (-5 / 3)
+
+            if type(data) == dict:
+                result = {}
+                for k, v in data.items():
+                    result[k] = self.domain.add_phase(v, -fiducial_phase)
+            else:
+                result = self.domain.add_phase(data, -fiducial_phase)
+
+            return result
+
+        else:
+            raise NotImplementedError("Can only use GNPEChirpMass in frequency domain.")
+
+
+class GNPEChirpMassOld(object):
     """
     GNPE [1] Transformation for chirp mass.
 
@@ -254,32 +334,3 @@ class GNPEChirpMass(object):
         # else:
         #     sample["gnpe_proxies"] = proxies_array
         return sample
-
-
-def get_gnpe_kernel(kernel_kwargs):
-    """
-    Returns kernel from kernel_kwargs.
-
-    :param kernel_kwargs: dict
-        kernel_kwargs['type'] contains the type of the kernel (choices:
-        'uniform' and 'random'). The remaining kwargs are passed to the
-        corresponding numpy function.
-    :return: kernel
-    """
-    # kernel_type = kernel_kwargs.pop('type')
-    kernel_type = kernel_kwargs["type"]
-    kernel_kwargs = {k: v for k, v in kernel_kwargs.items() if k != "type"}
-    if kernel_type == "uniform":
-
-        def kernel():
-            return np.random.uniform(**kernel_kwargs)
-
-        return kernel
-    elif kernel_type == "normal":
-
-        def kernel():
-            return np.random.normal(**kernel_kwargs)
-
-        return kernel
-    else:
-        raise NotImplementedError(f"Unknown kernel type {kernel_type}.")
