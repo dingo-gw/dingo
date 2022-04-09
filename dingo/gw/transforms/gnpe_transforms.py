@@ -4,7 +4,7 @@ import lal
 from bilby.core.prior import PriorDict
 from abc import ABC, abstractmethod
 
-from dingo.gw.domains import FrequencyDomain
+from dingo.gw.domains import FrequencyDomain, Domain
 
 
 class GNPEBase(ABC):
@@ -215,7 +215,31 @@ class GNPECoalescenceTimes(GNPEBase):
 
 
 class GNPEChirpMass(GNPEBase):
-    def __init__(self, kernel, domain):
+    """
+    Relative binning / heterodyning GNPE transform, which factors out the overall chirp
+    from the waveform.
+
+    Given a chirp mass estimate, this applies a multiplicative blur to obtain a GNPE proxy
+    variable. The data are then transformed by dividing by a fiducial waveform of the form
+
+    exp( - 1j * (3/128) * (pi G chirp_mass_proxy f / c**3)**(-5/3) ) ;
+
+    see 2001.11412, eq. (7.2). This is the leading order chirp due to the emission of
+    quadrupole radiation. (Higher PN order corrections could also be added.) We do not
+    include any amplitude in the fiducial waveform, since at inference time this
+    transform will be applied to noisy data. Multiplying the frequency-domain noise by
+    a complex number of unit norm is allowed because it only changes the phase,
+    not the overall amplitude, which would change the noise PSD.
+    """
+    def __init__(self, kernel: str, domain: Domain):
+        """
+        Parameters
+        ----------
+        kernel : str
+            Defines a Bilby prior.
+        domain : Domain
+            Only works for a FrequencyDomain at present.
+        """
         kernel_dict = {"chirp_mass": kernel}
         operators = {"chirp_mass": "x"}
         super().__init__(kernel_dict, operators)
@@ -245,6 +269,22 @@ class GNPEChirpMass(GNPEBase):
         return sample
 
     def factor_fiducial_waveform(self, chirp_mass, data):
+        """
+        Divides the data by the fiducial waveform defined by the chirp mass. Allows for
+        batching.
+
+        Parameters
+        ----------
+        chirp_mass : Union[np.array, torch.Tensor]
+        data : Union[dict, torch.Tensor]
+            If a dict, the keys would correspond to different detectors or
+            polarizations. For a Tensor, these would be within different components.
+            This method uses the same fiducial waveform for each detector.
+
+        Returns
+        -------
+        dict or torch.Tensor of the same form as data.
+        """
         if isinstance(self.domain, FrequencyDomain):
             if type(data) == dict:
                 f = self.domain.get_sample_frequencies_astype(list(data.values())[0])
@@ -261,7 +301,7 @@ class GNPEChirpMass(GNPEBase):
             elif type(chirp_mass) == torch.Tensor:
                 mf = torch.outer(chirp_mass, f)
                 if f[0] == 0.0:
-                    mf[0] = 0.0
+                    mf[0] = 1.0
             else:
                 raise TypeError(
                     f"Invalid type {type(chirp_mass)}. "
@@ -284,59 +324,3 @@ class GNPEChirpMass(GNPEBase):
 
         else:
             raise NotImplementedError("Can only use GNPEChirpMass in frequency domain.")
-
-
-class GNPEChirpMassOld(object):
-    """
-    GNPE [1] Transformation for chirp mass.
-
-    Todo
-
-    [1]: arxiv.org/abs/2111.13139
-    """
-
-    def __init__(self, frequencies, kernel_kwargs):
-        """
-        :param frequencies: np.array
-            sample frequencies of strain data
-        :param kernel_kwargs: dict
-            kwargs for gnpe kernel
-        :param mean: float = 0
-            mean for standardization of proxy
-        :param std: float = 1
-            standard deviation for standardization of proxy
-        """
-        self.f = frequencies
-        self.kernel = get_gnpe_kernel(kernel_kwargs)
-
-    def __call__(self, input_sample):
-        sample = input_sample.copy()
-        # Copy extrinsic parameters to not overwrite input_sample. Does this really
-        # matter?
-        extrinsic_parameters = sample["extrinsic_parameters"].copy()
-
-        # get proxy by adding perturbation from kernel to Mc
-        Mc_hat = sample["parameters"]["chirp_mass"] + self.kernel()
-        # convert to SI units
-        Mc_SI_hat = Mc_hat * lal.GMSUN_SI
-
-        rescaling = np.exp(
-            1j
-            * (3 / 4)
-            * (8 * np.pi * self.f * (Mc_SI_hat / lal.C_SI ** 3)) ** (-5 / 3)
-        )
-        hc = sample["waveform"]["h_cross"] * rescaling
-        hp = sample["waveform"]["h_plus"] * rescaling
-        sample["waveform"] = {"h_cross": hc, "h_plus": hp}
-
-        extrinsic_parameters.update({"chirp_mass_proxy": Mc_hat})
-        sample["extrinsic_parameters"] = extrinsic_parameters
-
-        # proxies_array = (np.array([Mc_hat]) - self.mean) / self.std
-        # if "gnpe_proxies" in sample:
-        #     sample["gnpe_proxies"] = np.concatenate(
-        #         (sample["gnpe_proxies"], proxies_array)
-        #     )
-        # else:
-        #     sample["gnpe_proxies"] = proxies_array
-        return sample
