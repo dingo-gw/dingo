@@ -23,7 +23,7 @@ data:
     kernel: bilby.core.prior.Uniform(minimum=-0.001, maximum=0.001)
     exact_equiv: True
   gnpe_chirp_mass:
-    kernel: bilby.core.prior.Uniform(minimum=0.99, maximum=1.01)
+    kernel: bilby.core.prior.Uniform(minimum=0.95, maximum=1.05)
   inference_parameters: default # [chirp_mass, mass_ratio,  luminosity_distance, dec]
 
 # Model architecture
