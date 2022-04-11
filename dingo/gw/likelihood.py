@@ -108,6 +108,7 @@ class StationaryGaussianLikelihoodBBH(Likelihood):
         sample = self.projection_transforms(sample)
 
         # import matplotlib.pyplot as plt
+        # plt.xlim((150,1000))
         # plt.xscale("log")
         # plt.plot(self.whitened_strains["H1"].real)
         # plt.plot(sample["waveform"]["H1"].real)
@@ -203,10 +204,40 @@ def split_off_extrinsic_parameters(theta):
     return theta_intrinsic, theta_extrinsic
 
 
+def build_stationary_gaussian_likelihood(metadata, event_dataset=None):
+    """
+    Build a StationaryGaussianLikelihoodBBH object from the metadata.
+
+    Parameters
+    ----------
+    metadata: dict
+        Metadata from stored dingo parameter samples file.
+        Typially accessed via pd.read_pickle(/path/to/dingo-output.pkl).metadata.
+
+    Returns
+    -------
+    likelihood: StationaryGaussianLikelihoodBBH
+        likelihood object
+    """
+    # get strain data
+    domain_data = get_domain_data(
+        metadata["model"], event_dataset=event_dataset, **metadata["event"]
+    )
+
+    # set up likelihood
+    wfg_kwargs = metadata["model"]["dataset_settings"]["waveform_generator"]
+    domain = build_domain_from_model_metadata(metadata["model"])
+    likelihood = StationaryGaussianLikelihoodBBH(
+        wfg_kwargs, domain, domain_data, t_ref=metadata["event"]["time_event"]
+    )
+
+    return likelihood
+
+
 def main():
     import pandas as pd
 
-    samples = (
+    samples = pd.read_pickle(
         "/Users/maxdax/Documents/Projects/GW-Inference/dingo/datasets/dingo_samples"
         "/02_XPHM/dingo_samples_GW150914.pkl"
     )
@@ -214,20 +245,8 @@ def main():
         "/Users/maxdax/Documents/Projects/GW-Inference/dingo/dingo-devel"
         "/tutorials/02_gwpe/datasets/strain_data/events_dataset.hdf5"
     )
-    samples = pd.read_pickle(samples)
-    metadata = samples.attrs
-    wfg_kwargs = metadata["model"]["dataset_settings"]["waveform_generator"]
-    domain = build_domain_from_model_metadata(metadata["model"])
 
-    # get strain data
-    domain_data = get_domain_data(
-        metadata["model"], event_dataset=event_dataset, **metadata["event"]
-    )
-
-    # set up likelihood
-    likelihood = StationaryGaussianLikelihoodBBH(
-        wfg_kwargs, domain, domain_data, t_ref=metadata["event"]["time_event"]
-    )
+    likelihood = build_stationary_gaussian_likelihood(samples.attrs, event_dataset)
 
     from tqdm import tqdm
     log_likelihoods = []
