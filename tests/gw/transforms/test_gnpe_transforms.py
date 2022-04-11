@@ -128,6 +128,8 @@ def test_gnpe_chirp_training(gnpe_chirp_setup):
     mf = chirp_mass * f
     mf[0] = 1.0
     phase = (3 / 128) * (np.pi * lal.GMSUN_SI / lal.C_SI ** 3 * mf) ** (-5 / 3)
+    # Each detector gets the same waveform. The transform also uses the same fiducial
+    # waveform for each detector.
     sample["waveform"]["H1"] = np.exp(-1j * phase).astype(np.complex64)
     sample["waveform"]["L1"] = sample["waveform"]["H1"]
     new_sample = transform(sample)
@@ -143,7 +145,7 @@ def test_gnpe_chirp_training(gnpe_chirp_setup):
         # test to this regime. Even above f_min, the tolerance must be raised to 1e-4.
         #
         # Oddly, the error all occurs in the imaginary part of the data.
-        # TODO: Figure out why.
+        # TODO: Figure out why. Maybe it's because the imaginary part is close to zero?
         assert np.allclose(data[domain.min_idx :], 1.0, atol=1e-4)
 
     assert new_sample["extrinsic_parameters"]["chirp_mass_proxy"] == chirp_mass

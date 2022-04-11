@@ -136,6 +136,7 @@ class TimeShiftStrain(object):
         elif isinstance(input_sample["waveform"], torch.Tensor):
             strains = input_sample["waveform"]
             dt = [extrinsic_parameters.pop(f"{ifo.name}_time") for ifo in self.ifo_list]
+            dt = torch.stack(dt, 1)
             strains = self.domain.time_translate_data(strains, dt)
 
         else:

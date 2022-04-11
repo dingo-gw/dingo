@@ -1,3 +1,5 @@
+import torch
+
 from dingo.gw.domains import FrequencyDomain, TimeDomain, build_domain
 from dingo.gw.gwutils import get_window_factor
 import pytest
@@ -135,6 +137,35 @@ def test_FD_time_translation(uniform_FD_params):
     # test that time translation can be undone
     assert np.allclose(a, domain.time_translate_data(a_dt, -dt))
     assert not np.allclose(a, domain.time_translate_data(a_dt, -1.01 * dt))
+
+
+def test_FD_time_translation_torch(uniform_FD_params):
+    p = uniform_FD_params
+    domain = FrequencyDomain(**p)
+    batch_size = 5
+    num_detectors = 2
+    dt = torch.randn(batch_size, num_detectors, dtype=torch.float32)
+    data = torch.empty(
+        (batch_size, num_detectors, 3, len(domain) - domain.min_idx),
+        dtype=torch.float32,
+    )
+    constant_value = 2.0
+    f = domain.sample_frequencies_torch[domain.min_idx :]
+    for i in range(batch_size):
+        for j in range(num_detectors):
+            signal = torch.exp(-2j * np.pi * dt[i, j] * f)
+            data[i, j, 0, :] = signal.real
+            data[i, j, 1, :] = signal.imag
+            data[i, j, 2, :] = constant_value
+    result = domain.time_translate_data(data, -dt)
+    assert result.dtype == torch.float32
+    assert result.shape == data.shape
+    assert torch.allclose(result[..., 0, :], torch.tensor(1.0))
+    # Tolerance of 1e-2 is required in the imaginary part, likely because we are
+    # checking that it *vanishes*. This is a consequence of single-precision floats.
+    # TODO: Is there a way to improve on this?
+    assert torch.allclose(result[..., 1, :], torch.tensor(0.0), atol=1e-2)
+    assert torch.allclose(result[..., 2, :], torch.tensor(constant_value))
 
 
 def test_FD_caching(uniform_FD_params):
