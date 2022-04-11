@@ -55,12 +55,13 @@ class StationaryGaussianLikelihoodBBH(Likelihood):
         )
 
         # set GW event data
-        # TODO: check that domain_data is in domain
         self.t_ref = t_ref
         self.whitened_strains = {
             k: v / domain_data["asds"][k] for k, v in domain_data["waveform"].items()
         }
         self.asds = domain_data["asds"]
+        if len(list(self.whitened_strains.values())[0]) != domain.max_idx + 1:
+            raise ValueError("Strain data does not match domain.")
 
         # build transforms for detector projections
         self.ifo_list = InterferometerList(self.whitened_strains.keys())
@@ -92,6 +93,7 @@ class StationaryGaussianLikelihoodBBH(Likelihood):
             GW strain for each detector.
         """
         theta_intrinsic, theta_extrinsic = split_off_extrinsic_parameters(theta)
+        theta_intrinsic = {k: float(v) for k, v in theta_intrinsic.items()}
 
         # Step 1: generate polarizations h_plus and h_cross
         polarizations = self.waveform_generator.generate_hplus_hcross(theta_intrinsic)
@@ -139,18 +141,6 @@ class StationaryGaussianLikelihoodBBH(Likelihood):
         # Step 2: subtract signal h from whitened strain data d, n = d - h
         n = {k: v - h[k] for k, v in self.whitened_strains.items()}
 
-        # import matplotlib.pyplot as plt
-        # plt.xlim((150, 1000))
-        # plt.xscale("log")
-        # plt.plot(n["H1"].real)
-        # plt.show()
-
-        # import torch
-        # n = {
-        #     k: torch.randn(*v.shape).numpy() + 1j * torch.randn(*v.shape).numpy()
-        #     for k, v in n.items()
-        # }
-
         # Step 3: compute likelihood that n is Gaussian noise with variance 1 on real
         # and imaginary part individually
         log_likelihoods = {}
@@ -164,13 +154,13 @@ class StationaryGaussianLikelihoodBBH(Likelihood):
             #           log(N[0, 1](n[i])) = - log(sqrt(2) * pi) - 1/2. n[i] ** 2.
             #
             # To compute the log likelihood for a whole array, we sum over the array of
-            # log likelihoods. We further omit the constant term - log(sqrt(2) * pi),
-            # since we do not need a normalized density.
+            # log likelihoods.
             # The considerations above hold for the real and imaginary part of the
             # noise individually, so we add both contributions.
             l_real = np.sum(-1 / 2.0 * n_ifo.real ** 2)
             l_imag = np.sum(-1 / 2.0 * n_ifo.imag ** 2)
-            log_likelihoods[ifo] = l_real + l_imag
+            l_const =  - 2 * len(n_ifo) * np.log(np.sqrt(2) * np.pi)
+            log_likelihoods[ifo] = l_real + l_imag + l_const
 
         return sum(log_likelihoods.values())
 
@@ -239,12 +229,22 @@ def main():
         wfg_kwargs, domain, domain_data, t_ref=metadata["event"]["time_event"]
     )
 
-    theta_test = dict(samples.iloc[0])
-    theta_test = {k: float(v) for k, v in theta_test.items()}
-
-    likelihood.log_likelihood(theta_test)
-
-    samples = samples.to_numpy()
+    from tqdm import tqdm
+    log_likelihoods = []
+    for idx in tqdm(range(1000)):
+        theta = dict(samples.iloc[idx])
+        try:
+            l = likelihood.log_prob(theta)
+        except:
+            print(idx)
+            l = float("nan")
+        log_likelihoods.append(l)
+    log_likelihoods = np.array(log_likelihoods)
+    log_likelihoods = log_likelihoods[~np.isnan(log_likelihoods)]
+    print(f"mean: {np.mean(log_likelihoods)}")
+    print(f"std: {np.std(log_likelihoods)}")
+    print(f"max: {np.max(log_likelihoods)}")
+    print(f"min: {np.min(log_likelihoods)}")
 
 
 if __name__ == "__main__":
