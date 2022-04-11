@@ -139,11 +139,21 @@ def analyze_event():
             num_gnpe_iterations=args.num_gnpe_iterations,
             device=device,
         )
-        samples = {k: v.cpu() for k, v in samples.items()}
+
+        # convert to pandas dataframe, add metadata
+        samples = pd.DataFrame({k: v.cpu() for k, v in samples.items()})
+        metadata = {
+            "model": model.metadata,
+            "event": {
+                "gps_time": time_event,
+                "time_psd": args.time_psd,
+            },
+        }
+        samples.attrs = metadata
 
         # if no reference samples are available, simply save the dingo samples
         if ref is None or time_event not in ref:
-            pd.DataFrame(samples).to_pickle(
+            samples.to_pickle(
                 join(args.out_directory, f"dingo_samples_gps-{time_event}.pkl")
             )
 
@@ -154,7 +164,7 @@ def analyze_event():
             ref_samples_file = ref[time_event]["reference_samples"]["file"]
             ref_method = ref[time_event]["reference_samples"]["method"]
 
-            pd.DataFrame(samples).to_pickle(
+            samples.to_pickle(
                 join(args.out_directory, f"dingo_samples_{name_event}.pkl")
             )
 
@@ -162,7 +172,7 @@ def analyze_event():
 
             generate_cornerplot(
                 {"name": ref_method, "samples": ref_samples, "color": "blue"},
-                {"name": "dingo", "samples": pd.DataFrame(samples), "color": "orange"},
+                {"name": "dingo", "samples": samples, "color": "orange"},
                 filename=join(args.out_directory, f"cornerplot_{name_event}.pdf"),
             )
 
