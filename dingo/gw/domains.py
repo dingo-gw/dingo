@@ -510,24 +510,25 @@ def build_domain(settings: Dict) -> Domain:
         raise NotImplementedError(f'Domain {settings["name"]} not implemented.')
 
 
-def build_domain_for_model(model: PosteriorModel) -> Domain:
+def build_domain_from_model_metadata(model_metadata) -> Domain:
     """
     Instantiate a domain class from settings of model.
 
     Parameters
     ----------
-    model: PosteriorModel
-        model containing metadata to build the domain
+    model_metadata: dict
+        model metadata containing information to build the domain
+        typically obtained from the model.metadata attribute
 
     Returns
     -------
     A Domain instance of the correct type.
     """
-    domain = build_domain(model.metadata["dataset_settings"]["domain"])
-    if "domain_update" in model.metadata["train_settings"]["data"]:
-        domain.update(model.metadata["train_settings"]["data"]["domain_update"])
+    domain = build_domain(model_metadata["dataset_settings"]["domain"])
+    if "domain_update" in model_metadata["train_settings"]["data"]:
+        domain.update(model_metadata["train_settings"]["data"]["domain_update"])
     domain.window_factor = get_window_factor(
-        model.metadata["train_settings"]["data"]["window"]
+        model_metadata["train_settings"]["data"]["window"]
     )
     return domain
 
