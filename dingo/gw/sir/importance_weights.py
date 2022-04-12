@@ -52,6 +52,7 @@ class UnnormalizedPosteriorDensityBBH:
     as the product of the likelihood p(d|theta) and prior p(theta), omitting the
     constant evidence p(d).
     """
+
     def __init__(self, likelihood, prior):
         self.likelihood = likelihood
         self.prior = prior
@@ -75,6 +76,12 @@ def main():
     with open(args.settings, "r") as fp:
         settings = yaml.safe_load(fp)
     samples = pd.read_pickle(settings["nde"]["data"]["parameter_samples"])
+    # samples.attrs["event"] = {
+    #     "time_event": 1126259462.4,
+    #     "time_psd": 1024,
+    #     "time_buffer": 2.0,
+    # }
+    # samples.to_pickle(settings["nde"]["data"]["parameter_samples"])
     metadata = samples.attrs
 
     # Step 1: Build proposal distribution.
@@ -104,7 +111,6 @@ def main():
         print(f"Renaming trained nde model to {nde_name}.")
         rename(join(args.outdir, "model_latest.pt"), nde_name)
 
-
     # Step 2: Build target distribution.
     #
     # Our target distribution is the posterior p(theta|d) = p(d|theta) * p(theta) / p(d).
@@ -123,7 +129,6 @@ def main():
     prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
     # wrap likelihood and prior to unnormalized posterior
     posterior = UnnormalizedPosteriorDensityBBH(likelihood, prior)
-
 
     # Step 3: SIR step
     #
@@ -148,23 +153,126 @@ def main():
 
     # compute the unnormalized target posterior density for each sample
     log_probs_target = []
+    likelihoods = []
+    priors = []
     print(f"Computing unnormalized target posterior density for {num_samples} samples.")
     for idx in range(num_samples):
         try:
+            priors.append(prior.ln_prob(dict(theta.iloc[idx])))
+            likelihoods.append(likelihood.log_prob(dict(theta.iloc[idx])))
             log_probs_target.append(posterior.log_prob(dict(theta.iloc[idx])))
         except:
             log_probs_target.append(-np.inf)
     log_probs_target = np.array(log_probs_target)
+    likelihoods = np.array(likelihoods)
+    priors = np.array(priors)
 
     weights = log_probs_target - log_probs_proposal
     w = weights - np.max(weights)
     # test_samples = pd.DataFrame(samples[num_train_samples:], columns=parameters)
 
+    log_probs_target_ref = []
+    likelihoods_ref = []
+    priors_ref = []
+    for idx in range(num_samples):
+        try:
+            priors_ref.append(prior.ln_prob(dict(samples.iloc[idx])))
+            likelihoods_ref.append(likelihood.log_prob(dict(samples.iloc[idx])))
+            log_probs_target_ref.append(posterior.log_prob(dict(samples.iloc[idx])))
+        except:
+            log_probs_target_ref.append(-np.inf)
+    log_probs_target_ref = np.array(log_probs_target_ref)
+    likelihoods_ref = np.array(likelihoods_ref)
+    priors_ref = np.array(priors_ref)
 
+    import matplotlib.pyplot as plt
 
+    # plot weights
+    plt.xlabel("log_weights")
+    plt.hist(weights[~np.isinf(weights)] - np.max(weights), bins=100)
+    plt.savefig(join(args.outdir, "weights.png"))
+    plt.show()
 
+    # plot nde density
+    plt.xlabel("log_prob")
+    plt.title("nde density")
+    plt.hist(log_probs_proposal, bins=100)
+    plt.savefig(join(args.outdir, "nde.png"))
+    plt.show()
 
+    # plot prior densities of original gnpe samples ("ref") and nde samples
+    plt.xlabel("log_prob")
+    plt.title("prior densities")
+    plt.hist(priors_ref[~np.isinf(priors_ref)] - np.max(priors), bins=100, label="GNPE")
+    plt.hist(
+        priors[~np.isinf(priors)] - np.max(priors), bins=100, label="Unconditional NDE"
+    )
+    plt.legend()
+    plt.savefig(join(args.outdir, "priors.png"))
+    plt.show()
 
+    # plot likelihoods densities of original gnpe samples ("ref") and nde samples
+    plt.xlabel("log_prob")
+    plt.title("likelihood densities")
+    plt.xlim((-100, 0))
+    plt.hist(
+        likelihoods_ref[~np.isinf(likelihoods_ref)] - np.max(likelihoods),
+        bins=1000,
+        label="GNPE",
+    )
+    plt.hist(
+        likelihoods[~np.isinf(likelihoods)] - np.max(likelihoods),
+        bins=1000,
+        alpha=0.8,
+        label="Unconditional NDE",
+    )
+    plt.legend()
+    plt.savefig(join(args.outdir, "likelihoods.png"))
+    plt.show()
+
+    # zoom out for likelihoods
+    plt.yscale("log")
+    plt.title("likelihood densities")
+    plt.xlabel("log_prob")
+    plt.hist(
+        likelihoods_ref[~np.isinf(likelihoods_ref)] - np.max(likelihoods),
+        bins=100,
+        label="GNPE",
+    )
+    plt.legend()
+    plt.savefig(join(args.outdir, "likelihoods-gnpe.png"))
+    plt.show()
+    plt.yscale("log")
+    plt.xlabel("log_prob")
+    plt.title("likelihood densities")
+    plt.hist(
+        likelihoods[~np.isinf(likelihoods)] - np.max(likelihoods),
+        bins=100,
+        label="Unconditional NDE",
+    )
+    plt.legend()
+    plt.savefig(join(args.outdir, "likelihoods-nde.png"))
+    plt.show()
+
+    plt.hist(likelihoods - np.max(likelihoods), bins=100)
+    plt.show()
+    plt.hist(priors[~np.isinf(priors)] - np.max(priors), bins=100)
+    plt.show()
+    plt.hist(log_probs_proposal - np.max(log_probs_proposal), bins=100)
+    plt.show()
+    weights = log_probs_target - log_probs_proposal
+    plt.hist(weights[~np.isinf(weights)] - np.max(weights), bins=100)
+    plt.show()
+
+    plt.hist(likelihoods_ref - np.max(likelihoods_ref), bins=100)
+    plt.show()
+    plt.hist(priors_ref[~np.isinf(priors_ref)] - np.max(priors_ref), bins=100)
+    plt.show()
+    plt.hist(
+        log_probs_target_ref[~np.isinf(log_probs_target_ref)]
+        - np.max(log_probs_target_ref, bins=100)
+    )
+    plt.show()
 
     f = (
         "/Users/maxdax/Documents/Projects/GW-Inference/dingo/datasets/dingo_samples"
