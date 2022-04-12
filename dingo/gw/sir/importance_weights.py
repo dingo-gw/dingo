@@ -150,26 +150,83 @@ def main():
         log_probs_proposal = nde.model.log_prob(theta).cpu().numpy()
     theta = theta.cpu().numpy() * std + mean
     theta = pd.DataFrame(theta, columns=samples.columns)
+    #
+    # import bilby
+    # result = bilby.result.read_in_result(
+    #     filename=join(args.outdir, "GW150914_result.json"))
+    # theta_bilby = result.posterior[samples.columns]
+    # theta_bilby["geocent_time"] -= likelihood.t_ref
+    # l_bilby = result.log_likelihood_evaluations
+    # # (np.mean(theta_bilby) - np.mean(theta)) / np.std(theta_bilby)
+    #
+    # theta = theta_bilby
 
     # compute the unnormalized target posterior density for each sample
     log_probs_target = []
-    likelihoods = []
-    priors = []
+    # likelihoods = []
+    # priors = []
     print(f"Computing unnormalized target posterior density for {num_samples} samples.")
-    for idx in range(num_samples):
+    from tqdm import tqdm
+    for idx in tqdm(range(num_samples)):
         try:
-            priors.append(prior.ln_prob(dict(theta.iloc[idx])))
-            likelihoods.append(likelihood.log_prob(dict(theta.iloc[idx])))
+            # priors.append(prior.ln_prob(dict(theta.iloc[idx])))
+            # likelihoods.append(likelihood.log_prob(dict(theta.iloc[idx])))
             log_probs_target.append(posterior.log_prob(dict(theta.iloc[idx])))
         except:
+            # likelihoods.append(-np.inf)
+            # priors.append(-np.inf)
             log_probs_target.append(-np.inf)
+
     log_probs_target = np.array(log_probs_target)
-    likelihoods = np.array(likelihoods)
-    priors = np.array(priors)
+    # likelihoods = np.array(likelihoods)
+    # priors = np.array(priors)
 
     weights = log_probs_target - log_probs_proposal
-    w = weights - np.max(weights)
+    w = np.exp(weights - np.max(weights))
+    w_norm = w / np.sum(w)
+    print(np.sort(w_norm)[:20:-1])
     # test_samples = pd.DataFrame(samples[num_train_samples:], columns=parameters)
+    theta.insert(theta.shape[1], "weights", w_norm)
+    theta.to_pickle(join(args.outdir, "weighted_samples.pkl"))
+
+
+    import matplotlib.pyplot as plt
+
+    x = log_probs_proposal
+    y = log_probs_target - np.max(log_probs_target)
+
+    plt.clf()
+    plt.ylabel("Likelihood x Prior log_prob")
+    plt.xlabel("NDE log_prob")
+    plt.ylim((-20, 0))
+    plt.xlim((-15, 0))
+    plt.scatter(x, y, s=0.5)
+    plt.savefig(join(args.outdir, "scatter_plot.png"))
+    plt.show()
+
+
+    # cornerplot with reweighted samples
+    import scipy
+    from chainconsumer import ChainConsumer
+    N = 2
+    c = ChainConsumer()
+    c.add_chain(theta, weights=None, color="orange", name="dingo")
+    c.add_chain(theta, weights=w_norm, color="red", name="dingo-SIR")
+    c.configure(
+        linestyles=["-"] * N,
+        linewidths=[1.5] * N,
+        sigmas=[np.sqrt(2) * scipy.special.erfinv(x) for x in [0.5, 0.9]],
+        shade=[False] + [True] * (N - 1),
+        shade_alpha=0.3,
+        bar_shade=False,
+        label_font_size=10,
+        tick_font_size=10,
+        usetex=False,
+        legend_kwargs={"fontsize": 30},
+        kde=0.7,
+    )
+    c.plotter.plot(filename=join(args.outdir, "cornerplot.pdf"))
+
 
     log_probs_target_ref = []
     likelihoods_ref = []
@@ -185,7 +242,6 @@ def main():
     likelihoods_ref = np.array(likelihoods_ref)
     priors_ref = np.array(priors_ref)
 
-    import matplotlib.pyplot as plt
 
     # plot weights
     plt.xlabel("log_weights")
