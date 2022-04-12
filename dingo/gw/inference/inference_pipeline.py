@@ -90,7 +90,7 @@ def parse_args():
     parser.add_argument(
         "--time_buffer",
         type=float,
-        default=2,
+        default=2.0,
         help="Buffer time in seconds. The analyzed strain segment extends up to "
         "gps_time_event + time_buffer.",
     )
@@ -133,6 +133,7 @@ def analyze_event():
             model=model,
             model_init=args.model_init,
             time_psd=args.time_psd,
+            time_buffer=args.time_buffer,
             event_dataset=args.event_dataset,
             event_dataset_init=args.event_dataset_init,
             num_samples=args.num_samples,
@@ -145,8 +146,9 @@ def analyze_event():
         metadata = {
             "model": model.metadata,
             "event": {
-                "gps_time": time_event,
+                "time_event": time_event,
                 "time_psd": args.time_psd,
+                "time_buffer": args.time_buffer,
             },
         }
         samples.attrs = metadata
