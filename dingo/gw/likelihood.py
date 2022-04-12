@@ -1,6 +1,5 @@
 import numpy as np
 from torchvision.transforms import Compose
-from bilby import Likelihood
 from bilby.gw.detector.networks import InterferometerList
 
 from dingo.gw.waveform_generator import WaveformGenerator
@@ -13,7 +12,7 @@ from dingo.gw.transforms import (
 )
 
 
-class StationaryGaussianLikelihoodBBH(Likelihood):
+class StationaryGaussianLikelihoodBBH:
     """
     Implements BBH likelihood for stationary, Gaussian noise.
     """
@@ -57,7 +56,8 @@ class StationaryGaussianLikelihoodBBH(Likelihood):
         # set GW event data
         self.t_ref = t_ref
         self.whitened_strains = {
-            k: v / domain_data["asds"][k] for k, v in domain_data["waveform"].items()
+            k: v / domain_data["asds"][k] / domain.noise_std
+            for k, v in domain_data["waveform"].items()
         }
         self.asds = domain_data["asds"]
         if len(list(self.whitened_strains.values())[0]) != domain.max_idx + 1:
@@ -160,7 +160,7 @@ class StationaryGaussianLikelihoodBBH(Likelihood):
             # noise individually, so we add both contributions.
             l_real = np.sum(-1 / 2.0 * n_ifo.real ** 2)
             l_imag = np.sum(-1 / 2.0 * n_ifo.imag ** 2)
-            l_const =  - 2 * len(n_ifo) * np.log(np.sqrt(2) * np.pi)
+            l_const = -2 * len(n_ifo) * np.log(np.sqrt(2) * np.pi)
             log_likelihoods[ifo] = l_real + l_imag + l_const
 
         return sum(log_likelihoods.values())
@@ -249,6 +249,7 @@ def main():
     likelihood = build_stationary_gaussian_likelihood(samples.attrs, event_dataset)
 
     from tqdm import tqdm
+
     log_likelihoods = []
     for idx in tqdm(range(1000)):
         theta = dict(samples.iloc[idx])
