@@ -226,8 +226,9 @@ def sample_posterior_of_event(
     # load model
     if not type(model) == PosteriorModel:
         model = PosteriorModel(model, device=device, load_training_info=False)
-    # currently gnpe only implemented for time shifts
-    gnpe = "gnpe_time_shifts" in model.metadata["train_settings"]["data"]
+
+    gnpe = ("gnpe_time_shifts" in model.metadata["train_settings"]["data"] or
+            'gnpe_chirp_mass' in model.metadata["train_settings"]["data"])
 
     # step 1: download raw event data
     settings_raw_data = parse_settings_for_raw_data(
