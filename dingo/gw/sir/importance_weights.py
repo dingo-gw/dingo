@@ -6,6 +6,9 @@ from os import rename
 from os.path import dirname, join, isfile
 import numpy as np
 import torch
+import pandas as pd
+from multiprocessing import Pool
+from threadpoolctl import threadpool_limits
 import argparse
 
 from dingo.core.models import PosteriorModel
@@ -42,6 +45,43 @@ def parse_args():
     return args
 
 
+def get_samples_and_log_probs_from_proposal(nde, num_samples):
+    """
+    Generate num_samples samples from the proposal distribution, which is represented
+    by an unconditional nde.
+
+    Parameters
+    ----------
+    nde: dingo.core.models.PosteriorModel
+        Unconditional nde used as proposal distribution.
+    num_samples: int
+        Number of samples to generate.
+
+    Returns
+    -------
+    samples: pd.DataFrame
+        Dataframe with samples from proposal distribution.
+    log_probs: numpy.ndarray
+        Array with log_probs of the samples.
+    """
+    nde.model.eval()
+    with torch.no_grad():
+        theta = nde.model.sample(num_samples=num_samples)
+        log_probs_proposal = nde.model.log_prob(theta).cpu().numpy()
+
+    # undo standardization
+    mean, std = nde.metadata["train_settings"]["data"]["standardization"].values()
+    mean = np.array([v for v in mean.values()])
+    std = np.array([v for v in std.values()])
+    theta = theta.cpu().numpy() * std + mean
+
+    # convert to pd.DataFrame
+    columns = nde.metadata["train_settings"]["data"]["standardization"]["mean"].keys()
+    theta = pd.DataFrame(theta, columns=columns)
+
+    return theta, log_probs_proposal
+
+
 class UnnormalizedPosteriorDensityBBH:
     """
     Implements the *unnormalized* posterior density for BBH events. This is computed
@@ -60,8 +100,41 @@ class UnnormalizedPosteriorDensityBBH:
     def __call__(self, theta):
         return self.log_prob(theta)
 
+    def log_prob_multiprocessing(self, theta, num_processes=1):
+        """
+        Compute the log_prob of theta in parallel.
+
+        Parameters
+        ----------
+        theta: pd.DataFrame
+            Dataframe with parameter samples theta.
+        num_processes: int
+            Number of processes to use.
+
+        Returns
+        -------
+        log_probs: numpy.ndarray
+            Array with log_probs of theta.
+        """
+        with threadpool_limits(limits=1, user_api="blas"):
+            with Pool(processes=num_processes) as pool:
+                # Generator object for theta rows. For idx this yields row idx of theta
+                # dataframe, converted to dict, ready to be passed to self.log_prob.
+                theta_generator = (d[1].to_dict() for d in theta.iterrows())
+                # compute logprobs with multiprocessing
+                log_probs = pool.map(self.log_prob, theta_generator)
+
+        return np.array(log_probs)
+
     def log_prob(self, theta):
-        return self.likelihood.log_prob(theta) + self.prior.ln_prob(theta)
+        try:
+            log_likelihood = self.likelihood.log_prob(theta)
+            log_prior = self.prior.ln_prob(theta)
+            return log_likelihood + log_prior
+        except:
+            return -np.inf
+
+        # return self.likelihood.log_prob(theta) + self.prior.ln_prob(theta)
 
 
 def main():
@@ -76,12 +149,6 @@ def main():
     with open(args.settings, "r") as fp:
         settings = yaml.safe_load(fp)
     samples = pd.read_pickle(settings["nde"]["data"]["parameter_samples"])
-    # samples.attrs["event"] = {
-    #     "time_event": 1126259462.4,
-    #     "time_psd": 1024,
-    #     "time_buffer": 2.0,
-    # }
-    # samples.to_pickle(settings["nde"]["data"]["parameter_samples"])
     metadata = samples.attrs
 
     # Step 1: Build proposal distribution.
@@ -104,7 +171,7 @@ def main():
             load_training_info=False,
         )
     else:
-        print(f"Training new for event {event_name}.")
+        print(f"Training new nde for event {event_name}.")
         nde = train_unconditional_density_estimator(
             samples, settings["nde"], args.outdir
         )
@@ -138,59 +205,39 @@ def main():
     #
     # to obtain weighted samples from the proposal distribution.
 
-    # sample from proposal distribution, and get the log_prob densities
     num_samples = settings["num_samples"]
-    mean, std = nde.metadata["train_settings"]["data"]["standardization"].values()
-    mean = np.array([v for v in mean.values()])
-    std = np.array([v for v in std.values()])
+    # sample from proposal distribution, and get the log_prob densities
     print(f"Generating {num_samples} samples from proposal distribution.")
-    nde.model.eval()
-    with torch.no_grad():
-        theta = nde.model.sample(num_samples=num_samples)
-        log_probs_proposal = nde.model.log_prob(theta).cpu().numpy()
-    theta = theta.cpu().numpy() * std + mean
-    theta = pd.DataFrame(theta, columns=samples.columns)
-    #
-    # import bilby
-    # result = bilby.result.read_in_result(
-    #     filename=join(args.outdir, "GW150914_result.json"))
-    # theta_bilby = result.posterior[samples.columns]
-    # theta_bilby["geocent_time"] -= likelihood.t_ref
-    # l_bilby = result.log_likelihood_evaluations
-    # # (np.mean(theta_bilby) - np.mean(theta)) / np.std(theta_bilby)
-    #
-    # theta = theta_bilby
-
+    theta, log_probs_proposal = get_samples_and_log_probs_from_proposal(nde, num_samples)
     # compute the unnormalized target posterior density for each sample
-    log_probs_target = []
-    # likelihoods = []
-    # priors = []
     print(f"Computing unnormalized target posterior density for {num_samples} samples.")
-    from tqdm import tqdm
-    for idx in tqdm(range(num_samples)):
-        try:
-            # priors.append(prior.ln_prob(dict(theta.iloc[idx])))
-            # likelihoods.append(likelihood.log_prob(dict(theta.iloc[idx])))
-            log_probs_target.append(posterior.log_prob(dict(theta.iloc[idx])))
-        except:
-            # likelihoods.append(-np.inf)
-            # priors.append(-np.inf)
-            log_probs_target.append(-np.inf)
+    log_probs_target = posterior.log_prob_multiprocessing(
+        theta, settings.get("num_processes", 1)
+    )
 
-    log_probs_target = np.array(log_probs_target)
-    # likelihoods = np.array(likelihoods)
-    # priors = np.array(priors)
+    # weights = log_probs_target - log_probs_proposal
+    # w = np.exp(weights - np.max(weights))
+    # w_norm = w / np.sum(w)
+    # print(np.sort(w_norm)[:20:-1])
+    log_weights = log_probs_target - log_probs_proposal
+    weights = np.exp(log_weights - np.max(log_weights))
+    weights /= np.mean(weights)
 
-    weights = log_probs_target - log_probs_proposal
-    w = np.exp(weights - np.max(weights))
-    w_norm = w / np.sum(w)
-    print(np.sort(w_norm)[:20:-1])
     # test_samples = pd.DataFrame(samples[num_train_samples:], columns=parameters)
-    theta.insert(theta.shape[1], "weights", w_norm)
+    theta.insert(theta.shape[1], "weights", weights)
+    theta.insert(theta.shape[1], "log_probs_proposal", log_probs_proposal)
+    theta.insert(theta.shape[1], "log_probs_target", log_probs_target)
     theta.to_pickle(join(args.outdir, "weighted_samples.pkl"))
 
-
     import matplotlib.pyplot as plt
+    plt.yscale("log")
+    plt.ylim(1e-4, 1e3)
+    plt.xlabel("proposal log_prob")
+    plt.ylabel("Weights (normalized to mean 1)")
+    plt.scatter(log_probs_proposal, w_norm * len(w_norm), s=0.5)
+    plt.savefig(join(args.outdir, "weights_scatter_plot.png"))
+    plt.show()
+    plt.clf()
 
     x = log_probs_proposal
     y = log_probs_target - np.max(log_probs_target)
@@ -204,10 +251,10 @@ def main():
     plt.savefig(join(args.outdir, "scatter_plot.png"))
     plt.show()
 
-
     # cornerplot with reweighted samples
     import scipy
     from chainconsumer import ChainConsumer
+
     N = 2
     c = ChainConsumer()
     c.add_chain(theta, weights=None, color="orange", name="dingo")
@@ -227,7 +274,6 @@ def main():
     )
     c.plotter.plot(filename=join(args.outdir, "cornerplot.pdf"))
 
-
     log_probs_target_ref = []
     likelihoods_ref = []
     priors_ref = []
@@ -241,7 +287,6 @@ def main():
     log_probs_target_ref = np.array(log_probs_target_ref)
     likelihoods_ref = np.array(likelihoods_ref)
     priors_ref = np.array(priors_ref)
-
 
     # plot weights
     plt.xlabel("log_weights")
