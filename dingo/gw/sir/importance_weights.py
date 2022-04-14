@@ -178,6 +178,15 @@ def main():
         print(f"Renaming trained nde model to {nde_name}.")
         rename(join(args.outdir, "model_latest.pt"), nde_name)
 
+    # diagnostics
+    # from dingo.gw.inference.visualization import generate_cornerplot
+    # samples_nde, _ = get_samples_and_log_probs_from_proposal(nde, 10000)
+    # generate_cornerplot(
+    #     {"name": "gnpe", "color": "orange", "samples": samples[:10000]},
+    #     {"name": "nde", "color": "black", "samples": samples_nde},
+    #     filename=join(args.outdir, "cornerplot-nde.png"),
+    # )
+
     # Step 2: Build target distribution.
     #
     # Our target distribution is the posterior p(theta|d) = p(d|theta) * p(theta) / p(d).
@@ -185,7 +194,7 @@ def main():
     # likelihood p(d|theta) and the prior p(theta), but not the evidence p(d).
 
     # build likelihood
-    likelihood = build_stationary_gaussian_likelihood(samples.attrs, args.event_dataset)
+    likelihood = build_stationary_gaussian_likelihood(metadata, args.event_dataset)
     # build prior
     intrinsic_prior = metadata["model"]["dataset_settings"]["intrinsic_prior"]
     extrinsic_prior = get_extrinsic_prior_dict(
@@ -196,6 +205,41 @@ def main():
     prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
     # wrap likelihood and prior to unnormalized posterior
     posterior = UnnormalizedPosteriorDensityBBH(likelihood, prior)
+
+    theta_d_Pv2 = pd.read_pickle("/Users/maxdax/Documents/Projects/GW-Inference/dingo/datasets/dingo_samples/04_Pv2/merged_dingo_samples_gps-1126259462.4_.pkl")
+
+    # p_dPv2 = posterior.log_prob_multiprocessing(theta_d_Pv2[:1000], num_processes=8)
+    # p_nde = posterior.log_prob_multiprocessing(samples[:1000], num_processes=8)
+
+
+    # diagnostics
+    from dingo.gw.inference.visualization import generate_cornerplot, load_ref_samples
+    theta_LI = load_ref_samples("/Users/maxdax/Documents/Projects/GW-Inference/dingo/dingo-devel/tutorials/02_gwpe/train_dir_max/cluster_models/GW150914_Pv2_LI.npz")
+    theta_PRL = load_ref_samples(join("/Users/maxdax/Documents/Projects/GW-Inference/dingo/datasets/dingo_samples/04_Pv2/GW150914_PRL.npz"),
+                                 drop_geocent_time=False)
+
+    import bilby
+    result = bilby.result.read_in_result(
+     filename=join("/Users/maxdax/Documents/Projects/GW-Inference/dingo/datasets"
+                   "/dingo_samples/04_Pv2/GW150914_result_UDP.json"))
+    theta_bilby = result.posterior[samples.columns]
+    theta_bilby["geocent_time"] -= likelihood.t_ref
+    theta_bilby = theta_bilby.sample(frac=1) # shuffle bilby data
+    samples.attrs = {}
+    posterior.log_prob(dict(samples.iloc[0]))
+    posterior.log_prob(dict(theta_bilby.iloc[0]))
+
+    l_bilby = result.log_likelihood_evaluations
+    # p_nde = posterior.log_prob_multiprocessing(samples[:50_000], num_processes=8)
+    p_bilby = posterior.log_prob_multiprocessing(theta_bilby[:50_000], num_processes=8)
+    # p_PRL = posterior.log_prob_multiprocessing(theta_PRL[:1000], num_processes=8)
+    # generate_cornerplot(
+    #     {"name": "bilby", "color": "black", "samples": theta_bilby[:10_000]},
+    #     {"name": "LI", "color": "blue", "samples": theta_LI[:10_000]},
+    #     {"name": "gnpe", "color": "orange", "samples": samples[:10_000]},
+    #     filename=join(args.outdir, "cornerplot-bilby-LI.pdf"),
+    # )
+
 
     # Step 3: SIR step
     #
@@ -210,10 +254,13 @@ def main():
     print(f"Generating {num_samples} samples from proposal distribution.")
     theta, log_probs_proposal = get_samples_and_log_probs_from_proposal(nde, num_samples)
     # compute the unnormalized target posterior density for each sample
+    import time
+    t0 = time.time()
     print(f"Computing unnormalized target posterior density for {num_samples} samples.")
     log_probs_target = posterior.log_prob_multiprocessing(
         theta, settings.get("num_processes", 1)
     )
+    print(f"Done. This took {time.time() - t0:.2f} seconds.")
 
     # weights = log_probs_target - log_probs_proposal
     # w = np.exp(weights - np.max(weights))
@@ -223,18 +270,113 @@ def main():
     weights = np.exp(log_weights - np.max(log_weights))
     weights /= np.mean(weights)
 
+    threshold = 1e-3
+    inds = np.where(weights > threshold)[0]
+    theta_new = theta.loc[inds]
+    weights_new = weights[inds]
+
+    from chainconsumer import ChainConsumer
+    import scipy
+    from dingo.gw.inference.visualization import load_ref_samples
+    theta_LI = load_ref_samples(
+        "/Users/maxdax/Documents/Projects/GW-Inference/dingo/dingo-devel/tutorials/02_gwpe/train_dir_max/cluster_models/GW150914_Pv2_LI.npz")
+    theta_LI.drop(columns="mass_ratio", inplace=True)
+    theta_LI.drop(columns="chirp_mass", inplace=True)
+
+    c = ChainConsumer()
+    c.add_chain(theta_LI, color="blue", name="LI")
+    c.add_chain(theta[:20_000], weights=None, color="orange", name="dingo")
+    c.add_chain(theta_new, weights=weights_new, color="red", name="dingo-sir")
+    N = 3
+    c.configure(
+        linestyles=["-"] * N,
+        linewidths=[1.5] * N,
+        sigmas=[np.sqrt(2) * scipy.special.erfinv(x) for x in [0.5, 0.9]],
+        shade=[False] + [True] * (N - 1),
+        shade_alpha=0.3,
+        bar_shade=False,
+        label_font_size=10,
+        tick_font_size=10,
+        usetex=False,
+        legend_kwargs={"fontsize": 30},
+        kde=0.7,
+    )
+    c.plotter.plot(filename=join(args.outdir, "cornerplot_sir-300k-LI.pdf"))
+
+
+    inds_low = list(set(np.where(weights > 1e-15)[0]) & set(np.where(weights < 1e-10)[0]))
+    weights_low = weights[inds_low]
+    theta_low = theta.loc[inds_low]
+
+    c = ChainConsumer()
+    c.add_chain(theta_LI, color="blue", name="LI")
+    c.add_chain(theta_low, weights=None, color="orange", name="dingo low weights")
+    N = 2
+    c.configure(
+        linestyles=["-"] * N,
+        linewidths=[1.5] * N,
+        sigmas=[np.sqrt(2) * scipy.special.erfinv(x) for x in [0.5, 0.9]],
+        shade=[False] + [True] * (N - 1),
+        shade_alpha=0.3,
+        bar_shade=False,
+        label_font_size=10,
+        tick_font_size=10,
+        usetex=False,
+        legend_kwargs={"fontsize": 30},
+        kde=0.7,
+    )
+    c.plotter.plot(filename=join(args.outdir, "cornerplot_dingo-low-weights.pdf"))
+
+
+    l_bilby = result.log_likelihood_evaluations
+    p_bilby = posterior.log_prob_multiprocessing(theta_bilby, num_processes=8)
+    priors_bilby = []
+    for idx in range(len(theta_bilby)):
+        try:
+            priors_bilby.append(prior.ln_prob(dict(theta_bilby.iloc[idx])))
+        except:
+            priors_bilby.append(-np.inf)
+    priors_bilby = np.array(priors_bilby)
+    np.percentile(p_bilby - l_bilby - priors_bilby, 10)
+
+    plt.title("Densities of bilby samples")
+    plt.xlabel("Proposal density (NDE)")
+    plt.ylabel(f"Target density (likelihood * prior) [{np.max(p_bilby):.2f}]")
+    plt.scatter(log_probs_bilby, p_bilby - np.max(p_bilby), s=0.1)
+    plt.savefig(join(args.outdir, "nde_densities_bilby-2.png"))
+    plt.show()
+    plt.clf()
+
     # test_samples = pd.DataFrame(samples[num_train_samples:], columns=parameters)
     theta.insert(theta.shape[1], "weights", weights)
     theta.insert(theta.shape[1], "log_probs_proposal", log_probs_proposal)
     theta.insert(theta.shape[1], "log_probs_target", log_probs_target)
     theta.to_pickle(join(args.outdir, "weighted_samples.pkl"))
 
+    nde.model.eval()
+    # standardize
+    mean, std = nde.metadata["train_settings"]["data"]["standardization"].values()
+    mean = np.array([v for v in mean.values()])
+    std = np.array([v for v in std.values()])
+    theta_bilby_torch = torch.tensor((np.array(theta_bilby) - mean) / std).float()
+    with torch.no_grad():
+        log_probs_bilby = nde.model.log_prob(theta_bilby_torch).cpu().numpy()
+
+    import matplotlib.pyplot as plt
+    plt.clf()
+    plt.xlabel("nde density")
+    plt.hist(log_probs_proposal, bins=100, density=True, label="nde samples")
+    plt.hist(log_probs_bilby, bins=100, density=True, label="bilby samples")
+    plt.show()
+
+
+
     import matplotlib.pyplot as plt
     plt.yscale("log")
     plt.ylim(1e-4, 1e3)
     plt.xlabel("proposal log_prob")
     plt.ylabel("Weights (normalized to mean 1)")
-    plt.scatter(log_probs_proposal, w_norm * len(w_norm), s=0.5)
+    plt.scatter(log_probs_proposal, weights, s=0.5)
     plt.savefig(join(args.outdir, "weights_scatter_plot.png"))
     plt.show()
     plt.clf()
