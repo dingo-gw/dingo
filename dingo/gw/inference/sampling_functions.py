@@ -55,7 +55,14 @@ def get_transforms_for_npe(model, num_samples, as_type="dict"):
     return transforms_pre, transforms_post
 
 
-def sample_with_npe(domain_data, model, num_samples, as_type="dict", batch_size=None):
+def sample_with_npe(
+    domain_data,
+    model,
+    num_samples,
+    as_type="dict",
+    batch_size=None,
+    get_log_prob=False,
+):
     # get transformations for preprocessing
     transforms_pre, transforms_post = get_transforms_for_npe(
         model, num_samples, as_type
@@ -65,11 +72,19 @@ def sample_with_npe(domain_data, model, num_samples, as_type="dict", batch_size=
     x = transforms_pre(domain_data)["waveform"]
 
     # sample from inference network
-    model.model.eval()
-    y = model.sample(x, batch_size=batch_size)
-
-    # post process samples
-    samples = transforms_post({"parameters": y})
+    model.model.eval() # Max: I don't think we need this, this is done inside sample method
+    if not get_log_prob:
+        y = model.sample(x, batch_size=batch_size)
+        # post process samples
+        samples = transforms_post({"parameters": y})["parameters"]
+    else:
+        y, log_prob = model.sample(x, batch_size=batch_size, get_log_prob=True)
+        # post process samples
+        samples = transforms_post({"parameters": y})["parameters"]
+        if as_type == "dict":
+            samples["log_prob"] = log_prob
+        else:
+            raise NotImplementedError()
 
     return samples
 
@@ -134,18 +149,18 @@ def sample_with_gnpe(
 ):
     # prepare data for inference network, and add initial samples as extrinsic parameters
     transforms_pre, _ = get_transforms_for_npe(
-        model, num_samples=len(list(samples_init["parameters"].values())[0])
+        model, num_samples=len(list(samples_init.values())[0])
     )
     data = {
         "waveform_": transforms_pre(domain_data)["waveform"],
-        "extrinsic_parameters": samples_init["parameters"],
+        "extrinsic_parameters": samples_init,
         "parameters": {},
     }
 
     # get transformations for gnpe loop
     gnpe_transforms_pre, gnpe_transforms_post = get_transforms_for_gnpe_time(
         model,
-        init_parameters=samples_init["parameters"].keys(),
+        init_parameters=samples_init.keys(),
     )
 
     model.model.eval()
