@@ -309,6 +309,7 @@ class PosteriorModel:
         self,
         *x,
         batch_size=None,
+        get_log_prob=False,
     ):
         """
         Sample from posterior model, conditioned on context x. x is expected to have a
@@ -325,6 +326,8 @@ class PosteriorModel:
             e.g., gnpe proxies
         batch_size: int = None
             batch size for sampling
+        get_log_prob: bool = False
+            if True, also return log probability along with the samples
 
         Returns
         -------
@@ -335,15 +338,26 @@ class PosteriorModel:
         with torch.no_grad():
             if batch_size is None:
                 samples = self.model.sample(*x)
+                if get_log_prob:
+                    log_prob = self.model.log_prob(samples, *x)
             else:
                 samples = []
+                if get_log_prob:
+                    log_prob = []
                 num_batches = math.ceil(len(x[0]) / batch_size)
                 for idx_batch in range(num_batches):
                     lower, upper = idx_batch * batch_size, (idx_batch + 1) * batch_size
                     x_batch = [xi[lower:upper] for xi in x]
                     samples.append(self.model.sample(*x_batch, num_samples=1))
+                    if get_log_prob:
+                        log_prob.append(self.model.log_prob(samples[-1], *x_batch))
                 samples = torch.cat(samples, dim=0)
-        return samples
+                if get_log_prob:
+                    log_prob = torch.cat(log_prob, dim=0)
+        if not get_log_prob:
+            return samples
+        else:
+            return samples, log_prob
 
 
 def get_model_callable(model_type: str):
