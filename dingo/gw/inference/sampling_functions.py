@@ -198,6 +198,7 @@ def sample_posterior_of_event(
     samples_init=None,
     num_gnpe_iterations=30,
     batch_size=None,
+    get_log_prob=False,
 ):
     # get init_samples if requested (typically for gnpe)
     if model_init is not None:
@@ -231,10 +232,16 @@ def sample_posterior_of_event(
         if samples_init is not None:
             raise ValueError("samples_init can only be used for gnpe.")
         samples = sample_with_npe(
-            domain_data, model, num_samples, batch_size=batch_size
+            domain_data, 
+            model, 
+            num_samples, 
+            batch_size=batch_size, 
+            get_log_prob=get_log_prob, 
         )
 
     else:
+        if get_log_prob:
+            raise ValueError("GNPE does not provide access to log_prob.")
         samples = sample_with_gnpe(
             domain_data,
             model,

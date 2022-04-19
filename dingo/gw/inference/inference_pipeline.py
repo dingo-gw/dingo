@@ -100,6 +100,11 @@ def parse_args():
         default="",
         help="Optional suffix for sample name.",
     )
+    parser.add_argument(
+        "--get_log_prob",
+        action="store_true",
+        help="If set, log_probs of samples are saved. Will not work for GNPE.",
+    )
 
     args = parser.parse_args()
 
@@ -145,6 +150,7 @@ def analyze_event():
             num_samples=args.num_samples,
             num_gnpe_iterations=args.num_gnpe_iterations,
             device=device,
+            get_log_prob=args.get_log_prob,
         )
 
         # convert to pandas dataframe, add metadata
