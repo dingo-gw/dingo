@@ -94,6 +94,12 @@ def parse_args():
         help="Buffer time in seconds. The analyzed strain segment extends up to "
         "gps_time_event + time_buffer.",
     )
+    parser.add_argument(
+        "--suffix",
+        type=str,
+        default="",
+        help="Optional suffix for sample name.",
+    )
 
     args = parser.parse_args()
 
@@ -156,7 +162,7 @@ def analyze_event():
         # if no reference samples are available, simply save the dingo samples
         if ref is None or time_event not in ref:
             samples.to_pickle(
-                join(args.out_directory, f"dingo_samples_gps-{time_event}.pkl")
+                join(args.out_directory, f"dingo_samples_gps-{time_event}{args.suffix}.pkl")
             )
 
         # if reference samples are available, save dingo samples and additionally
@@ -175,8 +181,9 @@ def analyze_event():
             generate_cornerplot(
                 {"name": ref_method, "samples": ref_samples, "color": "blue"},
                 {"name": "dingo", "samples": samples, "color": "orange"},
-                filename=join(args.out_directory, f"cornerplot_{name_event}.pdf"),
+                filename=join(args.out_directory, f"cornerplot_{name_event}{args.suffix}.pdf"),
             )
+
 
 
 if __name__ == "__main__":
