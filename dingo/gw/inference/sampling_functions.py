@@ -17,7 +17,10 @@ from dingo.gw.transforms import (
     ResetSample,
 )
 from dingo.core.models import PosteriorModel
-from dingo.gw.inference.data_preparation import get_domain_data
+from dingo.gw.inference.data_preparation import (
+    get_domain_data,
+    get_corrected_sky_position,
+)
 from dingo.gw.domains import build_domain_from_model_metadata
 
 
@@ -72,7 +75,7 @@ def sample_with_npe(
     x = transforms_pre(domain_data)["waveform"]
 
     # sample from inference network
-    model.model.eval() # Max: I don't think we need this, this is done inside sample method
+    model.model.eval()  # Max: I don't think we need this, this is done inside sample method
     if not get_log_prob:
         y = model.sample(x, batch_size=batch_size)
         # post process samples
@@ -198,6 +201,7 @@ def sample_posterior_of_event(
     samples_init=None,
     num_gnpe_iterations=30,
     batch_size=None,
+    post_correct_ra=True,
 ):
     # get init_samples if requested (typically for gnpe)
     if model_init is not None:
@@ -214,6 +218,8 @@ def sample_posterior_of_event(
             device=device,
             num_samples=num_samples,
             batch_size=batch_size,
+            # correct ra only in last step, until then use ref_time of model
+            post_correct_ra=False,
         )
 
     # load model
@@ -243,6 +249,12 @@ def sample_posterior_of_event(
             batch_size=batch_size,
         )
 
-    # TODO: apply post correction of sky position here
+    # post correction of sky position
+    if post_correct_ra:
+        samples["ra"] = get_corrected_sky_position(
+            samples["ra"],
+            time_event,
+            model.metadata["train_settings"]["data"]["ref_time"],
+        )
 
     return samples
