@@ -94,6 +94,12 @@ def parse_args():
         help="Buffer time in seconds. The analyzed strain segment extends up to "
         "gps_time_event + time_buffer.",
     )
+    parser.add_argument(
+        "--suffix",
+        type=str,
+        default="",
+        help="Optional suffix for sample name.",
+    )
 
     args = parser.parse_args()
 
@@ -139,12 +145,49 @@ def analyze_event():
             num_gnpe_iterations=args.num_gnpe_iterations,
             device=device,
         )
-        samples = {k: v.cpu() for k, v in samples.items()}
+        # samples = {k: v.cpu() for k, v in samples.items()}
+
+        # # if no reference samples are available, simply save the dingo samples
+        # if ref is None or time_event not in ref:
+        #     pd.DataFrame(samples).to_pickle(
+        #         join(args.out_directory, f"dingo_samples_gps-{time_event}.pkl")
+        #     )
+
+        # # if reference samples are available, save dingo samples and additionally
+        # # compare to the reference method in a corner plot
+        # else:
+        #     name_event = ref[time_event]["event_name"]
+        #     ref_samples_file = ref[time_event]["reference_samples"]["file"]
+        #     ref_method = ref[time_event]["reference_samples"]["method"]
+
+        #     pd.DataFrame(samples).to_pickle(
+        #         join(args.out_directory, f"dingo_samples_{name_event}.pkl")
+        #     )
+
+        #     ref_samples = load_ref_samples(ref_samples_file)
+
+        #     generate_cornerplot(
+        #         {"name": ref_method, "samples": ref_samples, "color": "blue"},
+        #         {"name": "dingo", "samples": pd.DataFrame(samples), "color": "orange"},
+        #         filename=join(args.out_directory, f"cornerplot_{name_event}.pdf"),
+        #     )
+
+        # convert to pandas dataframe, add metadata
+        samples = pd.DataFrame({k: v.cpu() for k, v in samples.items()})
+        metadata = {
+            "model": model.metadata,
+            "event": {
+                "time_event": time_event,
+                "time_psd": args.time_psd,
+                "time_buffer": args.time_buffer,
+            },
+        }
+        samples.attrs = metadata
 
         # if no reference samples are available, simply save the dingo samples
         if ref is None or time_event not in ref:
-            pd.DataFrame(samples).to_pickle(
-                join(args.out_directory, f"dingo_samples_gps-{time_event}.pkl")
+            samples.to_pickle(
+                join(args.out_directory, f"dingo_samples_gps-{time_event}{args.suffix}.pkl")
             )
 
         # if reference samples are available, save dingo samples and additionally
@@ -154,7 +197,7 @@ def analyze_event():
             ref_samples_file = ref[time_event]["reference_samples"]["file"]
             ref_method = ref[time_event]["reference_samples"]["method"]
 
-            pd.DataFrame(samples).to_pickle(
+            samples.to_pickle(
                 join(args.out_directory, f"dingo_samples_{name_event}.pkl")
             )
 
@@ -162,9 +205,10 @@ def analyze_event():
 
             generate_cornerplot(
                 {"name": ref_method, "samples": ref_samples, "color": "blue"},
-                {"name": "dingo", "samples": pd.DataFrame(samples), "color": "orange"},
-                filename=join(args.out_directory, f"cornerplot_{name_event}.pdf"),
+                {"name": "dingo", "samples": samples, "color": "orange"},
+                filename=join(args.out_directory, f"cornerplot_{name_event}{args.suffix}.pdf"),
             )
+
 
 
 if __name__ == "__main__":
