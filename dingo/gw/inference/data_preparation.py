@@ -1,5 +1,6 @@
 import numpy as np
 from gwpy.timeseries import TimeSeries
+from astropy.time import Time
 
 from dingo.core.dataset import DingoDataset
 from dingo.core.utils import load_data_from_file
@@ -134,3 +135,35 @@ def get_domain_data(
     )
 
     return domain_data
+
+
+def get_corrected_sky_position(ra, t_event, t_ref=1126259462.391):
+    """
+    Calculate the corrected sky position of an event. This is necessary, since the
+    model was trained with waveform projections assuming a particular reference time
+    t_ref. The corrected sky position takes into account the time difference between
+    the event and t_ref.
+
+    Parameters
+    ----------
+    ra:
+        right ascension parameter of the event
+    t_event:
+        gps time of the event
+    t_ref: float
+        gps time, used as reference time for the model
+
+    Returns
+    -------
+    ra_corr: float
+        corrected right ascension parameter of the event
+
+    """
+    time_reference =  Time(t_ref, format='gps', scale='utc')
+    time_event = Time(t_event, format='gps', scale='utc')
+    longitude_event = time_event.sidereal_time('apparent', 'greenwich')
+    longitude_reference = time_reference.sidereal_time('apparent', 'greenwich')
+    delta_longitude = longitude_event - longitude_reference
+    ra_correction = delta_longitude.rad
+    ra_corr = (ra + ra_correction) % (2 * np.pi)
+    return ra_corr
