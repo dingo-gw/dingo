@@ -1,0 +1,34 @@
+num_samples: 1000
+event_dataset: /Users/maxdax/Documents/Projects/GW-Inference/dingo/dingo-devel/tutorials/02_gwpe/datasets/strain_data/events_dataset.hdf5
+
+# settings for unconditional neural density estimator (nde)
+nde:
+  # training data: output dingo samples for nde
+  data:
+    parameter_samples: /Users/maxdax/Documents/Projects/GW-Inference/dingo/datasets/dingo_samples/03_XPHM/merged_dingo_samples_gps-1126259462.4_.pkl
+    parameters: null # [mass_1, mass_2]
+  # nde architecture
+  model:
+    type: nsf
+    num_flow_steps: 10
+    base_transform_kwargs:
+      hidden_dim: 128
+      num_transform_blocks: 2
+      activation: elu
+      dropout_probability: 0.1
+      batch_norm: true
+      num_bins: 8
+      base_transform_type: rq-coupling
+  # nde training
+  training:
+    device: cpu
+    num_workers: 0
+    train_fraction: 0.9
+    batch_size: 512
+    epochs: 20
+    optimizer:
+      type: adam
+      lr: 0.003
+    scheduler:
+      type: cosine
+      T_max: 20

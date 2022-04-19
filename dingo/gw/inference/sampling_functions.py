@@ -17,16 +17,12 @@ from dingo.gw.transforms import (
     ResetSample,
 )
 from dingo.core.models import PosteriorModel
-from dingo.gw.inference.data_preparation import (
-    parse_settings_for_raw_data,
-    load_raw_data,
-    data_to_domain,
-)
-from dingo.gw.domains import build_domain_for_model
+from dingo.gw.inference.data_preparation import get_domain_data
+from dingo.gw.domains import build_domain_from_model_metadata
 
 
 def get_transforms_for_npe(model, num_samples, as_type="dict"):
-    domain = build_domain_for_model(model)
+    domain = build_domain_from_model_metadata(model.metadata)
 
     # preprocessing transforms:
     #   * whiten and scale strain (since the inference network expects standardized data)
@@ -226,20 +222,9 @@ def sample_posterior_of_event(
     # currently gnpe only implemented for time shifts
     gnpe = "gnpe_time_shifts" in model.metadata["train_settings"]["data"]
 
-    # step 1: download raw event data
-    settings_raw_data = parse_settings_for_raw_data(
-        model.metadata, time_psd, time_buffer
-    )
-    raw_data = load_raw_data(
-        time_event, settings=settings_raw_data, event_dataset=event_dataset
-    )
-
-    # step 2: prepare the data for the network domain
-    domain_data = data_to_domain(
-        raw_data,
-        settings_raw_data,
-        build_domain_for_model(model),
-        window=model.metadata["train_settings"]["data"]["window"],
+    # get raw event data, and prepare it for the network domain
+    domain_data = get_domain_data(
+        model.metadata, time_event, time_psd, time_buffer, event_dataset
     )
 
     if not gnpe:
