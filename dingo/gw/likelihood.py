@@ -3,8 +3,8 @@ from torchvision.transforms import Compose
 from bilby.gw.detector.networks import InterferometerList
 
 from dingo.gw.waveform_generator import WaveformGenerator
-from dingo.gw.domains import build_domain_from_model_metadata, FrequencyDomain
-from dingo.gw.inference.data_preparation import get_domain_data
+from dingo.gw.domains import build_domain, FrequencyDomain
+from dingo.gw.inference.data_preparation import get_event_data_and_domain
 from dingo.gw.transforms import (
     ProjectOntoDetectors,
     GetDetectorTimes,
@@ -20,9 +20,10 @@ class StationaryGaussianLikelihoodBBH:
     def __init__(
         self,
         wfg_kwargs,
-        domain,
-        domain_data,
+        data_domain,
+        event_data,
         t_ref=None,
+        wfg_frequency_range=None,
     ):
         """
         Initialize the likelihood.
@@ -31,36 +32,46 @@ class StationaryGaussianLikelihoodBBH:
         ----------
         wfg_kwargs: dict
             Waveform generator parameters (at least approximant and f_ref).
-        domain: dingo.gw.domains.Domain
-            Domain object for strain data.
-        domain_data: dict
-            GW data. Contains strain data in domain_data["waveforms"] and asds in
-            domain_data["asds"].
+        data_domain: dingo.gw.domains.Domain
+            Domain object for event data.
+        event_data: dict
+            GW data. Contains strain data in event_data["waveforms"] and asds in
+            event_data["asds"].
         t_ref: float
             Reference time; true geocent time for GW is t_ref + theta["geocent_time"].
+        wfg_frequency_range: dict
+            Frequency range for waveform generator. If None, that of data domain is used,
+            which corresponds to the bounds of the likelihood integral.
+            Possible keys:
+                'f_start': float
+                    Frequency at which to start the waveform generation. Overrides f_start in
+                    metadata["model"]["dataset_settings"]["waveform_generator"].
+                'f_end': float
+                    Frequency at which to start the waveform generation.
         """
         super().__init__()
 
         # set up waveform generator
         self.wfg_kwargs = wfg_kwargs
-        self.domain = domain
-        if type(self.domain) is not FrequencyDomain:
+        self.data_domain = data_domain
+        if type(self.data_domain) is not FrequencyDomain:
             raise NotImplementedError(
-                f"Likelihood implemented for FrequencyDomain, got {type(self.domain)}"
+                f"Likelihood implemented for FrequencyDomain, "
+                f"got {type(self.data_domain)}."
             )
-        self.waveform_generator = WaveformGenerator(
-            domain=self.domain,
-            **self.wfg_kwargs,
-        )
+        # The waveform generator potentially has a larger frequency range than the
+        # data domain, which may e.g. be required for EOB waveforms to generate robustly.
+        # When computing the likelihood the data will be truncated accordingly.
+        self.waveform_generator = get_wfg(wfg_kwargs, data_domain, wfg_frequency_range)
 
         # set GW event data
         self.t_ref = t_ref
         self.whitened_strains = {
-            k: v / domain_data["asds"][k] / domain.noise_std
-            for k, v in domain_data["waveform"].items()
+            k: v / event_data["asds"][k] / data_domain.noise_std
+            for k, v in event_data["waveform"].items()
         }
-        self.asds = domain_data["asds"]
-        if len(list(self.whitened_strains.values())[0]) != domain.max_idx + 1:
+        self.asds = event_data["asds"]
+        if len(list(self.whitened_strains.values())[0]) != data_domain.max_idx + 1:
             raise ValueError("Strain data does not match domain.")
 
         # build transforms for detector projections
@@ -68,8 +79,8 @@ class StationaryGaussianLikelihoodBBH:
         self.projection_transforms = Compose(
             [
                 GetDetectorTimes(self.ifo_list, self.t_ref),
-                ProjectOntoDetectors(self.ifo_list, self.domain, self.t_ref),
-                WhitenAndScaleStrain(self.domain.noise_std),
+                ProjectOntoDetectors(self.ifo_list, self.data_domain, self.t_ref),
+                WhitenAndScaleStrain(self.data_domain.noise_std),
             ]
         )
 
@@ -97,6 +108,9 @@ class StationaryGaussianLikelihoodBBH:
 
         # Step 1: generate polarizations h_plus and h_cross
         polarizations = self.waveform_generator.generate_hplus_hcross(theta_intrinsic)
+        polarizations = { # truncation, in case wfg has a larger frequency range
+            k: self.data_domain.update_data(v) for k, v in polarizations.items()
+        }
 
         # Step 2: project h_plus and h_cross onto detectors
         sample = {
@@ -147,7 +161,7 @@ class StationaryGaussianLikelihoodBBH:
         log_likelihoods = {}
         for ifo, n_ifo in n.items():
             # truncate according to domain
-            n_ifo = n_ifo[self.domain.min_idx :]
+            n_ifo = n_ifo[self.data_domain.min_idx :]
             # Compute likelihood. We assume that the noise is Gaussian and white (after
             # whitening), so the likelihood is given by N[0, 1](n). For a single bin i,
             # the log likelihood is this given by
@@ -204,7 +218,11 @@ def split_off_extrinsic_parameters(theta):
     return theta_intrinsic, theta_extrinsic
 
 
-def build_stationary_gaussian_likelihood(metadata, event_dataset=None):
+def build_stationary_gaussian_likelihood(
+    metadata,
+    event_dataset=None,
+    wfg_frequency_range=None,
+):
     """
     Build a StationaryGaussianLikelihoodBBH object from the metadata.
 
@@ -213,6 +231,17 @@ def build_stationary_gaussian_likelihood(metadata, event_dataset=None):
     metadata: dict
         Metadata from stored dingo parameter samples file.
         Typially accessed via pd.read_pickle(/path/to/dingo-output.pkl).metadata.
+    event_dataset: str = None
+        Path to event dataset for caching. If None, don't cache.
+    wfg_frequency_range: dict = None
+        Frequency range for waveform generator. If None, that of data domain is used,
+        which corresponds to the bounds of the likelihood integral.
+        Possible keys:
+            'f_start': float
+                Frequency at which to start the waveform generation. Overrides f_start in
+                metadata["model"]["dataset_settings"]["waveform_generator"].
+            'f_end': float
+                Frequency at which to start the waveform generation.
 
     Returns
     -------
@@ -220,18 +249,69 @@ def build_stationary_gaussian_likelihood(metadata, event_dataset=None):
         likelihood object
     """
     # get strain data
-    domain_data = get_domain_data(
+    event_data, data_domain = get_event_data_and_domain(
         metadata["model"], event_dataset=event_dataset, **metadata["event"]
     )
 
     # set up likelihood
-    wfg_kwargs = metadata["model"]["dataset_settings"]["waveform_generator"]
-    domain = build_domain_from_model_metadata(metadata["model"])
     likelihood = StationaryGaussianLikelihoodBBH(
-        wfg_kwargs, domain, domain_data, t_ref=metadata["event"]["time_event"]
+        metadata["model"]["dataset_settings"]["waveform_generator"],
+        data_domain,
+        event_data,
+        t_ref=metadata["event"]["time_event"],
+        wfg_frequency_range=wfg_frequency_range,
     )
 
     return likelihood
+
+
+def get_wfg(wfg_kwargs, data_domain, frequency_range=None):
+    """
+    Set up waveform generator from wfg_kwargs. The domain of the wfg is primarily
+    determined by the data domain, but a new (larger) frequency range can be
+    specified if this is necessary for the waveforms to be generated successfully
+    (e.g., for EOB waveforms which require a sufficiently small f_min and sufficiently
+    large f_max).
+
+    Parameters
+    ----------
+    wfg_kwargs: dict
+        Waveform generator parameters.
+    data_domain: dingo.gw.domains.Domain
+        Domain of event data, with bounds determined by likelihood integral.
+    frequency_range: dict = None
+        Frequency range for waveform generator. If None, that of data domain is used,
+        which corresponds to the bounds of the likelihood integral.
+        Possible keys:
+            'f_start': float
+                Frequency at which to start the waveform generation. Overrides f_start in
+                metadata["model"]["dataset_settings"]["waveform_generator"].
+            'f_end': float
+                Frequency at which to start the waveform generation.
+
+    Returns
+    -------
+    wfg: dingo.gw.waveform_generator.WaveformGenerator
+        Waveform generator object.
+
+    """
+    if frequency_range is None:
+        return WaveformGenerator(domain=data_domain, **wfg_kwargs)
+
+    else:
+        if "f_start" in frequency_range:
+            if frequency_range["f_start"] > data_domain.f_min:
+                raise ValueError("f_start must be less than f_min.")
+            wfg_kwargs["f_start"] = frequency_range["f_start"]
+        if "f_end" in frequency_range:
+            if frequency_range["f_end"] < data_domain.f_max:
+                raise ValueError("f_end must be greater than f_max.")
+            # get wfg domain, but care to not modify the original data_domain
+            data_domain = build_domain(
+                {**data_domain.domain_dict, "f_max": frequency_range["f_end"]}
+            )
+
+    return WaveformGenerator(domain=data_domain, **wfg_kwargs)
 
 
 def main():
