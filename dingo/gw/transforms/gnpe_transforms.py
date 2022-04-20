@@ -334,7 +334,7 @@ class GNPEChirp(GNPEBase):
                 mc_f = torch.outer(chirp_mass, f)
                 if f[0] == 0.0:
                     mc_f[0] = 1.0
-                if mass_ratio:
+                if mass_ratio is not None:
                     mass_ratio = mass_ratio[:, None]
             else:
                 raise TypeError(
@@ -348,7 +348,7 @@ class GNPEChirp(GNPEBase):
 
             # 1PN correction
             if self.order >= 2:
-                assert mass_ratio
+                assert mass_ratio is not None
                 symmetric_mass_ratio = mass_ratio / (1 + mass_ratio) ** 2
                 pi_m_f_SI = pi_mc_f_SI / symmetric_mass_ratio ** (3 / 5)
                 correction = 1 + (55 * symmetric_mass_ratio / 9 + 3715 / 756) * (
