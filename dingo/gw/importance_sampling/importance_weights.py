@@ -7,6 +7,7 @@ import yaml
 from os import rename, makedirs
 from os.path import dirname, join, isfile, exists
 import numpy as np
+import math
 import torch
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -161,7 +162,10 @@ def plot_diagnostics(theta, outdir):
     x = log_probs_proposal
     plt.xlabel("proposal log_prob")
     plt.ylabel("Weights (normalized to mean 1)")
-    y_lower, y_upper = 1e-4, 2e2
+    y_lower = 1e-4
+    y_upper = math.ceil(
+        np.max(y) / 10 ** math.ceil(np.log10(np.max(y)) - 1)
+    ) * 10 ** math.ceil(np.log10(np.max(y)) - 1)
     plt.ylim(y_lower, y_upper)
     n_below = len(np.where(y < y_lower)[0])
     n_above = len(np.where(y > y_upper)[0])
@@ -182,17 +186,18 @@ def plot_diagnostics(theta, outdir):
     plt.scatter(x, y, s=0.5)
     plt.savefig(join(outdir, "log_probs.png"))
 
-
     # cornerplot with unweighted vs. weighted samples
     weights = weights / np.mean(weights)
     threshold = 1e-3
     inds = np.where(weights > threshold)[0]
     theta_new = theta.loc[inds]
     weights_new = weights[inds]
-    print(f"Generating cornerplot with {len(theta_new)} out of {len(theta)} IS samples.")
+    print(
+        f"Generating cornerplot with {len(theta_new)} out of {len(theta)} IS samples."
+    )
 
     c = ChainConsumer()
-    c.add_chain(theta[:len(theta_new)], weights=None, color="orange", name="dingo")
+    c.add_chain(theta[: len(theta_new)], weights=None, color="orange", name="dingo")
     c.add_chain(theta_new, weights=weights_new, color="red", name="dingo-is")
     N = 2
     c.configure(
@@ -224,7 +229,6 @@ def main():
     samples = pd.read_pickle(settings["nde"]["data"]["parameter_samples"])
     metadata = samples.attrs
 
-
     # Step 1: Build proposal distribution.
     #
     # We use the dingo posterior as our proposal distribution. We need to be able to
@@ -236,7 +240,9 @@ def main():
     # nde to recover the posterior density.
 
     if not "log_prob" in samples.columns:
-        event_name = str(metadata["event"]["time_event"])  # use gps time as name for now
+        event_name = str(
+            metadata["event"]["time_event"]
+        )  # use gps time as name for now
         nde_name = join(args.outdir, f"nde-{event_name}.pt")
         if isfile(nde_name):
             print(f"Loading nde at {nde_name} for event {event_name}.")
@@ -253,7 +259,6 @@ def main():
             print(f"Renaming trained nde model to {nde_name}.")
             rename(join(args.outdir, "model_latest.pt"), nde_name)
 
-
     # Step 2: Build target distribution.
     #
     # Our target distribution is the posterior p(theta|d) = p(d|theta) * p(theta) / p(d).
@@ -264,7 +269,9 @@ def main():
     # metadata["model"]["dataset_settings"]["waveform_generator"]["approximant"] = "SEOBNRv4PHM"
     likelihood = build_stationary_gaussian_likelihood(
         # this should be set automatically from the samples
-        metadata, args.event_dataset, settings.get("wfg_frequency_range", None),
+        metadata,
+        args.event_dataset,
+        settings.get("wfg_frequency_range", None),
     )
     # build prior
     intrinsic_prior = metadata["model"]["dataset_settings"]["intrinsic_prior"]
@@ -276,7 +283,6 @@ def main():
     prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
     # wrap likelihood and prior to unnormalized posterior
     posterior = UnnormalizedPosteriorDensityBBH(likelihood, prior)
-
 
     # Step 3: SIR step
     #
