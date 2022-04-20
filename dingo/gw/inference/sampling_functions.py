@@ -18,7 +18,7 @@ from dingo.gw.transforms import (
 )
 from dingo.core.models import PosteriorModel
 from dingo.gw.inference.data_preparation import (
-    get_domain_data,
+    get_event_data_and_domain,
     get_corrected_sky_position,
 )
 from dingo.gw.domains import build_domain_from_model_metadata
@@ -59,7 +59,7 @@ def get_transforms_for_npe(model, num_samples, as_type="dict"):
 
 
 def sample_with_npe(
-    domain_data,
+    event_data,
     model,
     num_samples,
     as_type="dict",
@@ -72,7 +72,7 @@ def sample_with_npe(
     )
 
     # prepare data for inference network
-    x = transforms_pre(domain_data)["waveform"]
+    x = transforms_pre(event_data)["waveform"]
 
     # sample from inference network
     model.model.eval()  # Max: I don't think we need this, this is done inside sample method
@@ -144,7 +144,7 @@ def get_transforms_for_gnpe_time(model, init_parameters, as_type="dict"):
 
 
 def sample_with_gnpe(
-    domain_data,
+    event_data,
     model,
     samples_init,
     num_gnpe_iterations=None,
@@ -155,7 +155,7 @@ def sample_with_gnpe(
         model, num_samples=len(list(samples_init.values())[0])
     )
     data = {
-        "waveform_": transforms_pre(domain_data)["waveform"],
+        "waveform_": transforms_pre(event_data)["waveform"],
         "extrinsic_parameters": samples_init,
         "parameters": {},
     }
@@ -230,7 +230,7 @@ def sample_posterior_of_event(
     gnpe = "gnpe_time_shifts" in model.metadata["train_settings"]["data"]
 
     # get raw event data, and prepare it for the network domain
-    domain_data = get_domain_data(
+    event_data, _ = get_event_data_and_domain(
         model.metadata, time_event, time_psd, time_buffer, event_dataset
     )
 
@@ -238,7 +238,7 @@ def sample_posterior_of_event(
         if samples_init is not None:
             raise ValueError("samples_init can only be used for gnpe.")
         samples = sample_with_npe(
-            domain_data, 
+            event_data,
             model, 
             num_samples, 
             batch_size=batch_size, 
@@ -249,7 +249,7 @@ def sample_posterior_of_event(
         if get_log_prob:
             raise ValueError("GNPE does not provide access to log_prob.")
         samples = sample_with_gnpe(
-            domain_data,
+            event_data,
             model,
             samples_init,
             num_gnpe_iterations=num_gnpe_iterations,

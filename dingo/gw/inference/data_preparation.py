@@ -115,7 +115,7 @@ def data_to_domain(raw_data, settings_raw_data, domain, **kwargs):
         raise NotImplementedError(f"Unknown domain type {type(domain)}")
 
 
-def get_domain_data(
+def get_event_data_and_domain(
     model_metadata, time_event, time_psd, time_buffer, event_dataset=None,
 ):
     # step 1: download raw event data
@@ -127,14 +127,15 @@ def get_domain_data(
     )
 
     # step 2: prepare the data for the network domain
-    domain_data = data_to_domain(
+    domain = build_domain_from_model_metadata(model_metadata)
+    event_data = data_to_domain(
         raw_data,
         settings_raw_data,
-        build_domain_from_model_metadata(model_metadata),
+        domain,
         window=model_metadata["train_settings"]["data"]["window"],
     )
 
-    return domain_data
+    return event_data, domain
 
 
 def get_corrected_sky_position(ra, t_event, t_ref=1126259462.391):
