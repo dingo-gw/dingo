@@ -146,6 +146,50 @@ def get_transforms_for_gnpe(model, init_parameters, as_type="dict"):
 
     return gnpe_transforms_pre, gnpe_transforms_post
 
+# def sample_with_gnpe(
+#     domain_data,
+#     model,
+#     samples_init,
+#     num_gnpe_iterations=None,
+#     batch_size=None,
+# ):
+#     # prepare data for inference network, and add initial samples as extrinsic parameters
+#     transforms_pre, _ = get_transforms_for_npe(
+#         model, num_samples=len(list(samples_init["parameters"].values())[0])
+#     )
+#     data = {
+#         "waveform_": transforms_pre(domain_data)["waveform"],
+#         "extrinsic_parameters": samples_init["parameters"],
+#         "parameters": {},
+#     }
+
+#     # get transformations for gnpe loop
+#     gnpe_transforms_pre, gnpe_transforms_post = get_transforms_for_gnpe(
+#         model,
+#         init_parameters=samples_init["parameters"].keys(),
+#     )
+
+#     model.model.eval()
+
+#     print("iteration / network time / processing time")
+#     for idx in range(num_gnpe_iterations):
+#         time_start = time.time()
+
+#         data = gnpe_transforms_pre(data)
+#         x = [data["waveform"], data["context_parameters"]]
+
+#         time_network_start = time.time()
+#         data["parameters"] = model.sample(*x, batch_size=batch_size)
+#         time_network = time.time() - time_network_start
+
+#         data = gnpe_transforms_post(data)
+
+#         time_processing = time.time() - time_start - time_network
+#         print(f"{idx:03d}  /  {time_network:.2f} s  /  {time_processing:.2f} s")
+
+#     samples = data["parameters"]
+#     return samples
+
 
 def sample_with_gnpe(
     domain_data,
@@ -172,25 +216,58 @@ def sample_with_gnpe(
 
     model.model.eval()
 
+    
+    sampler = list(torch.utils.data.BatchSampler(range(data["waveform_"].shape[0]), batch_size=batch_size, drop_last=False))
     print("iteration / network time / processing time")
+    time_network = 0
     for idx in range(num_gnpe_iterations):
+        torch.cuda.empty_cache()
         time_start = time.time()
 
-        data = gnpe_transforms_pre(data)
-        x = [data["waveform"], data["context_parameters"]]
+        batch_list = []
+        for i in range(len(sampler)):
+            # Taking a batch of the full data dict according to the sampler
+            batch_data =  {
+                    "waveform_": data["waveform_"][sampler[i], ...],
+                    "extrinsic_parameters": {k:v[sampler[i], ...] for k,v in data["extrinsic_parameters"].items()},
+                    "parameters": {}
+                }
+            batch_data = gnpe_transforms_pre(batch_data)
+            x = [batch_data["waveform"], batch_data["context_parameters"]]
 
-        time_network_start = time.time()
-        data["parameters"] = model.sample(*x, batch_size=batch_size)
-        time_network = time.time() - time_network_start
+            time_network_start = time.time()
+            batch_data["parameters"] = model.sample(*x)
+            time_network += time.time() - time_network_start
 
-        data = gnpe_transforms_post(data)
+            batch_data = gnpe_transforms_post(batch_data)
+            batch_list.append(batch_data)
 
+        # Combining Batches into a full data dict
+        data = {
+            key:(torch.cat([batch[key] for batch in batch_list]) if isinstance(val, torch.Tensor)
+            else {
+                k:torch.cat(
+                    [
+                    batch[key][k] for batch in batch_list
+                    ]) for k in batch_list[0][key].keys()
+                })
+            for key, val in batch_list[0].items()
+        }
+
+        # Alternative (hard coded but more readable implementation)
+        # data = {
+        #     "context_parameters": torch.cat([batch["context_parameters"] for batch in batch_list]),
+        #     "waveform": torch.cat([batch["waveform"] for batch in batch_list]),
+        #     "waveform_": torch.cat([batch["waveform_"] for batch in batch_list]),
+        #     "extrinsic_parameters": {k:torch.cat([batch["extrinsic_parameters"][k] for batch in batch_list]) for k in batch_list[0]["extrinsic_parameters"].keys()},
+        #     "parameters": {k:torch.cat([batch["parameters"][k] for batch in batch_list]) for k in batch_list[0]["parameters"].keys()},
+        # }
+        
         time_processing = time.time() - time_start - time_network
         print(f"{idx:03d}  /  {time_network:.2f} s  /  {time_processing:.2f} s")
 
     samples = data["parameters"]
     return samples
-
 
 def sample_posterior_of_event(
     time_event,
@@ -263,5 +340,49 @@ def sample_posterior_of_event(
         )
 
     # TODO: apply post correction of sky position here
+
+    return samples
+
+def sample_posterier_of_injection(
+    domain_data,
+    model,
+    model_init=None,
+    device="cpu",
+    num_samples=50_000,
+    samples_init=None,
+    num_gnpe_iterations=30,
+    batch_size=None,
+):
+    # get init_samples if requested (typically for gnpe)
+    if model_init is not None:
+        samples_init = sample_posterier_of_injection(
+            domain_data,
+            model_init,
+            device=device,
+            num_samples=num_samples,
+            batch_size=batch_size,
+        )
+
+    # load model
+    if not type(model) == PosteriorModel:
+        model = PosteriorModel(model, device=device, load_training_info=False)
+    # currently gnpe only implemented for time shifts
+    gnpe = "gnpe_time_shifts" in model.metadata["train_settings"]["data"]
+
+    if not gnpe:
+        if samples_init is not None:
+            raise ValueError("samples_init can only be used for gnpe.")
+        samples = sample_with_npe(
+            domain_data, model, num_samples, batch_size=batch_size
+        )
+
+    else:
+        samples = sample_with_gnpe(
+            domain_data,
+            model,
+            samples_init,
+            num_gnpe_iterations=num_gnpe_iterations,
+            batch_size=batch_size,
+        )
 
     return samples
