@@ -146,51 +146,6 @@ def get_transforms_for_gnpe(model, init_parameters, as_type="dict"):
 
     return gnpe_transforms_pre, gnpe_transforms_post
 
-# def sample_with_gnpe(
-#     domain_data,
-#     model,
-#     samples_init,
-#     num_gnpe_iterations=None,
-#     batch_size=None,
-# ):
-#     # prepare data for inference network, and add initial samples as extrinsic parameters
-#     transforms_pre, _ = get_transforms_for_npe(
-#         model, num_samples=len(list(samples_init["parameters"].values())[0])
-#     )
-#     data = {
-#         "waveform_": transforms_pre(domain_data)["waveform"],
-#         "extrinsic_parameters": samples_init["parameters"],
-#         "parameters": {},
-#     }
-
-#     # get transformations for gnpe loop
-#     gnpe_transforms_pre, gnpe_transforms_post = get_transforms_for_gnpe(
-#         model,
-#         init_parameters=samples_init["parameters"].keys(),
-#     )
-
-#     model.model.eval()
-
-#     print("iteration / network time / processing time")
-#     for idx in range(num_gnpe_iterations):
-#         time_start = time.time()
-
-#         data = gnpe_transforms_pre(data)
-#         x = [data["waveform"], data["context_parameters"]]
-
-#         time_network_start = time.time()
-#         data["parameters"] = model.sample(*x, batch_size=batch_size)
-#         time_network = time.time() - time_network_start
-
-#         data = gnpe_transforms_post(data)
-
-#         time_processing = time.time() - time_start - time_network
-#         print(f"{idx:03d}  /  {time_network:.2f} s  /  {time_processing:.2f} s")
-
-#     samples = data["parameters"]
-#     return samples
-
-
 def sample_with_gnpe(
     domain_data,
     model,
@@ -254,15 +209,6 @@ def sample_with_gnpe(
             for key, val in batch_list[0].items()
         }
 
-        # Alternative (hard coded but more readable implementation)
-        # data = {
-        #     "context_parameters": torch.cat([batch["context_parameters"] for batch in batch_list]),
-        #     "waveform": torch.cat([batch["waveform"] for batch in batch_list]),
-        #     "waveform_": torch.cat([batch["waveform_"] for batch in batch_list]),
-        #     "extrinsic_parameters": {k:torch.cat([batch["extrinsic_parameters"][k] for batch in batch_list]) for k in batch_list[0]["extrinsic_parameters"].keys()},
-        #     "parameters": {k:torch.cat([batch["parameters"][k] for batch in batch_list]) for k in batch_list[0]["parameters"].keys()},
-        # }
-        
         time_processing = time.time() - time_start - time_network
         print(f"{idx:03d}  /  {time_network:.2f} s  /  {time_processing:.2f} s")
 
