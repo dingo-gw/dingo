@@ -178,6 +178,7 @@ def sample_with_gnpe(
     for idx in range(num_gnpe_iterations):
         torch.cuda.empty_cache()
         time_start = time.time()
+        time_network = 0
 
         batch_list = []
         for i in range(len(sampler)):
@@ -195,10 +196,16 @@ def sample_with_gnpe(
             time_network += time.time() - time_network_start
 
             batch_data = gnpe_transforms_post(batch_data)
+            del batch_data["waveform_"]
+            del batch_data["waveform"]
             batch_list.append(batch_data)
 
         # Combining Batches into a full data dict
+        # Copying the old waveform
         data = {
+            "waveform_": data["waveform_"]
+        }
+        data.update({
             key:(torch.cat([batch[key] for batch in batch_list]) if isinstance(val, torch.Tensor)
             else {
                 k:torch.cat(
@@ -207,7 +214,7 @@ def sample_with_gnpe(
                     ]) for k in batch_list[0][key].keys()
                 })
             for key, val in batch_list[0].items()
-        }
+        })
 
         time_processing = time.time() - time_start - time_network
         print(f"{idx:03d}  /  {time_network:.2f} s  /  {time_processing:.2f} s")
