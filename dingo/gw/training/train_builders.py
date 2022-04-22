@@ -19,7 +19,7 @@ from dingo.gw.transforms import (
     SelectStandardizeRepackageParameters,
     RepackageStrainsAndASDS,
     UnpackDict,
-    GNPEChirpMass,
+    GNPEChirp,
     GNPECoalescenceTimes,
     SampleExtrinsicParameters,
     GetDetectorTimes,
@@ -118,14 +118,9 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
             )
         )
         extra_context_parameters += transforms[-1].proxy_list
-    if "gnpe_chirp_mass" in data_settings:
-        d = data_settings["gnpe_chirp_mass"]
-        transforms.append(
-            GNPEChirpMass(
-                d["kernel"],
-                domain,
-            )
-        )
+    if "gnpe_chirp" in data_settings:
+        d = data_settings["gnpe_chirp"]
+        transforms.append(GNPEChirp(d["kernel"], domain, d.get("order", 0)))
         extra_context_parameters += transforms[-1].proxy_list
 
     # Add the GNPE proxies to context_parameters the first time the transforms are

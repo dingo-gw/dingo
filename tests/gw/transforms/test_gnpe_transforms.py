@@ -6,7 +6,7 @@ from bilby.core.prior import PriorDict
 from bilby.gw.detector import InterferometerList
 
 from dingo.gw.domains import FrequencyDomain
-from dingo.gw.transforms import GNPECoalescenceTimes, GNPEChirpMass
+from dingo.gw.transforms import GNPECoalescenceTimes, GNPEChirp
 
 
 @pytest.fixture
@@ -32,7 +32,7 @@ def gnpe_chirp_setup():
     )
     p = {"f_min": 20.0, "f_max": 1024.0, "delta_f": 1.0 / 4.0}
     domain = FrequencyDomain(**p)
-    return GNPEChirpMass(kernel, domain), prior
+    return GNPEChirp(kernel, domain), prior
 
 
 def test_gnpe_time_training(gnpe_time_setup):

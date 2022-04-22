@@ -8,7 +8,7 @@ from dingo.gw.transforms import SampleExtrinsicParameters,\
     GetDetectorTimes, ProjectOntoDetectors, SampleNoiseASD, \
     WhitenAndScaleStrain, AddWhiteNoiseComplex, \
     SelectStandardizeRepackageParameters, RepackageStrainsAndASDS, UnpackDict, \
-    GNPEDetectorTimes, GNPEChirpMass
+    GNPEDetectorTimes, GNPEChirp
 from dingo.gw.noise_dataset import ASDDataset
 from dingo.gw.prior import default_inference_parameters
 from dingo.gw.gwutils import *
@@ -61,7 +61,7 @@ if 'gnpe_time_shifts' in train_settings['transform_settings']:
         std=standardization_dict['std']['geocent_time'])
 if 'gnpe_chirp_mass' in train_settings['transform_settings']:
     d = train_settings['transform_settings']['gnpe_chirp_mass']
-    gnpe_chirp_mass = GNPEChirpMass(
+    gnpe_chirp_mass = GNPEChirp(
         domain.sample_frequencies_truncated,
         d['kernel_kwargs'],
         mean=standardization_dict['std']['chirp_mass'],

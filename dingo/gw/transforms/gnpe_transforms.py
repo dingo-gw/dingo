@@ -214,44 +214,73 @@ class GNPECoalescenceTimes(GNPEBase):
         return sample
 
 
-class GNPEChirpMass(GNPEBase):
+class GNPEChirp(GNPEBase):
     """
     Relative binning / heterodyning GNPE transform, which factors out the overall chirp
     from the waveform.
 
-    Given a chirp mass estimate, this applies a multiplicative blur to obtain a GNPE proxy
-    variable. The data are then transformed by dividing by a fiducial waveform of the form
+    At leading order, given a chirp mass estimate, this applies a multiplicative blur
+    to obtain a GNPE proxy variable. The data are then transformed by dividing by a
+    fiducial waveform of the form
 
     exp( - 1j * (3/128) * (pi G chirp_mass_proxy f / c**3)**(-5/3) ) ;
 
     see 2001.11412, eq. (7.2). This is the leading order chirp due to the emission of
-    quadrupole radiation. (Higher PN order corrections could also be added.) We do not
-    include any amplitude in the fiducial waveform, since at inference time this
-    transform will be applied to noisy data. Multiplying the frequency-domain noise by
-    a complex number of unit norm is allowed because it only changes the phase,
-    not the overall amplitude, which would change the noise PSD.
+    quadrupole radiation.
+
+    This transform also optionally implements 1PN corrections involving the mass ratio.
+    We do not include any amplitude in the fiducial waveform, since at inference time
+    this transform will be applied to noisy data. Multiplying the frequency-domain
+    noise by a complex number of unit norm is allowed because it only changes the
+    phase, not the overall amplitude, which would change the noise PSD.
     """
-    def __init__(self, kernel: str, domain: Domain):
+
+    def __init__(self, kernel, domain: Domain, order: int = 0):
         """
         Parameters
         ----------
-        kernel : str
-            Defines a Bilby prior.
+        kernel : dict or str
+            Defines a Bilby prior. If a dict, keys should include chirp_mass,
+            and (possibly) mass_ratio.
         domain : Domain
             Only works for a FrequencyDomain at present.
+        order : int
+            Twice the post-Newtonian order for the expansion. Valid orders are 0 and 2.
         """
-        kernel_dict = {"chirp_mass": kernel}
-        operators = {"chirp_mass": "x"}
-        super().__init__(kernel_dict, operators)
+        if type(kernel) == str:
+            # Assume this is the kernel for the chirp mass (backward compatibility)
+            kernel = {"chirp_mass": kernel}
+        else:
+            # We copy the kernel because the PriorDict constructor modifies the argument.
+            kernel = kernel.copy()
+
+        if order == 0:
+            if "chirp_mass" not in kernel:
+                raise KeyError(f"Kernel must include chirp_mass key.")
+            if "mass_ratio" in kernel:
+                print(
+                    "Warning: mass_ratio kernel provided, but will be ignored for "
+                    "order 0 GNPE."
+                )
+                kernel.pop("mass_ratio")
+        elif order == 2:
+            if "chirp_mass" not in kernel or "mass_ratio" not in kernel:
+                raise KeyError(f"Kernel must include chirp_mass and mass_ratio keys.")
+        else:
+            raise ValueError(f"Order {order} invalid. Acceptable values are 0 and 2.")
+        self.order = order
+
+        operators = {"chirp_mass": "x", "mass_ratio": "x"}
+        super().__init__(kernel, operators)
         self.domain = domain
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
         extrinsic_parameters = sample["extrinsic_parameters"].copy()
 
-        # The chirp mass could be in either the intrinsic or extrinsic parameters list.
-        # At inference time, we put all GNPE parameters into the extrinsic parameters
-        # list.
+        # The relevant parameters could be in either the intrinsic or extrinsic
+        # parameters list. At inference time, we put all GNPE parameters into the
+        # extrinsic parameters list.
         proxies = self.sample_proxies(
             {**sample["parameters"], **sample["extrinsic_parameters"]}
         )
@@ -263,23 +292,26 @@ class GNPEChirpMass(GNPEBase):
         # draw samples of the parameters at that point, and not prepare any data.
         if "waveform" in sample:
             sample["waveform"] = self.factor_fiducial_waveform(
-                proxies["chirp_mass_proxy"], sample["waveform"]
+                sample["waveform"],
+                proxies["chirp_mass_proxy"],
+                proxies.get("mass_ratio_proxy"),
             )
 
         return sample
 
-    def factor_fiducial_waveform(self, chirp_mass, data):
+    def factor_fiducial_waveform(self, data, chirp_mass, mass_ratio):
         """
-        Divides the data by the fiducial waveform defined by the chirp mass. Allows for
-        batching.
+        Divides the data by the fiducial waveform defined by the chirp mass and (
+        optionally) mass ratio. Allows for batching.
 
         Parameters
         ----------
-        chirp_mass : Union[np.array, torch.Tensor]
         data : Union[dict, torch.Tensor]
             If a dict, the keys would correspond to different detectors or
             polarizations. For a Tensor, these would be within different components.
             This method uses the same fiducial waveform for each detector.
+        chirp_mass : Union[np.array, torch.Tensor]
+        mass_ratio : Union[np.array, torch.Tensor]
 
         Returns
         -------
@@ -293,25 +325,37 @@ class GNPEChirpMass(GNPEBase):
 
             # Expand across possible batch dimension.
             if type(chirp_mass) == np.float64 or type(chirp_mass) == float:
-                mf = chirp_mass * f
+                mc_f = chirp_mass * f
                 # Avoid taking a negative power of 0 in the first index. This will get
                 # chopped off or multiplied by 0 later anyway.
                 if f[0] == 0.0:
-                    mf[0] = 1.0
+                    mc_f[0] = 1.0
             elif type(chirp_mass) == torch.Tensor:
-                mf = torch.outer(chirp_mass, f)
+                mc_f = torch.outer(chirp_mass, f)
                 if f[0] == 0.0:
-                    mf[0] = 1.0
+                    mc_f[0] = 1.0
+                if mass_ratio is not None:
+                    mass_ratio = mass_ratio[:, None]
             else:
                 raise TypeError(
                     f"Invalid type {type(chirp_mass)}. "
                     f"Only implemented for floats and tensors"
                 )
 
-            # Add higher order corrections to the leading PN order if desired.
-            fiducial_phase = (3 / 128) * (
-                np.pi * mf * lal.GMSUN_SI / lal.C_SI ** 3
-            ) ** (-5 / 3)
+            # Leading (0PN) phase
+            pi_mc_f_SI = np.pi * (lal.GMSUN_SI / lal.C_SI ** 3) * mc_f
+            fiducial_phase = (3 / 128) * (pi_mc_f_SI) ** (-5 / 3)
+
+            # 1PN correction
+            if self.order >= 2:
+                assert mass_ratio is not None
+                symmetric_mass_ratio = mass_ratio / (1 + mass_ratio) ** 2
+                pi_m_f_SI = pi_mc_f_SI / symmetric_mass_ratio ** (3 / 5)
+                correction = 1 + (55 * symmetric_mass_ratio / 9 + 3715 / 756) * (
+                    pi_m_f_SI
+                ) ** (2 / 3)
+
+                fiducial_phase *= correction
 
             if type(data) == dict:
                 result = {}
@@ -323,4 +367,4 @@ class GNPEChirpMass(GNPEBase):
             return result
 
         else:
-            raise NotImplementedError("Can only use GNPEChirpMass in frequency domain.")
+            raise NotImplementedError("Can only use GNPEChirp in frequency domain.")

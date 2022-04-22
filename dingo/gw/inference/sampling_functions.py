@@ -15,7 +15,7 @@ from dingo.gw.transforms import (
     ExpandStrain,
     ToTorch,
     ResetSample,
-    GNPEChirpMass,
+    GNPEChirp,
 )
 from dingo.core.models import PosteriorModel
 from dingo.gw.inference.data_preparation import (
@@ -88,9 +88,7 @@ def get_transforms_for_gnpe(model, init_parameters, as_type="dict"):
     gnpe_time_settings = model.metadata["train_settings"]["data"].get(
         "gnpe_time_shifts"
     )
-    gnpe_chirp_settings = model.metadata["train_settings"]["data"].get(
-        "gnpe_chirp_mass"
-    )
+    gnpe_chirp_settings = model.metadata["train_settings"]["data"].get("gnpe_chirp")
     if not gnpe_time_settings and not gnpe_chirp_settings:
         raise KeyError(
             "GNPE inference requires network trained for either chirp mass "
@@ -115,7 +113,13 @@ def get_transforms_for_gnpe(model, init_parameters, as_type="dict"):
         )
         gnpe_transforms_pre.append(TimeShiftStrain(ifo_list, domain))
     if gnpe_chirp_settings:
-        gnpe_transforms_pre.append(GNPEChirpMass(gnpe_chirp_settings["kernel"], domain))
+        gnpe_transforms_pre.append(
+            GNPEChirp(
+                gnpe_chirp_settings["kernel"],
+                domain,
+                gnpe_chirp_settings.get("order", 0),
+            )
+        )
     gnpe_transforms_pre.append(
         SelectStandardizeRepackageParameters(
             {"context_parameters": data_settings["context_parameters"]},
@@ -139,7 +143,9 @@ def get_transforms_for_gnpe(model, init_parameters, as_type="dict"):
                 as_type=as_type,
             ),
             PostCorrectGeocentTime(),
-            CopyToExtrinsicParameters("ra", "dec", "geocent_time", "chirp_mass"),
+            CopyToExtrinsicParameters(
+                "ra", "dec", "geocent_time", "chirp_mass", "mass_ratio"
+            ),
             GetDetectorTimes(ifo_list, data_settings["ref_time"]),
         ]
     )
@@ -227,8 +233,10 @@ def sample_posterior_of_event(
     if not type(model) == PosteriorModel:
         model = PosteriorModel(model, device=device, load_training_info=False)
 
-    gnpe = ("gnpe_time_shifts" in model.metadata["train_settings"]["data"] or
-            'gnpe_chirp_mass' in model.metadata["train_settings"]["data"])
+    gnpe = (
+        "gnpe_time_shifts" in model.metadata["train_settings"]["data"]
+        or "gnpe_chirp_mass" in model.metadata["train_settings"]["data"]
+    )
 
     # step 1: download raw event data
     settings_raw_data = parse_settings_for_raw_data(

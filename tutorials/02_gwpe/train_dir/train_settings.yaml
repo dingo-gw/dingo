@@ -22,8 +22,11 @@ data:
   gnpe_time_shifts:
     kernel: bilby.core.prior.Uniform(minimum=-0.001, maximum=0.001)
     exact_equiv: True
-  gnpe_chirp_mass:
-    kernel: bilby.core.prior.Uniform(minimum=0.95, maximum=1.05)
+  gnpe_chirp:
+    order: 2
+    kernel:
+      chirp_mass: bilby.core.prior.Uniform(minimum=0.98, maximum=1.02)
+      mass_ratio: bilby.core.prior.Uniform(minimum=0.95, maximum=1.05)
   inference_parameters: default # [chirp_mass, mass_ratio,  luminosity_distance, dec]
 
 # Model architecture
