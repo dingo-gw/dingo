@@ -13,8 +13,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from chainconsumer import ChainConsumer
 import scipy
-from multiprocessing import Pool
-from threadpoolctl import threadpool_limits
 import argparse
 
 from dingo.core.models import PosteriorModel
@@ -22,6 +20,7 @@ from dingo.gw.likelihood import build_stationary_gaussian_likelihood
 from dingo.core.density import train_unconditional_density_estimator
 from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.prior import build_prior_with_defaults
+from dingo.gw.posterior import UnnormalizedPosteriorDensityBBH
 
 
 def parse_args():
@@ -32,7 +31,7 @@ def parse_args():
         "--settings",
         type=str,
         required=True,
-        help="Path to settings file",
+        help="Path to settings file.",
     )
     parser.add_argument(
         "--event_dataset",
@@ -90,62 +89,6 @@ def get_samples_and_log_probs_from_proposal(nde, num_samples):
 
     return theta, log_probs_proposal
 
-
-class UnnormalizedPosteriorDensityBBH:
-    """
-    Implements the *unnormalized* posterior density for BBH events. This is computed
-    via Bayes' theorem
-
-            p(theta|d) = p(d|theta) * p(theta) / p(d)
-
-    as the product of the likelihood p(d|theta) and prior p(theta), omitting the
-    constant evidence p(d).
-    """
-
-    def __init__(self, likelihood, prior):
-        self.likelihood = likelihood
-        self.prior = prior
-
-    def __call__(self, theta):
-        return self.log_prob(theta)
-
-    def log_prob_multiprocessing(self, theta, num_processes=1):
-        """
-        Compute the log_prob of theta in parallel.
-
-        Parameters
-        ----------
-        theta: pd.DataFrame
-            Dataframe with parameter samples theta.
-        num_processes: int
-            Number of processes to use.
-
-        Returns
-        -------
-        log_probs: numpy.ndarray
-            Array with log_probs of theta.
-        """
-        with threadpool_limits(limits=1, user_api="blas"):
-            with Pool(processes=num_processes) as pool:
-                # Generator object for theta rows. For idx this yields row idx of theta
-                # dataframe, converted to dict, ready to be passed to self.log_prob.
-                theta_generator = (d[1].to_dict() for d in theta.iterrows())
-                # compute logprobs with multiprocessing
-                log_probs = pool.map(self.log_prob, theta_generator)
-
-        return np.array(log_probs)
-
-    def log_prob(self, theta):
-        try:
-            log_prior = self.prior.ln_prob(theta)
-            if log_prior == -np.inf:
-                return -np.inf
-            log_likelihood = self.likelihood.log_prob(theta)
-            return log_likelihood + log_prior
-        except:
-            return -np.inf
-
-        # return self.likelihood.log_prob(theta) + self.prior.ln_prob(theta)
 
 
 def plot_diagnostics(theta, outdir):
@@ -321,10 +264,10 @@ def main():
     theta.insert(theta.shape[1], "log_probs_target", log_probs_target)
     theta.to_pickle(join(args.outdir, "weighted_samples.pkl"))
 
-    diagnositcs_dir = join(args.outdir, "IS-diagnostics")
-    if not exists(diagnositcs_dir):
-        makedirs(diagnositcs_dir)
-    plot_diagnostics(theta, diagnositcs_dir)
+    diagnostics_dir = join(args.outdir, "IS-diagnostics")
+    if not exists(diagnostics_dir):
+        makedirs(diagnostics_dir)
+    plot_diagnostics(theta, diagnostics_dir)
 
 
 if __name__ == "__main__":

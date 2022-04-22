@@ -299,19 +299,18 @@ def get_wfg(wfg_kwargs, data_domain, frequency_range=None):
         return WaveformGenerator(domain=data_domain, **wfg_kwargs)
 
     else:
-        if "f_start" in frequency_range:
+        if "f_start" in frequency_range and frequency_range["f_start"] is not None:
             if frequency_range["f_start"] > data_domain.f_min:
                 raise ValueError("f_start must be less than f_min.")
             wfg_kwargs["f_start"] = frequency_range["f_start"]
-        if "f_end" in frequency_range:
+        if "f_end" in frequency_range and frequency_range["f_end"] is not None:
             if frequency_range["f_end"] < data_domain.f_max:
                 raise ValueError("f_end must be greater than f_max.")
             # get wfg domain, but care to not modify the original data_domain
             data_domain = build_domain(
                 {**data_domain.domain_dict, "f_max": frequency_range["f_end"]}
             )
-
-    return WaveformGenerator(domain=data_domain, **wfg_kwargs)
+        return WaveformGenerator(domain=data_domain, **wfg_kwargs)
 
 
 def main():
