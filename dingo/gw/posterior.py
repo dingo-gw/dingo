@@ -101,6 +101,12 @@ def parse_args():
         help="Number of processes for waveform generation.",
     )
     parser.add_argument(
+        "--num_samples",
+        type=int,
+        default=None,
+        help="Use only first num_samples from samples file.",
+    )
+    parser.add_argument(
         "--prefix",
         type=str,
         default="",
@@ -115,7 +121,7 @@ def main():
     args = parse_args()
 
     # load dingo parameter samples
-    theta = pd.read_pickle(args.samples_file)
+    theta = pd.read_pickle(args.samples_file)[: args.num_samples]
     metadata = theta.attrs
 
     # likelihood
@@ -142,7 +148,7 @@ def main():
     # insert log_probs_target into theta and save the updated samples
     theta.insert(theta.shape[1], "log_probs_target", log_probs_target)
     theta.to_pickle(
-        join(split(args.sample_file)[0], args.prefix + split(args.sample_file)[1])
+        join(split(args.samples_file)[0], args.prefix + split(args.samples_file)[1])
     )
 
 
