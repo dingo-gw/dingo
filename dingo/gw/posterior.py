@@ -1,5 +1,5 @@
 import time
-from os.path import splitext
+from os.path import split, join
 import numpy as np
 import pandas as pd
 from multiprocessing import Pool
@@ -101,10 +101,10 @@ def parse_args():
         help="Number of processes for waveform generation.",
     )
     parser.add_argument(
-        "--suffix",
+        "--prefix",
         type=str,
         default="",
-        help="Suffix for new samples. If empty string, overwrite old sample file.",
+        help="Prefix for new samples. If empty string, overwrite old sample file.",
     )
     args = parser.parse_args()
 
@@ -142,7 +142,7 @@ def main():
     # insert log_probs_target into theta and save the updated samples
     theta.insert(theta.shape[1], "log_probs_target", log_probs_target)
     theta.to_pickle(
-        splitext(args.samples_file)[0] + args.suffix + splitext(args.samples_file)[1]
+        join(split(args.sample_file)[0], args.prefix + split(args.sample_file)[1])
     )
 
 
