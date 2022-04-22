@@ -146,6 +146,7 @@ def get_transforms_for_gnpe(model, init_parameters, as_type="dict"):
 
     return gnpe_transforms_pre, gnpe_transforms_post
 
+
 def sample_with_gnpe(
     domain_data,
     model,
@@ -171,8 +172,11 @@ def sample_with_gnpe(
 
     model.model.eval()
 
-    
-    sampler = list(torch.utils.data.BatchSampler(range(data["waveform_"].shape[0]), batch_size=batch_size, drop_last=False))
+    sampler = list(
+        torch.utils.data.BatchSampler(
+            range(data["waveform_"].shape[0]), batch_size=batch_size, drop_last=False
+        )
+    )
     print("iteration / network time / processing time")
     time_network = 0
     for idx in range(num_gnpe_iterations):
@@ -183,11 +187,14 @@ def sample_with_gnpe(
         batch_list = []
         for i in range(len(sampler)):
             # Taking a batch of the full data dict according to the sampler
-            batch_data =  {
-                    "waveform_": data["waveform_"][sampler[i], ...],
-                    "extrinsic_parameters": {k:v[sampler[i], ...] for k,v in data["extrinsic_parameters"].items()},
-                    "parameters": {}
-                }
+            batch_data = {
+                "waveform_": data["waveform_"][sampler[i], ...],
+                "extrinsic_parameters": {
+                    k: v[sampler[i], ...]
+                    for k, v in data["extrinsic_parameters"].items()
+                },
+                "parameters": {},
+            }
             batch_data = gnpe_transforms_pre(batch_data)
             x = [batch_data["waveform"], batch_data["context_parameters"]]
 
@@ -202,25 +209,27 @@ def sample_with_gnpe(
 
         # Combining Batches into a full data dict
         # Copying the old waveform
-        data = {
-            "waveform_": data["waveform_"]
-        }
-        data.update({
-            key:(torch.cat([batch[key] for batch in batch_list]) if isinstance(val, torch.Tensor)
-            else {
-                k:torch.cat(
-                    [
-                    batch[key][k] for batch in batch_list
-                    ]) for k in batch_list[0][key].keys()
-                })
-            for key, val in batch_list[0].items()
-        })
+        data = {"waveform_": data["waveform_"]}
+        data.update(
+            {
+                key: (
+                    torch.cat([batch[key] for batch in batch_list])
+                    if isinstance(val, torch.Tensor)
+                    else {
+                        k: torch.cat([batch[key][k] for batch in batch_list])
+                        for k in batch_list[0][key].keys()
+                    }
+                )
+                for key, val in batch_list[0].items()
+            }
+        )
 
         time_processing = time.time() - time_start - time_network
         print(f"{idx:03d}  /  {time_network:.2f} s  /  {time_processing:.2f} s")
 
     samples = data["parameters"]
     return samples
+
 
 def sample_posterior_of_event(
     time_event,
@@ -257,8 +266,10 @@ def sample_posterior_of_event(
     if not type(model) == PosteriorModel:
         model = PosteriorModel(model, device=device, load_training_info=False)
 
-    gnpe = ("gnpe_time_shifts" in model.metadata["train_settings"]["data"] or
-            'gnpe_chirp_mass' in model.metadata["train_settings"]["data"])
+    gnpe = (
+        "gnpe_time_shifts" in model.metadata["train_settings"]["data"]
+        or "gnpe_chirp_mass" in model.metadata["train_settings"]["data"]
+    )
 
     # step 1: download raw event data
     settings_raw_data = parse_settings_for_raw_data(
@@ -295,6 +306,7 @@ def sample_posterior_of_event(
     # TODO: apply post correction of sky position here
 
     return samples
+
 
 def sample_posterier_of_injection(
     domain_data,
