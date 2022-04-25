@@ -119,10 +119,11 @@ def get_standardization_dict(
     # to sample these and estimate the mean and standard deviation numerically.
     additional_parameters = [p for p in selected_parameters if p not in mean]
     if additional_parameters:
-        num_samples = 100_000
+        num_samples = min(100_000, len(wfd.parameters))
         samples = {p: np.empty(num_samples) for p in additional_parameters}
         for n in range(num_samples):
-            sample = transform({})
+            sample = {'parameters': wfd.parameters.iloc[n].to_dict()}
+            sample = transform(sample)
             for p in additional_parameters:
                 # This assumes all of the additional parameters are contained within
                 # extrinsic_parameters. We have set it up so this is the case for the

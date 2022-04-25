@@ -1,7 +1,10 @@
 from copy import deepcopy
 
 from bilby.gw.prior import BBHPriorDict
-from bilby.gw.conversion import fill_from_fixed_priors, convert_to_lal_binary_black_hole_parameters
+from bilby.gw.conversion import (
+    fill_from_fixed_priors,
+    convert_to_lal_binary_black_hole_parameters,
+)
 from bilby.core.prior import Uniform, Sine, Cosine
 
 import numpy as np
@@ -11,7 +14,7 @@ import warnings
 # Silence INFO and WARNING messages from bilby
 import logging
 
-logging.getLogger('bilby').setLevel("ERROR")
+logging.getLogger("bilby").setLevel("ERROR")
 
 
 class BBHExtrinsicPriorDict(BBHPriorDict):
@@ -31,8 +34,10 @@ class BBHExtrinsicPriorDict(BBHPriorDict):
 
         # The previous call sometimes adds phi_jl, phi_12 parameters. These are
         # not needed so they can be deleted.
-        if 'phi_jl' in out_sample.keys(): del out_sample['phi_jl']
-        if 'phi_12' in out_sample.keys(): del out_sample['phi_12']
+        if "phi_jl" in out_sample.keys():
+            del out_sample["phi_jl"]
+        if "phi_12" in out_sample.keys():
+            del out_sample["phi_12"]
 
         return out_sample
 
@@ -66,13 +71,17 @@ class BBHExtrinsicPriorDict(BBHPriorDict):
                 # A few analytic cases
                 if isinstance(p, Uniform):
                     mean[key] = (p.maximum + p.minimum) / 2.0
-                    std[key] = np.sqrt((p.maximum - p.minimum)**2.0 / 12.0).item()
+                    std[key] = np.sqrt((p.maximum - p.minimum) ** 2.0 / 12.0).item()
                 elif isinstance(p, Sine) and p.minimum == 0.0 and p.maximum == np.pi:
                     mean[key] = np.pi / 2.0
-                    std[key] = np.sqrt(0.25 * (np.pi**2) - 2).item()
-                elif isinstance(p, Cosine) and p.minimum == -np.pi/2 and p.maximum == np.pi/2:
+                    std[key] = np.sqrt(0.25 * (np.pi ** 2) - 2).item()
+                elif (
+                    isinstance(p, Cosine)
+                    and p.minimum == -np.pi / 2
+                    and p.maximum == np.pi / 2
+                ):
                     mean[key] = 0.0
-                    std[key] = np.sqrt(0.25 * (np.pi**2) - 2).item()
+                    std[key] = np.sqrt(0.25 * (np.pi ** 2) - 2).item()
                 else:
                     estimation_keys.append(key)
         else:
@@ -89,37 +98,52 @@ class BBHExtrinsicPriorDict(BBHPriorDict):
 
         return mean, std
 
+
 # TODO: Add latex labels, names
 
 
 default_extrinsic_dict = {
-    'dec': 'bilby.core.prior.Cosine(minimum=-np.pi/2, maximum=np.pi/2)',
-    'ra': 'bilby.core.prior.Uniform(minimum=0., maximum=2*np.pi, boundary="periodic")',
-    'geocent_time': 'bilby.core.prior.Uniform(minimum=-0.1, maximum=0.1)',
-    'psi': 'bilby.core.prior.Uniform(minimum=0.0, maximum=np.pi, boundary="periodic")',
-    'luminosity_distance': 'bilby.core.prior.Uniform(minimum=100.0, maximum=6000.0)',
+    "dec": "bilby.core.prior.Cosine(minimum=-np.pi/2, maximum=np.pi/2)",
+    "ra": 'bilby.core.prior.Uniform(minimum=0., maximum=2*np.pi, boundary="periodic")',
+    "geocent_time": "bilby.core.prior.Uniform(minimum=-0.1, maximum=0.1)",
+    "psi": 'bilby.core.prior.Uniform(minimum=0.0, maximum=np.pi, boundary="periodic")',
+    "luminosity_distance": "bilby.core.prior.Uniform(minimum=100.0, maximum=6000.0)",
 }
 
 default_intrinsic_dict = {
-    'mass_1': 'bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)',
-    'mass_2': 'bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)',
-    'mass_ratio': 'bilby.core.prior.Uniform(minimum=0.125, maximum=1.0)',
-    'chirp_mass': 'bilby.core.prior.Uniform(minimum=25.0, maximum=100.0)',
-    'luminosity_distance': 1000.0,
-    'theta_jn': 'bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)',
-    'phase': 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
-    'a_1': 'bilby.core.prior.Uniform(minimum=0.0, maximum=0.99)',
-    'a_2': 'bilby.core.prior.Uniform(minimum=0.0, maximum=0.99)',
-    'tilt_1': 'bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)',
-    'tilt_2': 'bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)',
-    'phi_12': 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
-    'phi_jl': 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
-    'geocent_time': 0.0,
+    "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
+    "mass_2": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
+    "mass_ratio": "bilby.core.gw.UniformInComponentsMassRatio(minimum=0.125, maximum=1.0)",
+    "chirp_mass": "bilby.core.gw.UniformInComponentsChirpMass(minimum=25.0, maximum=100.0)",
+    "luminosity_distance": 1000.0,
+    "theta_jn": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
+    "phase": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
+    "a_1": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.99)",
+    "a_2": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.99)",
+    "tilt_1": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
+    "tilt_2": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
+    "phi_12": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
+    "phi_jl": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
+    "geocent_time": 0.0,
 }
 
-default_inference_parameters = ['mass_ratio', 'chirp_mass', 'phase', 'a_1', 'a_2',
-                  'tilt_1', 'tilt_2', 'phi_12', 'phi_jl', 'theta_jn',
-                  'luminosity_distance', 'geocent_time', 'ra', 'dec', 'psi']
+default_inference_parameters = [
+    "mass_ratio",
+    "chirp_mass",
+    "phase",
+    "a_1",
+    "a_2",
+    "tilt_1",
+    "tilt_2",
+    "phi_12",
+    "phi_jl",
+    "theta_jn",
+    "luminosity_distance",
+    "geocent_time",
+    "ra",
+    "dec",
+    "psi",
+]
 
 
 def build_prior_with_defaults(prior_settings: Dict[str, str]):
@@ -142,7 +166,7 @@ def build_prior_with_defaults(prior_settings: Dict[str, str]):
 
     full_prior_settings = deepcopy(prior_settings)
     for k, v in prior_settings.items():
-        if v == 'default':
+        if v == "default":
             full_prior_settings[k] = default_intrinsic_dict[k]
 
     return BBHPriorDict(full_prior_settings)

@@ -19,8 +19,8 @@ from dingo.gw.transforms import (
     SelectStandardizeRepackageParameters,
     RepackageStrainsAndASDS,
     UnpackDict,
-    GNPEChirpMass,
-    GNPEShiftDetectorTimes,
+    GNPEChirp,
+    GNPECoalescenceTimes,
     SampleExtrinsicParameters,
     GetDetectorTimes,
 )
@@ -110,23 +110,18 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     if "gnpe_time_shifts" in data_settings:
         d = data_settings["gnpe_time_shifts"]
         transforms.append(
-            GNPEShiftDetectorTimes(
+            GNPECoalescenceTimes(
                 ifo_list,
                 d["kernel"],
                 d["exact_equiv"],
                 inference=False,
             )
         )
-        extra_context_parameters += transforms[-1].get_context_parameters()
-    if "gnpe_chirp_mass" in data_settings:
-        d = data_settings["gnpe_chirp_mass"]
-        transforms.append(
-            GNPEChirpMass(
-                domain.sample_frequencies,
-                d["kernel_kwargs"],
-            )
-        )
-        extra_context_parameters.append("chirp_mass_proxy")
+        extra_context_parameters += transforms[-1].proxy_list
+    if "gnpe_chirp" in data_settings:
+        d = data_settings["gnpe_chirp"]
+        transforms.append(GNPEChirp(d["kernel"], domain, d.get("order", 0)))
+        extra_context_parameters += transforms[-1].proxy_list
 
     # Add the GNPE proxies to context_parameters the first time the transforms are
     # constructed. We do not want to overwrite the ordering of the parameters in
@@ -258,6 +253,11 @@ def build_svd_for_embedding_network(
     ifos = list(wfd[0]["waveform"].keys())
     waveform_len = len(wfd[0]["waveform"][ifos[0]])
     num_waveforms = num_training_samples + num_validation_samples
+    if num_waveforms > len(wfd):
+        raise IndexError(
+            f"Requested {num_waveforms} samples for generating SVD for embedding "
+            f"network, but waveform dataset only contains {len(wfd)} samples."
+        )
     waveforms = {
         ifo: np.empty((num_waveforms, waveform_len), dtype=np.complex128)
         for ifo in ifos

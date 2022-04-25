@@ -53,6 +53,12 @@ def parse_args():
     parser.add_argument(
         "--request_memory", type=int, default=None, help="Memory per job."
     )
+    parser.add_argument(
+        "--request_memory_high", type=int, default=None, help="Memory per job, "
+                                                              "used only for "
+                                                              "aggregating data and "
+                                                              "building SVD."
+    )
     parser.add_argument("--error", type=str, default="condor/error")
     parser.add_argument("--output", type=str, default="condor/output")
     parser.add_argument("--log", type=str, default="condor/log")
@@ -143,6 +149,9 @@ def create_dag(args, settings):
         "log": args.log,
         "getenv": True,
     }
+    kwargs_high_memory = kwargs.copy()
+    if args.request_memory_high is not None:
+        kwargs_high_memory["request_memory"] = args.request_memory_high
 
     # scripts are installed in the env's bin directory
     path = os.path.join(args.env_path, "bin")
@@ -188,7 +197,7 @@ def create_dag(args, settings):
                 executable=executable,
                 dag=dagman,
                 arguments=args_str,
-                **kwargs,
+                **kwargs_high_memory,
             )
             consolidate_svd_dataset.add_parent(generate_svd_dataset_part)
 
@@ -206,7 +215,7 @@ def create_dag(args, settings):
                 executable=executable,
                 dag=dagman,
                 arguments=args_str,
-                **kwargs,
+                **kwargs_high_memory,
             )
             build_svd.add_parent(consolidate_svd_dataset)
 
@@ -246,7 +255,7 @@ def create_dag(args, settings):
         executable=executable,
         dag=dagman,
         arguments=args_str,
-        **kwargs,
+        **kwargs_high_memory,
     )
     consolidate_dataset.add_parent(generate_dataset_part)
 

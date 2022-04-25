@@ -3,6 +3,7 @@ from typing import Dict
 from functools import lru_cache
 from abc import ABC, abstractmethod
 
+import numpy as np
 import torch
 
 from dingo.gw.gwutils import *
@@ -199,63 +200,133 @@ class FrequencyDomain(Domain):
         return data
 
     def time_translate_data(self, data, dt):
-        """Time translate complex frequency domain data by dt [in seconds]."""
-        if isinstance(data, np.ndarray) and np.iscomplexobj(data):
+        """
+        Time translate frequency-domain data by dt. Time translation corresponds (in
+        frequency domain) to multiplication by
+
+        exp(-2j * pi * dt * f).
+
+        This method allows for multiple batch dimensions. For torch.Tensor data,
+        allow for either a complex or a (real, imag) representation.
+
+        Parameters
+        ----------
+        data : array-like (numpy, torch)
+            Shape (B, C, N), where
+                B corresponds to any dimension >= 0,
+                C is either absent (for complex data) or has dimension >= 2 (for data
+                represented as real and imaginary parts), and
+                N is either len(self) or len(self)-self.min_idx (for truncated data),
+        dt : torch tensor, or scalar (if data is numpy)
+            Shape (B)
+
+        Returns
+        -------
+        Array-like of the same form as data.
+        """
+        f = self.get_sample_frequencies_astype(data)
+        if isinstance(data, np.ndarray):
+            # Assume numpy arrays un-batched, since they are only used at train time.
+            phase_shift = 2 * np.pi * dt * f
+        elif isinstance(data, torch.Tensor):
+            # Allow for possible multiple "batch" dimensions (e.g., batch + detector,
+            # which might have independent time shifts).
+            phase_shift = 2 * np.pi * torch.einsum("...,i", dt, f)
+        else:
+            raise NotImplementedError(
+                f"Time translation not implemented for data of " "type {data}."
+            )
+        return self.add_phase(data, phase_shift)
+
+    def get_sample_frequencies_astype(self, data):
+        """
+        Returns a 1D frequency array compatible with the last index of data array.
+
+        Decides whether array is numpy or torch tensor (and cuda vs cpu), and whether it
+        contains the leading zeros below f_min.
+
+        Parameters
+        ----------
+        data : Union[np.array, torch.Tensor]
+            Sample data
+
+        Returns
+        -------
+        frequency array compatible with last index
+        """
+        # Type
+        if isinstance(data, np.ndarray):
             f = self.sample_frequencies
-            return data * np.exp(-2j * np.pi * dt * f)
-
-        elif isinstance(data, torch.Tensor) and not torch.is_complex(data):
-            # add batch dimension if not present
-            omit_batch_dimension = False
-            if len(data.shape) == 3:
-                data = data[None, ...]
-                omit_batch_dimension = True
-            # expected shape: (batch_size, num_detectors, num_channels, num_fbins).
-            # The third axis contains strain.real and strain.imag in channel 0 and 1,
-            # and optionally additional channels (e.g., ASD).
-            batch_size, Nd, Nc, Nf = data.shape
-            cos_txf = torch.empty((batch_size, Nd, Nf), device=data.device)
-            sin_txf = torch.empty((batch_size, Nd, Nf), device=data.device)
+        elif isinstance(data, torch.Tensor):
             if data.is_cuda:
-                f = self.sample_frequencies_torch_cuda[self.min_idx :]
+                f = self.sample_frequencies_torch_cuda
             else:
-                f = self.sample_frequencies_torch[self.min_idx :]
-            assert Nd == len(dt), "Number of detectors does not match."
-            assert len(f) == Nf, "Number of frequency bins does not match"
-            for idx in range(Nd):
-                # get local phases
-                txf_det = torch.outer(dt[idx], f)
-                cos_txf_det = torch.cos(-2 * np.pi * txf_det)
-                sin_txf_det = torch.sin(-2 * np.pi * txf_det)
-                cos_txf[:, idx, ...] = cos_txf_det[...]
-                sin_txf[:, idx, ...] = sin_txf_det[...]
+                f = self.sample_frequencies_torch
+        else:
+            raise TypeError("Invalid data type. Should be np.array or torch.Tensor.")
 
-            x = torch.empty(*data.shape, device=data.device)
-            x[:, :, 0, :] = cos_txf * data[:, :, 0, :] - sin_txf * data[:, :, 1, :]
-            x[:, :, 1, :] = sin_txf * data[:, :, 0, :] + cos_txf * data[:, :, 1, :]
-            x[:, :, 2:, :] = data[:, :, 2:, :]
+        # Whether to include zeros below f_min
+        if data.shape[-1] == len(self) - self.min_idx:
+            f = f[self.min_idx :]
+        elif data.shape[-1] != len(self):
+            raise TypeError(
+                f"Data with {data.shape[-1]} frequency bins is "
+                f"incompatible with domain."
+            )
 
-            if omit_batch_dimension:
-                assert x.shape[0] == 1
-                x = x[0]
+        return f
 
-            return x
+    @staticmethod
+    def add_phase(data, phase):
+        """
+        Add a (frequency-dependent) phase to a frequency series. Allows for batching,
+        as well as additional channels (such as detectors). Accounts for the fact that
+        the data could be a complex frequency series or real and imaginary parts.
+
+        Convention: the phase phi(f) is defined via exp(- 1j * phi(f)).
+
+        Parameters
+        ----------
+        data : Union[np.array, torch.Tensor]
+        phase : Union[np.array, torch.Tensor]
+
+        Returns
+        -------
+        New array or tensor of the same shape as data.
+        """
+        if isinstance(data, np.ndarray) and np.iscomplexobj(data):
+            # This case is assumed to only occur during inference, with un-batched data.
+            return data * np.exp(-1j * phase)
+
+        elif isinstance(data, torch.Tensor):
+            if torch.is_complex(data):
+                # Expand the trailing batch dimensions to allow for broadcasting.
+                while phase.dim() < data.dim():
+                    phase = phase[..., None, :]
+                return data * torch.exp(-1j * phase)
+            else:
+                # The first two components of the second last index should be the real
+                # and imaginary parts of the data. Remaining components correspond to,
+                # e.g., the ASD. The "-1" below accounts for this extra dimension when
+                # broadcasting.
+                while phase.dim() < data.dim() - 1:
+                    phase = phase[..., None, :]
+
+                cos_phase = torch.cos(phase)
+                sin_phase = torch.sin(phase)
+                result = torch.empty_like(data)
+                result[..., 0, :] = (
+                    data[..., 0, :] * cos_phase + data[..., 1, :] * sin_phase
+                )
+                result[..., 1, :] = (
+                    data[..., 1, :] * cos_phase - data[..., 0, :] * sin_phase
+                )
+                if data.shape[-2] > 2:
+                    result[..., 2:, :] = data[..., 2:, :]
+                return result
 
         else:
-            raise NotImplementedError()
-
-    # def time_translate_batch(self, data, dt, axis=None):
-    #     # h_d * np.exp(- 2j * np.pi * time_shift * self.sample_frequencies)
-    #     if isinstance(data, np.ndarray):
-    #         if np.iscomplexobj(data):
-    #             pass
-    #         else:
-    #             pass
-    #     elif isinstance(data, torch.Tensor):
-    #         pass
-    #     else:
-    #         raise NotImplementedError(f'Method only implemented for np arrays '
-    #                                   f'and torch tensors, got {type(data)}')
+            raise TypeError(f"Invalid data type {type(data)}.")
 
     def __len__(self):
         """Number of frequency bins in the domain [0, f_max]"""

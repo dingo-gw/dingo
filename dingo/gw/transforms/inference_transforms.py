@@ -34,7 +34,8 @@ class CopyToExtrinsicParameters(object):
         sample = input_sample.copy()
         extrinsic_parameters = sample["extrinsic_parameters"].copy()
         for par in self.parameter_list:
-            extrinsic_parameters[par] = sample["parameters"][par]
+            if par in sample['parameters']:
+                extrinsic_parameters[par] = sample["parameters"][par]
         sample["extrinsic_parameters"] = extrinsic_parameters
         return sample
 

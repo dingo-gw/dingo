@@ -350,14 +350,11 @@ def train_local():
 
         local_settings = train_settings.pop("local")
         with open(os.path.join(args.train_dir, "local_settings.yaml"), "w") as f:
-
-            if "WANDB_API_KEY" not in os.environ.keys():
-                os.environ["WANDB_API_KEY"] = local_settings["wandb_api_key"]
-            if (
-                local_settings["use_wandb"]
-                and "wandb_run_id" not in local_settings.keys()
-            ):
-                local_settings["wandb_run_id"] = wandb.util.generate_id()
+            if local_settings.get("use_wandb", False):
+                if "WANDB_API_KEY" not in os.environ.keys():
+                    os.environ["WANDB_API_KEY"] = local_settings["wandb_api_key"]
+                if "wandb_run_id" not in local_settings.keys():
+                    local_settings["wandb_run_id"] = wandb.util.generate_id()
             yaml.dump(local_settings, f, default_flow_style=False, sort_keys=False)
 
         pm, wfd = prepare_training_new(train_settings, args.train_dir, local_settings)
