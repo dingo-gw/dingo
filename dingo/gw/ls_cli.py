@@ -16,10 +16,7 @@ def ls():
     path = Path(args.file_name)
     if path.suffix == ".pt":
         print("Extracting information about torch model.\n")
-        if torch.cuda.is_available():
-            d = torch.load(path)
-        else:
-            d = torch.load(path, map_location=torch.device("cpu"))
+        d = torch.load(path, map_location=torch.device("cpu"))
         print(f"Model epoch: {d['epoch']}\n")
         print("Model metadata:")
         print(
