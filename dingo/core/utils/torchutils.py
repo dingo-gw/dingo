@@ -1,12 +1,11 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from torch.utils.data import DataLoader
 from typing import Union, Tuple, Iterable
 
 
-def get_activation_function_from_string(
-        activation_name: str
-):
+def get_activation_function_from_string(activation_name: str):
     """
     Returns an activation function, based on the name provided.
 
@@ -15,19 +14,19 @@ def get_activation_function_from_string(
     :return: function
         corresponding activation function
     """
-    if activation_name.lower() == 'elu':
+    if activation_name.lower() == "elu":
         return F.elu
-    elif activation_name.lower() == 'relu':
+    elif activation_name.lower() == "relu":
         return F.relu
-    elif activation_name.lower() == 'leaky_relu':
+    elif activation_name.lower() == "leaky_relu":
         return F.leaky_relu
     else:
-        raise ValueError('Invalid activation function.')
+        raise ValueError("Invalid activation function.")
 
 
 def forward_pass_with_unpacked_tuple(
-        model: nn.Module,
-        x: Union[Tuple, torch.Tensor],
+    model: nn.Module,
+    x: Union[Tuple, torch.Tensor],
 ):
     """
     Performs forward pass of model with input x. If x is a tuple, it return
@@ -46,8 +45,8 @@ def forward_pass_with_unpacked_tuple(
 
 
 def get_number_of_model_parameters(
-        model: nn.Module,
-        requires_grad_flags: tuple = (True, False),
+    model: nn.Module,
+    requires_grad_flags: tuple = (True, False),
 ):
     """
     Counts parameters of the module. The list requires_grad_flag can be used
@@ -70,9 +69,10 @@ def get_number_of_model_parameters(
     return num_params
 
 
-def get_optimizer_from_kwargs(model_parameters: Iterable,
-                              **optimizer_kwargs,
-                              ):
+def get_optimizer_from_kwargs(
+    model_parameters: Iterable,
+    **optimizer_kwargs,
+):
     """
     Builds and returns an optimizer for model_parameters. The type of the
     optimizer is determined by kwarg type, the remaining kwargs are passed to
@@ -92,24 +92,25 @@ def get_optimizer_from_kwargs(model_parameters: Iterable,
     optimizer
     """
     optimizers_dict = {
-        'adagrad': torch.optim.Adagrad,
-        'adam': torch.optim.Adam,
-        'adamw': torch.optim.AdamW,
-        'lbfgs': torch.optim.LBFGS,
-        'RMSprop': torch.optim.RMSprop,
-        'sgd': torch.optim.SGD,
+        "adagrad": torch.optim.Adagrad,
+        "adam": torch.optim.Adam,
+        "adamw": torch.optim.AdamW,
+        "lbfgs": torch.optim.LBFGS,
+        "RMSprop": torch.optim.RMSprop,
+        "sgd": torch.optim.SGD,
     }
-    if not 'type' in optimizer_kwargs:
-        raise KeyError('Optimizer type needs to be specified.')
-    if not optimizer_kwargs['type'].lower() in optimizers_dict:
-        raise ValueError('No valid optimizer specified.')
-    optimizer = optimizers_dict[optimizer_kwargs.pop('type')]
+    if not "type" in optimizer_kwargs:
+        raise KeyError("Optimizer type needs to be specified.")
+    if not optimizer_kwargs["type"].lower() in optimizers_dict:
+        raise ValueError("No valid optimizer specified.")
+    optimizer = optimizers_dict[optimizer_kwargs.pop("type")]
     return optimizer(model_parameters, **optimizer_kwargs)
 
 
-def get_scheduler_from_kwargs(optimizer: torch.optim.Optimizer,
-                              **scheduler_kwargs,
-                              ):
+def get_scheduler_from_kwargs(
+    optimizer: torch.optim.Optimizer,
+    **scheduler_kwargs,
+):
     """
     Builds and returns an scheduler for optimizer. The type of the
     scheduler is determined by kwarg type, the remaining kwargs are passed to
@@ -129,21 +130,22 @@ def get_scheduler_from_kwargs(optimizer: torch.optim.Optimizer,
     scheduler
     """
     schedulers_dict = {
-        'step': torch.optim.lr_scheduler.StepLR,
-        'cosine': torch.optim.lr_scheduler.CosineAnnealingLR,
-        'reduce_on_plateau': torch.optim.lr_scheduler.ReduceLROnPlateau,
+        "step": torch.optim.lr_scheduler.StepLR,
+        "cosine": torch.optim.lr_scheduler.CosineAnnealingLR,
+        "reduce_on_plateau": torch.optim.lr_scheduler.ReduceLROnPlateau,
     }
-    if not 'type' in scheduler_kwargs:
-        raise KeyError('Scheduler type needs to be specified.')
-    if not scheduler_kwargs['type'].lower() in schedulers_dict:
-        raise ValueError('No valid scheduler specified.')
-    scheduler = schedulers_dict[scheduler_kwargs.pop('type')]
+    if not "type" in scheduler_kwargs:
+        raise KeyError("Scheduler type needs to be specified.")
+    if not scheduler_kwargs["type"].lower() in schedulers_dict:
+        raise ValueError("No valid scheduler specified.")
+    scheduler = schedulers_dict[scheduler_kwargs.pop("type")]
     return scheduler(optimizer, **scheduler_kwargs)
 
 
-def perform_scheduler_step(scheduler,
-                           loss=None,
-                           ):
+def perform_scheduler_step(
+    scheduler,
+    loss=None,
+):
     """
     Wrapper for scheduler.step(). If scheduler is ReduceLROnPlateau,
     then scheduler.step(loss) is called, if not, scheduler.step().
@@ -161,10 +163,11 @@ def perform_scheduler_step(scheduler,
     else:
         scheduler.step()
 
+
 def get_lr(optimizer):
     """Returns a list with the learning rates of the optimizer."""
-    return [param_group['lr'] for param_group in optimizer.state_dict()[
-        'param_groups']]
+    return [param_group["lr"] for param_group in optimizer.state_dict()["param_groups"]]
+
 
 def split_dataset_into_train_and_test(dataset, train_fraction):
     """
@@ -186,19 +189,76 @@ def split_dataset_into_train_and_test(dataset, train_fraction):
     train_size = int(train_fraction * len(dataset))
     test_size = len(dataset) - train_size
     return torch.utils.data.random_split(
-        dataset, [train_size, test_size],
-        generator=torch.Generator().manual_seed(42))
+        dataset, [train_size, test_size], generator=torch.Generator().manual_seed(42)
+    )
 
 
-def set_requires_grad_flag(model,
-                           name_startswith=None,
-                           name_contains=None,
-                           requires_grad=True):
+def build_train_and_test_loaders(
+    dataset: torch.utils.data.Dataset,
+    train_fraction: float,
+    batch_size: int,
+    num_workers: int,
+):
+    """
+    Split the dataset into train and test sets, and build corresponding DataLoaders.
+    The random split uses a fixed seed for reproducibility.
+
+    Parameters
+    ----------
+    dataset : torch.utils.data.Dataset
+    train_fraction : float
+        Fraction of dataset to use for training. The remainder is used for testing.
+        Should lie between 0 and 1.
+    batch_size : int
+    num_workers : int
+
+    Returns
+    -------
+    (train_loader, test_loader)
+    """
+
+    # Split the dataset. This function uses a fixed seed for reproducibility.
+    train_dataset, test_dataset = split_dataset_into_train_and_test(
+        dataset, train_fraction
+    )
+
+    # Build DataLoaders
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        pin_memory=True,
+        num_workers=num_workers,
+        worker_init_fn=lambda _: np.random.seed(
+            int(torch.initial_seed()) % (2 ** 32 - 1)
+        ),
+    )
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        pin_memory=True,
+        num_workers=num_workers,
+        worker_init_fn=lambda _: np.random.seed(
+            int(torch.initial_seed()) % (2 ** 32 - 1)
+        ),
+    )
+
+    return train_loader, test_loader
+
+
+def set_requires_grad_flag(
+    model, name_startswith=None, name_contains=None, requires_grad=True
+):
     """
     Set param.requires_grad of all model parameters with a name starting with
     name_startswith, or name containing name_contains, to requires_grad.
     """
     for name, param in model.named_parameters():
-        if name_startswith is not None and name.startswith(name_startswith) \
-                or name_contains is not None and name_contains in name:
+        if (
+            name_startswith is not None
+            and name.startswith(name_startswith)
+            or name_contains is not None
+            and name_contains in name
+        ):
             param.requires_grad = requires_grad

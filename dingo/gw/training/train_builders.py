@@ -182,55 +182,6 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     wfd.transform = torchvision.transforms.Compose(transforms)
 
 
-def build_train_and_test_loaders(
-    wfd: WaveformDataset, train_fraction: float, batch_size: int, num_workers: int
-):
-    """
-    Split the dataset into train and test sets, and build corresponding DataLoaders.
-    The random split uses a fixed seed for reproducibility.
-
-    Parameters
-    ----------
-    wfd : WaveformDataset
-    train_fraction : float
-        Fraction of dataset to use for training. The remainder is used for testing.
-        Should lie between 0 and 1.
-    batch_size : int
-    num_workers : int
-
-    Returns
-    -------
-    (train_loader, test_loader)
-    """
-
-    # Split the dataset. This function uses a fixed seed for reproducibility.
-    train_dataset, test_dataset = split_dataset_into_train_and_test(wfd, train_fraction)
-
-    # Build DataLoaders
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        pin_memory=True,
-        num_workers=num_workers,
-        worker_init_fn=lambda _: np.random.seed(
-            int(torch.initial_seed()) % (2 ** 32 - 1)
-        ),
-    )
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        pin_memory=True,
-        num_workers=num_workers,
-        worker_init_fn=lambda _: np.random.seed(
-            int(torch.initial_seed()) % (2 ** 32 - 1)
-        ),
-    )
-
-    return train_loader, test_loader
-
-
 def build_svd_for_embedding_network(
     wfd: WaveformDataset,
     data_settings: dict,

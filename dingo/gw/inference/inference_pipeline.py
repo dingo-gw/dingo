@@ -90,9 +90,20 @@ def parse_args():
     parser.add_argument(
         "--time_buffer",
         type=float,
-        default=2,
+        default=2.0,
         help="Buffer time in seconds. The analyzed strain segment extends up to "
         "gps_time_event + time_buffer.",
+    )
+    parser.add_argument(
+        "--suffix",
+        type=str,
+        default="",
+        help="Optional suffix for sample name.",
+    )
+    parser.add_argument(
+        "--get_log_prob",
+        action="store_true",
+        help="If set, log_probs of samples are saved. Will not work for GNPE.",
     )
 
     args = parser.parse_args()
@@ -133,18 +144,31 @@ def analyze_event():
             model=model,
             model_init=args.model_init,
             time_psd=args.time_psd,
+            time_buffer=args.time_buffer,
             event_dataset=args.event_dataset,
             event_dataset_init=args.event_dataset_init,
             num_samples=args.num_samples,
             num_gnpe_iterations=args.num_gnpe_iterations,
             device=device,
+            get_log_prob=args.get_log_prob,
         )
-        samples = {k: v.cpu() for k, v in samples.items()}
+
+        # convert to pandas dataframe, add metadata
+        samples = pd.DataFrame({k: v.cpu() for k, v in samples.items()})
+        metadata = {
+            "model": model.metadata,
+            "event": {
+                "time_event": time_event,
+                "time_psd": args.time_psd,
+                "time_buffer": args.time_buffer,
+            },
+        }
+        samples.attrs = metadata
 
         # if no reference samples are available, simply save the dingo samples
         if ref is None or time_event not in ref:
-            pd.DataFrame(samples).to_pickle(
-                join(args.out_directory, f"dingo_samples_gps-{time_event}.pkl")
+            samples.to_pickle(
+                join(args.out_directory, f"dingo_samples_gps-{time_event}{args.suffix}.pkl")
             )
 
         # if reference samples are available, save dingo samples and additionally
@@ -154,7 +178,7 @@ def analyze_event():
             ref_samples_file = ref[time_event]["reference_samples"]["file"]
             ref_method = ref[time_event]["reference_samples"]["method"]
 
-            pd.DataFrame(samples).to_pickle(
+            samples.to_pickle(
                 join(args.out_directory, f"dingo_samples_{name_event}.pkl")
             )
 
@@ -162,9 +186,10 @@ def analyze_event():
 
             generate_cornerplot(
                 {"name": ref_method, "samples": ref_samples, "color": "blue"},
-                {"name": "dingo", "samples": pd.DataFrame(samples), "color": "orange"},
-                filename=join(args.out_directory, f"cornerplot_{name_event}.pdf"),
+                {"name": "dingo", "samples": samples, "color": "orange"},
+                filename=join(args.out_directory, f"cornerplot_{name_event}{args.suffix}.pdf"),
             )
+
 
 
 if __name__ == "__main__":

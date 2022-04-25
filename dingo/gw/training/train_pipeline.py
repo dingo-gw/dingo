@@ -17,7 +17,11 @@ from dingo.gw.training.train_builders import (
 )
 from dingo.core.models.posterior_model import PosteriorModel
 from dingo.core.utils.trainutils import RuntimeLimits
-from dingo.core.utils import set_requires_grad_flag, get_number_of_model_parameters
+from dingo.core.utils import (
+    set_requires_grad_flag,
+    get_number_of_model_parameters,
+    build_train_and_test_loaders,
+)
 from dingo.gw.dataset import WaveformDataset
 
 

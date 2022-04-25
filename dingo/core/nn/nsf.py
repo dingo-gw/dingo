@@ -208,16 +208,27 @@ class FlowWrapper(nn.Module):
     def log_prob(self, y, *x):
         if self.embedding_net is not None:
             x = torchutils.forward_pass_with_unpacked_tuple(self.embedding_net, x)
-        return self.flow.log_prob(y, x)
+        if len(x) > 0:
+            return self.flow.log_prob(y, x)
+        else:
+            # if there is no context
+            return self.flow.log_prob(y)
 
     def sample(self, *x, num_samples=1):
         if self.embedding_net is not None:
             x = torchutils.forward_pass_with_unpacked_tuple(self.embedding_net, x)
-        return torch.squeeze(self.flow.sample(num_samples, x))
+        if len(x) > 0:
+            return torch.squeeze(self.flow.sample(num_samples, x))
+        else:
+            # if there is no context, omit the context argument
+            return torch.squeeze(self.flow.sample(num_samples))
 
     def forward(self, y, *x):
-        return self.log_prob(y, *x)
-
+        if len(x) > 0:
+            return self.log_prob(y, *x)
+        else:
+        # if there is no context, omit the context argument
+            return self.log_prob(y)
 
 def create_nsf_model(
     input_dim: int,
@@ -275,6 +286,15 @@ def create_nsf_model(
     }
 
     return flow
+
+
+def create_nsf_wrapped(**kwargs):
+    """
+    Wraps the NSF model in a FlowWrapper. This is required for parallel
+    training, and wraps the log_prob method as a forward method.
+    """
+    flow = create_nsf_model(**kwargs)
+    return FlowWrapper(flow)
 
 
 def create_nsf_with_rb_projection_embedding_net(

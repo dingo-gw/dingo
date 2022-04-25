@@ -1,11 +1,12 @@
 import numpy as np
 from gwpy.timeseries import TimeSeries
+from astropy.time import Time
 
 from dingo.core.dataset import DingoDataset
 from dingo.core.utils import load_data_from_file
 from dingo.gw.inference.data_download import download_raw_data
 from dingo.gw.gwutils import get_window
-from dingo.gw.domains import FrequencyDomain
+from dingo.gw.domains import build_domain_from_model_metadata, FrequencyDomain
 
 
 def load_raw_data(time_event, settings, event_dataset=None):
@@ -112,3 +113,30 @@ def data_to_domain(raw_data, settings_raw_data, domain, **kwargs):
 
     else:
         raise NotImplementedError(f"Unknown domain type {type(domain)}")
+
+
+def get_event_data_and_domain(
+    model_metadata,
+    time_event,
+    time_psd,
+    time_buffer,
+    event_dataset=None,
+):
+    # step 1: download raw event data
+    settings_raw_data = parse_settings_for_raw_data(
+        model_metadata, time_psd, time_buffer
+    )
+    raw_data = load_raw_data(
+        time_event, settings=settings_raw_data, event_dataset=event_dataset
+    )
+
+    # step 2: prepare the data for the network domain
+    domain = build_domain_from_model_metadata(model_metadata)
+    event_data = data_to_domain(
+        raw_data,
+        settings_raw_data,
+        domain,
+        window=model_metadata["train_settings"]["data"]["window"],
+    )
+
+    return event_data, domain
