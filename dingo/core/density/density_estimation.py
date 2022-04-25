@@ -1,7 +1,7 @@
 import torch
 import yaml
 from os.path import dirname, join
-from torch.utils.data import DataLoader
+from dingo.core.utils import build_train_and_test_loaders
 from dingo.core.utils.trainutils import RuntimeLimits
 import numpy as np
 import pandas as pd
@@ -77,18 +77,11 @@ def train_unconditional_density_estimator(
     model.initialize_optimizer_and_scheduler()
 
     # set up dataloaders
-    num_train_samples = int(num_samples * settings["training"]["train_fraction"])
-    train_loader = DataLoader(
-        SampleDataset(samples_torch[:num_train_samples]),
-        batch_size=settings["training"]["batch_size"],
-        shuffle=True,
-        num_workers=settings["training"]["num_workers"],
-    )
-    test_loader = DataLoader(
-        SampleDataset(samples_torch[num_train_samples:]),
-        batch_size=settings["training"]["batch_size"],
-        shuffle=True,
-        num_workers=settings["training"]["num_workers"],
+    train_loader, test_loader = build_train_and_test_loaders(
+        SampleDataset(samples_torch),
+        settings["training"]["train_fraction"],
+        settings["training"]["batch_size"],
+        settings["training"]["num_workers"],
     )
 
     # train model
