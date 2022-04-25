@@ -22,7 +22,9 @@ def append_stage():
         d = torch.load(args.checkpoint, map_location=torch.device("cpu"))
 
     stages = [
-        s for s in d["metadata"]["train_settings"]["training"] if s.startswith("stage_")
+        v
+        for k, v in d["metadata"]["train_settings"]["training"].items()
+        if k.startswith("stage_")
     ]
     num_stages = len(stages)
     print(f"Checkpoint training plan consists of {num_stages} stages.")
