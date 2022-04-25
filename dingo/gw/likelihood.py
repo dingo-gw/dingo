@@ -84,9 +84,9 @@ class StationaryGaussianLikelihoodBBH:
             ]
         )
 
-    def compute_gw_strain(self, theta):
+    def generate_signal(self, theta):
         """
-        Compute the GW strain for a given set of parameters theta.
+        Compute the GW signal for a given set of parameters theta.
 
         Step 1: generate polarizations h_plus and h_cross
         Step 2: project h_plus and h_cross onto detectors,
@@ -101,7 +101,7 @@ class StationaryGaussianLikelihoodBBH:
         Returns
         -------
         gw_strain: dict
-            GW strain for each detector.
+            GW signal for each detector.
         """
         theta_intrinsic, theta_extrinsic = split_off_extrinsic_parameters(theta)
         theta_intrinsic = {k: float(v) for k, v in theta_intrinsic.items()}
@@ -134,7 +134,7 @@ class StationaryGaussianLikelihoodBBH:
         """
         Compute the log likelihood for GW data (strains + asds) given parameters theta.
 
-        Step 1: compute whitened GW strain h(theta) for parameters theta
+        Step 1: compute whitened GW signal h(theta) for parameters theta
         Step 2: subtract signal h from whitened strain data d, n = d - h
         Step 3: compute likelihood that n is Gaussian noise  with variance 1 on real and
                 imaginary part individually
@@ -151,7 +151,7 @@ class StationaryGaussianLikelihoodBBH:
             Log likelihood of the data whitened_strains given the parameters theta.
         """
         # Step 1: compute whitened GW strain h(theta) for parameters theta
-        h = self.compute_gw_strain(theta)["waveform"]
+        h = self.generate_signal(theta)["waveform"]
 
         # Step 2: subtract signal h from whitened strain data d, n = d - h
         n = {k: v - h[k] for k, v in self.whitened_strains.items()}
