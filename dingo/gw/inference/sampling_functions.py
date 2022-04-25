@@ -75,7 +75,6 @@ def sample_with_npe(
     x = transforms_pre(event_data)["waveform"]
 
     # sample from inference network
-    model.model.eval()  # Max: I don't think we need this, this is done inside sample method
     if not get_log_prob:
         y = model.sample(x, batch_size=batch_size)
         # post process samples
