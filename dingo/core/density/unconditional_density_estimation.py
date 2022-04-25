@@ -1,10 +1,12 @@
 import torch
 import yaml
 from os.path import dirname, join
-from torch.utils.data import DataLoader
+from dingo.core.utils import build_train_and_test_loaders
 from dingo.core.utils.trainutils import RuntimeLimits
 import numpy as np
 import pandas as pd
+import argparse
+
 from dingo.core.models import PosteriorModel
 
 
@@ -77,18 +79,11 @@ def train_unconditional_density_estimator(
     model.initialize_optimizer_and_scheduler()
 
     # set up dataloaders
-    num_train_samples = int(num_samples * settings["training"]["train_fraction"])
-    train_loader = DataLoader(
-        SampleDataset(samples_torch[:num_train_samples]),
-        batch_size=settings["training"]["batch_size"],
-        shuffle=True,
-        num_workers=settings["training"]["num_workers"],
-    )
-    test_loader = DataLoader(
-        SampleDataset(samples_torch[num_train_samples:]),
-        batch_size=settings["training"]["batch_size"],
-        shuffle=True,
-        num_workers=settings["training"]["num_workers"],
+    train_loader, test_loader = build_train_and_test_loaders(
+        SampleDataset(samples_torch),
+        settings["training"]["train_fraction"],
+        settings["training"]["batch_size"],
+        settings["training"]["num_workers"],
     )
 
     # train model
@@ -106,16 +101,31 @@ def train_unconditional_density_estimator(
     return model
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Unconditional density estimation for dingo samples."
+    )
+    parser.add_argument(
+        "--settings",
+        type=str,
+        required=True,
+        help="Path to settings file.",
+    )
+    return parser.parse_args()
+
+
 def main():
     # load settings
-    f = "/Users/maxdax/Documents/Projects/GW-Inference/dingo/datasets/dingo_samples/01_Pv2/density_settings.yaml"
-    with open(f, "r") as fp:
+    args = parse_args()
+    with open(args.settings, "r") as fp:
         settings = yaml.safe_load(fp)
 
     # load samples from dingo output
     samples = pd.read_pickle(settings["data"]["sample_file"])
 
-    model = train_unconditional_density_estimator(samples, settings, dirname(f))
+    model = train_unconditional_density_estimator(
+        samples, settings, dirname(args.settings)
+    )
 
     model.model.eval()
     with torch.no_grad():

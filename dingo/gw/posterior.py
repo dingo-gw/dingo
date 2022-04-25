@@ -11,10 +11,9 @@ from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.prior import build_prior_with_defaults
 
 
-class UnnormalizedPosteriorDensityBBH:
+class UnnormalizedPosterior:
     """
-    Implements the *unnormalized* posterior density for BBH events. This is computed
-    via Bayes' theorem
+    Implements the *unnormalized* posterior. This is computed via Bayes' theorem
 
             p(theta|d) = p(d|theta) * p(theta) / p(d)
 
@@ -137,7 +136,7 @@ def main():
     )
     prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
     # posterior
-    posterior = UnnormalizedPosteriorDensityBBH(likelihood, prior)
+    posterior = UnnormalizedPosterior(likelihood, prior)
 
     # compute posterior log_prob
     t0 = time.time()
