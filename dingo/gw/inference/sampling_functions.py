@@ -17,10 +17,7 @@ from dingo.gw.transforms import (
     ResetSample,
 )
 from dingo.core.models import PosteriorModel
-from dingo.gw.inference.data_preparation import (
-    get_event_data_and_domain,
-    get_corrected_sky_position,
-)
+from dingo.gw.inference.data_preparation import get_event_data_and_domain
 from dingo.gw.domains import build_domain_from_model_metadata
 
 
@@ -238,10 +235,10 @@ def sample_posterior_of_event(
             raise ValueError("samples_init can only be used for gnpe.")
         samples = sample_with_npe(
             event_data,
-            model, 
-            num_samples, 
-            batch_size=batch_size, 
-            get_log_prob=get_log_prob, 
+            model,
+            num_samples,
+            batch_size=batch_size,
+            get_log_prob=get_log_prob,
         )
 
     else:
@@ -264,3 +261,35 @@ def sample_posterior_of_event(
         )
 
     return samples
+
+
+def get_corrected_sky_position(ra, t_event, t_ref):
+    """
+    Calculate the corrected sky position of an event. This is necessary, since the
+    model was trained with waveform projections assuming a particular reference time
+    t_ref. The corrected sky position takes into account the time difference between
+    the event and t_ref.
+
+    Parameters
+    ----------
+    ra:
+        right ascension parameter of the event
+    t_event:
+        gps time of the event
+    t_ref: float
+        gps time, used as reference time for the model
+
+    Returns
+    -------
+    ra_corr: float
+        corrected right ascension parameter of the event
+
+    """
+    time_reference = Time(t_ref, format="gps", scale="utc")
+    time_event = Time(t_event, format="gps", scale="utc")
+    longitude_event = time_event.sidereal_time("apparent", "greenwich")
+    longitude_reference = time_reference.sidereal_time("apparent", "greenwich")
+    delta_longitude = longitude_event - longitude_reference
+    ra_correction = delta_longitude.rad
+    ra_corr = (ra + ra_correction) % (2 * np.pi)
+    return ra_corr

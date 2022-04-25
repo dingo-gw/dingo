@@ -116,7 +116,11 @@ def data_to_domain(raw_data, settings_raw_data, domain, **kwargs):
 
 
 def get_event_data_and_domain(
-    model_metadata, time_event, time_psd, time_buffer, event_dataset=None,
+    model_metadata,
+    time_event,
+    time_psd,
+    time_buffer,
+    event_dataset=None,
 ):
     # step 1: download raw event data
     settings_raw_data = parse_settings_for_raw_data(
@@ -136,35 +140,3 @@ def get_event_data_and_domain(
     )
 
     return event_data, domain
-
-
-def get_corrected_sky_position(ra, t_event, t_ref=1126259462.391):
-    """
-    Calculate the corrected sky position of an event. This is necessary, since the
-    model was trained with waveform projections assuming a particular reference time
-    t_ref. The corrected sky position takes into account the time difference between
-    the event and t_ref.
-
-    Parameters
-    ----------
-    ra:
-        right ascension parameter of the event
-    t_event:
-        gps time of the event
-    t_ref: float
-        gps time, used as reference time for the model
-
-    Returns
-    -------
-    ra_corr: float
-        corrected right ascension parameter of the event
-
-    """
-    time_reference =  Time(t_ref, format='gps', scale='utc')
-    time_event = Time(t_event, format='gps', scale='utc')
-    longitude_event = time_event.sidereal_time('apparent', 'greenwich')
-    longitude_reference = time_reference.sidereal_time('apparent', 'greenwich')
-    delta_longitude = longitude_event - longitude_reference
-    ra_correction = delta_longitude.rad
-    ra_corr = (ra + ra_correction) % (2 * np.pi)
-    return ra_corr
