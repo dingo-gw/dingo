@@ -20,7 +20,7 @@ from dingo.gw.likelihood import build_stationary_gaussian_likelihood
 from dingo.core.density import train_unconditional_density_estimator
 from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.prior import build_prior_with_defaults
-from dingo.gw.posterior import UnnormalizedPosteriorDensity
+from dingo.gw.posterior import UnnormalizedPosterior
 
 
 def parse_args():
@@ -225,7 +225,7 @@ def main():
     # which is in both, in extrinsic_prior, and as a reference value in intrinsic prior)
     prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
     # wrap likelihood and prior to unnormalized posterior
-    posterior = UnnormalizedPosteriorDensity(likelihood, prior)
+    posterior = UnnormalizedPosterior(likelihood, prior)
 
     # Step 3: SIR step
     #
