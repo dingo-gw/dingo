@@ -33,6 +33,9 @@ def append_stage():
         new_stage = yaml.safe_load(f)
 
     if args.replace is not None:
+        if args.replace < 0 or args.replace >= num_stages:
+            raise ValueError(f"Invalid argument replace={args.replace}. Valid values "
+                             f"are {list(range(num_stages))}.")
         current_epoch = d["epoch"]
         stage_epoch = np.sum([s["epochs"] for s in stages[: args.replace]])
         if current_epoch > stage_epoch:

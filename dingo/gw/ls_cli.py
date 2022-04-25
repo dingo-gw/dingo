@@ -1,8 +1,6 @@
 import argparse
-import ast
 from pathlib import Path
 
-import h5py
 import torch
 import yaml
 
@@ -55,7 +53,7 @@ def ls():
                 svd.print_validation_summary()
 
     elif path.suffix == ".yaml":
-        with open(path, 'r') as f:
+        with open(path, "r") as f:
             settings = yaml.safe_load(f)
         print(
             yaml.dump(
