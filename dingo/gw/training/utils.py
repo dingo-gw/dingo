@@ -19,10 +19,11 @@ def append_stage():
     if torch.cuda.is_available():
         d = torch.load(args.checkpoint)
     else:
-        d = torch.load(args.checkpoint, map_location=torch.device('cpu'))
+        d = torch.load(args.checkpoint, map_location=torch.device("cpu"))
 
-    stages = [s for s in d["metadata"]["train_settings"]["training"] if s.startswith(
-        "stage_")]
+    stages = [
+        s for s in d["metadata"]["train_settings"]["training"] if s.startswith("stage_")
+    ]
     num_stages = len(stages)
     print(f"Checkpoint training plan consists of {num_stages} stages.")
 
@@ -31,11 +32,13 @@ def append_stage():
 
     if args.replace is not None:
         current_epoch = d["epoch"]
-        stage_epoch = np.sum(s['epochs'] for s in stages[:args.replace])
+        stage_epoch = np.sum([s["epochs"] for s in stages[: args.replace]])
         if current_epoch > stage_epoch:
-            print(f'WARNING: Modification to training plan changes a training stage '
-                  f'that has already started. Current model epoch is {current_epoch}. '
-                  f'Proceed at your own risk!')
+            print(
+                f"WARNING: Modification to training plan changes a training stage "
+                f"that has already started. Current model epoch is {current_epoch}. "
+                f"Proceed at your own risk!"
+            )
         print(f"Replacing planned stage {args.replace} with new stage.")
         new_stage_number = args.replace
     else:
