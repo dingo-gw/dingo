@@ -50,7 +50,11 @@ class WhitenFixedASD(object):
     """
 
     def __init__(
-        self, domain: FrequencyDomain, asd_file: str = None, inverse: bool = False
+        self,
+        domain: FrequencyDomain,
+        asd_file: str = None,
+        inverse: bool = False,
+        precision=None,
     ):
         """
         Parameters
@@ -63,16 +67,34 @@ class WhitenFixedASD(object):
         inverse : bool
             Whether to apply the inverse whitening transform, to un-whiten data.
             [Default: False]
+        precision : str ("single", "double")
+            If not None, sets precision of ASD to specified precision.
+
         """
         if asd_file is not None:
             psd = PowerSpectralDensity(asd_file=asd_file)
         else:
             psd = PowerSpectralDensity.from_aligo()
+
+        if psd.frequency_array[-1] < domain.f_max:
+            raise ValueError(f"ASD in {asd_file} has f_max={psd.frequency_array[-1]}, "
+                             f"which is lower than domain f_max={domain.f_max}.")
         asd_interp = interp1d(
             psd.frequency_array, psd.asd_array, bounds_error=False, fill_value=np.inf
         )
         self.asd_array = asd_interp(domain.sample_frequencies)
         self.asd_array = domain.update_data(self.asd_array, low_value=1e-22)
+
+        if precision is not None:
+            if precision == "single":
+                self.asd_array = self.asd_array.astype(np.float32)
+            elif precision == "double":
+                self.asd_array = self.asd_array.astype(np.float64)
+            else:
+                raise TypeError(
+                    'precision can only be changed to "single" or "double".'
+                )
+
         self.inverse = inverse
 
     def __call__(self, sample):
@@ -90,7 +112,7 @@ class WhitenFixedASD(object):
         result = {}
         for k, v in sample.items():
             if self.inverse:
-                result = v * self.asd_array
+                result[k] = v * self.asd_array
             else:
                 result[k] = v / self.asd_array
         return result

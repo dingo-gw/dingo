@@ -7,6 +7,7 @@ from torchvision.transforms import Compose
 from dingo.core.dataset import DingoDataset
 from dingo.gw.SVD import SVDBasis, ApplySVD
 from dingo.gw.domains import build_domain
+from dingo.gw.transforms import WhitenFixedASD
 
 
 class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
@@ -129,14 +130,14 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         """
         if domain_update is not None:
             self.domain.update(domain_update)
-            self.settings['domain'] = copy.deepcopy(self.domain.domain_dict)
+            self.settings["domain"] = copy.deepcopy(self.domain.domain_dict)
 
         # Determine where any domain adjustment must be applied. If the dataset is SVD
         # compressed, then adjust the SVD matrices. Otherwise, adjust the dataset
         # itself.
         if (
-                self.settings["compression"] is not None
-                and "svd" in self.settings["compression"]
+            self.settings["compression"] is not None
+            and "svd" in self.settings["compression"]
         ):
             self.svd["V"] = self.domain.update_data(self.svd["V"], axis=0)
         else:
@@ -150,10 +151,23 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         """
         decompression_transform_list = []
 
+        # These transforms must be in reverse order compared to when dataset was
+        # constructed.
+
         if "svd" in self.settings["compression"]:
             assert self.svd is not None
             svd_basis = SVDBasis(dictionary=self.svd)
             decompression_transform_list.append(ApplySVD(svd_basis, inverse=True))
+
+        if "whitening" in self.settings["compression"]:
+            decompression_transform_list.append(
+                WhitenFixedASD(
+                    self.domain,
+                    asd_file=self.settings["compression"]["whitening"],
+                    inverse=True,
+                    precision=self.precision,
+                )
+            )
 
         self.decompression_transform = Compose(decompression_transform_list)
 
