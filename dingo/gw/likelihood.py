@@ -12,9 +12,9 @@ from dingo.gw.transforms import (
 )
 
 
-class StationaryGaussianLikelihoodBBH:
+class StationaryGaussianGWLikelihood:
     """
-    Implements BBH likelihood for stationary, Gaussian noise.
+    Implements GW likelihood for stationary, Gaussian noise.
     """
 
     def __init__(
@@ -245,7 +245,7 @@ def build_stationary_gaussian_likelihood(
 
     Returns
     -------
-    likelihood: StationaryGaussianLikelihoodBBH
+    likelihood: StationaryGaussianGWLikelihood
         likelihood object
     """
     # get strain data
@@ -254,7 +254,7 @@ def build_stationary_gaussian_likelihood(
     )
 
     # set up likelihood
-    likelihood = StationaryGaussianLikelihoodBBH(
+    likelihood = StationaryGaussianGWLikelihood(
         metadata["model"]["dataset_settings"]["waveform_generator"],
         data_domain,
         event_data,
