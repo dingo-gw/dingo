@@ -1,3 +1,4 @@
+import numpy as np
 from torchvision.transforms import Compose
 from bilby.gw.detector.networks import InterferometerList
 import time
