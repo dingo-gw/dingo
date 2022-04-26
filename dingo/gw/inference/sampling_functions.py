@@ -1,7 +1,7 @@
-import torch
 from torchvision.transforms import Compose
 from bilby.gw.detector.networks import InterferometerList
 import time
+from astropy.time import Time
 
 from dingo.gw.transforms import (
     WhitenAndScaleStrain,
