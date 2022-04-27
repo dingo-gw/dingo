@@ -9,6 +9,7 @@ data:
   domain_update:
     f_min: 20.0
     f_max: 1024.0
+  svd_size_update: 200  # Optionally, reduce the SVD size when decompressing (for performance)
   detectors:
     - H1
     - L1

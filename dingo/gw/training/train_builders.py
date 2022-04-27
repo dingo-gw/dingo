@@ -50,6 +50,7 @@ def build_dataset(data_settings):
         file_name=data_settings["waveform_dataset_path"],
         precision="single",
         domain_update=domain_update,
+        svd_size_update=data_settings.get("svd_size_update"),
     )
     return wfd
 
