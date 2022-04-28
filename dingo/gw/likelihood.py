@@ -1,6 +1,7 @@
 import numpy as np
 from torchvision.transforms import Compose
 from bilby.gw.detector.networks import InterferometerList
+from scipy.fft import fft
 
 from dingo.gw.waveform_generator import WaveformGenerator
 from dingo.gw.domains import build_domain, FrequencyDomain
@@ -24,6 +25,7 @@ class StationaryGaussianGWLikelihood:
         event_data,
         t_ref=None,
         wfg_frequency_range=None,
+        time_marginalization_kwargs=None,
     ):
         """
         Initialize the likelihood.
@@ -48,9 +50,10 @@ class StationaryGaussianGWLikelihood:
                     metadata["model"]["dataset_settings"]["waveform_generator"].
                 'f_end': float
                     Frequency at which to start the waveform generation.
+        time_marginalization_kwargs: dict
+            Time marginalization parameters. If None, no time marginalization is used.
         """
         super().__init__()
-
         # set up waveform generator
         self.wfg_kwargs = wfg_kwargs
         self.data_domain = data_domain
@@ -73,6 +76,13 @@ class StationaryGaussianGWLikelihood:
         self.asds = event_data["asds"]
         if len(list(self.whitened_strains.values())[0]) != data_domain.max_idx + 1:
             raise ValueError("Strain data does not match domain.")
+        # log noise evidence, independent of theta and waveform model
+        self.log_Zn = sum(
+            [
+                -1 / 2.0 * inner_product(d_ifo, d_ifo)
+                for d_ifo in self.whitened_strains.values()
+            ]
+        )
 
         # build transforms for detector projections
         self.ifo_list = InterferometerList(self.whitened_strains.keys())
@@ -83,6 +93,49 @@ class StationaryGaussianGWLikelihood:
                 WhitenAndScaleStrain(self.data_domain.noise_std),
             ]
         )
+
+        # optionally initialize time marginalization
+        self.time_marginalization = False
+        if time_marginalization_kwargs is not None:
+            self.initialize_time_marginalization(**time_marginalization_kwargs)
+
+    def initialize_time_marginalization(self, time_prior, N_t=None):
+        """
+        Initialize time marginalization.
+
+        Parameters
+        ----------
+        time_prior: bilby.core.prior.Prior
+            Prior for time.
+        N_t: int = None
+            Number of time samples. If None, we use FFT to compute the time
+            marginalized likelihood, which is fast but has a fixed time resolution of
+            1/self.data_domain.f_max. Else, the time shifting will be performed manually.
+        """
+        self.time_marginalization = True
+        self.time_prior = time_prior
+        self.N_t = N_t
+        t_lower, t_upper = self.time_prior._minimum, self.time_prior._maximum
+        # if N_t is None, set up time marginalization via FFT
+        if self.N_t is None:
+            # FFT returns an array, where bin i corresponds to time i * dt, where dt is
+            # 1 / self.domain.delta_f. The array wraps around, which we account for below.
+            time_axis = np.arange(len(self.data_domain())) / self.data_domain.f_max
+            self.time_prior_log = np.max(
+                (
+                    self.time_prior.ln_prob(time_axis),
+                    self.time_prior.ln_prob(time_axis - max(time_axis)),
+                ),
+                axis=0,
+            )
+            # normalize the time prior
+            self.time_prior_log -= np.log(np.sum(np.exp(self.time_prior_log)))
+        else:
+            # if N_t is not None, set up time marginalization via manual shifting.
+            # To that end we evaluate the time prior on a uniform 1D grid.
+            self.time_samples = np.linspace(t_lower, t_upper, self.N_t)
+            self.time_prior_log = self.time_prior.ln_prob(self.time_samples)
+            self.time_prior_log -= np.log(np.sum(np.exp(self.time_prior_log)))
 
     def generate_signal(self, theta):
         """
@@ -108,7 +161,7 @@ class StationaryGaussianGWLikelihood:
 
         # Step 1: generate polarizations h_plus and h_cross
         polarizations = self.waveform_generator.generate_hplus_hcross(theta_intrinsic)
-        polarizations = { # truncation, in case wfg has a larger frequency range
+        polarizations = {  # truncation, in case wfg has a larger frequency range
             k: self.data_domain.update_data(v) for k, v in polarizations.items()
         }
 
@@ -130,7 +183,7 @@ class StationaryGaussianGWLikelihood:
 
         return sample
 
-    def log_likelihood(self, theta):
+    def log_likelihood_old(self, theta):
         """
         Compute the log likelihood for GW data (strains + asds) given parameters theta.
 
@@ -179,12 +232,197 @@ class StationaryGaussianGWLikelihood:
 
         return sum(log_likelihoods.values())
 
+    def log_likelihood(self, theta):
+        """
+        The likelihood is given by
+
+                  log L(d|theta) = psi - 1/2. <d - mu(theta), d - mu(theta)>
+
+        where psi is a waveform model independent (and thus irrelevant) constant. Here,
+        we denote the strain data by d and the GW signal by mu(theta).
+        [see e.g. arxiv.org/pdf/1809.02293, equation (44) for details]
+        We expand this expression below to compute the log likelihood, and omit psi.
+        The expaneded expression reads
+
+                log L(d|theta) = log_Zn + kappa2(theta) - 1/2 rho2opt(theta),
+
+                log_Zn = -1/2. <d, d>,
+                kappa2(theta) = <d, mu(theta)>,
+                rho2opt(theta) = <mu(theta), mu(theta)>.
+
+        The noise-weighted inner product is defined as
+
+                  <a, b> = 4 * delta_f * sum(a.conj() * b / PSD).real.
+
+        Here, we work with data d and signals mu that are already whitened by
+        1 / [sqrt(PSD) * domain.noise_std], where
+
+                  noise_std = np.sqrt(window_factor) / np.sqrt(4 * delta_f).
+
+        With this preprocessing, the inner products thus simply become
+
+                  <a, b> = sum(a.conj() * b).real.
+
+        ! Be careful with window factors here !
+
+
+        Time marginalization:
+        The above expansion of the likelihood is particularly useful for time
+        marginalization, as only kappa2 depends on the time parameter.
+
+
+        Parameters
+        ----------
+        theta: dict
+            BBH parameters.
+
+        Returns
+        -------
+        log_likelihood: float
+        """
+
+        # Step 1: Compute whitened GW strain h(theta) for parameters theta.
+        mu = self.generate_signal(theta)["waveform"]
+        d = self.whitened_strains
+
+        # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to
+        # compute the remaining terms rho2opt and kappa2
+        rho2opt = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
+        kappa2 = sum(
+            [
+                inner_product(d_ifo, mu_ifo)
+                for d_ifo, mu_ifo in zip(d.values(), mu.values())
+            ]
+        )
+        return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+
+        #
+        # t_lower, t_upper, N = -0.100, 0.100, 1000
+        # kappa2_ = np.zeros((N, len(d)))
+        # import time
+        #
+        # t0 = time.time()
+        # for idx_ifo, (d_ifo, mu_ifo) in enumerate(zip(d.values(), mu.values())):
+        #     for idx_t, t in enumerate(np.linspace(t_lower, t_upper, N)):
+        #         kappa2_[idx_t, idx_ifo] = inner_product(
+        #             d_ifo, mu_ifo * np.exp(-2j * np.pi * self.data_domain() * t)
+        #         )
+        # print(time.time() - t0)
+
+        # from scipy.fft import fft
+        # ifo = "H1"
+        # kappa2_ifo = np.sum(d[ifo].conj() * mu[ifo]).real
+        # theta1 = theta.copy()
+        # offset = 0.010 * 1000 / 1024
+        # theta1["geocent_time"] -= offset
+        # mu1 = self.generate_signal(theta1)["waveform"][ifo]
+        # d1 = self.whitened_strains[ifo]
+        # y1 = fft(d1.conj() * mu1).real
+        # import matplotlib.pyplot as plt
+        # plt.xlim((0, 0.02))
+        # plt.plot(np.linspace(0, 8, 8193), y1, '.')
+        # plt.scatter(offset, kappa2_ifo, marker='x', s=50, c='red')
+        # plt.show()
+
+    def log_likelihood_time_marginalized(self, theta):
+        """
+        Compute log likelihood with time marginalization.
+
+        Parameters
+        ----------
+        theta
+
+        Returns
+        -------
+        log_likelihood: float
+        """
+        # Step 1: Compute whitened GW strain h(theta) for parameters theta.
+        # The geocent_time parameter needs to be set to 0.
+        theta["geocent_time"] = 0.0
+        mu = self.generate_signal(theta)["waveform"]
+        d = self.whitened_strains
+
+        # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to
+        # compute the remaining terms rho2opt and kappa2.
+        # rho2opt is time independent, and thus same as in the log_likelihood method.
+        rho2opt = sum(
+            [
+                inner_product(mu_ifo, mu_ifo, min_idx=self.data_domain.min_idx)
+                for mu_ifo in mu.values()
+            ]
+        )
+        # kappa2 is time dependent. We compute it for the discretized times k * delta_t
+        if self.N_t is None:
+            # Compute marginalized kappa2 with FFT
+            kappa2_ = [
+                fft(d_ifo.conj() * mu_ifo).real
+                for d_ifo, mu_ifo in zip(d.values(), mu.values())
+            ]
+            # sum contributions of different ifos
+            kappa2_ = np.sum(kappa2_, axis=0)
+            # marginalize over time; this requires multiplying the likelihoods with the
+            # prior (*not* in log space), summing over the time bins, and then taking
+            # the log. See Eq. (52) in https://arxiv.org/pdf/1809.02293.pdf.
+            kappa2 = np.log(np.sum(np.exp(kappa2_) * np.exp(self.time_prior_log)))
+
+        else:
+            kappa2_ = np.zeros((len(d), self.N_t))
+            for idx_ifo, (d_ifo, mu_ifo) in enumerate(zip(d.values(), mu.values())):
+                for idx_t, t in enumerate(self.time_samples):
+                    kappa2_[idx_ifo, idx_t] = inner_product(
+                        d_ifo, mu_ifo * np.exp(-2j * np.pi * self.data_domain() * t)
+                    )
+            kappa2_ = np.sum(kappa2_, axis=0)
+            kappa2 = np.log(np.sum(np.exp(kappa2_) * np.exp(self.time_prior_log)))
+
+        return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+
+
     def log_prob(self, *args, **kwargs):
         """
-        Wraps log_likelihood method, required since downstream methods call
-        distribution.log_prob, but bilby.Likelihood requires distribution.loq_likelihood.
+        Wraps log_likelihood method, required since downstream methods call log_prob.
         """
-        return self.log_likelihood(*args, **kwargs)
+        if not self.time_marginalization:
+            return self.log_likelihood(*args, **kwargs)
+        else:
+            return self.log_likelihood_time_marginalized(*args, **kwargs)
+
+
+def inner_product(a, b, min_idx=0, delta_f=None, psd=None):
+    """
+    Compute the inner product between two complex arrays. There are two modes: either,
+    the data a and b are not whitened, in which case delta_f and the psd must be
+    provided. Alternatively, if delta_f and psd are not provided, the data a and b are
+    assumed to be whitened already (i.e., whitened as d -> d * sqrt(4 delta_f / psd)).
+
+    Parameters
+    ----------
+    a: np.ndaarray
+        First array with frequency domain data.
+    b: np.ndaarray
+        Second array with frequency domain data.
+    min_idx: int = 0
+        Truncation of likelihood integral, index of lowest frequency bin to consider.
+    delta_f: float
+        Frequency resolution of the data. If None, a and b are assumed to be whitened
+        and the inner product is computed without further whitening.
+    psd: np.ndarray = None
+        PSD of the data. If None, a and b are assumed to be whitened and the inner
+        product is computed without further whitening.
+
+    Returns
+    -------
+    inner_product: float
+    """
+    #
+    if psd is not None:
+        if delta_f is None:
+            raise ValueError(
+                "If unwhitened data is provided, both delta_f and psd must be provided."
+            )
+        return 4 * delta_f * np.sum((a.conj() * b / psd)[min_idx:]).real
+    else:
+        return np.sum((a.conj() * b)[min_idx:]).real
 
 
 def split_off_extrinsic_parameters(theta):
