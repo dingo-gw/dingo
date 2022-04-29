@@ -21,9 +21,15 @@ class UnnormalizedPosterior:
     constant evidence p(d).
     """
 
-    def __init__(self, likelihood, prior):
+    def __init__(self, likelihood, prior, time_marginalization_kwargs=None):
         self.likelihood = likelihood
         self.prior = prior
+        if time_marginalization_kwargs is not None:
+            self.time_marginalization = True
+            time_marginalization_kwargs["time_prior"] = self.prior.pop("geocent_time")
+            self.likelihood.initialize_time_marginalization(**time_marginalization_kwargs)
+        else:
+            self.time_marginalization = False
 
     def __call__(self, theta):
         return self.log_prob(theta)
@@ -55,14 +61,14 @@ class UnnormalizedPosterior:
         return np.array(log_probs)
 
     def log_prob(self, theta):
-        try:
-            log_prior = self.prior.ln_prob(theta)
-            if log_prior == -np.inf:
-                return -np.inf
-            log_likelihood = self.likelihood.log_prob(theta)
-            return log_likelihood + log_prior
-        except:
+        # try:
+        log_prior = self.prior.ln_prob(theta)
+        if log_prior == -np.inf:
             return -np.inf
+        log_likelihood = self.likelihood.log_prob(theta)
+        return log_likelihood + log_prior
+        # except:
+        #     return -np.inf
 
 
 def parse_args():

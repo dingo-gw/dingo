@@ -1,5 +1,9 @@
 import numpy as np
 import torch
+from bilby.gw.detector import PowerSpectralDensity
+from scipy.interpolate import interp1d
+
+from dingo.gw.domains import FrequencyDomain
 
 
 class SampleNoiseASD(object):
@@ -37,6 +41,81 @@ class WhitenStrain(object):
         }
         sample["waveform"] = whitened_strains
         return sample
+
+
+class WhitenFixedASD(object):
+    """
+    Whiten frequency-series data according to an ASD specified in a file. This uses the
+    ASD files contained in Bilby.
+    """
+
+    def __init__(
+        self,
+        domain: FrequencyDomain,
+        asd_file: str = None,
+        inverse: bool = False,
+        precision=None,
+    ):
+        """
+        Parameters
+        ----------
+        domain : FrequencyDomain
+            ASD is interpolated to the associated frequency grid.
+        asd_file : str
+            Name of the ASD file. If None, use the aligo ASD.
+            [Default: None]
+        inverse : bool
+            Whether to apply the inverse whitening transform, to un-whiten data.
+            [Default: False]
+        precision : str ("single", "double")
+            If not None, sets precision of ASD to specified precision.
+
+        """
+        if asd_file is not None:
+            psd = PowerSpectralDensity(asd_file=asd_file)
+        else:
+            psd = PowerSpectralDensity.from_aligo()
+
+        if psd.frequency_array[-1] < domain.f_max:
+            raise ValueError(f"ASD in {asd_file} has f_max={psd.frequency_array[-1]}, "
+                             f"which is lower than domain f_max={domain.f_max}.")
+        asd_interp = interp1d(
+            psd.frequency_array, psd.asd_array, bounds_error=False, fill_value=np.inf
+        )
+        self.asd_array = asd_interp(domain.sample_frequencies)
+        self.asd_array = domain.update_data(self.asd_array, low_value=1e-22)
+
+        if precision is not None:
+            if precision == "single":
+                self.asd_array = self.asd_array.astype(np.float32)
+            elif precision == "double":
+                self.asd_array = self.asd_array.astype(np.float64)
+            else:
+                raise TypeError(
+                    'precision can only be changed to "single" or "double".'
+                )
+
+        self.inverse = inverse
+
+    def __call__(self, sample):
+        """
+        Parameters
+        ----------
+        sample : dict
+            Dictionary of numpy arrays, e.g., with keys corresponding to polarizations.
+            Method whitens each array with the same ASD.
+
+        Returns
+        -------
+        dict of the same form as sample, but with whitened / un-whitened data.
+        """
+        result = {}
+        for k, v in sample.items():
+            if self.inverse:
+                result[k] = v * self.asd_array
+            else:
+                result[k] = v / self.asd_array
+        return result
 
 
 class WhitenAndScaleStrain(object):
@@ -127,6 +206,6 @@ class RepackageStrainsAndASDS(object):
         return sample
 
 
-if __name__ == "__main__":
-    AD = ASDDataset("../../../data/PSDs/asds_O1.hdf5")
-    asd_samples = AD.sample_random_asds()
+# if __name__ == "__main__":
+#     AD = ASDDataset("../../../data/PSDs/asds_O1.hdf5")
+#     asd_samples = AD.sample_random_asds()

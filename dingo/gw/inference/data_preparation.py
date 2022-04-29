@@ -1,6 +1,5 @@
 import numpy as np
 from gwpy.timeseries import TimeSeries
-from astropy.time import Time
 
 from dingo.core.dataset import DingoDataset
 from dingo.core.utils import load_data_from_file

@@ -171,6 +171,9 @@ def main():
         settings = yaml.safe_load(fp)
     samples = pd.read_pickle(settings["nde"]["data"]["parameter_samples"])
     metadata = samples.attrs
+    # for time marginalization, we drop geocent time from the samples
+    if "time_marginalization_kwargs" in settings:
+        samples.drop("geocent_time", axis=1, inplace=True)
 
     # Step 1: Build proposal distribution.
     #
@@ -225,7 +228,10 @@ def main():
     # which is in both, in extrinsic_prior, and as a reference value in intrinsic prior)
     prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
     # wrap likelihood and prior to unnormalized posterior
-    posterior = UnnormalizedPosterior(likelihood, prior)
+    # posterior = UnnormalizedPosterior(likelihood, prior)
+    posterior = UnnormalizedPosterior(
+        likelihood, prior, settings.get("time_marginalization_kwargs", None)
+    )
 
     # Step 3: SIR step
     #

@@ -190,6 +190,23 @@ class SVDBasis(DingoDataset):
         self.Vh = self.V.T.conj()
         self.n = self.V.shape[1]
 
+    # def truncate(self, n: int):
+    #     """
+    #     Truncate size of SVD.
+    #
+    #     Parameters
+    #     ----------
+    #     n : int
+    #         New SVD size. Should be less than current size.
+    #     """
+    #     if n > self.n or n < 0:
+    #         print(f"Cannot truncate SVD from size n={self.n} to n={n}.")
+    #     else:
+    #         self.V = self.V[:, :n]
+    #         self.Vh = self.Vh[:n, :]
+    #         self.s = self.s[:n]
+    #         self.n = n
+
 
 class ApplySVD(object):
     """Transform operator for applying an SVD compression / decompression."""

@@ -7,6 +7,7 @@ from torchvision.transforms import Compose
 from dingo.core.dataset import DingoDataset
 from dingo.gw.SVD import SVDBasis, ApplySVD
 from dingo.gw.domains import build_domain
+from dingo.gw.transforms import WhitenFixedASD
 
 
 class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
@@ -27,6 +28,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         transform=None,
         precision=None,
         domain_update=None,
+        svd_size_update=None,
     ):
         """
         For constructing, provide either file_name, or dictionary containing data and
@@ -45,6 +47,8 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             If provided, changes precision of loaded dataset.
         domain_update : dict
             If provided, update domain from existing domain using new settings.
+        svd_size_update : int
+            If provided, reduces the SVD size when decompressing (for speed).
         """
         self.domain = None
         self.transform = transform
@@ -61,9 +65,9 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             and self.polarizations is not None
             and self.settings is not None
         ):
-            self.load_supplemental(domain_update)
+            self.load_supplemental(domain_update, svd_size_update)
 
-    def load_supplemental(self, domain_update=None):
+    def load_supplemental(self, domain_update=None, svd_size_update=None):
         """Method called immediately after loading a dataset.
 
         Creates (and possibly updates) domain, updates dtypes, and initializes any
@@ -73,6 +77,8 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         ----------
         domain_update : dict
             If provided, update domain from existing domain using new settings.
+        svd_size_update : int
+            If provided, reduces the SVD size when decompressing (for speed).
         """
         self.domain = build_domain(self.settings["domain"])
 
@@ -105,7 +111,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                     self.svd["s"] = self.svd["s"].astype(real_type, copy=False)
 
         if self.settings["compression"] is not None:
-            self.initialize_decompression()
+            self.initialize_decompression(svd_size_update)
 
     def update_domain(self, domain_update: dict = None):
         """
@@ -129,31 +135,65 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         """
         if domain_update is not None:
             self.domain.update(domain_update)
-            self.settings['domain'] = copy.deepcopy(self.domain.domain_dict)
+            self.settings["domain"] = copy.deepcopy(self.domain.domain_dict)
 
         # Determine where any domain adjustment must be applied. If the dataset is SVD
         # compressed, then adjust the SVD matrices. Otherwise, adjust the dataset
         # itself.
         if (
-                self.settings["compression"] is not None
-                and "svd" in self.settings["compression"]
+            self.settings["compression"] is not None
+            and "svd" in self.settings["compression"]
         ):
             self.svd["V"] = self.domain.update_data(self.svd["V"], axis=0)
         else:
             for k, v in self.polarizations.items():
                 self.polarizations[k] = self.domain.update_data(v)
 
-    def initialize_decompression(self):
+    def initialize_decompression(self, svd_size_update: int = None):
         """
         Sets up decompression transforms. These are applied to the raw dataset before
         self.transform. E.g., SVD decompression.
+
+        Parameters
+        ----------
+        svd_size_update : int
+            If provided, reduces the SVD size when decompressing (for speed).
         """
         decompression_transform_list = []
 
+        # These transforms must be in reverse order compared to when dataset was
+        # constructed.
+
         if "svd" in self.settings["compression"]:
             assert self.svd is not None
+
+            # We allow the option to reduce the size of the SVD used for decompression,
+            # since decompression is the costliest preprocessing operation. Be careful
+            # when using this to not introduce a large mismatch.
+            if svd_size_update is not None:
+                if svd_size_update > self.svd["V"].shape[-1] or svd_size_update < 0:
+                    raise ValueError(
+                        f"Cannot truncate SVD from size "
+                        f"{self.svd['V'].shape[-1]} to size "
+                        f"{svd_size_update}."
+                    )
+                self.svd["V"] = self.svd["V"][:, :svd_size_update]
+                self.svd["s"] = self.svd["s"][:svd_size_update]
+                for k, v in self.polarizations.items():
+                    self.polarizations[k] = v[:, :svd_size_update]
+
             svd_basis = SVDBasis(dictionary=self.svd)
             decompression_transform_list.append(ApplySVD(svd_basis, inverse=True))
+
+        if "whitening" in self.settings["compression"]:
+            decompression_transform_list.append(
+                WhitenFixedASD(
+                    self.domain,
+                    asd_file=self.settings["compression"]["whitening"],
+                    inverse=True,
+                    precision=self.precision,
+                )
+            )
 
         self.decompression_transform = Compose(decompression_transform_list)
 
