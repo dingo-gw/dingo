@@ -363,7 +363,9 @@ class StationaryGaussianGWLikelihood:
             # marginalize over time; this requires multiplying the likelihoods with the
             # prior (*not* in log space), summing over the time bins, and then taking
             # the log. See Eq. (52) in https://arxiv.org/pdf/1809.02293.pdf.
-            kappa2 = np.log(np.sum(np.exp(kappa2_) * np.exp(self.time_prior_log)))
+            # To prevent numerical issues, we use the logsumexp trick.
+            alpha = np.max(kappa2_ + self.time_prior_log)
+            kappa2 = alpha - np.log(np.sum(np.exp(kappa2_ + self.time_prior_log - alpha)))
 
         else:
             kappa2_ = np.zeros((len(d), self.N_t))
@@ -373,7 +375,12 @@ class StationaryGaussianGWLikelihood:
                         d_ifo, mu_ifo * np.exp(-2j * np.pi * self.data_domain() * t)
                     )
             kappa2_ = np.sum(kappa2_, axis=0)
-            kappa2 = np.log(np.sum(np.exp(kappa2_) * np.exp(self.time_prior_log)))
+            # marginalize over time; this requires multiplying the likelihoods with the
+            # prior (*not* in log space), summing over the time bins, and then taking
+            # the log. See Eq. (52) in https://arxiv.org/pdf/1809.02293.pdf.
+            # To prevent numerical issues, we use the logsumexp trick.
+            alpha = np.max(kappa2_ + self.time_prior_log)
+            kappa2 = alpha - np.log(np.sum(np.exp(kappa2_ + self.time_prior_log - alpha)))
 
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
