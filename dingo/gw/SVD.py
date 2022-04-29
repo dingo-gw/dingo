@@ -174,6 +174,8 @@ class SVDBasis(DingoDataset):
         filename : str
         """
         super().from_file(filename)
+        if self.V is None:
+            raise KeyError("File does not contain SVD V matrix. No SVD basis to load.")
         self.Vh = self.V.T.conj()
         self.n = self.V.shape[1]
 
@@ -187,6 +189,8 @@ class SVDBasis(DingoDataset):
             The dictionary should contain at least a 'V' key, and optionally an 's' key.
         """
         super().from_dictionary(dictionary)
+        if self.V is None:
+            raise KeyError("dict does not contain SVD V matrix. No SVD basis to load.")
         self.Vh = self.V.T.conj()
         self.n = self.V.shape[1]
 

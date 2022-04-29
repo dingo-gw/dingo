@@ -28,13 +28,13 @@ def ls():
         )
 
     elif path.suffix == ".hdf5":
-        if path.stem.startswith("svd"):
+        try:
             svd = SVDBasis(file_name=args.file_name)
             print(f"SVD dataset of size n={svd.n}.")
             print("Validation summary:")
             svd.print_validation_summary()
 
-        else:
+        except KeyError:
             dataset = DingoDataset(file_name=args.file_name, data_keys=["svd"])
             if dataset.settings is not None:
                 print(
