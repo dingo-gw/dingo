@@ -189,7 +189,7 @@ def main():
         event_name = str(
             metadata["event"]["time_event"]
         )  # use gps time as name for now
-        nde_name = join(args.outdir, f"nde-{event_name}.pt")
+        nde_name = settings["nde"].get("path", join(args.outdir, f"nde-{event_name}.pt"))
         if isfile(nde_name):
             print(f"Loading nde at {nde_name} for event {event_name}.")
             nde = PosteriorModel(
