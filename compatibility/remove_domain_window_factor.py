@@ -27,9 +27,9 @@ def main():
 
     elif path.suffix == ".pt":
         if torch.cuda.is_available():
-            d = torch.load(args.checkpoint)
+            d = torch.load(path)
         else:
-            d = torch.load(args.checkpoint, map_location=torch.device("cpu"))
+            d = torch.load(path, map_location=torch.device("cpu"))
 
         try:
             del d["metadata"]["dataset_settings"]["domain"]["window_factor"]
