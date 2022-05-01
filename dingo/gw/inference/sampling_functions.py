@@ -3,6 +3,7 @@ from torchvision.transforms import Compose
 from bilby.gw.detector.networks import InterferometerList
 import time
 from astropy.time import Time
+import torch
 
 from dingo.gw.transforms import (
     WhitenAndScaleStrain,
@@ -189,18 +190,57 @@ def sample_with_gnpe(
 
     model.model.eval()
 
+    sampler = list(
+        torch.utils.data.BatchSampler(
+            range(data["waveform_"].shape[0]), batch_size=batch_size, drop_last=False
+        )
+    )
     print("iteration / network time / processing time")
+    time_network = 0
     for idx in range(num_gnpe_iterations):
+        torch.cuda.empty_cache()
         time_start = time.time()
+        time_network = 0
 
-        data = gnpe_transforms_pre(data)
-        x = [data["waveform"], data["context_parameters"]]
+        batch_list = []
+        for i in range(len(sampler)):
+            # Taking a batch of the full data dict according to the sampler
+            batch_data = {
+                "waveform_": data["waveform_"][sampler[i], ...],
+                "extrinsic_parameters": {
+                    k: v[sampler[i], ...]
+                    for k, v in data["extrinsic_parameters"].items()
+                },
+                "parameters": {},
+            }
+            batch_data = gnpe_transforms_pre(batch_data)
+            x = [batch_data["waveform"], batch_data["context_parameters"]]
 
-        time_network_start = time.time()
-        data["parameters"] = model.sample(*x, batch_size=batch_size)
-        time_network = time.time() - time_network_start
+            time_network_start = time.time()
+            batch_data["parameters"] = model.sample(*x)
+            time_network += time.time() - time_network_start
 
-        data = gnpe_transforms_post(data)
+            batch_data = gnpe_transforms_post(batch_data)
+            del batch_data["waveform_"]
+            del batch_data["waveform"]
+            batch_list.append(batch_data)
+
+        # Combining Batches into a full data dict
+        # Copying the old waveform
+        data = {"waveform_": data["waveform_"]}
+        data.update(
+            {
+                key: (
+                    torch.cat([batch[key] for batch in batch_list])
+                    if isinstance(val, torch.Tensor)
+                    else {
+                        k: torch.cat([batch[key][k] for batch in batch_list])
+                        for k in batch_list[0][key].keys()
+                    }
+                )
+                for key, val in batch_list[0].items()
+            }
+        )
 
         time_processing = time.time() - time_start - time_network
         print(f"{idx:03d}  /  {time_network:.2f} s  /  {time_processing:.2f} s")
@@ -285,6 +325,72 @@ def sample_posterior_of_event(
         samples["ra"] = get_corrected_sky_position(
             samples["ra"],
             time_event,
+            model.metadata["train_settings"]["data"]["ref_time"],
+        )
+
+    return samples
+
+
+def sample_posterior_of_injection(
+    event_data,
+    model,
+    model_init=None,
+    device="cpu",
+    num_samples=50_000,
+    samples_init=None,
+    num_gnpe_iterations=30,
+    batch_size=None,
+    get_log_prob=False,
+    post_correct_ra=True,
+):
+    # get init_samples if requested (typically for gnpe)
+    if model_init is not None:
+        samples_init = sample_posterior_of_injection(
+            event_data,
+            model_init,
+            device=device,
+            num_samples=num_samples,
+            batch_size=batch_size,
+            # correct ra only in last step, until then use ref_time of model
+            post_correct_ra=False,
+        )
+
+    # load model
+    if not type(model) == PosteriorModel:
+        model = PosteriorModel(model, device=device, load_training_info=False)
+
+    gnpe = (
+        "gnpe_time_shifts" in model.metadata["train_settings"]["data"]
+        or "gnpe_chirp_mass" in model.metadata["train_settings"]["data"]
+    )
+
+    if not gnpe:
+        if samples_init is not None:
+            raise ValueError("samples_init can only be used for gnpe.")
+        samples = sample_with_npe(
+            event_data,
+            model,
+            num_samples,
+            batch_size=batch_size,
+            get_log_prob=get_log_prob,
+        )
+
+    else:
+        if get_log_prob:
+            raise ValueError("GNPE does not provide access to log_prob.")
+        samples = sample_with_gnpe(
+            event_data,
+            model,
+            samples_init,
+            num_gnpe_iterations=num_gnpe_iterations,
+            batch_size=batch_size,
+        )
+
+    # post correction of sky position
+    if post_correct_ra:
+        samples["ra"] = get_corrected_sky_position(
+            samples["ra"],
+            event_data["parameters"]['geocent_time'],
             model.metadata["train_settings"]["data"]["ref_time"],
         )
 
