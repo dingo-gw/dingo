@@ -1,5 +1,6 @@
 import argparse
 import ast
+import textwrap
 from pathlib import Path
 import h5py
 import torch
@@ -7,8 +8,15 @@ import torch
 
 def main():
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("file_name", type=str)
+    parser = argparse.ArgumentParser(
+        description=textwrap.dedent(
+            """Removes any domain window_factor from dataset or model settings. This 
+        modifies the file in-place."""
+        )
+    )
+    parser.add_argument(
+        "file_name", type=str, help="Dataset or model file to be " "modified."
+    )
     args = parser.parse_args()
 
     path = Path(args.file_name)
