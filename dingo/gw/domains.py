@@ -73,6 +73,12 @@ class Domain(ABC):
         """Enables to rebuild the domain via calling build_domain(domain_dict)."""
         pass
 
+    def __eq__(self, other):
+        if self.domain_dict == other.domain_dict:
+            return True
+        else:
+            return False
+
 
 class FrequencyDomain(Domain):
     """Defines the physical domain on which the data of interest live.

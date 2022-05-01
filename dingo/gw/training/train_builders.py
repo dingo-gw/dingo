@@ -87,11 +87,10 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         precision="single",
         domain_update=wfd.domain.domain_dict,
     )
-    assert wfd.domain.domain_dict == asd_dataset.domain.domain_dict
+    assert wfd.domain == asd_dataset.domain
 
-    # Add window factor to domain. Can this just be added directly rather than
-    # using a second domain instance?
-    domain = build_domain(wfd.domain.domain_dict)
+    # Add window factor to domain, so that we can compute the noise variance.
+    domain = wfd.domain
     domain.window_factor = get_window_factor(data_settings["window"])
 
     extrinsic_prior_dict = get_extrinsic_prior_dict(data_settings["extrinsic_prior"])
@@ -103,9 +102,8 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     ifo_list = InterferometerList(data_settings["detectors"])
 
     # Build transforms.
-    transforms = []
-    transforms.append(SampleExtrinsicParameters(extrinsic_prior_dict))
-    transforms.append(GetDetectorTimes(ifo_list, ref_time))
+    transforms = [SampleExtrinsicParameters(extrinsic_prior_dict),
+                  GetDetectorTimes(ifo_list, ref_time)]
 
     extra_context_parameters = []
     if "gnpe_time_shifts" in data_settings:
