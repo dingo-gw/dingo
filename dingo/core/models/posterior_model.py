@@ -12,7 +12,10 @@ import dingo.core.utils.trainutils
 import math
 import wandb
 
-from dingo.core.nn.nsf import create_nsf_with_rb_projection_embedding_net
+from dingo.core.nn.nsf import (
+    create_nsf_with_rb_projection_embedding_net,
+    create_nsf_wrapped,
+)
 
 
 class PosteriorModel:
@@ -116,7 +119,9 @@ class PosteriorModel:
         """
         model_builder = get_model_callable(self.model_kwargs["type"])
         model_kwargs = {k: v for k, v in self.model_kwargs.items() if k != "type"}
-        self.model = model_builder(**model_kwargs, initial_weights=self.initial_weights)
+        if self.initial_weights is not None:
+            model_kwargs["initial_weights"] = self.initial_weights
+        self.model = model_builder(**model_kwargs)
 
     def initialize_optimizer_and_scheduler(self):
         """
@@ -304,6 +309,7 @@ class PosteriorModel:
         self,
         *x,
         batch_size=None,
+        get_log_prob=False,
     ):
         """
         Sample from posterior model, conditioned on context x. x is expected to have a
@@ -320,6 +326,8 @@ class PosteriorModel:
             e.g., gnpe proxies
         batch_size: int = None
             batch size for sampling
+        get_log_prob: bool = False
+            if True, also return log probability along with the samples
 
         Returns
         -------
@@ -330,20 +338,33 @@ class PosteriorModel:
         with torch.no_grad():
             if batch_size is None:
                 samples = self.model.sample(*x)
+                if get_log_prob:
+                    log_prob = self.model.log_prob(samples, *x)
             else:
                 samples = []
+                if get_log_prob:
+                    log_prob = []
                 num_batches = math.ceil(len(x[0]) / batch_size)
                 for idx_batch in range(num_batches):
                     lower, upper = idx_batch * batch_size, (idx_batch + 1) * batch_size
                     x_batch = [xi[lower:upper] for xi in x]
                     samples.append(self.model.sample(*x_batch, num_samples=1))
+                    if get_log_prob:
+                        log_prob.append(self.model.log_prob(samples[-1], *x_batch))
                 samples = torch.cat(samples, dim=0)
-        return samples
+                if get_log_prob:
+                    log_prob = torch.cat(log_prob, dim=0)
+        if not get_log_prob:
+            return samples
+        else:
+            return samples, log_prob
 
 
 def get_model_callable(model_type: str):
     if model_type == "nsf+embedding":
         return create_nsf_with_rb_projection_embedding_net
+    elif model_type == "nsf":
+        return create_nsf_wrapped
     else:
         raise KeyError("Invalid model type.")
 

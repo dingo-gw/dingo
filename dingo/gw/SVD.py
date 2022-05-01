@@ -174,6 +174,8 @@ class SVDBasis(DingoDataset):
         filename : str
         """
         super().from_file(filename)
+        if self.V is None:
+            raise KeyError("File does not contain SVD V matrix. No SVD basis to load.")
         self.Vh = self.V.T.conj()
         self.n = self.V.shape[1]
 
@@ -187,8 +189,27 @@ class SVDBasis(DingoDataset):
             The dictionary should contain at least a 'V' key, and optionally an 's' key.
         """
         super().from_dictionary(dictionary)
+        if self.V is None:
+            raise KeyError("dict does not contain SVD V matrix. No SVD basis to load.")
         self.Vh = self.V.T.conj()
         self.n = self.V.shape[1]
+
+    # def truncate(self, n: int):
+    #     """
+    #     Truncate size of SVD.
+    #
+    #     Parameters
+    #     ----------
+    #     n : int
+    #         New SVD size. Should be less than current size.
+    #     """
+    #     if n > self.n or n < 0:
+    #         print(f"Cannot truncate SVD from size n={self.n} to n={n}.")
+    #     else:
+    #         self.V = self.V[:, :n]
+    #         self.Vh = self.Vh[:n, :]
+    #         self.s = self.s[:n]
+    #         self.n = n
 
 
 class ApplySVD(object):

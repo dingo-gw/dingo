@@ -224,6 +224,7 @@ class WaveformGenerator:
             domain_pars = (D.delta_t, f_min, p['f_ref'])
         else:
             raise ValueError(f'Unsupported domain type {type(D)}.')
+        domain_pars = tuple(float(p) for p in domain_pars)
 
         lal_parameter_tuple = masses + spins_cartesian + extra_params + ecc_params + \
                               domain_pars + (lal_params, self.approximant)

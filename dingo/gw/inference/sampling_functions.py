@@ -1,7 +1,9 @@
-import torch
+import numpy as np
 from torchvision.transforms import Compose
 from bilby.gw.detector.networks import InterferometerList
 import time
+from astropy.time import Time
+import torch
 
 from dingo.gw.transforms import (
     WhitenAndScaleStrain,
@@ -15,19 +17,15 @@ from dingo.gw.transforms import (
     ExpandStrain,
     ToTorch,
     ResetSample,
-    GNPEChirpMass,
+    GNPEChirp,
 )
 from dingo.core.models import PosteriorModel
-from dingo.gw.inference.data_preparation import (
-    parse_settings_for_raw_data,
-    load_raw_data,
-    data_to_domain,
-)
-from dingo.gw.domains import build_domain_for_model
+from dingo.gw.inference.data_preparation import get_event_data_and_domain
+from dingo.gw.domains import build_domain_from_model_metadata
 
 
 def get_transforms_for_npe(model, num_samples, as_type="dict"):
-    domain = build_domain_for_model(model)
+    domain = build_domain_from_model_metadata(model.metadata)
 
     # preprocessing transforms:
     #   * whiten and scale strain (since the inference network expects standardized data)
@@ -60,21 +58,35 @@ def get_transforms_for_npe(model, num_samples, as_type="dict"):
     return transforms_pre, transforms_post
 
 
-def sample_with_npe(domain_data, model, num_samples, as_type="dict", batch_size=None):
+def sample_with_npe(
+    event_data,
+    model,
+    num_samples,
+    as_type="dict",
+    batch_size=None,
+    get_log_prob=False,
+):
     # get transformations for preprocessing
     transforms_pre, transforms_post = get_transforms_for_npe(
         model, num_samples, as_type
     )
 
     # prepare data for inference network
-    x = transforms_pre(domain_data)["waveform"]
+    x = transforms_pre(event_data)["waveform"]
 
     # sample from inference network
-    model.model.eval()
-    y = model.sample(x, batch_size=batch_size)
-
-    # post process samples
-    samples = transforms_post({"parameters": y})
+    if not get_log_prob:
+        y = model.sample(x, batch_size=batch_size)
+        # post process samples
+        samples = transforms_post({"parameters": y})["parameters"]
+    else:
+        y, log_prob = model.sample(x, batch_size=batch_size, get_log_prob=True)
+        # post process samples
+        samples = transforms_post({"parameters": y})["parameters"]
+        if as_type == "dict":
+            samples["log_prob"] = log_prob
+        else:
+            raise NotImplementedError()
 
     return samples
 
@@ -83,14 +95,12 @@ def get_transforms_for_gnpe(model, init_parameters, as_type="dict"):
     # get model settings
     data_settings = model.metadata["train_settings"]["data"]
     ifo_list = InterferometerList(data_settings["detectors"])
-    domain = build_domain_for_model(model)
+    domain = build_domain_from_model_metadata(model.metadata)
 
     gnpe_time_settings = model.metadata["train_settings"]["data"].get(
         "gnpe_time_shifts"
     )
-    gnpe_chirp_settings = model.metadata["train_settings"]["data"].get(
-        "gnpe_chirp_mass"
-    )
+    gnpe_chirp_settings = model.metadata["train_settings"]["data"].get("gnpe_chirp")
     if not gnpe_time_settings and not gnpe_chirp_settings:
         raise KeyError(
             "GNPE inference requires network trained for either chirp mass "
@@ -115,7 +125,13 @@ def get_transforms_for_gnpe(model, init_parameters, as_type="dict"):
         )
         gnpe_transforms_pre.append(TimeShiftStrain(ifo_list, domain))
     if gnpe_chirp_settings:
-        gnpe_transforms_pre.append(GNPEChirpMass(gnpe_chirp_settings["kernel"], domain))
+        gnpe_transforms_pre.append(
+            GNPEChirp(
+                gnpe_chirp_settings["kernel"],
+                domain,
+                gnpe_chirp_settings.get("order", 0),
+            )
+        )
     gnpe_transforms_pre.append(
         SelectStandardizeRepackageParameters(
             {"context_parameters": data_settings["context_parameters"]},
@@ -139,7 +155,9 @@ def get_transforms_for_gnpe(model, init_parameters, as_type="dict"):
                 as_type=as_type,
             ),
             PostCorrectGeocentTime(),
-            CopyToExtrinsicParameters("ra", "dec", "geocent_time", "chirp_mass"),
+            CopyToExtrinsicParameters(
+                "ra", "dec", "geocent_time", "chirp_mass", "mass_ratio"
+            ),
             GetDetectorTimes(ifo_list, data_settings["ref_time"]),
         ]
     )
@@ -148,7 +166,7 @@ def get_transforms_for_gnpe(model, init_parameters, as_type="dict"):
 
 
 def sample_with_gnpe(
-    domain_data,
+    event_data,
     model,
     samples_init,
     num_gnpe_iterations=None,
@@ -156,18 +174,18 @@ def sample_with_gnpe(
 ):
     # prepare data for inference network, and add initial samples as extrinsic parameters
     transforms_pre, _ = get_transforms_for_npe(
-        model, num_samples=len(list(samples_init["parameters"].values())[0])
+        model, num_samples=len(list(samples_init.values())[0])
     )
     data = {
-        "waveform_": transforms_pre(domain_data)["waveform"],
-        "extrinsic_parameters": samples_init["parameters"],
+        "waveform_": transforms_pre(event_data)["waveform"],
+        "extrinsic_parameters": samples_init,
         "parameters": {},
     }
 
     # get transformations for gnpe loop
     gnpe_transforms_pre, gnpe_transforms_post = get_transforms_for_gnpe(
         model,
-        init_parameters=samples_init["parameters"].keys(),
+        init_parameters=samples_init.keys(),
     )
 
     model.model.eval()
@@ -244,6 +262,8 @@ def sample_posterior_of_event(
     samples_init=None,
     num_gnpe_iterations=30,
     batch_size=None,
+    get_log_prob=False,
+    post_correct_ra=True,
 ):
     # get init_samples if requested (typically for gnpe)
     if model_init is not None:
@@ -260,6 +280,8 @@ def sample_posterior_of_event(
             device=device,
             num_samples=num_samples,
             batch_size=batch_size,
+            # correct ra only in last step, until then use ref_time of model
+            post_correct_ra=False,
         )
 
     # load model
@@ -271,45 +293,46 @@ def sample_posterior_of_event(
         or "gnpe_chirp_mass" in model.metadata["train_settings"]["data"]
     )
 
-    # step 1: download raw event data
-    settings_raw_data = parse_settings_for_raw_data(
-        model.metadata, time_psd, time_buffer
-    )
-    raw_data = load_raw_data(
-        time_event, settings=settings_raw_data, event_dataset=event_dataset
-    )
-
-    # step 2: prepare the data for the network domain
-    domain_data = data_to_domain(
-        raw_data,
-        settings_raw_data,
-        build_domain_for_model(model),
-        window=model.metadata["train_settings"]["data"]["window"],
+    # get raw event data, and prepare it for the network domain
+    event_data, _ = get_event_data_and_domain(
+        model.metadata, time_event, time_psd, time_buffer, event_dataset
     )
 
     if not gnpe:
         if samples_init is not None:
             raise ValueError("samples_init can only be used for gnpe.")
         samples = sample_with_npe(
-            domain_data, model, num_samples, batch_size=batch_size
+            event_data,
+            model,
+            num_samples,
+            batch_size=batch_size,
+            get_log_prob=get_log_prob,
         )
 
     else:
+        if get_log_prob:
+            raise ValueError("GNPE does not provide access to log_prob.")
         samples = sample_with_gnpe(
-            domain_data,
+            event_data,
             model,
             samples_init,
             num_gnpe_iterations=num_gnpe_iterations,
             batch_size=batch_size,
         )
 
-    # TODO: apply post correction of sky position here
+    # post correction of sky position
+    if post_correct_ra:
+        samples["ra"] = get_corrected_sky_position(
+            samples["ra"],
+            time_event,
+            model.metadata["train_settings"]["data"]["ref_time"],
+        )
 
     return samples
 
 
-def sample_posterier_of_injection(
-    domain_data,
+def sample_posterior_of_injection(
+    event_data,
     model,
     model_init=None,
     device="cpu",
@@ -317,37 +340,90 @@ def sample_posterier_of_injection(
     samples_init=None,
     num_gnpe_iterations=30,
     batch_size=None,
+    get_log_prob=False,
+    post_correct_ra=True,
 ):
     # get init_samples if requested (typically for gnpe)
     if model_init is not None:
-        samples_init = sample_posterier_of_injection(
-            domain_data,
+        samples_init = sample_posterior_of_injection(
+            event_data,
             model_init,
             device=device,
             num_samples=num_samples,
             batch_size=batch_size,
+            # correct ra only in last step, until then use ref_time of model
+            post_correct_ra=False,
         )
 
     # load model
     if not type(model) == PosteriorModel:
         model = PosteriorModel(model, device=device, load_training_info=False)
-    # currently gnpe only implemented for time shifts
-    gnpe = "gnpe_time_shifts" in model.metadata["train_settings"]["data"]
+
+    gnpe = (
+        "gnpe_time_shifts" in model.metadata["train_settings"]["data"]
+        or "gnpe_chirp_mass" in model.metadata["train_settings"]["data"]
+    )
 
     if not gnpe:
         if samples_init is not None:
             raise ValueError("samples_init can only be used for gnpe.")
         samples = sample_with_npe(
-            domain_data, model, num_samples, batch_size=batch_size
+            event_data,
+            model,
+            num_samples,
+            batch_size=batch_size,
+            get_log_prob=get_log_prob,
         )
 
     else:
+        if get_log_prob:
+            raise ValueError("GNPE does not provide access to log_prob.")
         samples = sample_with_gnpe(
-            domain_data,
+            event_data,
             model,
             samples_init,
             num_gnpe_iterations=num_gnpe_iterations,
             batch_size=batch_size,
         )
 
+    # post correction of sky position
+    if post_correct_ra:
+        samples["ra"] = get_corrected_sky_position(
+            samples["ra"],
+            event_data["parameters"]['geocent_time'],
+            model.metadata["train_settings"]["data"]["ref_time"],
+        )
+
     return samples
+
+
+def get_corrected_sky_position(ra, t_event, t_ref):
+    """
+    Calculate the corrected sky position of an event. This is necessary, since the
+    model was trained with waveform projections assuming a particular reference time
+    t_ref. The corrected sky position takes into account the time difference between
+    the event and t_ref.
+
+    Parameters
+    ----------
+    ra:
+        right ascension parameter of the event
+    t_event:
+        gps time of the event
+    t_ref: float
+        gps time, used as reference time for the model
+
+    Returns
+    -------
+    ra_corr: float
+        corrected right ascension parameter of the event
+
+    """
+    time_reference = Time(t_ref, format="gps", scale="utc")
+    time_event = Time(t_event, format="gps", scale="utc")
+    longitude_event = time_event.sidereal_time("apparent", "greenwich")
+    longitude_reference = time_reference.sidereal_time("apparent", "greenwich")
+    delta_longitude = longitude_event - longitude_reference
+    ra_correction = delta_longitude.rad
+    ra_corr = (ra + ra_correction) % (2 * np.pi)
+    return ra_corr

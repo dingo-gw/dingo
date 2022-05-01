@@ -14,13 +14,16 @@ from bilby.gw.prior import BBHPriorDict
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.domains import build_domain
+from dingo.gw.transforms import WhitenFixedASD
 from dingo.gw.waveform_generator import WaveformGenerator, generate_waveforms_parallel
 from dingo.gw.SVD import SVDBasis, ApplySVD
 
 
 def generate_parameters_and_polarizations(
-        waveform_generator: WaveformGenerator, prior: BBHPriorDict,
-        num_samples: int, num_processes: int
+    waveform_generator: WaveformGenerator,
+    prior: BBHPriorDict,
+    num_samples: int,
+    num_processes: int,
 ) -> Tuple[pd.DataFrame, Dict[str, np.ndarray]]:
     """
     Generate a dataset of waveforms based on parameters drawn from the prior.
@@ -50,17 +53,21 @@ def generate_parameters_and_polarizations(
         polarizations = generate_waveforms_parallel(waveform_generator, parameters)
 
     # Find cases where waveform generation failed and only return data for successful ones
-    wf_failed = np.any(np.isnan(polarizations['h_plus']), axis=1)
+    wf_failed = np.any(np.isnan(polarizations["h_plus"]), axis=1)
     if wf_failed.any():
         idx_failed = np.where(wf_failed)[0]
         idx_ok = np.where(~wf_failed)[0]
         polarizations_ok = {k: v[idx_ok] for k, v in polarizations.items()}
         parameters_ok = parameters.iloc[idx_ok]
         failed_percent = 100 * len(idx_failed) / len(parameters)
-        print(f'{len(idx_failed)} out of {len(parameters)} configuration ({failed_percent:.1f}%) failed to generate.')
-        with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+        print(
+            f"{len(idx_failed)} out of {len(parameters)} configuration ({failed_percent:.1f}%) failed to generate."
+        )
+        with pd.option_context("display.max_rows", None, "display.max_columns", None):
             print(parameters.iloc[idx_failed])
-        print(f'Only returning the {len(idx_ok)} successfully generated configurations.')
+        print(
+            f"Only returning the {len(idx_ok)} successfully generated configurations."
+        )
         return parameters_ok, polarizations_ok
 
     return parameters, polarizations
@@ -155,6 +162,15 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
     if "compression" in settings:
         compression_transforms = []
 
+        if "whitening" in settings["compression"]:
+            compression_transforms.append(
+                WhitenFixedASD(
+                    domain,
+                    asd_file=settings["compression"]["whitening"],
+                    inverse=False,
+                )
+            )
+
         if "svd" in settings["compression"]:
             svd_settings = settings["compression"]["svd"]
 
@@ -164,6 +180,9 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
 
             # Otherwise, generate the basis based on simulated waveforms.
             else:
+                # If using whitened waveforms, then the SVD should be based on these.
+                waveform_generator.transform = Compose(compression_transforms)
+
                 n_train = svd_settings["num_training_samples"]
                 n_test = svd_settings.get("num_validation_samples", 0)
                 parameters, polarizations = generate_parameters_and_polarizations(
@@ -210,7 +229,7 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
     dataset_dict["parameters"] = parameters
     dataset_dict["polarizations"] = polarizations
     # Update to take into account potentially failed configurations
-    dataset_dict[settings['num_samples']] = len(parameters)
+    dataset_dict[settings["num_samples"]] = len(parameters)
 
     dataset = WaveformDataset(dictionary=dataset_dict)
     return dataset
