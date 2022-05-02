@@ -15,7 +15,7 @@ def main():
         )
     )
     parser.add_argument(
-        "file_name", type=str, help="Dataset or model file to be " "modified."
+        "file_name", type=str, help="Dataset or model file to be modified."
     )
     args = parser.parse_args()
 
