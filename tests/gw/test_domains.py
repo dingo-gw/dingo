@@ -178,7 +178,7 @@ def test_FD_caching(uniform_FD_params):
     # does not update the cached properties
     domain._f_max = 50
     assert np.all(domain() == domain_ref())
-    domain.clear_cache_for_all_instances()
+    domain._reset_caches()
     # after clearing the cache, the __call__ method should return the correct
     # result
     assert np.all(domain() != domain_ref())
@@ -189,21 +189,14 @@ def test_FD_window_factor(uniform_FD_params, window_setup):
     domain = FrequencyDomain(**p)
     _, window_factor = window_setup
     assert window_factor == 0.9374713897717841
-    # check that window_factor is initially set to 1
-    assert domain._window_factor == 1.0
+    # check that window_factor is initially None
+    assert domain.window_factor is None
     # set new window_factor
     domain.window_factor = window_factor
     assert domain._window_factor == domain.window_factor == window_factor
     noise_std = domain.noise_std
     assert noise_std == np.sqrt(domain.window_factor) / np.sqrt(4 * domain.delta_f)
-    # set new window_factor incorrectly and check that noise_std is not updated
     window_factor = 1
-    domain._window_factor = window_factor
-    assert domain._window_factor == domain.window_factor == window_factor
-    assert domain.noise_std == noise_std
-    assert domain.noise_std != np.sqrt(domain.window_factor) / np.sqrt(
-        4 * domain.delta_f
-    )
     # now set new window factor correctly via the setter and check that
     # noise_std is updated as intended since the cache is cleared
     domain.window_factor = window_factor
@@ -267,10 +260,10 @@ def test_FD_window_factor(uniform_FD_params, window_setup):
 #     # plt.show()
 
 
-def test_TD():
-    time_duration, sampling_rate = 4.0, 1.0 / 4096.0
-    domain = TimeDomain(time_duration, sampling_rate)
-    delta_t = 1.0 / sampling_rate
-    n = time_duration / delta_t
-    times_expected = np.arange(n) * delta_t
-    assert np.linalg.norm(domain() - times_expected) < 1e-15
+# def test_TD():
+#     time_duration, sampling_rate = 4.0, 1.0 / 4096.0
+#     domain = TimeDomain(time_duration, sampling_rate)
+#     delta_t = 1.0 / sampling_rate
+#     n = time_duration / delta_t
+#     times_expected = np.arange(n) * delta_t
+#     assert np.linalg.norm(domain() - times_expected) < 1e-15

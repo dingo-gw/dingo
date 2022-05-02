@@ -3,7 +3,6 @@ domain:
   f_min: 20.0
   f_max: 1024.0
   delta_f: 0.125  # Expressions like 1.0/8.0 would require eval and are not supported
-  window_factor: 1.0
 
 waveform_generator:
   approximant: IMRPhenomXPHM  # SEOBNRv4PHM

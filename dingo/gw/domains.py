@@ -7,7 +7,6 @@ import numpy as np
 import torch
 
 from dingo.gw.gwutils import *
-from dingo.core.models import PosteriorModel
 
 
 class Domain(ABC):
@@ -73,6 +72,12 @@ class Domain(ABC):
         """Enables to rebuild the domain via calling build_domain(domain_dict)."""
         pass
 
+    def __eq__(self, other):
+        if self.domain_dict == other.domain_dict:
+            return True
+        else:
+            return False
+
 
 class FrequencyDomain(Domain):
     """Defines the physical domain on which the data of interest live.
@@ -86,28 +91,17 @@ class FrequencyDomain(Domain):
     """
 
     def __init__(
-        self, f_min: float, f_max: float, delta_f: float, window_factor: float = 1.0
+        self, f_min: float, f_max: float, delta_f: float, window_factor: float = None
     ):
         self._f_min = f_min
         self._f_max = f_max
         self._delta_f = delta_f
         self._window_factor = window_factor
 
-    @staticmethod
-    def clear_cache_for_all_instances():
-        """
-        Whenever self._f_min and self._f_max are modified, this method needs to
-        be the called to clear the cached properties such as
-        self.sample_frequencies.
-
-        This clears the cache for the corresponding properties for *all*
-        class instances.
-        """
-        FrequencyDomain.sample_frequencies.fget.cache_clear()
-        FrequencyDomain.sample_frequencies_torch.fget.cache_clear()
-        FrequencyDomain.sample_frequencies_torch_cuda.fget.cache_clear()
-        FrequencyDomain.frequency_mask.fget.cache_clear()
-        FrequencyDomain.noise_std.fget.cache_clear()
+        self._sample_frequencies = None
+        self._sample_frequencies_torch = None
+        self._sample_frequencies_torch_cuda = None
+        self._frequency_mask = None
 
     def update(self, new_settings: dict):
         """
@@ -140,30 +134,27 @@ class FrequencyDomain(Domain):
 
     def set_new_range(self, f_min: float = None, f_max: float = None):
         """
-        Set a new range for the domain. This changes the range of the domain to
-        [0, f_max], and the truncation range to [f_min, f_max].
+        Set a new range [f_min, f_max] for the domain. This is only allowed if the new
+        range is contained within the old one.
         """
         if f_min is not None and f_max is not None and f_min >= f_max:
             raise ValueError("f_min must not be larger than f_max.")
         if f_min is not None:
-            if self._f_min <= f_min <= self._f_max:
-                self._f_min = f_min
+            if self.f_min <= f_min <= self.f_max:
+                self.f_min = f_min
             else:
                 raise ValueError(
                     f"f_min = {f_min} is not in expected range "
-                    f"[{self._f_min,self._f_max}]."
+                    f"[{self.f_min,self.f_max}]."
                 )
         if f_max is not None:
-            if self._f_min <= f_max <= self._f_max:
-                self._f_max = f_max
+            if self.f_min <= f_max <= self.f_max:
+                self.f_max = f_max
             else:
                 raise ValueError(
                     f"f_max = {f_max} is not in expected range "
-                    f"[{self._f_min, self._f_max}]."
+                    f"[{self.f_min, self.f_max}]."
                 )
-        # clear cached properties, such that they are recomputed when needed
-        # instead of using the old (incorrect) ones.
-        self.clear_cache_for_all_instances()
 
     def update_data(self, data: np.ndarray, axis: int = -1, low_value: float = 0.0):
         """
@@ -330,7 +321,7 @@ class FrequencyDomain(Domain):
 
     def __len__(self):
         """Number of frequency bins in the domain [0, f_max]"""
-        return int(self._f_max / self._delta_f) + 1
+        return int(self.f_max / self.delta_f) + 1
 
     def __call__(self) -> np.ndarray:
         """Array of uniform frequency bins in the domain [0, f_max]"""
@@ -342,31 +333,44 @@ class FrequencyDomain(Domain):
         return sample_frequencies[idx]
 
     @property
-    @lru_cache()
     def sample_frequencies(self):
-        # print('Computing sample_frequencies.') # To understand caching
-        num_bins = self.__len__()
-        return np.linspace(
-            0.0, self._f_max, num=num_bins, endpoint=True, dtype=np.float32
-        )
+        if self._sample_frequencies is None:
+            num_bins = len(self)
+            self._sample_frequencies = np.linspace(
+                0.0, self.f_max, num=num_bins, endpoint=True, dtype=np.float32
+            )
+        return self._sample_frequencies
 
     @property
-    @lru_cache()
     def sample_frequencies_torch(self):
-        num_bins = self.__len__()
-        return torch.linspace(0.0, self._f_max, steps=num_bins, dtype=torch.float32)
+        if self._sample_frequencies_torch is None:
+            num_bins = len(self)
+            self._sample_frequencies_torch = torch.linspace(
+                0.0, self.f_max, steps=num_bins, dtype=torch.float32
+            )
+        return self._sample_frequencies_torch
 
     @property
-    @lru_cache()
     def sample_frequencies_torch_cuda(self):
-        return self.sample_frequencies_torch.to("cuda")
+        if self._sample_frequencies_torch_cuda is None:
+            self._sample_frequencies_torch_cuda = self.sample_frequencies_torch.to(
+                "cuda"
+            )
+        return self._sample_frequencies_torch_cuda
 
     @property
-    @lru_cache()
     def frequency_mask(self) -> np.ndarray:
         """Mask which selects frequency bins greater than or equal to the
         starting frequency"""
-        return self.sample_frequencies >= self._f_min
+        if self._frequency_mask is None:
+            self._frequency_mask = self.sample_frequencies >= self.f_min
+        return self._frequency_mask
+
+    def _reset_caches(self):
+        self._sample_frequencies = None
+        self._sample_frequencies_torch = None
+        self._sample_frequencies_torch_cuda = None
+        self._frequency_mask = None
 
     @property
     def frequency_mask_length(self) -> int:
@@ -389,11 +393,9 @@ class FrequencyDomain(Domain):
     @window_factor.setter
     def window_factor(self, value):
         """Set self._window_factor and clear cache of self.noise_std."""
-        self._window_factor = value
-        FrequencyDomain.noise_std.fget.cache_clear()
+        self._window_factor = float(value)
 
     @property
-    @lru_cache()
     def noise_std(self) -> float:
         """Standard deviation of the whitened noise distribution.
 
@@ -415,34 +417,49 @@ class FrequencyDomain(Domain):
         rate."""
         return self._f_max
 
+    @f_max.setter
+    def f_max(self, value):
+        self._f_max = float(value)
+        self._reset_caches()
+
     @property
     def f_min(self) -> float:
         """The minimum frequency [Hz]."""
         return self._f_min
+
+    @f_min.setter
+    def f_min(self, value):
+        self._f_min = float(value)
+        self._reset_caches()
 
     @property
     def delta_f(self) -> float:
         """The frequency spacing of the uniform grid [Hz]."""
         return self._delta_f
 
+    @delta_f.setter
+    def delta_f(self, value):
+        self._delta_f = float(value)
+        self._reset_caches()
+
     @property
     def duration(self) -> float:
         """Waveform duration in seconds."""
-        return 1.0 / self._delta_f
+        return 1.0 / self.delta_f
 
     @property
     def sampling_rate(self) -> float:
-        return 2.0 * self._f_max
+        return 2.0 * self.f_max
 
     @property
     def domain_dict(self):
         """Enables to rebuild the domain via calling build_domain(domain_dict)."""
         return {
             "type": "FrequencyDomain",
-            "f_min": self._f_min,
-            "f_max": self._f_max,
-            "delta_f": self._delta_f,
-            "window_factor": self._window_factor,
+            "f_min": self.f_min,
+            "f_max": self.f_max,
+            "delta_f": self.delta_f,
+            "window_factor": self.window_factor,
         }
 
 
