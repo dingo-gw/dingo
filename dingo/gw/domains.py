@@ -5,10 +5,8 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 import torch
-from cryptography.utils import cached_property
 
 from dingo.gw.gwutils import *
-from dingo.core.models import PosteriorModel
 
 
 class Domain(ABC):
