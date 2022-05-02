@@ -148,6 +148,7 @@ def analyze_event():
             event_dataset=args.event_dataset,
             event_dataset_init=args.event_dataset_init,
             num_samples=args.num_samples,
+            batch_size=args.batch_size,
             num_gnpe_iterations=args.num_gnpe_iterations,
             device=device,
             get_log_prob=args.get_log_prob,

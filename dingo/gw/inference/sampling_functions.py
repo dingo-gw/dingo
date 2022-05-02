@@ -265,6 +265,9 @@ def sample_posterior_of_event(
     get_log_prob=False,
     post_correct_ra=True,
 ):
+    if batch_size is None:
+        batch_size = num_samples
+
     # get init_samples if requested (typically for gnpe)
     if model_init is not None:
         # use event_dataset if no separate one is provided for initialization;
