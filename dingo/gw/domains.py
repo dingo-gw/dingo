@@ -323,7 +323,7 @@ class FrequencyDomain(Domain):
 
     def __len__(self):
         """Number of frequency bins in the domain [0, f_max]"""
-        return int(self._f_max / self._delta_f) + 1
+        return int(self.f_max / self.delta_f) + 1
 
     def __call__(self) -> np.ndarray:
         """Array of uniform frequency bins in the domain [0, f_max]"""
@@ -339,16 +339,16 @@ class FrequencyDomain(Domain):
         if self._sample_frequencies is None:
             num_bins = len(self)
             self._sample_frequencies = np.linspace(
-                0.0, self._f_max, num=num_bins, endpoint=True, dtype=np.float32
+                0.0, self.f_max, num=num_bins, endpoint=True, dtype=np.float32
             )
         return self._sample_frequencies
 
     @property
     def sample_frequencies_torch(self):
         if self._sample_frequencies_torch is None:
-            num_bins = self.__len__()
+            num_bins = len(self)
             self._sample_frequencies_torch = torch.linspace(
-                0.0, self._f_max, steps=num_bins, dtype=torch.float32
+                0.0, self.f_max, steps=num_bins, dtype=torch.float32
             )
         return self._sample_frequencies_torch
 
@@ -365,7 +365,7 @@ class FrequencyDomain(Domain):
         """Mask which selects frequency bins greater than or equal to the
         starting frequency"""
         if self._frequency_mask is None:
-            self._frequency_mask = self.sample_frequencies >= self._f_min
+            self._frequency_mask = self.sample_frequencies >= self.f_min
         return self._frequency_mask
 
     def _reset_caches(self):
