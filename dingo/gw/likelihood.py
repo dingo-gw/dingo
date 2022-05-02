@@ -99,7 +99,7 @@ class StationaryGaussianGWLikelihood:
         if time_marginalization_kwargs is not None:
             self.initialize_time_marginalization(**time_marginalization_kwargs)
 
-    def initialize_time_marginalization(self, time_prior, N_t=None):
+    def initialize_time_marginalization_old(self, time_prior, N_t=None):
         """
         Initialize time marginalization.
 
@@ -136,6 +136,56 @@ class StationaryGaussianGWLikelihood:
             self.time_samples = np.linspace(t_lower, t_upper, self.N_t)
             self.time_prior_log = self.time_prior.ln_prob(self.time_samples)
             self.time_prior_log -= np.log(np.sum(np.exp(self.time_prior_log)))
+
+    def initialize_time_marginalization(self, t_lower, t_upper, N_FFT=1):
+        """
+        Initialize time marginalization. Time marginalization can be performed via FFT,
+        which is super fast. However, this limits the time resolution to delta_t =
+        1/self.data_domain.f_max. In order to allow for a finer time resolution we
+        compute the time marginalized likelihood N_FFT via FFT on a grid of N_FFT
+        different time shifts [0, delta_t, 2*delta_t, ..., (N_FFT-1)*delta_t] and
+        average over the time shifts. The effective time resolution is thus
+
+            delta_t_eff = delta_t / N_FFT = 1 / (f_max * N_FFT).
+
+        Note: Time marginalization in only implemented for uniform time priors.
+
+        Parameters
+        ----------
+        t_lower: float
+            Lower time bound of the uniform time prior.
+        t_upper: float
+            Upper time bound of the uniform time prior.
+        N_FFT: int = 1
+            Size of grid for FFT for time marginalization.
+        """
+        self.time_marginalization = True
+        self.N_FFT = N_FFT
+        delta_t = 1.0 / self.data_domain.f_max  # time resolution of FFT
+        # time shifts for different FFTs
+        self.t_FFT = np.arange(self.N_FFT) * delta_t / self.N_FFT
+
+        self.shifted_strains = {}
+        for idx, dt in enumerate(self.t_FFT):
+            # Instead of shifting the waveform mu by + dt when computing the
+            # time-marginalized likelihood, we shift the strain data by -dt. This saves
+            # time for likelihood evaluations, since it can be precomputed.
+            self.shifted_strains[dt] = {
+                k: v * np.exp(-2j * np.pi * self.data_domain() * (-dt))
+                for k, v in self.whitened_strains.items()
+            }
+
+        # Get the time prior. This will be multiplied with the result of the FFT.
+        T = 1 / self.data_domain.delta_f
+        time_axis = (np.arange(len(self.data_domain())) / self.data_domain.f_max)
+        self.time_grid = time_axis[:, np.newaxis] + self.t_FFT[np.newaxis, :]
+        active_indices = np.where(
+            (self.time_grid >= t_lower) & (self.time_grid <= t_upper)
+            | (self.time_grid - T >= t_lower) & (self.time_grid - T <= t_upper)
+        )
+        time_prior = np.zeros(self.time_grid.shape)
+        time_prior[active_indices] = 1.0
+        self.time_prior_log = np.log(time_prior / np.sum(time_prior))
 
     def generate_signal(self, theta):
         """
@@ -174,63 +224,7 @@ class StationaryGaussianGWLikelihood:
         }
         sample = self.projection_transforms(sample)
 
-        # import matplotlib.pyplot as plt
-        # plt.xlim((150,1000))
-        # plt.xscale("log")
-        # plt.plot(self.whitened_strains["H1"].real)
-        # plt.plot(sample["waveform"]["H1"].real)
-        # plt.show()
-
         return sample
-
-    def log_likelihood_old(self, theta):
-        """
-        Compute the log likelihood for GW data (strains + asds) given parameters theta.
-
-        Step 1: compute whitened GW signal h(theta) for parameters theta
-        Step 2: subtract signal h from whitened strain data d, n = d - h
-        Step 3: compute likelihood that n is Gaussian noise  with variance 1 on real and
-                imaginary part individually
-
-        Parameters
-        ----------
-        theta: dict
-            BBH parameters. Includes intrinsic parameters to be passed to waveform
-            generator, and extrinsic parameters for detector projection.
-
-        Returns
-        -------
-        log_likelihood: float
-            Log likelihood of the data whitened_strains given the parameters theta.
-        """
-        # Step 1: compute whitened GW strain h(theta) for parameters theta
-        h = self.generate_signal(theta)["waveform"]
-
-        # Step 2: subtract signal h from whitened strain data d, n = d - h
-        n = {k: v - h[k] for k, v in self.whitened_strains.items()}
-
-        # Step 3: compute likelihood that n is Gaussian noise with variance 1 on real
-        # and imaginary part individually
-        log_likelihoods = {}
-        for ifo, n_ifo in n.items():
-            # truncate according to domain
-            n_ifo = n_ifo[self.data_domain.min_idx :]
-            # Compute likelihood. We assume that the noise is Gaussian and white (after
-            # whitening), so the likelihood is given by N[0, 1](n). For a single bin i,
-            # the log likelihood is this given by
-            #
-            #           log(N[0, 1](n[i])) = - log(sqrt(2) * pi) - 1/2. n[i] ** 2.
-            #
-            # To compute the log likelihood for a whole array, we sum over the array of
-            # log likelihoods.
-            # The considerations above hold for the real and imaginary part of the
-            # noise individually, so we add both contributions.
-            l_real = np.sum(-1 / 2.0 * n_ifo.real ** 2)
-            l_imag = np.sum(-1 / 2.0 * n_ifo.imag ** 2)
-            l_const = -2 * len(n_ifo) * np.log(np.sqrt(2) * np.pi)
-            log_likelihoods[ifo] = l_real + l_imag + l_const
-
-        return sum(log_likelihoods.values())
 
     def log_likelihood(self, theta):
         """
@@ -281,7 +275,7 @@ class StationaryGaussianGWLikelihood:
         log_likelihood: float
         """
 
-        # Step 1: Compute whitened GW strain h(theta) for parameters theta.
+        # Step 1: Compute whitened GW strain mu(theta) for parameters theta.
         mu = self.generate_signal(theta)["waveform"]
         d = self.whitened_strains
 
@@ -296,35 +290,7 @@ class StationaryGaussianGWLikelihood:
         )
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
-        #
-        # t_lower, t_upper, N = -0.100, 0.100, 1000
-        # kappa2_ = np.zeros((N, len(d)))
-        # import time
-        #
-        # t0 = time.time()
-        # for idx_ifo, (d_ifo, mu_ifo) in enumerate(zip(d.values(), mu.values())):
-        #     for idx_t, t in enumerate(np.linspace(t_lower, t_upper, N)):
-        #         kappa2_[idx_t, idx_ifo] = inner_product(
-        #             d_ifo, mu_ifo * np.exp(-2j * np.pi * self.data_domain() * t)
-        #         )
-        # print(time.time() - t0)
-
-        # from scipy.fft import fft
-        # ifo = "H1"
-        # kappa2_ifo = np.sum(d[ifo].conj() * mu[ifo]).real
-        # theta1 = theta.copy()
-        # offset = 0.010 * 1000 / 1024
-        # theta1["geocent_time"] -= offset
-        # mu1 = self.generate_signal(theta1)["waveform"][ifo]
-        # d1 = self.whitened_strains[ifo]
-        # y1 = fft(d1.conj() * mu1).real
-        # import matplotlib.pyplot as plt
-        # plt.xlim((0, 0.02))
-        # plt.plot(np.linspace(0, 8, 8193), y1, '.')
-        # plt.scatter(offset, kappa2_ifo, marker='x', s=50, c='red')
-        # plt.show()
-
-    def log_likelihood_time_marginalized(self, theta):
+    def log_likelihood_time_marginalized_old(self, theta):
         """
         Compute log likelihood with time marginalization.
 
@@ -336,7 +302,7 @@ class StationaryGaussianGWLikelihood:
         -------
         log_likelihood: float
         """
-        # Step 1: Compute whitened GW strain h(theta) for parameters theta.
+        # Step 1: Compute whitened GW strain mu(theta) for parameters theta.
         # The geocent_time parameter needs to be set to 0.
         theta["geocent_time"] = 0.0
         mu = self.generate_signal(theta)["waveform"]
@@ -345,12 +311,8 @@ class StationaryGaussianGWLikelihood:
         # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to
         # compute the remaining terms rho2opt and kappa2.
         # rho2opt is time independent, and thus same as in the log_likelihood method.
-        rho2opt = sum(
-            [
-                inner_product(mu_ifo, mu_ifo, min_idx=self.data_domain.min_idx)
-                for mu_ifo in mu.values()
-            ]
-        )
+        rho2opt = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
+
         # kappa2 is time dependent. We compute it for the discretized times k * delta_t
         if self.N_t is None:
             # Compute marginalized kappa2 with FFT
@@ -365,7 +327,9 @@ class StationaryGaussianGWLikelihood:
             # the log. See Eq. (52) in https://arxiv.org/pdf/1809.02293.pdf.
             # To prevent numerical issues, we use the logsumexp trick.
             alpha = np.max(kappa2_ + self.time_prior_log)
-            kappa2 = alpha - np.log(np.sum(np.exp(kappa2_ + self.time_prior_log - alpha)))
+            kappa2 = alpha - np.log(
+                np.sum(np.exp(kappa2_ + self.time_prior_log - alpha))
+            )
 
         else:
             kappa2_ = np.zeros((len(d), self.N_t))
@@ -380,10 +344,71 @@ class StationaryGaussianGWLikelihood:
             # the log. See Eq. (52) in https://arxiv.org/pdf/1809.02293.pdf.
             # To prevent numerical issues, we use the logsumexp trick.
             alpha = np.max(kappa2_ + self.time_prior_log)
-            kappa2 = alpha - np.log(np.sum(np.exp(kappa2_ + self.time_prior_log - alpha)))
+            kappa2 = alpha - np.log(
+                np.sum(np.exp(kappa2_ + self.time_prior_log - alpha))
+            )
 
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
+    def log_likelihood_time_marginalized(self, theta):
+        """
+        Compute log likelihood with time marginalization.
+
+        Parameters
+        ----------
+        theta
+
+        Returns
+        -------
+        log_likelihood: float
+        """
+        # Step 1: Compute whitened GW strain mu(theta) for parameters theta.
+        # The geocent_time parameter needs to be set to 0.
+        theta["geocent_time"] = 0.0
+        mu = self.generate_signal(theta)["waveform"]
+        # d = self.whitened_strains
+
+        # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to
+        # compute the remaining terms rho2opt and kappa2.
+        # rho2opt is time independent, and thus same as in the log_likelihood method.
+        rho2opt = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
+
+        # kappa2 is time dependent. We use FFT to compute it for the discretized times
+        # k * (delta_t/N_FFT) and then sum over the time bins. The kappa2 contribution
+        # is then given by
+        #
+        #       log sum_k exp(kappa2_k + log_prior_k),
+        #
+        # see Eq. (52) in https://arxiv.org/pdf/1809.02293.pdf. Here, kappa2_k is the
+        # value of kappa2 and log_prior_k is the log_prior density at time
+        # k * (delta_t/N_FFT). The sum over k is the discretized integration of t.
+        # Note: the time is discretized in two ways; for each FFT j (N_FFT in total),
+        # there are len(data_domain) time samples i, such that
+        #
+        #       t_ij = i * delta_t + j * (delta_t/N_FFT).
+        #
+        # Summing over the time bins corresponds to a sum across both axes i and j.
+        kappa2_ij = np.zeros((len(self.data_domain), self.N_FFT))
+        for j, dt in enumerate(self.t_FFT):
+            # Get precomputed whitened strain, that is shifted by -dt.
+            d = self.shifted_strains[dt]
+            # Compute kappa2 contribution
+            kappa2_ = [
+                fft(d_ifo.conj() * mu_ifo).real
+                for d_ifo, mu_ifo in zip(d.values(), mu.values())
+            ]
+            # sum contributions of different ifos
+            kappa2_ij[:, j] = np.sum(kappa2_, axis=0)
+        # Marginalize over time; this requires multiplying the likelihoods with the
+        # prior (*not* in log space), summing over the time bins (both axes i and j!),
+        # and then taking the log. See Eq. (52) in https://arxiv.org/pdf/1809.02293.pdf.
+        # To prevent numerical issues, we use the logsumexp trick.
+        assert kappa2_ij.shape == self.time_prior_log.shape
+        exponent = kappa2_ij + self.time_prior_log
+        alpha = np.max(exponent)
+        kappa2 = alpha + np.log(np.sum(np.exp(exponent - alpha)))
+
+        return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
     def log_prob(self, *args, **kwargs):
         """

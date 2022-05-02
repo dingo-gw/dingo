@@ -2,6 +2,7 @@ import time
 from os.path import split, join
 import numpy as np
 import pandas as pd
+import bilby
 from multiprocessing import Pool
 from threadpoolctl import threadpool_limits
 import argparse
@@ -26,8 +27,16 @@ class UnnormalizedPosterior:
         self.prior = prior
         if time_marginalization_kwargs is not None:
             self.time_marginalization = True
-            time_marginalization_kwargs["time_prior"] = self.prior.pop("geocent_time")
-            self.likelihood.initialize_time_marginalization(**time_marginalization_kwargs)
+            time_prior = self.prior.pop("geocent_time")
+            if type(time_prior) != bilby.core.prior.Uniform:
+                raise NotImplementedError(
+                    "Only uniform time prior is supported for " "time marginalization."
+                )
+            time_marginalization_kwargs["t_lower"] = time_prior._minimum
+            time_marginalization_kwargs["t_upper"] = time_prior._maximum
+            self.likelihood.initialize_time_marginalization(
+                **time_marginalization_kwargs
+            )
         else:
             self.time_marginalization = False
 
@@ -61,14 +70,11 @@ class UnnormalizedPosterior:
         return np.array(log_probs)
 
     def log_prob(self, theta):
-        # try:
         log_prior = self.prior.ln_prob(theta)
         if log_prior == -np.inf:
             return -np.inf
         log_likelihood = self.likelihood.log_prob(theta)
         return log_likelihood + log_prior
-        # except:
-        #     return -np.inf
 
 
 def parse_args():
