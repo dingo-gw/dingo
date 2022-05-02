@@ -185,7 +185,8 @@ class StationaryGaussianGWLikelihood:
         )
         time_prior = np.zeros(self.time_grid.shape)
         time_prior[active_indices] = 1.0
-        self.time_prior_log = np.log(time_prior / np.sum(time_prior))
+        with np.errstate(divide='ignore'): # ignore warnings for log(0) = -inf
+            self.time_prior_log = np.log(time_prior / np.sum(time_prior))
 
     def generate_signal(self, theta):
         """
