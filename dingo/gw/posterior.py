@@ -30,7 +30,7 @@ class UnnormalizedPosterior:
             time_prior = self.prior.pop("geocent_time")
             if type(time_prior) != bilby.core.prior.Uniform:
                 raise NotImplementedError(
-                    "Only uniform time prior is supported for " "time marginalization."
+                    "Only uniform time prior is supported for time marginalization."
                 )
             time_marginalization_kwargs["t_lower"] = time_prior._minimum
             time_marginalization_kwargs["t_upper"] = time_prior._maximum
