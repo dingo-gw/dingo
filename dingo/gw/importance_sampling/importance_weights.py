@@ -172,7 +172,7 @@ def main():
     samples = pd.read_pickle(settings["nde"]["data"]["parameter_samples"])
     metadata = samples.attrs
     # for time marginalization, we drop geocent time from the samples
-    if "time_marginalization_kwargs" in settings:
+    if "time_marginalization" in settings:
         samples.drop("geocent_time", axis=1, inplace=True)
 
     # Step 1: Build proposal distribution.
@@ -230,7 +230,7 @@ def main():
     # wrap likelihood and prior to unnormalized posterior
     # posterior = UnnormalizedPosterior(likelihood, prior)
     posterior = UnnormalizedPosterior(
-        likelihood, prior, settings.get("time_marginalization_kwargs", None)
+        likelihood, prior, settings.get("time_marginalization", None)
     )
 
     # Step 3: SIR step
