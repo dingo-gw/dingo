@@ -173,7 +173,7 @@ def main():
     metadata = samples.attrs
     # for time marginalization, we drop geocent time from the samples
     if "time_marginalization" in settings and "geocent_time" in samples:
-            samples.drop("geocent_time", axis=1, inplace=True)
+        samples.drop("geocent_time", axis=1, inplace=True)
 
     # Step 1: Build proposal distribution.
     #
