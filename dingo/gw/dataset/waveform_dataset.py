@@ -115,8 +115,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
 
     def update_domain(self, domain_update: dict = None):
         """
-        Update the domain based on new configuration. Also adjust data arrays to match
-        the new domain.
+        Update the domain based on new configuration.
 
         The waveform dataset provides waveform polarizations in a particular domain. In
         Frequency domain, this is [0, domain._f_max]. Furthermore, data is set to 0 below
@@ -135,7 +134,6 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         """
         if domain_update is not None:
             self.domain.update(domain_update)
-            self.settings["domain"] = copy.deepcopy(self.domain.domain_dict)
 
         # Determine where any domain adjustment must be applied. If the dataset is SVD
         # compressed, then adjust the SVD matrices. Otherwise, adjust the dataset
