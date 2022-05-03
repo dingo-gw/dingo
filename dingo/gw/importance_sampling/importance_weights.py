@@ -172,8 +172,8 @@ def main():
     samples = pd.read_pickle(settings["nde"]["data"]["parameter_samples"])
     metadata = samples.attrs
     # for time marginalization, we drop geocent time from the samples
-    if "time_marginalization" in settings:
-        samples.drop("geocent_time", axis=1, inplace=True)
+    if "time_marginalization" in settings and "geocent_time" in samples:
+            samples.drop("geocent_time", axis=1, inplace=True)
 
     # Step 1: Build proposal distribution.
     #
