@@ -99,44 +99,6 @@ class StationaryGaussianGWLikelihood:
         if time_marginalization_kwargs is not None:
             self.initialize_time_marginalization(**time_marginalization_kwargs)
 
-    def initialize_time_marginalization_old(self, time_prior, N_t=None):
-        """
-        Initialize time marginalization.
-
-        Parameters
-        ----------
-        time_prior: bilby.core.prior.Prior
-            Prior for time.
-        N_t: int = None
-            Number of time samples. If None, we use FFT to compute the time
-            marginalized likelihood, which is fast but has a fixed time resolution of
-            1/self.data_domain.f_max. Else, the time shifting will be performed manually.
-        """
-        self.time_marginalization = True
-        self.time_prior = time_prior
-        self.N_t = N_t
-        t_lower, t_upper = self.time_prior._minimum, self.time_prior._maximum
-        # if N_t is None, set up time marginalization via FFT
-        if self.N_t is None:
-            # FFT returns an array, where bin i corresponds to time i * dt, where dt is
-            # 1 / self.domain.delta_f. The array wraps around, which we account for below.
-            time_axis = np.arange(len(self.data_domain())) / self.data_domain.f_max
-            self.time_prior_log = np.max(
-                (
-                    self.time_prior.ln_prob(time_axis),
-                    self.time_prior.ln_prob(time_axis - max(time_axis)),
-                ),
-                axis=0,
-            )
-            # normalize the time prior
-            self.time_prior_log -= np.log(np.sum(np.exp(self.time_prior_log)))
-        else:
-            # if N_t is not None, set up time marginalization via manual shifting.
-            # To that end we evaluate the time prior on a uniform 1D grid.
-            self.time_samples = np.linspace(t_lower, t_upper, self.N_t)
-            self.time_prior_log = self.time_prior.ln_prob(self.time_samples)
-            self.time_prior_log -= np.log(np.sum(np.exp(self.time_prior_log)))
-
     def initialize_time_marginalization(self, t_lower, t_upper, N_FFT=1):
         """
         Initialize time marginalization. Time marginalization can be performed via FFT,
@@ -177,7 +139,7 @@ class StationaryGaussianGWLikelihood:
 
         # Get the time prior. This will be multiplied with the result of the FFT.
         T = 1 / self.data_domain.delta_f
-        time_axis = (np.arange(len(self.data_domain())) / self.data_domain.f_max)
+        time_axis = np.arange(len(self.data_domain())) / self.data_domain.f_max
         self.time_grid = time_axis[:, np.newaxis] + self.t_FFT[np.newaxis, :]
         active_indices = np.where(
             (self.time_grid >= t_lower) & (self.time_grid <= t_upper)
@@ -185,7 +147,7 @@ class StationaryGaussianGWLikelihood:
         )
         time_prior = np.zeros(self.time_grid.shape)
         time_prior[active_indices] = 1.0
-        with np.errstate(divide='ignore'): # ignore warnings for log(0) = -inf
+        with np.errstate(divide="ignore"):  # ignore warnings for log(0) = -inf
             self.time_prior_log = np.log(time_prior / np.sum(time_prior))
 
     def generate_signal(self, theta):
@@ -289,66 +251,6 @@ class StationaryGaussianGWLikelihood:
                 for d_ifo, mu_ifo in zip(d.values(), mu.values())
             ]
         )
-        return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
-
-    def log_likelihood_time_marginalized_old(self, theta):
-        """
-        Compute log likelihood with time marginalization.
-
-        Parameters
-        ----------
-        theta
-
-        Returns
-        -------
-        log_likelihood: float
-        """
-        # Step 1: Compute whitened GW strain mu(theta) for parameters theta.
-        # The geocent_time parameter needs to be set to 0.
-        theta["geocent_time"] = 0.0
-        mu = self.generate_signal(theta)["waveform"]
-        d = self.whitened_strains
-
-        # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to
-        # compute the remaining terms rho2opt and kappa2.
-        # rho2opt is time independent, and thus same as in the log_likelihood method.
-        rho2opt = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
-
-        # kappa2 is time dependent. We compute it for the discretized times k * delta_t
-        if self.N_t is None:
-            # Compute marginalized kappa2 with FFT
-            kappa2_ = [
-                fft(d_ifo.conj() * mu_ifo).real
-                for d_ifo, mu_ifo in zip(d.values(), mu.values())
-            ]
-            # sum contributions of different ifos
-            kappa2_ = np.sum(kappa2_, axis=0)
-            # marginalize over time; this requires multiplying the likelihoods with the
-            # prior (*not* in log space), summing over the time bins, and then taking
-            # the log. See Eq. (52) in https://arxiv.org/pdf/1809.02293.pdf.
-            # To prevent numerical issues, we use the logsumexp trick.
-            alpha = np.max(kappa2_ + self.time_prior_log)
-            kappa2 = alpha - np.log(
-                np.sum(np.exp(kappa2_ + self.time_prior_log - alpha))
-            )
-
-        else:
-            kappa2_ = np.zeros((len(d), self.N_t))
-            for idx_ifo, (d_ifo, mu_ifo) in enumerate(zip(d.values(), mu.values())):
-                for idx_t, t in enumerate(self.time_samples):
-                    kappa2_[idx_ifo, idx_t] = inner_product(
-                        d_ifo, mu_ifo * np.exp(-2j * np.pi * self.data_domain() * t)
-                    )
-            kappa2_ = np.sum(kappa2_, axis=0)
-            # marginalize over time; this requires multiplying the likelihoods with the
-            # prior (*not* in log space), summing over the time bins, and then taking
-            # the log. See Eq. (52) in https://arxiv.org/pdf/1809.02293.pdf.
-            # To prevent numerical issues, we use the logsumexp trick.
-            alpha = np.max(kappa2_ + self.time_prior_log)
-            kappa2 = alpha - np.log(
-                np.sum(np.exp(kappa2_ + self.time_prior_log - alpha))
-            )
-
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
     def log_likelihood_time_marginalized(self, theta):
