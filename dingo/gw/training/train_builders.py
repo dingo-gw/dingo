@@ -90,7 +90,13 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     assert wfd.domain == asd_dataset.domain
 
     # Add window factor to domain, so that we can compute the noise variance.
-    domain = wfd.domain
+    # TODO: we want to set `domain = wfd.domain`. This does not work at the moment,
+    #  because this requires updating the window factor of the wfd.domain (instead of
+    #  just the local domain object). This causes trouble if the
+    #  set_train_transforms function is called multiple times, since the second time
+    #  the domain_update = wfd.domain.domain_dict contains a window factor, which will
+    #  cause an error in domain_update.
+    domain = build_domain(wfd.domain.domain_dict)
     domain.window_factor = get_window_factor(data_settings["window"])
 
     extrinsic_prior_dict = get_extrinsic_prior_dict(data_settings["extrinsic_prior"])
