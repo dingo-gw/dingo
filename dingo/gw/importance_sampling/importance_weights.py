@@ -92,6 +92,44 @@ def get_samples_and_log_probs_from_proposal(nde, num_samples):
     return theta, log_probs_proposal
 
 
+def get_log_probs_from_proposal(nde, theta):
+    """
+    Compute the log_prob of, which is represented by an unconditional nde, from theta.
+
+    Parameters
+    ----------
+    nde: dingo.core.models.PosteriorModel
+        Unconditional nde used as proposal distribution.
+    theta: pd.DataFrame
+        Dataframe with theta samples for log_prob evaluation.
+
+    Returns
+    -------
+    log_probs: numpy.ndarray
+        Array with log_probs of the theta samples.
+    """
+    # standardization
+    mean, std = nde.metadata["train_settings"]["data"]["standardization"].values()
+    mean = np.array([v for v in mean.values()])
+    std = np.array([v for v in std.values()])
+    theta = (torch.from_numpy(np.array(theta)).to(nde.device).float() - mean) / std
+
+    nde.model.eval()
+    with torch.no_grad():
+        log_probs_proposal = nde.model.log_prob(theta).cpu().numpy()
+
+    # The standardization has an impact on the log_prob. For the computation of the
+    # Bayesian evidence, the standardization of the proposal distribution (the nde) and
+    # the target distribution (likelihood * prior) must be the same with respect to the
+    # parameters theta. Since the prior is not standardized (it is a density in the
+    # original parameter space), we simply undo the standardization of the nde to
+    # restore compatibility with the prior. The contribution to the log_prob is thus
+    # given by log(prod_i(std_i)) = sum_i log(std_i).
+    log_probs_proposal += np.sum(np.log(std))
+
+    return log_probs_proposal
+
+
 def get_evidence(log_probs_target, log_probs_proposal):
     """
     Compute the Bayesian evidence p(d). The target distribution is the unnormalized
@@ -144,11 +182,64 @@ def get_evidence(log_probs_target, log_probs_proposal):
     N = len(log_w)
     # Use the logsumexp trick to avoid numerical underflow.
     alpha = np.max(log_w)
-    log_evidence = - np.log(N) + np.log(np.sum(np.exp(log_w - alpha))) + alpha
+    log_evidence = -np.log(N) + np.log(np.sum(np.exp(log_w - alpha))) + alpha
     return log_evidence
 
 
-def plot_diagnostics(theta, outdir):
+def plot_posterior_slice(
+    posterior,
+    nde,
+    theta,
+    theta_range,
+    log_evidence,
+    outname=None,
+    num_processes=1,
+    n_grid=200,
+):
+    # repeat theta n_grid times
+    theta_grid = pd.DataFrame(
+        np.repeat(np.array(theta)[np.newaxis], n_grid, axis=0),
+        columns=theta.keys(),
+    )
+    fig, ax = plt.subplots(3, 5, figsize=(30, 12))
+    for idx, param in enumerate(theta.keys()):
+        # axis with scan for param
+        param_axis = np.linspace(theta_range[param][0], theta_range[param][1], n_grid)
+        # build theta_grid for param
+        theta_param = theta_grid.copy()
+        theta_param[param] = param_axis
+        # evaluate the posterior at theta_grid
+        log_probs_target = (
+            posterior.log_prob_multiprocessing(theta_param, num_processes)
+            - log_evidence
+        )
+        # evaluate nde at theta_grid
+        log_probs_proposal = get_log_probs_from_proposal(nde, theta_param)
+
+        # plot
+        i, j = idx // 5, idx % 5
+        ax[i, j].set_xlabel(param)
+        ax[i, j].axvline([theta[param]], color="black", label="theta")
+        ax[i, j].plot(param_axis, np.exp(log_probs_target), label="target")
+        ax[i, j].plot(param_axis, np.exp(log_probs_proposal), label="proposal")
+
+    plt.legend()
+    if outname is not None:
+        plt.savefig(outname)
+    plt.show()
+
+    print("done")
+
+
+def plot_diagnostics(
+    theta,
+    outdir,
+    theta_slice_plots=None,
+    posterior=None,
+    nde=None,
+    num_processes=1,
+    n_grid=200,
+):
     weights = np.array(theta.pop("weights"))
     # compute ESS
     ESS = get_ESS(weights)
@@ -159,7 +250,6 @@ def plot_diagnostics(theta, outdir):
     # Compute log_evidence
     log_evidence = get_evidence(log_probs_target, log_probs_proposal)
     print(f"Log evidence:                  {log_evidence:.2f}")
-
 
     # Plot weights
     plt.clf()
@@ -192,6 +282,27 @@ def plot_diagnostics(theta, outdir):
     plt.title(f"Target log_probs. {n_below} below {y_lower}.")
     plt.scatter(x, y, s=0.5)
     plt.savefig(join(outdir, "log_probs.png"))
+
+    if theta_slice_plots is not None:
+        if posterior is None or nde is None:
+            raise ValueError("Must provide posterior and nde.")
+        # global range for parameter scan
+        theta_range = {
+            k: (np.min(theta[k]), np.max(theta[k])) for k in theta_slice_plots.columns
+        }
+        # generate slice plots for each theta sample
+        for idx, (_, theta_idx) in enumerate(theta_slice_plots.iterrows()):
+            plot_posterior_slice(
+                posterior,
+                nde,
+                theta_idx,
+                theta_range,
+                log_evidence,
+                num_processes=num_processes,
+                outname=join(outdir, f"theta_{idx}_posterior_slice.pdf"),
+                n_grid=n_grid,
+            )
+            print("done")
 
     # cornerplot with unweighted vs. weighted samples
     weights = weights / np.mean(weights)
@@ -340,7 +451,23 @@ def main():
     diagnostics_dir = join(args.outdir, "IS-diagnostics")
     if not exists(diagnostics_dir):
         makedirs(diagnostics_dir)
-    plot_diagnostics(theta, diagnostics_dir)
+    if settings.get("n_slice_plots", 0) > 0:
+        theta_slice_plots = theta.sample(settings["n_slice_plots"]).drop(
+            columns=["weights", "log_probs_proposal", "log_probs_target"]
+        )
+    else:
+        theta_slice_plots = None
+    # theta_slice_plots = theta.iloc[[np.argmax(theta["log_probs_target"])]].drop(
+    #     columns=["weights", "log_probs_proposal", "log_probs_target"]
+    # )
+    plot_diagnostics(
+        theta,
+        diagnostics_dir,
+        theta_slice_plots=theta_slice_plots,
+        posterior=posterior,
+        nde=nde,
+        num_processes=settings.get("num_processes", 1),
+    )
 
 
 if __name__ == "__main__":

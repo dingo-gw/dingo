@@ -5,6 +5,8 @@ event_dataset: <path/to/event_dataset>
 time_marginalization: 
   N_FFT: 5
 
+n_slice_plots: 10
+
 # settings for unconditional neural density estimator (nde)
 nde:
   # training data: output dingo samples for nde
