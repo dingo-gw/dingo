@@ -201,6 +201,7 @@ def plot_posterior_slice(
         np.repeat(np.array(theta)[np.newaxis], n_grid, axis=0),
         columns=theta.keys(),
     )
+    plt.clf()
     fig, ax = plt.subplots(3, 5, figsize=(30, 12))
     for idx, param in enumerate(theta.keys()):
         # axis with scan for param
@@ -226,7 +227,8 @@ def plot_posterior_slice(
     plt.legend()
     if outname is not None:
         plt.savefig(outname)
-    plt.show()
+    else:
+        plt.show()
 
 
 def plot_diagnostics(
@@ -384,6 +386,8 @@ def main():
             )
             print(f"Renaming trained nde model to {nde_name}.")
             rename(join(args.outdir, "model_latest.pt"), nde_name)
+    else:
+        nde = None
 
     # Step 2: Build target distribution.
     #
@@ -422,9 +426,10 @@ def main():
     # to obtain weighted samples from the proposal distribution.
 
     if "log_prob" in samples.columns:
-        num_samples = len(samples)
-        log_probs_proposal = np.array(samples["log_prob"])
-        theta = samples.drop(columns="log_prob")
+        num_samples = settings.get("num_samples", len(samples))
+        theta = samples.sample(num_samples)
+        log_probs_proposal = np.array(theta["log_prob"])
+        theta = theta.drop(columns="log_prob")
     else:
         num_samples = settings["num_samples"]
         # sample from proposal distribution, and get the log_prob densities
