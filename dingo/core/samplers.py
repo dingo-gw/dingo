@@ -1,9 +1,12 @@
+import numpy as np
+import pandas as pd
+from astropy.time import Time
 from bilby.core.result import Result
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 
 from dingo.core.transforms import GetItem, RenameKey
-from dingo.gw.domains import build_domain, build_domain_from_model_metadata
+from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_window_factor
 from dingo.gw.transforms import (
     WhitenAndScaleStrain,
@@ -15,7 +18,8 @@ from dingo.gw.transforms import (
     GetDetectorTimes,
     CopyToExtrinsicParameters,
     ToTorch,
-    GNPEChirp, GNPEBase,
+    GNPEChirp,
+    GNPEBase,
 )
 
 
@@ -24,17 +28,19 @@ class ConditionalSampler(object):
         self.model = model
         self.initialize_transforms()
 
-    def _run_sampler(self, n, context):
+    def _run_sampler(self, n, context, batch_size=None):
         x = self.transforms_pre(context)
         x = x.expand(n, *x.shape)
-        y = self.model.sample(x)
-        samples = self.transforms_post({'parameters': y})['parameters']
+        y = self.model.sample(x, batch_size=batch_size)
+        samples = self.transforms_post({"parameters": y})["parameters"]
 
         return samples
 
-    def run_sampler(self, n, context):
+    def run_sampler(self, n, context, **kwargs):
         samples = self._run_sampler(n, context)
-        return self._generate_result(samples)
+        self._post_correct(samples, **kwargs)
+        samples = {k: v.cpu() for k, v in samples.items()}
+        return pd.DataFrame(samples)
 
     def initialize_transforms(self):
         self.transforms_pre = Compose([])
@@ -43,24 +49,34 @@ class ConditionalSampler(object):
     def _generate_result(self, samples):
         pass
 
+    def _post_correct(self, samples, **kwargs):
+        pass
+
 
 class GNPESampler(ConditionalSampler):
-    def __init__(self, model, init_sampler : ConditionalSampler, num_iterations : int):
+    def __init__(self, model, init_sampler: ConditionalSampler, num_iterations: int):
         self.init_sampler = init_sampler
         self.num_iterations = num_iterations
         self.gnpe_parameters = None
         super().__init__(model)
 
-    def _run_sampler(self, n, context):
+    def _run_sampler(self, n, context, batch_size=None):
+        if batch_size is None:
+            batch_size = n
+
         data_ = self.init_sampler.transforms_pre(context)
 
         x = {
-            'extrinsic_parameters': self.init_sampler._run_sampler(n, context),
-            'parameters': {},
+            "extrinsic_parameters": self.init_sampler._run_sampler(
+                n, context, batch_size=batch_size
+            ),
+            "parameters": {},
         }
         for i in range(self.num_iterations):
-            x["extrinsic_parameters"] = {k: x["extrinsic_parameters"][k] for k in
-                                         self.gnpe_parameters}
+            print(i)
+            x["extrinsic_parameters"] = {
+                k: x["extrinsic_parameters"][k] for k in self.gnpe_parameters
+            }
             d = data_.clone()
             x["data"] = d.expand(n, *d.shape)
 
@@ -68,18 +84,19 @@ class GNPESampler(ConditionalSampler):
             x["parameters"] = self.model.sample(x["data"], x["context_parameters"])
             x = self.transforms_post(x)
 
-        samples = x['parameters']
+        samples = x["parameters"]
 
         return samples
 
 
 class GWSamplerMixin(object):
-
     def __init__(self, **kwargs):
         self.model = kwargs["model"]
         self.build_domain()
         self.inference_parameters = self.model.metadata["train_settings"]["data"][
-            "inference_parameters"]
+            "inference_parameters"
+        ]
+        self.t_ref = self.model.metadata["train_settings"]["data"]["ref_time"]
         super().__init__(**kwargs)
 
     def build_domain(self):
@@ -91,9 +108,19 @@ class GWSamplerMixin(object):
 
         self.domain.window_factor = get_window_factor(data_settings["window"])
 
+    def _post_correct(self, samples, t_event):
+        ra = samples["ra"]
+        time_reference = Time(self.t_ref, format="gps", scale="utc")
+        time_event = Time(t_event, format="gps", scale="utc")
+        longitude_event = time_event.sidereal_time("apparent", "greenwich")
+        longitude_reference = time_reference.sidereal_time("apparent", "greenwich")
+        delta_longitude = longitude_event - longitude_reference
+        ra_correction = delta_longitude.rad
+        samples["ra"] = (ra + ra_correction) % (2 * np.pi)
+
+
 
 class GWSamplerNPE(GWSamplerMixin, ConditionalSampler):
-
     def initialize_transforms(self):
 
         data_settings = self.model.metadata["train_settings"]["data"]
@@ -123,12 +150,11 @@ class GWSamplerNPE(GWSamplerMixin, ConditionalSampler):
             {"inference_parameters": self.inference_parameters},
             data_settings["standardization"],
             inverse=True,
-            as_type='dict',
+            as_type="dict",
         )
 
 
 class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
-
     def initialize_transforms(self):
 
         data_settings = self.model.metadata["train_settings"]["data"]
@@ -174,7 +200,7 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 device=self.model.device,
             )
         )
-        transforms_pre.append(RenameKey('waveform', 'data'))
+        transforms_pre.append(RenameKey("waveform", "data"))
 
         self.gnpe_parameters = []
         for transform in transforms_pre:
@@ -190,7 +216,7 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                     {"inference_parameters": self.inference_parameters},
                     data_settings["standardization"],
                     inverse=True,
-                    as_type='dict',
+                    as_type="dict",
                 ),
                 PostCorrectGeocentTime(),
                 CopyToExtrinsicParameters(
