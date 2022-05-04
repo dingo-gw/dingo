@@ -156,7 +156,7 @@ def analyze_event():
             args.event_dataset
         )
 
-        samples = sampler.run_sampler(args.num_samples, event_data, time_event=time_event)
+        samples = sampler.run_sampler(args.num_samples, event_data, t_event=time_event)
         metadata = {
             "model": model.metadata,
             "event": {
