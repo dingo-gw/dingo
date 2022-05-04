@@ -127,7 +127,7 @@ class GWSignal(object):
             asd = self._asd.sample_random_asds()
         else:
             raise TypeError("Invalid ASD type.")
-        asd = {k: self.out_domain.update_data(v, low_value=0.0) for k, v in asd.items()}
+        asd = {k: self.out_domain.update_data(v, low_value=1e-20) for k, v in asd.items()}
         return asd
 
     @asd.setter
@@ -182,7 +182,8 @@ class Injection(GWSignal):
                 * asd[ifo]
                 * self.out_domain.noise_std
             )
-            data[ifo] = s + noise
+            d = s + noise
+            data[ifo] = self.out_domain.update_data(d, low_value=0.0)
 
         signal["waveform"] = data
         return signal
