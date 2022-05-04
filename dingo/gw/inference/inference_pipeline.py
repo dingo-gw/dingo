@@ -7,6 +7,7 @@ import pandas as pd
 
 from dingo.core.models import PosteriorModel
 from dingo.core.samplers import GWSamplerNPE, GWSamplerGNPE
+from dingo.gw.inference.data_preparation import get_event_data_and_domain
 from dingo.gw.inference.sampling_functions import sample_posterior_of_event
 from dingo.gw.inference.visualization import load_ref_samples, generate_cornerplot
 
@@ -149,7 +150,13 @@ def analyze_event():
     for time_event in args.gps_time_event:
         print(f"Analyzing event at gps time {time_event}.")
 
-        samples = sampler.run_sampler(args.num_samples, time_event=time_event)
+        # get raw event data, and prepare it for the network domain
+        event_data, _ = get_event_data_and_domain(
+            model.metadata, time_event, args.time_psd, args.time_buffer,
+            args.event_dataset
+        )
+
+        samples = sampler.run_sampler(args.num_samples, event_data, time_event=time_event)
         metadata = {
             "model": model.metadata,
             "event": {
