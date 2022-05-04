@@ -228,8 +228,6 @@ def plot_posterior_slice(
         plt.savefig(outname)
     plt.show()
 
-    print("done")
-
 
 def plot_diagnostics(
     theta,
@@ -250,6 +248,8 @@ def plot_diagnostics(
     # Compute log_evidence
     log_evidence = get_evidence(log_probs_target, log_probs_proposal)
     print(f"Log evidence:                  {log_evidence:.2f}")
+    # Normalize target log_probs
+    log_probs_target = log_probs_target - log_evidence
 
     # Plot weights
     plt.clf()
@@ -272,15 +272,19 @@ def plot_diagnostics(
     plt.savefig(join(outdir, "weights.png"))
 
     plt.clf()
-    x = log_probs_proposal - np.max(log_probs_proposal)
-    y = log_probs_target - np.max(log_probs_target)
-    plt.xlabel("Proposal log_prob (NDE)")
-    plt.ylabel("Target log_prob (Likelihood x Prior)")
-    y_lower, y_upper = -20, 0
+    x = log_probs_proposal
+    y = log_probs_target
+    plt.xlabel("NDE log_prob (proposal)")
+    plt.ylabel("Posterior log_prob (target)")
+    y_lower, y_upper = np.max(y) - 20, np.max(y)
     plt.ylim(y_lower, y_upper)
     n_below = len(np.where(y < y_lower)[0])
-    plt.title(f"Target log_probs. {n_below} below {y_lower}.")
+    plt.title(
+        f"Target log_probs. {n_below} below {y_lower:.2f}. "
+        f"Log_evidence {log_evidence:.2f}."
+    )
     plt.scatter(x, y, s=0.5)
+    plt.plot([y_upper - 20, y_upper], [y_upper - 20, y_upper], color="black")
     plt.savefig(join(outdir, "log_probs.png"))
 
     if theta_slice_plots is not None:
@@ -302,7 +306,6 @@ def plot_diagnostics(
                 outname=join(outdir, f"theta_{idx}_posterior_slice.pdf"),
                 n_grid=n_grid,
             )
-            print("done")
 
     # cornerplot with unweighted vs. weighted samples
     weights = weights / np.mean(weights)
