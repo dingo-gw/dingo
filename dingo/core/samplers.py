@@ -1,13 +1,15 @@
 import numpy as np
 import pandas as pd
 from astropy.time import Time
+from bilby.core.prior import Prior, Constraint, DeltaFunction
 from bilby.core.result import Result
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 
 from dingo.core.transforms import GetItem, RenameKey
 from dingo.gw.domains import build_domain
-from dingo.gw.gwutils import get_window_factor
+from dingo.gw.gwutils import get_window_factor, get_extrinsic_prior_dict
+from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.transforms import (
     WhitenAndScaleStrain,
     RepackageStrainsAndASDS,
@@ -26,9 +28,20 @@ from dingo.gw.transforms import (
 class ConditionalSampler(object):
     def __init__(self, model):
         self.model = model
-        self.initialize_transforms()
+        self.transforms_pre = Compose([])
+        self.transforms_post = Compose([])
+        self._search_parameter_keys = []
+        self._constraint_parameter_keys = []
+        self._fixed_parameter_keys = []
+        self._build_prior()
+        self._reset_sampler()
 
     def _run_sampler(self, n, context, batch_size=None):
+
+        x = context.copy()
+        x["parameters"] = {}
+        x["extrinsic_parameters"] = {}
+
         x = self.transforms_pre(context)
         x = x.expand(n, *x.shape)
         y = self.model.sample(x, batch_size=batch_size)
@@ -36,31 +49,91 @@ class ConditionalSampler(object):
 
         return samples
 
-    def run_sampler(self, n, context, **kwargs):
+    def run_sampler(
+        self, n, context, label=None, as_type='result', **post_correction_kwargs
+    ):
+        self._reset_sampler()
+        self.injection_parameters = context.pop("parameters", None)
+        self.label = label
+
         samples = self._run_sampler(n, context)
-        self._post_correct(samples, **kwargs)
+        self._post_correct(samples, **post_correction_kwargs)
         samples = {k: v.cpu() for k, v in samples.items()}
-        return pd.DataFrame(samples)
 
-    def initialize_transforms(self):
-        self.transforms_pre = Compose([])
-        self.transforms_post = Compose([])
+        self._store_metadata()
+        self._generate_result(samples)
 
-    def _generate_result(self, samples):
-        pass
+        if as_type == 'result':
+            return self.result
+        elif as_type == 'pandas':
+            samples = pd.DataFrame(samples)
+            samples.attrs = self.metadata
+            return samples
+        elif as_type == 'dict':
+            return samples
 
     def _post_correct(self, samples, **kwargs):
         pass
 
+    def _build_prior(self):
+        intrinsic_prior = self.model.metadata["dataset_settings"]["intrinsic_prior"]
+        extrinsic_prior = get_extrinsic_prior_dict(
+            self.model.metadata["train_settings"]["data"]["extrinsic_prior"]
+        )
+        self.prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
+
+        # Initialize lists of parameters (from Bilby)
+        for key in self.prior:
+            if isinstance(self.prior[key], Prior) and self.prior[key].is_fixed is False:
+                self._search_parameter_keys.append(key)
+            elif isinstance(self.prior[key], Constraint):
+                self._constraint_parameter_keys.append(key)
+            elif isinstance(self.prior[key], DeltaFunction):
+                # self.likelihood.parameters[key] = self.prior[key].sample()
+                self._fixed_parameter_keys.append(key)
+
+    def _generate_result(self, samples):
+        result_kwargs = dict(
+            label=self.label,
+            # outdir=self.outdir,
+            sampler=self.__class__.__name__.lower(),
+            search_parameter_keys=self._search_parameter_keys,
+            fixed_parameter_keys=self._fixed_parameter_keys,
+            constraint_parameter_keys=self._constraint_parameter_keys,
+            priors=self.prior,
+            meta_data=self.metadata,
+            injection_parameters=self.injection_parameters,
+            sampler_kwargs=None,
+            use_ratio=False,
+        )
+        self.result = Result(**result_kwargs)
+        self.result.samples = samples
+
+        # TODO: decide whether to run this, and whether to use it to generate
+        #  additional parameters.
+        # self.result.samples_to_posterior()
+
+    def _store_metadata(self):
+        self.metadata = dict(
+            model_metadata=self.model.metadata,
+        )
+
+    def _reset_sampler(self):
+        self.result = None
+        self.samples = None
+        self.injection_parameters = None
+        self.label = None
+
 
 class GNPESampler(ConditionalSampler):
     def __init__(self, model, init_sampler: ConditionalSampler, num_iterations: int):
+        super().__init__(model)
         self.init_sampler = init_sampler
         self.num_iterations = num_iterations
         self.gnpe_parameters = None
-        super().__init__(model)
 
     def _run_sampler(self, n, context, batch_size=None):
+        # TODO: Add batching + ability to sample several events simulataneously
         if batch_size is None:
             batch_size = n
 
@@ -88,16 +161,23 @@ class GNPESampler(ConditionalSampler):
 
         return samples
 
+    def _store_metadata(self):
+        super()._store_metadata()
+        self.init_sampler._store_metadata()
+        self.metadata["init_model_metadata"] = self.init_sampler.metadata
+
+        # TODO: Could also go in sampler_kwargs, which we don't use now.
+        self.metadata["num_iterations"] = self.num_iterations
+
 
 class GWSamplerMixin(object):
     def __init__(self, **kwargs):
-        self.model = kwargs["model"]
+        super().__init__(**kwargs)
         self.build_domain()
         self.inference_parameters = self.model.metadata["train_settings"]["data"][
             "inference_parameters"
         ]
         self.t_ref = self.model.metadata["train_settings"]["data"]["ref_time"]
-        super().__init__(**kwargs)
 
     def build_domain(self):
         self.domain = build_domain(self.model.metadata["dataset_settings"]["domain"])
@@ -108,20 +188,34 @@ class GWSamplerMixin(object):
 
         self.domain.window_factor = get_window_factor(data_settings["window"])
 
-    def _post_correct(self, samples, t_event):
-        ra = samples["ra"]
-        time_reference = Time(self.t_ref, format="gps", scale="utc")
-        time_event = Time(t_event, format="gps", scale="utc")
-        longitude_event = time_event.sidereal_time("apparent", "greenwich")
-        longitude_reference = time_reference.sidereal_time("apparent", "greenwich")
-        delta_longitude = longitude_event - longitude_reference
-        ra_correction = delta_longitude.rad
-        samples["ra"] = (ra + ra_correction) % (2 * np.pi)
+    def _post_correct(self, samples, t_event=None):
+        self.time_event = t_event
+        if t_event is not None:
+            ra = samples["ra"]
+            time_reference = Time(self.t_ref, format="gps", scale="utc")
+            time_event = Time(t_event, format="gps", scale="utc")
+            longitude_event = time_event.sidereal_time("apparent", "greenwich")
+            longitude_reference = time_reference.sidereal_time("apparent", "greenwich")
+            delta_longitude = longitude_event - longitude_reference
+            ra_correction = delta_longitude.rad
+            samples["ra"] = (ra + ra_correction) % (2 * np.pi)
 
+    def _store_metadate(self):
+        super()._store_metadata()
+        self.metadata["event"] = {
+            "time_event": self.time_event,
+            # "time_psd": args.time_psd,
+            # "time_buffer": args.time_buffer,
+        }
+        # TODO: Store strain data? ASD?
 
 
 class GWSamplerNPE(GWSamplerMixin, ConditionalSampler):
-    def initialize_transforms(self):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._initialize_transforms()
+
+    def _initialize_transforms(self):
 
         data_settings = self.model.metadata["train_settings"]["data"]
 
@@ -155,7 +249,11 @@ class GWSamplerNPE(GWSamplerMixin, ConditionalSampler):
 
 
 class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
-    def initialize_transforms(self):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._initialize_transforms()
+
+    def _initialize_transforms(self):
 
         data_settings = self.model.metadata["train_settings"]["data"]
         ifo_list = InterferometerList(data_settings["detectors"])
@@ -225,7 +323,3 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 GetDetectorTimes(ifo_list, data_settings["ref_time"]),
             ]
         )
-
-
-class ImportanceSampler(GWSamplerMixin, ConditionalSampler):
-    pass
