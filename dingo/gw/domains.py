@@ -27,6 +27,10 @@ class Domain(ABC):
         pass
 
     @abstractmethod
+    def update(self, new_settings : dict):
+        pass
+
+    @abstractmethod
     def time_translate_data(self, data, dt) -> np.ndarray:
         """Time translate strain data by dt seconds."""
         pass
