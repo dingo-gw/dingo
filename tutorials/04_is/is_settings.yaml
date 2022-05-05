@@ -1,12 +1,18 @@
 num_samples: 1000
-event_dataset: /Users/maxdax/Documents/Projects/GW-Inference/dingo/dingo-devel/tutorials/02_gwpe/datasets/strain_data/events_dataset.hdf5
+event_dataset: <path/to/event_dataset>
+
+# to turn off time marginalization, simply
+time_marginalization: 
+  n_fft: 5
+
+n_slice_plots: 10
 
 # settings for unconditional neural density estimator (nde)
 nde:
   # training data: output dingo samples for nde
   data:
-    parameter_samples: /Users/maxdax/Documents/Projects/GW-Inference/dingo/datasets/dingo_samples/03_XPHM/merged_dingo_samples_gps-1126259462.4_.pkl
-    parameters: null # [mass_1, mass_2]
+    parameter_samples: <path/to/dingo-samples>
+    parameters: null # need all parameters for likelihood
   # nde architecture
   model:
     type: nsf
