@@ -3,7 +3,7 @@ event_dataset: <path/to/event_dataset>
 
 # to turn off time marginalization, simply
 time_marginalization: 
-  N_FFT: 5
+  n_fft: 5
 
 n_slice_plots: 10
 

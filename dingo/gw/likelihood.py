@@ -99,16 +99,16 @@ class StationaryGaussianGWLikelihood:
         if time_marginalization_kwargs is not None:
             self.initialize_time_marginalization(**time_marginalization_kwargs)
 
-    def initialize_time_marginalization(self, t_lower, t_upper, N_FFT=1):
+    def initialize_time_marginalization(self, t_lower, t_upper, n_fft=1):
         """
         Initialize time marginalization. Time marginalization can be performed via FFT,
         which is super fast. However, this limits the time resolution to delta_t =
         1/self.data_domain.f_max. In order to allow for a finer time resolution we
-        compute the time marginalized likelihood N_FFT via FFT on a grid of N_FFT
-        different time shifts [0, delta_t, 2*delta_t, ..., (N_FFT-1)*delta_t] and
+        compute the time marginalized likelihood n_fft via FFT on a grid of n_fft
+        different time shifts [0, delta_t, 2*delta_t, ..., (n_fft-1)*delta_t] and
         average over the time shifts. The effective time resolution is thus
 
-            delta_t_eff = delta_t / N_FFT = 1 / (f_max * N_FFT).
+            delta_t_eff = delta_t / n_fft = 1 / (f_max * n_fft).
 
         Note: Time marginalization in only implemented for uniform time priors.
 
@@ -118,14 +118,14 @@ class StationaryGaussianGWLikelihood:
             Lower time bound of the uniform time prior.
         t_upper: float
             Upper time bound of the uniform time prior.
-        N_FFT: int = 1
+        n_fft: int = 1
             Size of grid for FFT for time marginalization.
         """
         self.time_marginalization = True
-        self.N_FFT = N_FFT
+        self.n_fft = n_fft
         delta_t = 1.0 / self.data_domain.f_max  # time resolution of FFT
         # time shifts for different FFTs
-        self.t_FFT = np.arange(self.N_FFT) * delta_t / self.N_FFT
+        self.t_FFT = np.arange(self.n_fft) * delta_t / self.n_fft
 
         self.shifted_strains = {}
         for idx, dt in enumerate(self.t_FFT):
@@ -277,21 +277,21 @@ class StationaryGaussianGWLikelihood:
         rho2opt = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
 
         # kappa2 is time dependent. We use FFT to compute it for the discretized times
-        # k * (delta_t/N_FFT) and then sum over the time bins. The kappa2 contribution
+        # k * (delta_t/n_fft) and then sum over the time bins. The kappa2 contribution
         # is then given by
         #
         #       log sum_k exp(kappa2_k + log_prior_k),
         #
         # see Eq. (52) in https://arxiv.org/pdf/1809.02293.pdf. Here, kappa2_k is the
         # value of kappa2 and log_prior_k is the log_prior density at time
-        # k * (delta_t/N_FFT). The sum over k is the discretized integration of t.
-        # Note: the time is discretized in two ways; for each FFT j (N_FFT in total),
+        # k * (delta_t/n_fft). The sum over k is the discretized integration of t.
+        # Note: the time is discretized in two ways; for each FFT j (n_fft in total),
         # there are len(data_domain) time samples i, such that
         #
-        #       t_ij = i * delta_t + j * (delta_t/N_FFT).
+        #       t_ij = i * delta_t + j * (delta_t/n_fft).
         #
         # Summing over the time bins corresponds to a sum across both axes i and j.
-        kappa2_ij = np.zeros((len(self.data_domain), self.N_FFT))
+        kappa2_ij = np.zeros((len(self.data_domain), self.n_fft))
         for j, dt in enumerate(self.t_FFT):
             # Get precomputed whitened strain, that is shifted by -dt.
             d = self.shifted_strains[dt]
