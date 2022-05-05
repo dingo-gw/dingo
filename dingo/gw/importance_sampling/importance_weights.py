@@ -82,8 +82,8 @@ def get_samples_and_log_probs_from_proposal(nde, num_samples):
     # parameters theta. Since the prior is not standardized (it is a density in the
     # original parameter space), we simply undo the standardization of the nde to
     # restore compatibility with the prior. The contribution to the log_prob is thus
-    # given by log(prod_i(std_i)) = sum_i log(std_i).
-    log_probs_proposal += np.sum(np.log(std))
+    # given by log(prod_i(1/std_i)) = - sum_i log(std_i).
+    log_probs_proposal -= np.sum(np.log(std))
 
     # convert to pd.DataFrame
     columns = nde.metadata["train_settings"]["data"]["standardization"]["mean"].keys()
@@ -124,8 +124,8 @@ def get_log_probs_from_proposal(nde, theta):
     # parameters theta. Since the prior is not standardized (it is a density in the
     # original parameter space), we simply undo the standardization of the nde to
     # restore compatibility with the prior. The contribution to the log_prob is thus
-    # given by log(prod_i(std_i)) = sum_i log(std_i).
-    log_probs_proposal += np.sum(np.log(std))
+    # given by log(prod_i(1/std_i)) = - sum_i log(std_i).
+    log_probs_proposal -= np.sum(np.log(std))
 
     return log_probs_proposal
 
