@@ -41,11 +41,13 @@ class StationaryGaussianGWLikelihood(GWSignal):
         time_marginalization_kwargs: dict
             Time marginalization parameters. If None, no time marginalization is used.
         """
-        super().__init__(wfg_kwargs=wfg_kwargs,
-                         wfg_domain=wfg_domain,
-                         data_domain=data_domain,
-                         ifo_list=list(event_data["waveform"].keys()),
-                         t_ref=t_ref)
+        super().__init__(
+            wfg_kwargs=wfg_kwargs,
+            wfg_domain=wfg_domain,
+            data_domain=data_domain,
+            ifo_list=list(event_data["waveform"].keys()),
+            t_ref=t_ref,
+        )
 
         self.asd = event_data["asds"]
 

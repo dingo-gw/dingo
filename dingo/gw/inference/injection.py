@@ -20,7 +20,36 @@ from dingo.gw.waveform_generator import WaveformGenerator
 
 
 class GWSignal(object):
-    def __init__(self, wfg_kwargs, wfg_domain, data_domain, ifo_list, t_ref):
+    """
+    Base class for generating gravitational wave signals in interferometers. Generates
+    waveform polarizations based on provided parameters, and then projects to detectors.
+
+    Includes option for whitening the signal based on a provided ASD.
+    """
+
+    def __init__(
+        self,
+        wfg_kwargs: dict,
+        wfg_domain: FrequencyDomain,
+        data_domain: FrequencyDomain,
+        ifo_list: list,
+        t_ref: float,
+    ):
+        """
+        Parameters
+        ----------
+        wfg_kwargs : dict
+            Waveform generator parameters [approximant, f_ref, and (optionally) f_start].
+        wfg_domain : FrequencyDomain
+            Domain used for waveform generation. This can potentially deviate from the
+            final domain, having a wider frequency range needed for waveform generation.
+        data_domain : FrequencyDomain
+            Domain object for final signal.
+        ifo_list : list
+            Names of interferometers for projection.
+        t_ref : float
+            Reference time that specifies ifo locations.
+        """
 
         self._check_domains(wfg_domain, data_domain)
         self.data_domain = data_domain
@@ -41,12 +70,6 @@ class GWSignal(object):
 
     @staticmethod
     def _check_domains(domain_in, domain_out):
-        if not isinstance(domain_in, FrequencyDomain) or not isinstance(
-            domain_out, FrequencyDomain
-        ):
-            raise NotImplementedError(
-                "Signal generation only implemented for " "FrequencyDomain."
-            )
         if domain_in.f_min > domain_out.f_min or domain_in.f_max < domain_out.f_max:
             raise ValueError(
                 "Output domain is not contained within WaveformGenerator " "domain."
@@ -56,6 +79,9 @@ class GWSignal(object):
 
     @property
     def whiten(self):
+        """
+        Bool specifying whether to whiten (and scale) generated signals.
+        """
         return self._whiten
 
     @whiten.setter
@@ -74,22 +100,26 @@ class GWSignal(object):
 
     def signal(self, theta):
         """
-        Compute the GW signal for a given set of parameters theta.
+        Compute the GW signal for parameters theta.
 
-        Step 1: generate polarizations h_plus and h_cross
-        Step 2: project h_plus and h_cross onto detectors,
-                whiten the signal, scale to account for window factor
+        Step 1: Generate polarizations
+        Step 2: Project polarizations onto detectors; optionally (depending on
+        self.whiten) whiten and scale.
 
         Parameters
         ----------
         theta: dict
-            BBH parameters. Includes intrinsic parameters to be passed to waveform
+            Signal parameters. Includes intrinsic parameters to be passed to waveform
             generator, and extrinsic parameters for detector projection.
 
         Returns
         -------
-        gw_strain: dict
-            GW signal for each detector.
+        dict
+            keys:
+                waveform: GW strain signal for each detector.
+                extrinsic_parameters: {}
+                parameters: waveform parameters
+                asd (if set): amplitude spectral density for each detector
         """
         theta_intrinsic, theta_extrinsic = split_off_extrinsic_parameters(theta)
         theta_intrinsic = {k: float(v) for k, v in theta_intrinsic.items()}
@@ -119,6 +149,12 @@ class GWSignal(object):
 
     @property
     def asd(self):
+        """
+        Amplitude spectral density.
+
+        Either a single array, a dict (for individual interferometers),
+        or an ASDDataset, from which random ASDs are drawn.
+        """
         if isinstance(self._asd, np.ndarray):
             asd = {ifo.name: self._asd for ifo in self.ifo_list}
         elif isinstance(self._asd, dict):
@@ -127,7 +163,9 @@ class GWSignal(object):
             asd = self._asd.sample_random_asds()
         else:
             raise TypeError("Invalid ASD type.")
-        asd = {k: self.data_domain.update_data(v, low_value=1e-20) for k, v in asd.items()}
+        asd = {
+            k: self.data_domain.update_data(v, low_value=1e-20) for k, v in asd.items()
+        }
         return asd
 
     @asd.setter
@@ -147,14 +185,33 @@ class GWSignal(object):
 
 
 class Injection(GWSignal):
+    """
+    Produces injections of signals (with random or specified parameters) into stationary
+    Gaussian noise. Output is not whitened.
+    """
 
     def __init__(self, prior, **gwsignal_kwargs):
+        """
+        Parameters
+        ----------
+        prior : PriorDict
+            Prior used for sampling random parameters.
+        gwsignal_kwargs
+            Arguments to be passed to GWSignal base class.
+        """
         super().__init__(**gwsignal_kwargs)
         self.prior = prior
 
     @classmethod
     def from_posterior_model(cls, pm):
+        """
+        Instantiate an Injection based on a posterior model. The prior, waveform
+        settings, etc., will all be consistent with what the model was trained with.
 
+        Parameters
+        ----------
+        pm : PosteriorModel
+        """
         metadata = pm.metadata
         intrinsic_prior = metadata["dataset_settings"]["intrinsic_prior"]
         extrinsic_prior = get_extrinsic_prior_dict(
@@ -172,8 +229,37 @@ class Injection(GWSignal):
         )
 
     def injection(self, theta):
+        """
+        Generate an injection based on specified parameters.
+
+        This is a signal + noise  consistent with the amplitude spectral density in
+        self.asd. If self.asd is an ASDDataset, then it uses a random ASD from this
+        dataset.
+
+        Data are not whitened.
+
+        Parameters
+        ----------
+        theta : dict
+            Parameters used for injection.
+
+        Returns
+        -------
+        dict
+            keys:
+                waveform: data (signal + noise) in each detector
+                extrinsic_parameters: {}
+                parameters: waveform parameters
+                asd (if set): amplitude spectral density for each detector
+        """
         signal = self.signal(theta)
         asd = self.asd
+
+        if asd is None:
+            raise ValueError("self.asd must be set in order to produce injections.")
+        if self.whiten:
+            print("self.whiten was set to True. Resetting to False.")
+            self.whiten = False
 
         data = {}
         for ifo, s in signal["waveform"].items():
@@ -189,5 +275,23 @@ class Injection(GWSignal):
         return signal
 
     def random_injection(self):
+        """
+        Generate an random injection.
+
+        This is a signal + noise  consistent with the amplitude spectral density in
+        self.asd. If self.asd is an ASDDataset, then it uses a random ASD from this
+        dataset.
+
+        Data are not whitened.
+
+        Returns
+        -------
+        dict
+            keys:
+                waveform: data (signal + noise) in each detector
+                extrinsic_parameters: {}
+                parameters: waveform parameters
+                asd (if set): amplitude spectral density for each detector
+        """
         theta = self.prior.sample()
         return self.injection(theta)
