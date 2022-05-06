@@ -20,10 +20,10 @@ from dingo.gw.waveform_generator import WaveformGenerator
 
 
 class GWSignal(object):
-    def __init__(self, wfg_kwargs, wfg_domain, out_domain, ifo_list, t_ref):
+    def __init__(self, wfg_kwargs, wfg_domain, data_domain, ifo_list, t_ref):
 
-        self._check_domains(wfg_domain, out_domain)
-        self.out_domain = out_domain
+        self._check_domains(wfg_domain, data_domain)
+        self.data_domain = data_domain
 
         # The waveform generator potentially has a larger frequency range than the
         # domain of the trained network / requested injection / etc. This is typically
@@ -66,10 +66,10 @@ class GWSignal(object):
     def _initialize_transform(self):
         transforms = [
             GetDetectorTimes(self.ifo_list, self.t_ref),
-            ProjectOntoDetectors(self.ifo_list, self.out_domain, self.t_ref),
+            ProjectOntoDetectors(self.ifo_list, self.data_domain, self.t_ref),
         ]
         if self.whiten:
-            transforms.append(WhitenAndScaleStrain(self.out_domain.noise_std))
+            transforms.append(WhitenAndScaleStrain(self.data_domain.noise_std))
         self.projection_transforms = Compose(transforms)
 
     def signal(self, theta):
@@ -97,7 +97,7 @@ class GWSignal(object):
         # Step 1: generate polarizations h_plus and h_cross
         polarizations = self.waveform_generator.generate_hplus_hcross(theta_intrinsic)
         polarizations = {  # truncation, in case wfg has a larger frequency range
-            k: self.out_domain.update_data(v) for k, v in polarizations.items()
+            k: self.data_domain.update_data(v) for k, v in polarizations.items()
         }
 
         # Step 2: project h_plus and h_cross onto detectors
@@ -127,7 +127,7 @@ class GWSignal(object):
             asd = self._asd.sample_random_asds()
         else:
             raise TypeError("Invalid ASD type.")
-        asd = {k: self.out_domain.update_data(v, low_value=1e-20) for k, v in asd.items()}
+        asd = {k: self.data_domain.update_data(v, low_value=1e-20) for k, v in asd.items()}
         return asd
 
     @asd.setter
@@ -166,7 +166,7 @@ class Injection(GWSignal):
             prior=prior,
             wfg_kwargs=pm.metadata["dataset_settings"]["waveform_generator"],
             wfg_domain=build_domain(pm.metadata["dataset_settings"]["domain"]),
-            out_domain=build_domain_from_model_metadata(pm.metadata),
+            data_domain=build_domain_from_model_metadata(pm.metadata),
             ifo_list=pm.metadata["train_settings"]["data"]["detectors"],
             t_ref=pm.metadata["train_settings"]["data"]["ref_time"],
         )
@@ -180,10 +180,10 @@ class Injection(GWSignal):
             noise = (
                 (np.random.randn(len(s)) + 1j * np.random.randn(len(s)))
                 * asd[ifo]
-                * self.out_domain.noise_std
+                * self.data_domain.noise_std
             )
             d = s + noise
-            data[ifo] = self.out_domain.update_data(d, low_value=0.0)
+            data[ifo] = self.data_domain.update_data(d, low_value=0.0)
 
         signal["waveform"] = data
         return signal

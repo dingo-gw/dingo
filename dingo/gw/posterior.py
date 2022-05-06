@@ -139,7 +139,6 @@ def main():
     likelihood = build_stationary_gaussian_likelihood(
         metadata,
         args.event_dataset,
-        {"f_start": args.f_start, "f_end": args.f_end},
     )
     # prior
     intrinsic_prior = metadata["model"]["dataset_settings"]["intrinsic_prior"]

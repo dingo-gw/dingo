@@ -401,7 +401,6 @@ def main():
         # this should be set automatically from the samples
         metadata,
         settings.get("event_dataset", None),
-        settings.get("wfg_frequency_range", None),
     )
     # build prior
     intrinsic_prior = metadata["model"]["dataset_settings"]["intrinsic_prior"]
