@@ -138,11 +138,15 @@ def analyze_event():
         ref = None
 
     if args.model_init is not None:
-        init_model = PosteriorModel(args.model_init, device=device,
-                                    load_training_info=False)
+        init_model = PosteriorModel(
+            args.model_init, device=device, load_training_info=False
+        )
         init_sampler = GWSamplerNPE(model=init_model)
-        sampler = GWSamplerGNPE(model=model, init_sampler=init_sampler,
-                                num_iterations=args.num_gnpe_iterations)
+        sampler = GWSamplerGNPE(
+            model=model,
+            init_sampler=init_sampler,
+            num_iterations=args.num_gnpe_iterations,
+        )
     else:
         sampler = GWSamplerNPE(model=model)
 
@@ -152,26 +156,32 @@ def analyze_event():
 
         # get raw event data, and prepare it for the network domain
         event_data, _ = get_event_data_and_domain(
-            model.metadata, time_event, args.time_psd, args.time_buffer,
-            args.event_dataset
+            model.metadata,
+            time_event,
+            args.time_psd,
+            args.time_buffer,
+            args.event_dataset,
         )
 
-        samples = sampler.run_sampler(args.num_samples, event_data, t_event=time_event)
-        metadata = {
-            "model": model.metadata,
-            "event": {
-                "time_event": time_event,
-                "time_psd": args.time_psd,
-                "time_buffer": args.time_buffer,
-            },
+        event_metadata = {
+            "time_event": time_event,
+            "time_psd": args.time_psd,
+            "time_buffer": args.time_buffer,
         }
-        samples.attrs = metadata
+        samples = sampler.run_sampler(
+            args.num_samples,
+            event_data,
+            event_metadata=event_metadata,
+            as_type="pandas",
+        )
 
         # if no reference samples are available, simply save the dingo samples
         if ref is None or time_event not in ref:
             samples.to_pickle(
-                join(args.out_directory,
-                     f"dingo_samples_gps-{time_event}{args.suffix}.pkl")
+                join(
+                    args.out_directory,
+                    f"dingo_samples_gps-{time_event}{args.suffix}.pkl",
+                )
             )
 
         # if reference samples are available, save dingo samples and additionally
@@ -190,8 +200,9 @@ def analyze_event():
             generate_cornerplot(
                 {"name": ref_method, "samples": ref_samples, "color": "blue"},
                 {"name": "dingo", "samples": samples, "color": "orange"},
-                filename=join(args.out_directory,
-                              f"cornerplot_{name_event}{args.suffix}.pdf"),
+                filename=join(
+                    args.out_directory, f"cornerplot_{name_event}{args.suffix}.pdf"
+                ),
             )
 
 
@@ -253,7 +264,10 @@ def analyze_event_functional():
         # if no reference samples are available, simply save the dingo samples
         if ref is None or time_event not in ref:
             samples.to_pickle(
-                join(args.out_directory, f"dingo_samples_gps-{time_event}{args.suffix}.pkl")
+                join(
+                    args.out_directory,
+                    f"dingo_samples_gps-{time_event}{args.suffix}.pkl",
+                )
             )
 
         # if reference samples are available, save dingo samples and additionally
@@ -272,9 +286,10 @@ def analyze_event_functional():
             generate_cornerplot(
                 {"name": ref_method, "samples": ref_samples, "color": "blue"},
                 {"name": "dingo", "samples": samples, "color": "orange"},
-                filename=join(args.out_directory, f"cornerplot_{name_event}{args.suffix}.pdf"),
+                filename=join(
+                    args.out_directory, f"cornerplot_{name_event}{args.suffix}.pdf"
+                ),
             )
-
 
 
 if __name__ == "__main__":

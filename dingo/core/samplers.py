@@ -1,3 +1,7 @@
+import copy
+import math
+from typing import Union, Optional
+
 import numpy as np
 import pandas as pd
 from astropy.time import Time
@@ -6,6 +10,7 @@ from bilby.core.result import Result
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 
+from dingo.core.models import PosteriorModel
 from dingo.core.transforms import GetItem, RenameKey
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_window_factor, get_extrinsic_prior_dict
@@ -26,7 +31,18 @@ from dingo.gw.transforms import (
 
 
 class ConditionalSampler(object):
-    def __init__(self, model):
+    """
+    Conditional sampler class that wraps a PosteriorModel.
+
+    Draws samples from the model based on context data, and outputs in various formats.
+    """
+
+    def __init__(self, model: PosteriorModel):
+        """
+        Parameters
+        ----------
+        model : PosteriorModel
+        """
         self.model = model
         self.transforms_pre = Compose([])
         self.transforms_post = Compose([])
@@ -36,46 +52,86 @@ class ConditionalSampler(object):
         self._build_prior()
         self._reset_sampler()
 
-    def _run_sampler(self, n, context, batch_size=None):
-
+    def _run_sampler(self, n: int, context: dict) -> dict:
         x = context.copy()
         x["parameters"] = {}
         x["extrinsic_parameters"] = {}
 
+        # transforms_pre are expected to transform the data in the same way for each
+        # requested sample. We therefore expand it across the batch *after*
+        # pre-processing.
         x = self.transforms_pre(context)
         x = x.expand(n, *x.shape)
-        y = self.model.sample(x, batch_size=batch_size)
+        y = self.model.sample(x)
         samples = self.transforms_post({"parameters": y})["parameters"]
 
         return samples
 
     def run_sampler(
-        self, n, context, label=None, as_type='result', **post_correction_kwargs
+        self,
+        n: int,
+        context: dict,
+        batch_size: Optional[int] = None,
+        label: Optional[str] = None,
+        event_metadata: Optional[dict] = None,
+        as_type: str = "result",
     ):
+        """
+        Generates samples and returns them in requested format. Samples (and metadata)
+        are also saved within the ConditionalSampler instance.
+
+        Allows for batched sampling, e.g., if limited by GPU memory.
+
+        Actual sampling is performed by self._run_sampler().
+
+        Parameters
+        ----------
+        n : int
+            Number of samples requested.
+        context : dict
+            Data on which to condition the sampler.
+            For injections, there should be a 'parameters' key with truth values.
+        batch_size : int
+            (Optional) Batch size for sampler.
+        label : str
+            (Optional) Label which is forwarded to the Results instance.
+        event_metadata : dict
+            (Optional) Metadata for data analyzed. Stored along with sample metadata,
+            and can in principle influence any post-sampling parameter transformations
+            (e.g., sky position correction).
+        as_type : str
+            Format of output ('results', 'pandas', or 'dict').
+
+        Returns
+        -------
+        Samples in format specified by as_type.
+        """
+        # TODO: Implement batching
         self._reset_sampler()
         self.injection_parameters = context.pop("parameters", None)
         self.label = label
+        self._store_metadata(event_metadata=event_metadata)
 
         samples = self._run_sampler(n, context)
-        self._post_correct(samples, **post_correction_kwargs)
+        self._post_correct(samples)
         samples = {k: v.cpu() for k, v in samples.items()}
 
-        self._store_metadata()
         self._generate_result(samples)
 
-        if as_type == 'result':
+        if as_type == "result":
             return self.result
-        elif as_type == 'pandas':
+        elif as_type == "pandas":
             samples = pd.DataFrame(samples)
             samples.attrs = self.metadata
             return samples
-        elif as_type == 'dict':
+        elif as_type == "dict":
             return samples
 
     def _post_correct(self, samples, **kwargs):
         pass
 
     def _build_prior(self):
+        """Build the prior based on model metadata."""
         intrinsic_prior = self.model.metadata["dataset_settings"]["intrinsic_prior"]
         extrinsic_prior = get_extrinsic_prior_dict(
             self.model.metadata["train_settings"]["data"]["extrinsic_prior"]
@@ -110,15 +166,19 @@ class ConditionalSampler(object):
         self.result.samples = samples
 
         # TODO: decide whether to run this, and whether to use it to generate
-        #  additional parameters.
+        #  additional parameters. This may depend on how pesummary processes the
+        #  Results file.
         # self.result.samples_to_posterior()
 
-    def _store_metadata(self):
+    def _store_metadata(self, event_metadata: Optional[dict] = None):
         self.metadata = dict(
-            model_metadata=self.model.metadata,
+            model=self.model.metadata,
+            event=event_metadata,
         )
 
     def _reset_sampler(self):
+        """Clear out all data produced by self.run_sampler(), to prepare for the next
+        sampler run."""
         self.result = None
         self.samples = None
         self.injection_parameters = None
@@ -126,23 +186,36 @@ class ConditionalSampler(object):
 
 
 class GNPESampler(ConditionalSampler):
-    def __init__(self, model, init_sampler: ConditionalSampler, num_iterations: int):
+    """
+    Base class for GNPE sampler. It wraps a PosteriorModel, and must contain also an NPE
+    sampler, which is used to generate initial samples.
+    """
+
+    def __init__(
+        self,
+        model: PosteriorModel,
+        init_sampler: ConditionalSampler,
+        num_iterations: int,
+    ):
+        """
+        Parameters
+        ----------
+        model : PosteriorModel
+        init_sampler : ConditionalSampler
+            Used for generating initial samples
+        num_iterations : int
+            Number of GNPE iterations to be performed by sampler.
+        """
         super().__init__(model)
         self.init_sampler = init_sampler
         self.num_iterations = num_iterations
         self.gnpe_parameters = None
 
-    def _run_sampler(self, n, context, batch_size=None):
-        # TODO: Add batching + ability to sample several events simulataneously
-        if batch_size is None:
-            batch_size = n
-
+    def _run_sampler(self, n: int, context: dict):
         data_ = self.init_sampler.transforms_pre(context)
 
         x = {
-            "extrinsic_parameters": self.init_sampler._run_sampler(
-                n, context, batch_size=batch_size
-            ),
+            "extrinsic_parameters": self.init_sampler._run_sampler(n, context),
             "parameters": {},
         }
         for i in range(self.num_iterations):
@@ -161,25 +234,40 @@ class GNPESampler(ConditionalSampler):
 
         return samples
 
-    def _store_metadata(self):
-        super()._store_metadata()
-        self.init_sampler._store_metadata()
-        self.metadata["init_model_metadata"] = self.init_sampler.metadata
+    def _store_metadata(self, **kwargs):
+        super()._store_metadata(**kwargs)
+        self.metadata["init_model"] = self.init_sampler.model.metadata
 
         # TODO: Could also go in sampler_kwargs, which we don't use now.
         self.metadata["num_iterations"] = self.num_iterations
 
 
 class GWSamplerMixin(object):
+    """
+    Mixin class designed to add gravitational wave functionality to Sampler classes:
+        * domain information
+        * correction for fixed detector locations during training (t_ref)
+    """
+
     def __init__(self, **kwargs):
+        """
+        Parameters
+        ----------
+        kwargs
+            Keyword arguments that are forwarded to the superclass.
+        """
         super().__init__(**kwargs)
-        self.build_domain()
+        self._build_domain()
         self.inference_parameters = self.model.metadata["train_settings"]["data"][
             "inference_parameters"
         ]
         self.t_ref = self.model.metadata["train_settings"]["data"]["ref_time"]
 
-    def build_domain(self):
+    def _build_domain(self):
+        """
+        Constructs the domain object based on model metadata. Includes the window
+        factor needed for whitening data.
+        """
         self.domain = build_domain(self.model.metadata["dataset_settings"]["domain"])
 
         data_settings = self.model.metadata["train_settings"]["data"]
@@ -188,8 +276,23 @@ class GWSamplerMixin(object):
 
         self.domain.window_factor = get_window_factor(data_settings["window"])
 
-    def _post_correct(self, samples, t_event=None):
-        self.time_event = t_event
+    def _post_correct(self, samples: dict):
+        """
+        Correct the sky position of an event based on the reference time of the model.
+        This is necessary since the model was trained with with fixed detector (reference)
+        positions. This transforms the right ascension based on the e difference between
+        the time of the event and t_ref.
+
+        The correction is only applied if the event time can be found in self.metadata[
+        'event'].
+
+        This method modifies the samples dict in place.
+
+        Parameters
+        ----------
+        samples : dict
+        """
+        t_event = self.metadata["event"].get("time_event")
         if t_event is not None:
             ra = samples["ra"]
             time_reference = Time(self.t_ref, format="gps", scale="utc")
@@ -200,17 +303,20 @@ class GWSamplerMixin(object):
             ra_correction = delta_longitude.rad
             samples["ra"] = (ra + ra_correction) % (2 * np.pi)
 
-    def _store_metadate(self):
-        super()._store_metadata()
-        self.metadata["event"] = {
-            "time_event": self.time_event,
-            # "time_psd": args.time_psd,
-            # "time_buffer": args.time_buffer,
-        }
+    def _store_metadate(self, **kwargs):
+        super()._store_metadata(**kwargs)
         # TODO: Store strain data? ASD?
 
 
 class GWSamplerNPE(GWSamplerMixin, ConditionalSampler):
+    """
+    Sampler for gravitational-wave inference using neural posterior estimation. Wraps a
+    PosteriorModel instance.
+
+    This is intended for use either as a standalone sampler, or as a sampler producing
+    initial sample points for a GNPE sampler.
+    """
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._initialize_transforms()
@@ -224,7 +330,6 @@ class GWSamplerNPE(GWSamplerMixin, ConditionalSampler):
         #   data)
         #   * repackage strains and asds from dicts to an array
         #   * convert array to torch tensor on the correct device
-        #   * expand strain num_sample times
         #   * extract only strain/waveform from the sample
         self.transforms_pre = Compose(
             [
@@ -249,6 +354,14 @@ class GWSamplerNPE(GWSamplerMixin, ConditionalSampler):
 
 
 class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
+    """
+    Sampler for graviational-wave inference using group-equivariant neural posterior
+    estimation. Wraps a PosteriorModel instance.
+
+    This sampler also contains an NPE sampler, which is used to generate initial
+    samples for the GNPE loop.
+    """
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._initialize_transforms()
@@ -308,6 +421,11 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
 
         self.transforms_pre = Compose(transforms_pre)
 
+        # transforms for gnpe loop, to be applied after sampling step:
+        #   * de-standardization of parameters
+        #   * post correction for geocent time (required for gnpe with exact equivariance)
+        #   * computation of detectortimes from parameters (required for next gnpe
+        #       iteration)
         self.transforms_post = Compose(
             [
                 SelectStandardizeRepackageParameters(
