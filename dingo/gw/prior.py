@@ -170,3 +170,34 @@ def build_prior_with_defaults(prior_settings: Dict[str, str]):
             full_prior_settings[k] = default_intrinsic_dict[k]
 
     return BBHPriorDict(full_prior_settings)
+
+
+def split_off_extrinsic_parameters(theta):
+    """
+    Split theta into intrinsic and extrinsic parameters.
+
+    Parameters
+    ----------
+    theta: dict
+        BBH parameters. Includes intrinsic parameters to be passed to waveform
+        generator, and extrinsic parameters for detector projection.
+
+    Returns
+    -------
+    theta_intrinsic: dict
+        BBH intrinsic parameters.
+    theta_extrinsic: dict
+        BBH extrinsic parameters.
+    """
+    extrinsic_parameters = ["geocent_time", "luminosity_distance", "ra", "dec", "psi"]
+    theta_intrinsic = {}
+    theta_extrinsic = {}
+    for k, v in theta.items():
+        if k in extrinsic_parameters:
+            theta_extrinsic[k] = v
+        else:
+            theta_intrinsic[k] = v
+    # set fiducial values for time and distance
+    theta_intrinsic["geocent_time"] = 0
+    theta_intrinsic["luminosity_distance"] = 100
+    return theta_intrinsic, theta_extrinsic

@@ -6,7 +6,7 @@ import yaml
 import pandas as pd
 
 from dingo.core.models import PosteriorModel
-from dingo.core.samplers import GWSamplerNPE, GWSamplerGNPE
+from dingo.gw.inference.gw_samplers import GWSamplerNPE, GWSamplerGNPE
 from dingo.gw.inference.data_preparation import get_event_data_and_domain
 from dingo.gw.inference.sampling_functions import sample_posterior_of_event
 from dingo.gw.inference.visualization import load_ref_samples, generate_cornerplot
