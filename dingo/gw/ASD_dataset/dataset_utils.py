@@ -111,9 +111,7 @@ def get_path_raw_data(data_dir, run, detector, T_PSD=1024, T_gap=0):
     return join(data_dir, "tmp", run, detector, str(T_PSD) + "_" + str(T_gap))
 
 
-def download_and_estimate_PSDs(
-    data_dir: str, run: str, detector: str, settings: dict, verbose=False
-):
+def download_and_estimate_PSDs(data_dir: str, settings: dict, verbose=False):
     """
     Download segment lists from the official GWOSC website that have the BURST_CAT_2 quality label. A .npy file
     is created for every PSD that will be in the final dataset. These are stored in data_dir/tmp and may be removed
@@ -123,10 +121,6 @@ def download_and_estimate_PSDs(
     ----------
     data_dir : str
         Path to the directory where the PSD dataset will be stored
-    run : str
-        Observing run that is used for the PSD dataset generation
-    detector : str
-        Detector that is used for the PSD dataset generation
     settings : dict
         Dictionary of settings that are used for the dataset generation
     verbose : bool
@@ -135,78 +129,79 @@ def download_and_estimate_PSDs(
     -------
 
     """ ""
+    run = settings["observing_run"]
+    for detector in settings["detectors"]:
+        key = run + "_" + detector
+        urls = URL_DIRECTORY[key]
 
-    key = run + "_" + detector
-    urls = URL_DIRECTORY[key]
-
-    starts, stops, durations = [], [], []
-    for url in urls:
-        r = requests.get(url, allow_redirects=True)
-        c = StringIO(r.content.decode("utf-8"))
-        starts_seg, stops_seg, durations_seg = np.loadtxt(c, dtype="int", unpack=True)
-        starts = np.hstack([starts, starts_seg])
-        stops = np.hstack([stops, stops_seg])
-        durations = np.hstack([durations, durations_seg])
-
-    T_PSD = settings["T_PSD"]
-    T_gap = settings["T_gap"]
-    T = settings["T"]
-    f_s = settings["f_s"]
-
-    window_kwargs = {
-        "f_s": f_s,
-        "roll_off": settings["window"]["roll_off"],
-        "type": settings["window"]["type"],
-        "T": T,
-    }
-    w = get_window(window_kwargs)
-
-    path_raw_psds = get_path_raw_data(data_dir, run, detector, T_PSD, T_gap)
-    os.makedirs(path_raw_psds, exist_ok=True)
-
-    valid_segments = get_valid_segments(
-        list(zip(starts, stops, durations)), T_PSD=T_PSD, T_gap=T_gap
-    )
-
-    num_psds_max = settings["num_psds_max"]
-    if num_psds_max >= 1:
-        valid_segments = random.sample(valid_segments, num_psds_max)
-
-    print(
-        f"Fetching data and computing Welch's estimate of {len(valid_segments)} valid segments:\n"
-    )
-
-    for index, (start, end) in enumerate(tqdm(valid_segments, disable=not verbose)):
-        filename = join(path_raw_psds, "psd_{:05d}.npy".format(index))
-
-        if not os.path.exists(filename):
-            psd = download_psd(
-                det=detector,
-                time_start=start,
-                time_segment=T,
-                window=w,
-                f_s=f_s,
-                num_segments=int(T_PSD / T),
+        starts, stops, durations = [], [], []
+        for url in urls:
+            r = requests.get(url, allow_redirects=True)
+            c = StringIO(r.content.decode("utf-8"))
+            starts_seg, stops_seg, durations_seg = np.loadtxt(
+                c, dtype="int", unpack=True
             )
-            np.save(
-                filename,
-                {
-                    "detector": detector,
-                    "segment": (index, start, end),
-                    "time": (start, end),
-                    "psd": psd,
-                    "tukey window": {
-                        "f_s": f_s,
-                        "roll_off": settings["window"]["roll_off"],
-                        "T": T,
+            starts = np.hstack([starts, starts_seg])
+            stops = np.hstack([stops, stops_seg])
+            durations = np.hstack([durations, durations_seg])
+
+        T_PSD = settings["T_PSD"]
+        T_gap = settings["T_gap"]
+        T = settings["T"]
+        f_s = settings["f_s"]
+
+        window_kwargs = {
+            "f_s": f_s,
+            "roll_off": settings["window"]["roll_off"],
+            "type": settings["window"]["type"],
+            "T": T,
+        }
+        w = get_window(window_kwargs)
+
+        path_raw_psds = get_path_raw_data(data_dir, run, detector, T_PSD, T_gap)
+        os.makedirs(path_raw_psds, exist_ok=True)
+
+        valid_segments = get_valid_segments(
+            list(zip(starts, stops, durations)), T_PSD=T_PSD, T_gap=T_gap
+        )
+
+        num_psds_max = settings["num_psds_max"]
+        if num_psds_max >= 1:
+            valid_segments = random.sample(valid_segments, num_psds_max)
+
+        print(
+            f"Fetching data and computing Welch's estimate of {len(valid_segments)} valid segments:\n"
+        )
+
+        for index, (start, end) in enumerate(tqdm(valid_segments, disable=not verbose)):
+            filename = join(path_raw_psds, "psd_{:05d}.npy".format(index))
+
+            if not os.path.exists(filename):
+                psd = download_psd(
+                    det=detector,
+                    time_start=start,
+                    time_segment=T,
+                    window=w,
+                    f_s=f_s,
+                    num_segments=int(T_PSD / T),
+                )
+                np.save(
+                    filename,
+                    {
+                        "detector": detector,
+                        "segment": (index, start, end),
+                        "time": (start, end),
+                        "psd": psd,
+                        "tukey window": {
+                            "f_s": f_s,
+                            "roll_off": settings["window"]["roll_off"],
+                            "T": T,
+                        },
                     },
-                },
-            )
+                )
 
 
-def create_dataset_from_files(
-    data_dir: str, run: str, detectors: List[str], settings: dict
-):
+def create_dataset_from_files(data_dir: str, settings: dict):
 
     """
     Creates a .hdf5 ASD datset file for an observing run using the estimated detector PSDs.
@@ -215,10 +210,6 @@ def create_dataset_from_files(
     ----------
     data_dir : str
         Path to the directory where the PSD dataset will be stored
-    run : str
-        Observing run that is used for the ASD dataset generation
-    detectors : List[str]
-        Detector data that is used for the ASD dataset generation
     settings : dict
         Dictionary of settings that are used for the dataset generation
     -------
@@ -248,9 +239,11 @@ def create_dataset_from_files(
     asds_dict = {}
     gps_times_dict = {}
 
-    for ifo in detectors:
+    for ifo in settings["detectors"]:
 
-        path_raw_psds = get_path_raw_data(data_dir, run, ifo, T_PSD, T_gap)
+        path_raw_psds = get_path_raw_data(
+            data_dir, settings["observing_run"], ifo, T_PSD, T_gap
+        )
         filenames = [el for el in os.listdir(path_raw_psds) if el.endswith(".npy")]
 
         Nf = ind_max - ind_min + 1
@@ -269,4 +262,4 @@ def create_dataset_from_files(
     dataset_dict["gps_times"] = gps_times_dict
 
     dataset = ASDDataset(dictionary=dataset_dict)
-    dataset.to_file(file_name=join(data_dir, f"asds_{run}.hdf5"))
+    dataset.to_file(file_name=join(data_dir, f"asds_{settings['observing_run']}.hdf5"))
