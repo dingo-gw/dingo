@@ -1,9 +1,8 @@
-import copy
-import math
-from typing import Union, Optional
+from typing import Optional
 
 import numpy as np
 import pandas as pd
+import torch
 from astropy.time import Time
 from bilby.core.prior import Prior, Constraint, DeltaFunction
 from bilby.core.result import Result
@@ -52,7 +51,7 @@ class ConditionalSampler(object):
         self._build_prior()
         self._reset_sampler()
 
-    def _run_sampler(self, n: int, context: dict) -> dict:
+    def _run_sampler(self, num_samples: int, context: dict) -> dict:
         x = context.copy()
         x["parameters"] = {}
         x["extrinsic_parameters"] = {}
@@ -61,7 +60,7 @@ class ConditionalSampler(object):
         # requested sample. We therefore expand it across the batch *after*
         # pre-processing.
         x = self.transforms_pre(context)
-        x = x.expand(n, *x.shape)
+        x = x.expand(num_samples, *x.shape)
         y = self.model.sample(x)
         samples = self.transforms_post({"parameters": y})["parameters"]
 
@@ -69,7 +68,7 @@ class ConditionalSampler(object):
 
     def run_sampler(
         self,
-        n: int,
+        num_samples: int,
         context: dict,
         batch_size: Optional[int] = None,
         label: Optional[str] = None,
@@ -86,7 +85,7 @@ class ConditionalSampler(object):
 
         Parameters
         ----------
-        n : int
+        num_samples : int
             Number of samples requested.
         context : dict
             Data on which to condition the sampler.
@@ -106,16 +105,33 @@ class ConditionalSampler(object):
         -------
         Samples in format specified by as_type.
         """
-        # TODO: Implement batching
+        # Reset sampler and store all metadata associated with data.
         self._reset_sampler()
         self.injection_parameters = context.pop("parameters", None)
         self.label = label
         self._store_metadata(event_metadata=event_metadata)
 
-        samples = self._run_sampler(n, context)
-        self._post_correct(samples)
-        samples = {k: v.cpu() for k, v in samples.items()}
+        # Carry out batched sampling by calling _run_sample() on each batch and
+        # consolidating the results.
+        if batch_size is None:
+            batch_size = num_samples
+        full_batches, remainder = divmod(num_samples, batch_size)
+        batch_sizes = [batch_size] * full_batches
+        if remainder > 0:
+            batch_sizes += [remainder]
+        sample_list = []
+        for i, n in enumerate(batch_sizes):
+            # TODO: Make sure we don't need to copy the context.
+            print(f"Sampling batch {i+1} of {len(batch_sizes)}, size {n}.")
+            sample_list.append(self._run_sampler(n, context))
+        samples = {p: torch.cat([s[p] for s in sample_list]) for p in
+                   sample_list[0].keys()}
 
+        # Apply any post-sampling corrections to sampled parameters, and place on CPU.
+        self._post_correct(samples)
+        samples = {k: v.cpu().numpy() for k, v in samples.items()}
+
+        # Prepare output
         self._generate_result(samples)
 
         if as_type == "result":
@@ -127,7 +143,7 @@ class ConditionalSampler(object):
         elif as_type == "dict":
             return samples
 
-    def _post_correct(self, samples, **kwargs):
+    def _post_correct(self, samples: dict):
         pass
 
     def _build_prior(self):
@@ -148,7 +164,7 @@ class ConditionalSampler(object):
                 # self.likelihood.parameters[key] = self.prior[key].sample()
                 self._fixed_parameter_keys.append(key)
 
-    def _generate_result(self, samples):
+    def _generate_result(self, samples: dict):
         result_kwargs = dict(
             label=self.label,
             # outdir=self.outdir,
@@ -211,11 +227,11 @@ class GNPESampler(ConditionalSampler):
         self.num_iterations = num_iterations
         self.gnpe_parameters = None
 
-    def _run_sampler(self, n: int, context: dict):
+    def _run_sampler(self, num_samples: int, context: dict):
         data_ = self.init_sampler.transforms_pre(context)
 
         x = {
-            "extrinsic_parameters": self.init_sampler._run_sampler(n, context),
+            "extrinsic_parameters": self.init_sampler._run_sampler(num_samples, context),
             "parameters": {},
         }
         for i in range(self.num_iterations):
@@ -224,7 +240,7 @@ class GNPESampler(ConditionalSampler):
                 k: x["extrinsic_parameters"][k] for k in self.gnpe_parameters
             }
             d = data_.clone()
-            x["data"] = d.expand(n, *d.shape)
+            x["data"] = d.expand(num_samples, *d.shape)
 
             x = self.transforms_pre(x)
             x["parameters"] = self.model.sample(x["data"], x["context_parameters"])

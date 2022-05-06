@@ -294,37 +294,6 @@ def inner_product(a, b, min_idx=0, delta_f=None, psd=None):
         return np.sum((a.conj() * b)[min_idx:]).real
 
 
-def split_off_extrinsic_parameters(theta):
-    """
-    Split theta into intrinsic and extrinsic parameters.
-
-    Parameters
-    ----------
-    theta: dict
-        BBH parameters. Includes intrinsic parameters to be passed to waveform
-        generator, and extrinsic parameters for detector projection.
-
-    Returns
-    -------
-    theta_intrinsic: dict
-        BBH intrinsic parameters.
-    theta_extrinsic: dict
-        BBH extrinsic parameters.
-    """
-    extrinsic_parameters = ["geocent_time", "luminosity_distance", "ra", "dec", "psi"]
-    theta_intrinsic = {}
-    theta_extrinsic = {}
-    for k, v in theta.items():
-        if k in extrinsic_parameters:
-            theta_extrinsic[k] = v
-        else:
-            theta_intrinsic[k] = v
-    # set fiducial values for time and distance
-    theta_intrinsic["geocent_time"] = 0
-    theta_intrinsic["luminosity_distance"] = 100
-    return theta_intrinsic, theta_extrinsic
-
-
 def build_stationary_gaussian_likelihood(
     metadata,
     event_dataset=None,
@@ -353,7 +322,7 @@ def build_stationary_gaussian_likelihood(
     # set up likelihood
     likelihood = StationaryGaussianGWLikelihood(
         wfg_kwargs=metadata["model"]["dataset_settings"]["waveform_generator"],
-        wfg_domain=metadata["model"]["dataset_settings"]["domain"],
+        wfg_domain=build_domain(metadata["model"]["dataset_settings"]["domain"]),
         data_domain=data_domain,
         event_data=event_data,
         t_ref=metadata["event"]["time_event"],

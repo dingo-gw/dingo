@@ -171,6 +171,7 @@ def analyze_event():
         samples = sampler.run_sampler(
             args.num_samples,
             event_data,
+            batch_size=args.batch_size,
             event_metadata=event_metadata,
             as_type="pandas",
         )

@@ -112,7 +112,8 @@ def get_log_probs_from_proposal(nde, theta):
     mean, std = nde.metadata["train_settings"]["data"]["standardization"].values()
     mean = np.array([v for v in mean.values()])
     std = np.array([v for v in std.values()])
-    theta = (torch.from_numpy(np.array(theta)).to(nde.device).float() - mean) / std
+    theta = (torch.from_numpy(np.array(theta)).to(nde.device).float() -
+             torch.tensor(mean).to(nde.device)) / torch.tensor(std).to(nde.device)
 
     nde.model.eval()
     with torch.no_grad():
