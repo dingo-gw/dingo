@@ -112,7 +112,7 @@ def get_path_raw_data(data_dir, run, detector, T_PSD=1024, T_gap=0):
 
 
 def download_and_estimate_PSDs(
-        data_dir: str, run: str, detector: str, settings: dict, verbose=False
+    data_dir: str, run: str, detector: str, settings: dict, verbose=False
 ):
     """
     Download segment lists from the official GWOSC website that have the BURST_CAT_2 quality label. A .npy file
@@ -205,7 +205,7 @@ def download_and_estimate_PSDs(
 
 
 def create_dataset_from_files(
-        data_dir: str, run: str, detectors: List[str], settings: dict
+    data_dir: str, run: str, detectors: List[str], settings: dict
 ):
 
     """
@@ -242,7 +242,9 @@ def create_dataset_from_files(
     )
     ind_min, ind_max = domain.min_idx, domain.max_idx
 
-    dataset_dict = {"settings": {"dataset_settings": settings, "domain_dict": domain.domain_dict}}
+    dataset_dict = {
+        "settings": {"dataset_settings": settings, "domain_dict": domain.domain_dict}
+    }
     asds_dict = {}
     gps_times_dict = {}
 

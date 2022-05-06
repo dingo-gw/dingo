@@ -4,7 +4,10 @@ import argparse
 import textwrap
 from typing import List
 
-from dingo.gw.ASD_dataset.dataset_utils import download_and_estimate_PSDs, create_dataset_from_files
+from dingo.gw.ASD_dataset.dataset_utils import (
+    download_and_estimate_PSDs,
+    create_dataset_from_files,
+)
 
 
 def generate_dataset(data_dir, settings, run: str, ifos: List[str], verbose=False):
