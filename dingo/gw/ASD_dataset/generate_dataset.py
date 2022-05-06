@@ -1,19 +1,10 @@
-import os
-
-os.environ["OMP_NUM_THREADS"] = str(1)
-os.environ["MKL_NUM_THREADS"] = str(1)
-
-import numpy as np
 import yaml
 from os.path import join
-import logging
 import argparse
 import textwrap
-from typing import Dict, List
-from functools import partial
-from tqdm import tqdm
+from typing import List
 
-from dataset_utils import download_and_estimate_PSDs, create_dataset_from_files
+from dingo.gw.ASD_dataset.dataset_utils import download_and_estimate_PSDs, create_dataset_from_files
 
 
 def generate_dataset(data_dir, settings, run: str, ifos: List[str], verbose=False):
@@ -41,6 +32,12 @@ def parse_args():
         type=str,
         required=True,
         help="Path where the PSD data is to be stored. Must contain a 'settings.yaml' file.",
+    )
+    parser.add_argument(
+        "--settings",
+        type=str,
+        default=None,
+        help="Optional path to a settings file in case two different datasets are generated in the sam directory",
     )
     parser.add_argument(
         "--observing_run",
@@ -76,8 +73,12 @@ def main():
     args = parse_args()
 
     # Load settings
-    with open(join(args.data_dir, "settings.yaml"), "r") as f:
-        settings = yaml.safe_load(f)
+    if args.settings is not None:
+        with open(args.settings, "r") as f:
+            settings = yaml.safe_load(f)
+    else:
+        with open(join(args.data_dir, "settings.yaml"), "r") as f:
+            settings = yaml.safe_load(f)
 
     generate_dataset(
         args.data_dir,

@@ -6,7 +6,7 @@ from functools import partial
 from tqdm import tqdm
 import random
 from multiprocessing import Pool
-from dataset_utils import *
+from dingo.gw.ASD_dataset.noise_dataset import ASDDataset
 from dingo.gw.domains import build_domain
 import h5py
 import warnings
@@ -108,19 +108,17 @@ def get_path_raw_data(data_dir, run, detector, T_PSD=1024, T_gap=0):
     -------
     the path where the data is stored
     """
-    return os.path.join(
-        data_dir, "tmp", "raw_PSDs", run, detector, str(T_PSD) + "_" + str(T_gap)
-    )
+    return join(data_dir, "tmp", run, detector, str(T_PSD) + "_" + str(T_gap))
 
 
 def download_and_estimate_PSDs(
-    data_dir: str, run: str, detector: str, settings: dict, verbose=False
+        data_dir: str, run: str, detector: str, settings: dict, verbose=False
 ):
     """
     Download segment lists from the official GWOSC website that have the BURST_CAT_2 quality label. A .npy file
     is created for every PSD that will be in the final dataset. These are stored in data_dir/tmp and may be removed
     once the final dataset has been created.
-    
+
     Parameters
     ----------
     data_dir : str
@@ -207,7 +205,7 @@ def download_and_estimate_PSDs(
 
 
 def create_dataset_from_files(
-    data_dir: str, run: str, detectors: List[str], settings: dict
+        data_dir: str, run: str, detectors: List[str], settings: dict
 ):
 
     """
@@ -232,9 +230,19 @@ def create_dataset_from_files(
     T_gap = settings["T_gap"]
     T = settings["T"]
 
-    domain_settings = {}
+    delta_f = 1 / T
+    domain = build_domain(
+        {
+            "type": "FrequencyDomain",
+            "f_min": f_min,
+            "f_max": f_max,
+            "delta_f": delta_f,
+            "window_factor": None,
+        }
+    )
+    ind_min, ind_max = domain.min_idx, domain.max_idx
 
-    save_dict = {}
+    dataset_dict = {"settings": {"dataset_settings": settings, "domain_dict": domain.domain_dict}}
     asds_dict = {}
     gps_times_dict = {}
 
@@ -242,20 +250,6 @@ def create_dataset_from_files(
 
         path_raw_psds = get_path_raw_data(data_dir, run, ifo, T_PSD, T_gap)
         filenames = [el for el in os.listdir(path_raw_psds) if el.endswith(".npy")]
-        psd = np.load(join(path_raw_psds, filenames[0]), allow_pickle=True).item()
-
-        delta_f = 1 / T
-        domain = build_domain(
-            {
-                "type": "FrequencyDomain",
-                "f_min": f_min,
-                "f_max": f_max,
-                "delta_f": delta_f,
-                "window_factor": 1.0,
-            }
-        )
-        domain_settings["domain_dict"] = domain.domain_dict
-        ind_min, ind_max = domain.f_min_idx, domain.f_max_idx
 
         Nf = ind_max - ind_min + 1
         asds = np.zeros((len(filenames), Nf))
@@ -269,10 +263,8 @@ def create_dataset_from_files(
         asds_dict[ifo] = asds
         gps_times_dict[ifo] = times
 
-    save_dict["asds"] = asds_dict
-    save_dict["gps_times"] = gps_times_dict
+    dataset_dict["asds"] = asds_dict
+    dataset_dict["gps_times"] = gps_times_dict
 
-    f = h5py.File(join(data_dir, f"asds_{run}.hdf5"), "w")
-    recursive_hdf5_save(f, save_dict)
-    f.attrs["settings"] = str(domain_settings)
-    f.close()
+    dataset = ASDDataset(dictionary=dataset_dict)
+    dataset.to_file(file_name=join(data_dir, f"asds_{run}.hdf5"))
