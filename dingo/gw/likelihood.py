@@ -1,13 +1,14 @@
 import numpy as np
 from scipy.fft import fft
 
+from dingo.core.likelihood import Likelihood
 from dingo.gw.inference.injection import GWSignal
 from dingo.gw.waveform_generator import WaveformGenerator
 from dingo.gw.domains import build_domain
 from dingo.gw.inference.data_preparation import get_event_data_and_domain
 
 
-class StationaryGaussianGWLikelihood(GWSignal):
+class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
     """
     Implements GW likelihood for stationary, Gaussian noise.
     """
@@ -124,6 +125,12 @@ class StationaryGaussianGWLikelihood(GWSignal):
             self.time_prior_log = np.log(time_prior / np.sum(time_prior))
 
     def log_likelihood(self, theta):
+        if self.time_marginalization:
+            return self._log_likelihood_time_marginalized(theta)
+        else:
+            return self._log_likelihood(theta)
+
+    def _log_likelihood(self, theta):
         """
         The likelihood is given by
 
@@ -187,7 +194,7 @@ class StationaryGaussianGWLikelihood(GWSignal):
         )
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
-    def log_likelihood_time_marginalized(self, theta):
+    def _log_likelihood_time_marginalized(self, theta):
         """
         Compute log likelihood with time marginalization.
 

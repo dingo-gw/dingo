@@ -1,15 +1,22 @@
+import time
 from typing import Optional
 
+import numpy as np
 import pandas as pd
 import torch
 from bilby.core.prior import Prior, Constraint, DeltaFunction
 from bilby.core.result import Result
+from scipy.special import logsumexp
 from torchvision.transforms import Compose
 
+from dingo.core.likelihood import Likelihood
 from dingo.core.models import PosteriorModel
 from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.prior import build_prior_with_defaults
 
+#
+# Sampler classes are based on Bilby Samplers.
+#
 
 class ConditionalSampler(object):
     """
@@ -18,7 +25,7 @@ class ConditionalSampler(object):
     Draws samples from the model based on context data, and outputs in various formats.
     """
 
-    def __init__(self, model: PosteriorModel):
+    def __init__(self, model: PosteriorModel, likelihood: Optional[Likelihood] = None):
         """
         Parameters
         ----------
@@ -31,7 +38,9 @@ class ConditionalSampler(object):
         self._constraint_parameter_keys = []
         self._fixed_parameter_keys = []
         self._build_prior()
+        self.likelihood = likelihood
         self._reset_sampler()
+        self._pesummary_package = 'core'
 
     def _run_sampler(self, num_samples: int, context: dict) -> dict:
         x = context.copy()
@@ -55,7 +64,7 @@ class ConditionalSampler(object):
         batch_size: Optional[int] = None,
         label: Optional[str] = None,
         event_metadata: Optional[dict] = None,
-        as_type: str = "result",
+        # as_type: str = "result",
     ):
         """
         Generates samples and returns them in requested format. Samples (and metadata)
@@ -114,17 +123,19 @@ class ConditionalSampler(object):
         self._post_correct(samples)
         samples = {k: v.cpu().numpy() for k, v in samples.items()}
 
-        # Prepare output
-        self._generate_result(samples)
+        self.samples = pd.DataFrame(samples)
 
-        if as_type == "result":
-            return self.result
-        elif as_type == "pandas":
-            samples = pd.DataFrame(samples)
-            samples.attrs = self.metadata
-            return samples
-        elif as_type == "dict":
-            return samples
+        # Prepare output
+        # self._generate_result()
+
+        # if as_type == "result":
+        #     return self.result
+        # elif as_type == "pandas":
+        #     samples = pd.DataFrame(self.samples)
+        #     samples.attrs = self.metadata
+        #     return samples
+        # elif as_type == "dict":
+        #     return self.samples
 
     def _post_correct(self, samples: dict):
         pass
@@ -147,27 +158,34 @@ class ConditionalSampler(object):
                 # self.likelihood.parameters[key] = self.prior[key].sample()
                 self._fixed_parameter_keys.append(key)
 
-    def _generate_result(self, samples: dict):
-        result_kwargs = dict(
-            label=self.label,
-            # outdir=self.outdir,
-            sampler=self.__class__.__name__.lower(),
-            search_parameter_keys=self._search_parameter_keys,
-            fixed_parameter_keys=self._fixed_parameter_keys,
-            constraint_parameter_keys=self._constraint_parameter_keys,
-            priors=self.prior,
-            meta_data=self.metadata,
-            injection_parameters=self.injection_parameters,
-            sampler_kwargs=None,
-            use_ratio=False,
-        )
-        self.result = Result(**result_kwargs)
-        self.result.samples = samples
-
-        # TODO: decide whether to run this, and whether to use it to generate
-        #  additional parameters. This may depend on how pesummary processes the
-        #  Results file.
-        # self.result.samples_to_posterior()
+    # def _generate_result(self):
+    #     result_kwargs = dict(
+    #         label=self.label,
+    #         # outdir=self.outdir,
+    #         sampler=self.__class__.__name__.lower(),
+    #         search_parameter_keys=self._search_parameter_keys,
+    #         fixed_parameter_keys=self._fixed_parameter_keys,
+    #         constraint_parameter_keys=self._constraint_parameter_keys,
+    #         priors=self.prior,
+    #         meta_data=self.metadata,
+    #         injection_parameters=self.injection_parameters,
+    #         sampler_kwargs=None,
+    #         use_ratio=False,
+    #     )
+    #     self.result = Result(**result_kwargs)
+    #
+    #     if 'weights' in self.samples:
+    #         self.result.nested_samples = pd.DataFrame(self.samples)
+    #         # TODO: Calculate unweighted samples and store them in self.result.samples.
+    #     else:
+    #         self.result.samples = pd.DataFrame(self.samples)
+    #
+    #     self.result.log_evidence = self.log_evidence
+    #
+    #     # TODO: decide whether to run this, and whether to use it to generate
+    #     #  additional parameters. This may depend on how pesummary processes the
+    #     #  Results file.
+    #     # self.result.samples_to_posterior()
 
     def _store_metadata(self, event_metadata: Optional[dict] = None):
         self.metadata = dict(
@@ -182,6 +200,75 @@ class ConditionalSampler(object):
         self.samples = None
         self.injection_parameters = None
         self.label = None
+        self.log_evidence = None
+
+    def importance_sample(self, num_processes: int = 1):
+
+        if self.likelihood is None:
+            raise KeyError("A likelihood is required to calculate importance weights.")
+        if self.samples is None:
+            raise KeyError(
+                "Initial samples are required for importance sampling. "
+                "Please execute run_sampler()."
+            )
+        if "log_prob" not in self.samples:
+            raise KeyError(
+                "Stored samples do not contain log probability, which is "
+                "needed for importance sampling."
+            )
+
+        # Proposal samples and associated log probability have already been calculated
+        # using the stored model. These form a normalized probability distribution.
+
+        log_prob_proposal = self.samples["log_prob"]
+        theta = {
+            k: v
+            for k, v in self.samples.items()
+            if k in self._search_parameter_keys or k in self._constraint_parameter_keys
+        }
+
+        # Calculate the (un-normalized) target density as prior times likelihood,
+        # evaluated at the same sample points. The expensive part is the likelihood,
+        # so we allow for multiprocessing.
+
+        num_samples = len(log_prob_proposal)
+
+        log_prior = self.prior.ln_prob(theta, axis=0)
+        print(f"Calculating {num_samples} likelihoods.")
+        t0 = time.time()
+        log_likelihood = self.likelihood.log_likelihood_multi(
+            theta, num_processes=num_processes
+        )
+        print(f"Done. This took {time.time() - t0:.2f} seconds.")
+
+        # Calculate weights.
+
+        log_weights = log_prior + log_likelihood - log_prob_proposal
+        weights = np.exp(log_weights - np.max(log_weights))
+        weights /= np.mean(weights)
+
+        self.samples['weights'] = weights
+        self.samples['log_likelihood'] = log_likelihood
+        self.samples['log_prior'] = log_prior
+        # Note that self.samples['log_prob'] is the proposal log_prob, not the
+        # importance_weighted log_prob.
+
+        self.log_evidence = logsumexp(log_weights) - float(np.log(num_samples))
+
+        # self._generate_result()
+
+    def write_pesummary(self, filename):
+        from pesummary.io import write
+        from pesummary.utils.samples_dict import SamplesDict
+
+        samples_dict = SamplesDict(self.samples)
+        write(samples_dict, package=self._pesummary_package, file_format="hdf5",
+              filename=filename)
+        # TODO: Save much more information.
+
+    def summary(self):
+        print("Number of samples:", len(self.samples))
+        print("log_evidence:", self.log_evidence)
 
 
 class GNPESampler(ConditionalSampler):

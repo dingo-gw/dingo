@@ -42,6 +42,7 @@ class GWSamplerMixin(object):
             "inference_parameters"
         ]
         self.t_ref = self.model.metadata["train_settings"]["data"]["ref_time"]
+        self._pesummary_package = 'gw'
 
     def _build_domain(self):
         """
