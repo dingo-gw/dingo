@@ -41,7 +41,7 @@ class GWSamplerMixin(object):
         super().__init__(**kwargs)
         self._build_domain()
 
-        self.inference_parameters = self.base_model_metadata["train_settings"]["data"][
+        self.inference_parameters = self.model.metadata["train_settings"]["data"][
             "inference_parameters"
         ]
         self.t_ref = self.base_model_metadata["train_settings"]["data"]["ref_time"]
@@ -99,16 +99,17 @@ class GWSamplerMixin(object):
         ----------
         samples : dict
         """
-        t_event = self.metadata["event"].get("time_event")
-        if t_event is not None and t_event != self.t_ref:
-            ra = samples["ra"]
-            time_reference = Time(self.t_ref, format="gps", scale="utc")
-            time_event = Time(t_event, format="gps", scale="utc")
-            longitude_event = time_event.sidereal_time("apparent", "greenwich")
-            longitude_reference = time_reference.sidereal_time("apparent", "greenwich")
-            delta_longitude = longitude_event - longitude_reference
-            ra_correction = delta_longitude.rad
-            samples["ra"] = (ra + ra_correction) % (2 * np.pi)
+        if self.metadata["event"] is not None:
+            t_event = self.metadata["event"].get("time_event")
+            if t_event is not None and t_event != self.t_ref:
+                ra = samples["ra"]
+                time_reference = Time(self.t_ref, format="gps", scale="utc")
+                time_event = Time(t_event, format="gps", scale="utc")
+                longitude_event = time_event.sidereal_time("apparent", "greenwich")
+                longitude_reference = time_reference.sidereal_time("apparent", "greenwich")
+                delta_longitude = longitude_event - longitude_reference
+                ra_correction = delta_longitude.rad
+                samples["ra"] = (ra + ra_correction) % (2 * np.pi)
 
     def _store_metadate(self, **kwargs):
         super()._store_metadata(**kwargs)
@@ -251,7 +252,6 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
 
 
 class GWSamplerUnconditional(GWSampler):
-
     def _initialize_transforms(self):
 
         # Postprocessing transform only:
@@ -263,3 +263,6 @@ class GWSamplerUnconditional(GWSampler):
             inverse=True,
             as_type="dict",
         )
+
+    def _post_correct(self, samples: dict):
+        pass

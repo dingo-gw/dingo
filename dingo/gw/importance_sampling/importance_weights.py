@@ -113,8 +113,10 @@ def get_log_probs_from_proposal(nde, theta):
     mean, std = nde.metadata["train_settings"]["data"]["standardization"].values()
     mean = np.array([v for v in mean.values()])
     std = np.array([v for v in std.values()])
-    theta = (torch.from_numpy(np.array(theta)).to(nde.device).float() -
-             torch.tensor(mean).to(nde.device)) / torch.tensor(std).to(nde.device)
+    theta = (
+        torch.from_numpy(np.array(theta)).to(nde.device).float()
+        - torch.tensor(mean).to(nde.device)
+    ) / torch.tensor(std).to(nde.device)
 
     nde.model.eval()
     with torch.no_grad():
@@ -354,8 +356,13 @@ def main():
     samples = pd.read_pickle(settings["nde"]["data"]["parameter_samples"])
     metadata = samples.attrs
     # for time marginalization, we drop geocent time from the samples
+    inference_parameters = metadata["model"]["train_settings"]["data"][
+        "inference_parameters"
+    ].copy()
     if "time_marginalization" in settings and "geocent_time" in samples:
         samples.drop("geocent_time", axis=1, inplace=True)
+        inference_parameters.remove("geocent_time")
+    settings["nde"]["data"]["inference_parameters"] = inference_parameters
 
     # Step 1: Build proposal distribution.
     #
@@ -420,7 +427,7 @@ def main():
 
     nde_sampler = GWSamplerUnconditional(model=nde, likelihood=likelihood)
     print(f'Generating {settings["num_samples"]} from proposal distribution.')
-    nde_sampler.run_sampler(num_samples=settings['num_samples'])
+    nde_sampler.run_sampler(num_samples=settings["num_samples"])
     print(f"Importance sampling.")
     nde_sampler.importance_sample(num_processes=settings.get("num_processes", 1))
 
