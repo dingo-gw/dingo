@@ -83,6 +83,17 @@ class StationaryGaussianGWLikelihood:
                 for d_ifo in self.whitened_strains.values()
             ]
         )
+        # For completeness (not used): there is a PSD-dependent contribution to the
+        # likelihood,  which is typically ignored as it is constant for a given PSD
+        # (e.g.,  for different waveform models) or event strains. Intuitively it is the
+        # correction term that needs to be added to the log-likelihood to account
+        # for the fact we compute N[0,1](strain/ASD) instead of N[0,ASD^2](strain).
+        # But this contribution is typically ignored since we are only interested in
+        # log-likelihood *differences*, see e.g. https://arxiv.org/pdf/1809.02293.pdf.
+        # psi = - sum_i log(2pi * PSD_i) = - 2 * sum_i * log(2pi * ASD_i)
+        self.psi = -2 * sum(
+            np.sum(np.log(2 * np.pi * asd)) for asd in self.asds.values()
+        )
 
         # build transforms for detector projections
         self.ifo_list = InterferometerList(self.whitened_strains.keys())
