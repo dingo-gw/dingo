@@ -52,10 +52,20 @@ class ConditionalSampler(object):
         # pre-processing.
         x = self.transforms_pre(context)
         x = x.expand(num_samples, *x.shape)
-        y = self.model.sample(x)
-        samples = self.transforms_post({"parameters": y})["parameters"]
 
-        return samples
+        # For a normalizing flow, we get the log_prob for "free" when sampling,
+        # so we always include this. For other architectures, it may make sense to have
+        # a flag for whether to calculate the log_prob.
+        self.model.model.eval()
+        with torch.no_grad():
+            y, log_prob = self.model.model.sample_and_log_prob(x)
+
+        samples = self.transforms_post({"parameters": y,
+                                        "log_prob": log_prob})
+        result = samples['parameters']
+        result['log_prob'] = samples['log_prob']
+
+        return result
 
     def run_sampler(
         self,
@@ -64,7 +74,6 @@ class ConditionalSampler(object):
         batch_size: Optional[int] = None,
         label: Optional[str] = None,
         event_metadata: Optional[dict] = None,
-        # as_type: str = "result",
     ):
         """
         Generates samples and returns them in requested format. Samples (and metadata)
@@ -89,8 +98,6 @@ class ConditionalSampler(object):
             (Optional) Metadata for data analyzed. Stored along with sample metadata,
             and can in principle influence any post-sampling parameter transformations
             (e.g., sky position correction).
-        as_type : str
-            Format of output ('results', 'pandas', or 'dict').
 
         Returns
         -------
@@ -123,19 +130,9 @@ class ConditionalSampler(object):
         self._post_correct(samples)
         samples = {k: v.cpu().numpy() for k, v in samples.items()}
 
-        self.samples = pd.DataFrame(samples)
-
-        # Prepare output
-        # self._generate_result()
-
-        # if as_type == "result":
-        #     return self.result
-        # elif as_type == "pandas":
-        #     samples = pd.DataFrame(self.samples)
-        #     samples.attrs = self.metadata
-        #     return samples
-        # elif as_type == "dict":
-        #     return self.samples
+        samples = pd.DataFrame(samples)
+        samples.attrs = self.metadata
+        self.samples = samples
 
     def _post_correct(self, samples: dict):
         pass

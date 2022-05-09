@@ -168,13 +168,13 @@ def analyze_event():
             "time_psd": args.time_psd,
             "time_buffer": args.time_buffer,
         }
-        samples = sampler.run_sampler(
+        sampler.run_sampler(
             args.num_samples,
             event_data,
             batch_size=args.batch_size,
             event_metadata=event_metadata,
-            as_type="pandas",
         )
+        samples = sampler.samples
 
         # if no reference samples are available, simply save the dingo samples
         if ref is None or time_event not in ref:

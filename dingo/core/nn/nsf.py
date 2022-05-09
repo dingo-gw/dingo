@@ -223,6 +223,17 @@ class FlowWrapper(nn.Module):
             # if there is no context, omit the context argument
             return torch.squeeze(self.flow.sample(num_samples))
 
+    def sample_and_log_prob(self, *x, num_samples=1):
+        if self.embedding_net is not None:
+            x = torchutils.forward_pass_with_unpacked_tuple(self.embedding_net, x)
+        if len(x) > 0:
+            sample, log_prob = self.flow.sample_and_log_prob(num_samples, x)
+            return torch.squeeze(sample), torch.squeeze(log_prob)
+        else:
+            # if there is no context, omit the context argument
+            sample, log_prob = self.flow.sample_and_log_prob(num_samples)
+            return torch.squeeze(sample), torch.squeeze(log_prob)
+
     def forward(self, y, *x):
         if len(x) > 0:
             return self.log_prob(y, *x)
