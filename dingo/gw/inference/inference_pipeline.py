@@ -6,7 +6,7 @@ import yaml
 import pandas as pd
 
 from dingo.core.models import PosteriorModel
-from dingo.gw.inference.gw_samplers import GWSamplerNPE, GWSamplerGNPE
+from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
 from dingo.gw.inference.data_preparation import get_event_data_and_domain
 from dingo.gw.inference.sampling_functions import sample_posterior_of_event
 from dingo.gw.inference.visualization import load_ref_samples, generate_cornerplot
@@ -141,14 +141,14 @@ def analyze_event():
         init_model = PosteriorModel(
             args.model_init, device=device, load_training_info=False
         )
-        init_sampler = GWSamplerNPE(model=init_model)
+        init_sampler = GWSampler(model=init_model)
         sampler = GWSamplerGNPE(
             model=model,
             init_sampler=init_sampler,
             num_iterations=args.num_gnpe_iterations,
         )
     else:
-        sampler = GWSamplerNPE(model=model)
+        sampler = GWSampler(model=model)
 
     # sample posterior for events
     for time_event in args.gps_time_event:

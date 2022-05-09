@@ -144,9 +144,9 @@ class SelectStandardizeRepackageParameters(object):
                 )
 
             # TODO: Implement this for the forward map, if needed.
-            if 'log_prob' in sample:
+            if "log_prob" in sample:
                 log_std = np.sum(np.log([self.std[p] for p in inference_parameters]))
-                sample['log_prob'] -= log_std
+                sample["log_prob"] -= log_std
 
         return sample
 

@@ -1,3 +1,5 @@
+from typing import Optional
+
 import torch
 import yaml
 from os.path import dirname, join
@@ -58,12 +60,13 @@ def train_unconditional_density_estimator(
         parameters = settings["data"]["parameters"]
     else:
         parameters = list(samples.keys())
+    base_metadata = samples.attrs
     samples = np.array(samples[parameters])
     num_samples, num_params = samples.shape
     mean, std = np.mean(samples, axis=0), np.std(samples, axis=0)
     settings["data"]["standardization"] = {
-        "mean": {param: mean[i] for i, param in enumerate(parameters)},
-        "std": {param: std[i] for i, param in enumerate(parameters)},
+        "mean": {param: mean[i].item() for i, param in enumerate(parameters)},
+        "std": {param: std[i].item() for i, param in enumerate(parameters)},
     }
     # normalized torch samples
     samples_torch = torch.from_numpy((samples - mean) / std).float()
@@ -72,7 +75,8 @@ def train_unconditional_density_estimator(
     settings["model"]["input_dim"] = num_params
     settings["model"]["context_dim"] = None
     model = PosteriorModel(
-        metadata={"train_settings": settings}, device=settings["training"]["device"]
+        metadata={"train_settings": settings, "base": base_metadata},
+        device=settings["training"]["device"]
     )
     model.optimizer_kwargs = settings["training"]["optimizer"]
     model.scheduler_kwargs = settings["training"]["scheduler"]

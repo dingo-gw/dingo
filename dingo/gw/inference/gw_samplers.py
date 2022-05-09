@@ -1,12 +1,14 @@
 import numpy as np
 from astropy.time import Time
+from bilby.core.prior import Prior, Constraint, DeltaFunction
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 
-from dingo.core.samplers import ConditionalSampler, GNPESampler
+from dingo.core.samplers import Sampler, GNPESampler
 from dingo.core.transforms import GetItem, RenameKey
 from dingo.gw.domains import build_domain
-from dingo.gw.gwutils import get_window_factor
+from dingo.gw.gwutils import get_window_factor, get_extrinsic_prior_dict
+from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.transforms import (
     WhitenAndScaleStrain,
     RepackageStrainsAndASDS,
@@ -38,20 +40,44 @@ class GWSamplerMixin(object):
         """
         super().__init__(**kwargs)
         self._build_domain()
-        self.inference_parameters = self.model.metadata["train_settings"]["data"][
+
+        self.inference_parameters = self.base_model_metadata["train_settings"]["data"][
             "inference_parameters"
         ]
-        self.t_ref = self.model.metadata["train_settings"]["data"]["ref_time"]
-        self._pesummary_package = 'gw'
+        self.t_ref = self.base_model_metadata["train_settings"]["data"]["ref_time"]
+        self._pesummary_package = "gw"
+
+    def _build_prior(self):
+        """Build the prior based on model metadata."""
+
+        intrinsic_prior = self.base_model_metadata["dataset_settings"][
+            "intrinsic_prior"
+        ]
+        extrinsic_prior = get_extrinsic_prior_dict(
+            self.base_model_metadata["train_settings"]["data"]["extrinsic_prior"]
+        )
+        self.prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
+
+        # Initialize lists of parameters (from Bilby)
+        for key in self.prior:
+            if isinstance(self.prior[key], Prior) and self.prior[key].is_fixed is False:
+                self._search_parameter_keys.append(key)
+            elif isinstance(self.prior[key], Constraint):
+                self._constraint_parameter_keys.append(key)
+            elif isinstance(self.prior[key], DeltaFunction):
+                # self.likelihood.parameters[key] = self.prior[key].sample()
+                self._fixed_parameter_keys.append(key)
 
     def _build_domain(self):
         """
         Constructs the domain object based on model metadata. Includes the window
         factor needed for whitening data.
         """
-        self.domain = build_domain(self.model.metadata["dataset_settings"]["domain"])
+        self.domain = build_domain(
+            self.base_model_metadata["dataset_settings"]["domain"]
+        )
 
-        data_settings = self.model.metadata["train_settings"]["data"]
+        data_settings = self.base_model_metadata["train_settings"]["data"]
         if "domain_update" in data_settings:
             self.domain.update(data_settings["domain_update"])
 
@@ -74,7 +100,7 @@ class GWSamplerMixin(object):
         samples : dict
         """
         t_event = self.metadata["event"].get("time_event")
-        if t_event is not None:
+        if t_event is not None and t_event != self.t_ref:
             ra = samples["ra"]
             time_reference = Time(self.t_ref, format="gps", scale="utc")
             time_event = Time(t_event, format="gps", scale="utc")
@@ -89,7 +115,7 @@ class GWSamplerMixin(object):
         # TODO: Store strain data? ASD?
 
 
-class GWSamplerNPE(GWSamplerMixin, ConditionalSampler):
+class GWSampler(GWSamplerMixin, Sampler):
     """
     Sampler for gravitational-wave inference using neural posterior estimation. Wraps a
     PosteriorModel instance.
@@ -221,4 +247,19 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 ),
                 GetDetectorTimes(ifo_list, data_settings["ref_time"]),
             ]
+        )
+
+
+class GWSamplerUnconditional(GWSampler):
+
+    def _initialize_transforms(self):
+
+        # Postprocessing transform only:
+        #   * De-standardize data and extract inference parameters. Be careful to use
+        #   the standardization of the correct model, not the base model.
+        self.transforms_post = SelectStandardizeRepackageParameters(
+            {"inference_parameters": self.inference_parameters},
+            self.model.metadata["train_settings"]["data"]["standardization"],
+            inverse=True,
+            as_type="dict",
         )

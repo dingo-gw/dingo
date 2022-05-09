@@ -16,6 +16,7 @@ import scipy
 import argparse
 
 from dingo.core.models import PosteriorModel
+from dingo.gw.inference.gw_samplers import GWSamplerUnconditional
 from dingo.gw.likelihood import build_stationary_gaussian_likelihood
 from dingo.core.density import train_unconditional_density_estimator
 from dingo.gw.gwutils import get_extrinsic_prior_dict
@@ -403,19 +404,28 @@ def main():
         metadata,
         settings.get("event_dataset", None),
     )
-    # build prior
-    intrinsic_prior = metadata["model"]["dataset_settings"]["intrinsic_prior"]
-    extrinsic_prior = get_extrinsic_prior_dict(
-        metadata["model"]["train_settings"]["data"]["extrinsic_prior"]
-    )
-    # merge priors, keep extrinsic prior if in conflict (e.g. for luminosity distance
-    # which is in both, in extrinsic_prior, and as a reference value in intrinsic prior)
-    prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
-    # wrap likelihood and prior to unnormalized posterior
-    # posterior = UnnormalizedPosterior(likelihood, prior)
-    posterior = UnnormalizedPosterior(
-        likelihood, prior, settings.get("time_marginalization", None)
-    )
+    # # build prior
+    # intrinsic_prior = metadata["model"]["dataset_settings"]["intrinsic_prior"]
+    # extrinsic_prior = get_extrinsic_prior_dict(
+    #     metadata["model"]["train_settings"]["data"]["extrinsic_prior"]
+    # )
+    # # merge priors, keep extrinsic prior if in conflict (e.g. for luminosity distance
+    # # which is in both, in extrinsic_prior, and as a reference value in intrinsic prior)
+    # prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
+    # # wrap likelihood and prior to unnormalized posterior
+    # # posterior = UnnormalizedPosterior(likelihood, prior)
+    # posterior = UnnormalizedPosterior(
+    #     likelihood, prior, settings.get("time_marginalization", None)
+    # )
+
+    nde_sampler = GWSamplerUnconditional(model=nde, likelihood=likelihood)
+    print(f'Generating {settings["num_samples"]} from proposal distribution.')
+    nde_sampler.run_sampler(num_samples=settings['num_samples'])
+    print(f"Importance sampling.")
+    nde_sampler.importance_sample(num_processes=settings.get("num_processes", 1))
+
+    samples = nde_sampler.samples
+    samples.to_pickle(join(args.outdir, "weighted_samples.pkl"))
 
     # Step 3: SIR step
     #
@@ -425,42 +435,42 @@ def main():
     #
     # to obtain weighted samples from the proposal distribution.
 
-    if "log_prob" in samples.columns:
-        num_samples = settings.get("num_samples", len(samples))
-        theta = samples.sample(num_samples)
-        log_probs_proposal = np.array(theta["log_prob"])
-        theta = theta.drop(columns="log_prob")
-    else:
-        num_samples = settings["num_samples"]
-        # sample from proposal distribution, and get the log_prob densities
-        print(f"Generating {num_samples} samples from proposal distribution.")
-        theta, log_probs_proposal = get_samples_and_log_probs_from_proposal(
-            nde, num_samples
-        )
-
-    # compute the unnormalized target posterior density for each sample
-    t0 = time.time()
-    print(f"Computing unnormalized target posterior density for {num_samples} samples.")
-    log_probs_target = posterior.log_prob_multiprocessing(
-        theta, settings.get("num_processes", 1)
-    )
-    print(f"Done. This took {time.time() - t0:.2f} seconds.")
-
-    # compute weights, save weighted samples with metadata
-    log_weights = log_probs_target - log_probs_proposal
-    weights = np.exp(log_weights - np.max(log_weights))
-    weights /= np.mean(weights)
-    theta.insert(theta.shape[1], "weights", weights)
-    theta.insert(theta.shape[1], "log_probs_proposal", log_probs_proposal)
-    theta.insert(theta.shape[1], "log_probs_target", log_probs_target)
-    theta.attrs = {"dingo_settings": metadata, "is_settings": settings}
-    theta.to_pickle(join(args.outdir, "weighted_samples.pkl"))
+    # if "log_prob" in samples.columns:
+    #     num_samples = settings.get("num_samples", len(samples))
+    #     theta = samples.sample(num_samples)
+    #     log_probs_proposal = np.array(theta["log_prob"])
+    #     theta = theta.drop(columns="log_prob")
+    # else:
+    #     num_samples = settings["num_samples"]
+    #     # sample from proposal distribution, and get the log_prob densities
+    #     print(f"Generating {num_samples} samples from proposal distribution.")
+    #     theta, log_probs_proposal = get_samples_and_log_probs_from_proposal(
+    #         nde, num_samples
+    #     )
+    #
+    # # compute the unnormalized target posterior density for each sample
+    # t0 = time.time()
+    # print(f"Computing unnormalized target posterior density for {num_samples} samples.")
+    # log_probs_target = posterior.log_prob_multiprocessing(
+    #     theta, settings.get("num_processes", 1)
+    # )
+    # print(f"Done. This took {time.time() - t0:.2f} seconds.")
+    #
+    # # compute weights, save weighted samples with metadata
+    # log_weights = log_probs_target - log_probs_proposal
+    # weights = np.exp(log_weights - np.max(log_weights))
+    # weights /= np.mean(weights)
+    # theta.insert(theta.shape[1], "weights", weights)
+    # theta.insert(theta.shape[1], "log_probs_proposal", log_probs_proposal)
+    # theta.insert(theta.shape[1], "log_probs_target", log_probs_target)
+    # theta.attrs = {"dingo_settings": metadata, "is_settings": settings}
+    # theta.to_pickle(join(args.outdir, "weighted_samples.pkl"))
 
     diagnostics_dir = join(args.outdir, "IS-diagnostics")
     if not exists(diagnostics_dir):
         makedirs(diagnostics_dir)
     if settings.get("n_slice_plots", 0) > 0:
-        theta_slice_plots = theta.sample(settings["n_slice_plots"]).drop(
+        theta_slice_plots = samples.sample(settings["n_slice_plots"]).drop(
             columns=["weights", "log_probs_proposal", "log_probs_target"]
         )
     else:
@@ -469,7 +479,7 @@ def main():
     #     columns=["weights", "log_probs_proposal", "log_probs_target"]
     # )
     plot_diagnostics(
-        theta,
+        samples,
         diagnostics_dir,
         theta_slice_plots=theta_slice_plots,
         posterior=posterior,
