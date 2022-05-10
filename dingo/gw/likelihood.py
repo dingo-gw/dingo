@@ -304,6 +304,7 @@ def inner_product(a, b, min_idx=0, delta_f=None, psd=None):
 def build_stationary_gaussian_likelihood(
     metadata,
     event_dataset=None,
+    time_marginalization_kwargs=None,
 ):
     """
     Build a StationaryGaussianLikelihoodBBH object from the metadata.
@@ -315,6 +316,8 @@ def build_stationary_gaussian_likelihood(
         Typially accessed via pd.read_pickle(/path/to/dingo-output.pkl).metadata.
     event_dataset: str = None
         Path to event dataset for caching. If None, don't cache.
+    time_marginalization_kwargs: dict = None
+        Forwarded to the likelihood.
 
     Returns
     -------
@@ -333,6 +336,7 @@ def build_stationary_gaussian_likelihood(
         data_domain=data_domain,
         event_data=event_data,
         t_ref=metadata["event"]["time_event"],
+        time_marginalization_kwargs=time_marginalization_kwargs,
     )
 
     return likelihood

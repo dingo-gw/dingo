@@ -1,4 +1,5 @@
 import time
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -7,8 +8,8 @@ import torch
 from scipy.special import logsumexp
 from torchvision.transforms import Compose
 
-from dingo.core.likelihood import Likelihood
 from dingo.core.models import PosteriorModel
+from dingo.core.samples_dataset import SamplesDataset
 
 #
 # Sampler classes are based on Bilby Samplers.
@@ -24,17 +25,24 @@ class Sampler(object):
     formats.
     """
 
-    def __init__(self, model: PosteriorModel, likelihood: Optional[Likelihood] = None):
+    def __init__(self, model: PosteriorModel):
         """
         Parameters
         ----------
         model : PosteriorModel
         """
         self.model = model
-        if 'base' in self.model.metadata:
-            self.base_model_metadata = self.model.metadata['base']['model']
+        self.metadata = self.model.metadata.copy()
+
+        # For unconditional models, the context will be stored with the model,
+        # so we copy it here. This is necessary for calculating the likelihood for
+        # importance sampling.
+        self.context = self.model.context
+
+        if "base" in self.metadata:
+            self.base_model_metadata = self.metadata["base"]
         else:
-            self.base_model_metadata = self.model.metadata
+            self.base_model_metadata = self.metadata
 
         self.transforms_pre = Compose([])
         self.transforms_post = Compose([])
@@ -43,9 +51,17 @@ class Sampler(object):
         self._fixed_parameter_keys = []
         self.inference_parameters = []
         self._build_prior()
-        self.likelihood = likelihood
+        self._build_domain()
         self._reset_sampler()
+
         self._pesummary_package = "core"
+
+    def _reset_sampler(self):
+        """Clear out all data produced by self.run_sampler(), to prepare for the next
+        sampler run."""
+        self.samples = None
+        self.injection_parameters = None
+        self.log_evidence = None
 
     def _run_sampler(self, num_samples: int, context: Optional[dict] = None) -> dict:
 
@@ -85,7 +101,6 @@ class Sampler(object):
         num_samples: int,
         context: Optional[dict] = None,
         batch_size: Optional[int] = None,
-        label: Optional[str] = None,
         event_metadata: Optional[dict] = None,
     ):
         """
@@ -104,8 +119,6 @@ class Sampler(object):
             For injections, there should be a 'parameters' key with truth values.
         batch_size : int, optional
             Batch size for sampler.
-        label : str, optional
-            Label for the event.
         event_metadata : dict, optional
             Metadata for data analyzed. Stored along with sample metadata, and can in
             principle influence any post-sampling parameter transformations (e.g.,
@@ -114,9 +127,9 @@ class Sampler(object):
         # Reset sampler and store all metadata associated with data.
         self._reset_sampler()
         if context is not None:
-            self.injection_parameters = context.pop("parameters", None)
-        self.label = label
-        self._store_metadata(event_metadata=event_metadata)
+            self.metadata["injection_parameters"] = context.pop("parameters", None)
+            self.context = context
+        self.metadata["event"] = event_metadata
         self._check_context(context)
 
         # Carry out batched sampling by calling _run_sample() on each batch and
@@ -133,9 +146,7 @@ class Sampler(object):
         self._post_correct(samples)
         samples = {k: v.cpu().numpy() for k, v in samples.items()}
 
-        samples = pd.DataFrame(samples)
-        samples.attrs = self.metadata
-        self.samples = samples
+        self.samples = pd.DataFrame(samples)
 
     def _check_context(self, context: Optional[dict] = None):
         # TODO: Add some checks that the context is appropriate.
@@ -145,56 +156,16 @@ class Sampler(object):
         pass
 
     def _build_prior(self):
-        pass
+        self.prior = None
 
-    # def _generate_result(self):
-    #     result_kwargs = dict(
-    #         label=self.label,
-    #         # outdir=self.outdir,
-    #         sampler=self.__class__.__name__.lower(),
-    #         search_parameter_keys=self._search_parameter_keys,
-    #         fixed_parameter_keys=self._fixed_parameter_keys,
-    #         constraint_parameter_keys=self._constraint_parameter_keys,
-    #         priors=self.prior,
-    #         meta_data=self.metadata,
-    #         injection_parameters=self.injection_parameters,
-    #         sampler_kwargs=None,
-    #         use_ratio=False,
-    #     )
-    #     self.result = Result(**result_kwargs)
-    #
-    #     if 'weights' in self.samples:
-    #         self.result.nested_samples = pd.DataFrame(self.samples)
-    #         # TODO: Calculate unweighted samples and store them in self.result.samples.
-    #     else:
-    #         self.result.samples = pd.DataFrame(self.samples)
-    #
-    #     self.result.log_evidence = self.log_evidence
-    #
-    #     # TODO: decide whether to run this, and whether to use it to generate
-    #     #  additional parameters. This may depend on how pesummary processes the
-    #     #  Results file.
-    #     # self.result.samples_to_posterior()
+    def _build_domain(self):
+        self.domain = None
 
-    def _store_metadata(self, event_metadata: Optional[dict] = None):
-        self.metadata = dict(
-            model=self.model.metadata,
-            event=event_metadata,
-        )
+    def _build_likelihood(self, **likelihood_kwargs):
+        self.likelihood = None
 
-    def _reset_sampler(self):
-        """Clear out all data produced by self.run_sampler(), to prepare for the next
-        sampler run."""
-        self.result = None
-        self.samples = None
-        self.injection_parameters = None
-        self.label = None
-        self.log_evidence = None
+    def importance_sample(self, num_processes: int = 1, **likelihood_kwargs):
 
-    def importance_sample(self, num_processes: int = 1):
-
-        if self.likelihood is None:
-            raise KeyError("A likelihood is required to calculate importance weights.")
         if self.samples is None:
             raise KeyError(
                 "Initial samples are required for importance sampling. "
@@ -206,11 +177,13 @@ class Sampler(object):
                 "needed for importance sampling."
             )
 
+        self._build_likelihood(**likelihood_kwargs)
+
         # Proposal samples and associated log probability have already been calculated
         # using the stored model. These form a normalized probability distribution.
 
         log_prob_proposal = self.samples["log_prob"].to_numpy()
-        theta = self.samples.drop(columns='log_prob')
+        theta = self.samples.drop(columns="log_prob")
 
         # TODO: Expand theta_all to include all parameters that make up the prior,
         #  including constraints. These might not be included within the inference
@@ -261,6 +234,18 @@ class Sampler(object):
         )
         # TODO: Save much more information.
 
+    def to_hdf5(self, label="", outdir="."):
+        save_dict = {
+            "settings": self.metadata,
+            "samples": self.samples,
+            "context": self.context,
+            "log_evidence": self.log_evidence,
+        }
+        dataset = SamplesDataset(dictionary=save_dict)
+
+        file_name = "dingo_samples_" + label + ".hdf5"
+        dataset.to_file(file_name=Path(outdir, file_name))
+
     def summary(self):
         print("Number of samples:", len(self.samples))
         print("log_evidence:", self.log_evidence)
@@ -292,6 +277,24 @@ class GNPESampler(Sampler):
         self.num_iterations = num_iterations
         self.gnpe_parameters = None
 
+    @property
+    def init_sampler(self):
+        return self._init_sampler
+
+    @init_sampler.setter
+    def init_sampler(self, value):
+        self._init_sampler = value
+        self.metadata["init_model"] = self._init_sampler.model.metadata
+
+    @property
+    def num_iterations(self):
+        return self._num_iterations
+
+    @num_iterations.setter
+    def num_iterations(self, value):
+        self._num_iterations = value
+        self.metadata["num_iterations"] = self._num_iterations
+
     def _run_sampler(self, num_samples: int, context: Optional[dict] = None) -> dict:
 
         assert context is not None
@@ -318,10 +321,3 @@ class GNPESampler(Sampler):
         samples = x["parameters"]
 
         return samples
-
-    def _store_metadata(self, **kwargs):
-        super()._store_metadata(**kwargs)
-        self.metadata["init_model"] = self.init_sampler.model.metadata
-
-        # TODO: Could also go in sampler_kwargs, which we don't use now.
-        self.metadata["num_iterations"] = self.num_iterations

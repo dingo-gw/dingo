@@ -3,6 +3,8 @@ from typing import Optional
 import torch
 import yaml
 from os.path import dirname, join
+
+from dingo.core.samples_dataset import SamplesDataset
 from dingo.core.utils import build_train_and_test_loaders
 from dingo.core.utils.trainutils import RuntimeLimits
 import numpy as np
@@ -34,7 +36,7 @@ class SampleDataset(torch.utils.data.Dataset):
 
 
 def train_unconditional_density_estimator(
-    samples: pd.DataFrame,
+    samples_dataset: SamplesDataset,
     settings: dict,
     train_dir: str,
 ):
@@ -55,12 +57,13 @@ def train_unconditional_density_estimator(
     model: PosteriorModel
         trained density estimator
     """
+    samples = samples_dataset.samples
     # Process samples: select parameters, normalize, and convert to torch tensor
     if "parameters" in settings["data"] and settings["data"]["parameters"]:
         parameters = settings["data"]["parameters"]
     else:
         parameters = list(samples.keys())
-    base_metadata = samples.attrs
+    base_metadata = samples_dataset.settings
     samples = np.array(samples[parameters])
     num_samples, num_params = samples.shape
     mean, std = np.mean(samples, axis=0), np.std(samples, axis=0)
@@ -81,6 +84,9 @@ def train_unconditional_density_estimator(
     model.optimizer_kwargs = settings["training"]["optimizer"]
     model.scheduler_kwargs = settings["training"]["scheduler"]
     model.initialize_optimizer_and_scheduler()
+
+    # Store context to keep a record, even though it will not be used in training.
+    model.context = samples_dataset.context
 
     # set up dataloaders
     train_loader, test_loader = build_train_and_test_loaders(

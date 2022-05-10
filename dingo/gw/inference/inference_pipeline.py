@@ -170,20 +170,15 @@ def analyze_event():
         }
         sampler.run_sampler(
             args.num_samples,
-            event_data,
+            context=event_data,
             batch_size=args.batch_size,
             event_metadata=event_metadata,
         )
-        samples = sampler.samples
 
         # if no reference samples are available, simply save the dingo samples
         if ref is None or time_event not in ref:
-            samples.to_pickle(
-                join(
-                    args.out_directory,
-                    f"dingo_samples_gps-{time_event}{args.suffix}.pkl",
-                )
-            )
+            label = f'gps-{time_event}{args.suffix}'
+            sampler.to_hdf5(label=label, outdir=args.out_directory)
 
         # if reference samples are available, save dingo samples and additionally
         # compare to the reference method in a corner plot
@@ -192,15 +187,13 @@ def analyze_event():
             ref_samples_file = ref[time_event]["reference_samples"]["file"]
             ref_method = ref[time_event]["reference_samples"]["method"]
 
-            samples.to_pickle(
-                join(args.out_directory, f"dingo_samples_{name_event}.pkl")
-            )
+            sampler.to_hdf5(label=name_event, outdir=args.out_directory)
 
             ref_samples = load_ref_samples(ref_samples_file)
 
             generate_cornerplot(
                 {"name": ref_method, "samples": ref_samples, "color": "blue"},
-                {"name": "dingo", "samples": samples, "color": "orange"},
+                {"name": "dingo", "samples": sampler.samples, "color": "orange"},
                 filename=join(
                     args.out_directory, f"cornerplot_{name_event}{args.suffix}.pdf"
                 ),

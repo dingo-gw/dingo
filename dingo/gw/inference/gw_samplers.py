@@ -1,6 +1,8 @@
+from typing import Optional
+
 import numpy as np
 from astropy.time import Time
-from bilby.core.prior import Prior, Constraint, DeltaFunction
+from bilby.core.prior import Prior, Constraint, DeltaFunction, Uniform
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 
@@ -8,6 +10,7 @@ from dingo.core.samplers import Sampler, GNPESampler
 from dingo.core.transforms import GetItem, RenameKey
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_window_factor, get_extrinsic_prior_dict
+from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.transforms import (
     WhitenAndScaleStrain,
@@ -39,13 +42,29 @@ class GWSamplerMixin(object):
             Keyword arguments that are forwarded to the superclass.
         """
         super().__init__(**kwargs)
-        self._build_domain()
 
-        self.inference_parameters = self.model.metadata["train_settings"]["data"][
+        self.inference_parameters = self.metadata["train_settings"]["data"][
             "inference_parameters"
         ]
         self.t_ref = self.base_model_metadata["train_settings"]["data"]["ref_time"]
         self._pesummary_package = "gw"
+
+    # _build_domain amd _build_prior are called by Sampler.__init__, in that order.
+
+    def _build_domain(self):
+        """
+        Constructs the domain object based on model metadata. Includes the window
+        factor needed for whitening data.
+        """
+        self.domain = build_domain(
+            self.base_model_metadata["dataset_settings"]["domain"]
+        )
+
+        data_settings = self.base_model_metadata["train_settings"]["data"]
+        if "domain_update" in data_settings:
+            self.domain.update(data_settings["domain_update"])
+
+        self.domain.window_factor = get_window_factor(data_settings["window"])
 
     def _build_prior(self):
         """Build the prior based on model metadata."""
@@ -68,20 +87,31 @@ class GWSamplerMixin(object):
                 # self.likelihood.parameters[key] = self.prior[key].sample()
                 self._fixed_parameter_keys.append(key)
 
-    def _build_domain(self):
-        """
-        Constructs the domain object based on model metadata. Includes the window
-        factor needed for whitening data.
-        """
-        self.domain = build_domain(
-            self.base_model_metadata["dataset_settings"]["domain"]
+    # _build_likelihood is called at the beginning of Sampler.importance_sample
+
+    def _build_likelihood(self, time_marginalization_kwargs: Optional[dict] = None):
+
+        if time_marginalization_kwargs is not None:
+            time_prior = self.prior.pop("geocent_time")
+            if type(time_prior) != Uniform:
+                raise NotImplementedError(
+                    "Only uniform time prior is supported for time marginalization."
+                )
+            time_marginalization_kwargs["t_lower"] = time_prior.minimum
+            time_marginalization_kwargs["t_upper"] = time_prior.maximum
+
+        self.likelihood = StationaryGaussianGWLikelihood(
+            wfg_kwargs=self.base_model_metadata["dataset_settings"][
+                "waveform_generator"
+            ],
+            wfg_domain=build_domain(
+                self.base_model_metadata["dataset_settings"]["domain"]
+            ),
+            data_domain=self.domain,
+            event_data=self.context,
+            t_ref=self.t_ref,
+            time_marginalization_kwargs=time_marginalization_kwargs,
         )
-
-        data_settings = self.base_model_metadata["train_settings"]["data"]
-        if "domain_update" in data_settings:
-            self.domain.update(data_settings["domain_update"])
-
-        self.domain.window_factor = get_window_factor(data_settings["window"])
 
     def _post_correct(self, samples: dict):
         """
@@ -99,21 +129,20 @@ class GWSamplerMixin(object):
         ----------
         samples : dict
         """
-        if self.metadata["event"] is not None:
-            t_event = self.metadata["event"].get("time_event")
+        event_metadata = self.metadata.get("event")
+        if event_metadata is not None:
+            t_event = event_metadata.get("time_event")
             if t_event is not None and t_event != self.t_ref:
                 ra = samples["ra"]
                 time_reference = Time(self.t_ref, format="gps", scale="utc")
                 time_event = Time(t_event, format="gps", scale="utc")
                 longitude_event = time_event.sidereal_time("apparent", "greenwich")
-                longitude_reference = time_reference.sidereal_time("apparent", "greenwich")
+                longitude_reference = time_reference.sidereal_time(
+                    "apparent", "greenwich"
+                )
                 delta_longitude = longitude_event - longitude_reference
                 ra_correction = delta_longitude.rad
                 samples["ra"] = (ra + ra_correction) % (2 * np.pi)
-
-    def _store_metadate(self, **kwargs):
-        super()._store_metadata(**kwargs)
-        # TODO: Store strain data? ASD?
 
 
 class GWSampler(GWSamplerMixin, Sampler):
@@ -127,11 +156,12 @@ class GWSampler(GWSamplerMixin, Sampler):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._initialize_transforms()
+        if self.model is not None:
+            self._initialize_transforms()
 
     def _initialize_transforms(self):
 
-        data_settings = self.model.metadata["train_settings"]["data"]
+        data_settings = self.metadata["train_settings"]["data"]
 
         # preprocessing transforms:
         #   * whiten and scale strain (since the inference network expects standardized
@@ -172,11 +202,12 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._initialize_transforms()
+        if self.model is not None:
+            self._initialize_transforms()
 
     def _initialize_transforms(self):
 
-        data_settings = self.model.metadata["train_settings"]["data"]
+        data_settings = self.metadata["train_settings"]["data"]
         ifo_list = InterferometerList(data_settings["detectors"])
 
         gnpe_time_settings = data_settings.get("gnpe_time_shifts")
@@ -259,7 +290,7 @@ class GWSamplerUnconditional(GWSampler):
         #   the standardization of the correct model, not the base model.
         self.transforms_post = SelectStandardizeRepackageParameters(
             {"inference_parameters": self.inference_parameters},
-            self.model.metadata["train_settings"]["data"]["standardization"],
+            self.metadata["train_settings"]["data"]["standardization"],
             inverse=True,
             as_type="dict",
         )

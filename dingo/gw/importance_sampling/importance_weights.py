@@ -16,6 +16,7 @@ import scipy
 import argparse
 
 from dingo.core.models import PosteriorModel
+from dingo.core.samples_dataset import SamplesDataset
 from dingo.gw.inference.gw_samplers import GWSamplerUnconditional
 from dingo.gw.likelihood import build_stationary_gaussian_likelihood
 from dingo.core.density import train_unconditional_density_estimator
@@ -353,13 +354,17 @@ def main():
     args = parse_args()
     with open(args.settings, "r") as fp:
         settings = yaml.safe_load(fp)
-    samples = pd.read_pickle(settings["nde"]["data"]["parameter_samples"])
-    metadata = samples.attrs
+    samples_dataset = SamplesDataset(
+        file_name=settings["nde"]["data"]["parameter_samples"]
+    )
+    metadata = samples_dataset.settings
+    samples = samples_dataset.samples
     # for time marginalization, we drop geocent time from the samples
-    inference_parameters = metadata["model"]["train_settings"]["data"][
+    inference_parameters = metadata["train_settings"]["data"][
         "inference_parameters"
     ].copy()
-    if "time_marginalization" in settings and "geocent_time" in samples:
+    time_marginalization_kwargs = settings.get("time_marginalization", None)
+    if time_marginalization_kwargs is not None and "geocent_time" in samples:
         samples.drop("geocent_time", axis=1, inplace=True)
         inference_parameters.remove("geocent_time")
     settings["nde"]["data"]["inference_parameters"] = inference_parameters
@@ -391,7 +396,7 @@ def main():
         else:
             print(f"Training new nde for event {event_name}.")
             nde = train_unconditional_density_estimator(
-                samples, settings["nde"], args.outdir
+                samples_dataset, settings["nde"], args.outdir
             )
             print(f"Renaming trained nde model to {nde_name}.")
             rename(join(args.outdir, "model_latest.pt"), nde_name)
@@ -406,11 +411,12 @@ def main():
 
     # build likelihood
     # metadata["model"]["dataset_settings"]["waveform_generator"]["approximant"] = "SEOBNRv4PHM"
-    likelihood = build_stationary_gaussian_likelihood(
-        # this should be set automatically from the samples
-        metadata,
-        settings.get("event_dataset", None),
-    )
+    # likelihood = build_stationary_gaussian_likelihood(
+    #     # this should be set automatically from the samples
+    #     metadata,
+    #     settings.get("event_dataset", None),
+    #     time_marginalization_kwargs=time_marginalization_kwargs,
+    # )
     # # build prior
     # intrinsic_prior = metadata["model"]["dataset_settings"]["intrinsic_prior"]
     # extrinsic_prior = get_extrinsic_prior_dict(
@@ -425,14 +431,19 @@ def main():
     #     likelihood, prior, settings.get("time_marginalization", None)
     # )
 
-    nde_sampler = GWSamplerUnconditional(model=nde, likelihood=likelihood)
+    nde_sampler = GWSamplerUnconditional(model=nde)
     print(f'Generating {settings["num_samples"]} from proposal distribution.')
     nde_sampler.run_sampler(num_samples=settings["num_samples"])
     print(f"Importance sampling.")
-    nde_sampler.importance_sample(num_processes=settings.get("num_processes", 1))
+    nde_sampler.importance_sample(
+        num_processes=settings.get("num_processes", 1),
+        time_marginalization_kwargs=time_marginalization_kwargs,
+    )
 
+    nde_sampler.summary()
+
+    nde_sampler.to_hdf5(label="weighted", outdir=args.outdir)
     samples = nde_sampler.samples
-    samples.to_pickle(join(args.outdir, "weighted_samples.pkl"))
 
     # Step 3: SIR step
     #
