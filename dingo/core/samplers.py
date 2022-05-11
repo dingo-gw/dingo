@@ -195,21 +195,32 @@ class Sampler(object):
         # so we allow for multiprocessing.
 
         breakpoint()
-        num_samples = len(log_prob_proposal)
-
         log_prior = self.prior.ln_prob(theta_all, axis=0)
-        print(f"Calculating {num_samples} likelihoods.")
+
+        # The prior may evaluate to -inf for certain samples. For these, we do not want
+        # to evaluate the likelihood, in particular because it may not even be possible
+        # to generate data outside the prior (e.g., for BH spins > 1). We represent the
+        # log likelihood of such samples as NaN.
+
+        within_prior = log_prior != -np.inf
+        print(f"Calculating {np.sum(within_prior)} likelihoods.")
         t0 = time.time()
-        log_likelihood = self.likelihood.log_likelihood_multi(
-            theta, num_processes=num_processes
+        log_likelihood = np.empty_like(log_prior)
+        log_likelihood[:] = np.nan
+        log_likelihood[within_prior] = self.likelihood.log_likelihood_multi(
+            theta.loc[within_prior], num_processes=num_processes
         )
         print(f"Done. This took {time.time() - t0:.2f} seconds.")
 
         # Calculate weights.
         breakpoint()
-        log_weights = log_prior + log_likelihood - log_prob_proposal
+        log_weights = log_prior
+        log_weights[within_prior] += (
+            log_likelihood[within_prior] - log_prob_proposal[within_prior]
+        )
         weights = np.exp(log_weights - np.max(log_weights))
         weights /= np.mean(weights)
+        breakpoint()
 
         self.samples["weights"] = weights
         self.samples["log_likelihood"] = log_likelihood
