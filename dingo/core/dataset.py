@@ -16,6 +16,8 @@ def recursive_hdf5_save(group, d):
         elif isinstance(v, pd.DataFrame):
             group.create_dataset(k, data=v.to_records(index=False))
         elif isinstance(v, (int, float)):
+            # TODO: Set as an attribute, not a scalar dataset. Maybe do the same for
+            #  the entire contents of the settings dict.
             group.create_dataset(k, data=v)
         else:
             raise TypeError("Cannot save datatype {} as hdf5 dataset.".format(type(v)))

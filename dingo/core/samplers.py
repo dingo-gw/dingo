@@ -36,7 +36,8 @@ class Sampler(object):
 
         # For unconditional models, the context will be stored with the model,
         # so we copy it here. This is necessary for calculating the likelihood for
-        # importance sampling.
+        # importance sampling. However, it will not be used when sampling from the
+        # model, since it is unconditional.
         self.context = self.model.context
 
         if "base" in self.metadata:
@@ -65,6 +66,8 @@ class Sampler(object):
 
     def _run_sampler(self, num_samples: int, context: Optional[dict] = None) -> dict:
 
+        # TODO: Base this on stored context. This requires knowing whether the model is
+        #  conditional or not. Possibly introduce a flag that gets set to indicate this.
         if context is not None:
             x = context.copy()
             x["parameters"] = {}
@@ -148,6 +151,42 @@ class Sampler(object):
 
         self.samples = pd.DataFrame(samples)
 
+    def log_prob(
+        self, samples: pd.DataFrame, context: Optional[dict] = None
+    ) -> np.ndarray:
+
+        # TODO: Base this on stored context.
+
+        # Standardize the sample parameters and place on device.
+        y = samples[self.inference_parameters].to_numpy()
+        standardization = self.metadata["train_settings"]["data"]["standardization"]
+        mean = np.array([standardization["mean"][p] for p in self.inference_parameters])
+        std = np.array([standardization["std"][p] for p in self.inference_parameters])
+        y = (y - mean) / std
+        y = torch.from_numpy(y).to(device=self.model.device, dtype=torch.float32)
+
+        if context is not None:
+            x = context.copy()
+            x["parameters"] = {}
+            x["extrinsic_parameters"] = {}
+
+            # transforms_pre are expected to transform the data in the same way for each
+            # requested sample. We therefore expand it across the batch *after*
+            # pre-processing.
+            x = self.transforms_pre(context)
+            x = x.expand(len(samples), *x.shape)
+
+            self.model.model.eval()
+            with torch.no_grad():
+                log_prob = self.model.model.log_prob(y, x)
+
+        else:
+            self.model.model.eval()
+            with torch.no_grad():
+                log_prob = self.model.model.log_prob(y)
+
+        return log_prob.cpu().numpy()
+
     def _check_context(self, context: Optional[dict] = None):
         # TODO: Add some checks that the context is appropriate.
         pass
@@ -228,7 +267,6 @@ class Sampler(object):
 
         self.log_evidence = logsumexp(log_weights) - np.log(len(self.samples))
         self.effective_sample_size = np.sum(weights) ** 2 / np.sum(weights ** 2)
-        breakpoint()
 
     def write_pesummary(self, filename):
         from pesummary.io import write
@@ -338,3 +376,5 @@ class GNPESampler(Sampler):
         samples = x["parameters"]
 
         return samples
+
+    log_prob = None
