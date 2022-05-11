@@ -52,16 +52,16 @@ class Sampler(object):
         self.inference_parameters = []
         self._build_prior()
         self._build_domain()
-        self._reset_sampler()
+        self._reset_result()
 
         self._pesummary_package = "core"
 
-    def _reset_sampler(self):
+    def _reset_result(self):
         """Clear out all data produced by self.run_sampler(), to prepare for the next
         sampler run."""
         self.samples = None
-        self.injection_parameters = None
         self.log_evidence = None
+        self.effective_sample_size = None
 
     def _run_sampler(self, num_samples: int, context: Optional[dict] = None) -> dict:
 
@@ -124,8 +124,8 @@ class Sampler(object):
             principle influence any post-sampling parameter transformations (e.g.,
             sky position correction).
         """
-        # Reset sampler and store all metadata associated with data.
-        self._reset_sampler()
+        # Reset sampling results and store all metadata associated with data.
+        self._reset_result()
         if context is not None:
             self.metadata["injection_parameters"] = context.pop("parameters", None)
             self.context = context
@@ -194,7 +194,6 @@ class Sampler(object):
         # evaluated at the same sample points. The expensive part is the likelihood,
         # so we allow for multiprocessing.
 
-        breakpoint()
         log_prior = self.prior.ln_prob(theta_all, axis=0)
 
         # The prior may evaluate to -inf for certain samples. For these, we do not want
@@ -212,25 +211,24 @@ class Sampler(object):
         )
         print(f"Done. This took {time.time() - t0:.2f} seconds.")
 
-        # Calculate weights.
-        breakpoint()
+        # Calculate weights, careful to handle samples where the likelihood was not
+        # evaluated.
         log_weights = log_prior
         log_weights[within_prior] += (
             log_likelihood[within_prior] - log_prob_proposal[within_prior]
         )
         weights = np.exp(log_weights - np.max(log_weights))
         weights /= np.mean(weights)
-        breakpoint()
 
         self.samples["weights"] = weights
         self.samples["log_likelihood"] = log_likelihood
         self.samples["log_prior"] = log_prior
-        # Note that self.samples['log_prob'] is the proposal log_prob, not the
+        # Note that self.samples['log_prob'] is the *proposal* log_prob, not the
         # importance_weighted log_prob.
 
-        self.log_evidence = logsumexp(log_weights) - float(np.log(num_samples))
-
-        # self._generate_result()
+        self.log_evidence = logsumexp(log_weights) - np.log(len(self.samples))
+        self.effective_sample_size = np.sum(weights) ** 2 / np.sum(weights ** 2)
+        breakpoint()
 
     def write_pesummary(self, filename):
         from pesummary.io import write
@@ -245,21 +243,29 @@ class Sampler(object):
         )
         # TODO: Save much more information.
 
-    def to_hdf5(self, label="", outdir="."):
-        save_dict = {
+    def to_samples_dataset(self) -> SamplesDataset:
+        data_dict = {
             "settings": self.metadata,
             "samples": self.samples,
             "context": self.context,
             "log_evidence": self.log_evidence,
+            "effective_sample_size": self.effective_sample_size,
         }
-        dataset = SamplesDataset(dictionary=save_dict)
+        return SamplesDataset(dictionary=data_dict)
 
+    def to_hdf5(self, label="", outdir="."):
+        dataset = self.to_samples_dataset()
         file_name = "dingo_samples_" + label + ".hdf5"
         dataset.to_file(file_name=Path(outdir, file_name))
 
-    def summary(self):
+    def print_summary(self):
         print("Number of samples:", len(self.samples))
-        print("log_evidence:", self.log_evidence)
+        if self.log_evidence is not None:
+            print("Log(evidence):", self.log_evidence)
+            print(
+                f"Effective sample size: {self.effective_sample_size:.1f} "
+                f"({100 * self.effective_sample_size / len(self.samples):.2f}%)"
+            )
 
 
 class GNPESampler(Sampler):

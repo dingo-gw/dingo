@@ -16,6 +16,7 @@ import scipy
 import argparse
 
 from dingo.core.models import PosteriorModel
+from dingo.core.samplers import Sampler
 from dingo.core.samples_dataset import SamplesDataset
 from dingo.gw.inference.gw_samplers import GWSamplerUnconditional
 from dingo.gw.likelihood import build_stationary_gaussian_likelihood
@@ -192,11 +193,9 @@ def get_evidence(log_probs_target, log_probs_proposal):
 
 
 def plot_posterior_slice(
-    posterior,
-    nde,
+    sampler,
     theta,
     theta_range,
-    log_evidence,
     outname=None,
     num_processes=1,
     n_grid=200,
@@ -216,8 +215,9 @@ def plot_posterior_slice(
         theta_param[param] = param_axis
         # evaluate the posterior at theta_grid
         log_probs_target = (
-            posterior.log_prob_multiprocessing(theta_param, num_processes)
-            - log_evidence
+            sampler.likelihood.log_likelihood_multi(theta_param, num_processes)
+            + sampler.prior.ln_prob(theta_param, axis=0)
+            - sampler.log_evidence
         )
         # evaluate nde at theta_grid
         log_probs_proposal = get_log_probs_from_proposal(nde, theta_param)
@@ -237,29 +237,41 @@ def plot_posterior_slice(
 
 
 def plot_diagnostics(
-    theta,
+    sampler: Sampler,
     outdir,
     theta_slice_plots=None,
-    posterior=None,
-    nde=None,
     num_processes=1,
     n_grid=200,
 ):
-    weights = np.array(theta.pop("weights"))
-    # compute ESS
-    ESS = get_ESS(weights)
-    log_probs_proposal = np.array(theta["log_probs_proposal"])
-    log_probs_target = np.array(theta.pop("log_probs_target"))
-    print(f"Number of samples:             {len(weights)}")
-    print(f"Effective sample size (ESS):   {ESS:.0f} ({100 * ESS / len(weights):.2f}%)")
-    # Compute log_evidence
-    log_evidence = get_evidence(log_probs_target, log_probs_proposal)
-    print(f"Log evidence:                  {log_evidence:.2f}")
-    # Normalize target log_probs
-    log_probs_target = log_probs_target - log_evidence
+    # weights = np.array(theta.pop("weights"))
+    # # compute ESS
+    # ESS = get_ESS(weights)
+    # log_probs_proposal = np.array(theta["log_probs_proposal"])
+    # log_probs_target = np.array(theta.pop("log_probs_target"))
+    # print(f"Number of samples:             {len(weights)}")
+    # print(f"Effective sample size (ESS):   {ESS:.0f} ({100 * ESS / len(weights):.2f}%)")
+    # # Compute log_evidence
+    # log_evidence = get_evidence(log_probs_target, log_probs_proposal)
+    # print(f"Log evidence:                  {log_evidence:.2f}")
+    # # Normalize target log_probs
+    # log_probs_target = log_probs_target - log_evidence
+
+    theta = sampler.samples
+    weights = theta['weights'].to_numpy()
+    log_probs_proposal = theta['log_prob'].to_numpy()
+
+    log_prior = theta['log_prior'].to_numpy()
+    log_likelihood = theta['log_likelihood'].to_numpy()
+    within_prior = log_prior != -np.inf
+    log_probs_target = log_prior.copy()
+    log_probs_target[within_prior] += log_likelihood[within_prior]
+
+    ESS = sampler.effective_sample_size
+    log_evidence = sampler.log_evidence
 
     # Plot weights
     plt.clf()
+
     y = weights / np.mean(weights)
     x = log_probs_proposal
     plt.xlabel("proposal log_prob")
@@ -295,8 +307,6 @@ def plot_diagnostics(
     plt.savefig(join(outdir, "log_probs.png"))
 
     if theta_slice_plots is not None:
-        if posterior is None or nde is None:
-            raise ValueError("Must provide posterior and nde.")
         # global range for parameter scan
         theta_range = {
             k: (np.min(theta[k]), np.max(theta[k])) for k in theta_slice_plots.columns
@@ -304,11 +314,9 @@ def plot_diagnostics(
         # generate slice plots for each theta sample
         for idx, (_, theta_idx) in enumerate(theta_slice_plots.iterrows()):
             plot_posterior_slice(
-                posterior,
-                nde,
+                sampler,
                 theta_idx,
                 theta_range,
-                log_evidence,
                 num_processes=num_processes,
                 outname=join(outdir, f"theta_{idx}_posterior_slice.pdf"),
                 n_grid=n_grid,
@@ -379,7 +387,7 @@ def main():
     # sample from the dingo posterior, such that one can easily train an unconditional
     # nde to recover the posterior density.
 
-    if not "log_prob" in samples.columns:
+    if "log_prob" not in samples.columns:
         event_name = str(
             metadata["event"]["time_event"]
         )  # use gps time as name for now
@@ -440,7 +448,7 @@ def main():
         time_marginalization_kwargs=time_marginalization_kwargs,
     )
 
-    nde_sampler.summary()
+    nde_sampler.print_summary()
 
     nde_sampler.to_hdf5(label="weighted", outdir=args.outdir)
     samples = nde_sampler.samples
@@ -489,7 +497,7 @@ def main():
         makedirs(diagnostics_dir)
     if settings.get("n_slice_plots", 0) > 0:
         theta_slice_plots = samples.sample(settings["n_slice_plots"]).drop(
-            columns=["weights", "log_probs_proposal", "log_probs_target"]
+            columns=["weights", "log_prob", "log_prior", "log_likelihood"]
         )
     else:
         theta_slice_plots = None
@@ -497,11 +505,9 @@ def main():
     #     columns=["weights", "log_probs_proposal", "log_probs_target"]
     # )
     plot_diagnostics(
-        samples,
+        nde_sampler,
         diagnostics_dir,
         theta_slice_plots=theta_slice_plots,
-        posterior=posterior,
-        nde=nde,
         num_processes=settings.get("num_processes", 1),
     )
 

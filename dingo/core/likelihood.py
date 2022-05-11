@@ -9,7 +9,9 @@ class Likelihood(object):
     def log_likelihood(self, theta):
         raise NotImplementedError("log_likelihood() should be implemented in subclass.")
 
-    def log_likelihood_multi(self, theta: pd.DataFrame, num_processes: int = 1) -> np.ndarray:
+    def log_likelihood_multi(
+        self, theta: pd.DataFrame, num_processes: int = 1
+    ) -> np.ndarray:
         """
         Calculate the log likelihood at multiple points in parameter space. Works with
         multiprocessing.
@@ -18,8 +20,8 @@ class Likelihood(object):
 
         Parameters
         ----------
-        theta : dict
-            Parameter dictionary. Each value is expected to be a numpy array.
+        theta : pd.DataFrame
+            Parameters values at which to evaluate likelihood.
         num_processes : int
             Number of processes to use.
 

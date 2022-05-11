@@ -10,5 +10,6 @@ class SamplesDataset(DingoDataset):
                 "samples",
                 "context",
                 "log_evidence",
+                "effective_sample_size",
             ],
         )
