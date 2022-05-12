@@ -237,34 +237,41 @@ class Sampler(object):
 
         # The prior may evaluate to -inf for certain samples. For these, we do not want
         # to evaluate the likelihood, in particular because it may not even be possible
-        # to generate data outside the prior (e.g., for BH spins > 1). We represent the
-        # log likelihood of such samples as NaN.
+        # to generate data outside the prior (e.g., for BH spins > 1). Since there is
+        # no point in keeping these samples, we simply drop them; this means we do not
+        # have to make special exceptions for outside-prior samples elsewhere in the
+        # code. Moreover, they do not contribute to the evidence or the effective sample
+        # size, so we are not losing anything useful.
 
         within_prior = log_prior != -np.inf
-        print(f"Calculating {np.sum(within_prior)} likelihoods.")
+        if len(self.samples) != np.sum(within_prior):
+            print(f"Of {len(self.samples)} samples, "
+                  f"{len(self.samples) - np.sum(within_prior)} lie outside the prior. "
+                  f"Dropping these.")
+            theta = theta.iloc[within_prior].reset_index(drop=True)
+            log_prob_proposal = log_prob_proposal[within_prior]
+            log_prior = log_prior[within_prior]
+
+        print(f"Calculating {len(theta)} likelihoods.")
         t0 = time.time()
-        log_likelihood = np.empty_like(log_prior)
-        log_likelihood[:] = np.nan
-        log_likelihood[within_prior] = self.likelihood.log_likelihood_multi(
-            theta.loc[within_prior], num_processes=num_processes
+        log_likelihood = self.likelihood.log_likelihood_multi(
+            theta, num_processes=num_processes
         )
         print(f"Done. This took {time.time() - t0:.2f} seconds.")
 
-        # Calculate weights, careful to handle samples where the likelihood was not
-        # evaluated.
-        log_weights = log_prior
-        log_weights[within_prior] += (
-            log_likelihood[within_prior] - log_prob_proposal[within_prior]
-        )
+        # Calculate weights.
+        log_weights = log_prior + log_likelihood - log_prob_proposal
         weights = np.exp(log_weights - np.max(log_weights))
         weights /= np.mean(weights)
 
+        # Repackage samples along with weights, etc.
+        self.samples = theta
+        self.samples["log_prob"] = log_prob_proposal  # Proposal log_prob, not target!
         self.samples["weights"] = weights
         self.samples["log_likelihood"] = log_likelihood
         self.samples["log_prior"] = log_prior
-        # Note that self.samples['log_prob'] is the *proposal* log_prob, not the
-        # importance_weighted log_prob.
 
+        # Calculate scalar results.
         self.log_evidence = logsumexp(log_weights) - np.log(len(self.samples))
         self.effective_sample_size = np.sum(weights) ** 2 / np.sum(weights ** 2)
 

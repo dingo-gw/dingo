@@ -500,8 +500,6 @@ def main():
         theta_slice_plots = samples.sample(settings["n_slice_plots"]).drop(
             columns=["weights", "log_prob", "log_prior", "log_likelihood"]
         )
-        log_prior = nde_sampler.prior.ln_prob(theta_slice_plots, axis=0)
-        theta_slice_plots = theta_slice_plots.iloc[log_prior != -np.inf]
     else:
         theta_slice_plots = None
     # theta_slice_plots = theta.iloc[[np.argmax(theta["log_probs_target"])]].drop(
