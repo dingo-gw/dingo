@@ -34,11 +34,17 @@ class Sampler(object):
         self.model = model
         self.metadata = self.model.metadata.copy()
 
-        # For unconditional models, the context will be stored with the model,
-        # so we copy it here. This is necessary for calculating the likelihood for
-        # importance sampling. However, it will not be used when sampling from the
-        # model, since it is unconditional.
-        self.context = self.model.context
+        if "parameter_samples" in self.metadata["train_settings"]["data"]:
+            self.unconditional_model = True
+
+            # For unconditional models, the context will be stored with the model. It
+            # is needed for calculating the likelihood for importance sampling.
+            # However, it will not be used when sampling from the model, since it is
+            # unconditional.
+            self.context = self.model.context
+        else:
+            self.unconditional_model = False
+            self.context = None
 
         if "base" in self.metadata:
             self.base_model_metadata = self.metadata["base"]
@@ -64,11 +70,38 @@ class Sampler(object):
         self.log_evidence = None
         self.effective_sample_size = None
 
-    def _run_sampler(self, num_samples: int, context: Optional[dict] = None) -> dict:
+    @property
+    def context(self):
+        """Data on which to condition the sampler. For injections, there should be a
+        'parameters' key with truth values."""
+        return self._context
 
-        # TODO: Base this on stored context. This requires knowing whether the model is
-        #  conditional or not. Possibly introduce a flag that gets set to indicate this.
-        if context is not None:
+    @context.setter
+    def context(self, value):
+        if value is not None:
+            self._check_context(value)
+            if "parameters" in value:
+                self.metadata["injection_parameters"] = value.pop("parameters")
+        self._context = value
+
+    def _check_context(self, context: Optional[dict] = None):
+        # TODO: Add some checks that the context is appropriate.
+        pass
+
+    @property
+    def event_metadata(self):
+        """Metadata for data analyzed. Can in principle influence any post-sampling
+        parameter transformations (e.g., sky position correction)."""
+        return self.metadata.get("event")
+
+    @event_metadata.setter
+    def event_metadata(self, value):
+        self.metadata["event"] = value
+
+    def _run_sampler(self, num_samples: int, context: Optional[dict] = None) -> dict:
+        if not self.unconditional_model:
+            if context is None:
+                raise ValueError("Context required to run sampler.")
             x = context.copy()
             x["parameters"] = {}
             x["extrinsic_parameters"] = {}
@@ -78,69 +111,64 @@ class Sampler(object):
             # pre-processing.
             x = self.transforms_pre(context)
             x = x.expand(num_samples, *x.shape)
-
-            # For a normalizing flow, we get the log_prob for "free" when sampling,
-            # so we always include this. For other architectures, it may make sense to
-            # have a flag for whether to calculate the log_prob.
-            self.model.model.eval()
-            with torch.no_grad():
-                y, log_prob = self.model.model.sample_and_log_prob(x)
-
+            x = [x]
+            # The number of samples is expressed via the first dimension of x,
+            # so we must pass num_samples = 1 to sample_and_log_prob().
+            num_samples = 1
         else:
-            self.model.model.eval()
-            with torch.no_grad():
-                y, log_prob = self.model.model.sample_and_log_prob(
-                    num_samples=num_samples
-                )
+            if context is not None:
+                raise ValueError("Context should not be passed to an unconditional "
+                                 "sampler.")
+            x = []
+
+        # For a normalizing flow, we get the log_prob for "free" when sampling,
+        # so we always include this. For other architectures, it may make sense to
+        # have a flag for whether to calculate the log_prob.
+        self.model.model.eval()
+        with torch.no_grad():
+            y, log_prob = self.model.model.sample_and_log_prob(
+                *x, num_samples=num_samples
+            )
 
         samples = self.transforms_post({"parameters": y, "log_prob": log_prob})
         result = samples["parameters"]
         result["log_prob"] = samples["log_prob"]
-
         return result
 
     def run_sampler(
         self,
         num_samples: int,
-        context: Optional[dict] = None,
         batch_size: Optional[int] = None,
-        event_metadata: Optional[dict] = None,
     ):
         """
-        Generates samples and stores them along with metadata in self.
+        Generates samples and stores them as class attribute.
 
-        Allows for batched sampling, e.g., if limited by GPU memory.
-
-        Actual sampling is performed by self._run_sampler().
+        Allows for batched sampling, e.g., if limited by GPU memory. Actual sampling is
+        performed by self._run_sampler().
 
         Parameters
         ----------
         num_samples : int
             Number of samples requested.
-        context : dict, optional
-            Data on which to condition the sampler.
-            For injections, there should be a 'parameters' key with truth values.
         batch_size : int, optional
             Batch size for sampler.
-        event_metadata : dict, optional
-            Metadata for data analyzed. Stored along with sample metadata, and can in
-            principle influence any post-sampling parameter transformations (e.g.,
-            sky position correction).
         """
-        # Reset sampling results and store all metadata associated with data.
         self._reset_result()
-        if context is not None:
-            self.metadata["injection_parameters"] = context.pop("parameters", None)
-            self.context = context
-        self.metadata["event"] = event_metadata
-        self._check_context(context)
+        if not self.unconditional_model:
+            if self.context is None:
+                raise ValueError("Context must be set in order to run sampler.")
+            context = self.context
+        else:
+            context = None
 
         # Carry out batched sampling by calling _run_sample() on each batch and
         # consolidating the results.
         if batch_size is None:
             batch_size = num_samples
         full_batches, remainder = divmod(num_samples, batch_size)
-        samples = [self._run_sampler(batch_size, context) for _ in range(full_batches)]
+        samples = [
+            self._run_sampler(batch_size, context) for _ in range(full_batches)
+        ]
         if remainder > 0:
             samples.append(self._run_sampler(remainder, context))
         samples = {p: torch.cat([s[p] for s in samples]) for p in samples[0].keys()}
@@ -148,14 +176,23 @@ class Sampler(object):
         # Apply any post-sampling corrections to sampled parameters, and place on CPU.
         self._post_correct(samples)
         samples = {k: v.cpu().numpy() for k, v in samples.items()}
-
         self.samples = pd.DataFrame(samples)
 
-    def log_prob(
-        self, samples: pd.DataFrame, context: Optional[dict] = None
-    ) -> np.ndarray:
+    def log_prob(self, samples: pd.DataFrame) -> np.ndarray:
+        """
+        Calculate the model log probability at specific sample points.
 
-        # TODO: Base this on stored context.
+        Parameters
+        ----------
+        samples : pd.DataFrame
+            Sample points at which to calculate the log probability.
+
+        Returns
+        -------
+        np.array of log probabilities.
+        """
+        if self.context is None and not self.unconditional_model:
+            raise ValueError("Context must be set in order to run sampler.")
 
         # Standardize the sample parameters and place on device.
         y = samples[self.inference_parameters].to_numpy()
@@ -165,31 +202,24 @@ class Sampler(object):
         y = (y - mean) / std
         y = torch.from_numpy(y).to(device=self.model.device, dtype=torch.float32)
 
-        if context is not None:
-            x = context.copy()
+        if not self.unconditional_model:
+            x = self.context.copy()
             x["parameters"] = {}
             x["extrinsic_parameters"] = {}
 
-            # transforms_pre are expected to transform the data in the same way for each
-            # requested sample. We therefore expand it across the batch *after*
+            # Context is the same for each sample. Expand across batch dimension after
             # pre-processing.
-            x = self.transforms_pre(context)
+            x = self.transforms_pre(self.context)
             x = x.expand(len(samples), *x.shape)
-
-            self.model.model.eval()
-            with torch.no_grad():
-                log_prob = self.model.model.log_prob(y, x)
-
+            x = [x]
         else:
-            self.model.model.eval()
-            with torch.no_grad():
-                log_prob = self.model.model.log_prob(y)
+            x = []
+
+        self.model.model.eval()
+        with torch.no_grad():
+            log_prob = self.model.model.log_prob(y, *x)
 
         return log_prob.cpu().numpy()
-
-    def _check_context(self, context: Optional[dict] = None):
-        # TODO: Add some checks that the context is appropriate.
-        pass
 
     def _post_correct(self, samples: dict):
         pass
@@ -244,10 +274,13 @@ class Sampler(object):
         # size, so we are not losing anything useful.
 
         within_prior = log_prior != -np.inf
-        if len(self.samples) != np.sum(within_prior):
-            print(f"Of {len(self.samples)} samples, "
-                  f"{len(self.samples) - np.sum(within_prior)} lie outside the prior. "
-                  f"Dropping these.")
+        num_samples = len(self.samples)
+        if num_samples != np.sum(within_prior):
+            print(
+                f"Of {num_samples} samples, "
+                f"{num_samples - np.sum(within_prior)} lie outside the prior. "
+                f"Dropping these."
+            )
             theta = theta.iloc[within_prior].reset_index(drop=True)
             log_prob_proposal = log_prob_proposal[within_prior]
             log_prior = log_prior[within_prior]
@@ -271,8 +304,9 @@ class Sampler(object):
         self.samples["log_likelihood"] = log_likelihood
         self.samples["log_prior"] = log_prior
 
-        # Calculate scalar results.
-        self.log_evidence = logsumexp(log_weights) - np.log(len(self.samples))
+        # When calculating log(evidence), use the *original* number of samples in the
+        # subtraction of log(num_samples).
+        self.log_evidence = logsumexp(log_weights) - np.log(num_samples)
         self.effective_sample_size = np.sum(weights) ** 2 / np.sum(weights ** 2)
 
     def write_pesummary(self, filename):
@@ -358,8 +392,9 @@ class GNPESampler(Sampler):
         self.metadata["num_iterations"] = self._num_iterations
 
     def _run_sampler(self, num_samples: int, context: Optional[dict] = None) -> dict:
+        if context is None:
+            raise ValueError("self.context must be set to run sampler.")
 
-        assert context is not None
         data_ = self.init_sampler.transforms_pre(context)
 
         x = {

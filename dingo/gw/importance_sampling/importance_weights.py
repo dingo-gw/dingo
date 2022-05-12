@@ -441,7 +441,7 @@ def main():
     # )
 
     nde_sampler = GWSamplerUnconditional(model=nde)
-    print(f'Generating {settings["num_samples"]} from proposal distribution.')
+    print(f'Generating {settings["num_samples"]} samples from proposal distribution.')
     nde_sampler.run_sampler(num_samples=settings["num_samples"])
     print(f"Importance sampling.")
     nde_sampler.importance_sample(

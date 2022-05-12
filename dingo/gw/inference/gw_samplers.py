@@ -92,6 +92,9 @@ class GWSamplerMixin(object):
     def _build_likelihood(self, time_marginalization_kwargs: Optional[dict] = None):
 
         if time_marginalization_kwargs is not None:
+            # This is producing the side effect of removing 'geocent_time' from the
+            # prior, which will be necessary to evaluate on the samples (which do not
+            # contain 'geocent_time').
             time_prior = self.prior.pop("geocent_time")
             if type(time_prior) != Uniform:
                 raise NotImplementedError(
@@ -129,9 +132,8 @@ class GWSamplerMixin(object):
         ----------
         samples : dict
         """
-        event_metadata = self.metadata.get("event")
-        if event_metadata is not None:
-            t_event = event_metadata.get("time_event")
+        if self.event_metadata is not None:
+            t_event = self.event_metadata.get("time_event")
             if t_event is not None and t_event != self.t_ref:
                 ra = samples["ra"]
                 time_reference = Time(self.t_ref, format="gps", scale="utc")

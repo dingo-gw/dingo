@@ -162,17 +162,15 @@ def analyze_event():
             args.time_buffer,
             args.event_dataset,
         )
-
-        event_metadata = {
+        sampler.context = event_data
+        sampler.event_metadata = {
             "time_event": time_event,
             "time_psd": args.time_psd,
             "time_buffer": args.time_buffer,
         }
         sampler.run_sampler(
             args.num_samples,
-            context=event_data,
             batch_size=args.batch_size,
-            event_metadata=event_metadata,
         )
 
         # if no reference samples are available, simply save the dingo samples
