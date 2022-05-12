@@ -51,8 +51,8 @@ class Sampler(object):
         else:
             self.base_model_metadata = self.metadata
 
-        self.transforms_pre = Compose([])
-        self.transforms_post = Compose([])
+        self.transform_pre = Compose([])
+        self.transform_post = Compose([])
         self._search_parameter_keys = []
         self._constraint_parameter_keys = []
         self._fixed_parameter_keys = []
@@ -111,7 +111,7 @@ class Sampler(object):
             # transforms_pre are expected to transform the data in the same way for each
             # requested sample. We therefore expand it across the batch *after*
             # pre-processing.
-            x = self.transforms_pre(context)
+            x = self.transform_pre(context)
             x = x.expand(num_samples, *x.shape)
             x = [x]
             # The number of samples is expressed via the first dimension of x,
@@ -132,7 +132,7 @@ class Sampler(object):
                 *x, num_samples=num_samples
             )
 
-        samples = self.transforms_post({"parameters": y, "log_prob": log_prob})
+        samples = self.transform_post({"parameters": y, "log_prob": log_prob})
         result = samples["parameters"]
         result["log_prob"] = samples["log_prob"]
         return result
@@ -146,7 +146,7 @@ class Sampler(object):
         Generates samples and stores them as class attribute.
 
         Allows for batched sampling, e.g., if limited by GPU memory. Actual sampling is
-        performed by self._run_sampler().
+        performed by _run_sampler().
 
         Parameters
         ----------
@@ -211,7 +211,7 @@ class Sampler(object):
 
             # Context is the same for each sample. Expand across batch dimension after
             # pre-processing.
-            x = self.transforms_pre(self.context)
+            x = self.transform_pre(self.context)
             x = x.expand(len(samples), *x.shape)
             x = [x]
         else:
@@ -397,7 +397,7 @@ class GNPESampler(Sampler):
         if context is None:
             raise ValueError("self.context must be set to run sampler.")
 
-        data_ = self.init_sampler.transforms_pre(context)
+        data_ = self.init_sampler.transform_pre(context)
 
         x = {
             "extrinsic_parameters": self.init_sampler._run_sampler(
@@ -413,9 +413,9 @@ class GNPESampler(Sampler):
             d = data_.clone()
             x["data"] = d.expand(num_samples, *d.shape)
 
-            x = self.transforms_pre(x)
+            x = self.transform_pre(x)
             x["parameters"] = self.model.sample(x["data"], x["context_parameters"])
-            x = self.transforms_post(x)
+            x = self.transform_post(x)
 
         samples = x["parameters"]
 

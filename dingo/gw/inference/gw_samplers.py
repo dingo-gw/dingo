@@ -168,8 +168,12 @@ class GWSampler(GWSamplerMixin, Sampler):
     This is intended for use either as a standalone sampler, or as a sampler producing
     initial sample points for a GNPE sampler.
     """
-
     def __init__(self, **kwargs):
+        """
+        Parameters
+        ----------
+        model : PosteriorModel
+        """
         super().__init__(**kwargs)
         if self.model is not None:
             self._initialize_transforms()
@@ -184,7 +188,7 @@ class GWSampler(GWSamplerMixin, Sampler):
         #   * repackage strains and asds from dicts to an array
         #   * convert array to torch tensor on the correct device
         #   * extract only strain/waveform from the sample
-        self.transforms_pre = Compose(
+        self.transform_pre = Compose(
             [
                 WhitenAndScaleStrain(self.domain.noise_std),
                 RepackageStrainsAndASDS(
@@ -198,7 +202,7 @@ class GWSampler(GWSamplerMixin, Sampler):
 
         # postprocessing transforms:
         #   * de-standardize data and extract inference parameters
-        self.transforms_post = SelectStandardizeRepackageParameters(
+        self.transform_post = SelectStandardizeRepackageParameters(
             {"inference_parameters": self.inference_parameters},
             data_settings["standardization"],
             inverse=True,
@@ -216,12 +220,25 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
     """
 
     def __init__(self, **kwargs):
+        """
+
+        Parameters
+        ----------
+        model : PosteriorModel
+            GNPE model.
+        init_model : PosteriodModel
+            Used to produce samples for initializing the GNPE loop.
+        num_iterations :
+            Number of GNPE iterations to be performed by sampler.
+        """
         super().__init__(**kwargs)
         if self.model is not None:
             self._initialize_transforms()
 
     def _initialize_transforms(self):
-
+        """
+        Builds the transforms that are used in the GNPE loop.
+        """
         data_settings = self.metadata["train_settings"]["data"]
         ifo_list = InterferometerList(data_settings["detectors"])
 
@@ -239,9 +256,9 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
         #   * shifting the strain by - gnpe proxies
         #   * repackaging & standardizing proxies to sample['context_parameters']
         #     for conditioning of the inference network
-        transforms_pre = [RenameKey("data", "waveform")]
+        transform_pre = [RenameKey("data", "waveform")]
         if gnpe_time_settings:
-            transforms_pre.append(
+            transform_pre.append(
                 GNPECoalescenceTimes(
                     ifo_list,
                     gnpe_time_settings["kernel"],
@@ -249,38 +266,38 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                     inference=True,
                 )
             )
-            transforms_pre.append(TimeShiftStrain(ifo_list, self.domain))
+            transform_pre.append(TimeShiftStrain(ifo_list, self.domain))
         if gnpe_chirp_settings:
-            transforms_pre.append(
+            transform_pre.append(
                 GNPEChirp(
                     gnpe_chirp_settings["kernel"],
                     self.domain,
                     gnpe_chirp_settings.get("order", 0),
                 )
             )
-        transforms_pre.append(
+        transform_pre.append(
             SelectStandardizeRepackageParameters(
                 {"context_parameters": data_settings["context_parameters"]},
                 data_settings["standardization"],
                 device=self.model.device,
             )
         )
-        transforms_pre.append(RenameKey("waveform", "data"))
+        transform_pre.append(RenameKey("waveform", "data"))
 
         self.gnpe_parameters = []
-        for transform in transforms_pre:
+        for transform in transform_pre:
             if isinstance(transform, GNPEBase):
                 self.gnpe_parameters += transform.input_parameter_names
         print("GNPE parameters: ", self.gnpe_parameters)
 
-        self.transforms_pre = Compose(transforms_pre)
+        self.transform_pre = Compose(transform_pre)
 
         # transforms for gnpe loop, to be applied after sampling step:
         #   * de-standardization of parameters
         #   * post correction for geocent time (required for gnpe with exact equivariance)
         #   * computation of detectortimes from parameters (required for next gnpe
         #       iteration)
-        self.transforms_post = Compose(
+        self.transform_post = Compose(
             [
                 SelectStandardizeRepackageParameters(
                     {"inference_parameters": self.inference_parameters},
@@ -299,11 +316,10 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
 
 class GWSamplerUnconditional(GWSampler):
     def _initialize_transforms(self):
-
         # Postprocessing transform only:
         #   * De-standardize data and extract inference parameters. Be careful to use
         #   the standardization of the correct model, not the base model.
-        self.transforms_post = SelectStandardizeRepackageParameters(
+        self.transform_post = SelectStandardizeRepackageParameters(
             {"inference_parameters": self.inference_parameters},
             self.metadata["train_settings"]["data"]["standardization"],
             inverse=True,
