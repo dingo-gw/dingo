@@ -42,32 +42,13 @@ class GWSamplerMixin(object):
             Keyword arguments that are forwarded to the superclass.
         """
         super().__init__(**kwargs)
-
-        self.inference_parameters = self.metadata["train_settings"]["data"][
-            "inference_parameters"
-        ]
         self.t_ref = self.base_model_metadata["train_settings"]["data"]["ref_time"]
         self._pesummary_package = "gw"
 
-    # _build_domain amd _build_prior are called by Sampler.__init__, in that order.
-
-    def _build_domain(self):
-        """
-        Constructs the domain object based on model metadata. Includes the window
-        factor needed for whitening data.
-        """
-        self.domain = build_domain(
-            self.base_model_metadata["dataset_settings"]["domain"]
-        )
-
-        data_settings = self.base_model_metadata["train_settings"]["data"]
-        if "domain_update" in data_settings:
-            self.domain.update(data_settings["domain_update"])
-
-        self.domain.window_factor = get_window_factor(data_settings["window"])
+    # _build_prior and _build_domain are called by Sampler.__init__, in that order.
 
     def _build_prior(self):
-        """Build the prior based on model metadata."""
+        """Build the prior based on model metadata. Called by __init__()."""
 
         intrinsic_prior = self.base_model_metadata["dataset_settings"][
             "intrinsic_prior"
@@ -87,21 +68,53 @@ class GWSamplerMixin(object):
                 # self.likelihood.parameters[key] = self.prior[key].sample()
                 self._fixed_parameter_keys.append(key)
 
+        # Split off prior over geocent_time if samples appear to be time-marginalized.
+        # This needs to be saved to initialize the likelihood.
+        if 'geocent_time' in self.prior.keys() and 'geocent_time' not in \
+                self.inference_parameters:
+            self.geocent_time_prior = self.prior.pop('geocent_time')
+        else:
+            self.geocent_time_prior = None
+
+    def _build_domain(self):
+        """
+        Construct the domain object based on model metadata. Includes the window factor
+        needed for whitening data.
+
+        Called by __init__() immediately after _build_prior().
+        """
+        self.domain = build_domain(
+            self.base_model_metadata["dataset_settings"]["domain"]
+        )
+
+        data_settings = self.base_model_metadata["train_settings"]["data"]
+        if "domain_update" in data_settings:
+            self.domain.update(data_settings["domain_update"])
+
+        self.domain.window_factor = get_window_factor(data_settings["window"])
+
     # _build_likelihood is called at the beginning of Sampler.importance_sample
 
     def _build_likelihood(self, time_marginalization_kwargs: Optional[dict] = None):
+        """
+        Build the likelihood function based on model metadata. This is called at the
+        beginning of importance_sample().
 
-        if time_marginalization_kwargs is not None:
-            # This is producing the side effect of removing 'geocent_time' from the
-            # prior, which will be necessary to evaluate on the samples (which do not
-            # contain 'geocent_time').
-            time_prior = self.prior.pop("geocent_time")
-            if type(time_prior) != Uniform:
+        Parameters
+        ----------
+        time_marginalization_kwargs
+        """
+
+        if self.geocent_time_prior is not None:
+            if time_marginalization_kwargs is not None:
+                raise NotImplementedError("Time marginalization is not compatible with "
+                                          "non-marginalized network.")
+            if type(self.time_prior) != Uniform:
                 raise NotImplementedError(
                     "Only uniform time prior is supported for time marginalization."
                 )
-            time_marginalization_kwargs["t_lower"] = time_prior.minimum
-            time_marginalization_kwargs["t_upper"] = time_prior.maximum
+            time_marginalization_kwargs["t_lower"] = self.time_prior.minimum
+            time_marginalization_kwargs["t_upper"] = self.time_prior.maximum
 
         self.likelihood = StationaryGaussianGWLikelihood(
             wfg_kwargs=self.base_model_metadata["dataset_settings"][

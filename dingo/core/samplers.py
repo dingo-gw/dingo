@@ -12,7 +12,7 @@ from dingo.core.models import PosteriorModel
 from dingo.core.samples_dataset import SamplesDataset
 
 #
-# Sampler classes are based on Bilby Samplers.
+# Sampler classes are motivated by the approach of Bilby.
 #
 
 
@@ -56,7 +56,9 @@ class Sampler(object):
         self._search_parameter_keys = []
         self._constraint_parameter_keys = []
         self._fixed_parameter_keys = []
-        self.inference_parameters = []
+        self.inference_parameters = self.metadata["train_settings"]["data"][
+            "inference_parameters"
+        ]
         self._build_prior()
         self._build_domain()
         self._reset_result()
