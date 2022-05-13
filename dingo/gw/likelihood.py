@@ -79,7 +79,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         self.psi = -2 * np.sum(
             [
                 np.sum(np.log(np.sqrt(2 * np.pi) * asd * self.data_domain.noise_std))
-                for asd in self.asds.values()
+                for asd in self.asd.values()
             ]
         )
 
