@@ -160,6 +160,8 @@ class GWSignal(object):
             asd = self._asd
         elif isinstance(self._asd, ASDDataset):
             asd = self._asd.sample_random_asds()
+        elif self._asd is None:
+            return None
         else:
             raise TypeError("Invalid ASD type.")
         asd = {

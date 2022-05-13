@@ -118,7 +118,8 @@ class WaveformGenerator:
         elif not isinstance(list(parameters.values())[0], float):
             raise ValueError('parameters dictionary must contain floats', parameters)
 
-        # Include reference frequency with the parameters
+        # Include reference frequency with the parameters. Copy the dict first for safety.
+        parameters = parameters.copy()
         parameters['f_ref'] = self.f_ref
 
         # Convert to lalsimulation parameters according to the specified domain
