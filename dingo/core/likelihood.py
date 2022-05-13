@@ -30,11 +30,16 @@ class Likelihood(object):
         np.array of log likelihoods
         """
         with threadpool_limits(limits=1, user_api="blas"):
-            with Pool(processes=num_processes) as pool:
-                # Generator object for theta rows. For idx this yields row idx of theta
-                # dataframe, converted to dict, ready to be passed to self.log_likelihood.
-                theta_generator = (d[1].to_dict() for d in theta.iterrows())
-                # compute log_likelihood with multiprocessing
-                log_likelihood = pool.map(self.log_likelihood, theta_generator)
+
+            # Generator object for theta rows. For idx this yields row idx of
+            # theta dataframe, converted to dict, ready to be passed to
+            # self.log_likelihood.
+            theta_generator = (d[1].to_dict() for d in theta.iterrows())
+
+            if num_processes > 1:
+                with Pool(processes=num_processes) as pool:
+                    log_likelihood = pool.map(self.log_likelihood, theta_generator)
+            else:
+                log_likelihood = list(map(self.log_likelihood, theta_generator))
 
         return np.array(log_likelihood)
