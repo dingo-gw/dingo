@@ -31,7 +31,7 @@ setup(
         "h5py",
         "bilby",
         "astropy",
-        "lalsuite>=7.3",
+        "lalsuite",
         "sklearn",
         "pycondor",
         "gwpy",
