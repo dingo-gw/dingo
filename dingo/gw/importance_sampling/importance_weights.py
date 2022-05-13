@@ -2,7 +2,6 @@
 Step 1: Train unconditional nde
 Step 2: Set up likelihood and prior
 """
-import time
 import yaml
 from os import rename, makedirs
 from os.path import dirname, join, isfile, exists
@@ -19,11 +18,7 @@ from dingo.core.models import PosteriorModel
 from dingo.core.samplers import Sampler
 from dingo.core.samples_dataset import SamplesDataset
 from dingo.gw.inference.gw_samplers import GWSamplerUnconditional
-from dingo.gw.likelihood import build_stationary_gaussian_likelihood
 from dingo.core.density import train_unconditional_density_estimator
-from dingo.gw.gwutils import get_extrinsic_prior_dict
-from dingo.gw.prior import build_prior_with_defaults
-from dingo.gw.posterior import UnnormalizedPosterior
 
 
 def parse_args():
@@ -244,28 +239,13 @@ def plot_diagnostics(
     num_processes=1,
     n_grid=200,
 ):
-    # weights = np.array(theta.pop("weights"))
-    # # compute ESS
-    # ESS = get_ESS(weights)
-    # log_probs_proposal = np.array(theta["log_probs_proposal"])
-    # log_probs_target = np.array(theta.pop("log_probs_target"))
-    # print(f"Number of samples:             {len(weights)}")
-    # print(f"Effective sample size (ESS):   {ESS:.0f} ({100 * ESS / len(weights):.2f}%)")
-    # # Compute log_evidence
-    # log_evidence = get_evidence(log_probs_target, log_probs_proposal)
-    # print(f"Log evidence:                  {log_evidence:.2f}")
-    # # Normalize target log_probs
-    # log_probs_target = log_probs_target - log_evidence
-
     theta = sampler.samples
     weights = theta['weights'].to_numpy()
     log_probs_proposal = theta['log_prob'].to_numpy()
 
     log_prior = theta['log_prior'].to_numpy()
     log_likelihood = theta['log_likelihood'].to_numpy()
-    within_prior = log_prior != -np.inf
-    log_probs_target = log_prior.copy()
-    log_probs_target[within_prior] += log_likelihood[within_prior]
+    log_probs_target = log_prior + log_likelihood
 
     ESS = sampler.effective_sample_size
     log_evidence = sampler.log_evidence

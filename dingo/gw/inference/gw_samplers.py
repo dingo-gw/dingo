@@ -30,7 +30,7 @@ from dingo.gw.transforms import (
 class GWSamplerMixin(object):
     """
     Mixin class designed to add gravitational wave functionality to Sampler classes:
-        * domain information
+        * builders for prior, domain, and likelihood
         * correction for fixed detector locations during training (t_ref)
     """
 
@@ -104,17 +104,25 @@ class GWSamplerMixin(object):
         ----------
         time_marginalization_kwargs
         """
-
-        if self.geocent_time_prior is not None:
-            if time_marginalization_kwargs is not None:
+        if time_marginalization_kwargs is not None:
+            if self.geocent_time_prior is None:
                 raise NotImplementedError("Time marginalization is not compatible with "
                                           "non-marginalized network.")
-            if type(self.time_prior) != Uniform:
+            if type(self.geocent_time_prior) != Uniform:
                 raise NotImplementedError(
                     "Only uniform time prior is supported for time marginalization."
                 )
-            time_marginalization_kwargs["t_lower"] = self.time_prior.minimum
-            time_marginalization_kwargs["t_upper"] = self.time_prior.maximum
+            time_marginalization_kwargs["t_lower"] = self.geocent_time_prior.minimum
+            time_marginalization_kwargs["t_upper"] = self.geocent_time_prior.maximum
+
+        # The detector reference positions during likelihood evaluation should be based
+        # on the event time, since any post-correction to account for the training
+        # reference time has already been applied to the samples.
+
+        if self.event_metadata is not None and 'time_event' in self.event_metadata:
+            t_ref = self.event_metadata['time_event']
+        else:
+            t_ref = self.t_ref
 
         self.likelihood = StationaryGaussianGWLikelihood(
             wfg_kwargs=self.base_model_metadata["dataset_settings"][
@@ -125,7 +133,7 @@ class GWSamplerMixin(object):
             ),
             data_domain=self.domain,
             event_data=self.context,
-            t_ref=self.t_ref,
+            t_ref=t_ref,
             time_marginalization_kwargs=time_marginalization_kwargs,
         )
 
@@ -175,8 +183,7 @@ class GWSampler(GWSamplerMixin, Sampler):
         model : PosteriorModel
         """
         super().__init__(**kwargs)
-        if self.model is not None:
-            self._initialize_transforms()
+        self._initialize_transforms()
 
     def _initialize_transforms(self):
 
@@ -232,8 +239,7 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
             Number of GNPE iterations to be performed by sampler.
         """
         super().__init__(**kwargs)
-        if self.model is not None:
-            self._initialize_transforms()
+        self._initialize_transforms()
 
     def _initialize_transforms(self):
         """
@@ -327,4 +333,7 @@ class GWSamplerUnconditional(GWSampler):
         )
 
     def _post_correct(self, samples: dict):
+        # We do not want to correct for t_ref because we assume that the unconditional
+        # model will have been trained on samples for which this correction was already
+        # implemented.
         pass

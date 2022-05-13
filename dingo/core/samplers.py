@@ -93,12 +93,13 @@ class Sampler(object):
     @property
     def event_metadata(self):
         """Metadata for data analyzed. Can in principle influence any post-sampling
-        parameter transformations (e.g., sky position correction)."""
-        return self.metadata.get("event")
+        parameter transformations (e.g., sky position correction), as well as the
+        likelihood detector positions."""
+        return self.base_model_metadata.get("event")
 
     @event_metadata.setter
     def event_metadata(self, value):
-        self.metadata["event"] = value
+        self.base_model_metadata["event"] = value
 
     def _run_sampler(self, num_samples: int, context: Optional[dict] = None) -> dict:
         if not self.unconditional_model:
@@ -119,8 +120,9 @@ class Sampler(object):
             num_samples = 1
         else:
             if context is not None:
-                raise ValueError("Context should not be passed to an unconditional "
-                                 "sampler.")
+                raise ValueError(
+                    "Context should not be passed to an unconditional " "sampler."
+                )
             x = []
 
         # For a normalizing flow, we get the log_prob for "free" when sampling,
@@ -168,9 +170,7 @@ class Sampler(object):
         if batch_size is None:
             batch_size = num_samples
         full_batches, remainder = divmod(num_samples, batch_size)
-        samples = [
-            self._run_sampler(batch_size, context) for _ in range(full_batches)
-        ]
+        samples = [self._run_sampler(batch_size, context) for _ in range(full_batches)]
         if remainder > 0:
             samples.append(self._run_sampler(remainder, context))
         samples = {p: torch.cat([s[p] for s in samples]) for p in samples[0].keys()}
@@ -195,6 +195,11 @@ class Sampler(object):
         """
         if self.context is None and not self.unconditional_model:
             raise ValueError("Context must be set in order to run sampler.")
+
+        # FIXME: For conditional NPE models analyzing real events, the samples and the
+        #  network will have different t_ref. We must undo the right ascension
+        #  correction here for this case. (This only affects slice plots, and only when
+        #  not using an unconditional model.)
 
         # Standardize the sample parameters and place on device.
         y = samples[self.inference_parameters].to_numpy()
@@ -294,20 +299,45 @@ class Sampler(object):
         )
         print(f"Done. This took {time.time() - t0:.2f} seconds.")
 
-        # Calculate weights.
+        # Calculate weights and normalize them to have mean 1.
         log_weights = log_prior + log_likelihood - log_prob_proposal
         weights = np.exp(log_weights - np.max(log_weights))
         weights /= np.mean(weights)
 
-        # Repackage samples along with weights, etc.
         self.samples = theta
         self.samples["log_prob"] = log_prob_proposal  # Proposal log_prob, not target!
         self.samples["weights"] = weights
         self.samples["log_likelihood"] = log_likelihood
         self.samples["log_prior"] = log_prior
 
-        # When calculating log(evidence), use the *original* number of samples in the
-        # subtraction of log(num_samples).
+        # The evidence
+        #           Z = \int d\theta \pi(\theta) L(\theta),
+        #
+        #                   where   \pi = prior,
+        #                           L = likelihood.
+        #
+        # For importance sampling, we estimate this using Monte Carlo integration using
+        # the proposal distribution q(\theta),
+        #
+        #           Z = \int d\theta q(\theta) \pi(\theta) L(\theta) / q(\theta)
+        #             ~ (1/N) \sum_i \pi(\theta_i) L(\theta_i) / q(\theta_i)
+        #
+        #                   where we are summing over samples \theta_i ~ q(\theta).
+        #
+        # The integrand is just the importance weight (prior to any normalization). It
+        # is more numerically stable to evaluate log(Z),
+        #
+        #           log Z ~ \log \sum_i \exp( log \pi_i + log L_i - log q_i ) - log N
+        #                 = logsumexp ( log_weights ) - log N
+        #
+        # Notes
+        # -----
+        #   * We use the logsumexp functions, which is more numerically stable.
+        #   * N is the *original* number of samples (including the zero-weight ones
+        #   that we dropped).
+        #   * q, \pi, L must be distributions in the same parameter space (the same
+        #   coordinates). We have undone any standardizations so this is the case.
+
         self.log_evidence = logsumexp(log_weights) - np.log(num_samples)
         self.effective_sample_size = np.sum(weights) ** 2 / np.sum(weights ** 2)
 
@@ -373,7 +403,7 @@ class GNPESampler(Sampler):
         super().__init__(model)
         self.init_sampler = init_sampler
         self.num_iterations = num_iterations
-        self.gnpe_parameters = None
+        self.gnpe_parameters = None  # Should be set in subclass.
 
     @property
     def init_sampler(self):
@@ -386,6 +416,7 @@ class GNPESampler(Sampler):
 
     @property
     def num_iterations(self):
+        """The number of GNPE iterations to perform when sampling."""
         return self._num_iterations
 
     @num_iterations.setter
