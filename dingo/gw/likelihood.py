@@ -74,8 +74,10 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         # log-likelihood *differences*, see e.g. https://arxiv.org/pdf/1809.02293.pdf.
         # psi = - sum_i log(2pi * PSD_i) = - 2 * sum_i * log(2pi * ASD_i)
         # self.psi = -2 * sum(
-        #     np.sum(np.log(2 * np.pi * asd)) for asd in self.asds.values()
+        #     np.sum(np.log(2 * np.pi * asd)) for asd in self.asd.values()
         # )
+
+        # Value in Veitch et al (2015)
         self.psi = -2 * np.sum(
             [
                 np.sum(np.log(np.sqrt(2 * np.pi) * asd * self.data_domain.noise_std))
@@ -209,7 +211,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 for d_ifo, mu_ifo in zip(d.values(), mu.values())
             ]
         )
-        return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt + self.psi
+        return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
     def _log_likelihood_time_marginalized(self, theta):
         """
@@ -269,7 +271,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         alpha = np.max(exponent)
         kappa2 = alpha + np.log(np.sum(np.exp(exponent - alpha)))
 
-        return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt + self.psi
+        return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
     def log_prob(self, *args, **kwargs):
         """
