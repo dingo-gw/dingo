@@ -45,148 +45,6 @@ def parse_args():
     return args
 
 
-def get_samples_and_log_probs_from_proposal(nde, num_samples):
-    """
-    Generate num_samples samples from the proposal distribution, which is represented
-    by an unconditional nde.
-
-    Parameters
-    ----------
-    nde: dingo.core.models.PosteriorModel
-        Unconditional nde used as proposal distribution.
-    num_samples: int
-        Number of samples to generate.
-
-    Returns
-    -------
-    samples: pd.DataFrame
-        Dataframe with samples from proposal distribution.
-    log_probs: numpy.ndarray
-        Array with log_probs of the samples.
-    """
-    nde.model.eval()
-    with torch.no_grad():
-        theta = nde.model.sample(num_samples=num_samples)
-        log_probs_proposal = nde.model.log_prob(theta).cpu().numpy()
-
-    # undo standardization
-    mean, std = nde.metadata["train_settings"]["data"]["standardization"].values()
-    mean = np.array([v for v in mean.values()])
-    std = np.array([v for v in std.values()])
-    theta = theta.cpu().numpy() * std + mean
-    # The standardization has an impact on the log_prob. For the computation of the
-    # Bayesian evidence, the standardization of the proposal distribution (the nde) and
-    # the target distribution (likelihood * prior) must be the same with respect to the
-    # parameters theta. Since the prior is not standardized (it is a density in the
-    # original parameter space), we simply undo the standardization of the nde to
-    # restore compatibility with the prior. The contribution to the log_prob is thus
-    # given by log(prod_i(1/std_i)) = - sum_i log(std_i).
-    log_probs_proposal -= np.sum(np.log(std))
-
-    # convert to pd.DataFrame
-    columns = nde.metadata["train_settings"]["data"]["standardization"]["mean"].keys()
-    theta = pd.DataFrame(theta, columns=columns)
-
-    return theta, log_probs_proposal
-
-
-def get_log_probs_from_proposal(nde, theta):
-    """
-    Compute the log_prob of, which is represented by an unconditional nde, from theta.
-
-    Parameters
-    ----------
-    nde: dingo.core.models.PosteriorModel
-        Unconditional nde used as proposal distribution.
-    theta: pd.DataFrame
-        Dataframe with theta samples for log_prob evaluation.
-
-    Returns
-    -------
-    log_probs: numpy.ndarray
-        Array with log_probs of the theta samples.
-    """
-    # standardization
-    mean, std = nde.metadata["train_settings"]["data"]["standardization"].values()
-    mean = np.array([v for v in mean.values()])
-    std = np.array([v for v in std.values()])
-    theta = (
-        torch.from_numpy(np.array(theta)).to(nde.device).float()
-        - torch.tensor(mean).to(nde.device)
-    ) / torch.tensor(std).to(nde.device)
-
-    nde.model.eval()
-    with torch.no_grad():
-        log_probs_proposal = nde.model.log_prob(theta).cpu().numpy()
-
-    # The standardization has an impact on the log_prob. For the computation of the
-    # Bayesian evidence, the standardization of the proposal distribution (the nde) and
-    # the target distribution (likelihood * prior) must be the same with respect to the
-    # parameters theta. Since the prior is not standardized (it is a density in the
-    # original parameter space), we simply undo the standardization of the nde to
-    # restore compatibility with the prior. The contribution to the log_prob is thus
-    # given by log(prod_i(1/std_i)) = - sum_i log(std_i).
-    log_probs_proposal -= np.sum(np.log(std))
-
-    return log_probs_proposal
-
-
-def get_evidence(log_probs_target, log_probs_proposal):
-    """
-    Compute the Bayesian evidence p(d). The target distribution is the unnormalized
-    posterior
-
-            p^(theta) = p(d|theta) * p(theta)
-
-    where p(d|theta) is the likelihood and p(theta) is the prior, and we leave the
-    d-dependence implicit. For importance sampling we use the proposal distribution
-    q(theta). We can express the evidence in terms of p^(theta) and q(theta) as
-
-            p(d) = int d_theta p(d|theta) * p(theta)
-                 = int d_theta p^(theta)
-                 = int d_theta p^(theta) / q(theta) * q(theta).
-
-    We evaluate this integral in the Monte Carlo approximation, by sampling
-    theta_i ~ q(theta) and evaluating p^(theta_i) / q(theta_i),
-
-            p(d) = 1/N * sum_{theta_i } p^(theta_i) / q(theta_i)
-                 = 1/N * sum_{theta_i } w(theta_i),
-
-    where w(theta_i) = p^(theta_i) / q(theta_i) are the importance weights of the
-    samples. The log evidence is thus given by
-
-            log(p(d)) = -log(N) + log sum exp(log_w),
-
-    where the log weights are given by
-
-            log_w = log(p^(theta)) - log(q(theta))
-                  = log_probs_target - log_probs_proposal.
-
-    Note: q(theta) and p(theta) need to be densities in the same parameter space, i.e.,
-    their standardizations need to match.
-
-    Parameters
-    ----------
-    log_probs_target: np.ndarray
-        Array with log_probs of the samples from the proposal distribution, which is
-        prior * likelihood.
-    log_probs_proposal: np.ndarray
-        Array with log_probs of the samples from the proposal distribution, which is
-        represented by the unconditional nde.
-
-    Returns
-    -------
-    log_evidence: float
-        Log evidence log(p(d)).
-    """
-    log_w = log_probs_target - log_probs_proposal
-    N = len(log_w)
-    # Use the logsumexp trick to avoid numerical underflow.
-    alpha = np.max(log_w)
-    log_evidence = -np.log(N) + np.log(np.sum(np.exp(log_w - alpha))) + alpha
-    return log_evidence
-
-
 def plot_posterior_slice(
     sampler,
     theta,
@@ -240,11 +98,11 @@ def plot_diagnostics(
     n_grid=200,
 ):
     theta = sampler.samples
-    weights = theta['weights'].to_numpy()
-    log_probs_proposal = theta['log_prob'].to_numpy()
+    weights = theta["weights"].to_numpy()
+    log_probs_proposal = theta["log_prob"].to_numpy()
 
-    log_prior = theta['log_prior'].to_numpy()
-    log_likelihood = theta['log_likelihood'].to_numpy()
+    log_prior = theta["log_prior"].to_numpy()
+    log_likelihood = theta["log_likelihood"].to_numpy()
     log_probs_target = log_prior + log_likelihood
 
     ESS = sampler.effective_sample_size
@@ -333,11 +191,6 @@ def plot_diagnostics(
     c.plotter.plot(filename=join(outdir, "cornerplot_dingo-is.pdf"))
 
 
-def get_ESS(weights):
-    weights = np.array(weights)
-    return np.sum(weights) ** 2 / np.sum(weights ** 2)
-
-
 def main():
     # parse args, load settings, load dingo parameter samples
     args = parse_args()
@@ -390,51 +243,24 @@ def main():
             print(f"Renaming trained nde model to {nde_name}.")
             rename(join(args.outdir, "model_latest.pt"), nde_name)
     else:
-        nde = None
+        raise NotImplementedError(
+            "Cannot currently perform importance sampling based "
+            "on just a samples dataset, even with log_prob "
+            "included. Please start with a posterior model."
+        )
 
-    # Step 2: Build target distribution.
-    #
-    # Our target distribution is the posterior p(theta|d) = p(d|theta) * p(theta) / p(d).
-    # For SIR, we need evaluate the *unnormalized* posterior, so we only need the
-    # likelihood p(d|theta) and the prior p(theta), but not the evidence p(d).
-
-    # build likelihood
-    # metadata["model"]["dataset_settings"]["waveform_generator"]["approximant"] = "SEOBNRv4PHM"
-    # likelihood = build_stationary_gaussian_likelihood(
-    #     # this should be set automatically from the samples
-    #     metadata,
-    #     settings.get("event_dataset", None),
-    #     time_marginalization_kwargs=time_marginalization_kwargs,
-    # )
-    # # build prior
-    # intrinsic_prior = metadata["model"]["dataset_settings"]["intrinsic_prior"]
-    # extrinsic_prior = get_extrinsic_prior_dict(
-    #     metadata["model"]["train_settings"]["data"]["extrinsic_prior"]
-    # )
-    # # merge priors, keep extrinsic prior if in conflict (e.g. for luminosity distance
-    # # which is in both, in extrinsic_prior, and as a reference value in intrinsic prior)
-    # prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
-    # # wrap likelihood and prior to unnormalized posterior
-    # # posterior = UnnormalizedPosterior(likelihood, prior)
-    # posterior = UnnormalizedPosterior(
-    #     likelihood, prior, settings.get("time_marginalization", None)
-    # )
+    # Step 2: Sample from proposal.
 
     nde_sampler = GWSamplerUnconditional(model=nde)
     print(f'Generating {settings["num_samples"]} samples from proposal distribution.')
     nde_sampler.run_sampler(num_samples=settings["num_samples"])
-    print(f"Importance sampling.")
-    nde_sampler.importance_sample(
-        num_processes=settings.get("num_processes", 1),
-        time_marginalization_kwargs=time_marginalization_kwargs,
-    )
 
-    nde_sampler.print_summary()
-
-    nde_sampler.to_hdf5(label="weighted", outdir=args.outdir)
-    samples = nde_sampler.samples
-
-    # Step 3: SIR step
+    # Step 3: Importance sample.
+    #
+    # Our target distribution is the posterior p(theta|d) = p(d|theta) * p(theta) / p(
+    # d). For importance sampling, we need to evaluate the *unnormalized* posterior,
+    # so we only need the likelihood p(d|theta) and the prior p(theta), but not the
+    # evidence p(d).
     #
     # Sample from proposal distribution q(theta|d) and reweight the samples theta_i with
     #
@@ -442,36 +268,16 @@ def main():
     #
     # to obtain weighted samples from the proposal distribution.
 
-    # if "log_prob" in samples.columns:
-    #     num_samples = settings.get("num_samples", len(samples))
-    #     theta = samples.sample(num_samples)
-    #     log_probs_proposal = np.array(theta["log_prob"])
-    #     theta = theta.drop(columns="log_prob")
-    # else:
-    #     num_samples = settings["num_samples"]
-    #     # sample from proposal distribution, and get the log_prob densities
-    #     print(f"Generating {num_samples} samples from proposal distribution.")
-    #     theta, log_probs_proposal = get_samples_and_log_probs_from_proposal(
-    #         nde, num_samples
-    #     )
-    #
-    # # compute the unnormalized target posterior density for each sample
-    # t0 = time.time()
-    # print(f"Computing unnormalized target posterior density for {num_samples} samples.")
-    # log_probs_target = posterior.log_prob_multiprocessing(
-    #     theta, settings.get("num_processes", 1)
-    # )
-    # print(f"Done. This took {time.time() - t0:.2f} seconds.")
-    #
-    # # compute weights, save weighted samples with metadata
-    # log_weights = log_probs_target - log_probs_proposal
-    # weights = np.exp(log_weights - np.max(log_weights))
-    # weights /= np.mean(weights)
-    # theta.insert(theta.shape[1], "weights", weights)
-    # theta.insert(theta.shape[1], "log_probs_proposal", log_probs_proposal)
-    # theta.insert(theta.shape[1], "log_probs_target", log_probs_target)
-    # theta.attrs = {"dingo_settings": metadata, "is_settings": settings}
-    # theta.to_pickle(join(args.outdir, "weighted_samples.pkl"))
+    print(f"Importance sampling.")
+    nde_sampler.importance_sample(
+        num_processes=settings.get("num_processes", 1),
+        time_marginalization_kwargs=time_marginalization_kwargs,
+    )
+    nde_sampler.print_summary()
+    nde_sampler.to_hdf5(label="weighted", outdir=args.outdir)
+    samples = nde_sampler.samples
+
+    # Diagnostics
 
     diagnostics_dir = join(args.outdir, "IS-diagnostics")
     if not exists(diagnostics_dir):
@@ -482,9 +288,6 @@ def main():
         )
     else:
         theta_slice_plots = None
-    # theta_slice_plots = theta.iloc[[np.argmax(theta["log_probs_target"])]].drop(
-    #     columns=["weights", "log_probs_proposal", "log_probs_target"]
-    # )
     plot_diagnostics(
         nde_sampler,
         diagnostics_dir,
