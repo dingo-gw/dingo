@@ -358,7 +358,7 @@ def train_local():
             yaml.dump(local_settings, f, default_flow_style=False, sort_keys=False)
 
         pm, wfd = prepare_training_new(train_settings, args.train_dir, local_settings)
-        breakpoint()
+
     else:
         print("Resuming training run.")
         with open(os.path.join(args.train_dir, "local_settings.yaml"), "r") as f:

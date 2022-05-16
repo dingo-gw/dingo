@@ -33,6 +33,7 @@ setup(
         "astropy",
         "lalsuite",
         "sklearn",
+        "pesummary",
         "pycondor",
         "gwpy",
         "pycbc",

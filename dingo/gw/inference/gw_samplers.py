@@ -3,7 +3,7 @@ from typing import Optional, Union
 import numpy as np
 import pandas as pd
 from astropy.time import Time
-from bilby.core.prior import Prior, Constraint, DeltaFunction, Uniform
+from bilby.core.prior import Uniform
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 

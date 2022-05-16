@@ -21,8 +21,17 @@ class Sampler(object):
     Sampler class that wraps a PosteriorModel. Allows for conditional and unconditional
     models.
 
-    Draws samples from the model based on (optional) context data, and outputs in various
-    formats.
+    Draws samples from the model based on (optional) context data. Also implements
+    importance sampling.
+
+    Methods
+    -------
+        run_sampler
+        log_prob
+        importance_sample
+        to_samples_dataset
+        to_hdf5
+        print_summary
     """
 
     def __init__(self, model: PosteriorModel):
@@ -238,6 +247,40 @@ class Sampler(object):
         self.likelihood = None
 
     def importance_sample(self, num_processes: int = 1, **likelihood_kwargs):
+        """
+        Calculate importance weights for samples.
+
+        Importance sampling starts with samples have been generated from a proposal
+        distribution q(theta), in this case a neural network model. Certain networks
+        (i.e., non-GNPE) also provide the log probability of each sample,
+        which is required for importance sampling.
+
+        Given the proposal, we re-weight samples according to the (un-normalized)
+        target distribution, which we take to be the likelihood L(theta) times the
+        prior pi(theta). This gives sample weights
+
+            w(theta) ~ pi(theta) L(theta) / q(theta),
+
+        where the overall normalization does not matter (and we take to have mean 1).
+        Since q(theta) enters this expression, importance sampling is only possible
+        when we know the log probability of each sample.
+
+        As byproducts, this method also estimates the evidence and effective sample
+        size of the importance sampled points.
+
+        This method modifies the samples pd.DataFrame in-place, adding new columns for
+        log_likelihood, log_prior, and weights. It also stores log_evidence and
+        effective_sample_size attributes.
+
+        Parameters
+        ----------
+        num_processes : int
+            Number of parallel processes to use when calculating likelihoods. (This is
+            the most expensive task.)
+        likelihood_kwargs : dict
+            kwargs that are forwarded to the likelihood constructor. E.g., options for
+            marginalization.
+        """
 
         if self.samples is None:
             raise KeyError(
@@ -254,7 +297,6 @@ class Sampler(object):
 
         # Proposal samples and associated log probability have already been calculated
         # using the stored model. These form a normalized probability distribution.
-
         log_prob_proposal = self.samples["log_prob"].to_numpy()
         theta = self.samples.drop(columns="log_prob")
 
