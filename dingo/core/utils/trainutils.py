@@ -2,6 +2,7 @@ import time
 import os
 from os.path import join, isfile
 import csv
+import numpy as np
 
 
 class AvgTracker:
@@ -252,3 +253,28 @@ def save_model(pm, log_dir, model_prefix="model", checkpoint_epochs=None):
         print(f"Copy model to checkpoint {model_name_cp}.", end=" ")
         copyfile(model_name, model_name_cp)
         print("Done.")
+
+
+def save_training_injection(outname, pm, data, idx=0):
+    """
+    For debugging: extract a training injection. To be used inside train or test loop.
+    """
+    param_names = pm.metadata["train_settings"]["data"]["inference_parameters"]
+    mean = pm.metadata["train_settings"]["data"]["standardization"]["mean"]
+    std = pm.metadata["train_settings"]["data"]["standardization"]["std"]
+    params = {p: data[0][idx, idx_p] for idx_p, p in enumerate(param_names)}
+    params = {p: v * std[p] + mean[p] for p, v in params.items()}
+
+    detectors = pm.metadata["train_settings"]["data"]["detectors"]
+    d = np.array(data[1])
+    asds = {
+        ifo: 1 / d[idx, idx_ifo, 2] * 1e-23
+        for idx_ifo, ifo in enumerate(detectors)
+    }
+    strains = {
+        ifo: (d[idx, idx_ifo, 0] + 1j * d[idx, idx_ifo, 1]) * asds[ifo]
+        for idx_ifo, ifo in enumerate(detectors)
+    }
+
+    out_data = {"parameters": params, "asds": asds, "strains": strains}
+    np.save(outname, out_data)
