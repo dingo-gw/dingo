@@ -53,9 +53,6 @@ class Sampler(object):
 
         self.transform_pre = Compose([])
         self.transform_post = Compose([])
-        self._search_parameter_keys = []
-        self._constraint_parameter_keys = []
-        self._fixed_parameter_keys = []
         self.inference_parameters = self.metadata["train_settings"]["data"][
             "inference_parameters"
         ]
@@ -261,23 +258,21 @@ class Sampler(object):
         log_prob_proposal = self.samples["log_prob"].to_numpy()
         theta = self.samples.drop(columns="log_prob")
 
-        # TODO: Expand theta_all to include all parameters that make up the prior,
-        #  including constraints. These might not be included within the inference
-        #  parameters theta.
-        theta_all = theta
-
         # Calculate the (un-normalized) target density as prior times likelihood,
-        # evaluated at the same sample points. The expensive part is the likelihood,
-        # so we allow for multiprocessing.
+        # evaluated at the same sample points.
+        log_prior = self.prior.ln_prob(theta, axis=0)
 
-        log_prior = self.prior.ln_prob(theta_all, axis=0)
+        # Check whether any constraints are violated that involve parameters not
+        # already present in theta.
+        constraints = self.prior.evaluate_constraints(theta)
+        np.putmask(log_prior, constraints == 0, -np.inf)
 
         # The prior may evaluate to -inf for certain samples. For these, we do not want
         # to evaluate the likelihood, in particular because it may not even be possible
         # to generate data outside the prior (e.g., for BH spins > 1). Since there is
         # no point in keeping these samples, we simply drop them; this means we do not
         # have to make special exceptions for outside-prior samples elsewhere in the
-        # code. Moreover, they do not contribute to the evidence or the effective sample
+        # code. They do not contribute directly to the evidence or the effective sample
         # size, so we are not losing anything useful.
 
         within_prior = log_prior != -np.inf

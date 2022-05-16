@@ -50,7 +50,6 @@ class GWSamplerMixin(object):
 
     def _build_prior(self):
         """Build the prior based on model metadata. Called by __init__()."""
-
         intrinsic_prior = self.base_model_metadata["dataset_settings"][
             "intrinsic_prior"
         ]
@@ -59,21 +58,13 @@ class GWSamplerMixin(object):
         )
         self.prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
 
-        # Initialize lists of parameters (from Bilby)
-        for key in self.prior:
-            if isinstance(self.prior[key], Prior) and self.prior[key].is_fixed is False:
-                self._search_parameter_keys.append(key)
-            elif isinstance(self.prior[key], Constraint):
-                self._constraint_parameter_keys.append(key)
-            elif isinstance(self.prior[key], DeltaFunction):
-                # self.likelihood.parameters[key] = self.prior[key].sample()
-                self._fixed_parameter_keys.append(key)
-
         # Split off prior over geocent_time if samples appear to be time-marginalized.
         # This needs to be saved to initialize the likelihood.
-        if 'geocent_time' in self.prior.keys() and 'geocent_time' not in \
-                self.inference_parameters:
-            self.geocent_time_prior = self.prior.pop('geocent_time')
+        if (
+            "geocent_time" in self.prior.keys()
+            and "geocent_time" not in self.inference_parameters
+        ):
+            self.geocent_time_prior = self.prior.pop("geocent_time")
         else:
             self.geocent_time_prior = None
 
@@ -107,8 +98,10 @@ class GWSamplerMixin(object):
         """
         if time_marginalization_kwargs is not None:
             if self.geocent_time_prior is None:
-                raise NotImplementedError("Time marginalization is not compatible with "
-                                          "non-marginalized network.")
+                raise NotImplementedError(
+                    "Time marginalization is not compatible with "
+                    "non-marginalized network."
+                )
             if type(self.geocent_time_prior) != Uniform:
                 raise NotImplementedError(
                     "Only uniform time prior is supported for time marginalization."
@@ -120,8 +113,8 @@ class GWSamplerMixin(object):
         # on the event time, since any post-correction to account for the training
         # reference time has already been applied to the samples.
 
-        if self.event_metadata is not None and 'time_event' in self.event_metadata:
-            t_ref = self.event_metadata['time_event']
+        if self.event_metadata is not None and "time_event" in self.event_metadata:
+            t_ref = self.event_metadata["time_event"]
         else:
             t_ref = self.t_ref
 
@@ -183,6 +176,7 @@ class GWSampler(GWSamplerMixin, Sampler):
     This is intended for use either as a standalone sampler, or as a sampler producing
     initial sample points for a GNPE sampler.
     """
+
     def __init__(self, **kwargs):
         """
         Parameters
