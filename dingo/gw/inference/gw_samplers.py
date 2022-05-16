@@ -1,6 +1,7 @@
-from typing import Optional
+from typing import Optional, Union
 
 import numpy as np
+import pandas as pd
 from astropy.time import Time
 from bilby.core.prior import Prior, Constraint, DeltaFunction, Uniform
 from bilby.gw.detector import InterferometerList
@@ -137,7 +138,7 @@ class GWSamplerMixin(object):
             time_marginalization_kwargs=time_marginalization_kwargs,
         )
 
-    def _post_correct(self, samples: dict):
+    def _post_correct(self, samples: Union[dict, pd.DataFrame], inverse: bool = False):
         """
         Correct the sky position of an event based on the reference time of the model.
         This is necessary since the model was trained with with fixed detector (reference)
@@ -147,11 +148,14 @@ class GWSamplerMixin(object):
         The correction is only applied if the event time can be found in self.metadata[
         'event'].
 
-        This method modifies the samples dict in place.
+        This method modifies the samples in place.
 
         Parameters
         ----------
-        samples : dict
+        samples : dict or pd.DataFrame
+        inverse : bool, default True
+            Whether to apply instead the inverse transformation. This is used prior to
+            calculating the log_prob.
         """
         if self.event_metadata is not None:
             t_event = self.event_metadata.get("time_event")
@@ -165,7 +169,10 @@ class GWSamplerMixin(object):
                 )
                 delta_longitude = longitude_event - longitude_reference
                 ra_correction = delta_longitude.rad
-                samples["ra"] = (ra + ra_correction) % (2 * np.pi)
+                if not inverse:
+                    samples["ra"] = (ra + ra_correction) % (2 * np.pi)
+                else:
+                    samples["ra"] = (ra - ra_correction) % (2 * np.pi)
 
 
 class GWSampler(GWSamplerMixin, Sampler):
@@ -332,7 +339,7 @@ class GWSamplerUnconditional(GWSampler):
             as_type="dict",
         )
 
-    def _post_correct(self, samples: dict):
+    def _post_correct(self, samples: Union[dict, pd.DataFrame], inverse: bool = False):
         # We do not want to correct for t_ref because we assume that the unconditional
         # model will have been trained on samples for which this correction was already
         # implemented.

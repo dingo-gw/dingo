@@ -128,8 +128,8 @@ default_intrinsic_dict = {
 }
 
 default_inference_parameters = [
-    "mass_ratio",
     "chirp_mass",
+    "mass_ratio",
     "phase",
     "a_1",
     "a_2",

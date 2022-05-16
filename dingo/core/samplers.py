@@ -1,6 +1,6 @@
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -194,12 +194,12 @@ class Sampler(object):
         np.array of log probabilities.
         """
         if self.context is None and not self.unconditional_model:
-            raise ValueError("Context must be set in order to run sampler.")
+            raise ValueError("Context must be set in order to calculate log_prob.")
 
-        # FIXME: For conditional NPE models analyzing real events, the samples and the
-        #  network will have different t_ref. We must undo the right ascension
-        #  correction here for this case. (This only affects slice plots, and only when
-        #  not using an unconditional model.)
+        # This undoes any post-correction that would have been done to the samples,
+        # before evaluating the log_prob. E.g., the t_ref / sky position correction.
+        samples = samples.copy()
+        self._post_correct(samples, inverse=True)
 
         # Standardize the sample parameters and place on device.
         y = samples[self.inference_parameters].to_numpy()
@@ -228,7 +228,7 @@ class Sampler(object):
 
         return log_prob.cpu().numpy()
 
-    def _post_correct(self, samples: dict):
+    def _post_correct(self, samples: Union[dict, pd.DataFrame], inverse: bool = False):
         pass
 
     def _build_prior(self):
