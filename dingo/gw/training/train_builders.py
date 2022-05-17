@@ -22,7 +22,7 @@ from dingo.gw.transforms import (
     GNPEChirp,
     GNPECoalescenceTimes,
     SampleExtrinsicParameters,
-    GetDetectorTimes,
+    GetDetectorTimes, GNPEPhase,
 )
 from dingo.gw.ASD_dataset.noise_dataset import ASDDataset
 from dingo.gw.prior import default_inference_parameters
@@ -126,6 +126,10 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     if "gnpe_chirp" in data_settings:
         d = data_settings["gnpe_chirp"]
         transforms.append(GNPEChirp(d["kernel"], domain, d.get("order", 0)))
+        extra_context_parameters += transforms[-1].proxy_list
+    if "gnpe_phase" in data_settings:
+        d = data_settings["gnpe_phase"]
+        transforms.append(GNPEPhase(d["kernel"]))
         extra_context_parameters += transforms[-1].proxy_list
 
     # Add the GNPE proxies to context_parameters the first time the transforms are
