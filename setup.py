@@ -31,7 +31,7 @@ setup(
         "h5py",
         "bilby",
         "astropy",
-        "lalsuite",
+        "lalsuite", # use >=7.3 if you run into errors with IMRPhenomXPHM generation
         "sklearn",
         "pesummary",
         "pycondor",

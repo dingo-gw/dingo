@@ -127,7 +127,7 @@ class Sampler(object):
         else:
             if context is not None:
                 raise ValueError(
-                    "Context should not be passed to an unconditional " "sampler."
+                    "Context should not be passed to an unconditional sampler."
                 )
             x = []
 
@@ -370,10 +370,10 @@ class Sampler(object):
         # Notes
         # -----
         #   * We use the logsumexp functions, which is more numerically stable.
-        #   * N is the *original* number of samples (including the zero-weight ones
-        #   that we dropped).
+        #   * N = num_samples is the *original* number of samples (including the
+        #     zero-weight ones that we dropped).
         #   * q, \pi, L must be distributions in the same parameter space (the same
-        #   coordinates). We have undone any standardizations so this is the case.
+        #     coordinates). We have undone any standardizations so this is the case.
 
         self.log_evidence = logsumexp(log_weights) - np.log(num_samples)
         self.effective_sample_size = np.sum(weights) ** 2 / np.sum(weights ** 2)
@@ -489,4 +489,5 @@ class GNPESampler(Sampler):
 
         return samples
 
+    # with GNPE the log_prob becomes intractable, so we drop the log_prob method
     log_prob = None

@@ -71,7 +71,7 @@ class GWSignal(object):
     def _check_domains(domain_in, domain_out):
         if domain_in.f_min > domain_out.f_min or domain_in.f_max < domain_out.f_max:
             raise ValueError(
-                "Output domain is not contained within WaveformGenerator " "domain."
+                "Output domain is not contained within WaveformGenerator domain."
             )
         if domain_in.delta_f != domain_out.delta_f:
             raise ValueError("Domains must have same delta_f.")
