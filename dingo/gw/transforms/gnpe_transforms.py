@@ -384,12 +384,20 @@ class GNPEPhase(GNPEBase):
     """
 
     def __init__(self, kernel, random_pi_jump):
+        """
+        Parameters
+        ----------
+        kernel : str
+            Bilby prior to be used as the GNPE kernel (additive).
+        random_pi_jump : bool
+            Whether to also include a random jump by pi when sampling the proxy. This
+            is useful because the posterior over phase is often multimodal with period
+            pi. With this set to True, Gibbs sampling may better explore the space.
+        """
         kernel_dict = {"phase": kernel}
         operators = {"phase": "+"}
         super().__init__(kernel_dict, operators)
         self.random_pi_jump = random_pi_jump
-        if self.random_pi_jump:
-            print("GNPEPhase: random_pi_jump = True")
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
@@ -398,7 +406,12 @@ class GNPEPhase(GNPEBase):
             {**sample["parameters"], **sample["extrinsic_parameters"]}
         )
         if self.random_pi_jump:
-            proxies["phase_proxy"] += np.random.choice([0.0, np.pi])
+            if isinstance(proxies["phase_proxy"], torch.Tensor):
+                proxies["phase_proxy"] += (
+                    torch.randint_like(proxies["phase_proxy"], 2) * np.pi
+                )
+            elif isinstance(proxies["phase_proxy"], (float, np.float64)):
+                proxies["phase_proxy"] += np.random.choice([0.0, np.pi])
         proxies["phase_proxy"] = proxies["phase_proxy"] % (2 * np.pi)
         extrinsic_parameters.update(proxies)
         sample["extrinsic_parameters"] = extrinsic_parameters
