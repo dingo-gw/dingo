@@ -129,7 +129,7 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         extra_context_parameters += transforms[-1].proxy_list
     if "gnpe_phase" in data_settings:
         d = data_settings["gnpe_phase"]
-        transforms.append(GNPEPhase(d["kernel"]))
+        transforms.append(GNPEPhase(d["kernel"], d.get("random_pi_jump", False)))
         extra_context_parameters += transforms[-1].proxy_list
 
     # Add the GNPE proxies to context_parameters the first time the transforms are

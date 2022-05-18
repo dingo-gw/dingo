@@ -24,7 +24,8 @@ from dingo.gw.transforms import (
     GNPEBase,
     PostCorrectGeocentTime,
     CopyToExtrinsicParameters,
-    GetDetectorTimes, GNPEPhase,
+    GetDetectorTimes,
+    GNPEPhase,
 )
 
 
@@ -252,7 +253,11 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
         gnpe_time_settings = data_settings.get("gnpe_time_shifts")
         gnpe_chirp_settings = data_settings.get("gnpe_chirp")
         gnpe_phase_settings = data_settings.get("gnpe_phase")
-        if not gnpe_time_settings and not gnpe_chirp_settings and not gnpe_phase_settings:
+        if (
+            not gnpe_time_settings
+            and not gnpe_chirp_settings
+            and not gnpe_phase_settings
+        ):
             raise KeyError(
                 "GNPE inference requires network trained for either chirp mass, "
                 "coalescence time, or phase GNPE."
@@ -285,7 +290,10 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
             )
         if gnpe_phase_settings:
             transform_pre.append(
-                GNPEPhase(gnpe_phase_settings["kernel"])
+                GNPEPhase(
+                    gnpe_phase_settings["kernel"],
+                    gnpe_phase_settings.get("random_pi_jump", False),
+                )
             )
         transform_pre.append(
             SelectStandardizeRepackageParameters(

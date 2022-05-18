@@ -374,27 +374,32 @@ class GNPEChirp(GNPEBase):
 class GNPEPhase(GNPEBase):
     """GNPE transform for phase of coalescence.
 
-     This transform simply adds a phase proxy parameter to the extrinsic parameters. It
-     does not bother to transform the data itself, since this would not provide a
-     simpler representation. The point is to guide the networks to identify the phase
-     during training by conditioning on the proxy.
+    This transform simply adds a phase proxy parameter to the extrinsic parameters. It
+    does not bother to transform the data itself, since this would not provide a
+    simpler representation. The point is to guide the networks to identify the phase
+    during training by conditioning on the proxy.
 
-     At inference time, the joint posterior over phase and phase_proxy is obtained
-     using Gibbs sampling.
-     """
+    At inference time, the joint posterior over phase and phase_proxy is obtained
+    using Gibbs sampling.
+    """
 
-    def __init__(self, kernel):
-        kernel_dict = {'phase': kernel}
-        operators = {'phase': '+'}
+    def __init__(self, kernel, random_pi_jump):
+        kernel_dict = {"phase": kernel}
+        operators = {"phase": "+"}
         super().__init__(kernel_dict, operators)
+        self.random_pi_jump = random_pi_jump
+        if self.random_pi_jump:
+            print("GNPEPhase: random_pi_jump = True")
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
-        extrinsic_parameters = sample['extrinsic_parameters'].copy()
+        extrinsic_parameters = sample["extrinsic_parameters"].copy()
         proxies = self.sample_proxies(
             {**sample["parameters"], **sample["extrinsic_parameters"]}
         )
-        proxies['phase_proxy'] = proxies['phase_proxy'] % (2 * np.pi)
+        if self.random_pi_jump:
+            proxies["phase_proxy"] += np.random.choice([0.0, np.pi])
+        proxies["phase_proxy"] = proxies["phase_proxy"] % (2 * np.pi)
         extrinsic_parameters.update(proxies)
         sample["extrinsic_parameters"] = extrinsic_parameters
         return sample
