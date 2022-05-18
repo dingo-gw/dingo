@@ -67,6 +67,12 @@ class GWSamplerMixin(object):
             self.geocent_time_prior = self.prior.pop("geocent_time")
         else:
             self.geocent_time_prior = None
+        # Remove prior over phase if samples appear to be phase-marginalized.
+        if (
+            "phase" in self.prior.keys()
+            and "phase" not in self.inference_parameters
+        ):
+            print("test")
 
     def _build_domain(self):
         """
