@@ -1,19 +1,14 @@
 import numpy as np
-from torchvision.transforms import Compose
-from bilby.gw.detector.networks import InterferometerList
 from scipy.fft import fft
 
+from dingo.core.likelihood import Likelihood
+from dingo.gw.inference.injection import GWSignal
 from dingo.gw.waveform_generator import WaveformGenerator
-from dingo.gw.domains import build_domain, FrequencyDomain
+from dingo.gw.domains import build_domain
 from dingo.gw.inference.data_preparation import get_event_data_and_domain
-from dingo.gw.transforms import (
-    ProjectOntoDetectors,
-    GetDetectorTimes,
-    WhitenAndScaleStrain,
-)
 
 
-class StationaryGaussianGWLikelihood:
+class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
     """
     Implements GW likelihood for stationary, Gaussian noise.
     """
@@ -21,10 +16,10 @@ class StationaryGaussianGWLikelihood:
     def __init__(
         self,
         wfg_kwargs,
+        wfg_domain,
         data_domain,
         event_data,
         t_ref=None,
-        wfg_frequency_range=None,
         time_marginalization_kwargs=None,
     ):
         """
@@ -34,6 +29,9 @@ class StationaryGaussianGWLikelihood:
         ----------
         wfg_kwargs: dict
             Waveform generator parameters (at least approximant and f_ref).
+        wfg_domain : dingo.gw.domains.Domain
+            Domain used for waveform generation. This can potentially deviate from the
+            final domain, having a wider frequency range needed for waveform generation.
         data_domain: dingo.gw.domains.Domain
             Domain object for event data.
         event_data: dict
@@ -41,39 +39,23 @@ class StationaryGaussianGWLikelihood:
             event_data["asds"].
         t_ref: float
             Reference time; true geocent time for GW is t_ref + theta["geocent_time"].
-        wfg_frequency_range: dict
-            Frequency range for waveform generator. If None, that of data domain is used,
-            which corresponds to the bounds of the likelihood integral.
-            Possible keys:
-                'f_start': float
-                    Frequency at which to start the waveform generation. Overrides f_start in
-                    metadata["model"]["dataset_settings"]["waveform_generator"].
-                'f_end': float
-                    Frequency at which to start the waveform generation.
         time_marginalization_kwargs: dict
             Time marginalization parameters. If None, no time marginalization is used.
         """
-        super().__init__()
-        # set up waveform generator
-        self.wfg_kwargs = wfg_kwargs
-        self.data_domain = data_domain
-        if type(self.data_domain) is not FrequencyDomain:
-            raise NotImplementedError(
-                f"Likelihood implemented for FrequencyDomain, "
-                f"got {type(self.data_domain)}."
-            )
-        # The waveform generator potentially has a larger frequency range than the
-        # data domain, which may e.g. be required for EOB waveforms to generate robustly.
-        # When computing the likelihood the data will be truncated accordingly.
-        self.waveform_generator = get_wfg(wfg_kwargs, data_domain, wfg_frequency_range)
+        super().__init__(
+            wfg_kwargs=wfg_kwargs,
+            wfg_domain=wfg_domain,
+            data_domain=data_domain,
+            ifo_list=list(event_data["waveform"].keys()),
+            t_ref=t_ref,
+        )
 
-        # set GW event data
-        self.t_ref = t_ref
+        self.asd = event_data["asds"]
+
         self.whitened_strains = {
-            k: v / event_data["asds"][k] / data_domain.noise_std
+            k: v / self.asd[k] / self.data_domain.noise_std
             for k, v in event_data["waveform"].items()
         }
-        self.asds = event_data["asds"]
         if len(list(self.whitened_strains.values())[0]) != data_domain.max_idx + 1:
             raise ValueError("Strain data does not match domain.")
         # log noise evidence, independent of theta and waveform model
@@ -91,19 +73,19 @@ class StationaryGaussianGWLikelihood:
         # But this contribution is typically ignored since we are only interested in
         # log-likelihood *differences*, see e.g. https://arxiv.org/pdf/1809.02293.pdf.
         # psi = - sum_i log(2pi * PSD_i) = - 2 * sum_i * log(2pi * ASD_i)
-        self.psi = -2 * sum(
-            np.sum(np.log(2 * np.pi * asd)) for asd in self.asds.values()
-        )
+        # self.psi = -2 * sum(
+        #     np.sum(np.log(2 * np.pi * asd)) for asd in self.asd.values()
+        # )
 
-        # build transforms for detector projections
-        self.ifo_list = InterferometerList(self.whitened_strains.keys())
-        self.projection_transforms = Compose(
+        # Value in Veitch et al (2015)
+        self.psi = -2 * np.sum(
             [
-                GetDetectorTimes(self.ifo_list, self.t_ref),
-                ProjectOntoDetectors(self.ifo_list, self.data_domain, self.t_ref),
-                WhitenAndScaleStrain(self.data_domain.noise_std),
+                np.sum(np.log(np.sqrt(2 * np.pi) * asd * self.data_domain.noise_std))
+                for asd in self.asd.values()
             ]
         )
+
+        self.whiten = True
 
         # optionally initialize time marginalization
         self.time_marginalization = False
@@ -161,46 +143,13 @@ class StationaryGaussianGWLikelihood:
         with np.errstate(divide="ignore"):  # ignore warnings for log(0) = -inf
             self.time_prior_log = np.log(time_prior / np.sum(time_prior))
 
-    def generate_signal(self, theta):
-        """
-        Compute the GW signal for a given set of parameters theta.
-
-        Step 1: generate polarizations h_plus and h_cross
-        Step 2: project h_plus and h_cross onto detectors,
-                whiten the signal, scale to account for window factor
-
-        Parameters
-        ----------
-        theta: dict
-            BBH parameters. Includes intrinsic parameters to be passed to waveform
-            generator, and extrinsic parameters for detector projection.
-
-        Returns
-        -------
-        gw_strain: dict
-            GW signal for each detector.
-        """
-        theta_intrinsic, theta_extrinsic = split_off_extrinsic_parameters(theta)
-        theta_intrinsic = {k: float(v) for k, v in theta_intrinsic.items()}
-
-        # Step 1: generate polarizations h_plus and h_cross
-        polarizations = self.waveform_generator.generate_hplus_hcross(theta_intrinsic)
-        polarizations = {  # truncation, in case wfg has a larger frequency range
-            k: self.data_domain.update_data(v) for k, v in polarizations.items()
-        }
-
-        # Step 2: project h_plus and h_cross onto detectors
-        sample = {
-            "parameters": theta_intrinsic,
-            "extrinsic_parameters": theta_extrinsic,
-            "waveform": polarizations,
-            "asds": self.asds,
-        }
-        sample = self.projection_transforms(sample)
-
-        return sample
-
     def log_likelihood(self, theta):
+        if self.time_marginalization:
+            return self._log_likelihood_time_marginalized(theta)
+        else:
+            return self._log_likelihood(theta)
+
+    def _log_likelihood(self, theta):
         """
         The likelihood is given by
 
@@ -250,7 +199,7 @@ class StationaryGaussianGWLikelihood:
         """
 
         # Step 1: Compute whitened GW strain mu(theta) for parameters theta.
-        mu = self.generate_signal(theta)["waveform"]
+        mu = self.signal(theta)["waveform"]
         d = self.whitened_strains
 
         # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to
@@ -264,7 +213,7 @@ class StationaryGaussianGWLikelihood:
         )
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
-    def log_likelihood_time_marginalized(self, theta):
+    def _log_likelihood_time_marginalized(self, theta):
         """
         Compute log likelihood with time marginalization.
 
@@ -279,7 +228,7 @@ class StationaryGaussianGWLikelihood:
         # Step 1: Compute whitened GW strain mu(theta) for parameters theta.
         # The geocent_time parameter needs to be set to 0.
         theta["geocent_time"] = 0.0
-        mu = self.generate_signal(theta)["waveform"]
+        mu = self.signal(theta)["waveform"]
         # d = self.whitened_strains
 
         # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to
@@ -371,41 +320,10 @@ def inner_product(a, b, min_idx=0, delta_f=None, psd=None):
         return np.sum((a.conj() * b)[min_idx:]).real
 
 
-def split_off_extrinsic_parameters(theta):
-    """
-    Split theta into intrinsic and extrinsic parameters.
-
-    Parameters
-    ----------
-    theta: dict
-        BBH parameters. Includes intrinsic parameters to be passed to waveform
-        generator, and extrinsic parameters for detector projection.
-
-    Returns
-    -------
-    theta_intrinsic: dict
-        BBH intrinsic parameters.
-    theta_extrinsic: dict
-        BBH extrinsic parameters.
-    """
-    extrinsic_parameters = ["geocent_time", "luminosity_distance", "ra", "dec", "psi"]
-    theta_intrinsic = {}
-    theta_extrinsic = {}
-    for k, v in theta.items():
-        if k in extrinsic_parameters:
-            theta_extrinsic[k] = v
-        else:
-            theta_intrinsic[k] = v
-    # set fiducial values for time and distance
-    theta_intrinsic["geocent_time"] = 0
-    theta_intrinsic["luminosity_distance"] = 100
-    return theta_intrinsic, theta_extrinsic
-
-
 def build_stationary_gaussian_likelihood(
     metadata,
     event_dataset=None,
-    wfg_frequency_range=None,
+    time_marginalization_kwargs=None,
 ):
     """
     Build a StationaryGaussianLikelihoodBBH object from the metadata.
@@ -417,15 +335,8 @@ def build_stationary_gaussian_likelihood(
         Typially accessed via pd.read_pickle(/path/to/dingo-output.pkl).metadata.
     event_dataset: str = None
         Path to event dataset for caching. If None, don't cache.
-    wfg_frequency_range: dict = None
-        Frequency range for waveform generator. If None, that of data domain is used,
-        which corresponds to the bounds of the likelihood integral.
-        Possible keys:
-            'f_start': float
-                Frequency at which to start the waveform generation. Overrides f_start in
-                metadata["model"]["dataset_settings"]["waveform_generator"].
-            'f_end': float
-                Frequency at which to start the waveform generation.
+    time_marginalization_kwargs: dict = None
+        Forwarded to the likelihood.
 
     Returns
     -------
@@ -439,11 +350,12 @@ def build_stationary_gaussian_likelihood(
 
     # set up likelihood
     likelihood = StationaryGaussianGWLikelihood(
-        metadata["model"]["dataset_settings"]["waveform_generator"],
-        data_domain,
-        event_data,
+        wfg_kwargs=metadata["model"]["dataset_settings"]["waveform_generator"],
+        wfg_domain=build_domain(metadata["model"]["dataset_settings"]["domain"]),
+        data_domain=data_domain,
+        event_data=event_data,
         t_ref=metadata["event"]["time_event"],
-        wfg_frequency_range=wfg_frequency_range,
+        time_marginalization_kwargs=time_marginalization_kwargs,
     )
 
     return likelihood

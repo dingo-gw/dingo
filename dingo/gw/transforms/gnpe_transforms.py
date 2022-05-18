@@ -21,6 +21,7 @@ class GNPEBase(ABC):
         self.kernel = PriorDict(kernel_dict)
         self.operators = operators
         self.proxy_list = [k + "_proxy" for k in kernel_dict.keys()]
+        self.input_parameter_names = list(self.kernel.keys())
 
     @abstractmethod
     def __call__(self, input_sample):

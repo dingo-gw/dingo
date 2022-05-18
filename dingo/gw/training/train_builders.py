@@ -159,7 +159,10 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     transforms.append(ProjectOntoDetectors(ifo_list, domain, ref_time))
     transforms.append(SampleNoiseASD(asd_dataset))
     transforms.append(WhitenAndScaleStrain(domain.noise_std))
-    transforms.append(AddWhiteNoiseComplex())
+    # We typically add white detector noise. For debugging purposes, this can be turned
+    # off with zero_noise option in data_settings.
+    if not data_settings.get("zero_noise", False):
+        transforms.append(AddWhiteNoiseComplex())
     transforms.append(
         SelectStandardizeRepackageParameters(
             {

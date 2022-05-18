@@ -85,6 +85,7 @@ class PosteriorModel:
         self.epoch = 0
         self.optimizer = None
         self.scheduler = None
+        self.context = None
 
         # build model
         if model_filename is not None:
@@ -163,6 +164,9 @@ class PosteriorModel:
         if self.metadata is not None:
             model_dict["metadata"] = self.metadata
 
+        if self.context is not None:
+            model_dict["context"] = self.context
+
         if save_training_info:
             model_dict["optimizer_kwargs"] = self.optimizer_kwargs
             model_dict["scheduler_kwargs"] = self.scheduler_kwargs
@@ -204,6 +208,9 @@ class PosteriorModel:
         self.epoch = d["epoch"]
 
         self.metadata = d["metadata"]
+
+        if "context" in d:
+            self.context = d["context"]
 
         self.model_to_device(device)
 
