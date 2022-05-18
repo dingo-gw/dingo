@@ -5,7 +5,9 @@ event_dataset: <path/to/event_dataset>
 time_marginalization: 
   n_fft: 5
 
-n_slice_plots: 10
+slice_plots:
+  num_slice_plots: 10
+  params_slice2d: [[phase, geocent_time], [phase, tilt_1]]
 
 # settings for unconditional neural density estimator (nde)
 nde:
