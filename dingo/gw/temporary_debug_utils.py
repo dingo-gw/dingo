@@ -3,7 +3,6 @@ import numpy as np
 def save_training_injection(outname, pm, data, idx=0):
     """
     For debugging: extract a training injection. To be used inside train or test loop.
-    TODO: this function should not really be in core.
     """
     param_names = pm.metadata["train_settings"]["data"]["inference_parameters"]
     mean = pm.metadata["train_settings"]["data"]["standardization"]["mean"]
