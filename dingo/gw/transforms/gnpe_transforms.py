@@ -412,6 +412,10 @@ class GNPEPhase(GNPEBase):
                 )
             elif isinstance(proxies["phase_proxy"], (float, np.float64)):
                 proxies["phase_proxy"] += np.random.choice([0.0, np.pi])
+            else:
+                raise NotImplementedError(
+                    f"Unsupported data type " f"{type(proxies['phase_proxy'])}."
+                )
         proxies["phase_proxy"] = proxies["phase_proxy"] % (2 * np.pi)
         extrinsic_parameters.update(proxies)
         sample["extrinsic_parameters"] = extrinsic_parameters
