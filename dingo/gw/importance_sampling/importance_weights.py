@@ -171,9 +171,9 @@ def plot_diagnostics(
     # plot log probs
     plt.clf()
     x = log_probs_proposal
-    y = log_probs_target
+    y = log_probs_target - log_evidence
     plt.xlabel("NDE log_prob (proposal)")
-    plt.ylabel("Posterior log_prob (target)")
+    plt.ylabel("Posterior log_prob (target) - log_evidence")
     y_lower, y_upper = np.max(y) - 20, np.max(y)
     plt.ylim(y_lower, y_upper)
     n_below = len(np.where(y < y_lower)[0])
