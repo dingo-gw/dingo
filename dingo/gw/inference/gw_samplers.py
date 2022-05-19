@@ -67,19 +67,11 @@ class GWSamplerMixin(object):
             self.geocent_time_prior = self.prior.pop("geocent_time")
         else:
             self.geocent_time_prior = None
-        # Remove prior over phase if samples appear to be phase-marginalized.
+        # Split off prior over phase if samples appear to be phase-marginalized.
         if "phase" in self.prior.keys() and "phase" not in self.inference_parameters:
-            # pop off phase prior
-            phase_prior = self.prior.pop("phase")
-            # check that phase prior is uniform [0, 2pi)
-            if not (
-                isinstance(phase_prior, Uniform)
-                or not (phase_prior._minimum, phase_prior._maximum) == (0, 2 * np.pi)
-            ):
-                raise ValueError(
-                    f"Phase prior should be uniform [0, 2pi) for phase "
-                    f"marginalization, but is {phase_prior}."
-                )
+            self.phase_prior = self.prior.pop("phase")
+        else:
+            self.phase_prior = None
 
     def _build_domain(self):
         """
@@ -130,6 +122,18 @@ class GWSamplerMixin(object):
                 )
             time_marginalization_kwargs["t_lower"] = self.geocent_time_prior.minimum
             time_marginalization_kwargs["t_upper"] = self.geocent_time_prior.maximum
+
+        if phase_marginalization:
+            # check that phase prior is uniform [0, 2pi)
+            if not (
+                isinstance(self.phase_prior, Uniform)
+                and (self.phase_prior._minimum, self.phase_prior._maximum)
+                == (0, 2 * np.pi)
+            ):
+                raise ValueError(
+                    f"Phase prior should be uniform [0, 2pi) for phase "
+                    f"marginalization, but is {self.phase_prior}."
+                )
 
         # The detector reference positions during likelihood evaluation should be based
         # on the event time, since any post-correction to account for the training
