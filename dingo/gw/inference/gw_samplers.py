@@ -9,6 +9,7 @@ from torchvision.transforms import Compose
 
 from dingo.core.samplers import Sampler, GNPESampler
 from dingo.core.transforms import GetItem, RenameKey
+from dingo.core.density import NaiveKDE
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_window_factor, get_extrinsic_prior_dict
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
@@ -35,16 +36,19 @@ class GWSamplerMixin(object):
         * correction for fixed detector locations during training (t_ref)
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, synthetic_phase_kwargs=None, **kwargs):
         """
         Parameters
         ----------
+        synthetic_phase_kwargs : dict = None
+            kwargs for synthetic phase generation.
         kwargs
             Keyword arguments that are forwarded to the superclass.
         """
         super().__init__(**kwargs)
         self.t_ref = self.base_model_metadata["train_settings"]["data"]["ref_time"]
         self._pesummary_package = "gw"
+        self.synthetic_phase_kwargs = synthetic_phase_kwargs
 
     # _build_prior and _build_domain are called by Sampler.__init__, in that order.
 
@@ -96,6 +100,7 @@ class GWSamplerMixin(object):
         self,
         time_marginalization_kwargs: Optional[dict] = None,
         phase_marginalization: bool = False,
+        phase_grid: Optional[np.ndarray] = None,
     ):
         """
         Build the likelihood function based on model metadata. This is called at the
@@ -156,9 +161,12 @@ class GWSamplerMixin(object):
             t_ref=t_ref,
             time_marginalization_kwargs=time_marginalization_kwargs,
             phase_marginalization=phase_marginalization,
+            phase_grid=phase_grid,
         )
 
-    def _post_correct(self, samples: Union[dict, pd.DataFrame], inverse: bool = False):
+    def _post_correct_for_tref(
+        self, samples: Union[dict, pd.DataFrame], inverse: bool = False
+    ):
         """
         Correct the sky position of an event based on the reference time of the model.
         This is necessary since the model was trained with with fixed detector (reference)
@@ -193,6 +201,120 @@ class GWSamplerMixin(object):
                     samples["ra"] = (ra + ra_correction) % (2 * np.pi)
                 else:
                     samples["ra"] = (ra - ra_correction) % (2 * np.pi)
+
+    def _sample_synthetic_phase(
+        self, samples: Union[dict, pd.DataFrame], inverse: bool = False
+    ):
+        """
+        Sample a synthetic phase for the waveform. This is a post-processing step
+        applicable to samples theta in the full parameter space, except for the phase
+        parameter (i.e., 14D samples). This step adds a theta parameter to the samples
+        based on likelihood evaluations.
+
+        A synthetic phase is sampled as follows.
+
+            * Compute the waveform mu(theta, phase=0) for phase 0.
+            * Compute the likelihood for mu(theta, phase=0) * exp(2i*phase) on a
+              uniform grid of phase values in the range [0, 2pi).
+              Note that this is *not* equivalent to the actual likelihood for
+              (theta, phase) unless the waveform is fully dominated by the (2, 2) mode.
+            * Build a synthetic conditional phase distribution based on this grid.
+              We use a kde, such that we can sample and also evaluate the log_prob.
+              We add a constant background with weight self.synthetic_phase_kwargs to the
+              kde to make sure that we keep a mass-covering property. With this,
+              the impportance sampling will yield exact results even if the synthetic
+              phase conditional is just an approximation.
+
+        Besides adding phase samples to samples['phase'], this method also modifies
+        samples['log_prob'] by adding the log_prob of the synthetic phase conditional.
+
+        This method modifies the samples in place.
+
+        Parameters
+        ----------
+        samples : dict or pd.DataFrame
+        inverse : bool, default True
+            Whether to apply instead the inverse transformation. This is used prior to
+            calculating the log_prob.
+
+        """
+        if inverse:
+            pass
+        else:
+            # build grid
+            kde = NaiveKDE(0, np.pi, self.synthetic_phase_kwargs["n_grid"])
+            phase_grid = kde.grid
+
+            self._build_likelihood(phase_grid=phase_grid)
+            theta = pd.DataFrame(samples).drop(columns="log_prob")
+
+            # only evaluate in prior support
+            log_prior = self.prior.ln_prob(theta, axis=0)
+            constraints = self.prior.evaluate_constraints(theta)
+            np.putmask(log_prior, constraints == 0, -np.inf)
+            within_prior = log_prior != -np.inf
+
+            import time
+
+            t0 = time.time()
+
+            # evaluate the likelihood on the phase grid (this is an approximation if
+            # higher modes are relevant)
+            log_likelihood_grid = self.likelihood.log_likelihood_multi(
+                theta.iloc[within_prior],
+                self.synthetic_phase_kwargs.get("num_processes", 1),
+            )
+
+            # build density
+            kde.initialize_log_prob(
+                log_likelihood_grid,
+                self.synthetic_phase_kwargs.get("uniform_weight", 0.05),
+            )
+            phase, delta_log_prob = kde.sample_and_log_prob()
+            # the kde is uniform in [0, pi), we now modify it to a pi-periodic
+            # distribution in [0, 2pi).
+            phase = phase + np.random.choice((0,np.pi), size=len(phase))
+            delta_log_prob = delta_log_prob - np.log(2)
+            print(f"{time.time() - t0:.2f}s to sample synthetic phase")
+
+            # unsqueeze phase and log_prob, fill samples outside prior support with -inf
+            phase_arr = np.full(len(theta), -np.inf)
+            phase_arr[within_prior] = phase
+            delta_log_prob_arr = np.full(len(theta), -np.inf)
+            delta_log_prob_arr[within_prior] = delta_log_prob
+
+            # insert phase into theta and add log_prob
+            if isinstance(samples, pd.DataFrame):
+                samples.insert(samples.shape[1] - 2, "phase", phase_arr)
+                samples["log_prob"] += delta_log_prob_arr
+            else:
+                samples["phase"] = phase_arr
+                samples["log_prob"] += delta_log_prob_arr
+
+            # set prior for phase, since now phase parameter is present
+            self.prior["phase"] = self.phase_prior
+            # reset likelihood for safety
+            self.likelihood = None
+
+    def _post_process(self, samples: Union[dict, pd.DataFrame], inverse: bool = False):
+        """
+        Post processing of parameter samples.
+        * Correct the sky position for a potentially fixed reference time.
+          (see self._post_correct_for_tref)
+        * Potentially sample a synthetic phase. (see self._sample_synthetic_phase)
+
+        This method modifies the samples in place.
+
+        Parameters
+        ----------
+        samples : dict or pd.DataFrame
+        inverse : bool, default True
+            Whether to apply instead the inverse transformation. This is used prior to
+            calculating the log_prob.
+        """
+        self._post_correct_for_tref(samples, inverse)
+        if self.synthetic_phase_kwargs is not None:
+            self._sample_synthetic_phase(samples, inverse)
 
 
 class GWSampler(GWSamplerMixin, Sampler):
@@ -360,7 +482,9 @@ class GWSamplerUnconditional(GWSampler):
             as_type="dict",
         )
 
-    def _post_correct(self, samples: Union[dict, pd.DataFrame], inverse: bool = False):
+    def _post_correct_for_tref(
+        self, samples: Union[dict, pd.DataFrame], inverse: bool = False
+    ):
         # We do not want to correct for t_ref because we assume that the unconditional
         # model will have been trained on samples for which this correction was already
         # implemented.

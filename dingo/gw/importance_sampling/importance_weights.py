@@ -53,13 +53,19 @@ def main():
         "inference_parameters"
     ].copy()
     time_marginalization_kwargs = settings.get("time_marginalization", None)
+    time_marginalization = time_marginalization_kwargs is not None
     phase_marginalization = settings.get("phase_marginalization", False)
-    if time_marginalization_kwargs is not None and phase_marginalization:
-        raise NotImplementedError("Time and phase marginalization not yet compatible.")
-    if time_marginalization_kwargs is not None and "geocent_time" in samples:
+    synthetic_phase_kwargs = settings.get("synthetic_phase", None)
+    synthetic_phase = synthetic_phase_kwargs is not None
+    if sum([time_marginalization, phase_marginalization, synthetic_phase]) > 1:
+        raise NotImplementedError(
+            "Only one of time_marginalization, phase_marginalization and"
+            "synthetic_phase can be set to True."
+        )
+    if time_marginalization and "geocent_time" in samples:
         samples.drop("geocent_time", axis=1, inplace=True)
         inference_parameters.remove("geocent_time")
-    if phase_marginalization:
+    if phase_marginalization or synthetic_phase:
         samples.drop("phase", axis=1, inplace=True)
         inference_parameters.remove("phase")
     settings["nde"]["data"]["inference_parameters"] = inference_parameters
@@ -104,7 +110,9 @@ def main():
 
     # Step 2: Sample from proposal.
 
-    nde_sampler = GWSamplerUnconditional(model=nde)
+    nde_sampler = GWSamplerUnconditional(
+        model=nde, synthetic_phase_kwargs=synthetic_phase_kwargs
+    )
     print(f'Generating {settings["num_samples"]} samples from proposal distribution.')
     nde_sampler.run_sampler(num_samples=settings["num_samples"])
 

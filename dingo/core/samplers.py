@@ -180,10 +180,11 @@ class Sampler(object):
         if remainder > 0:
             samples.append(self._run_sampler(remainder, context))
         samples = {p: torch.cat([s[p] for s in samples]) for p in samples[0].keys()}
-
-        # Apply any post-sampling corrections to sampled parameters, and place on CPU.
-        self._post_correct(samples)
         samples = {k: v.cpu().numpy() for k, v in samples.items()}
+
+        # Apply any post-sampling transformation to sampled parameters (e.g.,
+        # correction for t_ref or sampling of synthetic phase), and place on CPU.
+        self._post_process(samples)
         self.samples = pd.DataFrame(samples)
 
     def log_prob(self, samples: pd.DataFrame) -> np.ndarray:
@@ -205,7 +206,7 @@ class Sampler(object):
         # This undoes any post-correction that would have been done to the samples,
         # before evaluating the log_prob. E.g., the t_ref / sky position correction.
         samples = samples.copy()
-        self._post_correct(samples, inverse=True)
+        self._post_process(samples, inverse=True)
 
         # Standardize the sample parameters and place on device.
         y = samples[self.inference_parameters].to_numpy()
@@ -234,7 +235,7 @@ class Sampler(object):
 
         return log_prob.cpu().numpy()
 
-    def _post_correct(self, samples: Union[dict, pd.DataFrame], inverse: bool = False):
+    def _post_process(self, samples: Union[dict, pd.DataFrame], inverse: bool = False):
         pass
 
     def _build_prior(self):

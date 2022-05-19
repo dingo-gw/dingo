@@ -23,6 +23,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         t_ref=None,
         time_marginalization_kwargs=None,
         phase_marginalization=False,
+        phase_grid=None,
     ):
         """
         Initialize the likelihood.
@@ -94,6 +95,9 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         if time_marginalization_kwargs is not None:
             self.initialize_time_marginalization(**time_marginalization_kwargs)
         self.phase_marginalization = phase_marginalization
+        self.phase_grid = phase_grid
+        if self.phase_grid is not None:
+            self.initialize_phase_grid(phase_grid)
 
     def initialize_time_marginalization(self, t_lower, t_upper, n_fft=1):
         """
@@ -146,16 +150,38 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         with np.errstate(divide="ignore"):  # ignore warnings for log(0) = -inf
             self.time_prior_log = np.log(time_prior / np.sum(time_prior))
 
+    def initialize_phase_grid(self, phase_grid):
+        self.phase_grid = phase_grid
+        # Compute strains with phase shifted by -2*phase_grid. This is equivalent to
+        # shifting the phase of mu by +2*phase_grid, but it can be precomputed.
+        self.whitened_strains_phase_grid = {
+            k: np.repeat(v[:, np.newaxis], len(self.phase_grid), axis=1)
+            * np.exp(-2j * self.phase_grid)
+            for k, v in self.whitened_strains.items()
+        }
+
     def log_likelihood(self, theta):
-        if self.time_marginalization and self.phase_marginalization:
+        if (
+            sum(
+                [
+                    self.time_marginalization,
+                    self.phase_marginalization,
+                    self.phase_grid is not None,
+                ]
+            )
+            > 1
+        ):
             raise NotImplementedError(
-                "Time and phase marginalization not yet compatible."
+                "Only one out of time-marginalization, phase-marginalization and "
+                "phase-grid can be used at a time."
             )
 
         if self.time_marginalization:
             return self._log_likelihood_time_marginalized(theta)
         elif self.phase_marginalization:
             return self._log_likelihood_phase_marginalized(theta)
+        elif self.phase_grid is not None:
+            return self._log_likelihood_phase_grid(theta)
         else:
             return self._log_likelihood(theta)
 
@@ -222,6 +248,26 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             ]
         )
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+
+    def _log_likelihood_phase_grid(self, theta):
+
+        # Step 1: Compute whitened GW strain mu(theta) for parameters theta with phase 0.
+        theta["phase"] = 0
+        mu = self.signal(theta)["waveform"]
+        d_phase_grid = self.whitened_strains_phase_grid
+
+        # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to
+        # compute the remaining terms rho2opt and kappa2.
+        # rho2opt is independent of the phase.
+        rho2opt = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
+        # kappa2 depends on the phase.
+        kappa2 = np.sum(
+            [
+                inner_product(d_ifo, mu_ifo[:, np.newaxis])
+                for d_ifo, mu_ifo in zip(d_phase_grid.values(), mu.values())
+            ], axis=0,
+        )
+        return self.log_Zn + np.array(kappa2) - 1 / 2.0 * rho2opt
 
     def _log_likelihood_phase_marginalized(self, theta):
         """
@@ -328,6 +374,10 @@ def inner_product(a, b, min_idx=0, delta_f=None, psd=None):
     provided. Alternatively, if delta_f and psd are not provided, the data a and b are
     assumed to be whitened already (i.e., whitened as d -> d * sqrt(4 delta_f / psd)).
 
+    Note: sum is only taken along axis 0 (which is assumed to be the frequency axis),
+    while other axes are preserved. This is e.g. useful when evaluating kappa2 on a
+    phase grid.
+
     Parameters
     ----------
     a: np.ndaarray
@@ -353,9 +403,9 @@ def inner_product(a, b, min_idx=0, delta_f=None, psd=None):
             raise ValueError(
                 "If unwhitened data is provided, both delta_f and psd must be provided."
             )
-        return 4 * delta_f * np.sum((a.conj() * b / psd)[min_idx:]).real
+        return 4 * delta_f * np.sum((a.conj() * b / psd)[min_idx:], axis=0).real
     else:
-        return np.sum((a.conj() * b)[min_idx:]).real
+        return np.sum((a.conj() * b)[min_idx:], axis=0).real
 
 
 def inner_product_complex(a, b, min_idx=0, delta_f=None, psd=None):
@@ -370,9 +420,9 @@ def inner_product_complex(a, b, min_idx=0, delta_f=None, psd=None):
             raise ValueError(
                 "If unwhitened data is provided, both delta_f and psd must be provided."
             )
-        return 4 * delta_f * np.sum((a.conj() * b / psd)[min_idx:])
+        return 4 * delta_f * np.sum((a.conj() * b / psd)[min_idx:], axis=0)
     else:
-        return np.sum((a.conj() * b)[min_idx:])
+        return np.sum((a.conj() * b)[min_idx:], axis=0)
 
 
 def build_stationary_gaussian_likelihood(
