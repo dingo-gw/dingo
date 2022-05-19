@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.fft import fft
+from bilby.gw.utils import ln_i0
 
 from dingo.core.likelihood import Likelihood
 from dingo.gw.inference.injection import GWSignal
@@ -21,6 +22,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         event_data,
         t_ref=None,
         time_marginalization_kwargs=None,
+        phase_marginalization=False,
     ):
         """
         Initialize the likelihood.
@@ -91,6 +93,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         self.time_marginalization = False
         if time_marginalization_kwargs is not None:
             self.initialize_time_marginalization(**time_marginalization_kwargs)
+        self.phase_marginalization = phase_marginalization
 
     def initialize_time_marginalization(self, t_lower, t_upper, n_fft=1):
         """
@@ -144,8 +147,15 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             self.time_prior_log = np.log(time_prior / np.sum(time_prior))
 
     def log_likelihood(self, theta):
+        if self.time_marginalization and self.phase_marginalization:
+            raise NotImplementedError(
+                "Time and phase marginalization not yet compatible."
+            )
+
         if self.time_marginalization:
             return self._log_likelihood_time_marginalized(theta)
+        elif self.phase_marginalization:
+            return self._log_likelihood_phase_marginalized(theta)
         else:
             return self._log_likelihood(theta)
 
@@ -213,6 +223,43 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         )
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
+    def _log_likelihood_phase_marginalized(self, theta):
+        """
+
+        Parameters
+        ----------
+        theta: dict
+            BBH parameters.
+
+        Returns
+        -------
+        log_likelihood: float
+        """
+
+        # Step 1: Compute whitened GW strain mu(theta) for parameters theta.
+        # The phase parameter needs to be set to 0.
+        theta["phase"] = 0.0
+        mu = self.signal(theta)["waveform"]
+        d = self.whitened_strains
+
+        # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to
+        # compute the remaining terms rho2opt and kappa2
+        rho2opt = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
+        # For the phase marginalized likelihood, we need to replace kappa2 with
+        #
+        #       log I0 ( |kappa2C| ),
+        #
+        # where kappa2C is the same as kappa2, but with the complex inner product
+        # instead of the regular one, and I0 is the modified Bessel function of the
+        # first kind of order 0.
+        kappa2C = sum(
+            [
+                inner_product_complex(d_ifo, mu_ifo)
+                for d_ifo, mu_ifo in zip(d.values(), mu.values())
+            ]
+        )
+        return self.log_Zn + ln_i0(np.abs(kappa2C)) - 1 / 2.0 * rho2opt
+
     def _log_likelihood_time_marginalized(self, theta):
         """
         Compute log likelihood with time marginalization.
@@ -273,15 +320,6 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
-    def log_prob(self, *args, **kwargs):
-        """
-        Wraps log_likelihood method, required since downstream methods call log_prob.
-        """
-        if not self.time_marginalization:
-            return self.log_likelihood(*args, **kwargs)
-        else:
-            return self.log_likelihood_time_marginalized(*args, **kwargs)
-
 
 def inner_product(a, b, min_idx=0, delta_f=None, psd=None):
     """
@@ -318,6 +356,23 @@ def inner_product(a, b, min_idx=0, delta_f=None, psd=None):
         return 4 * delta_f * np.sum((a.conj() * b / psd)[min_idx:]).real
     else:
         return np.sum((a.conj() * b)[min_idx:]).real
+
+
+def inner_product_complex(a, b, min_idx=0, delta_f=None, psd=None):
+    """
+    Same as inner product, but without taking the real part. Retaining phase
+    information is useful for the phase-marginalized likelihood. For further
+    documentation see inner_product function.
+    """
+    #
+    if psd is not None:
+        if delta_f is None:
+            raise ValueError(
+                "If unwhitened data is provided, both delta_f and psd must be provided."
+            )
+        return 4 * delta_f * np.sum((a.conj() * b / psd)[min_idx:])
+    else:
+        return np.sum((a.conj() * b)[min_idx:])
 
 
 def build_stationary_gaussian_likelihood(

@@ -67,6 +67,11 @@ class GWSamplerMixin(object):
             self.geocent_time_prior = self.prior.pop("geocent_time")
         else:
             self.geocent_time_prior = None
+        # Split off prior over phase if samples appear to be phase-marginalized.
+        if "phase" in self.prior.keys() and "phase" not in self.inference_parameters:
+            self.phase_prior = self.prior.pop("phase")
+        else:
+            self.phase_prior = None
 
     def _build_domain(self):
         """
@@ -87,14 +92,23 @@ class GWSamplerMixin(object):
 
     # _build_likelihood is called at the beginning of Sampler.importance_sample
 
-    def _build_likelihood(self, time_marginalization_kwargs: Optional[dict] = None):
+    def _build_likelihood(
+        self,
+        time_marginalization_kwargs: Optional[dict] = None,
+        phase_marginalization: bool = False,
+    ):
         """
         Build the likelihood function based on model metadata. This is called at the
         beginning of importance_sample().
 
         Parameters
         ----------
-        time_marginalization_kwargs
+        time_marginalization_kwargs: dict, optional
+            kwargs for time marginalization. At this point the only kwarg is n_fft,
+            which determines the number of FFTs used (higher n_fft means better
+            accuracy, at the cost of longer computation time).
+        phase_marginalization: bool = False
+            Whether to marginalize over phase.
         """
         if time_marginalization_kwargs is not None:
             if self.geocent_time_prior is None:
@@ -108,6 +122,18 @@ class GWSamplerMixin(object):
                 )
             time_marginalization_kwargs["t_lower"] = self.geocent_time_prior.minimum
             time_marginalization_kwargs["t_upper"] = self.geocent_time_prior.maximum
+
+        if phase_marginalization:
+            # check that phase prior is uniform [0, 2pi)
+            if not (
+                isinstance(self.phase_prior, Uniform)
+                and (self.phase_prior._minimum, self.phase_prior._maximum)
+                == (0, 2 * np.pi)
+            ):
+                raise ValueError(
+                    f"Phase prior should be uniform [0, 2pi) for phase "
+                    f"marginalization, but is {self.phase_prior}."
+                )
 
         # The detector reference positions during likelihood evaluation should be based
         # on the event time, since any post-correction to account for the training
@@ -129,6 +155,7 @@ class GWSamplerMixin(object):
             event_data=self.context,
             t_ref=t_ref,
             time_marginalization_kwargs=time_marginalization_kwargs,
+            phase_marginalization=phase_marginalization,
         )
 
     def _post_correct(self, samples: Union[dict, pd.DataFrame], inverse: bool = False):
@@ -221,7 +248,7 @@ class GWSampler(GWSamplerMixin, Sampler):
 class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
     """
     Sampler for graviational-wave inference using group-equivariant neural posterior
-    estimation. Wraps a PosteriorModel instance.
+    estimation (GNPE). Wraps a PosteriorModel instance.
 
     This sampler also contains an NPE sampler, which is used to generate initial
     samples for the GNPE loop.
