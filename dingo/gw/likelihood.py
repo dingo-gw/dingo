@@ -320,22 +320,6 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
-    # def log_prob(self, *args, **kwargs):
-    #     """
-    #     Wraps log_likelihood method, required since downstream methods call log_prob.
-    #     """
-    #     if self.time_marginalization and self.phase_marginalization:
-    #         raise NotImplementedError(
-    #             "Time and phase marginalization not yet compatible."
-    #         )
-    #
-    #     if self.time_marginalization:
-    #         return self.log_likelihood_time_marginalized(*args, **kwargs)
-    #     elif self.phase_marginalization:
-    #         return self.log_likelihood_phase_marginalized(*args, **kwargs)
-    #     else:
-    #         return self.log_likelihood(*args, **kwargs)
-
 
 def inner_product(a, b, min_idx=0, delta_f=None, psd=None):
     """
