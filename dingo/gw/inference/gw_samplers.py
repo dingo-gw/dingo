@@ -112,7 +112,11 @@ class GWSamplerMixin(object):
         Parameters
         ----------
         time_marginalization_kwargs: dict, optional
+            kwargs for time marginalization. At this point the only kwarg is n_fft,
+            which determines the number of FFTs used (higher n_fft means better
+            accuracy, at the cost of longer computation time).
         phase_marginalization: bool = False
+            Whether to marginalize over phase.
         """
         if time_marginalization_kwargs is not None:
             if self.geocent_time_prior is None:
