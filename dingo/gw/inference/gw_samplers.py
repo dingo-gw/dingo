@@ -244,7 +244,7 @@ class GWSampler(GWSamplerMixin, Sampler):
 class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
     """
     Sampler for graviational-wave inference using group-equivariant neural posterior
-    estimation. Wraps a PosteriorModel instance.
+    estimation (GNPE). Wraps a PosteriorModel instance.
 
     This sampler also contains an NPE sampler, which is used to generate initial
     samples for the GNPE loop.
