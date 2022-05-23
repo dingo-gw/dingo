@@ -282,7 +282,10 @@ class GWSamplerMixin(object):
             phases = np.linspace(0, 2 * np.pi, self.synthetic_phase_kwargs["n_grid"])
             phasor = np.exp(-2j * phases)
             phase_log_posterior = np.outer(d_inner_h_complex, phasor).real
-            phase_posterior = np.exp(phase_log_posterior - max(phase_log_posterior))
+            phase_posterior = np.exp(
+                phase_log_posterior
+                - np.amax(phase_log_posterior, axis=1, keepdims=True)
+            )
 
             # Interpolate and sample a new phase.
             # new_phase = np.empty(len(phase_posterior))
