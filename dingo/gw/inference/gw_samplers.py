@@ -289,7 +289,7 @@ class GWSamplerMixin(object):
             # Include a floor value to maintain mass coverage.
             phase_posterior += phase_posterior.mean(
                 axis=-1, keepdims=True
-            ) * self.synthetic_phase_kwargs.get("uniform_weight", 0.1)
+            ) * self.synthetic_phase_kwargs.get("uniform_weight", 0.0)
 
             new_phase, delta_log_prob = interpolated_sample_and_log_prob_multi(
                 phases,
