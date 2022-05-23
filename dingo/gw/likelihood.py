@@ -436,7 +436,7 @@ def synthetic_phase_sample_and_log_prob_multi(
                 result_list = pool.map(task_fun, data_generator)
         else:
             result_list = list(map(task_fun, data_generator))
-    phase, log_prob = np.array(result_list)
+    phase, log_prob = np.array(result_list).T
     return phase, log_prob
 
 
