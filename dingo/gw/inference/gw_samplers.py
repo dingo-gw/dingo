@@ -280,7 +280,7 @@ class GWSamplerMixin(object):
             # un-normalized, with a different normalization for each sample. (It will
             # eventually be normalized.)
             phases = np.linspace(0, 2 * np.pi, self.synthetic_phase_kwargs["n_grid"])
-            phasor = np.exp(-2j * phases)
+            phasor = np.exp(2j * phases)
             phase_log_posterior = np.outer(d_inner_h_complex, phasor).real
             phase_posterior = np.exp(
                 phase_log_posterior
