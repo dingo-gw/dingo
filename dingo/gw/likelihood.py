@@ -1,7 +1,9 @@
+from functools import partial
 from multiprocessing import Pool
 
 import numpy as np
 import pandas as pd
+from bilby.core.prior import Interped
 from scipy.fft import fft
 from bilby.gw.utils import ln_i0
 from threadpoolctl import threadpool_limits
@@ -421,6 +423,28 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 for d_ifo, mu_ifo in zip(d.values(), mu.values())
             ]
         )
+
+
+def synthetic_phase_sample_and_log_prob_multi(
+    self, phases, phase_posteriors, num_processes: int = 1
+):
+    with threadpool_limits(limits=1, user_api="blas"):
+        data_generator = iter(phase_posteriors)
+        task_fun = partial(synthetic_phase_sample_and_log_prob, phases)
+        if num_processes > 1:
+            with Pool(processes=num_processes) as pool:
+                result_list = pool.map(task_fun, data_generator)
+        else:
+            result_list = list(map(task_fun, data_generator))
+    phase, log_prob = np.array(result_list)
+    return phase, log_prob
+
+
+def synthetic_phase_sample_and_log_prob(self, phases, posterior):
+    interp = Interped(phases, posterior)
+    new_phase = interp.sample()
+    log_prob = interp.ln_prob(new_phase)
+    return new_phase, log_prob
 
 
 def inner_product(a, b, min_idx=0, delta_f=None, psd=None):

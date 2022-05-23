@@ -12,7 +12,8 @@ from dingo.core.transforms import GetItem, RenameKey
 from dingo.core.density import NaiveKDE
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_window_factor, get_extrinsic_prior_dict
-from dingo.gw.likelihood import StationaryGaussianGWLikelihood
+from dingo.gw.likelihood import StationaryGaussianGWLikelihood, \
+    synthetic_phase_sample_and_log_prob_multi
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.transforms import (
     WhitenAndScaleStrain,
@@ -282,12 +283,16 @@ class GWSamplerMixin(object):
             phase_posterior = np.exp(phase_log_posterior - max(phase_log_posterior))
 
             # Interpolate and sample a new phase.
-            new_phase = np.empty(len(phase_posterior))
-            delta_log_prob = np.empty(len(phase_posterior))
-            for i, p in enumerate(phase_posterior):
-                interp = Interped(phases, p)
-                new_phase[i] = interp.sample()
-                delta_log_prob[i] = interp.ln_prob(new_phase[i])
+            # new_phase = np.empty(len(phase_posterior))
+            # delta_log_prob = np.empty(len(phase_posterior))
+            # for i, p in enumerate(phase_posterior):
+            #     interp = Interped(phases, p)
+            #     new_phase[i] = interp.sample()
+            #     delta_log_prob[i] = interp.ln_prob(new_phase[i])
+
+            new_phase, delta_log_prob = synthetic_phase_sample_and_log_prob_multi(
+                phases, phase_posterior
+            )
 
             print(f"{time.time() - t0:.2f}s to sample synthetic phase.")
 
