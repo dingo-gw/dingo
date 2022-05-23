@@ -3,19 +3,18 @@ from typing import Optional, Union
 import numpy as np
 import pandas as pd
 from astropy.time import Time
-from bilby.core.prior import Uniform, Interped
+from bilby.core.prior import Uniform
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 
 from dingo.core.samplers import Sampler, GNPESampler
 from dingo.core.transforms import GetItem, RenameKey
-from dingo.core.density import NaiveKDE
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_window_factor, get_extrinsic_prior_dict
 from dingo.gw.likelihood import (
     StationaryGaussianGWLikelihood,
-    synthetic_phase_sample_and_log_prob_multi,
 )
+from dingo.core.density.kde import interpolated_sample_and_log_prob_multi
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.transforms import (
     WhitenAndScaleStrain,
@@ -221,12 +220,13 @@ class GWSamplerMixin(object):
               uniform grid of phase values in the range [0, 2pi).
               Note that this is *not* equivalent to the actual likelihood for
               (theta, phase) unless the waveform is fully dominated by the (2, 2) mode.
-            * Build a synthetic conditional phase distribution based on this grid.
-              We use a kde, such that we can sample and also evaluate the log_prob.
-              We add a constant background with weight self.synthetic_phase_kwargs to the
-              kde to make sure that we keep a mass-covering property. With this,
-              the impportance sampling will yield exact results even if the synthetic
-              phase conditional is just an approximation.
+            * Build a synthetic conditional phase distribution based on this grid. We
+              use an interpolated prior distribution bilby.core.prior.Interped,
+              such that we can sample and also evaluate the log_prob. We add a constant
+              background with weight self.synthetic_phase_kwargs to the kde to make
+              sure that we keep a mass-covering property. With this, the importance
+              sampling will yield exact results even if the synthetic phase conditional is
+              just an approximation.
 
         Besides adding phase samples to samples['phase'], this method also modifies
         samples['log_prob'] by adding the log_prob of the synthetic phase conditional.
@@ -266,7 +266,6 @@ class GWSamplerMixin(object):
             self._build_likelihood()
 
             import time
-
             t0 = time.time()
 
             # Begin with phase set to zero and evaluate the complex inner product.
@@ -287,15 +286,12 @@ class GWSamplerMixin(object):
                 - np.amax(phase_log_posterior, axis=1, keepdims=True)
             )
 
-            # Interpolate and sample a new phase.
-            # new_phase = np.empty(len(phase_posterior))
-            # delta_log_prob = np.empty(len(phase_posterior))
-            # for i, p in enumerate(phase_posterior):
-            #     interp = Interped(phases, p)
-            #     new_phase[i] = interp.sample()
-            #     delta_log_prob[i] = interp.ln_prob(new_phase[i])
+            # Include a floor value to maintain mass coverage.
+            phase_posterior += phase_posterior.mean(
+                axis=-1
+            ) * self.synthetic_phase_kwargs.get("uniform_weight", 0.1)
 
-            new_phase, delta_log_prob = synthetic_phase_sample_and_log_prob_multi(
+            new_phase, delta_log_prob = interpolated_sample_and_log_prob_multi(
                 phases,
                 phase_posterior,
                 self.synthetic_phase_kwargs.get("num_processes", 1),

@@ -1,9 +1,7 @@
-from functools import partial
 from multiprocessing import Pool
 
 import numpy as np
 import pandas as pd
-from bilby.core.prior import Interped
 from scipy.fft import fft
 from bilby.gw.utils import ln_i0
 from threadpoolctl import threadpool_limits
@@ -377,21 +375,19 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         self, theta: pd.DataFrame, num_processes: int = 1
     ) -> np.ndarray:
         """
-        Calculate the log likelihood at multiple points in parameter space. Works with
-        multiprocessing.
-
-        This wraps the log_likelihood() method.
+        Calculate the complex inner product (d | h(theta)) between the stored data d
+        and a simulated waveform with given parameters theta. Works with multiprocessing.
 
         Parameters
         ----------
-        theta : pd.DataFrame
-            Parameters values at which to evaluate likelihood.
+        theta : dict
+            Parameters at which to evaluate h.
         num_processes : int
-            Number of processes to use.
+            Number of parallel processes to use.
 
         Returns
         -------
-        np.array of log likelihoods
+        complex : Inner product
         """
         with threadpool_limits(limits=1, user_api="blas"):
 
@@ -411,6 +407,19 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         return np.array(d_inner_h_complex)
 
     def d_inner_h_complex(self, theta):
+        """
+        Calculate the complex inner product (d | h(theta)) between the stored data d
+        and a simulated waveform with given parameters theta.
+
+        Parameters
+        ----------
+        theta : dict
+            Parameters at which to evaluate h.
+
+        Returns
+        -------
+        complex : Inner product
+        """
         # TODO: Implement for time marginalization.
         return self._d_inner_h_complex(theta)
 
@@ -423,28 +432,6 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 for d_ifo, mu_ifo in zip(d.values(), mu.values())
             ]
         )
-
-
-def synthetic_phase_sample_and_log_prob_multi(
-    phases, phase_posterior, num_processes: int = 1
-):
-    with threadpool_limits(limits=1, user_api="blas"):
-        data_generator = iter(phase_posterior)
-        task_fun = partial(synthetic_phase_sample_and_log_prob, phases)
-        if num_processes > 1:
-            with Pool(processes=num_processes) as pool:
-                result_list = pool.map(task_fun, data_generator)
-        else:
-            result_list = list(map(task_fun, data_generator))
-    phase, log_prob = np.array(result_list).T
-    return phase, log_prob
-
-
-def synthetic_phase_sample_and_log_prob(phases, posterior):
-    interp = Interped(phases, posterior)
-    new_phase = interp.sample()
-    log_prob = interp.ln_prob(new_phase)
-    return new_phase, log_prob
 
 
 def inner_product(a, b, min_idx=0, delta_f=None, psd=None):

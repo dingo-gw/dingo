@@ -1,4 +1,9 @@
+from functools import partial
+from multiprocessing import Pool
+
 import numpy as np
+from bilby.core.prior import Interped
+from threadpoolctl import threadpool_limits
 
 
 class NaiveKDE:
@@ -125,3 +130,60 @@ def average(x, weights, axis=None):
 
 def gaussian_density(x, mu, sigma):
     return np.exp(-0.5 * ((x - mu) / sigma) ** 2) / (sigma * np.sqrt(2 * np.pi))
+
+
+def interpolated_sample_and_log_prob_multi(
+    sample_points, values, num_processes: int = 1
+):
+    """
+    Given a distribution discretized on a grid, return a sample and the log prob from an
+    interpolated distribution. Wraps the bilby.core.prior.Interped class. Works with
+    multiprocessing.
+
+    Parameters
+    ----------
+    sample_points : np.ndarray, shape (N)
+        x values for samples
+    values : np.ndarray, shape (B, N)
+        y values for samples. The distributions do not have to be initially
+        normalized, although the final log_probs will be. B = batch dimension.
+    num_processes : int
+        Number of parallel processes to use.
+
+    Returns
+    -------
+    (np.ndarray, np.ndarray) : sample and log_prob arrays, each of length B
+    """
+    with threadpool_limits(limits=1, user_api="blas"):
+        data_generator = iter(values)
+        task_fun = partial(interpolated_sample_and_log_prob, sample_points)
+        if num_processes > 1:
+            with Pool(processes=num_processes) as pool:
+                result_list = pool.map(task_fun, data_generator)
+        else:
+            result_list = list(map(task_fun, data_generator))
+    phase, log_prob = np.array(result_list).T
+    return phase, log_prob
+
+
+def interpolated_sample_and_log_prob(sample_points, values):
+    """
+    Given a distribution discretized on a grid, return a sample and the log prob from an
+    interpolated distribution. Wraps the bilby.core.prior.Interped class.
+
+    Parameters
+    ----------
+    sample_points : np.ndarray
+        x values for samples
+    values : np.ndarray
+        y values for samples. The distribution does not have to be initially
+        normalized, although the final log_prob will be.
+
+    Returns
+    -------
+    (float, float) : sample and log_prob
+    """
+    interp = Interped(sample_points, values)
+    sample = interp.sample()
+    log_prob = interp.ln_prob(sample)
+    return sample, log_prob
