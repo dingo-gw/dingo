@@ -263,12 +263,15 @@ class GWSamplerMixin(object):
             self._build_likelihood()
 
             import time
+
             t0 = time.time()
 
             # Begin with phase set to zero and evaluate the complex inner product.
-            theta['phase'] = 0.0
+            theta["phase"] = 0.0
             d_inner_h_complex = self.likelihood.d_inner_h_complex_multi(
-                theta.iloc[within_prior])
+                theta.iloc[within_prior],
+                self.synthetic_phase_kwargs.get("num_processes", 1),
+            )
 
             # Evaluate the log posterior over the phase across the grid. This is
             # un-normalized, with a different normalization for each sample. (It will
@@ -293,8 +296,8 @@ class GWSamplerMixin(object):
             delta_log_prob_array = np.full(len(theta), -np.inf)
             delta_log_prob_array[within_prior] = delta_log_prob
 
-            samples['phase'] = phase_array
-            samples['log_prob'] += delta_log_prob_array
+            samples["phase"] = phase_array
+            samples["log_prob"] += delta_log_prob_array
 
             # set prior for phase, since now phase parameter is present
             self.prior["phase"] = self.phase_prior

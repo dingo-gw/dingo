@@ -269,7 +269,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             [
                 inner_product(d_ifo, mu_ifo[:, np.newaxis])
                 for d_ifo, mu_ifo in zip(d_phase_grid.values(), mu.values())
-            ], axis=0,
+            ],
+            axis=0,
         )
         return self.log_Zn + np.array(kappa2) - 1 / 2.0 * rho2opt
 
@@ -371,7 +372,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
     def d_inner_h_complex_multi(
-            self, theta: pd.DataFrame, num_processes: int = 1
+        self, theta: pd.DataFrame, num_processes: int = 1
     ) -> np.ndarray:
         """
         Calculate the log likelihood at multiple points in parameter space. Works with
@@ -399,7 +400,9 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
             if num_processes > 1:
                 with Pool(processes=num_processes) as pool:
-                    d_inner_h_complex = pool.map(self.d_inner_h_complex, theta_generator)
+                    d_inner_h_complex = pool.map(
+                        self.d_inner_h_complex, theta_generator
+                    )
             else:
                 d_inner_h_complex = list(map(self.d_inner_h_complex, theta_generator))
 
