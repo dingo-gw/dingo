@@ -426,10 +426,10 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
 
 def synthetic_phase_sample_and_log_prob_multi(
-    self, phases, phase_posteriors, num_processes: int = 1
+    phases, phase_posterior, num_processes: int = 1
 ):
     with threadpool_limits(limits=1, user_api="blas"):
-        data_generator = iter(phase_posteriors)
+        data_generator = iter(phase_posterior)
         task_fun = partial(synthetic_phase_sample_and_log_prob, phases)
         if num_processes > 1:
             with Pool(processes=num_processes) as pool:
@@ -440,7 +440,7 @@ def synthetic_phase_sample_and_log_prob_multi(
     return phase, log_prob
 
 
-def synthetic_phase_sample_and_log_prob(self, phases, posterior):
+def synthetic_phase_sample_and_log_prob(phases, posterior):
     interp = Interped(phases, posterior)
     new_phase = interp.sample()
     log_prob = interp.ln_prob(new_phase)
