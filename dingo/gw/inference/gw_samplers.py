@@ -12,8 +12,10 @@ from dingo.core.transforms import GetItem, RenameKey
 from dingo.core.density import NaiveKDE
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_window_factor, get_extrinsic_prior_dict
-from dingo.gw.likelihood import StationaryGaussianGWLikelihood, \
-    synthetic_phase_sample_and_log_prob_multi
+from dingo.gw.likelihood import (
+    StationaryGaussianGWLikelihood,
+    synthetic_phase_sample_and_log_prob_multi,
+)
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.transforms import (
     WhitenAndScaleStrain,
@@ -291,7 +293,9 @@ class GWSamplerMixin(object):
             #     delta_log_prob[i] = interp.ln_prob(new_phase[i])
 
             new_phase, delta_log_prob = synthetic_phase_sample_and_log_prob_multi(
-                phases, phase_posterior
+                phases,
+                phase_posterior,
+                self.synthetic_phase_kwargs.get("num_processes", 1),
             )
 
             print(f"{time.time() - t0:.2f}s to sample synthetic phase.")
