@@ -1,6 +1,10 @@
+from multiprocessing import Pool
+
 import numpy as np
+import pandas as pd
 from scipy.fft import fft
 from bilby.gw.utils import ln_i0
+from threadpoolctl import threadpool_limits
 
 from dingo.core.likelihood import Likelihood
 from dingo.gw.inference.injection import GWSignal
@@ -365,6 +369,55 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         kappa2 = alpha + np.log(np.sum(np.exp(exponent - alpha)))
 
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+
+    def d_inner_h_complex_multi(
+            self, theta: pd.DataFrame, num_processes: int = 1
+    ) -> np.ndarray:
+        """
+        Calculate the log likelihood at multiple points in parameter space. Works with
+        multiprocessing.
+
+        This wraps the log_likelihood() method.
+
+        Parameters
+        ----------
+        theta : pd.DataFrame
+            Parameters values at which to evaluate likelihood.
+        num_processes : int
+            Number of processes to use.
+
+        Returns
+        -------
+        np.array of log likelihoods
+        """
+        with threadpool_limits(limits=1, user_api="blas"):
+
+            # Generator object for theta rows. For idx this yields row idx of
+            # theta dataframe, converted to dict, ready to be passed to
+            # self.log_likelihood.
+            theta_generator = (d[1].to_dict() for d in theta.iterrows())
+
+            if num_processes > 1:
+                with Pool(processes=num_processes) as pool:
+                    d_inner_h_complex = pool.map(self.d_inner_h_complex, theta_generator)
+            else:
+                d_inner_h_complex = list(map(self.d_inner_h_complex, theta_generator))
+
+        return np.array(d_inner_h_complex)
+
+    def d_inner_h_complex(self, theta):
+        # TODO: Implement for time marginalization.
+        return self._d_inner_h_complex(theta)
+
+    def _d_inner_h_complex(self, theta):
+        mu = self.signal(theta)["waveform"]
+        d = self.whitened_strains
+        return sum(
+            [
+                inner_product_complex(d_ifo, mu_ifo)
+                for d_ifo, mu_ifo in zip(d.values(), mu.values())
+            ]
+        )
 
 
 def inner_product(a, b, min_idx=0, delta_f=None, psd=None):

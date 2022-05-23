@@ -3,7 +3,7 @@ from typing import Optional, Union
 import numpy as np
 import pandas as pd
 from astropy.time import Time
-from bilby.core.prior import Uniform
+from bilby.core.prior import Uniform, Interped
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 
@@ -241,60 +241,120 @@ class GWSamplerMixin(object):
         if inverse:
             pass
         else:
-            # build grid
-            kde = NaiveKDE(0, np.pi, self.synthetic_phase_kwargs["n_grid"])
-            phase_grid = kde.grid
+            if not (
+                isinstance(self.phase_prior, Uniform)
+                and (self.phase_prior._minimum, self.phase_prior._maximum)
+                == (0, 2 * np.pi)
+            ):
+                raise ValueError(
+                    f"Phase prior should be uniform [0, 2pi) to generate synthetic phase."
+                    f" However, the prior is {self.phase_prior}."
+                )
+            # This builds on the Bilby approach to sampling the phase when using a
+            # phase-marginalized likelihood.
 
-            self._build_likelihood(phase_grid=phase_grid)
+            # Only sample synthetic phase for samples initially within the prior.
             theta = pd.DataFrame(samples).drop(columns="log_prob")
-
-            # only evaluate in prior support
             log_prior = self.prior.ln_prob(theta, axis=0)
             constraints = self.prior.evaluate_constraints(theta)
             np.putmask(log_prior, constraints == 0, -np.inf)
             within_prior = log_prior != -np.inf
 
-            import time
+            self._build_likelihood()
 
+            import time
             t0 = time.time()
 
-            # evaluate the likelihood on the phase grid (this is an approximation if
-            # higher modes are relevant)
-            log_likelihood_grid = self.likelihood.log_likelihood_multi(
-                theta.iloc[within_prior],
-                self.synthetic_phase_kwargs.get("num_processes", 1),
-            )
+            # Begin with phase set to zero and evaluate the complex inner product.
+            theta['phase'] = 0.0
+            d_inner_h_complex = self.likelihood.d_inner_h_complex_multi(
+                theta.iloc[within_prior])
 
-            # build density
-            kde.initialize_log_prob(
-                log_likelihood_grid,
-                self.synthetic_phase_kwargs.get("uniform_weight", 0.05),
-            )
-            phase, delta_log_prob = kde.sample_and_log_prob()
-            # the kde is uniform in [0, pi), we now modify it to a pi-periodic
-            # distribution in [0, 2pi).
-            phase = phase + np.random.choice((0,np.pi), size=len(phase))
-            delta_log_prob = delta_log_prob - np.log(2)
-            print(f"{time.time() - t0:.2f}s to sample synthetic phase")
+            # Evaluate the log posterior over the phase across the grid. This is
+            # un-normalized, with a different normalization for each sample. (It will
+            # eventually be normalized.)
+            phases = np.linspace(0, 2 * np.pi, self.synthetic_phase_kwargs["n_grid"])
+            phasor = np.exp(-2j * phases)
+            phase_log_posterior = np.outer(d_inner_h_complex, phasor).real
+            phase_posterior = np.exp(phase_log_posterior - max(phase_log_posterior))
 
-            # unsqueeze phase and log_prob, fill samples outside prior support with -inf
-            phase_arr = np.full(len(theta), -np.inf)
-            phase_arr[within_prior] = phase
-            delta_log_prob_arr = np.full(len(theta), -np.inf)
-            delta_log_prob_arr[within_prior] = delta_log_prob
+            # Interpolate and sample a new phase.
+            new_phase = np.empty(len(phase_posterior))
+            delta_log_prob = np.empty(len(phase_posterior))
+            for i, p in enumerate(phase_posterior):
+                interp = Interped(phases, p)
+                new_phase[i] = interp.sample()
+                delta_log_prob[i] = interp.ln_prob(new_phase[i])
 
-            # insert phase into theta and add log_prob
-            if isinstance(samples, pd.DataFrame):
-                samples.insert(samples.shape[1] - 2, "phase", phase_arr)
-                samples["log_prob"] += delta_log_prob_arr
-            else:
-                samples["phase"] = phase_arr
-                samples["log_prob"] += delta_log_prob_arr
+            print(f"{time.time() - t0:.2f}s to sample synthetic phase.")
+
+            phase_array = np.full(len(theta), 0.0)
+            phase_array[within_prior] = new_phase
+            delta_log_prob_array = np.full(len(theta), -np.inf)
+            delta_log_prob_array[within_prior] = delta_log_prob
+
+            samples['phase'] = phase_array
+            samples['log_prob'] += delta_log_prob_array
 
             # set prior for phase, since now phase parameter is present
             self.prior["phase"] = self.phase_prior
             # reset likelihood for safety
             self.likelihood = None
+
+            # # build grid
+            # kde = NaiveKDE(0, np.pi, self.synthetic_phase_kwargs["n_grid"])
+            # phase_grid = kde.grid
+            #
+            # self._build_likelihood(phase_grid=phase_grid)
+            # theta = pd.DataFrame(samples).drop(columns="log_prob")
+            #
+            # # only evaluate in prior support
+            # log_prior = self.prior.ln_prob(theta, axis=0)
+            # constraints = self.prior.evaluate_constraints(theta)
+            # np.putmask(log_prior, constraints == 0, -np.inf)
+            # within_prior = log_prior != -np.inf
+            #
+            # import time
+            #
+            # t0 = time.time()
+            #
+            # # evaluate the likelihood on the phase grid (this is an approximation if
+            # # higher modes are relevant)
+            # log_likelihood_grid = self.likelihood.log_likelihood_multi(
+            #     theta.iloc[within_prior],
+            #     self.synthetic_phase_kwargs.get("num_processes", 1),
+            # )
+            #
+            # # build density
+            # kde.initialize_log_prob(
+            #     log_likelihood_grid,
+            #     self.synthetic_phase_kwargs.get("uniform_weight", 0.05),
+            # )
+            # phase, delta_log_prob = kde.sample_and_log_prob()
+            # # the kde is uniform in [0, pi), we now modify it to a pi-periodic
+            # # distribution in [0, 2pi).
+            # phase = phase + np.random.choice((0,np.pi), size=len(phase))
+            # delta_log_prob = delta_log_prob - np.log(2)
+            # print(f"{time.time() - t0:.2f}s to sample synthetic phase")
+            #
+            # # unsqueeze phase and log_prob, fill samples outside prior support with -inf
+            # phase_arr = np.full(len(theta), -np.inf)
+            # phase_arr[within_prior] = phase
+            # delta_log_prob_arr = np.full(len(theta), -np.inf)
+            # delta_log_prob_arr[within_prior] = delta_log_prob
+            #
+            # # insert phase into theta and add log_prob
+            # if isinstance(samples, pd.DataFrame):
+            #     samples.insert(samples.shape[1] - 2, "phase", phase_arr)
+            #     samples["log_prob"] += delta_log_prob_arr
+            # else:
+            #     samples["phase"] = phase_arr
+            #     samples["log_prob"] += delta_log_prob_arr
+            #
+            # # set prior for phase, since now phase parameter is present
+            # self.prior["phase"] = self.phase_prior
+            # # reset likelihood for safety
+            # self.likelihood = None
 
     def _post_process(self, samples: Union[dict, pd.DataFrame], inverse: bool = False):
         """
