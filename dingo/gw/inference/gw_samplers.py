@@ -1,4 +1,5 @@
 from typing import Optional, Union
+import time
 
 import numpy as np
 import pandas as pd
@@ -14,8 +15,10 @@ from dingo.gw.gwutils import get_window_factor, get_extrinsic_prior_dict
 from dingo.gw.likelihood import (
     StationaryGaussianGWLikelihood,
 )
-from dingo.core.density.kde import interpolated_sample_and_log_prob_multi, \
-    interpolated_log_prob_multi
+from dingo.core.density.kde import (
+    interpolated_sample_and_log_prob_multi,
+    interpolated_log_prob_multi,
+)
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.transforms import (
     WhitenAndScaleStrain,
@@ -252,59 +255,68 @@ class GWSamplerMixin(object):
                 f" However, the prior is {self.phase_prior}."
             )
 
+        # This builds on the Bilby approach to sampling the phase when using a
+        # phase-marginalized likelihood.
+
+        # Restrict to samples that are within the prior.
+        theta = pd.DataFrame(samples).drop(columns="log_prob", errors="ignore")
+        log_prior = self.prior.ln_prob(theta, axis=0)
+        constraints = self.prior.evaluate_constraints(theta)
+        np.putmask(log_prior, constraints == 0, -np.inf)
+        within_prior = log_prior != -np.inf
+
         # Put a cap on the number of processes to avoid overhead:
-        num_samples = len(pd.DataFrame(samples))
-        num_processes = min(self.synthetic_phase_kwargs.get("num_processes", 1),
-                            num_samples // 50)
+        num_valid_samples = np.sum(within_prior)
+        num_processes = min(
+            self.synthetic_phase_kwargs.get("num_processes", 1), num_valid_samples // 50
+        )
 
-        if not inverse:
-            # This builds on the Bilby approach to sampling the phase when using a
-            # phase-marginalized likelihood.
-
-            # Only sample synthetic phase for samples initially within the prior.
-            theta = pd.DataFrame(samples).drop(columns="log_prob")
-            log_prior = self.prior.ln_prob(theta, axis=0)
-            constraints = self.prior.evaluate_constraints(theta)
-            np.putmask(log_prior, constraints == 0, -np.inf)
-            within_prior = log_prior != -np.inf
-
-            self._build_likelihood()
-
-            import time
-
+        if num_valid_samples > 1e4:
+            print(f"Estimating synthetic phase for {num_valid_samples} samples.")
             t0 = time.time()
 
-            # Begin with phase set to zero and evaluate the complex inner product.
-            theta["phase"] = 0.0
-            d_inner_h_complex = self.likelihood.d_inner_h_complex_multi(
-                theta.iloc[within_prior],
-                num_processes,
-            )
+        if not inverse:
+            # TODO: This can probably be removed.
+            self._build_likelihood()
 
-            # Evaluate the log posterior over the phase across the grid. This is
-            # un-normalized, with a different normalization for each sample. (It will
-            # eventually be normalized.) Note that the prior over phase is assumed to
-            # be constant, so it may be neglected.
-            phases = np.linspace(0, 2 * np.pi, self.synthetic_phase_kwargs["n_grid"])
-            phasor = np.exp(2j * phases)
-            phase_log_posterior = np.outer(d_inner_h_complex, phasor).real
-            phase_posterior = np.exp(
-                phase_log_posterior
-                - np.amax(phase_log_posterior, axis=1, keepdims=True)
-            )
+        if inverse:
+            # We estimate the log_prob for given phases, so first save the evaluation
+            # points.
+            sample_phase = theta["phase"].to_numpy(copy=True)
 
-            # Include a floor value to maintain mass coverage.
-            phase_posterior += phase_posterior.mean(
-                axis=-1, keepdims=True
-            ) * self.synthetic_phase_kwargs.get("uniform_weight", 0.0)
+        # For each sample, build the posterior over phase given the remaining parameters.
+        # For each sample, the un-normalized posterior depends only on (d | h(phase)):
+        # The prior p(phase), and the inner products (h | h), and (d | d) only contribute
+        # to the normalization. (We check above that p(phase) is constant.)
+        theta["phase"] = 0.0
+        d_inner_h_complex = self.likelihood.d_inner_h_complex_multi(
+            theta.iloc[within_prior],
+            num_processes,
+        )
+
+        # Evaluate the log posterior over the phase across the grid.
+        phases = np.linspace(0, 2 * np.pi, self.synthetic_phase_kwargs["n_grid"])
+        phasor = np.exp(2j * phases)
+        phase_log_posterior = np.outer(d_inner_h_complex, phasor).real
+        phase_posterior = np.exp(
+            phase_log_posterior - np.amax(phase_log_posterior, axis=1, keepdims=True)
+        )
+
+        # Include a floor value to maintain mass coverage.
+        phase_posterior += phase_posterior.mean(
+            axis=-1, keepdims=True
+        ) * self.synthetic_phase_kwargs.get("uniform_weight", 0.01)
+
+        if not inverse:
+            # Forward direction:
+            #   (1) Sample a new phase according to the synthetic posterior.
+            #   (2) Add the log_prob to the existing log_prob.
 
             new_phase, delta_log_prob = interpolated_sample_and_log_prob_multi(
                 phases,
                 phase_posterior,
                 num_processes,
             )
-
-            print(f"{time.time() - t0:.2f} s to sample synthetic phase.")
 
             phase_array = np.full(len(theta), 0.0)
             phase_array[within_prior] = new_phase
@@ -314,43 +326,15 @@ class GWSamplerMixin(object):
             samples["phase"] = phase_array
             samples["log_prob"] += delta_log_prob_array
 
-            # set prior for phase, since now phase parameter is present
+            # Insert the phase prior in the prior, since now now the phase is present.
             self.prior["phase"] = self.phase_prior
             # reset likelihood for safety
+            # TODO: Can this be removed?
             self.likelihood = None
 
         else:
-            if not isinstance(samples, pd.DataFrame):
-                raise NotImplementedError("samples must be a DataFrame.")
-
-            theta = samples
-            log_prior = self.prior.ln_prob(theta, axis=0)
-            constraints = self.prior.evaluate_constraints(theta)
-            np.putmask(log_prior, constraints == 0, -np.inf)
-            within_prior = log_prior != -np.inf
-
-            # Assume there is already a likelihood.
-            # self._build_likelihood()
-
-            # Save the actual phase for later.
-            sample_phase = theta["phase"].copy()
-
-            # Build the posterior over phase for each sample.
-            theta["phase"] = 0.0
-            d_inner_h_complex = self.likelihood.d_inner_h_complex_multi(
-                theta.iloc[within_prior],
-                num_processes,
-            )
-            phases = np.linspace(0, 2 * np.pi, self.synthetic_phase_kwargs["n_grid"])
-            phasor = np.exp(2j * phases)
-            phase_log_posterior = np.outer(d_inner_h_complex, phasor).real
-            phase_posterior = np.exp(
-                phase_log_posterior
-                - np.amax(phase_log_posterior, axis=1, keepdims=True)
-            )
-            phase_posterior += phase_posterior.mean(
-                axis=-1, keepdims=True
-            ) * self.synthetic_phase_kwargs.get("uniform_weight", 0.0)
+            # Inverse direction:
+            #   (1) Evaluate the synthetic log prob for given phase points, and save it.
 
             log_prob = interpolated_log_prob_multi(
                 phases,
@@ -359,67 +343,177 @@ class GWSamplerMixin(object):
                 num_processes,
             )
 
-            # Outside of prior, set log_prob to -inf.
+            # Outside of prior, set log_prob to -np.inf.
             log_prob_array = np.full(len(theta), -np.inf)
             log_prob_array[within_prior] = log_prob
-            samples['log_prob'] = log_prob_array
-            samples.drop(columns=['phase'], inplace=True)
-            # self.likelihood = None
+            samples["log_prob"] = log_prob_array
+            del samples["phase"]
 
-            # # build grid
-            # kde = NaiveKDE(0, np.pi, self.synthetic_phase_kwargs["n_grid"])
-            # phase_grid = kde.grid
-            #
-            # self._build_likelihood(phase_grid=phase_grid)
-            # theta = pd.DataFrame(samples).drop(columns="log_prob")
-            #
-            # # only evaluate in prior support
-            # log_prior = self.prior.ln_prob(theta, axis=0)
-            # constraints = self.prior.evaluate_constraints(theta)
-            # np.putmask(log_prior, constraints == 0, -np.inf)
-            # within_prior = log_prior != -np.inf
-            #
-            # import time
-            #
-            # t0 = time.time()
-            #
-            # # evaluate the likelihood on the phase grid (this is an approximation if
-            # # higher modes are relevant)
-            # log_likelihood_grid = self.likelihood.log_likelihood_multi(
-            #     theta.iloc[within_prior],
-            #     self.synthetic_phase_kwargs.get("num_processes", 1),
-            # )
-            #
-            # # build density
-            # kde.initialize_log_prob(
-            #     log_likelihood_grid,
-            #     self.synthetic_phase_kwargs.get("uniform_weight", 0.05),
-            # )
-            # phase, delta_log_prob = kde.sample_and_log_prob()
-            # # the kde is uniform in [0, pi), we now modify it to a pi-periodic
-            # # distribution in [0, 2pi).
-            # phase = phase + np.random.choice((0,np.pi), size=len(phase))
-            # delta_log_prob = delta_log_prob - np.log(2)
-            # print(f"{time.time() - t0:.2f}s to sample synthetic phase")
-            #
-            # # unsqueeze phase and log_prob, fill samples outside prior support with -inf
-            # phase_arr = np.full(len(theta), -np.inf)
-            # phase_arr[within_prior] = phase
-            # delta_log_prob_arr = np.full(len(theta), -np.inf)
-            # delta_log_prob_arr[within_prior] = delta_log_prob
-            #
-            # # insert phase into theta and add log_prob
-            # if isinstance(samples, pd.DataFrame):
-            #     samples.insert(samples.shape[1] - 2, "phase", phase_arr)
-            #     samples["log_prob"] += delta_log_prob_arr
-            # else:
-            #     samples["phase"] = phase_arr
-            #     samples["log_prob"] += delta_log_prob_arr
-            #
-            # # set prior for phase, since now phase parameter is present
-            # self.prior["phase"] = self.phase_prior
-            # # reset likelihood for safety
-            # self.likelihood = None
+        if num_valid_samples > 1e4:
+            print(f"Done. This took {time.time() - t0:.2f} s.")
+
+        # if not inverse:
+        #
+        #
+        #     # Only sample synthetic phase for samples initially within the prior.
+        #     theta = pd.DataFrame(samples).drop(columns="log_prob")
+        #     log_prior = self.prior.ln_prob(theta, axis=0)
+        #     constraints = self.prior.evaluate_constraints(theta)
+        #     np.putmask(log_prior, constraints == 0, -np.inf)
+        #     within_prior = log_prior != -np.inf
+        #
+        #     self._build_likelihood()
+        #
+        #     import time
+        #
+        #     t0 = time.time()
+        #
+        #     # Begin with phase set to zero and evaluate the complex inner product.
+        #     theta["phase"] = 0.0
+        #     d_inner_h_complex = self.likelihood.d_inner_h_complex_multi(
+        #         theta.iloc[within_prior],
+        #         num_processes,
+        #     )
+        #
+        #     # Evaluate the log posterior over the phase across the grid. This is
+        #     # un-normalized, with a different normalization for each sample. (It will
+        #     # eventually be normalized.) Note that the prior over phase is assumed to
+        #     # be constant, so it may be neglected.
+        #     phases = np.linspace(0, 2 * np.pi, self.synthetic_phase_kwargs["n_grid"])
+        #     phasor = np.exp(2j * phases)
+        #     phase_log_posterior = np.outer(d_inner_h_complex, phasor).real
+        #     phase_posterior = np.exp(
+        #         phase_log_posterior
+        #         - np.amax(phase_log_posterior, axis=1, keepdims=True)
+        #     )
+        #
+        #     # Include a floor value to maintain mass coverage.
+        #     phase_posterior += phase_posterior.mean(
+        #         axis=-1, keepdims=True
+        #     ) * self.synthetic_phase_kwargs.get("uniform_weight", 0.0)
+        #
+        #     new_phase, delta_log_prob = interpolated_sample_and_log_prob_multi(
+        #         phases,
+        #         phase_posterior,
+        #         num_processes,
+        #     )
+        #
+        #     print(f"{time.time() - t0:.2f} s to sample synthetic phase.")
+        #
+        #     phase_array = np.full(len(theta), 0.0)
+        #     phase_array[within_prior] = new_phase
+        #     delta_log_prob_array = np.full(len(theta), -np.inf)
+        #     delta_log_prob_array[within_prior] = delta_log_prob
+        #
+        #     samples["phase"] = phase_array
+        #     samples["log_prob"] += delta_log_prob_array
+        #
+        #     # set prior for phase, since now phase parameter is present
+        #     self.prior["phase"] = self.phase_prior
+        #     # reset likelihood for safety
+        #     self.likelihood = None
+        #
+        # else:
+        #     if not isinstance(samples, pd.DataFrame):
+        #         raise NotImplementedError("samples must be a DataFrame.")
+        #
+        #     theta = samples
+        #     log_prior = self.prior.ln_prob(theta, axis=0)
+        #     constraints = self.prior.evaluate_constraints(theta)
+        #     np.putmask(log_prior, constraints == 0, -np.inf)
+        #     within_prior = log_prior != -np.inf
+        #
+        #     # Assume there is already a likelihood.
+        #     # self._build_likelihood()
+        #
+        #     # Save the actual phase for later.
+        #     sample_phase = theta["phase"].copy()
+        #
+        #     # Build the posterior over phase for each sample.
+        #     theta["phase"] = 0.0
+        #     d_inner_h_complex = self.likelihood.d_inner_h_complex_multi(
+        #         theta.iloc[within_prior],
+        #         num_processes,
+        #     )
+        #     phases = np.linspace(0, 2 * np.pi, self.synthetic_phase_kwargs["n_grid"])
+        #     phasor = np.exp(2j * phases)
+        #     phase_log_posterior = np.outer(d_inner_h_complex, phasor).real
+        #     phase_posterior = np.exp(
+        #         phase_log_posterior
+        #         - np.amax(phase_log_posterior, axis=1, keepdims=True)
+        #     )
+        #     phase_posterior += phase_posterior.mean(
+        #         axis=-1, keepdims=True
+        #     ) * self.synthetic_phase_kwargs.get("uniform_weight", 0.0)
+        #
+        #     log_prob = interpolated_log_prob_multi(
+        #         phases,
+        #         phase_posterior,
+        #         sample_phase[within_prior],
+        #         num_processes,
+        #     )
+        #
+        #     # Outside of prior, set log_prob to -inf.
+        #     log_prob_array = np.full(len(theta), -np.inf)
+        #     log_prob_array[within_prior] = log_prob
+        #     samples['log_prob'] = log_prob_array
+        #     samples.drop(columns=['phase'], inplace=True)
+        # self.likelihood = None
+
+        # # build grid
+        # kde = NaiveKDE(0, np.pi, self.synthetic_phase_kwargs["n_grid"])
+        # phase_grid = kde.grid
+        #
+        # self._build_likelihood(phase_grid=phase_grid)
+        # theta = pd.DataFrame(samples).drop(columns="log_prob")
+        #
+        # # only evaluate in prior support
+        # log_prior = self.prior.ln_prob(theta, axis=0)
+        # constraints = self.prior.evaluate_constraints(theta)
+        # np.putmask(log_prior, constraints == 0, -np.inf)
+        # within_prior = log_prior != -np.inf
+        #
+        # import time
+        #
+        # t0 = time.time()
+        #
+        # # evaluate the likelihood on the phase grid (this is an approximation if
+        # # higher modes are relevant)
+        # log_likelihood_grid = self.likelihood.log_likelihood_multi(
+        #     theta.iloc[within_prior],
+        #     self.synthetic_phase_kwargs.get("num_processes", 1),
+        # )
+        #
+        # # build density
+        # kde.initialize_log_prob(
+        #     log_likelihood_grid,
+        #     self.synthetic_phase_kwargs.get("uniform_weight", 0.05),
+        # )
+        # phase, delta_log_prob = kde.sample_and_log_prob()
+        # # the kde is uniform in [0, pi), we now modify it to a pi-periodic
+        # # distribution in [0, 2pi).
+        # phase = phase + np.random.choice((0,np.pi), size=len(phase))
+        # delta_log_prob = delta_log_prob - np.log(2)
+        # print(f"{time.time() - t0:.2f}s to sample synthetic phase")
+        #
+        # # unsqueeze phase and log_prob, fill samples outside prior support with -inf
+        # phase_arr = np.full(len(theta), -np.inf)
+        # phase_arr[within_prior] = phase
+        # delta_log_prob_arr = np.full(len(theta), -np.inf)
+        # delta_log_prob_arr[within_prior] = delta_log_prob
+        #
+        # # insert phase into theta and add log_prob
+        # if isinstance(samples, pd.DataFrame):
+        #     samples.insert(samples.shape[1] - 2, "phase", phase_arr)
+        #     samples["log_prob"] += delta_log_prob_arr
+        # else:
+        #     samples["phase"] = phase_arr
+        #     samples["log_prob"] += delta_log_prob_arr
+        #
+        # # set prior for phase, since now phase parameter is present
+        # self.prior["phase"] = self.phase_prior
+        # # reset likelihood for safety
+        # self.likelihood = None
 
     def _post_process(self, samples: Union[dict, pd.DataFrame], inverse: bool = False):
         """

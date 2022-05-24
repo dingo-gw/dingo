@@ -380,7 +380,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
         Parameters
         ----------
-        theta : dict
+        theta : pd.DataFrame
             Parameters at which to evaluate h.
         num_processes : int
             Number of parallel processes to use.
