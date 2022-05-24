@@ -233,7 +233,13 @@ class Sampler(object):
         with torch.no_grad():
             log_prob = self.model.model.log_prob(y, *x)
 
-        return log_prob.cpu().numpy()
+        log_prob = log_prob.cpu().numpy()
+
+        # Pre-processing step may have included a log_prob with the samples.
+        if 'log_prob' in samples:
+            log_prob += samples['log_prob'].to_numpy()
+
+        return log_prob
 
     def _post_process(self, samples: Union[dict, pd.DataFrame], inverse: bool = False):
         pass

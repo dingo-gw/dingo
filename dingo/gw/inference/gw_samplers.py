@@ -14,7 +14,8 @@ from dingo.gw.gwutils import get_window_factor, get_extrinsic_prior_dict
 from dingo.gw.likelihood import (
     StationaryGaussianGWLikelihood,
 )
-from dingo.core.density.kde import interpolated_sample_and_log_prob_multi
+from dingo.core.density.kde import interpolated_sample_and_log_prob_multi, \
+    interpolated_log_prob_multi
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.transforms import (
     WhitenAndScaleStrain,
@@ -166,7 +167,7 @@ class GWSamplerMixin(object):
             phase_grid=phase_grid,
         )
 
-    def _post_correct_for_tref(
+    def _correct_reference_time(
         self, samples: Union[dict, pd.DataFrame], inverse: bool = False
     ):
         """
@@ -238,21 +239,20 @@ class GWSamplerMixin(object):
         samples : dict or pd.DataFrame
         inverse : bool, default True
             Whether to apply instead the inverse transformation. This is used prior to
-            calculating the log_prob.
+            calculating the log_prob. In inverse mode, the posterior probability over
+            phase is calculated for given samples. It is stored in sample['log_prob'].
 
         """
-        if inverse:
-            pass
-        else:
-            if not (
-                isinstance(self.phase_prior, Uniform)
-                and (self.phase_prior._minimum, self.phase_prior._maximum)
-                == (0, 2 * np.pi)
-            ):
-                raise ValueError(
-                    f"Phase prior should be uniform [0, 2pi) to generate synthetic phase."
-                    f" However, the prior is {self.phase_prior}."
-                )
+        if not (
+            isinstance(self.phase_prior, Uniform)
+            and (self.phase_prior._minimum, self.phase_prior._maximum) == (0, 2 * np.pi)
+        ):
+            raise ValueError(
+                f"Phase prior should be uniform [0, 2pi) to work with synthetic phase."
+                f" However, the prior is {self.phase_prior}."
+            )
+
+        if not inverse:
             # This builds on the Bilby approach to sampling the phase when using a
             # phase-marginalized likelihood.
 
@@ -266,6 +266,7 @@ class GWSamplerMixin(object):
             self._build_likelihood()
 
             import time
+
             t0 = time.time()
 
             # Begin with phase set to zero and evaluate the complex inner product.
@@ -311,6 +312,51 @@ class GWSamplerMixin(object):
             # set prior for phase, since now phase parameter is present
             self.prior["phase"] = self.phase_prior
             # reset likelihood for safety
+            self.likelihood = None
+
+        else:
+            if not isinstance(samples, pd.DataFrame):
+                raise NotImplementedError("samples must be a DataFrame.")
+
+            theta = samples
+            log_prior = self.prior.ln_prob(theta, axis=0)
+            constraints = self.prior.evaluate_constraints(theta)
+            np.putmask(log_prior, constraints == 0, -np.inf)
+            within_prior = log_prior != -np.inf
+            if np.sum(within_prior) != len(theta):
+                raise ValueError("Some samples are not within the prior.")
+
+            self._build_likelihood()
+
+            # Save the actual phase for later.
+            sample_phase = theta["phase"].copy()
+
+            # Build the posterior over phase for each sample.
+            theta["phase"] = 0.0
+            d_inner_h_complex = self.likelihood.d_inner_h_complex_multi(
+                theta.iloc[within_prior],
+                self.synthetic_phase_kwargs.get("num_processes", 1),
+            )
+            phases = np.linspace(0, 2 * np.pi, self.synthetic_phase_kwargs["n_grid"])
+            phasor = np.exp(2j * phases)
+            phase_log_posterior = np.outer(d_inner_h_complex, phasor).real
+            phase_posterior = np.exp(
+                phase_log_posterior
+                - np.amax(phase_log_posterior, axis=1, keepdims=True)
+            )
+            phase_posterior += phase_posterior.mean(
+                axis=-1, keepdims=True
+            ) * self.synthetic_phase_kwargs.get("uniform_weight", 0.0)
+
+            log_prob = interpolated_log_prob_multi(
+                phases,
+                phase_posterior,
+                sample_phase,
+                self.synthetic_phase_kwargs.get("num_processes", 1),
+            )
+
+            samples['log_prob'] = log_prob
+            samples.drop(columns=['phase'], inplace=True)
             self.likelihood = None
 
             # # build grid
@@ -372,7 +418,7 @@ class GWSamplerMixin(object):
         """
         Post processing of parameter samples.
         * Correct the sky position for a potentially fixed reference time.
-          (see self._post_correct_for_tref)
+          (see self._correct_reference_time)
         * Potentially sample a synthetic phase. (see self._sample_synthetic_phase)
 
         This method modifies the samples in place.
@@ -384,9 +430,16 @@ class GWSamplerMixin(object):
             Whether to apply instead the inverse transformation. This is used prior to
             calculating the log_prob.
         """
-        self._post_correct_for_tref(samples, inverse)
-        if self.synthetic_phase_kwargs is not None:
-            self._sample_synthetic_phase(samples, inverse)
+        if not inverse:
+            self._correct_reference_time(samples, inverse)
+            if self.synthetic_phase_kwargs is not None:
+                self._sample_synthetic_phase(samples, inverse)
+
+        # If inverting, we go in reverse order.
+        else:
+            if self.synthetic_phase_kwargs is not None:
+                self._sample_synthetic_phase(samples, inverse)
+            self._correct_reference_time(samples, inverse)
 
 
 class GWSampler(GWSamplerMixin, Sampler):
@@ -554,7 +607,7 @@ class GWSamplerUnconditional(GWSampler):
             as_type="dict",
         )
 
-    def _post_correct_for_tref(
+    def _correct_reference_time(
         self, samples: Union[dict, pd.DataFrame], inverse: bool = False
     ):
         # We do not want to correct for t_ref because we assume that the unconditional
