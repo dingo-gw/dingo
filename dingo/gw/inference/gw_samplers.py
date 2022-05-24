@@ -277,7 +277,8 @@ class GWSamplerMixin(object):
 
             # Evaluate the log posterior over the phase across the grid. This is
             # un-normalized, with a different normalization for each sample. (It will
-            # eventually be normalized.)
+            # eventually be normalized.) Note that the prior over phase is assumed to
+            # be constant, so it may be neglected.
             phases = np.linspace(0, 2 * np.pi, self.synthetic_phase_kwargs["n_grid"])
             phasor = np.exp(2j * phases)
             phase_log_posterior = np.outer(d_inner_h_complex, phasor).real
@@ -297,7 +298,7 @@ class GWSamplerMixin(object):
                 self.synthetic_phase_kwargs.get("num_processes", 1),
             )
 
-            print(f"{time.time() - t0:.2f}s to sample synthetic phase.")
+            print(f"{time.time() - t0:.2f} s to sample synthetic phase.")
 
             phase_array = np.full(len(theta), 0.0)
             phase_array[within_prior] = new_phase
