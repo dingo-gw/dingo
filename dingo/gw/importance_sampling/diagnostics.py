@@ -54,6 +54,9 @@ def plot_posterior_slice(
     num_processes=1,
     n_grid=200,
 ):
+    # Put a cap on number of processes to avoid overhead.
+    num_processes = min(num_processes, n_grid // 50)
+
     # repeat theta n_grid times
     theta_grid = pd.DataFrame(
         np.repeat(np.array(theta)[np.newaxis], n_grid, axis=0),

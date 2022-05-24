@@ -252,6 +252,10 @@ class GWSamplerMixin(object):
                 f" However, the prior is {self.phase_prior}."
             )
 
+        # Put a cap on the number of processes to avoid overhead:
+        num_processes = min(self.synthetic_phase_kwargs.get("num_processes", 1),
+                            len(samples) // 50)
+
         if not inverse:
             # This builds on the Bilby approach to sampling the phase when using a
             # phase-marginalized likelihood.
@@ -273,7 +277,7 @@ class GWSamplerMixin(object):
             theta["phase"] = 0.0
             d_inner_h_complex = self.likelihood.d_inner_h_complex_multi(
                 theta.iloc[within_prior],
-                self.synthetic_phase_kwargs.get("num_processes", 1),
+                num_processes,
             )
 
             # Evaluate the log posterior over the phase across the grid. This is
@@ -296,7 +300,7 @@ class GWSamplerMixin(object):
             new_phase, delta_log_prob = interpolated_sample_and_log_prob_multi(
                 phases,
                 phase_posterior,
-                self.synthetic_phase_kwargs.get("num_processes", 1),
+                num_processes,
             )
 
             print(f"{time.time() - t0:.2f} s to sample synthetic phase.")
@@ -336,7 +340,7 @@ class GWSamplerMixin(object):
             theta["phase"] = 0.0
             d_inner_h_complex = self.likelihood.d_inner_h_complex_multi(
                 theta.iloc[within_prior],
-                self.synthetic_phase_kwargs.get("num_processes", 1),
+                num_processes,
             )
             phases = np.linspace(0, 2 * np.pi, self.synthetic_phase_kwargs["n_grid"])
             phasor = np.exp(2j * phases)
@@ -353,7 +357,7 @@ class GWSamplerMixin(object):
                 phases,
                 phase_posterior,
                 sample_phase,
-                self.synthetic_phase_kwargs.get("num_processes", 1),
+                num_processes,
             )
             
             samples['log_prob'] = log_prob
