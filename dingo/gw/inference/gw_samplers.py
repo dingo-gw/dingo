@@ -253,8 +253,9 @@ class GWSamplerMixin(object):
             )
 
         # Put a cap on the number of processes to avoid overhead:
+        num_samples = len(pd.DataFrame(samples))
         num_processes = min(self.synthetic_phase_kwargs.get("num_processes", 1),
-                            len(samples) // 50)
+                            num_samples // 50)
 
         if not inverse:
             # This builds on the Bilby approach to sampling the phase when using a
