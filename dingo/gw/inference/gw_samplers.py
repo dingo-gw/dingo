@@ -326,7 +326,8 @@ class GWSamplerMixin(object):
             if np.sum(within_prior) != len(theta):
                 raise ValueError("Some samples are not within the prior.")
 
-            self._build_likelihood()
+            # Assume there is already a likelihood.
+            # self._build_likelihood()
 
             # Save the actual phase for later.
             sample_phase = theta["phase"].copy()
@@ -354,10 +355,10 @@ class GWSamplerMixin(object):
                 sample_phase,
                 self.synthetic_phase_kwargs.get("num_processes", 1),
             )
-
+            
             samples['log_prob'] = log_prob
             samples.drop(columns=['phase'], inplace=True)
-            self.likelihood = None
+            # self.likelihood = None
 
             # # build grid
             # kde = NaiveKDE(0, np.pi, self.synthetic_phase_kwargs["n_grid"])

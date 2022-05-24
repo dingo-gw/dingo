@@ -1,5 +1,6 @@
 from functools import partial
 from multiprocessing import Pool
+from itertools import starmap
 
 import numpy as np
 from bilby.core.prior import Interped
@@ -218,9 +219,9 @@ def interpolated_log_prob_multi(
         task_fun = partial(interpolated_log_prob, sample_points)
         if num_processes > 1:
             with Pool(processes=num_processes) as pool:
-                result_list = pool.map(task_fun, data_generator)
+                result_list = pool.starmap(task_fun, data_generator)
         else:
-            result_list = list(map(task_fun, data_generator))
+            result_list = list(starmap(task_fun, data_generator))
     return np.array(result_list)
 
 

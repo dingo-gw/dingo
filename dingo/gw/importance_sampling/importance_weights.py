@@ -57,11 +57,11 @@ def main():
     phase_marginalization = settings.get("phase_marginalization", False)
     synthetic_phase_kwargs = settings.get("synthetic_phase", None)
     synthetic_phase = synthetic_phase_kwargs is not None
-    if sum([time_marginalization, phase_marginalization, synthetic_phase]) > 1:
-        raise NotImplementedError(
-            "Only one of time_marginalization, phase_marginalization and"
-            "synthetic_phase can be set to True."
-        )
+    #if sum([time_marginalization, phase_marginalization, synthetic_phase]) > 1:
+    #    raise NotImplementedError(
+    #        "Only one of time_marginalization, phase_marginalization and"
+    #        "synthetic_phase can be set to True."
+    #    )
     if time_marginalization and "geocent_time" in samples:
         samples.drop("geocent_time", axis=1, inplace=True)
         inference_parameters.remove("geocent_time")
