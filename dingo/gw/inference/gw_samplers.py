@@ -328,8 +328,6 @@ class GWSamplerMixin(object):
             constraints = self.prior.evaluate_constraints(theta)
             np.putmask(log_prior, constraints == 0, -np.inf)
             within_prior = log_prior != -np.inf
-            if np.sum(within_prior) != len(theta):
-                raise ValueError("Some samples are not within the prior.")
 
             # Assume there is already a likelihood.
             # self._build_likelihood()
@@ -357,11 +355,14 @@ class GWSamplerMixin(object):
             log_prob = interpolated_log_prob_multi(
                 phases,
                 phase_posterior,
-                sample_phase,
+                sample_phase[within_prior],
                 num_processes,
             )
-            
-            samples['log_prob'] = log_prob
+
+            # Outside of prior, set log_prob to -inf.
+            log_prob_array = np.full(len(theta), -np.inf)
+            log_prob_array[within_prior] = log_prob
+            samples['log_prob'] = log_prob_array
             samples.drop(columns=['phase'], inplace=True)
             # self.likelihood = None
 
