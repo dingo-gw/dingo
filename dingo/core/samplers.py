@@ -107,6 +107,84 @@ class Sampler(object):
     def event_metadata(self, value):
         self.base_model_metadata["event"] = value
 
+    def _run_sampler_batched(
+        self, num_samples: int, context: Optional[Union[list[dict]], dict] = None
+    ) -> Union[list[dict], dict]:
+        """
+        Parameters
+        ----------
+        num_samples : int
+        context : list[dict] or dict
+
+        Returns
+        -------
+        list[dict] or dict : samples and log_prob
+        """
+        # Determine return type
+        if context is not None and isinstance(context, list):
+            as_type = "list"
+        else:
+            as_type = "dict"
+
+        if not self.unconditional_model:
+            if context is None:
+                raise ValueError("Context required to run sampler.")
+            x_list = []
+            if isinstance(context, dict):
+                context = [context]
+            for c in context:
+                x = c.copy()
+                x["parameters"] = {}
+                x["extrinsic_parameters"] = {}
+
+                # For given context, transforms_pre act in the same way for each
+                # requested sample. We therefore expand across the batch only *after*
+                # pre-processing.
+                x = self.transform_pre(context)
+                x_list.append(x)
+            x = torch.stack(x_list)
+
+            # Expand across batch.
+            if len(context) == 1:
+                # This is more memory efficient since it only requires a new view on x.
+                x = x.expand(num_samples, *x.shape[1:])
+            else:
+                x.repeat_interleave(num_samples, dim=0)
+            x = [x]
+
+            # The number of samples is expressed via the first dimension of x,
+            # so we must pass num_samples = 1 to sample_and_log_prob().
+            num_samples = 1
+        else:
+            if context is not None:
+                raise ValueError(
+                    "Context should not be passed to an unconditional sampler."
+                )
+            x = []
+
+        # For a normalizing flow, we get the log_prob for "free" when sampling,
+        # so we always include this. For other architectures, it may make sense to
+        # have a flag for whether to calculate the log_prob.
+        self.model.model.eval()
+        with torch.no_grad():
+            y, log_prob = self.model.model.sample_and_log_prob(
+                *x, num_samples=num_samples
+            )
+
+        y_list = y.split(num_samples)
+        log_prob_list = log_prob.split(num_samples)
+        result_list = []
+        for y, log_prob in zip(y_list, log_prob_list):
+            samples = self.transform_post({"parameters": y, "log_prob": log_prob})
+            result = samples["parameters"]
+            result["log_prob"] = samples["log_prob"]
+            result_list.append(result)
+
+        if as_type == "dict":
+            return result_list[0]
+        else:
+            return result_list
+
     def _run_sampler(self, num_samples: int, context: Optional[dict] = None) -> dict:
         if not self.unconditional_model:
             if context is None:
@@ -176,9 +254,11 @@ class Sampler(object):
         if batch_size is None:
             batch_size = num_samples
         full_batches, remainder = divmod(num_samples, batch_size)
-        samples = [self._run_sampler(batch_size, context) for _ in range(full_batches)]
+        samples = [
+            self._run_sampler_batched(batch_size, context) for _ in range(full_batches)
+        ]
         if remainder > 0:
-            samples.append(self._run_sampler(remainder, context))
+            samples.append(self._run_sampler_batched(remainder, context))
         samples = {p: torch.cat([s[p] for s in samples]) for p in samples[0].keys()}
 
         # Apply any post-sampling corrections to sampled parameters, and place on CPU.
@@ -460,6 +540,59 @@ class GNPESampler(Sampler):
     def num_iterations(self, value):
         self._num_iterations = value
         self.metadata["num_iterations"] = self._num_iterations
+
+    def _run_sampler_batched(
+        self, num_samples: int, context: Optional[Union[list[dict]], dict] = None
+    ) -> Union[list[dict], dict]:
+        if context is None:
+            raise ValueError("self.context must be set to run sampler.")
+
+        # Determine return type
+        if isinstance(context, list):
+            as_type = "list"
+        else:
+            as_type = "dict"
+
+        init_parameters = self.init_sampler._run_sampler_batched(num_samples, context)
+
+        assert type(init_parameters) == type(context)
+        if isinstance(context, dict):
+            context = [context]
+            init_parameters = [init_parameters]
+
+        init_parameters = {
+            k: torch.vstack([i[k] for i in init_parameters])
+            for k in init_parameters[0].keys()
+        }
+        data_ = torch.stack([self.init_sampler.transform_pre(c) for c in context])
+
+        x = {
+            "extrinsic_parameters": init_parameters,
+            "parameters": {},
+        }
+        for i in range(self.num_iterations):
+            print(i)
+            x["extrinsic_parameters"] = {
+                k: x["extrinsic_parameters"][k] for k in self.gnpe_parameters
+            }
+            d = data_.clone()
+
+            if len(context) == 1:
+                x["data"] = d.expand(num_samples, *d.shape[1:])
+            else:
+                x["data"] = d.repeat_interleave(num_samples, dim=0)
+
+            x = self.transform_pre(x)
+            x["parameters"] = self.model.sample(x["data"], x["context_parameters"])
+            x = self.transform_post(x)
+
+        samples = x["parameters"]
+
+        samples = samples.split(num_samples)
+        if as_type == "dict":
+            return samples[0]
+        else:
+            return samples
 
     def _run_sampler(self, num_samples: int, context: Optional[dict] = None) -> dict:
         if context is None:
