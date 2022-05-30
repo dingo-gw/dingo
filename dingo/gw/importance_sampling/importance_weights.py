@@ -63,11 +63,13 @@ def main():
     #        "synthetic_phase can be set to True."
     #    )
     if time_marginalization and "geocent_time" in samples:
-        samples.drop("geocent_time", axis=1, inplace=True)
-        inference_parameters.remove("geocent_time")
+        if 'geocent_time' in inference_parameters:
+            samples.drop("geocent_time", axis=1, inplace=True)
+            inference_parameters.remove("geocent_time")
     if phase_marginalization or synthetic_phase:
-        samples.drop("phase", axis=1, inplace=True)
-        inference_parameters.remove("phase")
+        if 'phase' in inference_parameters:
+            samples.drop("phase", axis=1, inplace=True)
+            inference_parameters.remove("phase")
     settings["nde"]["data"]["inference_parameters"] = inference_parameters
 
     # Step 1: Build proposal distribution.
