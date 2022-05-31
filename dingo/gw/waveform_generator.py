@@ -283,7 +283,7 @@ class WaveformGenerator:
         ma = LS.SimInspiralCreateModeArray()
         for (ell, m) in mode_list:
             LS.SimInspiralModeArrayActivateMode(ma, ell, m)
-            LS.SimInspiralModeArrayActivateMode(ma, ell, -m)
+            # LS.SimInspiralModeArrayActivateMode(ma, ell, -m)
         LS.SimInspiralWaveformParamsInsertModeArray(lal_params, ma)
         return lal_params
 
@@ -375,6 +375,103 @@ class WaveformGenerator:
         h_cross *= time_shift
         pol_dict = {"h_plus": h_plus, "h_cross": h_cross}
         return pol_dict
+
+    def generate_hplus_hcross_phase_grid(
+        self, parameters: Dict[str, float], phases, catch_waveform_errors=True,
+    ) -> Dict[str, np.ndarray]:
+        """
+        Generate GW polarizations (h_plus, h_cross) on a grid for the phase parameter.
+        This method is identical to self.generate_hplus_hcross, except that it
+        generates the polarizations not just for one phase value, but for multiple.
+
+        To do so efficiently, the modes are generated only once, since they are
+        identical for all phases, and then combined into the polarizations for the
+        different phases using spherical harmonics.
+
+        Differences to self.generate_hplus_hcross:
+        - The polarizations are generated for multiple phases, not just one.
+        - We don't catch errors yet TODO
+        - We don't apply transforms yet TODO
+
+        Parameters
+        ----------
+        parameters: dict
+            Dictionary of parameters for the waveform.
+            For details see see self.generate_hplus_hcross.
+        phases: iterable
+            iterable of phases to generate the waveform for.
+        catch_waveform_errors: bool=True
+            Whether to catch lalsimulation errors
+
+        Returns
+        -------
+        """
+        if not isinstance(parameters, dict):
+            raise ValueError("parameters should be a dictionary, but got", parameters)
+        elif not isinstance(list(parameters.values())[0], float):
+            raise ValueError("parameters dictionary must contain floats", parameters)
+
+        if LS.SimInspiralImplementedTDApproximants(self.approximant):
+            domain_type = "TD"
+        elif LS.SimInspiralImplementedFDApproximants(self.approximant):
+            domain_type = "FD"
+        else:
+            raise ValueError(f"Unknown approximant {self.approximant}")
+
+        # Include reference frequency with the parameters. Copy the dict first for safety.
+        parameters = parameters.copy()
+        parameters["f_ref"] = self.f_ref
+
+        parameters_lal = self._convert_parameters_to_lal_frame(
+            parameters, self.lal_params
+        )
+        masses = parameters_lal[:2]
+        spins_cartesian = parameters_lal[2:8]
+        r = parameters_lal[8]
+        iota = parameters_lal[9]
+        lal_params = parameters_lal[-2]
+        approximant = parameters_lal[-1]
+        f_ref = self.f_ref
+        l_max = 5 # FIXME: hardcoded
+
+        if isinstance(self.domain, FrequencyDomain):
+            delta_t = 1 / self.domain.f_max
+            f_min = self.domain.f_min
+        elif isinstance(self.domain, TimeDomain):
+            raise NotImplementedError("Time domain not implemented yet")
+
+        # Generate modes. We need to differentiate between time domain and frequency
+        # domain waveform models. Note that this refers to the domain of the model,
+        # and not the final domain we want for the data.
+        if domain_type == "TD":
+            parameters_lal_td_modes = (
+                0,
+                delta_t,
+                *masses,
+                *spins_cartesian,
+                f_min,
+                f_ref,
+                r,
+                lal_params,
+                l_max,
+                approximant
+            )
+            modes = LS.SimInspiralChooseTDModes(*parameters_lal_td_modes)
+
+        elif domain_type == "FD":
+            raise NotImplementedError("FD waveform models not implemented yet")
+
+        # Loop over phases and combine the polarizations to
+        for phase in phases:
+            hp, hc = LS.SimInspiralPolarizationsFromSphHarmTimeSeries(modes, iota, phase)
+            hp1, hc1 = LS.SimInspiralChooseTDWaveform(
+                *parameters_lal[:14], delta_t, f_min, f_ref, lal_params, approximant
+            )
+            import matplotlib.pyplot as plt
+            plt.plot(hp.data.data)
+            plt.plot(hp1.data.data)
+            plt.show()
+
 
     def generate_TD_waveform(self, parameters_lal: Tuple) -> Dict[str, np.ndarray]:
         """
@@ -497,6 +594,53 @@ def generate_waveforms_parallel(
     return polarizations
 
 
+def generate_waveform_and_catch_errors(
+        wf_generator_func, parameters_lal, len_domain, catch_waveform_errors=True
+):
+    """
+    Wraps wf_generator_func.
+
+    If lal does not hit an error, this simply returns
+    wf_dict = wf_generator_func(parameters_lal).
+
+    If lal does hit an error:
+        * If catch_waveform_errors is False, this raises the error.
+        * If catch_waveform_errors is True, this returns a dictionary of nan's.
+
+    Parameters
+    ----------
+    wf_generator_func: callable
+        Function that computes wf_dict = wf_generator_func(parameters_lal)
+    parameters_lal
+        parameters for lal routine
+    len_domain: int
+        length of domain, required for nan initialization of the polarizations
+    catch_waveform_errors: bool=Tru
+        If True, catch lal errors and return nan's.
+
+    Returns
+    -------
+
+    """
+    try:
+        wf_dict = wf_generator_func(parameters_lal)
+    except Exception as e:
+        if not catch_waveform_errors:
+            raise
+        else:
+            EDOM = e.args[0] == "Internal function call failed: Input domain error"
+            if EDOM:
+                warnings.warn(
+                    f"Evaluating the waveform failed with error: {e}\n"
+                    f"The parameters were {parameters_lal}\n"
+                )
+                pol_nan = np.ones(len(self.domain)) * np.nan
+                wf_dict = {"h_plus": pol_nan, "h_cross": pol_nan}
+            else:
+                raise
+    return wf_dict
+
+
 if __name__ == "__main__":
     import pandas as pd
     import numpy as np
@@ -530,12 +674,41 @@ if __name__ == "__main__":
         "geocent_time": {0: 0.0},
     }
     parameters = pd.DataFrame(parameters)
-    pols1 = generate_waveforms_parallel(waveform_generator, parameters)
-    pols2 = generate_waveforms_parallel(waveform_generator, parameters * 1.000001)
-    hp1 = pols1["h_plus"][0]
-    hp2 = pols2["h_plus"][0]
-    print(np.max(np.abs(hp1)))
-    print(np.max(np.abs(hp2)))
+    # pols1 = generate_waveforms_parallel(waveform_generator, parameters)
+    # pols2 = generate_waveforms_parallel(waveform_generator, parameters * 1.000001)
+    # hp1 = pols1["h_plus"][0]
+    # hp2 = pols2["h_plus"][0]
+    # print(np.max(np.abs(hp1)))
+    # print(np.max(np.abs(hp2)))
+
+
+    domain_settings = {
+        "type": "FrequencyDomain",
+        "f_min": 10.0,
+        "f_max": 2048.0,
+        "delta_f": 0.125,
+    }
+    domain = build_domain(domain_settings)
+    mode_list = None
+    # mode_list = [(2, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6), (7, 7), (8, 8)]
+    # mode_list = [(2, 2), (2, -1)]
+    waveform_generator = WaveformGenerator(
+        "SEOBNRv4PHM",
+        domain,
+        20.0,
+        mode_list=mode_list,
+        f_start=10.0,
+    )
+    # generate_
+    waveform_generator.generate_hplus_hcross_phase_grid(
+        {k: v[0] for k, v in parameters.to_dict().items()}, [0.0, 1.0]
+    )
+    import time
+    t0 = time.time()
+    for idx in range(1):
+        pols = generate_waveforms_parallel(waveform_generator, parameters)
+    print(time.time() - t0)
+    print(pols["h_plus"].shape)
 
     # """A visual test."""
     # from dingo.gw.domains import Domain, FrequencyDomain
