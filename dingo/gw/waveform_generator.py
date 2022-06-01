@@ -264,6 +264,17 @@ class WaveformGenerator:
             + domain_pars
             + (lal_params, self.approximant)
         )
+        # 0: mass_1
+        # 1: mass_2
+        # 2: s1x
+        # 3: s1y
+        # 4: s1z
+        # 5: s2x
+        # 6: s2y
+        # 7: s2z
+        # 8: r
+        # 9: iota
+        # 10: phase
         return lal_parameter_tuple
 
     def setup_mode_array(self, mode_list: List[Tuple]) -> lal.Dict:
@@ -463,13 +474,24 @@ class WaveformGenerator:
 
         # Loop over phases and combine the polarizations to
         for phase in phases:
-            hp, hc = LS.SimInspiralPolarizationsFromSphHarmTimeSeries(modes, iota, phase)
+            hp, hc = LS.SimInspiralPolarizationsFromSphHarmTimeSeries(
+                modes, iota, np.pi/2. - phase
+            )
             hp1, hc1 = LS.SimInspiralChooseTDWaveform(
-                *parameters_lal[:14], delta_t, f_min, f_ref, lal_params, approximant
+                *parameters_lal[:10],
+                phase,
+                *parameters_lal[11:14],
+                delta_t,
+                f_min,
+                f_ref,
+                lal_params,
+                approximant,
             )
             import matplotlib.pyplot as plt
             plt.plot(hp.data.data)
             plt.plot(hp1.data.data)
+            plt.show()
+            plt.plot(hp.data.data-hp1.data.data)
             plt.show()
 
 
