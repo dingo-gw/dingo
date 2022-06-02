@@ -119,10 +119,19 @@ def test_mode_recombination_with_phase(uniform_fd_domain, BBH_parameters):
     )
 
     if visualize:
-        plt.plot(pol_dict_ref["h_plus"])
-        plt.plot(pol_dict_summed["h_plus"])
-        plt.plot(pol_dict_summed["h_plus"] - pol_dict_ref["h_plus"])
-        plt.xlim((0, 500))
+        x = domain()
+        m = get_mismatch(pol_dict_ref['h_plus'], pol_dict_summed['h_plus'], domain)
+        plt.title(f"h_plus. Mismatch: {m:.2e}.")
+        plt.plot(
+            x,
+            pol_dict_ref["h_plus"],
+            label="Reference (neglecting phase for cartesian spins)"
+        )
+        plt.plot(x, pol_dict_summed["h_plus"], label="Summed from modes")
+        plt.plot(x, pol_dict_summed["h_plus"] - pol_dict_ref["h_plus"], label="diff")
+        plt.xlim((0, 100))
+        plt.xlabel("f in Hz")
+        plt.legend()
         plt.show()
 
     for pol in ["h_plus", "h_cross"]:
@@ -175,10 +184,19 @@ def test_mode_recombination_with_phase(uniform_fd_domain, BBH_parameters):
     )
 
     if visualize:
-        plt.plot(pol_dict_ref["h_plus"])
-        plt.plot(pol_dict_summed["h_plus"])
-        plt.plot(pol_dict_summed["h_plus"] - pol_dict_ref["h_plus"])
-        plt.xlim((0, 500))
+        x = domain()
+        m = get_mismatch(pol_dict_ref['h_plus'], pol_dict_summed['h_plus'], domain)
+        plt.title(f"h_plus. Mismatch: {m:.2e}.")
+        plt.plot(
+            x,
+            pol_dict_ref["h_plus"],
+            label="Reference (using phase for cartesian spins)"
+        )
+        plt.plot(x, pol_dict_summed["h_plus"], label="Summed from modes")
+        plt.plot(x, pol_dict_summed["h_plus"] - pol_dict_ref["h_plus"], label="diff")
+        plt.xlim((0, 100))
+        plt.xlabel("f in Hz")
+        plt.legend()
         plt.show()
 
     # for comparison: naive baseline (i.e., exp(2i*phase) transformation) that
@@ -191,10 +209,19 @@ def test_mode_recombination_with_phase(uniform_fd_domain, BBH_parameters):
     }
 
     if visualize:
-        plt.plot(pol_dict_ref["h_plus"])
-        plt.plot(pol_dict_naive["h_plus"])
-        plt.plot(pol_dict_naive["h_plus"] - pol_dict_ref["h_plus"])
-        plt.xlim((0, 500))
+        x = domain()
+        m = get_mismatch(pol_dict_ref['h_plus'], pol_dict_naive['h_plus'], domain)
+        plt.title(f"h_plus. Mismatch: {m:.2e}.")
+        plt.plot(
+            x,
+            pol_dict_ref["h_plus"],
+            label="Reference (using phase for cartesian spins)"
+        )
+        plt.plot(x, pol_dict_naive["h_plus"], label="Naive exp(2i*phase) transformation")
+        plt.plot(x, pol_dict_naive["h_plus"] - pol_dict_ref["h_plus"], label="diff")
+        plt.xlim((0, 100))
+        plt.xlabel("f in Hz")
+        plt.legend()
         plt.show()
 
     mismatches = []
