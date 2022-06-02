@@ -89,7 +89,7 @@ def test_mode_recombination_with_phase(uniform_fd_domain, BBH_parameters):
     it here to test that the phase transformation of the spherical harmonics is
     implemented properly in sum_polarization_modes.
     """
-    visualize = True
+    visualize = False
 
     domain = uniform_fd_domain
     parameters = BBH_parameters
