@@ -637,6 +637,26 @@ class WaveformGenerator:
                 # plt.xlim((0, 2000))
                 # plt.show()
 
+                # check that domain of the polarizations is consistent with self.domain
+                if not isclose(self.domain.delta_f, hp_FD.deltaF, rel_tol=1e-6):
+                    raise ValueError(
+                        f"Waveform delta_f is inconsistent with domain: {hp.deltaF} vs "
+                        f"{self.domain.delta_f}! To avoid this, ensure that f_max = "
+                        f"{self.domain.f_max} is a power of two of delta_f = "
+                        f"{self.domain.delta_f} when you are using a native time-domain "
+                        f"waveform model."
+                    )
+
+                # Undo the time shift done by LS to the waveform
+                dt = (
+                    1 / hp_FD.deltaF
+                    + (hp_FD.epoch.gpsSeconds + hp_FD.epoch.gpsNanoSeconds * 1e-9)
+                )
+                time_shift = np.exp(-1j * 2 * np.pi * dt * self.domain())
+                for pol_dict in pol_dict_modes_FD.values():
+                    pol_dict["h_plus"] *= time_shift
+                    pol_dict["h_cross"] *= time_shift
+
                 return pol_dict_modes_FD
 
 
