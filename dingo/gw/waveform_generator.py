@@ -536,6 +536,16 @@ class WaveformGenerator:
                 self.lal_params,
                 lal_target_function="SimInspiralChooseTDModes",
             )
+            parameters_lal_td = self._convert_parameters_to_lal_frame(
+                parameters,
+                self.lal_params,
+                lal_target_function="SimInspiralTD",
+            )
+            parameters_lal_fd = self._convert_parameters_to_lal_frame(
+                parameters,
+                self.lal_params,
+                lal_target_function="SimInspiralFD",
+            )
             pol_dict_modes = self.generate_TD_waveform_modes(
                 parameters_lal_td_modes, iota, phase
             )
@@ -550,6 +560,12 @@ class WaveformGenerator:
                 delta_f = self.domain.delta_f
                 delta_t = 0.5 / self.domain.f_max
                 f_nyquist = self.domain.f_max # use f_max as f_nyquist
+                # check that nyquist frequency is power of two of delta_f
+                n = round(f_nyquist / delta_f)
+                if (n & (n-1)) != 0:
+                    raise NotImplementedError(
+                        "Nyquist frequency is not a power of two of delta_f"
+                    )
                 chirplen = int(2 * f_nyquist / delta_f)
                 if chirplen < hp_sample.data.length:
                     # warning from lalsimulation
@@ -559,8 +575,10 @@ class WaveformGenerator:
                         f"with Nyquist frequency {f_nyquist} Hz. The inspiral will be "
                         f"truncated."
                     )
+                lal_fft_plan = lal.CreateForwardREAL8FFTPlan(chirplen, 0)
+                pol_dict_modes_FD = {}
                 # iterate through modes, apply lines 3040 - 3050 in LS.SimInspiralFD
-                for pol_dict in pol_dict_modes.values():
+                for mode, pol_dict in pol_dict_modes.items():
                     hp = pol_dict["h_plus"]
                     hc = pol_dict["h_cross"]
                     # resize waveforms to the required length
@@ -569,18 +587,63 @@ class WaveformGenerator:
                     # put the waveform in the frequency domain
                     # (the units will correct themselves)
                     hp_FD = lal.CreateCOMPLEX16FrequencySeries(
-                        "FD H_PLUS",
-                        hp.epoch,
-                        0.0,
-                        delta_f,
-                        None, # should be lalDimensionlessUnit, how to get that in python?
-                        chirplen // 2 + 1
+                        # None should be lalDimensionlessUnit, how to get that in python?
+                        "FD H_PLUS", hp.epoch, 0.0, delta_f, None, chirplen // 2 + 1
                     )
+                    hc_FD = lal.CreateCOMPLEX16FrequencySeries(
+                        "FD H_CROSS", hc.epoch, 0.0, delta_f, None, chirplen // 2 + 1
+                    )
+                    lal.REAL8TimeFreqFFT(hp_FD, hp, lal_fft_plan)
+                    lal.REAL8TimeFreqFFT(hc_FD, hc, lal_fft_plan)
 
+                    pol_dict_modes_FD[mode] = {
+                        "h_plus": hp_FD.data.data, "h_cross": hc_FD.data.data,
+                    }
 
-                # * compute nyquist
-                # * resize
-                # * FFT
+                hptd, hctd = LS.SimInspiralTD(*parameters_lal_td)
+                lal.ResizeREAL8TimeSeries(
+                    hptd, hptd.data.length - chirplen, chirplen
+                )
+                hpsum = np.zeros(hptd.data.length)
+                for mode, pol_dict in pol_dict_modes.items():
+                    hpsum += pol_dict["h_plus"].data.data
+                import matplotlib.pyplot as plt
+                plt.plot(hpsum)
+                plt.plot(hptd.data.data - hpsum)
+                plt.show()
+                hptd_FD = lal.CreateCOMPLEX16FrequencySeries(
+                    "FD H_PLUS", hptd.epoch, 0.0, delta_f, None, chirplen // 2 + 1
+                )
+                lal.REAL8TimeFreqFFT(hptd_FD, hptd, lal_fft_plan)
+                hpfd, hcfd = LS.SimInspiralFD(*parameters_lal_fd)
+
+                # hpsum = np.zeros(hpfd.data.length, dtype=np.complex128)
+                # for mode, pol_dict in pol_dict_modes_FD.items():
+                #     hpsum += pol_dict["h_plus"]
+                #     # plt.plot(pol_dict["h_plus"], label=mode)
+                # plt.plot(hpfd.data.data, label="target")
+                # plt.plot(hpsum, label="sum")
+                # plt.plot(hpfd.data.data - hpsum, label="delta")
+                # plt.legend(ncol=5, prop={'size': 6})
+                # plt.xlim((0, 500))
+                # plt.show()
+
+                hp_sum, hc_sum = sum_polarization_modes(pol_dict_modes_FD, 0.0)
+
+                plt.plot(hp_sum.real)
+                plt.plot(hpfd.data.data.real)
+                plt.plot(hp_sum.real - hpfd.data.data.real)
+                plt.xlim((0, 2000))
+                plt.show()
+
+                plt.plot(hc_sum.imag)
+                plt.plot(hcfd.data.data.imag)
+                plt.plot(hc_sum.imag - hcfd.data.data.imag)
+                plt.xlim((0, 2000))
+                plt.show()
+
+                print("done")
+
 
             elif isinstance(self.domain, TimeDomain):
                 raise NotImplementedError("Time domain not implemented yet.")
@@ -697,7 +760,6 @@ class WaveformGenerator:
             p = modes.this
             while p is not None:
                 l, m = p.l, p.m
-                print(l, m)
                 # temporarily set p.next = None, such that the polarization is only
                 # computed for the present mode
                 next = p.next
@@ -860,6 +922,42 @@ def generate_waveform_and_catch_errors(
             else:
                 raise
     return wf_dict
+
+
+def sum_polarization_modes(pol_dict_modes, delta_phi=0.0):
+    """
+    Sums the contributions of the individual modes in pol_dict_modes to the final
+    polarizations.  polarization modes.
+
+    Parameters
+    ----------
+    pol_dict_modes: dict
+        Dictionary of polarization modes. Structure is:
+        {
+            {(l, m): {"h_plus": np.ndarray, "h_cross": np.ndarray}},
+            ...
+        }
+    delta_phi: float = 0.0
+        delta phi. Each mode (l, m) will be multiplied with exp(- i * |m| * delta_phi).
+
+    Returns
+    -------
+    hp_sum, hc_sum: np.ndarray, np.ndarray
+        Summed polarization.
+    """
+    sample = list(pol_dict_modes.values())[0]["h_plus"]
+    hp_sum = np.zeros_like(sample)
+    hc_sum = np.zeros_like(sample)
+    for mode, pol_dict in pol_dict_modes.items():
+        _, m = mode
+        hp, hc = pol_dict["h_plus"], pol_dict["h_cross"]
+        # add contribution, apply phase transformation
+        hp_sum += (hp * np.exp(-1j * m * delta_phi))
+        hc_sum += (hc * np.exp(-1j * m * delta_phi))
+    return hp_sum, hc_sum
+
+
+
 
 
 if __name__ == "__main__":
