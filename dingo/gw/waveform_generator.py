@@ -350,7 +350,7 @@ class WaveformGenerator:
             #   lal_params, l_max, approximant
             domain_pars = (delta_t, f_min, f_ref)
             domain_pars = tuple(float(p) for p in domain_pars)
-            if "l_max" not in parameters:
+            if "l_max" not in parameter_dict:
                 l_max = 5 # hard code l_max for now
             lal_parameter_tuple = (
                 (0.0, domain_pars[0],) # domain_pars[0] = delta_t
@@ -624,7 +624,8 @@ class WaveformGenerator:
                 #     lal_target_function="SimInspiralFD",
                 # )
                 # hpfd, hcfd = LS.SimInspiralFD(*parameters_lal_fd)
-                # hp_sum, hc_sum = sum_polarization_modes(pol_dict_modes_FD, 0.0)
+                # pol_dict_tmp = sum_polarization_modes(pol_dict_modes_FD, 0.0)
+                # hp_sum, hc_sum = pol_dict_tmp["h_plus"], pol_dict_tmp["h_cross"]
                 # import matplotlib.pyplot as plt
                 # plt.plot(hp_sum.real)
                 # plt.plot(hpfd.data.data.real, ',')
@@ -935,8 +936,9 @@ def sum_polarization_modes(pol_dict_modes_fd, delta_phi=0.0):
 
     Returns
     -------
-    hp_sum, hc_sum: np.ndarray, np.ndarray
-        Summed polarization.
+    pol_dict_fd: dict
+        Dictionary of summed frequency domain polarizations.
+        {"h_plus": hp_sum, "h_cross": hc_sum}
     """
     sample = list(pol_dict_modes_fd.values())[0]["h_plus"]
     hp_sum = np.zeros_like(sample)
@@ -945,9 +947,9 @@ def sum_polarization_modes(pol_dict_modes_fd, delta_phi=0.0):
         _, m = mode
         hp, hc = pol_dict["h_plus"], pol_dict["h_cross"]
         # add contribution, apply phase transformation
-        hp_sum += (hp * np.exp(-1j * m * delta_phi))
-        hc_sum += (hc * np.exp(-1j * m * delta_phi))
-    return hp_sum, hc_sum
+        hp_sum += (hp * np.exp(1j * abs(m) * delta_phi))
+        hc_sum += (hc * np.exp(1j * abs(m) * delta_phi))
+    return {"h_plus": hp_sum, "h_cross": hc_sum}
 
 
 
