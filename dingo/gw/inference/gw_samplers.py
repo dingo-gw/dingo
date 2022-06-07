@@ -10,6 +10,7 @@ from torchvision.transforms import Compose
 
 from dingo.core.samplers import Sampler, GNPESampler
 from dingo.core.transforms import GetItem, RenameKey
+from dingo.core.multiprocessing import apply_func_with_multiprocessing
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_window_factor, get_extrinsic_prior_dict
 from dingo.gw.likelihood import (
@@ -246,6 +247,9 @@ class GWSamplerMixin(object):
             phase is calculated for given samples. It is stored in sample['log_prob'].
 
         """
+        approximation_22_mode = self.synthetic_phase_kwargs.get(
+            "approximation_22_mode", True)
+
         if not (
             isinstance(self.phase_prior, Uniform)
             and (self.phase_prior._minimum, self.phase_prior._maximum) == (0, 2 * np.pi)
@@ -285,23 +289,34 @@ class GWSamplerMixin(object):
             sample_phase = theta["phase"].to_numpy(copy=True)
 
         # For each sample, build the posterior over phase given the remaining parameters.
-        # For each sample, the un-normalized posterior depends only on (d | h(phase)):
-        # The prior p(phase), and the inner products (h | h), and (d | d) only contribute
-        # to the normalization. (We check above that p(phase) is constant.)
-        theta["phase"] = 0.0
-        d_inner_h_complex = self.likelihood.d_inner_h_complex_multi(
-            theta.iloc[within_prior],
-            num_processes,
-        )
 
-        # Evaluate the log posterior over the phase across the grid.
         phases = np.linspace(0, 2 * np.pi, self.synthetic_phase_kwargs["n_grid"])
-        phasor = np.exp(2j * phases)
-        phase_log_posterior = np.outer(d_inner_h_complex, phasor).real
+        if approximation_22_mode:
+            # For each sample, the un-normalized posterior depends only on (d | h(phase)):
+            # The prior p(phase), and the inner products (h | h), and (d | d) only contribute
+            # to the normalization. (We check above that p(phase) is constant.)
+            theta["phase"] = 0.0
+            d_inner_h_complex = self.likelihood.d_inner_h_complex_multi(
+                theta.iloc[within_prior],
+                num_processes,
+            )
+
+            # Evaluate the log posterior over the phase across the grid.
+            phasor = np.exp(2j * phases)
+            phase_log_posterior = np.outer(d_inner_h_complex, phasor).real
+        else:
+            # Define higher order function for log_likelihood on phase grid.
+            # This let's us set the phases argument, and prepares the function for the
+            # multiprocessing wrapper.
+            def log_likelihood_phase_grid(theta_frame):
+                return self.likelihood.log_likelihood_phase_grid(theta_frame, phases)
+            phase_log_posterior = apply_func_with_multiprocessing(
+                log_likelihood_phase_grid, theta,
+            )
+
         phase_posterior = np.exp(
             phase_log_posterior - np.amax(phase_log_posterior, axis=1, keepdims=True)
         )
-
         # Include a floor value to maintain mass coverage.
         phase_posterior += phase_posterior.mean(
             axis=-1, keepdims=True

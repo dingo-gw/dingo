@@ -15,7 +15,11 @@ from dingo.gw.transforms import (
     ProjectOntoDetectors,
     WhitenAndScaleStrain,
 )
-from dingo.gw.waveform_generator import WaveformGenerator, sum_fd_mode_contributions
+from dingo.gw.waveform_generator import (
+    WaveformGenerator,
+    sum_fd_mode_contributions,
+    sum_over_l,
+)
 
 
 class GWSignal(object):
@@ -216,7 +220,7 @@ class GWSignal(object):
 
         return self.projection_transforms(sample), polarizations_modes
 
-    def signal_modes(self, theta):
+    def signal_modes(self, theta, keep_l=True):
         """
         Compute the GW signal for parameters theta. Same as self.signal method,
         but it returns the individual contributions of the modes instead of the sum.
@@ -230,6 +234,10 @@ class GWSignal(object):
         theta: dict
             Signal parameters. Includes intrinsic parameters to be passed to waveform
             generator, and extrinsic parameters for detector projection.
+        keep_l: bool = True
+            If False, then modes with different l but identical |m| will be summed. This
+            is useful, since only |m| determines the transformation behaviour under the
+            spherical harmonics when changing the phase.
 
         Returns
         -------
@@ -247,13 +255,17 @@ class GWSignal(object):
         polarizations_modes = self.waveform_generator.generate_hplus_hcross_modes(
             theta_intrinsic
         )
-        polarizations_modes = {  # truncation, in case wfg has a larger frequency range
+        # truncation, in case wfg has a larger frequency range
+        polarizations_modes = {
             k_mode: {
                 k_pol: self.data_domain.update_data(v_pol)
                 for k_pol, v_pol in v_mode.items()
             }
             for k_mode, v_mode in polarizations_modes.items()
         }
+        # sum modes with different l but identical |m| to (-1, |m|)
+        if not keep_l:
+            polarizations_modes = sum_over_l(polarizations_modes)
 
         # Step 2: project h_plus and h_cross onto detectors
         sample_out = {}

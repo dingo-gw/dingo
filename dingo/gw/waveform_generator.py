@@ -921,7 +921,7 @@ def generate_waveform_and_catch_errors(
 def sum_fd_mode_contributions(fd_modearray_dict, delta_phi=0.0):
     """
     Sums the contributions of individual FrequencyDomain (FD) modes in fd_modearray_dict.
-    This assumes exp(- i * |m| * delta_phi) transformations to account for delta_phi.
+    This assumes exp(i * |m| * delta_phi) transformations to account for delta_phi.
 
     Typically the arrays in fd_modearray_dict would be FD polarizations, but they could
     also be FD waveforms in the individual detectors.
@@ -937,7 +937,7 @@ def sum_fd_mode_contributions(fd_modearray_dict, delta_phi=0.0):
             ...
         }
     delta_phi: float = 0.0
-        delta phi. Each mode (l, m) will be multiplied with exp(- i * |m| * delta_phi)
+        delta phi. Each mode (l, m) will be multiplied with exp(i * |m| * delta_phi)
         before the sum.
 
     Returns
@@ -951,7 +951,10 @@ def sum_fd_mode_contributions(fd_modearray_dict, delta_phi=0.0):
     # initialized summed dicts
     summed_dict = {k: np.zeros_like(sample[k]) for k in keys}
     for mode, array_dict in fd_modearray_dict.items():
-        _, m = mode
+        if isinstance(mode, tuple):
+            _, m = mode
+        else:
+            m = mode
         for k in keys:
             summed_dict[k] += array_dict[k] * np.exp(1j * abs(m) * delta_phi)
     return summed_dict
