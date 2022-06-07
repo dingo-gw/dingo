@@ -15,7 +15,7 @@ from dingo.gw.transforms import (
     ProjectOntoDetectors,
     WhitenAndScaleStrain,
 )
-from dingo.gw.waveform_generator import WaveformGenerator, sum_polarization_modes
+from dingo.gw.waveform_generator import WaveformGenerator, sum_fd_mode_contributions
 
 
 class GWSignal(object):
@@ -193,7 +193,7 @@ class GWSignal(object):
             }
 
         # Step 2: sum different modes for h_plus and h_cross according to phase parameter
-        polarizations = sum_polarization_modes(
+        polarizations = sum_fd_mode_contributions(
             polarizations_modes, delta_phi=theta["phase"]
         )
 
@@ -216,7 +216,7 @@ class GWSignal(object):
 
         return self.projection_transforms(sample), polarizations_modes
 
-    def signal_modes(self, theta, ret_separate_modes=False):
+    def signal_modes(self, theta):
         """
         Compute the GW signal for parameters theta. Same as self.signal method,
         but it returns the individual contributions of the modes instead of the sum.
@@ -230,10 +230,6 @@ class GWSignal(object):
         theta: dict
             Signal parameters. Includes intrinsic parameters to be passed to waveform
             generator, and extrinsic parameters for detector projection.
-        ret_separate_modes: bool=False
-            If True, return the projection of the individual modes onto the detectors,
-            instead of their sum. Useful when treating the phase as an extrinsic
-            parameter.
 
         Returns
         -------
@@ -248,47 +244,28 @@ class GWSignal(object):
         theta_intrinsic = {k: float(v) for k, v in theta_intrinsic.items()}
 
         # Step 1: generate polarizations h_plus and h_cross
-        if not ret_separate_modes:
-            polarizations = self.waveform_generator.generate_hplus_hcross(
-                theta_intrinsic
-            )
-            polarizations = {  # truncation, in case wfg has a larger frequency range
-                k: self.data_domain.update_data(v) for k, v in polarizations.items()
+        polarizations_modes = self.waveform_generator.generate_hplus_hcross_modes(
+            theta_intrinsic
+        )
+        polarizations_modes = {  # truncation, in case wfg has a larger frequency range
+            k_mode: {
+                k_pol: self.data_domain.update_data(v_pol)
+                for k_pol, v_pol in v_mode.items()
             }
-        else:
-            polarizations = self.waveform_generator.generate_hplus_hcross_modes(
-                theta_intrinsic
-            )
-            polarizations = {  # truncation, in case wfg has a larger frequency range
-                k_mode: {
-                    k_pol: self.data_domain.update_data(v_pol)
-                    for k_pol, v_pol in v_mode.items()
-                }
-                for k_mode, v_mode in polarizations.items()
-            }
+            for k_mode, v_mode in polarizations_modes.items()
+        }
 
         # Step 2: project h_plus and h_cross onto detectors
-        if not ret_separate_modes:
+        sample_out = {}
+        for mode, mode_polarizations in polarizations_modes.items():
             sample = {
                 "parameters": theta_intrinsic,
                 "extrinsic_parameters": theta_extrinsic,
-                "waveform": polarizations,
+                "waveform": mode_polarizations,
             }
             if self.asd is not None:
                 sample["asds"] = self.asd
-            sample_out = self.projection_transforms(sample)
-
-        else:
-            sample_out = {}
-            for mode, mode_polarizations in polarizations.items():
-                sample = {
-                    "parameters": theta_intrinsic,
-                    "extrinsic_parameters": theta_extrinsic,
-                    "waveform": mode_polarizations,
-                }
-                if self.asd is not None:
-                    sample["asds"] = self.asd
-                sample_out[mode] = self.projection_transforms(sample)
+            sample_out[mode] = self.projection_transforms(sample)
 
         return sample_out
 

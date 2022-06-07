@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from dingo.gw.domains import build_domain
 
-from dingo.gw.waveform_generator import WaveformGenerator, sum_polarization_modes
+from dingo.gw.waveform_generator import WaveformGenerator, sum_fd_mode_contributions
 from dingo.gw.gwutils import get_mismatch
 
 
@@ -62,7 +62,7 @@ def test_mode_recombination(uniform_fd_domain, BBH_parameters):
     )
     pol_dict_ref = waveform_generator.generate_hplus_hcross(parameters)
     pol_dict_modes = waveform_generator.generate_hplus_hcross_modes(parameters)
-    pol_dict_summed = sum_polarization_modes(pol_dict_modes, delta_phi=0.0)
+    pol_dict_summed = sum_fd_mode_contributions(pol_dict_modes, delta_phi=0.0)
 
     if visualize:
         plt.plot(pol_dict_ref["h_plus"])
@@ -114,7 +114,7 @@ def test_mode_recombination_with_phase(uniform_fd_domain, BBH_parameters):
     pol_dict_modes = waveform_generator.generate_hplus_hcross_modes(
         {**parameters, "phase": 0.0}
     )
-    pol_dict_summed = sum_polarization_modes(
+    pol_dict_summed = sum_fd_mode_contributions(
         pol_dict_modes, delta_phi=parameters["phase"]
     )
 
@@ -179,7 +179,7 @@ def test_mode_recombination_with_phase(uniform_fd_domain, BBH_parameters):
     pol_dict_modes = waveform_generator.generate_hplus_hcross_modes(
         {**parameters, "phase": 0.0}
     )
-    pol_dict_summed = sum_polarization_modes(
+    pol_dict_summed = sum_fd_mode_contributions(
         pol_dict_modes, delta_phi=parameters["phase"]
     )
 

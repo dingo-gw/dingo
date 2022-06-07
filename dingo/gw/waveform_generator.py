@@ -918,38 +918,43 @@ def generate_waveform_and_catch_errors(
     return wf_dict
 
 
-def sum_polarization_modes(pol_dict_modes_fd, delta_phi=0.0):
+def sum_fd_mode_contributions(fd_modearray_dict, delta_phi=0.0):
     """
-    Sums the contributions of the individual modes in pol_dict_modes_fd to the final
-    polarizations.
+    Sums the contributions of individual FrequencyDomain (FD) modes in fd_modearray_dict.
+    This assumes exp(- i * |m| * delta_phi) transformations to account for delta_phi.
+
+    Typically the arrays in fd_modearray_dict would be FD polarizations, but they could
+    also be FD waveforms in the individual detectors.
 
     Parameters
     ----------
-    pol_dict_modes_fd: dict
-        Dictionary of frequency domain polarization modes. Structure is:
+    fd_modearray_dict: dict
+        Dictionary of frequency domain mode arrays. These could e.g. be the
+        polarizations, in which case the structure would be
         {
-            {(l, m): {"h_plus": np.ndarray, "h_cross": np.ndarray}},
+            {(2, 2): {"h_plus": np.ndarray, "h_cross": np.ndarray}},
+            {(2, 1): {"h_plus": np.ndarray, "h_cross": np.ndarray}},
             ...
         }
     delta_phi: float = 0.0
-        delta phi. Each mode (l, m) will be multiplied with exp(- i * |m| * delta_phi).
+        delta phi. Each mode (l, m) will be multiplied with exp(- i * |m| * delta_phi)
+        before the sum.
 
     Returns
     -------
     pol_dict_fd: dict
         Dictionary of summed frequency domain polarizations.
-        {"h_plus": hp_sum, "h_cross": hc_sum}
+        In case of polarizations: {"h_plus": hp_sum, "h_cross": hc_sum}
     """
-    sample = list(pol_dict_modes_fd.values())[0]["h_plus"]
-    hp_sum = np.zeros_like(sample)
-    hc_sum = np.zeros_like(sample)
-    for mode, pol_dict in pol_dict_modes_fd.items():
+    sample = list(fd_modearray_dict.values())[0]
+    keys = sample.keys()
+    # initialized summed dicts
+    summed_dict = {k: np.zeros_like(sample[k]) for k in keys}
+    for mode, pol_dict in fd_modearray_dict.items():
         _, m = mode
-        hp, hc = pol_dict["h_plus"], pol_dict["h_cross"]
-        # add contribution, apply phase transformation
-        hp_sum += (hp * np.exp(1j * abs(m) * delta_phi))
-        hc_sum += (hc * np.exp(1j * abs(m) * delta_phi))
-    return {"h_plus": hp_sum, "h_cross": hc_sum}
+        for k in keys:
+            summed_dict[k] += pol_dict[k] * np.exp(1j * abs(m) * delta_phi)
+    return summed_dict
 
 
 
