@@ -942,21 +942,64 @@ def sum_fd_mode_contributions(fd_modearray_dict, delta_phi=0.0):
 
     Returns
     -------
-    pol_dict_fd: dict
-        Dictionary of summed frequency domain polarizations.
+    summed_dict: dict
+        Dictionary of summed FD arrays.
         In case of polarizations: {"h_plus": hp_sum, "h_cross": hc_sum}
     """
     sample = list(fd_modearray_dict.values())[0]
     keys = sample.keys()
     # initialized summed dicts
     summed_dict = {k: np.zeros_like(sample[k]) for k in keys}
-    for mode, pol_dict in fd_modearray_dict.items():
+    for mode, array_dict in fd_modearray_dict.items():
         _, m = mode
         for k in keys:
-            summed_dict[k] += pol_dict[k] * np.exp(1j * abs(m) * delta_phi)
+            summed_dict[k] += array_dict[k] * np.exp(1j * abs(m) * delta_phi)
     return summed_dict
 
 
+def sum_over_l(fd_modearray_dict):
+    """
+    Sums the contributions of individual FrequencyDomain (FD) modes in
+    fd_modearray_dict for different l but identical |m|. This can be useful, since only
+    |m| determines the transformation behaviour under the spherical harmonics when
+    changing the phase.
+
+    Typically the arrays in fd_modearray_dict would be FD polarizations, but they could
+    also be FD waveforms in the individual detectors.
+
+    Parameters
+    ----------
+    fd_modearray_dict: dict
+        Dictionary of frequency domain mode arrays. These could e.g. be the
+        polarizations, in which case the structure would be
+        {
+            {(2, 2): {"h_plus": np.ndarray, "h_cross": np.ndarray}},
+            {(2, 1): {"h_plus": np.ndarray, "h_cross": np.ndarray}},
+            ...
+        }
+
+    Returns
+    -------
+    summed_dict: dict
+        Dictionary of summed FD arrays for different modes |m|.
+        In case of polarizations:
+        {
+            {(-1, 2): {"h_plus": np.ndarray, "h_cross": np.ndarray}},
+            {(-1, 1): {"h_plus": np.ndarray, "h_cross": np.ndarray}},
+            ...
+        }
+
+    """
+    summed_dict = {}
+    for mode, array_dict in fd_modearray_dict.items():
+        _, m = mode
+        mode_key = (-1, abs(m))
+        if mode_key not in summed_dict:
+            summed_dict[mode_key] = array_dict
+        else:
+            for array_key, v in array_dict.items():
+                summed_dict[mode_key][array_key] += v
+    return summed_dict
 
 
 

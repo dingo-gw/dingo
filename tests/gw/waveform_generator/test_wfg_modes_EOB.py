@@ -8,7 +8,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 from dingo.gw.domains import build_domain
 
-from dingo.gw.waveform_generator import WaveformGenerator, sum_fd_mode_contributions
+from dingo.gw.waveform_generator import (
+    WaveformGenerator,
+    sum_fd_mode_contributions,
+    sum_over_l,
+)
 from dingo.gw.gwutils import get_mismatch
 
 
@@ -94,7 +98,7 @@ def test_mode_recombination_with_phase(uniform_fd_domain, BBH_parameters):
     domain = uniform_fd_domain
     parameters = BBH_parameters
 
-    DEBUG_FIX_PHASE_FOR_CARTESIAN_SPINS=True
+    DEBUG_FIX_PHASE_FOR_CARTESIAN_SPINS = True
     # in this case, the phase only comes in via the spherical harmonics,
     # so the results of
     #   (a) wfg.generate_hplus_hcross(parameters)
@@ -120,12 +124,12 @@ def test_mode_recombination_with_phase(uniform_fd_domain, BBH_parameters):
 
     if visualize:
         x = domain()
-        m = get_mismatch(pol_dict_ref['h_plus'], pol_dict_summed['h_plus'], domain)
+        m = get_mismatch(pol_dict_ref["h_plus"], pol_dict_summed["h_plus"], domain)
         plt.title(f"h_plus. Mismatch: {m:.2e}.")
         plt.plot(
             x,
             pol_dict_ref["h_plus"],
-            label="Reference (neglecting phase for cartesian spins)"
+            label="Reference (neglecting phase for cartesian spins)",
         )
         plt.plot(x, pol_dict_summed["h_plus"], label="Summed from modes")
         plt.plot(x, pol_dict_summed["h_plus"] - pol_dict_ref["h_plus"], label="diff")
@@ -149,12 +153,13 @@ def test_mode_recombination_with_phase(uniform_fd_domain, BBH_parameters):
     mismatches_naive = []
     for pol in ["h_plus", "h_cross"]:
         mismatches.append(get_mismatch(pol_dict_ref[pol], pol_dict_summed[pol], domain))
-        mismatches_naive.append(get_mismatch(pol_dict_ref[pol], pol_dict_naive[pol], domain))
+        mismatches_naive.append(
+            get_mismatch(pol_dict_ref[pol], pol_dict_naive[pol], domain)
+        )
     # mismatches should be significantly smaller than mismatches_naive
     assert np.mean(mismatches) < np.mean(mismatches_naive)
 
-
-    DEBUG_FIX_PHASE_FOR_CARTESIAN_SPINS=False
+    DEBUG_FIX_PHASE_FOR_CARTESIAN_SPINS = False
     # in this case, the phase also comes in via the cartesian spins. In
     #   (a) wfg.generate_hplus_hcross(parameters)
     #   (b) sum_polarization_modes(
@@ -183,14 +188,22 @@ def test_mode_recombination_with_phase(uniform_fd_domain, BBH_parameters):
         pol_dict_modes, delta_phi=parameters["phase"]
     )
 
+    # Test dingo.gw.waveform_generator.sum_over_l
+    pol_dict_modes_l = sum_over_l(pol_dict_modes)
+    pol_dict_summed_l = sum_fd_mode_contributions(
+        pol_dict_modes_l, delta_phi=parameters["phase"]
+    )
+    for k in pol_dict_summed.keys():
+        assert get_mismatch(pol_dict_summed_l[k], pol_dict_summed[k], domain) < 1e-15
+
     if visualize:
         x = domain()
-        m = get_mismatch(pol_dict_ref['h_plus'], pol_dict_summed['h_plus'], domain)
+        m = get_mismatch(pol_dict_ref["h_plus"], pol_dict_summed["h_plus"], domain)
         plt.title(f"h_plus. Mismatch: {m:.2e}.")
         plt.plot(
             x,
             pol_dict_ref["h_plus"],
-            label="Reference (using phase for cartesian spins)"
+            label="Reference (using phase for cartesian spins)",
         )
         plt.plot(x, pol_dict_summed["h_plus"], label="Summed from modes")
         plt.plot(x, pol_dict_summed["h_plus"] - pol_dict_ref["h_plus"], label="diff")
@@ -210,14 +223,16 @@ def test_mode_recombination_with_phase(uniform_fd_domain, BBH_parameters):
 
     if visualize:
         x = domain()
-        m = get_mismatch(pol_dict_ref['h_plus'], pol_dict_naive['h_plus'], domain)
+        m = get_mismatch(pol_dict_ref["h_plus"], pol_dict_naive["h_plus"], domain)
         plt.title(f"h_plus. Mismatch: {m:.2e}.")
         plt.plot(
             x,
             pol_dict_ref["h_plus"],
-            label="Reference (using phase for cartesian spins)"
+            label="Reference (using phase for cartesian spins)",
         )
-        plt.plot(x, pol_dict_naive["h_plus"], label="Naive exp(2i*phase) transformation")
+        plt.plot(
+            x, pol_dict_naive["h_plus"], label="Naive exp(2i*phase) transformation"
+        )
         plt.plot(x, pol_dict_naive["h_plus"] - pol_dict_ref["h_plus"], label="diff")
         plt.xlim((0, 100))
         plt.xlabel("f in Hz")
@@ -227,11 +242,9 @@ def test_mode_recombination_with_phase(uniform_fd_domain, BBH_parameters):
     mismatches = []
     mismatches_naive = []
     for pol in ["h_plus", "h_cross"]:
-        mismatches.append(
-            get_mismatch(pol_dict_ref[pol], pol_dict_summed[pol], domain))
+        mismatches.append(get_mismatch(pol_dict_ref[pol], pol_dict_summed[pol], domain))
         mismatches_naive.append(
-            get_mismatch(pol_dict_ref[pol], pol_dict_naive[pol], domain))
+            get_mismatch(pol_dict_ref[pol], pol_dict_naive[pol], domain)
+        )
     # mismatches should be significantly smaller than mismatches_naive
     assert np.mean(mismatches) < np.mean(mismatches_naive)
-
-
