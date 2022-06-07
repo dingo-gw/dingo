@@ -259,9 +259,14 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
         # Step 1: Compute signal for phase = 0, separated into the contributions from
         # the individual modes.
-        waveform_modes = self.signal_modes({**theta, "phase": 0}, keep_l=False)
-        waveform_modes = {k[1]: v["waveform"] for k, v in waveform_modes.items()}
-
+        try:
+            waveform_modes = self.signal_modes({**theta, "phase": 0}, keep_l=False)
+            waveform_modes = {k[1]: v["waveform"] for k, v in waveform_modes.items()}
+        except:
+            # TODO: properly implement this exception
+            print(f"Waveform modes not generated for parameters {theta}.")
+            return np.ones(len(phases))
+l
         # Step 2: Precompute complex inner products (mu, mu) and (d, mu) for the
         # individual modes m.
         min_idx = self.data_domain.min_idx
