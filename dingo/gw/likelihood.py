@@ -266,7 +266,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             # TODO: properly implement this exception
             print(f"Waveform modes not generated for parameters {theta}.")
             return np.ones(len(phases))
-l
+
         # Step 2: Precompute complex inner products (mu, mu) and (d, mu) for the
         # individual modes m.
         min_idx = self.data_domain.min_idx
