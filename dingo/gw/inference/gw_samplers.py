@@ -248,7 +248,8 @@ class GWSamplerMixin(object):
 
         """
         approximation_22_mode = self.synthetic_phase_kwargs.get(
-            "approximation_22_mode", True)
+            "approximation_22_mode", True
+        )
 
         if not (
             isinstance(self.phase_prior, Uniform)
@@ -274,6 +275,7 @@ class GWSamplerMixin(object):
         num_processes = min(
             self.synthetic_phase_kwargs.get("num_processes", 1), num_valid_samples // 50
         )
+        num_processes = self.synthetic_phase_kwargs.get("num_processes", 1)
 
         if num_valid_samples > 1e4:
             print(f"Estimating synthetic phase for {num_valid_samples} samples.")
@@ -308,10 +310,14 @@ class GWSamplerMixin(object):
             # Define higher order function for log_likelihood on phase grid.
             # This let's us set the phases argument, and prepares the function for the
             # multiprocessing wrapper.
-            def log_likelihood_phase_grid(theta_frame):
-                return self.likelihood.log_likelihood_phase_grid(theta_frame, phases)
+            # def log_likelihood_phase_grid(theta_frame):
+            #     return self.likelihood.log_likelihood_phase_grid(theta_frame, phases)
+            self.likelihood.phase_grid = phases
+
             phase_log_posterior = apply_func_with_multiprocessing(
-                log_likelihood_phase_grid, theta,
+                self.likelihood.log_likelihood_phase_grid,
+                theta.iloc[within_prior],
+                num_processes=num_processes
             )
 
         phase_posterior = np.exp(
@@ -334,9 +340,9 @@ class GWSamplerMixin(object):
             )
 
             phase_array = np.full(len(theta), 0.0)
-            phase_array[within_prior] = new_phase[within_prior]
+            phase_array[within_prior] = new_phase
             delta_log_prob_array = np.full(len(theta), -np.inf)
-            delta_log_prob_array[within_prior] = delta_log_prob[within_prior]
+            delta_log_prob_array[within_prior] = delta_log_prob
 
             samples["phase"] = phase_array
             samples["log_prob"] += delta_log_prob_array
@@ -549,7 +555,10 @@ class GWSamplerMixin(object):
         if not inverse:
             self._correct_reference_time(samples, inverse)
             if self.synthetic_phase_kwargs is not None:
+                print(f"Sampling synthetic phase.")
+                t0 = time.time()
                 self._sample_synthetic_phase(samples, inverse)
+                print(f"Done. This took {time.time() - t0:.2f} seconds.")
 
         # If inverting, we go in reverse order.
         else:
