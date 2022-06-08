@@ -100,8 +100,6 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             self.initialize_time_marginalization(**time_marginalization_kwargs)
         self.phase_marginalization = phase_marginalization
         self.phase_grid = phase_grid
-        if self.phase_grid is not None:
-            self.initialize_phase_grid(phase_grid)
 
     def initialize_time_marginalization(self, t_lower, t_upper, n_fft=1):
         """
@@ -154,38 +152,17 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         with np.errstate(divide="ignore"):  # ignore warnings for log(0) = -inf
             self.time_prior_log = np.log(time_prior / np.sum(time_prior))
 
-    def initialize_phase_grid(self, phase_grid):
-        self.phase_grid = phase_grid
-        # Compute strains with phase shifted by -2*phase_grid. This is equivalent to
-        # shifting the phase of mu by +2*phase_grid, but it can be precomputed.
-        self.whitened_strains_phase_grid = {
-            k: np.repeat(v[:, np.newaxis], len(self.phase_grid), axis=1)
-            * np.exp(-2j * self.phase_grid)
-            for k, v in self.whitened_strains.items()
-        }
-
     def log_likelihood(self, theta):
-        if (
-            sum(
-                [
-                    self.time_marginalization,
-                    self.phase_marginalization,
-                    self.phase_grid is not None,
-                ]
-            )
-            > 1
-        ):
+        if sum([self.time_marginalization, self.phase_marginalization,]) > 1:
             raise NotImplementedError(
-                "Only one out of time-marginalization, phase-marginalization and "
-                "phase-grid can be used at a time."
+                "Only one out of time-marginalization and phase-marginalization "
+                "can be used at a time."
             )
 
         if self.time_marginalization:
             return self._log_likelihood_time_marginalized(theta)
         elif self.phase_marginalization:
             return self._log_likelihood_phase_marginalized(theta)
-        elif self.phase_grid is not None:
-            return self._log_likelihood_phase_grid(theta)
         else:
             return self._log_likelihood(theta)
 
@@ -253,19 +230,16 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         )
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
-    def log_likelihood_phase_grid(self, theta, phases):
+    def log_likelihood_phase_grid(self, theta, phases=None):
         # TODO: Implement for time marginalization
         d = self.whitened_strains
+        if phases is None:
+            phases = self.phase_grid
 
         # Step 1: Compute signal for phase = 0, separated into the contributions from
         # the individual modes.
-        try:
-            waveform_modes = self.signal_modes({**theta, "phase": 0}, keep_l=False)
-            waveform_modes = {k[1]: v["waveform"] for k, v in waveform_modes.items()}
-        except:
-            # TODO: properly implement this exception
-            print(f"Waveform modes not generated for parameters {theta}.")
-            return np.ones(len(phases))
+        waveform_modes = self.signal_modes({**theta, "phase": 0}, keep_l=False)
+        waveform_modes = {k[1]: v["waveform"] for k, v in waveform_modes.items()}
 
         # Step 2: Precompute complex inner products (mu, mu) and (d, mu) for the
         # individual modes m.
