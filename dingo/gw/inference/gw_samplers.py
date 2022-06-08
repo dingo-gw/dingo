@@ -273,9 +273,8 @@ class GWSamplerMixin(object):
         # Put a cap on the number of processes to avoid overhead:
         num_valid_samples = np.sum(within_prior)
         num_processes = min(
-            self.synthetic_phase_kwargs.get("num_processes", 1), num_valid_samples // 50
+            self.synthetic_phase_kwargs.get("num_processes", 1), num_valid_samples // 10
         )
-        num_processes = self.synthetic_phase_kwargs.get("num_processes", 1)
 
         if num_valid_samples > 1e4:
             print(f"Estimating synthetic phase for {num_valid_samples} samples.")
