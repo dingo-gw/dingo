@@ -336,7 +336,7 @@ class GWSamplerMixin(object):
             phase_array = np.full(len(theta), 0.0)
             phase_array[within_prior] = new_phase[within_prior]
             delta_log_prob_array = np.full(len(theta), -np.inf)
-            delta_log_prob_array[within_prior] = delta_log_prob
+            delta_log_prob_array[within_prior] = delta_log_prob[within_prior]
 
             samples["phase"] = phase_array
             samples["log_prob"] += delta_log_prob_array
