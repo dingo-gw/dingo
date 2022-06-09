@@ -236,6 +236,7 @@ class WaveformGenerator:
             "SimInspiralTD",
             "SimInspiralChooseTDModes",
             "SimInspiralChooseFDModes",
+            "SimIMRPhenomXPCalculateModelParametersFromSourceFrame",
         ]:
             raise ValueError(
                 f"Unsupported lalsimulation waveform function {lal_target_function}."
@@ -339,7 +340,25 @@ class WaveformGenerator:
                 + (lal_params, self.approximant)
             )
         elif lal_target_function == "SimInspiralChooseFDModes":
-            raise NotImplementedError("SimInspiralChooseFDModes not implemented yet.")
+            domain_pars = (delta_f, f_min, f_max, f_ref)
+            domain_pars = tuple(float(p) for p in domain_pars)
+            lal_parameter_tuple = (
+                    masses
+                    + spins_cartesian
+                    + domain_pars
+                    + (phase, r, iota)
+                    + (lal_params, self.approximant)
+            )
+
+        elif lal_target_function == \
+                "SimIMRPhenomXPCalculateModelParametersFromSourceFrame":
+            lal_parameter_tuple = (
+                masses
+                + (f_ref,)
+                + (phase, iota)
+                + spins_cartesian
+                + (lal_params,)
+            )
 
         elif lal_target_function == "SimInspiralChooseTDModes":
             # LS.SimInspiralChooseTDModes takes parameters:
