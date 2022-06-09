@@ -3,6 +3,7 @@ from multiprocessing import Pool
 import numpy as np
 import pandas as pd
 from scipy.fft import fft
+from scipy.special import logsumexp
 from bilby.gw.utils import ln_i0
 from threadpoolctl import threadpool_limits
 
@@ -26,7 +27,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         event_data,
         t_ref=None,
         time_marginalization_kwargs=None,
-        phase_marginalization=False,
+        phase_marginalization_kwargs=None,
         phase_grid=None,
     ):
         """
@@ -91,15 +92,27 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 for asd in self.asd.values()
             ]
         )
-
         self.whiten = True
+        self.phase_grid = phase_grid
 
         # optionally initialize time marginalization
         self.time_marginalization = False
         if time_marginalization_kwargs is not None:
             self.initialize_time_marginalization(**time_marginalization_kwargs)
-        self.phase_marginalization = phase_marginalization
-        self.phase_grid = phase_grid
+
+        # optionally initialize phase marginalization
+        self.phase_marginalization = False
+        if phase_marginalization_kwargs is not None:
+            self.phase_marginalization = True
+            # flag whether to use exp(2i * phi) approximation for phase transformations
+            self.pm_approx_22_mode = phase_marginalization_kwargs.get(
+                "approximation_22_mode", True
+            )
+            # if we don't use the exp(2i * phase) approximation, we need a phase grid
+            if not self.pm_approx_22_mode:
+                n_grid = phase_marginalization_kwargs.get("n_grid", 1_000)
+                # use endpoint = False for grid, since phase = 0/2pi are equivalent
+                self.phase_grid = np.linspace(0, 2 * np.pi, n_grid, endpoint=False)
 
     def initialize_time_marginalization(self, t_lower, t_upper, n_fft=1):
         """
@@ -153,7 +166,15 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             self.time_prior_log = np.log(time_prior / np.sum(time_prior))
 
     def log_likelihood(self, theta):
-        if sum([self.time_marginalization, self.phase_marginalization,]) > 1:
+        if (
+            sum(
+                [
+                    self.time_marginalization,
+                    self.phase_marginalization,
+                ]
+            )
+            > 1
+        ):
             raise NotImplementedError(
                 "Only one out of time-marginalization and phase-marginalization "
                 "can be used at a time."
@@ -328,7 +349,6 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
         return log_likelihoods
 
-
     def _log_likelihood_phase_grid_old(self, theta):
         # Step 1: Compute whitened GW strain mu(theta) for parameters theta with phase 0.
         theta["phase"] = 0
@@ -362,29 +382,55 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         log_likelihood: float
         """
 
-        # Step 1: Compute whitened GW strain mu(theta) for parameters theta.
-        # The phase parameter needs to be set to 0.
-        theta["phase"] = 0.0
-        mu = self.signal(theta)["waveform"]
-        d = self.whitened_strains
+        # exp(2i * phase) approximation
+        if self.pm_approx_22_mode:
+            # Step 1: Compute whitened GW strain mu(theta) for parameters theta.
+            # The phase parameter needs to be set to 0.
+            theta["phase"] = 0.0
+            mu = self.signal(theta)["waveform"]
+            d = self.whitened_strains
 
-        # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to
-        # compute the remaining terms rho2opt and kappa2
-        rho2opt = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
-        # For the phase marginalized likelihood, we need to replace kappa2 with
-        #
-        #       log I0 ( |kappa2C| ),
-        #
-        # where kappa2C is the same as kappa2, but with the complex inner product
-        # instead of the regular one, and I0 is the modified Bessel function of the
-        # first kind of order 0.
-        kappa2C = sum(
-            [
-                inner_product_complex(d_ifo, mu_ifo)
-                for d_ifo, mu_ifo in zip(d.values(), mu.values())
-            ]
-        )
-        return self.log_Zn + ln_i0(np.abs(kappa2C)) - 1 / 2.0 * rho2opt
+            # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to
+            # compute the remaining terms rho2opt and kappa2
+            rho2opt = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
+            # For the phase marginalized likelihood, we need to replace kappa2 with
+            #
+            #       log I0 ( |kappa2C| ),
+            #
+            # where kappa2C is the same as kappa2, but with the complex inner product
+            # instead of the regular one, and I0 is the modified Bessel function of the
+            # first kind of order 0.
+            kappa2C = sum(
+                [
+                    inner_product_complex(d_ifo, mu_ifo)
+                    for d_ifo, mu_ifo in zip(d.values(), mu.values())
+                ]
+            )
+            return self.log_Zn + ln_i0(np.abs(kappa2C)) - 1 / 2.0 * rho2opt
+
+        else:
+            log_likelihoods_phase_grid = self.log_likelihood_phase_grid(theta)
+            # Marginalize over phase. The phase-marginalized posterior is given by
+            #
+            #   p(theta^|d) = int d_phase p(d|theta^,phase) * p(theta^) * p(phase) / p(d),
+            #
+            #   where theta^ consists of all parameters except for the phase.
+            #   To marginalize over the phase we evaluate it on a phase grid.
+            #   With c = p(theta) / p(d) this yields
+            #
+            #   p(theta^|d) = c * int d_phase p(d|theta^,phase) * p(phase)
+            #               = c * sum_i^N delta_phase_i p(theta^,i * delta_phase_i|d)
+            #                   * p(i * delta_phase_i)
+            #               = c * sum_i^N (2*pi/N) * p(theta^,i * delta_phase_i|d)
+            #                   * (1/2*pi)
+            #               = c * mean[p(theta^,i * delta_phase_i|d)].
+            #
+            # So to marginalize over the phase we simply need to take the mean of
+            # np.exp(log_likelihoods_phase_grid). The constant c is accounted for
+            # outside of this function.
+            return logsumexp(log_likelihoods_phase_grid) - np.log(
+                len(log_likelihoods_phase_grid)
+            )
 
     def _log_likelihood_time_marginalized(self, theta):
         """

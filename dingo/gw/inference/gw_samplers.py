@@ -106,7 +106,7 @@ class GWSamplerMixin(object):
     def _build_likelihood(
         self,
         time_marginalization_kwargs: Optional[dict] = None,
-        phase_marginalization: bool = False,
+        phase_marginalization_kwargs: bool = False,
         phase_grid: Optional[np.ndarray] = None,
     ):
         """
@@ -119,8 +119,8 @@ class GWSamplerMixin(object):
             kwargs for time marginalization. At this point the only kwarg is n_fft,
             which determines the number of FFTs used (higher n_fft means better
             accuracy, at the cost of longer computation time).
-        phase_marginalization: bool = False
-            Whether to marginalize over phase.
+        phase_marginalization_kwargs: dict, optional
+            kwargs for phase marginalization.
         """
         if time_marginalization_kwargs is not None:
             if self.geocent_time_prior is None:
@@ -135,7 +135,7 @@ class GWSamplerMixin(object):
             time_marginalization_kwargs["t_lower"] = self.geocent_time_prior.minimum
             time_marginalization_kwargs["t_upper"] = self.geocent_time_prior.maximum
 
-        if phase_marginalization:
+        if phase_marginalization_kwargs is not None:
             # check that phase prior is uniform [0, 2pi)
             if not (
                 isinstance(self.phase_prior, Uniform)
@@ -167,7 +167,7 @@ class GWSamplerMixin(object):
             event_data=self.context,
             t_ref=t_ref,
             time_marginalization_kwargs=time_marginalization_kwargs,
-            phase_marginalization=phase_marginalization,
+            phase_marginalization_kwargs=phase_marginalization_kwargs,
             phase_grid=phase_grid,
         )
 
