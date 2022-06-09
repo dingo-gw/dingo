@@ -54,7 +54,8 @@ def main():
     ].copy()
     time_marginalization_kwargs = settings.get("time_marginalization", None)
     time_marginalization = time_marginalization_kwargs is not None
-    phase_marginalization = settings.get("phase_marginalization", False)
+    phase_marginalization_kwargs = settings.get("phase_marginalization", None)
+    phase_marginalization = phase_marginalization_kwargs is not None
     synthetic_phase_kwargs = settings.get("synthetic_phase", None)
     synthetic_phase = synthetic_phase_kwargs is not None
     #if sum([time_marginalization, phase_marginalization, synthetic_phase]) > 1:
@@ -135,7 +136,7 @@ def main():
     nde_sampler.importance_sample(
         num_processes=settings.get("num_processes", 1),
         time_marginalization_kwargs=time_marginalization_kwargs,
-        phase_marginalization=phase_marginalization,
+        phase_marginalization_kwargs=phase_marginalization_kwargs,
     )
     nde_sampler.print_summary()
     nde_sampler.to_hdf5(label="weighted", outdir=args.outdir)

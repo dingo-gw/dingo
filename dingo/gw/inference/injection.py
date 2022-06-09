@@ -15,7 +15,11 @@ from dingo.gw.transforms import (
     ProjectOntoDetectors,
     WhitenAndScaleStrain,
 )
-from dingo.gw.waveform_generator import WaveformGenerator
+from dingo.gw.waveform_generator import (
+    WaveformGenerator,
+    sum_fd_mode_contributions,
+    sum_over_l,
+)
 
 
 class GWSignal(object):
@@ -145,6 +149,137 @@ class GWSignal(object):
     # It would be good to have an ASD class to handle all of this functionality,
     # namely storing ASDs from numpy arrays, from ASDDatasets, loading from files,
     # etc. For now this functionality is partially implemented here.
+
+    def signal_from_cached_polarizations(self, theta, polarizations_cached=None):
+        """
+        Compute the GW signal for parameters theta. Same as self.signal method,
+        but allows for caching of the polarizations.
+
+        Step 1: Generate polarizations
+        Step 2: Project polarizations onto detectors;
+                optionally (depending on self.whiten) whiten and scale.
+
+        Parameters
+        ----------
+        theta: dict
+            Signal parameters. Includes intrinsic parameters to be passed to waveform
+            generator, and extrinsic parameters for detector projection.
+        polarizations_cached: dict = None
+
+        Returns
+        -------
+        GW_strain: dict
+            keys:
+                waveform: GW strain signal for each detector.
+                extrinsic_parameters: {}
+                parameters: waveform parameters
+                asd (if set): amplitude spectral density for each detector
+        polarizations_cached: dict
+            dict with cached polarizations, for next call of this method
+        """
+        theta_intrinsic, theta_extrinsic = split_off_extrinsic_parameters(theta)
+        theta_intrinsic = {k: float(v) for k, v in theta_intrinsic.items()}
+
+        # Step 1: generate polarizations h_plus and h_cross for all modes if they are not cached
+        polarizations_modes = polarizations_cached
+        if polarizations_modes is None:
+            # compute modes with phase=0, phase will be treated as extrinsic parameter
+            polarizations_modes = self.waveform_generator.generate_hplus_hcross_modes(
+                {**theta_intrinsic, "phase": 0}
+            )
+            polarizations_modes = {  # truncation, in case wfg has a larger frequency
+                # range
+                k_mode: {
+                    k_pol: self.data_domain.update_data(v_pol)
+                    for k_pol, v_pol in v_mode.items()
+                }
+                for k_mode, v_mode in polarizations_modes.items()
+            }
+
+        # Step 2: sum different modes for h_plus and h_cross according to phase parameter
+        polarizations = sum_fd_mode_contributions(
+            polarizations_modes, delta_phi=theta["phase"]
+        )
+
+        # Step 2: project h_plus and h_cross onto detectors
+        sample = {
+            "parameters": theta_intrinsic,
+            "extrinsic_parameters": {
+                **theta_extrinsic,
+                # Need to subtract phase from psi to account for the effect that phase
+                # parameter rotates spin in sx-sy plane, which is not accounted for by
+                # the spherical harmonics in sum_polarization_modes.
+                "psi": (theta_extrinsic["psi"] + 0.0 * theta["phase"]) % np.pi,
+            },
+            "waveform": polarizations,
+        }
+
+        asd = self.asd
+        if asd is not None:
+            sample["asds"] = asd
+
+        return self.projection_transforms(sample), polarizations_modes
+
+    def signal_modes(self, theta, keep_l=True):
+        """
+        Compute the GW signal for parameters theta. Same as self.signal method,
+        but it returns the individual contributions of the modes instead of the sum.
+
+        Step 1: Generate polarizations
+        Step 2: Project polarizations onto detectors;
+                optionally (depending on self.whiten) whiten and scale.
+
+        Parameters
+        ----------
+        theta: dict
+            Signal parameters. Includes intrinsic parameters to be passed to waveform
+            generator, and extrinsic parameters for detector projection.
+        keep_l: bool = True
+            If False, then modes with different l but identical |m| will be summed. This
+            is useful, since only |m| determines the transformation behaviour under the
+            spherical harmonics when changing the phase.
+
+        Returns
+        -------
+        dict
+            keys:
+                waveform: GW strain signal for each detector.
+                extrinsic_parameters: {}
+                parameters: waveform parameters
+                asd (if set): amplitude spectral density for each detector
+        """
+        theta_intrinsic, theta_extrinsic = split_off_extrinsic_parameters(theta)
+        theta_intrinsic = {k: float(v) for k, v in theta_intrinsic.items()}
+
+        # Step 1: generate polarizations h_plus and h_cross
+        polarizations_modes = self.waveform_generator.generate_hplus_hcross_modes(
+            theta_intrinsic
+        )
+        # truncation, in case wfg has a larger frequency range
+        polarizations_modes = {
+            k_mode: {
+                k_pol: self.data_domain.update_data(v_pol)
+                for k_pol, v_pol in v_mode.items()
+            }
+            for k_mode, v_mode in polarizations_modes.items()
+        }
+        # sum modes with different l but identical |m| to (-1, |m|)
+        if not keep_l:
+            polarizations_modes = sum_over_l(polarizations_modes)
+
+        # Step 2: project h_plus and h_cross onto detectors
+        sample_out = {}
+        for mode, mode_polarizations in polarizations_modes.items():
+            sample = {
+                "parameters": theta_intrinsic,
+                "extrinsic_parameters": theta_extrinsic,
+                "waveform": mode_polarizations,
+            }
+            if self.asd is not None:
+                sample["asds"] = self.asd
+            sample_out[mode] = self.projection_transforms(sample)
+
+        return sample_out
 
     @property
     def asd(self):

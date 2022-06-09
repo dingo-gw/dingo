@@ -1,5 +1,8 @@
 import numpy as np
 from scipy.signal import tukey
+from scipy.interpolate import interp1d
+from bilby.gw.detector import PowerSpectralDensity
+
 from dingo.gw.prior import default_extrinsic_dict
 from dingo.gw.prior import BBHExtrinsicPriorDict
 
@@ -73,6 +76,37 @@ def get_extrinsic_prior_dict(extrinsic_prior):
             extrinsic_prior_dict[k] = v
     return extrinsic_prior_dict
 
+
+def get_mismatch(a, b, domain, asd_file="aLIGO_ZERO_DET_high_P_asd.txt"):
+    """
+    Mistmatch is 1 - overlap, where overlap is defined by
+    inner(a, b) / sqrt(inner(a, a) * inner(b, b)).
+    See e.g. Eq. (44) in https://arxiv.org/pdf/1106.1021.pdf.
+
+    Parameters
+    ----------
+    a
+    b
+    domain
+    asd_file
+
+    Returns
+    -------
+
+    """
+    psd = PowerSpectralDensity(asd_file=asd_file)
+    asd_interp = interp1d(
+        psd.frequency_array, psd.asd_array, bounds_error=False, fill_value=np.inf
+    )
+    asd_array = asd_interp(domain.sample_frequencies)
+    # whiten a and b.
+    min_idx = domain.min_idx
+    delta_f = domain.delta_f
+    inner_ab = 4 * delta_f * np.sum((a.conj() * b / asd_array**2)[min_idx:], axis=0).real
+    inner_aa = 4 * delta_f * np.sum((a.conj() * a / asd_array**2)[min_idx:], axis=0).real
+    inner_bb = 4 * delta_f * np.sum((b.conj() * b / asd_array**2)[min_idx:], axis=0).real
+    overlap = inner_ab / np.sqrt(inner_aa * inner_bb)
+    return 1 - overlap
 
 def get_standardization_dict(
     extrinsic_prior_dict, wfd, selected_parameters, transform=None
