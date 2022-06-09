@@ -61,7 +61,7 @@ def test_mode_recombination(uniform_fd_domain, BBH_parameters):
     waveform_generator = WaveformGenerator(
         "SEOBNRv4PHM",
         domain,
-        20.0,
+        10.0,
         f_start=10.0,
     )
     pol_dict_ref = waveform_generator.generate_hplus_hcross(parameters)
@@ -96,6 +96,12 @@ def test_mode_recombination_with_phase(uniform_fd_domain, BBH_parameters):
     visualize = False
 
     domain = uniform_fd_domain
+    wfg_kwargs = {
+        "approximant": "SEOBNRv4PHM",
+        "domain": domain,
+        "f_ref": 10.0,
+        "f_start": 10.0,
+    }
     parameters = BBH_parameters
 
     DEBUG_FIX_PHASE_FOR_CARTESIAN_SPINS = True
@@ -108,10 +114,7 @@ def test_mode_recombination_with_phase(uniform_fd_domain, BBH_parameters):
     #       )
     # should match perfectly.
     waveform_generator = WaveformGenerator(
-        "SEOBNRv4PHM",
-        domain,
-        20.0,
-        f_start=10.0,
+        **wfg_kwargs,
         DEBUG_FIX_PHASE_FOR_CARTESIAN_SPINS=DEBUG_FIX_PHASE_FOR_CARTESIAN_SPINS,
     )
     pol_dict_ref = waveform_generator.generate_hplus_hcross(parameters)
@@ -174,10 +177,7 @@ def test_mode_recombination_with_phase(uniform_fd_domain, BBH_parameters):
     # should still be much better than the naive baseline with exp(2i*phase)
     # transformation.
     waveform_generator = WaveformGenerator(
-        "SEOBNRv4PHM",
-        domain,
-        20.0,
-        f_start=10.0,
+        **wfg_kwargs,
         DEBUG_FIX_PHASE_FOR_CARTESIAN_SPINS=DEBUG_FIX_PHASE_FOR_CARTESIAN_SPINS,
     )
     pol_dict_ref = waveform_generator.generate_hplus_hcross(parameters)
