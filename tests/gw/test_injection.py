@@ -15,7 +15,7 @@ def signal_setup_EOB():
         "approximant": "SEOBNRv4PHM",
         "f_ref": 20.0,
         "f_start": 10.0,
-        "DEBUG_FIX_PHASE_FOR_CARTESIAN_SPINS": False,
+        "spin_conversion_phase": None,
     }
     wfg_domain = build_domain(
         {

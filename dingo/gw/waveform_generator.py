@@ -30,7 +30,7 @@ class WaveformGenerator:
         f_start: float = None,
         mode_list: List[Tuple] = None,
         transform=None,
-        DEBUG_FIX_PHASE_FOR_CARTESIAN_SPINS=False,
+        spin_conversion_phase=None,
     ):
         """
         Parameters
@@ -51,12 +51,20 @@ class WaveformGenerator:
         mode_list : List[Tuple]
             A list of waveform (ell, m) modes to include when generating
             the polarizations.
-        DEBUG_FIX_PHASE_FOR_CARTESIAN_SPINS : bool=False
-            Flag used for the purpose of debugging. When interfacing the lalsimulation
-            functions, the phase of the waveform is used to compute the cartesian
-            spins. This is in addition to its primary use when combining different
-            modes via spherical harmonics. This flag is used to fix the phase to 0.0
-            when computing the cartesian spins to suppress its influence on the modes.
+        spin_conversion_phase : float = None
+            Value for phiRef when computing cartesian spins from bilby spins via
+            bilby_to_lalsimulation_spins. The common convention is to use the value of
+            the phase parameter here, which is also used in the spherical harmonics
+            when combining the different modes. If spin_conversion_phase = None,
+            this default behavior is adapted.
+            For dingo, this convention for the phase parameter makes it impossible to
+            treat the phase as an extrinsic parameter, since we can only account for
+            the change of phase in the spherical harmonics when changing the phase (in
+            order to also change the cartesian spins -- specifically, to rotate the spins
+            by phase in the sx-sy plane -- one would need to recompute the modes,
+            which is expensive).
+            By setting spin_conversion_phase != None, we impose the convention to always
+            use phase = spin_conversion_phase when computing the cartesian spins.
         """
         if not isinstance(approximant, str):
             raise ValueError("approximant should be a string, but got", approximant)
@@ -80,7 +88,7 @@ class WaveformGenerator:
             self.lal_params = self.setup_mode_array(mode_list)
 
         self.transform = transform
-        self.DEBUG_FIX_PHASE_FOR_CARTESIAN_SPINS = DEBUG_FIX_PHASE_FOR_CARTESIAN_SPINS
+        self.spin_conversion_phase = spin_conversion_phase
 
     def generate_hplus_hcross(
         self, parameters: Dict[str, float], catch_waveform_errors=True
@@ -265,9 +273,10 @@ class WaveformGenerator:
             "phase",
         )
         param_values_in = [p[k] for k in param_keys_in]
-        # for debugging: suppress effect of phase on Cartesian spins
-        if self.DEBUG_FIX_PHASE_FOR_CARTESIAN_SPINS:
-            param_values_in[-1] = 0.0
+        # if spin_conversion_phase is set, use this as fixed phiRef when computing the
+        # cartesian spins instead of using the phase parameter
+        if self.spin_conversion_phase is not None:
+            param_values_in[-1] = self.spin_conversion_phase
         iota_and_cart_spins = bilby_to_lalsimulation_spins(*param_values_in)
         iota, s1x, s1y, s1z, s2x, s2y, s2z = [
             float(self._convert_to_scalar(x)) for x in iota_and_cart_spins

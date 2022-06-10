@@ -85,13 +85,13 @@ def test_mode_recombination_with_phase(uniform_fd_domain, BBH_parameters):
     then summing over the modes with
     sum_polarization_modes(pol_dict_modes, delta_phi=parameters["phase"]).
 
-    Note: for identical results, one needs to set DEBUG_FIX_PHASE_FOR_CARTESIAN_SPINS =
-    True, since otherwise phase enters not just via spherical harmonics, but also in
-    the calculation for the cartesian spins (it rotates the spins in the x-y plan,
-    so while sx**2 + sy**2 = const., but sx and sy individually depend on phase). While
-    the latter effect in principle needs to be accounted for, it is useful to neglect
-    it here to test that the phase transformation of the spherical harmonics is
-    implemented properly in sum_polarization_modes.
+    Note: for identical results, one needs to set spin_conversion_phase = 0 (or to any
+    other value in [0, 2pi)). The reason is that conventionally, the phase enters not
+    just via spherical harmonics, but also in the calculation for the cartesian spins
+    (it rotates the spins in the x-y plan, so while sx**2 + sy**2 = const., sx and sy
+    individually depend on phase). This effect can't be accounted for when recombining
+    the individual modes, so exact agreement can only be achieved if we use a fixed
+    phase = spin_conversion_phase when computing the spins.
     """
     visualize = False
 
@@ -104,7 +104,7 @@ def test_mode_recombination_with_phase(uniform_fd_domain, BBH_parameters):
     }
     parameters = BBH_parameters
 
-    DEBUG_FIX_PHASE_FOR_CARTESIAN_SPINS = True
+    spin_conversion_phase = 0.0
     # in this case, the phase only comes in via the spherical harmonics,
     # so the results of
     #   (a) wfg.generate_hplus_hcross(parameters)
@@ -115,7 +115,7 @@ def test_mode_recombination_with_phase(uniform_fd_domain, BBH_parameters):
     # should match perfectly.
     waveform_generator = WaveformGenerator(
         **wfg_kwargs,
-        DEBUG_FIX_PHASE_FOR_CARTESIAN_SPINS=DEBUG_FIX_PHASE_FOR_CARTESIAN_SPINS,
+        spin_conversion_phase=spin_conversion_phase,
     )
     pol_dict_ref = waveform_generator.generate_hplus_hcross(parameters)
     pol_dict_modes = waveform_generator.generate_hplus_hcross_modes(
@@ -162,7 +162,7 @@ def test_mode_recombination_with_phase(uniform_fd_domain, BBH_parameters):
     # mismatches should be significantly smaller than mismatches_naive
     assert np.mean(mismatches) < np.mean(mismatches_naive)
 
-    DEBUG_FIX_PHASE_FOR_CARTESIAN_SPINS = False
+    spin_conversion_phase = None
     # in this case, the phase also comes in via the cartesian spins. In
     #   (a) wfg.generate_hplus_hcross(parameters)
     #   (b) sum_polarization_modes(
@@ -178,7 +178,7 @@ def test_mode_recombination_with_phase(uniform_fd_domain, BBH_parameters):
     # transformation.
     waveform_generator = WaveformGenerator(
         **wfg_kwargs,
-        DEBUG_FIX_PHASE_FOR_CARTESIAN_SPINS=DEBUG_FIX_PHASE_FOR_CARTESIAN_SPINS,
+        spin_conversion_phase=spin_conversion_phase,
     )
     pol_dict_ref = waveform_generator.generate_hplus_hcross(parameters)
     pol_dict_modes = waveform_generator.generate_hplus_hcross_modes(
