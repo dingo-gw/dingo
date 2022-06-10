@@ -525,6 +525,7 @@ class WaveformGenerator:
         pol_dict = {"h_plus": h_plus, "h_cross": h_cross}
         return pol_dict
 
+    # def generate_hplus_hcross_mode_contributions(
     def generate_hplus_hcross_modes(
         self,
         parameters: Dict[str, float],
@@ -550,6 +551,9 @@ class WaveformGenerator:
         Differences to self.generate_hplus_hcross:
         - We don't catch errors yet TODO
         - We don't apply transforms yet TODO
+
+        # Todo Check different models XPHM/EOB (NRsurr?)
+        # Todo Better name
 
         Parameters
         ----------
