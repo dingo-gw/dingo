@@ -88,7 +88,26 @@ class WaveformGenerator:
             self.lal_params = self.setup_mode_array(mode_list)
 
         self.transform = transform
+        self._spin_conversion_phase = None
         self.spin_conversion_phase = spin_conversion_phase
+
+    @property
+    def spin_conversion_phase(self):
+        return self._spin_conversion_phase
+
+    @spin_conversion_phase.setter
+    def spin_conversion_phase(self, value):
+        if value is None:
+            print(
+                "Setting spin_conversion_phase = None. Using phase parameter for "
+                "conversion to cartesian spins."
+            )
+        else:
+            print(
+                f"Setting spin_conversion_phase = {value}. Using this value for the "
+                f"phase parameter for conversion to cartesian spins."
+            )
+        self._spin_conversion_phase = value
 
     def generate_hplus_hcross(
         self, parameters: Dict[str, float], catch_waveform_errors=True
@@ -206,7 +225,10 @@ class WaveformGenerator:
             return x
 
     def _convert_parameters_to_lal_frame(
-        self, parameter_dict: Dict, lal_params=None, lal_target_function=None,
+        self,
+        parameter_dict: Dict,
+        lal_params=None,
+        lal_target_function=None,
     ) -> Tuple:
         """Convert to lal source frame parameters
 
@@ -307,11 +329,10 @@ class WaveformGenerator:
             f_min = 20.0
             delta_t = self.domain.delta_t
             # parameters needed for FD waveforms
-            f_max = 1. / self.domain.delta_t
+            f_max = 1.0 / self.domain.delta_t
             delta_f = 1.0 / self.domain.duration
         else:
             raise ValueError(f"Unsupported domain type {type(self.domain)}.")
-
 
         if lal_target_function == "SimInspiralFD":
             # LS.SimInspiralFD takes parameters:
@@ -352,21 +373,19 @@ class WaveformGenerator:
             domain_pars = (delta_f, f_min, f_max, f_ref)
             domain_pars = tuple(float(p) for p in domain_pars)
             lal_parameter_tuple = (
-                    masses
-                    + spins_cartesian
-                    + domain_pars
-                    + (phase, r, iota)
-                    + (lal_params, self.approximant)
+                masses
+                + spins_cartesian
+                + domain_pars
+                + (phase, r, iota)
+                + (lal_params, self.approximant)
             )
 
-        elif lal_target_function == \
-                "SimIMRPhenomXPCalculateModelParametersFromSourceFrame":
+        elif (
+            lal_target_function
+            == "SimIMRPhenomXPCalculateModelParametersFromSourceFrame"
+        ):
             lal_parameter_tuple = (
-                masses
-                + (f_ref,)
-                + (phase, iota)
-                + spins_cartesian
-                + (lal_params,)
+                masses + (f_ref,) + (phase, iota) + spins_cartesian + (lal_params,)
             )
 
         elif lal_target_function == "SimInspiralChooseTDModes":
@@ -379,12 +398,15 @@ class WaveformGenerator:
             domain_pars = (delta_t, f_min, f_ref)
             domain_pars = tuple(float(p) for p in domain_pars)
             if "l_max" not in parameter_dict:
-                l_max = 5 # hard code l_max for now
+                l_max = 5  # hard code l_max for now
             lal_parameter_tuple = (
-                (0.0, domain_pars[0],) # domain_pars[0] = delta_t
+                (
+                    0.0,
+                    domain_pars[0],
+                )  # domain_pars[0] = delta_t
                 + masses
                 + spins_cartesian
-                + domain_pars[1:] # domain_pars[1:] = f_min, f_ref
+                + domain_pars[1:]  # domain_pars[1:] = f_min, f_ref
                 + (r,)
                 + (lal_params, l_max, self.approximant)
             )
@@ -504,7 +526,9 @@ class WaveformGenerator:
         return pol_dict
 
     def generate_hplus_hcross_modes(
-        self, parameters: Dict[str, float], catch_waveform_errors=True,
+        self,
+        parameters: Dict[str, float],
+        catch_waveform_errors=True,
     ) -> Dict[tuple, Dict[str, np.ndarray]]:
         """
         Generate GW polarizations (h_plus, h_cross) for individual modes.
@@ -602,10 +626,10 @@ class WaveformGenerator:
                 hp_sample = list(pol_dict_modes.values())[0]["h_plus"]
                 delta_f = self.domain.delta_f
                 delta_t = 0.5 / self.domain.f_max
-                f_nyquist = self.domain.f_max # use f_max as f_nyquist
+                f_nyquist = self.domain.f_max  # use f_max as f_nyquist
                 # check that nyquist frequency is power of two of delta_f
                 n = round(f_nyquist / delta_f)
-                if (n & (n-1)) != 0:
+                if (n & (n - 1)) != 0:
                     raise NotImplementedError(
                         "Nyquist frequency is not a power of two of delta_f"
                     )
@@ -632,7 +656,12 @@ class WaveformGenerator:
                     # (the units will correct themselves)
                     hp_FD = lal.CreateCOMPLEX16FrequencySeries(
                         # None should be lalDimensionlessUnit, how to get that in python?
-                        "FD H_PLUS", hp.epoch, 0.0, delta_f, None, chirplen // 2 + 1
+                        "FD H_PLUS",
+                        hp.epoch,
+                        0.0,
+                        delta_f,
+                        None,
+                        chirplen // 2 + 1,
                     )
                     hc_FD = lal.CreateCOMPLEX16FrequencySeries(
                         "FD H_CROSS", hc.epoch, 0.0, delta_f, None, chirplen // 2 + 1
@@ -641,7 +670,8 @@ class WaveformGenerator:
                     lal.REAL8TimeFreqFFT(hc_FD, hc, lal_fft_plan)
 
                     pol_dict_modes_FD[mode] = {
-                        "h_plus": hp_FD.data.data, "h_cross": hc_FD.data.data,
+                        "h_plus": hp_FD.data.data,
+                        "h_cross": hc_FD.data.data,
                     }
 
                 # # Cross check, that the FFT polarizations modes indeed combine to the
@@ -677,9 +707,8 @@ class WaveformGenerator:
                     )
 
                 # Undo the time shift done by LS to the waveform
-                dt = (
-                    1 / hp_FD.deltaF
-                    + (hp_FD.epoch.gpsSeconds + hp_FD.epoch.gpsNanoSeconds * 1e-9)
+                dt = 1 / hp_FD.deltaF + (
+                    hp_FD.epoch.gpsSeconds + hp_FD.epoch.gpsNanoSeconds * 1e-9
                 )
                 time_shift = np.exp(-1j * 2 * np.pi * dt * self.domain())
                 for pol_dict in pol_dict_modes_FD.values():
@@ -688,18 +717,17 @@ class WaveformGenerator:
 
                 return pol_dict_modes_FD
 
-
             elif isinstance(self.domain, TimeDomain):
                 raise NotImplementedError("Time domain not implemented yet.")
                 # Time domain might require time shifting (not sure), but other than
                 # that I think pol_dict_modes is essentially what one needs.
             else:
-                raise NotImplementedError(f"Unsupported domain type {type(self.domain)}")
+                raise NotImplementedError(
+                    f"Unsupported domain type {type(self.domain)}"
+                )
 
         elif domain_type == "FD":
             raise NotImplementedError("FD waveform models not implemented yet")
-
-
 
     def generate_TD_waveform(self, parameters_lal: Tuple) -> Dict[str, np.ndarray]:
         """
@@ -733,9 +761,9 @@ class WaveformGenerator:
         pol_dict = {"h_plus": h_plus, "h_cross": h_cross}
         return pol_dict
 
-
-    def generate_TD_waveform_modes(self, parameters_lal: Tuple, iota, phase) \
-            -> Dict[tuple, Dict[str, np.ndarray]]:
+    def generate_TD_waveform_modes(
+        self, parameters_lal: Tuple, iota, phase
+    ) -> Dict[tuple, Dict[str, np.ndarray]]:
         """
         Generate time domain GW polarizations (h_plus, h_cross) for the individual
         modes. Similar to generate_TD_waveform, but returns the polarizations for the
@@ -788,7 +816,7 @@ class WaveformGenerator:
                 p.next = None
                 # compute contribution of present mode to polarizations
                 hp_mode, hc_mode = LS.SimInspiralPolarizationsFromSphHarmTimeSeries(
-                    p, iota, np.pi / 2. - phase
+                    p, iota, np.pi / 2.0 - phase
                 )
                 pol_dict_modes[(l, m)] = {"h_plus": hp_mode, "h_cross": hc_mode}
                 # proceed with next mode
@@ -810,6 +838,7 @@ class WaveformGenerator:
             # individual modes.
 
         return pol_dict_modes
+
 
 def SEOBNRv4PHM_maximum_starting_frequency(
     total_mass: float, fudge: float = 0.99
@@ -900,7 +929,7 @@ def generate_waveforms_parallel(
 
 
 def generate_waveform_and_catch_errors(
-        wf_generator_func, parameters_lal, len_domain, catch_waveform_errors=True
+    wf_generator_func, parameters_lal, len_domain, catch_waveform_errors=True
 ):
     """
     Wraps wf_generator_func.
@@ -1033,7 +1062,6 @@ def sum_over_l(fd_modearray_dict):
     return summed_dict
 
 
-
 if __name__ == "__main__":
     import pandas as pd
     import numpy as np
@@ -1074,7 +1102,6 @@ if __name__ == "__main__":
     # print(np.max(np.abs(hp1)))
     # print(np.max(np.abs(hp2)))
 
-
     domain_settings = {
         "type": "FrequencyDomain",
         "f_min": 10.0,
@@ -1097,6 +1124,7 @@ if __name__ == "__main__":
         {k: v[0] for k, v in parameters.to_dict().items()},
     )
     import time
+
     t0 = time.time()
     for idx in range(1):
         pols = generate_waveforms_parallel(waveform_generator, parameters)
