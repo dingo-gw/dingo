@@ -530,6 +530,7 @@ class WaveformGenerator:
         self,
         parameters: Dict[str, float],
         catch_waveform_errors=True,
+        tapering_phase=None,
     ) -> Dict[tuple, Dict[str, np.ndarray]]:
         """
         Generate GW polarizations (h_plus, h_cross) for individual modes.
@@ -588,16 +589,8 @@ class WaveformGenerator:
         # domain waveform models. Note that this refers to the domain of the model,
         # and not the final domain we want for the data.
         if domain_type == "TD":
-            phase = parameters["phase"]
             # Generate the contributions to the polarizations of the modes.
-            parameters_lal_td_modes, iota = self._convert_parameters_to_lal_frame(
-                parameters,
-                self.lal_params,
-                lal_target_function="SimInspiralChooseTDModes",
-            )
-            pol_dict_modes = self.generate_TD_waveform_modes(
-                parameters_lal_td_modes, iota, phase
-            )
+            pol_dict_modes = self.generate_TD_waveform_modes(parameters, tapering_phase=tapering_phase)
             # pol_dict_modes corresponds to the mode-separated output of LS.SimInspiralTD
 
             # # Cross check that modes indeed combine to the result of LS.SimInspiralTD.
@@ -760,13 +753,19 @@ class WaveformGenerator:
         #   lal_params, approximant
 
         hp, hc = LS.SimInspiralTD(*parameters_lal)
-        h_plus = (hp.data.data,)
+        h_plus = hp.data.data
         h_cross = hc.data.data
         pol_dict = {"h_plus": h_plus, "h_cross": h_cross}
         return pol_dict
 
     def generate_TD_waveform_modes(
-        self, parameters_lal: Tuple, iota, phase
+        self,
+        parameters,
+        # parameters_lal: Tuple,
+        # iota,
+        # phase,
+        taper_individually: bool = False,
+        tapering_phase: float = None,
     ) -> Dict[tuple, Dict[str, np.ndarray]]:
         """
         Generate time domain GW polarizations (h_plus, h_cross) for the individual
@@ -779,6 +778,8 @@ class WaveformGenerator:
 
         Parameters
         ----------
+        parameters: dict
+            parameters for waveform generation
         parameters_lal:
             A tuple of parameters for the lalsimulation waveform generator
         iota: float
@@ -805,9 +806,16 @@ class WaveformGenerator:
 
         spin_freq_flag = LS.SimInspiralGetSpinFreqFromApproximant(self.approximant)
 
+        phase = parameters["phase"]
+        parameters_lal_td_modes, iota = self._convert_parameters_to_lal_frame(
+            parameters,
+            self.lal_params,
+            lal_target_function="SimInspiralChooseTDModes",
+        )
+
         if spin_freq_flag in (1, 3):
             # Step 1: compute individual TD modes
-            modes = LS.SimInspiralChooseTDModes(*parameters_lal)
+            modes = LS.SimInspiralChooseTDModes(*parameters_lal_td_modes)
 
             # Step 2: recombine the modes to polarizations, but individually for each mode
             pol_dict_modes = {}
@@ -816,7 +824,7 @@ class WaveformGenerator:
                 l, m = p.l, p.m
                 # temporarily set p.next = None, such that the polarization is only
                 # computed for the present mode
-                next = p.next
+                next_node = p.next
                 p.next = None
                 # compute contribution of present mode to polarizations
                 hp_mode, hc_mode = LS.SimInspiralPolarizationsFromSphHarmTimeSeries(
@@ -824,13 +832,43 @@ class WaveformGenerator:
                 )
                 pol_dict_modes[(l, m)] = {"h_plus": hp_mode, "h_cross": hc_mode}
                 # proceed with next mode
-                p = next
+                p = next_node
 
             # Step 3: Apply tapering to the polarizations, as done in lines 2773-2777
+            # https://lscsoft.docs.ligo.org/lalsuite/lalsimulation/_l_a_l_sim_inspiral_waveform_taper_8c_source.html#l00222
             taper = 1  # corresponds to LAL_SIM_INSPIRAL_TAPER_START
-            for pol_dict in pol_dict_modes.values():
-                LS.SimInspiralREAL8WaveTaper(pol_dict["h_plus"].data, taper)
-                LS.SimInspiralREAL8WaveTaper(pol_dict["h_cross"].data, taper)
+            # Tapering of individual modes can lead to slightly inconsistent results,
+            # since the lal tapering functions adapt to the positions of the peeks.
+            if taper_individually:
+                for pol_dict in pol_dict_modes.values():
+                    LS.SimInspiralREAL8WaveTaper(pol_dict["h_plus"].data, taper)
+                    LS.SimInspiralREAL8WaveTaper(pol_dict["h_cross"].data, taper)
+            else:
+                if tapering_phase is not None:
+                    print(
+                        f"Warning. Using tapering phase {tapering_phase}, this requires "
+                        f"recomputing the waveform."
+                    )
+                    parameters_lal = self._convert_parameters_to_lal_frame(
+                        {**parameters, "phase": tapering_phase},
+                        self.lal_params,
+                        lal_target_function="SimInspiralTD",
+                    )
+                    hp, hc = LS.SimInspiralTD(*parameters_lal)
+                    hp_raw = np.array(hp.data.data, copy=True)
+                    hc_raw = np.array(hc.data.data, copy=True)
+                    LS.SimInspiralREAL8WaveTaper(hp.data, taper)
+                    LS.SimInspiralREAL8WaveTaper(hc.data, taper)
+                    eps = 1e-10 * np.max(np.abs(hp_raw))
+                    windows = {
+                        "h_plus": (np.abs(hp.data.data) + eps) / (np.abs(hp_raw) + eps),
+                        "h_cross": (np.abs(hc.data.data) + eps) / (np.abs(hc_raw) + eps),
+                    }
+                else:
+                    windows = get_tapering_windows(pol_dict_modes, taper)
+                for pol_dict in pol_dict_modes.values():
+                    for pol, pol_data in pol_dict.items():
+                        pol_data.data.data *= windows[pol]
 
         else:
             raise NotImplementedError(
@@ -1064,6 +1102,57 @@ def sum_over_l(fd_modearray_dict):
             for array_key, v in array_dict.items():
                 summed_dict[mode_key][array_key] += v
     return summed_dict
+
+
+def get_tapering_windows(pol_dict_modes, taper):
+    """
+    Get lal tapering windows for the different polarizations, by summing up the modes
+    of pol_dict_modes, applying lal tapering, and settings
+
+        windows[pol] = modes_summed_tapered[pol] / modes_summed.
+
+    This is useful since the lal tapering functions are adaptive to the input data,
+    so applying them to the modes individually yields different windows. Computing the
+    window with summed modes leads to coherent tapering between the modes.
+
+    Parameters
+    ----------
+    pol_dict_modes: dict
+        dict of mode contributions to the different polarizations
+    taper: int
+        lal flag for tapering
+
+    Returns
+    -------
+    windows: dict
+        dict with windows for the different polarization keys
+    """
+    pols = next(iter(pol_dict_modes.values())).keys()
+
+    # sum up mode contributions to different polarizations
+    pol_sums = {
+        k: sum(pol_dict_mode[k].data.data for pol_dict_mode in pol_dict_modes.values())
+        for k in pols
+    }
+
+    # To interface the lal tapering functions we need lal objects. As a bit of a hack,
+    # we temporarily use one of the modes to insert summed polarizations for tapering,
+    # and reset the data in the end
+    k_tmp, v_tmp = next(iter(pol_dict_modes.items()))
+    v_tmp = v_tmp["h_plus"]
+    data_tmp = np.array(v_tmp.data.data, copy=True)
+
+    # get windows
+    windows = {}
+    for pol, pol_sum in pol_sums.items():
+        v_tmp.data.data = pol_sum
+        LS.SimInspiralREAL8WaveTaper(v_tmp.data, taper)
+        eps = 1e-10 * np.max(np.abs(pol_sum))
+        windows[pol] = (np.abs(v_tmp.data.data) + eps) / (np.abs(pol_sum) + eps)
+    # reset value for tmp vector
+    pol_dict_modes[k_tmp]["h_plus"].data.data = data_tmp
+
+    return windows
 
 
 if __name__ == "__main__":
