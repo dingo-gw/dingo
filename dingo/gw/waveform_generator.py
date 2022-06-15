@@ -530,7 +530,6 @@ class WaveformGenerator:
         self,
         parameters: Dict[str, float],
         catch_waveform_errors=True,
-        tapering_phase=None,
     ) -> Dict[tuple, Dict[str, np.ndarray]]:
         """
         Generate GW polarizations (h_plus, h_cross) for individual modes.
@@ -590,7 +589,7 @@ class WaveformGenerator:
         # and not the final domain we want for the data.
         if domain_type == "TD":
             # Generate the contributions to the polarizations of the modes.
-            pol_dict_modes = self.generate_TD_waveform_modes(parameters, tapering_phase=tapering_phase)
+            pol_dict_modes = self.generate_TD_waveform_modes(parameters)
             # pol_dict_modes corresponds to the mode-separated output of LS.SimInspiralTD
 
             # # Cross check that modes indeed combine to the result of LS.SimInspiralTD.
@@ -765,7 +764,6 @@ class WaveformGenerator:
         # iota,
         # phase,
         taper_individually: bool = False,
-        tapering_phase: float = None,
     ) -> Dict[tuple, Dict[str, np.ndarray]]:
         """
         Generate time domain GW polarizations (h_plus, h_cross) for the individual
@@ -844,28 +842,7 @@ class WaveformGenerator:
                     LS.SimInspiralREAL8WaveTaper(pol_dict["h_plus"].data, taper)
                     LS.SimInspiralREAL8WaveTaper(pol_dict["h_cross"].data, taper)
             else:
-                if tapering_phase is not None:
-                    print(
-                        f"Warning. Using tapering phase {tapering_phase}, this requires "
-                        f"recomputing the waveform."
-                    )
-                    parameters_lal = self._convert_parameters_to_lal_frame(
-                        {**parameters, "phase": tapering_phase},
-                        self.lal_params,
-                        lal_target_function="SimInspiralTD",
-                    )
-                    hp, hc = LS.SimInspiralTD(*parameters_lal)
-                    hp_raw = np.array(hp.data.data, copy=True)
-                    hc_raw = np.array(hc.data.data, copy=True)
-                    LS.SimInspiralREAL8WaveTaper(hp.data, taper)
-                    LS.SimInspiralREAL8WaveTaper(hc.data, taper)
-                    eps = 1e-10 * np.max(np.abs(hp_raw))
-                    windows = {
-                        "h_plus": (np.abs(hp.data.data) + eps) / (np.abs(hp_raw) + eps),
-                        "h_cross": (np.abs(hc.data.data) + eps) / (np.abs(hc_raw) + eps),
-                    }
-                else:
-                    windows = get_tapering_windows(pol_dict_modes, taper)
+                windows = get_tapering_windows(pol_dict_modes, taper)
                 for pol_dict in pol_dict_modes.values():
                     for pol, pol_data in pol_dict.items():
                         pol_data.data.data *= windows[pol]
