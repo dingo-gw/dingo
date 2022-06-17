@@ -5,23 +5,9 @@ dataset_settings:
   window:
     roll_off: 0.4
     type: tukey
-  T_gap: 0
-  num_psds_max: 10
-
-parameterization_settings:
-  granularity: 100
-  indices: [5, 20, 35, 50, 60, 70,
-           80, 90, 100, 110, 120,
-           130, 140, 150, 180, 210,
-           240, 270, 300, 350, 400,
-           500, 600, 700, 900, 1200,
-           1500, 3500, 6000, 7600]
-  num_chains: 1
-  num_samples: 100
-  num_warmup: 3000
-  samples_drawn: 1
-  init: adapt_diag
-    
-    
-sampling_settings:
-    method: kde
+  T_gap: 0          # specifies the time skipped between to consecutive PSD estimates. If set < 0, the time segments overlap
+  num_psds_max: 2   # if set > 0, only a subset of all available PSDs will be used
+  detectors:
+    - H1
+    - L1
+  observing_run: O2

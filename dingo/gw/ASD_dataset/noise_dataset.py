@@ -1,9 +1,4 @@
 import copy
-
-import h5py
-import numpy as np
-from scipy.signal import tukey
-import ast
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import *
 from dingo.gw.dataset import DingoDataset
@@ -60,10 +55,10 @@ class ASDDataset(DingoDataset):
 
         # Update dtypes if necessary
         if self.precision is not None:
-            if self.precision == 'single':
+            if self.precision == "single":
                 for ifo, asd in self.asds.items():
                     self.asds[ifo] = asd.astype(np.float32, copy=False)
-            elif self.precision == 'double':
+            elif self.precision == "double":
                 for ifo, asd in self.asds.items():
                     self.asds[ifo] = asd.astype(np.float64, copy=False)
             else:
@@ -114,56 +109,3 @@ class ASDDataset(DingoDataset):
         :return: Dict with a random asd from the dataset for each detector.
         """
         return {k: v[np.random.choice(len(v), 1)[0]] for k, v in self.asds.items()}
-
-
-# if __name__ == '__main__':
-#     this transforms the np psd datasets from the research code to the hdf5
-#     datasets used by dingo
-#     from os.path import join
-#     num_psds_max = None
-#     run = 'O1'
-#     ifos = ['H1', 'L1']
-#     data_dir = '../../../data/PSDs'
-#     f = h5py.File(join(data_dir, f'asds_{run}.hdf5'), 'w')
-#     gps_times = f.create_group('gps_times')
-#     settings = {}
-#
-#
-#     for ifo in ifos:
-#         psds = np.load(join(data_dir, f'{run}_{ifo}_psd.npy'))
-#         meta = np.load(join(data_dir, f'{run}_{ifo}_metadata.npy'),
-#                        allow_pickle=True).item()
-#         freqs = meta['sample_frequencies']
-#         scale_factor = meta['scale_factor']
-#         asds = np.sqrt(psds) / np.sqrt(scale_factor)
-#         f_min, f_max, delta_f = freqs[0], freqs[-1], freqs[1] - freqs[0]
-#         domain = build_domain({'name': 'FrequencyDomain',
-#                                'kwargs': {'f_min': f_min, 'f_max': f_max,
-#                                           'delta_f': delta_f}})
-#         settings['domain_dict'] = domain.domain_dict
-#         # settings['window'] = {'type': 'tukey', **meta['tukey_window']}
-#         f.create_dataset(f'asds_{ifo}', data=asds[:num_psds_max])
-#         gps_times[ifo] = meta['start_times'][:num_psds_max]
-#
-#     f.attrs['metadata'] = str(settings)
-#     f.close()
-#
-#     asd_dataset = ASDDataset(join(data_dir, f'asds_{run}.hdf5'))
-#     asd_samples = asd_dataset.sample_random_asds()
-#
-#     window_factor = get_window_factor({'type': 'tukey',
-#                                        **meta['tukey_window']})
-#
-#     noise_std = np.sqrt(window_factor) / \
-#                 np.sqrt(4*asd_dataset.metadata['domain_dict']['kwargs']['delta_f'])
-#
-#     domain = build_domain(asd_dataset.metadata['domain_dict'])
-#
-#     print(window_factor)
-#     print(noise_std**2)
-#     print(noise_std)
-#
-#     # print(domain.window_factor)
-#     # print(domain.noise_std**2)
-#
-#     print('done')
