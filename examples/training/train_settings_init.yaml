@@ -20,19 +20,9 @@ data:
     psi: default
     luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0)
   ref_time: 1126259462.391
-  gnpe_time_shifts:
-    kernel: bilby.core.prior.Uniform(minimum=-0.001, maximum=0.001)
-    exact_equiv: True
-# ! the gnpe versions below are experimental and are currently not recommended !
-#   gnpe_chirp:
-#     order: 2
-#     kernel:
-#       chirp_mass: bilby.core.prior.Uniform(minimum=0.98, maximum=1.02)
-#       mass_ratio: bilby.core.prior.Uniform(minimum=0.95, maximum=1.05)
-#   gnpe_phase:
-#     kernel: bilby.core.prior.Uniform(minimum=-0.1, maximum=0.1)
-#     random_pi_jump: True
-#   inference_parameters: default # [chirp_mass, mass_ratio,  luminosity_distance, dec]
+  inference_parameters:
+  - H1_time
+  - L1_time
 
 # Model architecture
 model:
