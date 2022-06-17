@@ -18,7 +18,12 @@ One can use `dingo_generate_dataset_dag` to set up a condor DAG for generating w
 
 ### Noise ASDs
 
-(Jonas)
+To complement the waveform dataset with an ASD dataset, run
+```
+dingo_generate_ASD_dataset --data_dir data_dir --settings_file settings_file
+```
+This will download data from the GWOSC website and create a /tmp directory, in which the estimated PSDs are stored. Subsequently, these are processed together for the final ```.hdf5``` ASD dataset. 
+If no ```settings_file``` is passed, the script will attempt to use the default one ```data_dir/asd_dataset_settings.yaml```. 
 
 ## Training
 
