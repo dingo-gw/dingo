@@ -18,12 +18,12 @@ One can use `dingo_generate_dataset_dag` to set up a condor DAG for generating w
 
 ### Noise ASDs
 
-To complement the waveform dataset with an ASD dataset, run
+Training also requires a dataset of noise ASDs, which are sampled randomly for each training sample. To generate this dataset based on noise observed during a run, execute
 ```
-dingo_generate_ASD_dataset --data_dir data_dir --settings_file settings_file
+dingo_generate_ASD_dataset --data_dir data_dir --settings_file asd_dataset_settings.yaml
 ```
-This will download data from the GWOSC website and create a /tmp directory, in which the estimated PSDs are stored. Subsequently, these are processed together for the final ```.hdf5``` ASD dataset. 
-If no ```settings_file``` is passed, the script will attempt to use the default one ```data_dir/asd_dataset_settings.yaml```. 
+This will download data from the GWOSC website and create a `/tmp` directory, in which the estimated PSDs are stored. Subsequently, these are collected together into a final `.hdf5` ASD dataset. 
+If no `settings_file` is passed, the script will attempt to use the default one `data_dir/asd_dataset_settings.yaml`. 
 
 ## Training
 
@@ -42,14 +42,14 @@ If using CUDA on a machine with several GPUs, be sure to first select the desire
 Once a Dingo model is trained, inference for real events can be performed with 
 ```
 dingo_analyze_event 
-  --model model 
+  --model model.pt 
   --gps_time_event gps_time_event
   --num_samples num_samples
   --batch_size batch_size
 ```
-where `model` is the path of the trained Dingo mode, `gps_time_event` is the GPS time of the event to be analyzed (e.g., 1126259462.4 for GW150914), `num_samples` is the number of desired samples and `batch_size` is the batch size (the larger the faster the computation, but limited by GPU memory). 
+where `model.pt` is the path of the trained Dingo mode, `gps_time_event` is the GPS time of the event to be analyzed (e.g., 1126259462.4 for GW150914), `num_samples` is the number of desired samples and `batch_size` is the batch size (the larger the faster the computation, but limited by GPU memory). Dingo downloads the event data from GWOSC. It also estimates the noise ASD from data prior to the event.
 
-If Dingo was trained using GNPE, by setting the `data/gnpe_time_shifts` option in the settings file, one needs to provide an additional Dingo model for the initialization of inference. This model infers initial estimates for the coalescence times in the individual detectors and is trained just like any other dingo model. See `training/train_settings_init.yaml` for an example settings file. The command for GNPE inference reads
+If Dingo was trained using GNPE (with the `data/gnpe_time_shifts` option in the settings file) then one must train an additional Dingo model to initialize the Gibbs sampler. This model infers initial estimates for the coalescence times in the individual detectors and is trained just like any other dingo model. See `training/train_settings_init.yaml` for an example settings file. To perform inference using GNPE, the script must be pointed to this model:
 ```
 dingo_analyze_event 
   --model model 
