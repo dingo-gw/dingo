@@ -165,8 +165,8 @@ def download_and_estimate_PSDs(data_dir: str, settings: dict, verbose=False):
             list(zip(starts, stops, durations)), T_PSD=T_PSD, T_gap=T_gap
         )
 
-        num_psds_max = settings["num_psds_max"]
-        if num_psds_max >= 1:
+        num_psds_max = settings.get("num_psds_max")
+        if num_psds_max is not None and num_psds_max > 0:
             valid_segments = random.sample(valid_segments, num_psds_max)
 
         print(
