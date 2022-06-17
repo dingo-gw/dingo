@@ -1,5 +1,5 @@
 data:
-  waveform_dataset_path: /home/jwildberger/Desktop/dingo-devel/tutorials/02_gwpe/datasets/waveforms/waveform_dataset.hdf5  # Contains intrinsic waveforms
+  waveform_dataset_path: /path/to/waveform_dataset.hdf5  # Contains intrinsic waveforms
   train_fraction: 0.95
   window:  # Needed to calculate window factor for simulated data
     type: tukey
@@ -23,15 +23,16 @@ data:
   gnpe_time_shifts:
     kernel: bilby.core.prior.Uniform(minimum=-0.001, maximum=0.001)
     exact_equiv: True
-  gnpe_chirp:
-    order: 2
-    kernel:
-      chirp_mass: bilby.core.prior.Uniform(minimum=0.98, maximum=1.02)
-      mass_ratio: bilby.core.prior.Uniform(minimum=0.95, maximum=1.05)
-  gnpe_phase:
-    kernel: bilby.core.prior.Uniform(minimum=-0.1, maximum=0.1)
-    random_pi_jump: True
-  inference_parameters: default # [chirp_mass, mass_ratio,  luminosity_distance, dec]
+# ! the gnpe versions below are experimental and are currently not recommended !
+#   gnpe_chirp:
+#     order: 2
+#     kernel:
+#       chirp_mass: bilby.core.prior.Uniform(minimum=0.98, maximum=1.02)
+#       mass_ratio: bilby.core.prior.Uniform(minimum=0.95, maximum=1.05)
+#   gnpe_phase:
+#     kernel: bilby.core.prior.Uniform(minimum=-0.1, maximum=0.1)
+#     random_pi_jump: True
+#   inference_parameters: default # [chirp_mass, mass_ratio,  luminosity_distance, dec]
 
 # Model architecture
 model:
@@ -67,7 +68,7 @@ model:
 training:
   stage_0:
     epochs: 300
-    asd_dataset_path: /home/jwildberger/Desktop/dingo-devel/tutorials/02_gwpe/datasets/ASDs_new/asds_O3_fiducial.hdf5
+    asd_dataset_path: /path/to/asds_fiducial.hdf5 # this should just contain a single fiducial ASD per detector for pretraining
     freeze_rb_layer: True
     optimizer:
       type: adam
@@ -79,7 +80,7 @@ training:
 
   stage_1:
     epochs: 150
-    asd_dataset_path: ./asds_O3.hdf5
+    asd_dataset_path: /path/to/asds.hdf5 # this should contain many different ASDS per detector for finetuning
     freeze_rb_layer: False
     optimizer:
       type: adam
