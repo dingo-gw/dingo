@@ -5,8 +5,8 @@ dataset_settings:
   window:
     roll_off: 0.4
     type: tukey
-  T_gap: 0
-  num_psds_max: 2
+  T_gap: 0          # specifies the time skipped between to consecutive PSD estimates. If set < 0, the time segments overlap
+  num_psds_max: 2   # if set > 0, only a subset of all available PSDs will be used
   detectors:
     - H1
     - L1
