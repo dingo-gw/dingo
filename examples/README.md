@@ -34,7 +34,29 @@ If using CUDA on a machine with several GPUs, be sure to first select the desire
 
 ## Inference
 
-(Max)
+Once a Dingo model is trained, inference for real events can be performed with 
+```
+dingo_analyze_event 
+  --model model 
+  --gps_time_event gps_time_event
+  --num_samples num_samples
+  --batch_size batch_size
+```
+where `model` is the path of the trained Dingo mode, `gps_time_event` is the GPS time of the event to be analyzed (e.g., 1126259462.4 for GW150914), `num_samples` is the number of desired samples and `batch_size` is the batch size (the larger the faster the computation, but limited by GPU memory). 
+
+If Dingo was trained using GNPE, by setting the `data/gnpe_time_shifts` option in the settings file, one needs to provide an additional Dingo model for the initialization of inference. This model infers initial estimates for the coalescence times in the individual detectors and is trained just like any other dingo model. See `training/train_settings_init.yaml` for an example settings file. The command for GNPE inference reads
+```
+dingo_analyze_event 
+  --model model 
+  --model_init model_init
+  --gps_time_event gps_time_event
+  --num_samples num_samples
+  --num_gnpe_iterations num_gnpe_iterations
+  --batch_size batch_size
+```
+where `model_init` is the path of the aforementioned initialization model, and `num_gnpe_iterations` specifies the number of GNPE iterations (typically, `num_gnpe_iterations=30`).
+
+Finally, the option `--event_dataset </path/to/event_dataset.hdf5>` can be set to cache downloaded event data for future use.
 
 ## Importance sampling
 
