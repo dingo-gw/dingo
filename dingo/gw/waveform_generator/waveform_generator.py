@@ -14,6 +14,7 @@ from bilby.gw.conversion import (
     bilby_to_lalsimulation_spins,
 )
 
+import dingo.gw.waveform_generator.wfg_utils as wfg_utils
 from dingo.gw.domains import Domain, FrequencyDomain, TimeDomain
 
 
@@ -525,6 +526,151 @@ class WaveformGenerator:
         pol_dict = {"h_plus": h_plus, "h_cross": h_cross}
         return pol_dict
 
+    def generate_hplus_hcross_m(
+        self, parameters: Dict[str, float]
+    ) -> Dict[tuple, Dict[str, np.ndarray]]:
+        """
+        Generate GW polarizations (h_plus, h_cross), separated into contributions from
+        the different modes. This method is identical to self.generate_hplus_hcross,
+        except that it generates the individual contributions of the modes to the
+        polarizations and sorts these according to their transformation behavior (see
+        below), instead of returning the overall sum.
+
+        This is useful in order to treat the phase as an extrinsic parameter. Instead of
+        {"h_plus": hp, "h_cross": hc}, this method returns a dict in the form of
+        {m: {"h_plus": hp_m, "h_cross": hc_m} for m in [-l_max,...,0,...,l_max]}. Each
+        key m contains the contribution to the polarization that transforms according
+        to exp(-1j * m * phase) under phase transformations (due to the spherical
+        harmonics).
+
+        Note:
+            - pol_m[m] contains contributions of the m modes *and* and the -m modes.
+              This is because the frequency domain (FD) modes have a positive frequency
+              part which transforms as exp(-1j * m * phase), while the negative
+              frequency part transforms as exp(+1j * m * phase). Typically, one of these
+              dominates [e.g., the (2,2) mode is dominated by the negative frequency
+              part and the (-2,2) mode is dominated by the positive frequency part]
+              such that the sum of (l,|m|) and (l,-|m|) modes transforms approximately as
+              exp(1j * |m| * phase), which is e.g. used for phase marginalization in
+              bilby/lalinference. However, this is not exact. In this method we account
+              for this effect, such that each contribution pol_m[m] transforms
+              *exactly* as exp(-1j * m * phase).
+            - Phase shifts contribute in two ways: Firstly via the spherical harmonics,
+              which we account for with the exp(-1j * m * phase) transformation.
+              Secondly, the phase determines how the PE spins transform to cartesian
+              spins, by rotating (sx,sy) by phase. This is *not* accounted for in this
+              function. Instead, the phase for computing the cartesian spins is fixed
+              to self.spin_conversion_phase (if not None). This effectively changes the
+              PE parameters {phi_jl, phi_12} to parameters {phi_jl_prime, phi_12_prime}.
+              For parameter estimation, a postprocessing operation can be applied to
+              account for this, {phi_jl_prime, phi_12_prime} -> {phi_jl, phi_12}.
+              See also documentation of __init__ method for more information on
+              self.spin_conversion_phase.
+
+        Differences to self.generate_hplus_hcross:
+        - We don't catch errors yet TODO
+        - We don't apply transforms yet TODO
+        # Todo Check different models XPHM/EOB (NRsurr?)
+
+        Parameters
+        ----------
+        parameters: dict
+            Dictionary of parameters for the waveform.
+            For details see see self.generate_hplus_hcross.
+
+        Returns
+        -------
+        pol_m: dict
+            Dictionary with contributions to h_plus and h_cross, sorted by their
+            transformation behaviour under phase shifts:
+            {m: {"h_plus": hp_m, "h_cross": hc_m} for m in [-l_max,...,0,...,l_max]}
+            Each contribution h_m transforms as exp(-1j * m * phase) under phase shifts
+            (for fixed self.spin_conversion_phase, see above).
+        """
+        if not isinstance(parameters, dict):
+            raise ValueError("parameters should be a dictionary, but got", parameters)
+        elif not isinstance(list(parameters.values())[0], float):
+            raise ValueError("parameters dictionary must contain floats", parameters)
+
+        if LS.SimInspiralImplementedTDApproximants(self.approximant):
+            approximant_domain = "TD"
+        elif LS.SimInspiralImplementedFDApproximants(self.approximant):
+            approximant_domain = "FD"
+        else:
+            raise ValueError(f"Unknown approximant {self.approximant}")
+
+        if isinstance(self.domain, FrequencyDomain):
+            # Generate FD modes in for frequencies [-f_max, ..., 0, ..., f_max].
+            if approximant_domain == "FD":
+                # Step 1: generate waveform modes in L0 frame in native domain of
+                # approximant (here: FD)
+                hlm_fd, iota = self.generate_FD_modes_LO(parameters)
+
+                # Step 2: Transform modes to target domain.
+                # Not required here, as approximant domain and target domain are both FD.
+
+            else:
+                # Step 1: generate waveform modes in L0 frame in native domain of
+                # approximant (here: TD)
+                hlm_td, iota = self.generate_TD_modes_LO(parameters)
+
+                # Step 2: Transform modes to target domain.
+                # This requires tapering of TD modes, and FFT to transform to FD.
+                wfg_utils.taper_td_modes_in_place(hlm_td)
+                hlm_fd = wfg_utils.td_modes_to_fd_modes(hlm_td, self.domain)
+
+            # Step 3: Separate negative and positive frequency parts of the modes,
+            # and add contributions according to their transformation behavior under
+            # phase shifts.
+            pol_m = wfg_utils.get_polarizations_from_fd_modes_m(
+                hlm_fd, iota, parameters["phase"]
+            )
+
+        else:
+            raise NotImplementedError(
+                f"Target domain of type {type(self.domain)} not yet implemented"
+            )
+
+        return pol_m
+
+    def generate_TD_modes_LO(self, parameters):
+        """
+        Generate TD modes in the L0 frame.
+
+        Parameters
+        ----------
+        parameters: dict
+            Dictionary of parameters for the waveform.
+            For details see see self.generate_hplus_hcross.
+
+        Returns
+        -------
+        hlm_td: dict
+            Dictionary with (l,m) as keys and the corresponding TD modes in lal format as
+            values.
+        iota: float
+        """
+        # TD approximants that are implemented in L0 frame. Currently tested for:
+        #   52: SEOBNRv4PHM
+        if self.approximant in [52]:
+            parameters_lal_td_modes, iota = self._convert_parameters_to_lal_frame(
+                {**parameters, "f_ref": self.f_ref},
+                lal_target_function="SimInspiralChooseTDModes",
+            )
+            hlm_td = LS.SimInspiralChooseTDModes(*parameters_lal_td_modes)
+            return wfg_utils.linked_list_modes_to_dict_modes(hlm_td), iota
+        else:
+            raise NotImplementedError(
+                f"Approximant {LS.GetApproximantFromString(self.approximant)} not "
+                f"implemented. When adding this approximant to this method, make sure "
+                f"the the output dict hlm_td contains the TD modes in the *L0 frame*. "
+                f"In particular, adding an approximant that is implemented in the same "
+                f"domain and frame as one of the approximants should just be a matter of "
+                f"adding the approximant number (here: {self.approximant}) to the "
+                f"corresponding if statement. However, when doing this please make sure "
+                f"to test that this works as intended! Ideally, add some unit tests."
+            )
+
     # def generate_hplus_hcross_mode_contributions(
     def generate_hplus_hcross_modes(
         self,
@@ -994,6 +1140,18 @@ def generate_waveform_and_catch_errors(
     return wf_dict
 
 
+def sum_polarizations_m(pol_m, phase_shift=0.0):
+    """
+    Sum the polarizations over the m components, optionally introducing a phase shift.
+    """
+    polarizations = ["h_plus", "h_cross"]
+    result = {pol: 0.0 for pol in polarizations}
+    for pol in polarizations:
+        for m, h in pol_m.items():
+            result[pol] += h[pol] * np.exp(-1j * m * phase_shift)
+    return result
+
+
 def sum_fd_mode_contributions(fd_modearray_dict, delta_phi=0.0):
     """
     Sums the contributions of individual FrequencyDomain (FD) modes in fd_modearray_dict.
@@ -1132,45 +1290,23 @@ def get_tapering_windows(pol_dict_modes, taper):
     return windows
 
 
+def apply_frequency_mask(h, domain):
+    return {k: v * domain.frequency_mask for k, v in h.items()}
+
+
+def inner(h1, h2):
+    return np.sum([h1[pol].conj() * h2[pol] for pol in h1]).real
+
+
+def mismatch(h1, h2):
+    return 1 - inner(h1, h2) / np.sqrt(inner(h1, h1) * inner(h2, h2))
+
+
 if __name__ == "__main__":
     import pandas as pd
     import numpy as np
     from dingo.gw.domains import build_domain
-
-    domain_settings = {
-        "type": "FrequencyDomain",
-        "f_min": 10.0,
-        "f_max": 1024.0,
-        "delta_f": 0.125,
-    }
-    domain = build_domain(domain_settings)
-    waveform_generator = WaveformGenerator(
-        "IMRPhenomXPHM",
-        domain,
-        20.0,
-    )
-
-    parameters = {
-        "mass_1": {0: 60.29442201204798},
-        "mass_2": {0: 25.460299253933126},
-        "phase": {0: 2.346269257440926},
-        "a_1": {0: 0.07104636316747037},
-        "a_2": {0: 0.7853578509086726},
-        "tilt_1": {0: 1.8173336549500292},
-        "tilt_2": {0: 0.4380213394743055},
-        "phi_12": {0: 5.892609139936818},
-        "phi_jl": {0: 1.6975651971466297},
-        "theta_jn": {0: 1.0724395559873239},
-        "luminosity_distance": {0: 100.0},
-        "geocent_time": {0: 0.0},
-    }
-    parameters = pd.DataFrame(parameters)
-    # pols1 = generate_waveforms_parallel(waveform_generator, parameters)
-    # pols2 = generate_waveforms_parallel(waveform_generator, parameters * 1.000001)
-    # hp1 = pols1["h_plus"][0]
-    # hp2 = pols2["h_plus"][0]
-    # print(np.max(np.abs(hp1)))
-    # print(np.max(np.abs(hp2)))
+    from dingo.gw.prior import build_prior_with_defaults
 
     domain_settings = {
         "type": "FrequencyDomain",
@@ -1179,42 +1315,50 @@ if __name__ == "__main__":
         "delta_f": 0.125,
     }
     domain = build_domain(domain_settings)
-    mode_list = None
-    # mode_list = [(2, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6), (7, 7), (8, 8)]
-    # mode_list = [(2, 2), (2, -1)]
-    waveform_generator = WaveformGenerator(
+    wfg = WaveformGenerator(
         "SEOBNRv4PHM",
         domain,
         20.0,
-        mode_list=mode_list,
         f_start=10.0,
+        spin_conversion_phase=0.0,
     )
-    # generate_
-    waveform_generator.generate_hplus_hcross_modes(
-        {k: v[0] for k, v in parameters.to_dict().items()},
+
+    intrinsic_dict = {
+        "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
+        "mass_2": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
+        "mass_ratio": "bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.125, maximum=1.0)",
+        "chirp_mass": "bilby.gw.prior.UniformInComponentsChirpMass(minimum=25.0, maximum=100.0)",
+        "luminosity_distance": 1000.0,
+        "theta_jn": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
+        "phase": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
+        "a_1": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.99)",
+        "a_2": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.99)",
+        "tilt_1": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
+        "tilt_2": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
+        "phi_12": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
+        "phi_jl": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
+        "geocent_time": 0.0,
+    }
+    prior = build_prior_with_defaults(intrinsic_dict)
+    p = prior.sample()
+
+    pol_m = wfg.generate_hplus_hcross_m(p)
+
+    phase_shift = np.random.uniform(high=2 * np.pi)
+    print(f"{phase_shift:.2f}")
+    pol = sum_polarizations_m(pol_m, phase_shift=phase_shift)
+
+    pol_ref = wfg.generate_hplus_hcross({**p, "phase": p["phase"] + phase_shift})
+    m = mismatch(
+        apply_frequency_mask(pol, wfg.domain), apply_frequency_mask(pol_ref, wfg.domain)
     )
-    import time
+    print(f"mismatch {m:.1e}")
 
-    t0 = time.time()
-    for idx in range(1):
-        pols = generate_waveforms_parallel(waveform_generator, parameters)
-    print(time.time() - t0)
-    print(pols["h_plus"].shape)
-
-    # """A visual test."""
-    # from dingo.gw.domains import Domain, FrequencyDomain
-    # import matplotlib.pyplot as plt
-
-    # approximant = 'IMRPhenomPv2'
-    # f_min = 20.0
-    # f_max = 512.0
-    # domain = FrequencyDomain(f_min=f_min, f_max=f_max, delta_f=1.0/4.0, window_factor=1.0)
-    # parameters = {'chirp_mass': 34.0, 'mass_ratio': 0.35, 'chi_1': 0.2, 'chi_2': 0.1, 'theta_jn': 1.57, 'f_ref': 20.0, 'phase': 0.0, 'luminosity_distance': 1.0}
-    # WG = WaveformGenerator(approximant, domain)
-    # waveform_polarizations = WG.generate_hplus_hcross(parameters)
-    # print(waveform_polarizations['h_plus'])
-    #
-    # plt.loglog(domain(), np.abs(waveform_polarizations['h_plus']))
-    # plt.xlim([f_min/2, 2048.0])
-    # plt.axvline(f_min, c='gray', ls='--')
-    # plt.show()
+    import matplotlib.pyplot as plt
+    x = wfg.domain()
+    plt.xlim((10, 512))
+    plt.xscale("log")
+    plt.plot(x, pol_ref["h_plus"].real)
+    plt.plot(x, pol["h_plus"].real)
+    plt.plot(x, (pol_ref["h_plus"] - pol["h_plus"]).real)
+    plt.show()
