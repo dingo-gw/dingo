@@ -9,7 +9,7 @@ from threadpoolctl import threadpool_limits
 
 from dingo.core.likelihood import Likelihood
 from dingo.gw.inference.injection import GWSignal
-from dingo.gw.waveform_generator import WaveformGenerator, sum_fd_mode_contributions
+from dingo.gw.waveform_generator.waveform_generator import WaveformGenerator
 from dingo.gw.domains import build_domain
 from dingo.gw.inference.data_preparation import get_event_data_and_domain
 

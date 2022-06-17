@@ -15,7 +15,7 @@ from dingo.gw.transforms import (
     ProjectOntoDetectors,
     WhitenAndScaleStrain,
 )
-from dingo.gw.waveform_generator import (
+from dingo.gw.waveform_generator.waveform_generator import (
     WaveformGenerator,
     sum_fd_mode_contributions,
     sum_over_l,

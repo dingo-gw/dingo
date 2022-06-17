@@ -8,8 +8,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from dingo.gw.domains import build_domain
 
-from dingo.gw.waveform_generator import (
-    WaveformGenerator,
+from dingo.gw.waveform_generator import WaveformGenerator
+from dingo.gw.waveform_generator.waveform_generator import (
     sum_fd_mode_contributions,
     sum_over_l,
 )

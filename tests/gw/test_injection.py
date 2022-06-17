@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_mismatch
 from dingo.gw.inference.injection import GWSignal
-from dingo.gw.waveform_generator import sum_fd_mode_contributions
+from dingo.gw.waveform_generator.waveform_generator import sum_fd_mode_contributions
 
 
 @pytest.fixture
