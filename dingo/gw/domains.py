@@ -27,7 +27,7 @@ class Domain(ABC):
         pass
 
     @abstractmethod
-    def update(self, new_settings : dict):
+    def update(self, new_settings: dict):
         pass
 
     @abstractmethod

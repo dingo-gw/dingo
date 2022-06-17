@@ -3,10 +3,10 @@ import argparse
 import os
 from os.path import dirname, join
 import yaml
-import pandas as pd
 
 from dingo.core.models import PosteriorModel
-from dingo.gw.inference.sampling_functions import sample_posterior_of_event
+from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
+from dingo.gw.inference.data_preparation import get_event_data_and_domain
 from dingo.gw.inference.visualization import load_ref_samples, generate_cornerplot
 
 
@@ -135,42 +135,46 @@ def analyze_event():
     else:
         ref = None
 
+    if args.model_init is not None:
+        init_model = PosteriorModel(
+            args.model_init, device=device, load_training_info=False
+        )
+        init_sampler = GWSampler(model=init_model)
+        sampler = GWSamplerGNPE(
+            model=model,
+            init_sampler=init_sampler,
+            num_iterations=args.num_gnpe_iterations,
+        )
+    else:
+        sampler = GWSampler(model=model)
+
     # sample posterior for events
     for time_event in args.gps_time_event:
-
         print(f"Analyzing event at gps time {time_event}.")
-        samples = sample_posterior_of_event(
-            time_event=time_event,
-            model=model,
-            model_init=args.model_init,
-            time_psd=args.time_psd,
-            time_buffer=args.time_buffer,
-            event_dataset=args.event_dataset,
-            event_dataset_init=args.event_dataset_init,
-            num_samples=args.num_samples,
-            batch_size=args.batch_size,
-            num_gnpe_iterations=args.num_gnpe_iterations,
-            device=device,
-            get_log_prob=args.get_log_prob,
-        )
 
-        # convert to pandas dataframe, add metadata
-        samples = pd.DataFrame({k: v.cpu() for k, v in samples.items()})
-        metadata = {
-            "model": model.metadata,
-            "event": {
-                "time_event": time_event,
-                "time_psd": args.time_psd,
-                "time_buffer": args.time_buffer,
-            },
+        # get raw event data, and prepare it for the network domain
+        event_data, _ = get_event_data_and_domain(
+            model.metadata,
+            time_event,
+            args.time_psd,
+            args.time_buffer,
+            args.event_dataset,
+        )
+        sampler.context = event_data
+        sampler.event_metadata = {
+            "time_event": time_event,
+            "time_psd": args.time_psd,
+            "time_buffer": args.time_buffer,
         }
-        samples.attrs = metadata
+        sampler.run_sampler(
+            args.num_samples,
+            batch_size=args.batch_size,
+        )
 
         # if no reference samples are available, simply save the dingo samples
         if ref is None or time_event not in ref:
-            samples.to_pickle(
-                join(args.out_directory, f"dingo_samples_gps-{time_event}{args.suffix}.pkl")
-            )
+            label = f"gps-{time_event}{args.suffix}"
+            sampler.to_hdf5(label=label, outdir=args.out_directory)
 
         # if reference samples are available, save dingo samples and additionally
         # compare to the reference method in a corner plot
@@ -179,18 +183,17 @@ def analyze_event():
             ref_samples_file = ref[time_event]["reference_samples"]["file"]
             ref_method = ref[time_event]["reference_samples"]["method"]
 
-            samples.to_pickle(
-                join(args.out_directory, f"dingo_samples_{name_event}.pkl")
-            )
+            sampler.to_hdf5(label=name_event, outdir=args.out_directory)
 
             ref_samples = load_ref_samples(ref_samples_file)
 
             generate_cornerplot(
                 {"name": ref_method, "samples": ref_samples, "color": "blue"},
-                {"name": "dingo", "samples": samples, "color": "orange"},
-                filename=join(args.out_directory, f"cornerplot_{name_event}{args.suffix}.pdf"),
+                {"name": "dingo", "samples": sampler.samples, "color": "orange"},
+                filename=join(
+                    args.out_directory, f"cornerplot_{name_event}{args.suffix}.pdf"
+                ),
             )
-
 
 
 if __name__ == "__main__":

@@ -21,6 +21,7 @@ class GNPEBase(ABC):
         self.kernel = PriorDict(kernel_dict)
         self.operators = operators
         self.proxy_list = [k + "_proxy" for k in kernel_dict.keys()]
+        self.input_parameter_names = list(self.kernel.keys())
 
     @abstractmethod
     def __call__(self, input_sample):
@@ -368,3 +369,54 @@ class GNPEChirp(GNPEBase):
 
         else:
             raise NotImplementedError("Can only use GNPEChirp in frequency domain.")
+
+
+class GNPEPhase(GNPEBase):
+    """GNPE transform for phase of coalescence.
+
+    This transform simply adds a phase proxy parameter to the extrinsic parameters. It
+    does not bother to transform the data itself, since this would not provide a
+    simpler representation. The point is to guide the networks to identify the phase
+    during training by conditioning on the proxy.
+
+    At inference time, the joint posterior over phase and phase_proxy is obtained
+    using Gibbs sampling.
+    """
+
+    def __init__(self, kernel, random_pi_jump):
+        """
+        Parameters
+        ----------
+        kernel : str
+            Bilby prior to be used as the GNPE kernel (additive).
+        random_pi_jump : bool
+            Whether to also include a random jump by pi when sampling the proxy. This
+            is useful because the posterior over phase is often multimodal with period
+            pi. With this set to True, Gibbs sampling may better explore the space.
+        """
+        kernel_dict = {"phase": kernel}
+        operators = {"phase": "+"}
+        super().__init__(kernel_dict, operators)
+        self.random_pi_jump = random_pi_jump
+
+    def __call__(self, input_sample):
+        sample = input_sample.copy()
+        extrinsic_parameters = sample["extrinsic_parameters"].copy()
+        proxies = self.sample_proxies(
+            {**sample["parameters"], **sample["extrinsic_parameters"]}
+        )
+        if self.random_pi_jump:
+            if isinstance(proxies["phase_proxy"], torch.Tensor):
+                proxies["phase_proxy"] += (
+                    torch.randint_like(proxies["phase_proxy"], 2) * np.pi
+                )
+            elif isinstance(proxies["phase_proxy"], (float, np.float64)):
+                proxies["phase_proxy"] += np.random.choice([0.0, np.pi])
+            else:
+                raise NotImplementedError(
+                    f"Unsupported data type {type(proxies['phase_proxy'])}."
+                )
+        proxies["phase_proxy"] = proxies["phase_proxy"] % (2 * np.pi)
+        extrinsic_parameters.update(proxies)
+        sample["extrinsic_parameters"] = extrinsic_parameters
+        return sample

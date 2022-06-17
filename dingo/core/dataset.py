@@ -6,13 +6,19 @@ import pandas as pd
 
 def recursive_hdf5_save(group, d):
     for k, v in d.items():
-        if isinstance(v, dict):
+        if v is None:
+            continue
+        elif isinstance(v, dict):
             next_group = group.create_group(k)
             recursive_hdf5_save(next_group, v)
         elif isinstance(v, np.ndarray):
             group.create_dataset(k, data=v)
         elif isinstance(v, pd.DataFrame):
             group.create_dataset(k, data=v.to_records(index=False))
+        elif isinstance(v, (int, float)):
+            # TODO: Set as an attribute, not a scalar dataset. Maybe do the same for
+            #  the entire contents of the settings dict.
+            group.create_dataset(k, data=v)
         else:
             raise TypeError("Cannot save datatype {} as hdf5 dataset.".format(type(v)))
 
@@ -28,6 +34,9 @@ def recursive_hdf5_load(group, keys=None):
                 # If the array has column names, load it as a pandas DataFrame
                 if d[k].dtype.names is not None:
                     d[k] = pd.DataFrame(d[k])
+                # Convert arrays of size 1 to scalars
+                if d[k].size == 1:
+                    d[k] = d[k].item()
     return d
 
 
@@ -72,7 +81,7 @@ class DingoDataset:
             self.from_dictionary(dictionary)
 
     def to_file(self, file_name, mode="w"):
-        print("Saving dataset to " + file_name)
+        print("Saving dataset to " + str(file_name))
         save_dict = {
             k: v
             for k, v in vars(self).items()
@@ -84,7 +93,7 @@ class DingoDataset:
                 f.attrs["settings"] = str(self.settings)
 
     def from_file(self, file_name):
-        print("\nLoading dataset from " + file_name + ".")
+        print("\nLoading dataset from " + str(file_name) + ".")
         with h5py.File(file_name, "r") as f:
             # Load only the keys that the class expects
             loaded_dict = recursive_hdf5_load(f, keys=self._data_keys)

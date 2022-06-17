@@ -22,7 +22,7 @@ from dingo.gw.transforms import (
     GNPEChirp,
     GNPECoalescenceTimes,
     SampleExtrinsicParameters,
-    GetDetectorTimes,
+    GetDetectorTimes, GNPEPhase,
 )
 from dingo.gw.ASD_dataset.noise_dataset import ASDDataset
 from dingo.gw.prior import default_inference_parameters
@@ -127,6 +127,10 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         d = data_settings["gnpe_chirp"]
         transforms.append(GNPEChirp(d["kernel"], domain, d.get("order", 0)))
         extra_context_parameters += transforms[-1].proxy_list
+    if "gnpe_phase" in data_settings:
+        d = data_settings["gnpe_phase"]
+        transforms.append(GNPEPhase(d["kernel"], d.get("random_pi_jump", False)))
+        extra_context_parameters += transforms[-1].proxy_list
 
     # Add the GNPE proxies to context_parameters the first time the transforms are
     # constructed. We do not want to overwrite the ordering of the parameters in
@@ -159,7 +163,10 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     transforms.append(ProjectOntoDetectors(ifo_list, domain, ref_time))
     transforms.append(SampleNoiseASD(asd_dataset))
     transforms.append(WhitenAndScaleStrain(domain.noise_std))
-    transforms.append(AddWhiteNoiseComplex())
+    # We typically add white detector noise. For debugging purposes, this can be turned
+    # off with zero_noise option in data_settings.
+    if not data_settings.get("zero_noise", False):
+        transforms.append(AddWhiteNoiseComplex())
     transforms.append(
         SelectStandardizeRepackageParameters(
             {

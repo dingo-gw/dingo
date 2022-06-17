@@ -63,6 +63,8 @@ class SelectStandardizeRepackageParameters(object):
         * if self.inverse == True:
             Applies only to sample['inference_parameters'].
             Undo normalization and return as type self.as_type.
+            Also transform input_sample['log_prob'], if present, according to the
+            change-of-variables rule.
 
         Parameters
         ----------
@@ -119,6 +121,8 @@ class SelectStandardizeRepackageParameters(object):
                     parameters[..., idx] * self.std[par] + self.mean[par]
                 )
 
+            # TODO: Can we remove the as_type option? Do we ever want anything other
+            #  than a dict?
             # return normalized parameters as desired type
             if self.as_type is None:
                 sample["parameters"] = parameters
@@ -138,6 +142,11 @@ class SelectStandardizeRepackageParameters(object):
                     f"Unexpected type {self.as_type}, "
                     f"expected one of [None, pandas, dict]."
                 )
+
+            # TODO: Implement this for the forward map, if needed.
+            if "log_prob" in sample:
+                log_std = np.sum(np.log([self.std[p] for p in inference_parameters]))
+                sample["log_prob"] -= log_std
 
         return sample
 
