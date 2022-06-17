@@ -28,7 +28,7 @@ intrinsic_prior:
   geocent_time: 0.0  # s
 
 # Dataset size
-num_samples: 50000000
+num_samples: 5000000
 
 # Save a compressed representation of the dataset
 compression:
