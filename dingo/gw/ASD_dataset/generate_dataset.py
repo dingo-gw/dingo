@@ -2,7 +2,6 @@ import yaml
 from os.path import join
 import argparse
 import textwrap
-from typing import List
 
 from dingo.gw.ASD_dataset.dataset_utils import (
     download_and_estimate_PSDs,
@@ -19,7 +18,7 @@ def generate_dataset():
         with open(args.settings, "r") as f:
             settings = yaml.safe_load(f)
     else:
-        with open(join(args.data_dir, "settings.yaml"), "r") as f:
+        with open(join(args.data_dir, "asd_dataset_settings.yaml"), "r") as f:
             settings = yaml.safe_load(f)
 
     download_and_estimate_PSDs(
