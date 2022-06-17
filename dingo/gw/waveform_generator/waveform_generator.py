@@ -15,6 +15,7 @@ from bilby.gw.conversion import (
 )
 
 import dingo.gw.waveform_generator.wfg_utils as wfg_utils
+import dingo.gw.waveform_generator.frame_utils as frame_utils
 from dingo.gw.domains import Domain, FrequencyDomain, TimeDomain
 
 
@@ -601,7 +602,7 @@ class WaveformGenerator:
 
         if isinstance(self.domain, FrequencyDomain):
             # Generate FD modes in for frequencies [-f_max, ..., 0, ..., f_max].
-            if approximant_domain == "FD":
+            if LS.SimInspiralImplementedFDApproximants(self.approximant):
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: FD)
                 hlm_fd, iota = self.generate_FD_modes_LO(parameters)
@@ -610,6 +611,7 @@ class WaveformGenerator:
                 # Not required here, as approximant domain and target domain are both FD.
 
             else:
+                assert LS.SimInspiralImplementedTDApproximants(self.approximant)
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: TD)
                 hlm_td, iota = self.generate_TD_modes_LO(parameters)
@@ -632,6 +634,56 @@ class WaveformGenerator:
             )
 
         return pol_m
+
+    def generate_FD_modes_LO(self, parameters):
+        """
+        Generate FD modes in the L0 frame.
+
+        Parameters
+        ----------
+        parameters: dict
+            Dictionary of parameters for the waveform.
+            For details see see self.generate_hplus_hcross.
+
+        Returns
+        -------
+        hlm_fd: dict
+            Dictionary with (l,m) as keys and the corresponding FD modes in lal format as
+            values.
+        iota: float
+        """
+        # TD approximants that are implemented in J frame. Currently tested for:
+        #   101: IMRPhenomXPHM
+        if self.approximant in [101]:
+            parameters_lal_fd_modes = self._convert_parameters_to_lal_frame(
+                {**parameters, "f_ref": self.f_ref},
+                lal_target_function="SimInspiralChooseFDModes",
+            )
+            iota = parameters_lal_fd_modes[14]
+            hlm_fd = LS.SimInspiralChooseFDModes(*parameters_lal_fd_modes)
+            # unpack linked list, convert lal objects to arrays
+            hlm_fd = wfg_utils.linked_list_modes_to_dict_modes(hlm_fd)
+            hlm_fd = {k: v.data.data for k, v in hlm_fd.items()}
+            # For the waveform models considered here (e.g., IMRPhenomXPHM), the modes
+            # are returned in the J frame (where the observer is at inclination=theta_JN,
+            # azimuth=0). In this frame, the dependence on the reference phase enters
+            # via the modes themselves. We need to convert to the L0 frame so that the
+            # dependence on phase enters via the spherical harmonics.
+            hlm_fd = frame_utils.convert_J_to_L0_frame(
+                hlm_fd, p, self, spin_conversion_phase=self.spin_conversion_phase
+            )
+            return hlm_fd, iota
+        else:
+            raise NotImplementedError(
+                f"Approximant {LS.GetApproximantFromString(self.approximant)} not "
+                f"implemented. When adding this approximant to this method, make sure "
+                f"the the output dict hlm_td contains the TD modes in the *L0 frame*. "
+                f"In particular, adding an approximant that is implemented in the same "
+                f"domain and frame as one of the approximants should just be a matter of "
+                f"adding the approximant number (here: {self.approximant}) to the "
+                f"corresponding if statement. However, when doing this please make sure "
+                f"to test that this works as intended! Ideally, add some unit tests."
+            )
 
     def generate_TD_modes_LO(self, parameters):
         """
@@ -1315,14 +1367,6 @@ if __name__ == "__main__":
         "delta_f": 0.125,
     }
     domain = build_domain(domain_settings)
-    wfg = WaveformGenerator(
-        "SEOBNRv4PHM",
-        domain,
-        20.0,
-        f_start=10.0,
-        spin_conversion_phase=0.0,
-    )
-
     intrinsic_dict = {
         "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
         "mass_2": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
@@ -1341,6 +1385,15 @@ if __name__ == "__main__":
     }
     prior = build_prior_with_defaults(intrinsic_dict)
     p = prior.sample()
+
+    wfg = WaveformGenerator(
+        # "SEOBNRv4PHM",
+        "IMRPhenomXPHM",
+        domain,
+        20.0,
+        f_start=10.0,
+        spin_conversion_phase=0.0,
+    )
 
     pol_m = wfg.generate_hplus_hcross_m(p)
 
