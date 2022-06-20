@@ -1199,6 +1199,18 @@ def sum_polarizations_m(pol_m, phase_shift=0.0):
     return result
 
 
+def sum_contributions_m(x_m, phase_shift=0.0):
+    """
+    Sum the contributions over m-components, optionally introducing a phase shift.
+    """
+    keys = next(iter(x_m.values())).keys()
+    result = {key: 0.0 for key in keys}
+    for key in keys:
+        for m, x in x_m.items():
+            result[key] += x[key] * np.exp(-1j * m * phase_shift)
+    return result
+
+
 def sum_fd_mode_contributions(fd_modearray_dict, delta_phi=0.0):
     """
     Sums the contributions of individual FrequencyDomain (FD) modes in fd_modearray_dict.

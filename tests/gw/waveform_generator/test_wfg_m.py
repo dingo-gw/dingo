@@ -1,6 +1,6 @@
 """
 This tests the method WaveformGenerator.generate_hplus_hcross_m, that returns the
-polarzations disentangled into contributions m \in [-l_max, ..., 0, ..., l_max],
+polarzations disentangled into contributions m \in [-l_max, ...,0, ...,l_max],
 that transform as exp(-1j * m * phase_shift) under phase shifts. This is important when
 treating the phase parameter as an extrinsic parameter.
 
