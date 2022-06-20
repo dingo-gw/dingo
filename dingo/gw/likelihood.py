@@ -257,15 +257,15 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         if phases is None:
             phases = self.phase_grid
 
-        # Step 1: Compute signal for phase = 0, separated into the contributions from
+        # Step 1: Compute signal for phase = 0, separated into the m-contributions from
         # the individual modes.
-        waveform_modes = self.signal_modes({**theta, "phase": 0}, keep_l=False)
-        waveform_modes = {k[1]: v["waveform"] for k, v in waveform_modes.items()}
+        pol_m = self.signal_m({**theta, "phase": 0})
+        pol_m = {k: pol["waveform"] for k, pol in pol_m.items()}
 
         # Step 2: Precompute complex inner products (mu, mu) and (d, mu) for the
         # individual modes m.
         min_idx = self.data_domain.min_idx
-        m_vals = sorted(waveform_modes.keys())
+        m_vals = sorted(pol_m.keys())
 
         # rho2opt is defined as the inner product of the waveform mu with itself.
         # Since we work with whitened data, the inner product simply reads
@@ -283,14 +283,14 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         rho2opt_const = 0
         rho2opt_crossterms = {}
         for idx, m in enumerate(m_vals):
-            mu_m = waveform_modes[m]
+            mu_m = pol_m[m]
             # contribution to rho2opt_const
             rho2opt_const += sum(
                 [inner_product(mu_ifo, mu_ifo, min_idx) for mu_ifo in mu_m.values()]
             )
             # cross terms
             for n in m_vals[idx + 1 :]:
-                mu_n = waveform_modes[n]
+                mu_n = pol_m[n]
                 # factor 2, since (m, n) and (n, m) cross terms contribute symmetrically
                 rho2opt_crossterms[(m, n)] = 2 * sum(
                     [
@@ -310,7 +310,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         # Below we precompute (d.conj() * mu_m) for the different modes m.
         kappa2_modes = {}
         for m in m_vals:
-            mu_m = waveform_modes[m]
+            mu_m = pol_m[m]
             kappa2_modes[m] = sum(
                 [
                     inner_product_complex(d_ifo, mu_ifo, min_idx)
@@ -334,7 +334,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             kappa2_all.append(kappa2)
 
             # # comment out for cross check:
-            # mu = sum_fd_mode_contributions(waveform_modes, delta_phi=phase)
+            # mu = sum_fd_mode_contributions(pol_m, delta_phi=phase)
             # rho2opt_ref = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
             # kappa2_ref = sum(
             #     [
@@ -348,26 +348,6 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             log_likelihoods[idx] = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
         return log_likelihoods
-
-    def _log_likelihood_phase_grid_old(self, theta):
-        # Step 1: Compute whitened GW strain mu(theta) for parameters theta with phase 0.
-        theta["phase"] = 0
-        mu = self.signal(theta)["waveform"]
-        d_phase_grid = self.whitened_strains_phase_grid
-
-        # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to
-        # compute the remaining terms rho2opt and kappa2.
-        # rho2opt is independent of the phase.
-        rho2opt = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
-        # kappa2 depends on the phase.
-        kappa2 = np.sum(
-            [
-                inner_product(d_ifo, mu_ifo[:, np.newaxis])
-                for d_ifo, mu_ifo in zip(d_phase_grid.values(), mu.values())
-            ],
-            axis=0,
-        )
-        return self.log_Zn + np.array(kappa2) - 1 / 2.0 * rho2opt
 
     def _log_likelihood_phase_marginalized(self, theta):
         """
