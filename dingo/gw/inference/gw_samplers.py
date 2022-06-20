@@ -106,7 +106,7 @@ class GWSamplerMixin(object):
     def _build_likelihood(
         self,
         time_marginalization_kwargs: Optional[dict] = None,
-        phase_marginalization_kwargs: bool = False,
+        phase_marginalization_kwargs: Optional[dict] = None,
         phase_grid: Optional[np.ndarray] = None,
     ):
         """
