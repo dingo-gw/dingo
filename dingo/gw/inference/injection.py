@@ -15,11 +15,7 @@ from dingo.gw.transforms import (
     ProjectOntoDetectors,
     WhitenAndScaleStrain,
 )
-from dingo.gw.waveform_generator.waveform_generator import (
-    WaveformGenerator,
-    sum_fd_mode_contributions,
-    sum_over_l,
-)
+from dingo.gw.waveform_generator.waveform_generator import WaveformGenerator
 
 
 class GWSignal(object):
@@ -149,7 +145,6 @@ class GWSignal(object):
     # It would be good to have an ASD class to handle all of this functionality,
     # namely storing ASDs from numpy arrays, from ASDDatasets, loading from files,
     # etc. For now this functionality is partially implemented here.
-
 
     def signal_m(self, theta):
         """
