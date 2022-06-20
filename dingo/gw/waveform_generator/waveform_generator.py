@@ -571,7 +571,6 @@ class WaveformGenerator:
         Differences to self.generate_hplus_hcross:
         - We don't catch errors yet TODO
         - We don't apply transforms yet TODO
-        # Todo Check different models XPHM/EOB (NRsurr?)
 
         Parameters
         ----------
@@ -592,13 +591,6 @@ class WaveformGenerator:
             raise ValueError("parameters should be a dictionary, but got", parameters)
         elif not isinstance(list(parameters.values())[0], float):
             raise ValueError("parameters dictionary must contain floats", parameters)
-
-        if LS.SimInspiralImplementedTDApproximants(self.approximant):
-            approximant_domain = "TD"
-        elif LS.SimInspiralImplementedFDApproximants(self.approximant):
-            approximant_domain = "FD"
-        else:
-            raise ValueError(f"Unknown approximant {self.approximant}")
 
         if isinstance(self.domain, FrequencyDomain):
             # Generate FD modes in for frequencies [-f_max, ..., 0, ..., f_max].
@@ -630,7 +622,7 @@ class WaveformGenerator:
 
         else:
             raise NotImplementedError(
-                f"Target domain of type {type(self.domain)} not yet implemented"
+                f"Target domain of type {type(self.domain)} not yet implemented."
             )
 
         return pol_m
@@ -670,7 +662,10 @@ class WaveformGenerator:
             # via the modes themselves. We need to convert to the L0 frame so that the
             # dependence on phase enters via the spherical harmonics.
             hlm_fd = frame_utils.convert_J_to_L0_frame(
-                hlm_fd, p, self, spin_conversion_phase=self.spin_conversion_phase
+                hlm_fd,
+                parameters,
+                self,
+                spin_conversion_phase=self.spin_conversion_phase,
             )
             return hlm_fd, iota
         else:
@@ -1385,6 +1380,20 @@ if __name__ == "__main__":
     }
     prior = build_prior_with_defaults(intrinsic_dict)
     p = prior.sample()
+    p = {
+        "mass_ratio": 0.3501852584069329,
+        "chirp_mass": 31.709276525188667,
+        "luminosity_distance": 1000.0,
+        "theta_jn": 1.3663250108421872,
+        "phase": 2.3133395191342094,
+        "a_1": 0.9082488389607664,
+        "a_2": 0.23195443013657285,
+        "tilt_1": 2.2991912365076708,
+        "tilt_2": 2.2878677821511086,
+        "phi_12": 2.3726027637572384,
+        "phi_jl": 1.5356479043406908,
+        "geocent_time": 0.0,
+    }
 
     wfg = WaveformGenerator(
         # "SEOBNRv4PHM",
@@ -1408,6 +1417,7 @@ if __name__ == "__main__":
     print(f"mismatch {m:.1e}")
 
     import matplotlib.pyplot as plt
+
     x = wfg.domain()
     plt.xlim((10, 512))
     plt.xscale("log")
