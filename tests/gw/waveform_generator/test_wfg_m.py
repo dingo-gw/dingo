@@ -57,9 +57,6 @@ def intrinsic_prior():
 def test_generate_hplus_hcross_m_SEOBNRv4PHM(uniform_fd_domain, intrinsic_prior):
     domain = uniform_fd_domain
     prior = intrinsic_prior
-    p = prior.sample()
-    phase_shift = np.random.uniform(high=2 * np.pi)
-
     wfg = WaveformGenerator(
         "SEOBNRv4PHM",
         domain,
@@ -67,6 +64,9 @@ def test_generate_hplus_hcross_m_SEOBNRv4PHM(uniform_fd_domain, intrinsic_prior)
         f_start=10.0,
         spin_conversion_phase=0.0,
     )
+
+    p = prior.sample()
+    phase_shift = np.random.uniform(high=2 * np.pi)
     pol_m = wfg.generate_hplus_hcross_m(p)
     pol = sum_polarizations_m(pol_m, phase_shift=phase_shift)
     pol_ref = wfg.generate_hplus_hcross({**p, "phase": p["phase"] + phase_shift})
@@ -81,15 +81,12 @@ def test_generate_hplus_hcross_m_SEOBNRv4PHM(uniform_fd_domain, intrinsic_prior)
     # happens on the level of complex modes.
     # We tested the mismatches for 20k waveforms, and the largest mismatch encountered
     # was 7e-4, while almost all mismatches were of order 1e-5.
-    assert max(mismatches) < 1e-3
+    assert max(mismatches) < 5e-4
 
 
 def test_generate_hplus_hcross_m_IMRPhenomXPHM(uniform_fd_domain, intrinsic_prior):
     domain = uniform_fd_domain
     prior = intrinsic_prior
-    p = prior.sample()
-    phase_shift = np.random.uniform(high=2 * np.pi)
-
     wfg = WaveformGenerator(
         "IMRPhenomXPHM",
         domain,
@@ -97,19 +94,27 @@ def test_generate_hplus_hcross_m_IMRPhenomXPHM(uniform_fd_domain, intrinsic_prio
         f_start=10.0,
         spin_conversion_phase=0.0,
     )
-    pol_m = wfg.generate_hplus_hcross_m(p)
-    pol = sum_polarizations_m(pol_m, phase_shift=phase_shift)
-    pol_ref = wfg.generate_hplus_hcross({**p, "phase": p["phase"] + phase_shift})
 
-    mismatches = [
-        get_mismatch(pol[pol_name], pol_ref[pol_name], wfg.domain) for pol_name in pol
-    ]
+    mismatches = []
+    for idx in range(10):
+        p = prior.sample()
+        phase_shift = np.random.uniform(high=2 * np.pi)
+
+        pol_m = wfg.generate_hplus_hcross_m(p)
+        pol = sum_polarizations_m(pol_m, phase_shift=phase_shift)
+        pol_ref = wfg.generate_hplus_hcross({**p, "phase": p["phase"] + phase_shift})
+
+        mismatches.append(
+            [
+                get_mismatch(pol[pol_name], pol_ref[pol_name], wfg.domain)
+                for pol_name in pol
+            ]
+        )
 
     # The mismatches are typically be of order 1e-5 to 1e-9. This comes from the
     # calculation of the magnitude of the orbital angular momentum, which we calculate
     # to a different order the IMRPhenomXPHM. It's tricky to get this exactly right,
     # since there are many different methods for this. But the small mismatches we do
-    # get should not have an effect in practice.
-    print(p)
-    print(mismatches)
-    assert max(mismatches) < 1e-3
+    # get should not have a big effect in practice.
+    mismatches = np.array(mismatches)
+    assert np.max(mismatches) < 2e-3
