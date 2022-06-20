@@ -1,21 +1,19 @@
 import pytest
 import numpy as np
-import time
-import matplotlib.pyplot as plt
 
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_mismatch
 from dingo.gw.inference.injection import GWSignal
-from dingo.gw.waveform_generator.waveform_generator import sum_fd_mode_contributions
+from dingo.gw.waveform_generator import sum_contributions_m
 
 
 @pytest.fixture
 def signal_setup_EOB():
     wfg_kwargs = {
         "approximant": "SEOBNRv4PHM",
-        "f_ref": 20.0,
+        "f_ref": 10.0,
         "f_start": 10.0,
-        "spin_conversion_phase": None,
+        "spin_conversion_phase": 0,
     }
     wfg_domain = build_domain(
         {
@@ -63,75 +61,18 @@ def BBH_parameters():
     return parameters
 
 
-def test_signal_from_cached_polarizations(signal_setup_EOB, BBH_parameters):
-    """
-    Test GWSignal.signal_from_cached_polarizations method.
-    """
-    visualize = False
-
+def test_signal_m_EOB(signal_setup_EOB, BBH_parameters):
     signal = signal_setup_EOB
-    theta = BBH_parameters
-    # compute signals from cached polarizations
-    t0 = time.time()
-    signal_0, pol_0 = signal.signal_from_cached_polarizations(
-        {**theta, "phase": 0},
-    )
-    delta_t0 = time.time() - t0
-    t0 = time.time()
-    signal_1, pol_1 = signal.signal_from_cached_polarizations(
-        {**theta, "phase": 1},
-        polarizations_cached=pol_0,
-    )
-    delta_t1 = time.time() - t0
-    # Check that compunting cached signal is significantly faster
-    assert delta_t0 > 10 * delta_t1, "Caching does not seem to have an effect."
-
-    # compute reference signals
-    signal_0_ref = signal.signal({**theta, "phase": 0})
-    signal_1_ref = signal.signal({**theta, "phase": 1})
-    mismatch_0 = get_mismatch(
-        signal_0["waveform"]["H1"],
-        signal_0_ref["waveform"]["H1"],
-        signal.waveform_generator.domain,
-    )
-    mismatch_1 = get_mismatch(
-        signal_1["waveform"]["H1"],
-        signal_1_ref["waveform"]["H1"],
-        signal.waveform_generator.domain,
-    )
-
-    assert mismatch_0 < 1e-4
-    # We don't expect a very small mismatch_1 here, since the effect of the phase on the
-    # cartesian spins is not accounted for.
-    assert mismatch_1 < 5e-2
-
-    if visualize:
-        x = signal.waveform_generator.domain()
-        plt.title(f"mismatch {mismatch_0:.2e}")
-        plt.xlim((20, 1024))
-        plt.xscale("log")
-        plt.plot(x, signal_0["waveform"]["H1"])
-        plt.plot(x, signal_0_ref["waveform"]["H1"])
-        plt.show()
-        plt.title(f"mismatch {mismatch_1:.2e}")
-        plt.xlim((20, 1024))
-        plt.xscale("log")
-        plt.plot(x, signal_1["waveform"]["H1"])
-        plt.plot(x, signal_1_ref["waveform"]["H1"])
-        plt.show()
-
-
-def test_signal_modes(signal_setup_EOB, BBH_parameters):
-    signal = signal_setup_EOB
-    theta = BBH_parameters
+    p = BBH_parameters
     domain = signal.waveform_generator.domain
 
-    waveform_0 = signal.signal(theta)["waveform"]
-    waveform_1 = signal.signal_modes(theta)
-    waveform_1 = {k: v["waveform"] for k, v in waveform_1.items()}
-    waveform_summed_1 = sum_fd_mode_contributions(waveform_1)
+    phase_shift = np.random.uniform(high=2 * np.pi)
+    waveform_ref = signal.signal({**p, "phase": p["phase"] + phase_shift})["waveform"]
+    waveform_m = signal.signal_m(p)
+    waveform_m = {k: v["waveform"] for k, v in waveform_m.items()}
+    waveform = sum_contributions_m(waveform_m, phase_shift=phase_shift)
     mismatches = [
-        get_mismatch(waveform_0[k], waveform_summed_1[k], domain)
-        for k in waveform_0.keys()
+        get_mismatch(waveform_ref[k], waveform[k], domain)
+        for k in waveform.keys()
     ]
     assert np.max(mismatches) < 1e-4

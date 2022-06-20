@@ -220,6 +220,62 @@ class GWSignal(object):
 
         return self.projection_transforms(sample), polarizations_modes
 
+    def signal_m(self, theta):
+        """
+        Compute the GW signal for parameters theta. Same as self.signal(theta) method,
+        but it does not sum the contributions of the individual modes, and instead
+        returns a dict {m: pol_m for m in [-l_max,...,0,...,l_max]} where each
+        contribution pol_m transforms as exp(-1j * m * phase_shift) under phase shifts.
+
+        Step 1: Generate polarizations
+        Step 2: Project polarizations onto detectors;
+                optionally (depending on self.whiten) whiten and scale.
+
+        Parameters
+        ----------
+        theta: dict
+            Signal parameters. Includes intrinsic parameters to be passed to waveform
+            generator, and extrinsic parameters for detector projection.
+
+        Returns
+        -------
+        dict
+            keys:
+                waveform:
+                    GW strain signal for each detector, with individual contributions
+                    {m: pol_m for m in [-l_max,...,0,...,l_max]}
+                extrinsic_parameters: {}
+                parameters: waveform parameters
+                asd (if set): amplitude spectral density for each detector
+        """
+        theta_intrinsic, theta_extrinsic = split_off_extrinsic_parameters(theta)
+        theta_intrinsic = {k: float(v) for k, v in theta_intrinsic.items()}
+
+        # Step 1: generate m-contributions to polarizations h_plus and h_cross
+        pol_m = self.waveform_generator.generate_hplus_hcross_m(theta_intrinsic)
+        # truncation, in case wfg has a larger frequency range
+        pol_m = {
+            k_m: {
+                k_pol: self.data_domain.update_data(v_pol)
+                for k_pol, v_pol in v_m.items()
+            }
+            for k_m, v_m in pol_m.items()
+        }
+
+        # Step 2: project m-contributions to h_plus and h_cross onto detectors
+        sample_out = {}
+        for m, pol in pol_m.items():
+            sample = {
+                "parameters": theta_intrinsic,
+                "extrinsic_parameters": theta_extrinsic,
+                "waveform": pol,
+            }
+            if self.asd is not None:
+                sample["asds"] = self.asd
+            sample_out[m] = self.projection_transforms(sample)
+
+        return sample_out
+
     def signal_modes(self, theta, keep_l=True):
         """
         Compute the GW signal for parameters theta. Same as self.signal method,
