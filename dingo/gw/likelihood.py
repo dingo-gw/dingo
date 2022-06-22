@@ -9,7 +9,7 @@ from threadpoolctl import threadpool_limits
 
 from dingo.core.likelihood import Likelihood
 from dingo.gw.inference.injection import GWSignal
-from dingo.gw.waveform_generator.waveform_generator import WaveformGenerator
+from dingo.gw.waveform_generator import WaveformGenerator, sum_contributions_m
 from dingo.gw.domains import build_domain
 from dingo.gw.inference.data_preparation import get_event_data_and_domain
 
@@ -253,6 +253,14 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
     def log_likelihood_phase_grid(self, theta, phases=None):
         # TODO: Implement for time marginalization
+
+        if self.waveform_generator.spin_conversion_phase != 0:
+            raise ValueError(
+                f"The log likelihood on a phase grid assumes "
+                f"WaveformGenerator.spin_conversion_phase = 0, "
+                f"got {self.waveform_generator.spin_conversion_phase}."
+            )
+
         d = self.whitened_strains
         if phases is None:
             phases = self.phase_grid
@@ -273,10 +281,10 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         #   (mu, mu) = sum(mu.conj() * mu).real,
         #
         # where the sum extends over frequency bins and detectors. Applying phase
-        # transformations exp(i * |m| * phi) to the individual modes will lead to
+        # transformations exp(-i * m * phi) to the individual modes will lead to
         # cross terms (the ^-symbol indicates the phase shift by phi)
         #
-        #   (mu^_m, mu^_n) = [(mu_m.conj() * mu_n) * exp(i * (|n| - |m|) * phi)].real.
+        #   (mu^_m, mu^_n) = [(mu_m.conj() * mu_n) * exp(-i * (n - m) * phi)].real.
         #
         # Below we precompute the cross terms sum(mu_m.conj() * mu_n) and the constant
         # contribution for m = n.
@@ -302,10 +310,10 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         #
         #   (d, mu) = sum(d.conj() * mu).real.
         #
-        # Applying phase transformations exp(i * |m| * phi) to the individual modes
+        # Applying phase transformations exp(-i * m * phi) to the individual modes
         # thus corresponds to
         #
-        #   (d, mu^_m) = [(d.conj() * mu_m) * exp(i * |m| * phi)].real.
+        #   (d, mu^_m) = [(d.conj() * mu_m) * exp(-i * m * phi)].real.
         #
         # Below we precompute (d.conj() * mu_m) for the different modes m.
         kappa2_modes = {}
@@ -325,16 +333,16 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             # get rho2opt
             rho2opt = rho2opt_const
             for (m, n), c in rho2opt_crossterms.items():
-                rho2opt += (c * np.exp(1j * (n - m) * phase)).real
+                rho2opt += (c * np.exp(-1j * (n - m) * phase)).real
             # get kappa2
             kappa2 = 0
             for m in m_vals:
-                kappa2 += (kappa2_modes[m] * np.exp(1j * m * phase)).real
+                kappa2 += (kappa2_modes[m] * np.exp(-1j * m * phase)).real
             rho2opt_all.append(rho2opt)
             kappa2_all.append(kappa2)
 
             # # comment out for cross check:
-            # mu = sum_fd_mode_contributions(pol_m, delta_phi=phase)
+            # mu = sum_contributions_m(pol_m, phase_shift=phase)
             # rho2opt_ref = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
             # kappa2_ref = sum(
             #     [
@@ -346,6 +354,12 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             # assert kappa2 - kappa2_ref < 1e-10
 
             log_likelihoods[idx] = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+
+        # # Test that this works:
+        # idx = len(phases) // 3
+        # phase = phases[idx]
+        # log_likelihood_ref = self.log_likelihood({**theta, "phase": phase})
+        # print(log_likelihoods[idx] - log_likelihood_ref)
 
         return log_likelihoods
 
