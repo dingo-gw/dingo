@@ -851,156 +851,6 @@ def sum_contributions_m(x_m, phase_shift=0.0):
     return result
 
 
-def sum_fd_mode_contributions(fd_modearray_dict, delta_phi=0.0):
-    """
-    Sums the contributions of individual FrequencyDomain (FD) modes in fd_modearray_dict.
-    This assumes exp(i * |m| * delta_phi) transformations to account for delta_phi.
-
-    Typically the arrays in fd_modearray_dict would be FD polarizations, but they could
-    also be FD waveforms in the individual detectors.
-
-    Parameters
-    ----------
-    fd_modearray_dict: dict
-        Dictionary of frequency domain mode arrays. These could e.g. be the
-        polarizations, in which case the structure would be
-        {
-            {(2, 2): {"h_plus": np.ndarray, "h_cross": np.ndarray}},
-            {(2, 1): {"h_plus": np.ndarray, "h_cross": np.ndarray}},
-            ...
-        }
-    delta_phi: float = 0.0
-        delta phi. Each mode (l, m) will be multiplied with exp(i * |m| * delta_phi)
-        before the sum.
-
-    Returns
-    -------
-    summed_dict: dict
-        Dictionary of summed FD arrays.
-        In case of polarizations: {"h_plus": hp_sum, "h_cross": hc_sum}
-    """
-    sample = list(fd_modearray_dict.values())[0]
-    keys = sample.keys()
-    # initialized summed dicts
-    summed_dict = {k: np.zeros_like(sample[k]) for k in keys}
-    for mode, array_dict in fd_modearray_dict.items():
-        if isinstance(mode, tuple):
-            _, m = mode
-        else:
-            m = mode
-        for k in keys:
-            summed_dict[k] += array_dict[k] * np.exp(1j * abs(m) * delta_phi)
-    return summed_dict
-
-
-def sum_over_l(fd_modearray_dict):
-    """
-    Sums the contributions of individual FrequencyDomain (FD) modes in
-    fd_modearray_dict for different l but identical |m|. This can be useful, since only
-    |m| determines the transformation behaviour under the spherical harmonics when
-    changing the phase.
-
-    Typically the arrays in fd_modearray_dict would be FD polarizations, but they could
-    also be FD waveforms in the individual detectors.
-
-    Parameters
-    ----------
-    fd_modearray_dict: dict
-        Dictionary of frequency domain mode arrays. These could e.g. be the
-        polarizations, in which case the structure would be
-        {
-            {(2, 2): {"h_plus": np.ndarray, "h_cross": np.ndarray}},
-            {(2, 1): {"h_plus": np.ndarray, "h_cross": np.ndarray}},
-            ...
-        }
-
-    Returns
-    -------
-    summed_dict: dict
-        Dictionary of summed FD arrays for different modes |m|.
-        In case of polarizations:
-        {
-            {(-1, 2): {"h_plus": np.ndarray, "h_cross": np.ndarray}},
-            {(-1, 1): {"h_plus": np.ndarray, "h_cross": np.ndarray}},
-            ...
-        }
-
-    """
-    summed_dict = {}
-    for mode, array_dict in fd_modearray_dict.items():
-        _, m = mode
-        mode_key = (-1, abs(m))
-        if mode_key not in summed_dict:
-            summed_dict[mode_key] = array_dict
-        else:
-            for array_key, v in array_dict.items():
-                summed_dict[mode_key][array_key] += v
-    return summed_dict
-
-
-def get_tapering_windows(pol_dict_modes, taper):
-    """
-    Get lal tapering windows for the different polarizations, by summing up the modes
-    of pol_dict_modes, applying lal tapering, and settings
-
-        windows[pol] = modes_summed_tapered[pol] / modes_summed.
-
-    This is useful since the lal tapering functions are adaptive to the input data,
-    so applying them to the modes individually yields different windows. Computing the
-    window with summed modes leads to coherent tapering between the modes.
-
-    Parameters
-    ----------
-    pol_dict_modes: dict
-        dict of mode contributions to the different polarizations
-    taper: int
-        lal flag for tapering
-
-    Returns
-    -------
-    windows: dict
-        dict with windows for the different polarization keys
-    """
-    pols = next(iter(pol_dict_modes.values())).keys()
-
-    # sum up mode contributions to different polarizations
-    pol_sums = {
-        k: sum(pol_dict_mode[k].data.data for pol_dict_mode in pol_dict_modes.values())
-        for k in pols
-    }
-
-    # To interface the lal tapering functions we need lal objects. As a bit of a hack,
-    # we temporarily use one of the modes to insert summed polarizations for tapering,
-    # and reset the data in the end
-    k_tmp, v_tmp = next(iter(pol_dict_modes.items()))
-    v_tmp = v_tmp["h_plus"]
-    data_tmp = np.array(v_tmp.data.data, copy=True)
-
-    # get windows
-    windows = {}
-    for pol, pol_sum in pol_sums.items():
-        v_tmp.data.data = pol_sum
-        LS.SimInspiralREAL8WaveTaper(v_tmp.data, taper)
-        eps = 1e-10 * np.max(np.abs(pol_sum))
-        windows[pol] = (np.abs(v_tmp.data.data) + eps) / (np.abs(pol_sum) + eps)
-    # reset value for tmp vector
-    pol_dict_modes[k_tmp]["h_plus"].data.data = data_tmp
-
-    return windows
-
-
-def apply_frequency_mask(h, domain):
-    return {k: v * domain.frequency_mask for k, v in h.items()}
-
-
-def inner(h1, h2):
-    return np.sum([h1[pol].conj() * h2[pol] for pol in h1]).real
-
-
-def mismatch(h1, h2):
-    return 1 - inner(h1, h2) / np.sqrt(inner(h1, h1) * inner(h2, h2))
-
-
 if __name__ == "__main__":
     import pandas as pd
     import numpy as np
@@ -1063,10 +913,10 @@ if __name__ == "__main__":
     pol = sum_contributions_m(pol_m, phase_shift=phase_shift)
 
     pol_ref = wfg.generate_hplus_hcross({**p, "phase": p["phase"] + phase_shift})
-    m = mismatch(
-        apply_frequency_mask(pol, wfg.domain), apply_frequency_mask(pol_ref, wfg.domain)
-    )
-    print(f"mismatch {m:.1e}")
+    # m = mismatch(
+    #     apply_frequency_mask(pol, wfg.domain), apply_frequency_mask(pol_ref, wfg.domain)
+    # )
+    # print(f"mismatch {m:.1e}")
 
     import matplotlib.pyplot as plt
 
