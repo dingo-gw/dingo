@@ -32,7 +32,7 @@ data:
 #   gnpe_phase:
 #     kernel: bilby.core.prior.Uniform(minimum=-0.1, maximum=0.1)
 #     random_pi_jump: True
-#   inference_parameters: default # [chirp_mass, mass_ratio,  luminosity_distance, dec]
+  inference_parameters: default # [chirp_mass, mass_ratio,  luminosity_distance, dec]
 
 # Model architecture
 model:
@@ -94,7 +94,7 @@ training:
 local:
   device: cpu  # Change this to 'cuda' for training on a GPU.
   num_workers: 6  # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
-  use_wandb: True
+  use_wandb: False
   wandb_api_key: # insert_here. Can be obtained from https://wandb.ai/settings
   runtime_limits:
     max_time_per_run: 36000

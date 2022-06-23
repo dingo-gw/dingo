@@ -14,8 +14,8 @@ def generate_dataset():
     args = parse_args()
 
     # Load settings
-    if args.settings is not None:
-        with open(args.settings, "r") as f:
+    if args.settings_file is not None:
+        with open(args.settings_file, "r") as f:
             settings = yaml.safe_load(f)
     else:
         with open(join(args.data_dir, "asd_dataset_settings.yaml"), "r") as f:
@@ -44,7 +44,7 @@ def parse_args():
         help="Path where the PSD data is to be stored. Must contain a 'settings.yaml' file.",
     )
     parser.add_argument(
-        "--settings",
+        "--settings_file",
         type=str,
         default=None,
         help="Optional path to a settings file in case two different datasets are generated in the sam directory",
