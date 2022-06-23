@@ -839,65 +839,6 @@ def generate_waveforms_parallel(
     return polarizations
 
 
-def generate_waveform_and_catch_errors(
-    wf_generator_func, parameters_lal, len_domain, catch_waveform_errors=True
-):
-    """
-    Wraps wf_generator_func.
-
-    If lal does not hit an error, this simply returns
-    wf_dict = wf_generator_func(parameters_lal).
-
-    If lal does hit an error:
-        * If catch_waveform_errors is False, this raises the error.
-        * If catch_waveform_errors is True, this returns a dictionary of nan's.
-
-    Parameters
-    ----------
-    wf_generator_func: callable
-        Function that computes wf_dict = wf_generator_func(parameters_lal)
-    parameters_lal
-        parameters for lal routine
-    len_domain: int
-        length of domain, required for nan initialization of the polarizations
-    catch_waveform_errors: bool=Tru
-        If True, catch lal errors and return nan's.
-
-    Returns
-    -------
-
-    """
-    try:
-        wf_dict = wf_generator_func(parameters_lal)
-    except Exception as e:
-        if not catch_waveform_errors:
-            raise
-        else:
-            EDOM = e.args[0] == "Internal function call failed: Input domain error"
-            if EDOM:
-                warnings.warn(
-                    f"Evaluating the waveform failed with error: {e}\n"
-                    f"The parameters were {parameters_lal}\n"
-                )
-                pol_nan = np.ones(len(self.domain)) * np.nan
-                wf_dict = {"h_plus": pol_nan, "h_cross": pol_nan}
-            else:
-                raise
-    return wf_dict
-
-
-def sum_polarizations_m(pol_m, phase_shift=0.0):
-    """
-    Sum the polarizations over the m components, optionally introducing a phase shift.
-    """
-    polarizations = ["h_plus", "h_cross"]
-    result = {pol: 0.0 for pol in polarizations}
-    for pol in polarizations:
-        for m, h in pol_m.items():
-            result[pol] += h[pol] * np.exp(-1j * m * phase_shift)
-    return result
-
-
 def sum_contributions_m(x_m, phase_shift=0.0):
     """
     Sum the contributions over m-components, optionally introducing a phase shift.
@@ -1119,7 +1060,7 @@ if __name__ == "__main__":
 
     phase_shift = np.random.uniform(high=2 * np.pi)
     print(f"{phase_shift:.2f}")
-    pol = sum_polarizations_m(pol_m, phase_shift=phase_shift)
+    pol = sum_contributions_m(pol_m, phase_shift=phase_shift)
 
     pol_ref = wfg.generate_hplus_hcross({**p, "phase": p["phase"] + phase_shift})
     m = mismatch(

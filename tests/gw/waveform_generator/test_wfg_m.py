@@ -14,7 +14,7 @@ wfg.spin_conversion_phase = 0.0.
 import pytest
 import numpy as np
 
-from dingo.gw.waveform_generator import WaveformGenerator, sum_polarizations_m
+from dingo.gw.waveform_generator import WaveformGenerator, sum_contributions_m
 from dingo.gw.gwutils import get_mismatch
 from dingo.gw.domains import build_domain
 from dingo.gw.prior import build_prior_with_defaults
@@ -68,7 +68,7 @@ def test_generate_hplus_hcross_m_SEOBNRv4PHM(uniform_fd_domain, intrinsic_prior)
     p = prior.sample()
     phase_shift = np.random.uniform(high=2 * np.pi)
     pol_m = wfg.generate_hplus_hcross_m(p)
-    pol = sum_polarizations_m(pol_m, phase_shift=phase_shift)
+    pol = sum_contributions_m(pol_m, phase_shift=phase_shift)
     pol_ref = wfg.generate_hplus_hcross({**p, "phase": p["phase"] + phase_shift})
 
     mismatches = [
@@ -101,7 +101,7 @@ def test_generate_hplus_hcross_m_IMRPhenomXPHM(uniform_fd_domain, intrinsic_prio
         phase_shift = np.random.uniform(high=2 * np.pi)
 
         pol_m = wfg.generate_hplus_hcross_m(p)
-        pol = sum_polarizations_m(pol_m, phase_shift=phase_shift)
+        pol = sum_contributions_m(pol_m, phase_shift=phase_shift)
         pol_ref = wfg.generate_hplus_hcross({**p, "phase": p["phase"] + phase_shift})
 
         mismatches.append(
