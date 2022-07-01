@@ -1,15 +1,25 @@
 import time
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Union, Dict
 
+import numpy
 import numpy as np
 import pandas as pd
+import math
 import torch
 from scipy.special import logsumexp
 from torchvision.transforms import Compose
+import tempfile
 
 from dingo.core.models import PosteriorModel
 from dingo.core.samples_dataset import SamplesDataset
+from dingo.core.density import (
+    train_unconditional_density_estimator,
+    get_default_nde_settings_3d,
+)
+
+# FIXME: transform below should be in core
+from dingo.gw.transforms import SelectStandardizeRepackageParameters
 
 #
 # Sampler classes are motivated by the approach of Bilby.
@@ -107,7 +117,15 @@ class Sampler(object):
     def event_metadata(self, value):
         self.base_model_metadata["event"] = value
 
-    def _run_sampler(self, num_samples: int, context: Optional[dict] = None) -> dict:
+    def prepare_log_prob(self, *args, **kwargs):
+        pass
+
+    def _run_sampler(
+        self,
+        num_samples: int,
+        context: Optional[dict] = None,
+        **kwargs,
+    ) -> dict:
         if not self.unconditional_model:
             if context is None:
                 raise ValueError("Context required to run sampler.")
@@ -149,6 +167,8 @@ class Sampler(object):
         self,
         num_samples: int,
         batch_size: Optional[int] = None,
+        **kwargs,
+        # get_log_prob: bool = False,
     ):
         """
         Generates samples and stores them as class attribute.
@@ -162,6 +182,8 @@ class Sampler(object):
             Number of samples requested.
         batch_size : int, optional
             Batch size for sampler.
+        get_log_prob  :  bool = False
+            If set, compute log_prob for each sample
         """
         self._reset_result()
         if not self.unconditional_model:
@@ -176,10 +198,19 @@ class Sampler(object):
         if batch_size is None:
             batch_size = num_samples
         full_batches, remainder = divmod(num_samples, batch_size)
-        samples = [self._run_sampler(batch_size, context) for _ in range(full_batches)]
+        samples = [
+            self._run_sampler(batch_size, context, **kwargs)
+            for _ in range(full_batches)
+        ]
         if remainder > 0:
             samples.append(self._run_sampler(remainder, context))
         samples = {p: torch.cat([s[p] for s in samples]) for p in samples[0].keys()}
+        # get_log_prob = True
+        # if get_log_prob and "log_prob" not in samples.keys():
+        #     log_prob = self.log_prob_mc(
+        #         samples, n_mc=1000, batch_size=batch_size,
+        #     )
+        # # samples = {p: torch.cat([s[p] for s in samples]) for p in k_parameters}
         samples = {k: v.cpu().numpy() for k, v in samples.items()}
 
         # Apply any post-sampling transformation to sampled parameters (e.g.,
@@ -237,10 +268,13 @@ class Sampler(object):
         log_prob -= np.sum(np.log(std))
 
         # Pre-processing step may have included a log_prob with the samples.
-        if 'log_prob' in samples:
-            log_prob += samples['log_prob'].to_numpy()
+        if "log_prob" in samples:
+            log_prob += samples["log_prob"].to_numpy()
 
         return log_prob
+
+    def log_prob_mc(self, *args, **kwargs):
+        pass
 
     def _post_process(self, samples: Union[dict, pd.DataFrame], inverse: bool = False):
         pass
@@ -424,6 +458,24 @@ class Sampler(object):
             )
 
 
+class UnconditionalSampler(Sampler):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.unconditional_model = True
+        self._initialize_transforms()
+
+    def _initialize_transforms(self):
+        # Postprocessing transform only:
+        #   * De-standardize data and extract inference parameters. Be careful to use
+        #     the standardization of the correct model, not the base model.
+        self.transform_post = SelectStandardizeRepackageParameters(
+            {"inference_parameters": self.inference_parameters},
+            self.metadata["train_settings"]["data"]["standardization"],
+            inverse=True,
+            as_type="dict",
+        )
+
+
 class GNPESampler(Sampler):
     """
     Base class for GNPE sampler. It wraps a PosteriorModel, and must contain also an NPE
@@ -449,6 +501,8 @@ class GNPESampler(Sampler):
         self.init_sampler = init_sampler
         self.num_iterations = num_iterations
         self.gnpe_parameters = None  # Should be set in subclass.
+        self.gnpe_proxy_sampler = None
+        self.log_prob_correction = None  # log_prob correction, accounting for std
 
     @property
     def init_sampler(self):
@@ -469,33 +523,345 @@ class GNPESampler(Sampler):
         self._num_iterations = value
         self.metadata["num_iterations"] = self._num_iterations
 
-    def _run_sampler(self, num_samples: int, context: Optional[dict] = None) -> dict:
+    def prepare_log_prob(
+        self,
+        num_samples: int,
+        batch_size: Optional[int] = None,
+    ):
+        self.run_sampler(num_samples, batch_size)
+        gnpe_proxy_keys = [k for k in self.samples.keys() if k.startswith("GNPE:")]
+        gnpe_proxy_pd = self.samples[gnpe_proxy_keys].rename(columns=lambda x: x[5:])
+        gnpe_proxy_dataset = SamplesDataset(dictionary={"samples": gnpe_proxy_pd})
+        # samples_dict = self.samples[
+        #     [k for k in self.samples.keys() if k.startswith("GNPE:")]
+        # ].to_dict()
+        # samples_dataset = SamplesDataset(dictionary=samples_dict)
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            settings = get_default_nde_settings_3d(
+                device=str(self.model.device),
+                inference_parameters=[k[5:] for k in gnpe_proxy_keys],
+            )
+            gnpe_proxy_model = train_unconditional_density_estimator(
+                gnpe_proxy_dataset,
+                settings,
+                tmpdirname,
+            )
+            # from dingo.gw.inference.gw_samplers import GWSamplerUnconditional
+            self.gnpe_proxy_sampler = UnconditionalSampler(model=gnpe_proxy_model)
+
+        sampler = self.gnpe_proxy_sampler
+        std_gnpe_proxy_sampler = np.array(
+            [
+                sampler.metadata["train_settings"]["data"]["standardization"]["std"][p]
+                for p in sampler.inference_parameters
+            ]
+        )
+        sampler = self
+        std_sampler = np.array(
+            [
+                sampler.metadata["train_settings"]["data"]["standardization"]["std"][p]
+                for p in sampler.inference_parameters
+            ]
+        )
+        self.log_prob_correction = -np.sum(np.log(std_sampler)) - np.sum(
+            np.log(std_gnpe_proxy_sampler)
+        )
+
+    def _run_sampler(
+        self,
+        num_samples: int,
+        context: Optional[dict] = None,
+        use_gnpe_proxy_sampler=False,
+    ) -> dict:
         if context is None:
             raise ValueError("self.context must be set to run sampler.")
+        use_gnpe_proxy_sampler = self.gnpe_proxy_sampler is not None
 
         data_ = self.init_sampler.transform_pre(context)
 
-        x = {
-            "extrinsic_parameters": self.init_sampler._run_sampler(
-                num_samples, context
-            ),
-            "parameters": {},
-        }
-        for i in range(self.num_iterations):
-            print(i)
-            x["extrinsic_parameters"] = {
-                k: x["extrinsic_parameters"][k] for k in self.gnpe_parameters
+        if not use_gnpe_proxy_sampler:
+            # Run gnpe iterations to jointly infer gnpe proxies and inference parameters.
+            x = {
+                "extrinsic_parameters": self.init_sampler._run_sampler(
+                    num_samples, context
+                ),
+                "parameters": {},
             }
-            d = data_.clone()
-            x["data"] = d.expand(num_samples, *d.shape)
+            for i in range(self.num_iterations):
+                print(i)
+                x["extrinsic_parameters"] = {
+                    k: x["extrinsic_parameters"][k] for k in self.gnpe_parameters
+                }
+                d = data_.clone()
+                x["data"] = d.expand(num_samples, *d.shape)
 
+                x = self.transform_pre(x)
+                x["parameters"] = self.model.sample(x["data"], x["context_parameters"])
+                x = self.transform_post(x)
+                samples = x["parameters"]
+        else:
+            # Infer gnpe proxies based on trained model in gnpe_proxy sampler.
+            # With this, we can infer the inference parameters with a single pass
+            # through the gnpe network.
+            d = data_.clone()
+
+            gnpe_proxies_in = self.gnpe_proxy_sampler._run_sampler(
+                num_samples=num_samples, batch_size=num_samples
+            )
+            log_prob_gnpe_proxies = gnpe_proxies_in.pop("log_prob")
+
+            x = {
+                "extrinsic_parameters": {},
+                "parameters": {},
+                "gnpe_proxies_in": gnpe_proxies_in,
+                "data": d.expand(num_samples, *d.shape),
+            }
             x = self.transform_pre(x)
-            x["parameters"] = self.model.sample(x["data"], x["context_parameters"])
+            with torch.no_grad():
+                x["parameters"], log_prob = self.model.model.sample_and_log_prob(
+                    x["data"],
+                    x["context_parameters"],
+                )
             x = self.transform_post(x)
 
-        samples = x["parameters"]
+            samples = x["parameters"]
+            samples["log_prob"] = (
+                log_prob + log_prob_gnpe_proxies - self.log_prob_correction
+            )
+
+        # add gnpe parameters:
+        for k, v in x["gnpe_proxies"].items():
+            assert k.endswith("_proxy")
+            samples["GNPE:" + k] = x["gnpe_proxies"][k]
+
+        #
+        # get_log_prob = True
+        # n_log_prob = 10
+        # if get_log_prob:
+        #     extrinsic_parameters = x["extrinsic_parameters"]
+        #     for i_log_prob in range(1, n_log_prob+1):
+        #         # Shift everything by i along the batch dimension.
+        #         # This has the effect of evaluating the log_prob for random samples of
+        #         # the proxies, which corresponds to a Monte Carlo integration.
+        #         extrinsic_parameters_shifted = torch.roll(
+        #             extrinsic_parameters[k], shifts=i, dims=0
+        #         )
+        #         x["extrinsic_parameters"] = {
+        #             k: extrinsic_parameters_shifted for k in self.gnpe_parameters
+        #         }
+        #         # remove context parameters for safety, we want these to be sampled
+        #         # from the *shifted* extrinsic parameters, so we don't want to allow
+        #         # any further information to sneak in
+        #         x.pop("context_parameters", None)
+        #         d = data_.clone()
+        #         x["data"] = d.expand(num_samples, *d.shape)
+        #
+        #         x = self.transform_pre(x)
+        #         x["parameters"] =
+        #         x["parameters"] = self.model.sample(x["data"], x["context_parameters"])
+        #         x = self.transform_post(x)
+        #         # theta, log_prob = self.model.model.sample_and_log_prob(
+        #         #     x["data"], x["context_parameters"]
+        #         # )
+        #         # print(torch.abs(log_prob - log_prob_ref) / torch.abs(log_prob))
+        #         x["extrinsic_parameters"] = {
+        #             k: x["extrinsic_parameters"][k] for k in self.gnpe_parameters
+        #         }
+        #         d = data_.clone()
+        #         x["data"] = d.expand(num_samples, *d.shape)
+        #
+        #         x = self.transform_pre(x)
+        #         self.model.model.log_prob(
+        #             x["parameters"]
+        #         )
 
         return samples
+
+    def log_prob_mc(
+        self,
+        samples: Dict[str, torch.Tensor],
+        n_mc: int = 100,
+        batch_size: int = 100,
+    ) -> np.ndarray:
+        parameters, gnpe_proxies, gnpe_parameters = {}, {}, {}
+        for k, v in samples.items():
+            if not k.startswith("GNPE:"):
+                parameters[k] = v
+            elif k.endswith("_proxy"):
+                gnpe_proxies[k[len("GNPE:") :]] = v
+            else:
+                gnpe_parameters[k[len("GNPE:") :]] = v
+        num_samples = len(samples[k])
+        # gnpe_keys = [k[:-len("_proxy")] for k in gnpe_proxies.keys()]
+        gnpe_proxies = torch.cat(
+            [gnpe_proxies[k + "_proxy"][:, None] for k in self.gnpe_parameters],
+            dim=1,
+        )
+        gnpe_parameters = torch.cat(
+            [gnpe_parameters[k][:, None] for k in self.gnpe_parameters],
+            dim=1,
+        )
+
+        import pandas as pd
+
+        params = pd.DataFrame(samples)
+        n_train = int(len(params) * 0.9)
+        x = params[["geocent_time", "GNPE:H1_time_proxy", "GNPE:L1_time_proxy"]]
+        x_train, x_test = x[:n_train], x[n_train:]
+
+        import yaml
+        from os.path import join
+        from dingo.core.density import train_unconditional_density_estimator
+        from types import SimpleNamespace
+
+        xs = SimpleNamespace()
+        xs.samples = x
+        xs.context = None
+        xs.settins = None
+        nde_dir = "/Users/maxdax/Documents/Projects/GW-Inference/dingo/utils/tmp_dir/"
+        with open(join(nde_dir, "nde_settings.yaml")) as f:
+            nde_settings = yaml.safe_load(f)
+        nde = train_unconditional_density_estimator(xs, nde_settings, nde_dir)
+
+        from sklearn.neighbors import KernelDensity
+
+        x = np.array(gnpe_proxies)
+        n_train = int(len(x) * 0.9)
+        for bw in [1e-4, 1e-3, 1e-2, 1e-1]:
+            x_train, x_test = x[:n_train], x[n_train:]
+            kde = KernelDensity(bandwidth=bw, kernel="gaussian")
+            kde.fit(x_train)
+            train_score = kde.score_samples(x_train)
+            test_score = kde.score_samples(x_test)
+            print(
+                f"Bandwith: {bw}\t"
+                f"train score: {np.mean(train_score):.2f} ({np.min(train_score):.2f})\t"
+                f"test score: {np.mean(test_score):.2f} ({np.min(test_score):.2f})"
+            )
+
+        # for bw in [1e-4, 1e-3, 1e-2, 1e-1]:
+        #     kde = KernelDensity(bandwidth=bw, kernel='gaussian')
+        #     kde.fit(x_train)
+        #     train_score = kde.score_samples(x_train)
+        #     test_score = kde.score_samples(x_test)
+        #     print(
+        #         f"Bandwith: {bw}\t"
+        #         f"train score: {np.mean(train_score):.2f} ({np.min(train_score):.2f})\t"
+        #         f"test score: {np.mean(test_score):.2f} ({np.min(test_score):.2f})"
+        #     )
+        kde = KernelDensity(bandwidth=1e-3, kernel="gaussian")
+        kde.fit(x_train)
+        from chainconsumer import ChainConsumer
+        import scipy
+
+        c = ChainConsumer()
+        c.add_chain(x_test, color="blue", name="x_test")
+        c.add_chain(kde.sample(len(x_test)), color="orange", name="kde")
+        N = 2
+        c.configure(
+            linestyles=["-"] * N,
+            linewidths=[1.5] * N,
+            sigmas=[np.sqrt(2) * scipy.special.erfinv(x) for x in [0.5, 0.9]],
+            shade=[False] + [True] * (N - 1),
+            shade_alpha=0.3,
+            bar_shade=False,
+            label_font_size=10,
+            tick_font_size=10,
+            usetex=False,
+            legend_kwargs={"fontsize": 30},
+            kde=0.7,
+        )
+        c.plotter.plot(
+            filename="/Users/maxdax/Documents/Projects/GW-Inference/dingo/utils/tmp.pdf"
+        )
+
+        log_probs = []
+
+        n_per_batch = batch_size // n_mc  # number of likelihood approxmations per batch
+        num_samples = 30
+        for idx in range(math.ceil(num_samples / n_per_batch)):
+            theta_batch = {
+                k: v[idx * n_per_batch : (idx + 1) * n_per_batch]
+                for k, v in parameters.items()
+            }
+
+            # select only gnpe_proxies for which q(theta | x, proxies) != 0
+            gnpe_parameters_batch = gnpe_parameters[
+                idx * n_per_batch : (idx + 1) * n_per_batch
+            ]
+            diff_gnpe_parameters_proxies = torch.abs(
+                # expand is a view, but the diff will occupy memory
+                gnpe_proxies.expand(n_per_batch, *gnpe_proxies.shape)
+                - gnpe_parameters_batch[:, None, :].expand(-1, len(gnpe_proxies), -1)
+            )
+            max_diff = torch.Tensor([0.001, 0.001])
+            gnpe_mask = (
+                torch.sum(
+                    (diff_gnpe_parameters_proxies < max_diff[None, None, :]),
+                    dim=2,
+                )
+                == len(max_diff)
+            )
+            mc_indices = []
+            hot_fraction = []
+            for idx_theta in range(len(gnpe_mask)):
+                hot_indices = torch.where(gnpe_mask[idx_theta])[0]
+                hot_fraction.append(len(hot_indices) / gnpe_mask.shape[-1])
+                mc_indices.append(hot_indices[torch.randperm(len(hot_indices))[:n_mc]])
+
+            hot_fraction = torch.Tensor(hot_fraction)
+            mc_indices = torch.cat(mc_indices)
+            gnpe_proxies_in = gnpe_proxies[mc_indices]
+
+            data_ = self.init_sampler.transform_pre(self.context)
+            x = {
+                "extrinsic_parameters": {},
+                "parameters": {},
+            }
+            # x["extrinsic_parameters"] = {
+            #     k: x["extrinsic_parameters"][k] for k in self.gnpe_parameters
+            # }
+            d = data_.clone()
+            x["data"] = d.expand(len(gnpe_proxies_in), *d.shape)
+            x["gnpe_proxies_in"] = {
+                k + "_proxy": gnpe_proxies_in[:, idx]
+                for idx, k in enumerate(self.gnpe_parameters)
+            }
+            x = self.transform_pre(x)
+            # The above provides us with the context information that will be passed to
+            # the NDE, x["data"], x["context_parameters"].
+            # Now we need to prepare where to evaluate the flow, which requires
+            # standardizing the parameters and optionally applying the inverse GNPE
+            # postcorrection transformations.
+
+            theta_batch_n = {
+                k: v.repeat_interleave(n_mc) for k, v in theta_batch.items()
+            }
+            y = self.transform_post_inverse(
+                {
+                    # repeat each tensor in theta_batch n_mc times
+                    "parameters": theta_batch_n,
+                    "extrinsic_parameters": x["extrinsic_parameters"],
+                }
+            )
+            y = y["inference_parameters"]
+
+            log_prob = self.model.model.log_prob(
+                y, x["data"], x["context_parameters"]
+            ).detach()
+            prob = torch.exp(log_prob)
+            # Need to average the probability. Multiply it with hot_fraction, because
+            # only this fraction has non-zero probs
+            prob_avg = torch.mean(prob.reshape(-1, n_mc), dim=1) * hot_fraction
+
+            log_probs.append(torch.log(prob_avg).cpu().numpy())
+
+        return numpy.concatenate(log_probs)
+
+        # Step 1: filter valid proxies in self.proxies, save ratio n_valid / n_all
+        # Step 2: sample num_samples proxies for each sample
+        # Step 3: Prepare data with the proxies: subtract H1 proxy, standardize
+        # Step 4: Evaluate log_prob
 
     # with GNPE the log_prob becomes intractable, so we drop the log_prob method
     log_prob = None
