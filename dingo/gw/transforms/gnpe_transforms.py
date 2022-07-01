@@ -164,7 +164,16 @@ class GNPECoalescenceTimes(GNPEBase):
     def __call__(self, input_sample):
         sample = input_sample.copy()
         extrinsic_parameters = sample["extrinsic_parameters"].copy()
-        new_parameters = self.sample_proxies(extrinsic_parameters)
+        if not self.inference or "gnpe_proxies_in" not in sample:
+            # sample proxy
+            new_parameters = self.sample_proxies(extrinsic_parameters)
+        else:
+            # at inference, if proxies are provided, use these instead of sampling them
+            new_parameters = {
+                k: v
+                for k, v in sample["gnpe_proxies_in"].items()
+                if k[:-6] in self.kernel
+            }
 
         # If we are in training mode, we assume that the time shifting due to different
         # arrival times of the signal in individual detectors has not yet been applied
@@ -178,8 +187,13 @@ class GNPECoalescenceTimes(GNPEBase):
                 )
         # In inference mode, the data are only time shifted by minus the proxy.
         else:
+            if "gnpe_proxies" not in sample:
+                sample["gnpe_proxies"] = {}
             for k in self.ifo_time_labels:
                 new_parameters[k] = -new_parameters[k + "_proxy"]
+                sample["gnpe_proxies"][k + "_proxy"] = new_parameters[
+                    k + "_proxy"
+                ].clone()
 
         # If we are imposing the global time shift symmetry, then we treat the first
         # proxy as "preferred", in the sense that it defines the global time shift.
