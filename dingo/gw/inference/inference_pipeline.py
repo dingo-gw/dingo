@@ -136,6 +136,7 @@ def analyze_event():
         ref = None
 
     if args.model_init is not None:
+        gnpe = True
         init_model = PosteriorModel(
             args.model_init, device=device, load_training_info=False
         )
@@ -146,6 +147,7 @@ def analyze_event():
             num_iterations=args.num_gnpe_iterations,
         )
     else:
+        gnpe = False
         sampler = GWSampler(model=model)
 
     # sample posterior for events
@@ -166,6 +168,15 @@ def analyze_event():
             "time_psd": args.time_psd,
             "time_buffer": args.time_buffer,
         }
+
+        if gnpe and args.get_log_prob:
+            # GNPE generally does not provide straightforward access to the log_prob.
+            # If requested, need to train an initialization model for the GNPE proxies.
+            sampler.prepare_log_prob(
+                num_samples=200_000,
+                batch_size=args.batch_size,
+            )
+
         sampler.run_sampler(
             args.num_samples,
             batch_size=args.batch_size,
