@@ -109,13 +109,13 @@ def td_modes_to_fd_modes(hlm_td, domain):
         assert h_td.deltaT == delta_t
 
         # resize data to chirplen by zero-padding or truncating
-        if chirplen < h_td.data.length:
-            print(
-                f"Specified frequency interval of {delta_f} Hz is too large "
-                f"for a chirp of duration {h_td.data.length * delta_t} s with "
-                f"Nyquist frequency {f_nyquist} Hz. The inspiral will be "
-                f"truncated."
-            )
+        # if chirplen < h_td.data.length:
+        #     print(
+        #         f"Specified frequency interval of {delta_f} Hz is too large "
+        #         f"for a chirp of duration {h_td.data.length * delta_t} s with "
+        #         f"Nyquist frequency {f_nyquist} Hz. The inspiral will be "
+        #         f"truncated."
+        #     )
         lal.ResizeCOMPLEX16TimeSeries(h_td, h_td.data.length - chirplen, chirplen)
 
         # Initialize a lal frequency series. We choose length chirplen + 1, while h_td is
