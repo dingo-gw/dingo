@@ -15,6 +15,7 @@ from bilby.core.prior import Constraint
 from dingo.core.models import PosteriorModel
 from dingo.core.samples_dataset import SamplesDataset
 from dingo.core.density import train_unconditional_density_estimator
+from dingo.core.utils import torch_detach_to_cpu
 
 # FIXME: transform below should be in core
 from dingo.gw.transforms import SelectStandardizeRepackageParameters
@@ -187,7 +188,6 @@ class Sampler(object):
         num_samples: int,
         batch_size: Optional[int] = None,
         **kwargs,
-        # get_log_prob: bool = False,
     ):
         """
         Generates samples and stores them as class attribute.
@@ -213,6 +213,8 @@ class Sampler(object):
             )
             return
 
+        print(f"Running sampler to generate {num_samples} samples.")
+        t0 = time.time()
         if not self.unconditional_model:
             if self.context is None:
                 raise ValueError("Context must be set in order to run sampler.")
@@ -244,6 +246,7 @@ class Sampler(object):
         # correction for t_ref or sampling of synthetic phase), and place on CPU.
         self._post_process(samples)
         self.samples = pd.DataFrame(samples)
+        print(f"Done. This took {time.time() - t0:.1f} s.")
 
     def log_prob(self, samples: pd.DataFrame) -> np.ndarray:
         """
@@ -705,9 +708,9 @@ class GNPESampler(Sampler):
             # We compute log[p(theta^|theta)] below and store it as
             # samples["delta_log_prob_target"], such that for importance sampling we
             # only need to evaluate log[p(theta|x)] and add this correction.
-            kernel_log_prob = self._kernel_log_prob(
-                {**x["extrinsic_parameters"], **samples, **x["gnpe_proxies"]}
-            )
+            all_params = {**x["extrinsic_parameters"], **samples, **x["gnpe_proxies"]}
+            all_params = {k: torch_detach_to_cpu(v) for k, v in all_params.items()}
+            kernel_log_prob = self._kernel_log_prob(all_params)
             samples["delta_log_prob_target"] = torch.Tensor(kernel_log_prob)
 
         # add gnpe parameters:
