@@ -1,6 +1,7 @@
 import time
 from pathlib import Path
 from typing import Optional, Union, Dict
+import sys
 
 import numpy
 import numpy as np
@@ -247,6 +248,7 @@ class Sampler(object):
         self._post_process(samples)
         self.samples = pd.DataFrame(samples)
         print(f"Done. This took {time.time() - t0:.1f} s.")
+        sys.stdout.flush()
 
     def log_prob(self, samples: pd.DataFrame) -> np.ndarray:
         """
