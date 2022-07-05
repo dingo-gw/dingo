@@ -10,13 +10,11 @@ import torch
 from scipy.special import logsumexp
 from torchvision.transforms import Compose
 import tempfile
+from bilby.core.prior import Constraint
 
 from dingo.core.models import PosteriorModel
 from dingo.core.samples_dataset import SamplesDataset
-from dingo.core.density import (
-    train_unconditional_density_estimator,
-    get_default_nde_settings_3d,
-)
+from dingo.core.density import train_unconditional_density_estimator
 
 # FIXME: transform below should be in core
 from dingo.gw.transforms import SelectStandardizeRepackageParameters
@@ -44,37 +42,58 @@ class Sampler(object):
         print_summary
     """
 
-    def __init__(self, model: PosteriorModel):
+    def __init__(
+        self,
+        model: PosteriorModel = None,
+        samples_dataset: SamplesDataset = None,
+    ):
         """
         Parameters
         ----------
         model : PosteriorModel
         """
+        if (model is None) + (samples_dataset is None) != 1:
+            raise ValueError(
+                "Sampler should be initialized with either a model, or samples_dataset."
+            )
+
         self.model = model
-        self.metadata = self.model.metadata.copy()
+        self.samples_dataset = samples_dataset
 
-        if "parameter_samples" in self.metadata["train_settings"]["data"]:
+        if self.model is not None:
+            self.metadata = self.model.metadata.copy()
+
+            if "parameter_samples" in self.metadata["train_settings"]["data"]:
+                self.unconditional_model = True
+                # For unconditional models, the context will be stored with the model. It
+                # is needed for calculating the likelihood for importance sampling.
+                # However, it will not be used when sampling from the model, since it is
+                # unconditional.
+                self.context = self.model.context
+            else:
+                self.unconditional_model = False
+                self.context = None
+
+            if "base" in self.metadata:
+                self.base_model_metadata = self.metadata["base"]
+            else:
+                self.base_model_metadata = self.metadata
+
+            self.inference_parameters = self.metadata["train_settings"]["data"][
+                "inference_parameters"
+            ]
+
+        elif self.samples_dataset is not None:
+            self.metadata = None
             self.unconditional_model = True
-
-            # For unconditional models, the context will be stored with the model. It
-            # is needed for calculating the likelihood for importance sampling.
-            # However, it will not be used when sampling from the model, since it is
-            # unconditional.
-            self.context = self.model.context
-        else:
-            self.unconditional_model = False
-            self.context = None
-
-        if "base" in self.metadata:
-            self.base_model_metadata = self.metadata["base"]
-        else:
-            self.base_model_metadata = self.metadata
+            self.context = self.samples_dataset.context
+            self.base_model_metadata = self.samples_dataset.settings
+            self.samples = self.samples_dataset.samples
+            data_settings = self.base_model_metadata["train_settings"]["data"]
+            self.inference_parameters = data_settings["inference_parameters"]
 
         self.transform_pre = Compose([])
         self.transform_post = Compose([])
-        self.inference_parameters = self.metadata["train_settings"]["data"][
-            "inference_parameters"
-        ]
         self._build_prior()
         self._build_domain()
         self._reset_result()
@@ -186,6 +205,14 @@ class Sampler(object):
             If set, compute log_prob for each sample
         """
         self._reset_result()
+
+        if self.samples_dataset is not None:
+            # if self.samples_dataset is set, running the
+            self.samples = self.samples_dataset.samples.sample(
+                num_samples, ignore_index=True
+            )
+            return
+
         if not self.unconditional_model:
             if self.context is None:
                 raise ValueError("Context must be set in order to run sampler.")
@@ -340,7 +367,15 @@ class Sampler(object):
         # Proposal samples and associated log probability have already been calculated
         # using the stored model. These form a normalized probability distribution.
         log_prob_proposal = self.samples["log_prob"].to_numpy()
-        theta = self.samples.drop(columns="log_prob")
+
+        delta_log_prob_target = 0
+        if "delta_log_prob_target" in self.samples.columns:
+            delta_log_prob_target = self.samples["delta_log_prob_target"].to_numpy()
+
+        # select parameters in self.samples (required as log_prob and potentially gnpe
+        # proxies are also stored in self.samples, but are not needed for the likelihood.
+        param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
+        theta = self.samples[param_keys]
 
         # Calculate the (un-normalized) target density as prior times likelihood,
         # evaluated at the same sample points.
@@ -359,7 +394,7 @@ class Sampler(object):
         # code. They do not contribute directly to the evidence or the effective sample
         # size, so we are not losing anything useful.
 
-        within_prior = log_prior != -np.inf
+        within_prior = (log_prior + delta_log_prob_target) != -np.inf
         num_samples = len(self.samples)
         if num_samples != np.sum(within_prior):
             print(
@@ -370,6 +405,7 @@ class Sampler(object):
             theta = theta.iloc[within_prior].reset_index(drop=True)
             log_prob_proposal = log_prob_proposal[within_prior]
             log_prior = log_prior[within_prior]
+            delta_log_prob_target = delta_log_prob_target[within_prior]
 
         print(f"Calculating {len(theta)} likelihoods.")
         t0 = time.time()
@@ -379,7 +415,9 @@ class Sampler(object):
         print(f"Done. This took {time.time() - t0:.2f} seconds.")
 
         # Calculate weights and normalize them to have mean 1.
-        log_weights = log_prior + log_likelihood - log_prob_proposal
+        log_weights = (
+            log_prior + log_likelihood + delta_log_prob_target - log_prob_proposal
+        )
         weights = np.exp(log_weights - np.max(log_weights))
         weights /= np.mean(weights)
 
@@ -388,6 +426,7 @@ class Sampler(object):
         self.samples["weights"] = weights
         self.samples["log_likelihood"] = log_likelihood
         self.samples["log_prior"] = log_prior
+        # self.samples["delta_log_prob_target"] = delta_log_prob_target
 
         # The evidence
         #           Z = \int d\theta \pi(\theta) L(\theta),
@@ -503,6 +542,7 @@ class GNPESampler(Sampler):
         self.gnpe_parameters = None  # Should be set in subclass.
         self.gnpe_proxy_sampler = None
         self.log_prob_correction = None  # log_prob correction, accounting for std
+        self.gnpe_proxy_sampler = None
 
     @property
     def init_sampler(self):
@@ -523,49 +563,75 @@ class GNPESampler(Sampler):
         self._num_iterations = value
         self.metadata["num_iterations"] = self._num_iterations
 
+    def _kernel_log_prob(self, samples):
+        raise NotImplementedError("To be implemented in subclass.")
+
     def prepare_log_prob(
         self,
         num_samples: int,
+        nde_settings: dict,
         batch_size: Optional[int] = None,
+        threshold_std: Optional[float] = np.inf,
     ):
+        """
+        Prepare gnpe sampling with log_prob. This is required, since in its vanilla
+        form gnpe does not provide the density for its samples.
+
+        Specifically, we train an unconditional neural density estimator (nde) for the
+        gnpe proxies. This requires running the gnpe sampler till convergence, and
+        extracting the gnpe proxies after the final gnpe iteration. The nde is trained
+        to match the distribution over gnpe proxies, which provides a way of rapidly
+        sampling (converged!) gnpe proxies *and* evaluating the log_prob.
+
+        After this preparation step, self.run_sampler can leverage
+        self.gnpe_proxy_sampler (which is based on the aforementioned trained nde) to
+        sample gnpe proxies, such that one gnpe iteration is sufficient. The log_prob of
+        the samples in the *joint* space (inference parameters + gnpe proxies) is then
+        simply given by the sum of the corresponding log_probs (from self.model and
+        self.gnpe_proxy_sampler.model).
+
+        Parameters
+        ----------
+        num_samples: int
+            number of samples for training of nde
+        batch_size: int = None
+            batch size for sampler
+        threshold_std: float = np.inf
+            gnpe proxies deviating by more then threshold_std standard deviations from
+            the proxy mean (along any axis) are discarded.
+        """
         self.run_sampler(num_samples, batch_size)
         gnpe_proxy_keys = [k for k in self.samples.keys() if k.startswith("GNPE:")]
         gnpe_proxy_pd = self.samples[gnpe_proxy_keys].rename(columns=lambda x: x[5:])
         gnpe_proxy_dataset = SamplesDataset(dictionary={"samples": gnpe_proxy_pd})
-        # samples_dict = self.samples[
-        #     [k for k in self.samples.keys() if k.startswith("GNPE:")]
-        # ].to_dict()
-        # samples_dataset = SamplesDataset(dictionary=samples_dict)
+        # filter outliers, as they decrease the performance of the density estimator
+        mean = np.mean(gnpe_proxy_dataset.samples, axis=0)
+        std = np.std(gnpe_proxy_dataset.samples, axis=0)
+        lower, upper = mean - threshold_std * std, mean + threshold_std * std
+        inds = np.where(
+            np.all((lower <= gnpe_proxy_dataset.samples), axis=1)
+            * np.all((gnpe_proxy_dataset.samples <= upper), axis=1)
+        )[0]
+        if len(inds) / len(gnpe_proxy_dataset.samples) < 0.95:
+            raise ValueError("Too many proxy samples outside of specified range.")
+        gnpe_proxy_dataset.samples = gnpe_proxy_dataset.samples.iloc[inds]
+        nde_settings["data"] = {"inference_parameters": [k[5:] for k in gnpe_proxy_keys]}
+        nde_settings["training"]["device"] = str(self.model.device)
         with tempfile.TemporaryDirectory() as tmpdirname:
-            settings = get_default_nde_settings_3d(
-                device=str(self.model.device),
-                inference_parameters=[k[5:] for k in gnpe_proxy_keys],
-            )
             gnpe_proxy_model = train_unconditional_density_estimator(
                 gnpe_proxy_dataset,
-                settings,
+                nde_settings,
                 tmpdirname,
             )
-            # from dingo.gw.inference.gw_samplers import GWSamplerUnconditional
-            self.gnpe_proxy_sampler = UnconditionalSampler(model=gnpe_proxy_model)
+        self.gnpe_proxy_sampler = UnconditionalSampler(model=gnpe_proxy_model)
 
-        sampler = self.gnpe_proxy_sampler
-        std_gnpe_proxy_sampler = np.array(
-            [
-                sampler.metadata["train_settings"]["data"]["standardization"]["std"][p]
-                for p in sampler.inference_parameters
-            ]
-        )
-        sampler = self
-        std_sampler = np.array(
-            [
-                sampler.metadata["train_settings"]["data"]["standardization"]["std"][p]
-                for p in sampler.inference_parameters
-            ]
-        )
-        self.log_prob_correction = -np.sum(np.log(std_sampler)) - np.sum(
-            np.log(std_gnpe_proxy_sampler)
-        )
+        # Get correction for log_prob, which arises due to the standardization
+        # underlying the density estimators self.model and self.gnpe_proxy_sampler.model.
+        self.log_prob_correction = 0
+        for sampler in [self, self.gnpe_proxy_sampler]:
+            std = sampler.metadata["train_settings"]["data"]["standardization"]["std"]
+            std = np.array([std[p] for p in sampler.inference_parameters])
+            self.log_prob_correction += np.sum(np.log(std))
 
     def _run_sampler(
         self,
@@ -626,8 +692,23 @@ class GNPESampler(Sampler):
 
             samples = x["parameters"]
             samples["log_prob"] = (
-                log_prob + log_prob_gnpe_proxies - self.log_prob_correction
+                log_prob + log_prob_gnpe_proxies + self.log_prob_correction
             )
+
+            # The log_prob returned by gnpe is not just the log_prob over parmeters
+            # theta, but instead the log_prob in the *joint* space q(theta,theta^|x),
+            # including the proxies theta^. For importance sampling this means,
+            # that the target density is
+            #
+            #       p(theta,theta^|x) = p(theta^|theta) * p(theta|x).
+            #
+            # We compute log[p(theta^|theta)] below and store it as
+            # samples["delta_log_prob_target"], such that for importance sampling we
+            # only need to evaluate log[p(theta|x)] and add this correction.
+            kernel_log_prob = self._kernel_log_prob(
+                {**x["extrinsic_parameters"], **samples, **x["gnpe_proxies"]}
+            )
+            samples["delta_log_prob_target"] = torch.Tensor(kernel_log_prob)
 
         # add gnpe parameters:
         for k, v in x["gnpe_proxies"].items():

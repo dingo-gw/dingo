@@ -105,6 +105,13 @@ def parse_args():
         action="store_true",
         help="If set, log_probs of samples are saved. Will not work for GNPE.",
     )
+    parser.add_argument(
+        "--density_settings",
+        type=str,
+        default=None,
+        help="Path to yaml file with settings for density estimation. Only used if "
+        "log_prob is requested for a gnpe model.",
+    )
 
     args = parser.parse_args()
 
@@ -172,9 +179,11 @@ def analyze_event():
         if gnpe and args.get_log_prob:
             # GNPE generally does not provide straightforward access to the log_prob.
             # If requested, need to train an initialization model for the GNPE proxies.
+            with open(args.density_settings) as f:
+                density_settings = yaml.safe_load(f)
             sampler.prepare_log_prob(
-                num_samples=200_000,
                 batch_size=args.batch_size,
+                **density_settings,
             )
 
         sampler.run_sampler(

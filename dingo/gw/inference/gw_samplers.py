@@ -4,7 +4,7 @@ import time
 import numpy as np
 import pandas as pd
 from astropy.time import Time
-from bilby.core.prior import Uniform
+from bilby.core.prior import Uniform, PriorDict
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 
@@ -316,7 +316,7 @@ class GWSamplerMixin(object):
             phase_log_posterior = apply_func_with_multiprocessing(
                 self.likelihood.log_likelihood_phase_grid,
                 theta.iloc[within_prior],
-                num_processes=num_processes
+                num_processes=num_processes,
             )
 
         phase_posterior = np.exp(
@@ -582,7 +582,8 @@ class GWSampler(GWSamplerMixin, Sampler):
         model : PosteriorModel
         """
         super().__init__(**kwargs)
-        self._initialize_transforms()
+        if self.model is not None:
+            self._initialize_transforms()
 
     def _initialize_transforms(self):
 
@@ -661,6 +662,7 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
         #   * shifting the strain by - gnpe proxies
         #   * repackaging & standardizing proxies to sample['context_parameters']
         #     for conditioning of the inference network
+        self.gnpe_kernel = {}
         transform_pre = [RenameKey("data", "waveform")]
         if gnpe_time_settings:
             transform_pre.append(
@@ -671,6 +673,7 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                     inference=True,
                 )
             )
+            self.gnpe_kernel = {**self.gnpe_kernel, **transform_pre[-1].kernel}
             transform_pre.append(TimeShiftStrain(ifo_list, self.domain))
         if gnpe_chirp_settings:
             transform_pre.append(
@@ -680,6 +683,8 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                     gnpe_chirp_settings.get("order", 0),
                 )
             )
+            self.gnpe_kernel = {**self.gnpe_kernel, **transform_pre[-1].kernel}
+        self.gnpe_kernel = PriorDict(self.gnpe_kernel)
         transform_pre.append(
             SelectStandardizeRepackageParameters(
                 {"context_parameters": data_settings["context_parameters"]},
@@ -717,6 +722,17 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 GetDetectorTimes(ifo_list, data_settings["ref_time"]),
             ]
         )
+
+    def _kernel_log_prob(self, samples):
+        if len({"chirp_mass", "mass_ratio"} & self.gnpe_kernel.keys()) > 0:
+            raise NotImplementedError(
+                "kernel log_prob not implemented for non-additive gnpe kernels."
+            )
+        gnpe_proxies_diff = {
+            k: np.array(samples[k] - samples[f"{k}_proxy"])
+            for k in self.gnpe_kernel.keys()
+        }
+        return self.gnpe_kernel.ln_prob(gnpe_proxies_diff, axis=0)
 
 
 class GWSamplerUnconditional(GWSampler):
