@@ -4,7 +4,7 @@ import time
 import numpy as np
 import pandas as pd
 from astropy.time import Time
-from bilby.core.prior import Uniform, PriorDict
+from bilby.core.prior import Uniform, PriorDict, Constraint
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 
@@ -195,6 +195,7 @@ class GWSamplerMixin(object):
         if self.event_metadata is not None:
             t_event = self.event_metadata.get("time_event")
             if t_event is not None and t_event != self.t_ref:
+                assert self.samples_dataset is None, "t_ref correction should be needed"
                 ra = samples["ra"]
                 time_reference = Time(self.t_ref, format="gps", scale="utc")
                 time_event = Time(t_event, format="gps", scale="utc")
@@ -264,7 +265,8 @@ class GWSamplerMixin(object):
         # phase-marginalized likelihood.
 
         # Restrict to samples that are within the prior.
-        theta = pd.DataFrame(samples).drop(columns="log_prob", errors="ignore")
+        param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
+        theta = pd.DataFrame(samples)[param_keys]
         log_prior = self.prior.ln_prob(theta, axis=0)
         constraints = self.prior.evaluate_constraints(theta)
         np.putmask(log_prior, constraints == 0, -np.inf)

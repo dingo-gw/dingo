@@ -209,9 +209,12 @@ class Sampler(object):
 
         if self.samples_dataset is not None:
             # if self.samples_dataset is set, running the
-            self.samples = self.samples_dataset.samples.sample(
+            samples = self.samples_dataset.samples.sample(
                 num_samples, ignore_index=True
             )
+            samples = {k: np.array(samples[k]) for k in samples.columns}
+            self._post_process(samples)
+            self.samples = pd.DataFrame(samples)
             return
 
         print(f"Running sampler to generate {num_samples} samples.")
