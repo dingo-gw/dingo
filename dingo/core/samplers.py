@@ -635,11 +635,11 @@ class GNPESampler(Sampler):
 
         # Get correction for log_prob, which arises due to the standardization
         # underlying the density estimators self.model and self.gnpe_proxy_sampler.model.
-        self.log_prob_correction = 0
-        for sampler in [self, self.gnpe_proxy_sampler]:
-            std = sampler.metadata["train_settings"]["data"]["standardization"]["std"]
-            std = np.array([std[p] for p in sampler.inference_parameters])
-            self.log_prob_correction += np.sum(np.log(std))
+        # self.log_prob_correction = 0
+        # for sampler in [self, self.gnpe_proxy_sampler]:
+        #     std = sampler.metadata["train_settings"]["data"]["standardization"]["std"]
+        #     std = np.array([std[p] for p in sampler.inference_parameters])
+        #     self.log_prob_correction -= np.sum(np.log(std))
 
     def _run_sampler(
         self,
@@ -683,6 +683,8 @@ class GNPESampler(Sampler):
                 num_samples=num_samples, batch_size=num_samples
             )
             log_prob_gnpe_proxies = gnpe_proxies_in.pop("log_prob")
+            # log_prob_gnpe_proxies is already standardized, since it is covered in
+            # _run_sampler by self.transform_post [SelectStandardizeRepackageParameters]
 
             x = {
                 "extrinsic_parameters": {},
@@ -692,16 +694,14 @@ class GNPESampler(Sampler):
             }
             x = self.transform_pre(x)
             with torch.no_grad():
-                x["parameters"], log_prob = self.model.model.sample_and_log_prob(
+                x["parameters"], x["log_prob"] = self.model.model.sample_and_log_prob(
                     x["data"],
                     x["context_parameters"],
                 )
-            x = self.transform_post(x)
+            x = self.transform_post(x) # this also standardizes x["log_prob"]!
 
             samples = x["parameters"]
-            samples["log_prob"] = (
-                log_prob + log_prob_gnpe_proxies + self.log_prob_correction
-            )
+            samples["log_prob"] = x["log_prob"] + log_prob_gnpe_proxies
 
             # The log_prob returned by gnpe is not just the log_prob over parmeters
             # theta, but instead the log_prob in the *joint* space q(theta,theta^|x),
