@@ -125,6 +125,7 @@ def plot_diagnostics(
 
     ESS = sampler.effective_sample_size
     log_evidence = sampler.log_evidence
+    log_evidence_std = sampler.log_evidence_std
 
     # Plot weights
     plt.clf()
@@ -157,7 +158,7 @@ def plot_diagnostics(
     n_below = len(np.where(y < y_lower)[0])
     plt.title(
         f"Target log_probs. {n_below} below {y_lower:.2f}. "
-        f"Log_evidence {log_evidence:.2f}."
+        f"Log_evidence {log_evidence:.3f} +- {log_evidence_std:.3f}."
     )
     plt.scatter(x, y, s=0.5)
     plt.plot([y_upper - 20, y_upper], [y_upper - 20, y_upper], color="black")

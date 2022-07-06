@@ -465,6 +465,17 @@ class Sampler(object):
         #     coordinates). We have undone any standardizations so this is the case.
 
         self.log_evidence = logsumexp(log_weights) - np.log(num_samples)
+        log_weights_all = np.pad(
+            log_weights - self.log_evidence,
+            (num_samples - len(log_weights), 0),
+            constant_values=-np.inf,
+        )
+        assert np.allclose(np.mean(np.exp(log_weights_all)), 1)
+        # log_evidence_std = 1/sqrt(n) (evidence_std / evidence)
+        self.log_evidence_std = (
+            # evidence / evidence cancels below
+            1 / np.sqrt(num_samples) * np.std(np.exp(log_weights_all) - 1)
+        )
         self.effective_sample_size = np.sum(weights) ** 2 / np.sum(weights ** 2)
 
     def write_pesummary(self, filename):
@@ -498,7 +509,8 @@ class Sampler(object):
     def print_summary(self):
         print("Number of samples:", len(self.samples))
         if self.log_evidence is not None:
-            print("Log(evidence):", self.log_evidence)
+            print(
+                f"Log(evidence): {self.log_evidence:.3f} +-{self.log_evidence_std:.3f}")
             print(
                 f"Effective sample size: {self.effective_sample_size:.1f} "
                 f"({100 * self.effective_sample_size / len(self.samples):.2f}%)"
@@ -623,7 +635,9 @@ class GNPESampler(Sampler):
         if len(inds) / len(gnpe_proxy_dataset.samples) < 0.95:
             raise ValueError("Too many proxy samples outside of specified range.")
         gnpe_proxy_dataset.samples = gnpe_proxy_dataset.samples.iloc[inds]
-        nde_settings["data"] = {"inference_parameters": [k[5:] for k in gnpe_proxy_keys]}
+        nde_settings["data"] = {
+            "inference_parameters": [k[5:] for k in gnpe_proxy_keys]
+        }
         nde_settings["training"]["device"] = str(self.model.device)
         with tempfile.TemporaryDirectory() as tmpdirname:
             gnpe_proxy_model = train_unconditional_density_estimator(
@@ -694,7 +708,7 @@ class GNPESampler(Sampler):
                     x["data"],
                     x["context_parameters"],
                 )
-            x = self.transform_post(x) # this also standardizes x["log_prob"]!
+            x = self.transform_post(x)  # this also standardizes x["log_prob"]!
 
             samples = x["parameters"]
             samples["log_prob"] = x["log_prob"] + log_prob_gnpe_proxies
