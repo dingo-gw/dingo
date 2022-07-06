@@ -633,13 +633,9 @@ class GNPESampler(Sampler):
             )
         self.gnpe_proxy_sampler = UnconditionalSampler(model=gnpe_proxy_model)
 
-        # Get correction for log_prob, which arises due to the standardization
-        # underlying the density estimators self.model and self.gnpe_proxy_sampler.model.
-        # self.log_prob_correction = 0
-        # for sampler in [self, self.gnpe_proxy_sampler]:
-        #     std = sampler.metadata["train_settings"]["data"]["standardization"]["std"]
-        #     std = np.array([std[p] for p in sampler.inference_parameters])
-        #     self.log_prob_correction -= np.sum(np.log(std))
+        # Note: self.gnpe_proxy_sampler.transform_post, and self.transform_post *must*
+        # contain the SelectStandardizeRepackageParameters transformation, such that
+        # the log_prob is correctly de-standardized!
 
     def _run_sampler(
         self,
