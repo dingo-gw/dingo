@@ -1,5 +1,5 @@
 
-> **Notice:** This code is under development, and the authors plan to use it for several short-author papers before making it widely available. Feel free to peruse, use, or experiment with this code, but please do not distribute beyond the LSC. If you wish to publish work based on this code or the unpublished ideas therein, please contact [Stephen Green](mailto:stephen.green@aei.mpg.de) and [Maximilian Dax](mailto:maximilian.dax@tuebingen.mpg.de). Comments are welcome!
+> **Notice:** This code is under development, and the authors plan to use it for several short-author papers before making it widely available. Feel free to peruse, use, or experiment with this code, but please do not distribute beyond the LSC. If you wish to publish work based on this code or the unpublished ideas therein, please contact [Stephen Green](mailto:stephen.green@aei.mpg.de) and [Maximilian Dax](mailto:maximilian.dax@tuebingen.mpg.de) beforehand. Comments are welcome!
 
 # Dingo: Deep inference for gravitational-wave observations
 
