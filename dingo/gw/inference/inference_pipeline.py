@@ -203,7 +203,7 @@ def analyze_event():
             ref_samples_file = ref[time_event]["reference_samples"]["file"]
             ref_method = ref[time_event]["reference_samples"]["method"]
 
-            sampler.to_hdf5(label=name_event, outdir=args.out_directory)
+            sampler.to_hdf5(label=name_event + args.suffix, outdir=args.out_directory)
 
             ref_samples = load_ref_samples(ref_samples_file)
 
