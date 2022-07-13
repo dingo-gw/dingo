@@ -474,7 +474,9 @@ class Sampler(object):
         # log_evidence_std = 1/sqrt(n) (evidence_std / evidence)
         self.log_evidence_std = (
             # evidence / evidence cancels below
-            1 / np.sqrt(num_samples) * np.std(np.exp(log_weights_all) - 1)
+            1
+            / np.sqrt(num_samples)
+            * np.std(np.exp(log_weights_all) - 1)
         )
         self.effective_sample_size = np.sum(weights) ** 2 / np.sum(weights ** 2)
 
@@ -510,7 +512,8 @@ class Sampler(object):
         print("Number of samples:", len(self.samples))
         if self.log_evidence is not None:
             print(
-                f"Log(evidence): {self.log_evidence:.3f} +-{self.log_evidence_std:.3f}")
+                f"Log(evidence): {self.log_evidence:.3f} +-{self.log_evidence_std:.3f}"
+            )
             print(
                 f"Effective sample size: {self.effective_sample_size:.1f} "
                 f"({100 * self.effective_sample_size / len(self.samples):.2f}%)"
@@ -672,7 +675,6 @@ class GNPESampler(Sampler):
                 "parameters": {},
             }
             for i in range(self.num_iterations):
-                print(i)
                 x["extrinsic_parameters"] = {
                     k: x["extrinsic_parameters"][k] for k in self.gnpe_parameters
                 }
@@ -683,6 +685,12 @@ class GNPESampler(Sampler):
                 x["parameters"] = self.model.sample(x["data"], x["context_parameters"])
                 x = self.transform_post(x)
                 samples = x["parameters"]
+                print(
+                    f"it {i}.\tproxy mean: ",
+                    *[f"{torch.mean(v).item():.5f}" for v in x["gnpe_proxies"].values()],
+                    "\tproxy std:",
+                    *[f"{torch.std(v).item():.5f}" for v in x["gnpe_proxies"].values()],
+                )
         else:
             # Infer gnpe proxies based on trained model in gnpe_proxy sampler.
             # With this, we can infer the inference parameters with a single pass
