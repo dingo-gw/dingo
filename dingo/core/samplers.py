@@ -100,6 +100,15 @@ class Sampler(object):
         self._build_domain()
         self._reset_result()
 
+        # keys with attributes to be saved by self.to_hdf5()
+        self.samples_dataset_keys = [
+            "settings",
+            "samples",
+            "context",
+            "log_evidence",
+            "n_eff",
+            "effective_sample_size",
+        ]
         self._pesummary_package = "core"
 
     def _reset_result(self):
@@ -485,7 +494,6 @@ class Sampler(object):
             (num_samples - self.n_eff) / (num_samples * self.n_eff)
         )
 
-
     def write_pesummary(self, filename):
         from pesummary.io import write
         from pesummary.utils.samples_dict import SamplesDict
@@ -499,16 +507,14 @@ class Sampler(object):
         )
         # TODO: Save much more information.
 
+    @property
+    def settings(self):
+        return self.metadata
+
     def to_samples_dataset(self) -> SamplesDataset:
-        data_dict = {
-            "settings": self.metadata,
-            "samples": self.samples,
-            "context": self.context,
-            "log_evidence": self.log_evidence,
-            "num_effective_samples": self.n_eff,
-            "effective_sample_size": self.effective_sample_size,
-        }
-        return SamplesDataset(dictionary=data_dict)
+        data_dict = {k: getattr(self, k) for k in self.samples_dataset_keys}
+        data_keys = [k for k in data_dict.keys() if k != "settings"]
+        return SamplesDataset(dictionary=data_dict, data_keys=data_keys)
 
     def to_hdf5(self, label="", outdir="."):
         dataset = self.to_samples_dataset()
@@ -572,7 +578,6 @@ class GNPESampler(Sampler):
         self.gnpe_parameters = None  # Should be set in subclass.
         self.gnpe_proxy_sampler = None
         self.log_prob_correction = None  # log_prob correction, accounting for std
-        self.gnpe_proxy_sampler = None
 
     @property
     def init_sampler(self):
@@ -699,7 +704,10 @@ class GNPESampler(Sampler):
                 print(
                     f"it {i}.\tmin pvalue: {convergence_tracker.pvalue_min:.3f}"
                     f"\tproxy mean: ",
-                    *[f"{torch.mean(v).item():.5f}" for v in x["gnpe_proxies"].values()],
+                    *[
+                        f"{torch.mean(v).item():.5f}"
+                        for v in x["gnpe_proxies"].values()
+                    ],
                     "\tproxy std:",
                     *[f"{torch.std(v).item():.5f}" for v in x["gnpe_proxies"].values()],
                 )
