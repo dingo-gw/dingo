@@ -16,7 +16,7 @@ from dingo.gw.gwutils import get_window_factor, get_extrinsic_prior_dict
 from dingo.gw.likelihood import (
     StationaryGaussianGWLikelihood,
 )
-from dingo.core.density.kde import (
+from dingo.core.density import (
     interpolated_sample_and_log_prob_multi,
     interpolated_log_prob_multi,
 )
@@ -216,7 +216,7 @@ class GWSamplerMixin(object):
         """
         Sample a synthetic phase for the waveform. This is a post-processing step
         applicable to samples theta in the full parameter space, except for the phase
-        parameter (i.e., 14D samples). This step adds a theta parameter to the samples
+        parameter (i.e., 14D samples). This step adds a phase parameter to the samples
         based on likelihood evaluations.
 
         A synthetic phase is sampled as follows.
