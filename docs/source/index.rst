@@ -10,11 +10,22 @@
 Welcome to dingo's documentation!
 =================================
 
+**Dingo** is a Python program for analyzing gravitational wave data using neural posterior estimation. It is based on the ideas presented in https://arxiv.org/abs/2106.12594.
+
+.. note::
+   This project is under active development.
+
 .. toctree::
-   :caption: Contents:
+   :caption: Getting started
    
    installation
-   getting_started
+   overview
+   quickstart
+
+   :caption: User guide
+
+   sbi
+
 
 Indices and tables
 ==================

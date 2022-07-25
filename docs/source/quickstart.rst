@@ -1,27 +1,10 @@
-Development Installation 
-------------------------
+Quickstart Tutorial
+===================
 
-To install dingo, along with the tools for development and testing, do the following:
-
-Create and activate a virtual environment. By convention, the environment is called `venv` and is located in the dingo-devel directory. Some unit tests depend on this convention.
-
-
-.. code-block:: console
-
-   python3 -m venv venv
-   source venv/bin/activate 
-
-In this virtual environment, install dingo. 
-
-.. code-block:: console 
-
-    pip install wheel
-    python setup.py bdist_wheel
-    pip install -e ."[dev]"
-
+The quickest way to get started with Dingo is to follow the examples in the repository.
 
 Running Your First Injection
-============================
+----------------------------
 
 A general pipeline to using dingo for inference on injections is to 
 

@@ -19,8 +19,8 @@ sys.path.insert(0, os.path.abspath('../../dingo'))
 # -- Project information -----------------------------------------------------
 
 project = 'dingo'
-copyright = '2022, [temp]'
-author = '[temp]'
+copyright = '2022, Stephen Green'
+author = 'Stephen Green'
 
 # The full version, including alpha/beta/rc tags
 release = '1.0'
