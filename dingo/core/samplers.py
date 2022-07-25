@@ -16,7 +16,7 @@ from bilby.core.prior import Constraint
 from dingo.core.models import PosteriorModel
 from dingo.core.samples_dataset import SamplesDataset
 from dingo.core.density import train_unconditional_density_estimator
-from dingo.core.utils import torch_detach_to_cpu
+from dingo.core.utils import torch_detach_to_cpu, ConvergenceTracker
 
 # FIXME: transform below should be in core
 from dingo.gw.transforms import SelectStandardizeRepackageParameters
@@ -108,6 +108,7 @@ class Sampler(object):
         self.samples = None
         self.log_evidence = None
         self.effective_sample_size = None
+        self.n_eff = None
 
     @property
     def context(self):
@@ -346,8 +347,8 @@ class Sampler(object):
         size of the importance sampled points.
 
         This method modifies the samples pd.DataFrame in-place, adding new columns for
-        log_likelihood, log_prior, and weights. It also stores log_evidence and
-        effective_sample_size attributes.
+        log_likelihood, log_prior, and weights. It also stores log_evidence,
+        effective_sample_size and n_eff attributes.
 
         Parameters
         ----------
@@ -400,7 +401,9 @@ class Sampler(object):
         # no point in keeping these samples, we simply drop them; this means we do not
         # have to make special exceptions for outside-prior samples elsewhere in the
         # code. They do not contribute directly to the evidence or the effective sample
-        # size, so we are not losing anything useful.
+        # size, so we are not losing anything useful. However, it is important to count
+        # them in num_samples when computing the evidence, since they contribute to the
+        # normalization of the proposal distribution.
 
         within_prior = (log_prior + delta_log_prob_target) != -np.inf
         num_samples = len(self.samples)
@@ -464,6 +467,12 @@ class Sampler(object):
         #   * q, \pi, L must be distributions in the same parameter space (the same
         #     coordinates). We have undone any standardizations so this is the case.
 
+        self.n_eff = np.sum(weights) ** 2 / np.sum(weights ** 2)
+        # ESS computed with len(weights) in denominator instead of num_samples,
+        # since we are interested in ESS per *likelihood evaluation*, not per
+        # Dingo sample.
+        self.effective_sample_size = self.n_eff / len(weights)
+
         self.log_evidence = logsumexp(log_weights) - np.log(num_samples)
         log_weights_all = np.pad(
             log_weights - self.log_evidence,
@@ -472,13 +481,10 @@ class Sampler(object):
         )
         assert np.allclose(np.mean(np.exp(log_weights_all)), 1)
         # log_evidence_std = 1/sqrt(n) (evidence_std / evidence)
-        self.log_evidence_std = (
-            # evidence / evidence cancels below
-            1
-            / np.sqrt(num_samples)
-            * np.std(np.exp(log_weights_all) - 1)
+        self.log_evidence_std = np.sqrt(
+            (num_samples - self.n_eff) / (num_samples * self.n_eff)
         )
-        self.effective_sample_size = np.sum(weights) ** 2 / np.sum(weights ** 2)
+
 
     def write_pesummary(self, filename):
         from pesummary.io import write
@@ -499,6 +505,7 @@ class Sampler(object):
             "samples": self.samples,
             "context": self.context,
             "log_evidence": self.log_evidence,
+            "num_effective_samples": self.n_eff,
             "effective_sample_size": self.effective_sample_size,
         }
         return SamplesDataset(dictionary=data_dict)
@@ -515,8 +522,8 @@ class Sampler(object):
                 f"Log(evidence): {self.log_evidence:.3f} +-{self.log_evidence_std:.3f}"
             )
             print(
-                f"Effective sample size: {self.effective_sample_size:.1f} "
-                f"({100 * self.effective_sample_size / len(self.samples):.2f}%)"
+                f"Effective samples {self.n_eff:.1f}: "
+                f"(ESS = {100 * self.effective_sample_size:.2f}%)"
             )
 
 
@@ -668,6 +675,7 @@ class GNPESampler(Sampler):
 
         if not use_gnpe_proxy_sampler:
             # Run gnpe iterations to jointly infer gnpe proxies and inference parameters.
+            convergence_tracker = ConvergenceTracker()
             x = {
                 "extrinsic_parameters": self.init_sampler._run_sampler(
                     num_samples, context
@@ -678,6 +686,9 @@ class GNPESampler(Sampler):
                 x["extrinsic_parameters"] = {
                     k: x["extrinsic_parameters"][k] for k in self.gnpe_parameters
                 }
+                convergence_tracker.update(
+                    {k: v.cpu().numpy() for k, v in x["extrinsic_parameters"].items()}
+                )
                 d = data_.clone()
                 x["data"] = d.expand(num_samples, *d.shape)
 
@@ -686,7 +697,8 @@ class GNPESampler(Sampler):
                 x = self.transform_post(x)
                 samples = x["parameters"]
                 print(
-                    f"it {i}.\tproxy mean: ",
+                    f"it {i}.\tmin pvalue: {convergence_tracker.pvalue_min:.3f}"
+                    f"\tproxy mean: ",
                     *[f"{torch.mean(v).item():.5f}" for v in x["gnpe_proxies"].values()],
                     "\tproxy std:",
                     *[f"{torch.std(v).item():.5f}" for v in x["gnpe_proxies"].values()],

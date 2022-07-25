@@ -123,6 +123,7 @@ def plot_diagnostics(
     log_likelihood = theta["log_likelihood"].to_numpy()
     log_probs_target = log_prior + log_likelihood
 
+    n_eff = sampler.n_eff
     ESS = sampler.effective_sample_size
     log_evidence = sampler.log_evidence
     log_evidence_std = sampler.log_evidence_std
@@ -142,7 +143,7 @@ def plot_diagnostics(
     plt.yscale("log")
     plt.title(
         f"IS Weights. {n_below} below {y_lower}. "
-        f"ESS {ESS:.0f} ({100 * ESS / len(weights):.2f}%)."
+        f"Effective samples: {n_eff:.0f} (ESS = {100 * ESS:.2f}%)."
     )
     plt.scatter(x, y, s=0.5)
     plt.savefig(join(outdir, "weights.png"))
