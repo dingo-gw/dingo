@@ -113,8 +113,8 @@ default_extrinsic_dict = {
 default_intrinsic_dict = {
     "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
     "mass_2": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
-    "mass_ratio": "bilby.core.gw.UniformInComponentsMassRatio(minimum=0.125, maximum=1.0)",
-    "chirp_mass": "bilby.core.gw.UniformInComponentsChirpMass(minimum=25.0, maximum=100.0)",
+    "mass_ratio": "bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.125, maximum=1.0)",
+    "chirp_mass": "bilby.gw.prior.UniformInComponentsChirpMass(minimum=25.0, maximum=100.0)",
     "luminosity_distance": 1000.0,
     "theta_jn": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
     "phase": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',

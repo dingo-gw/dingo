@@ -310,10 +310,13 @@ class Injection(GWSignal):
                 asd (if set): amplitude spectral density for each detector
         """
         signal = self.signal(theta)
-        asd = self.asd
-
-        if asd is None:
+        try:
+            # Be careful to use the ASD included with the signal, since each time
+            # self.asd is accessed it gives a different ASD (if using an ASD dataset).
+            asd = signal['asds']
+        except KeyError:
             raise ValueError("self.asd must be set in order to produce injections.")
+        
         if self.whiten:
             print("self.whiten was set to True. Resetting to False.")
             self.whiten = False

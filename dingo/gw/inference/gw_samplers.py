@@ -33,6 +33,7 @@ from dingo.gw.transforms import (
     PostCorrectGeocentTime,
     CopyToExtrinsicParameters,
     GetDetectorTimes,
+    GNPEPhase,
 )
 
 
@@ -654,10 +655,15 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
 
         gnpe_time_settings = data_settings.get("gnpe_time_shifts")
         gnpe_chirp_settings = data_settings.get("gnpe_chirp")
-        if not gnpe_time_settings and not gnpe_chirp_settings:
+        gnpe_phase_settings = data_settings.get("gnpe_phase")
+        if (
+            not gnpe_time_settings
+            and not gnpe_chirp_settings
+            and not gnpe_phase_settings
+        ):
             raise KeyError(
-                "GNPE inference requires network trained for either chirp mass "
-                "or coalescence time GNPE."
+                "GNPE inference requires network trained for either chirp mass, "
+                "coalescence time, or phase GNPE."
             )
 
         # transforms for gnpe loop, to be applied prior to sampling step:
@@ -688,6 +694,13 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 )
             )
             self.gnpe_kernel = {**self.gnpe_kernel, **transform_pre[-1].kernel}
+        if gnpe_phase_settings:
+            transform_pre.append(
+                GNPEPhase(
+                    gnpe_phase_settings["kernel"],
+                    gnpe_phase_settings.get("random_pi_jump", False),
+                )
+            )
         self.gnpe_kernel = PriorDict(self.gnpe_kernel)
         transform_pre.append(
             SelectStandardizeRepackageParameters(
@@ -721,16 +734,16 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 ),
                 PostCorrectGeocentTime(),
                 CopyToExtrinsicParameters(
-                    "ra", "dec", "geocent_time", "chirp_mass", "mass_ratio"
+                    "ra", "dec", "geocent_time", "chirp_mass", "mass_ratio", "phase"
                 ),
                 GetDetectorTimes(ifo_list, data_settings["ref_time"]),
             ]
         )
 
     def _kernel_log_prob(self, samples):
-        if len({"chirp_mass", "mass_ratio"} & self.gnpe_kernel.keys()) > 0:
+        if len({"chirp_mass", "mass_ratio", "phase"} & self.gnpe_kernel.keys()) > 0:
             raise NotImplementedError(
-                "kernel log_prob not implemented for non-additive gnpe kernels."
+                "kernel log_prob only implemented for time gnpe."
             )
         gnpe_proxies_diff = {
             k: np.array(samples[k] - samples[f"{k}_proxy"])
