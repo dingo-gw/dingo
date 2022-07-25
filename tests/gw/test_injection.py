@@ -72,7 +72,12 @@ def test_signal_m_EOB(signal_setup_EOB, BBH_parameters):
     waveform_m = {k: v["waveform"] for k, v in waveform_m.items()}
     waveform = sum_contributions_m(waveform_m, phase_shift=phase_shift)
     mismatches = [
-        get_mismatch(waveform_ref[k], waveform[k], domain)
+        get_mismatch(
+            waveform_ref[k],
+            waveform[k],
+            domain,
+            asd_file="aLIGO_ZERO_DET_high_P_asd.txt",
+        )
         for k in waveform.keys()
     ]
     assert np.max(mismatches) < 1e-4
