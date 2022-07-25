@@ -221,18 +221,25 @@ class GWSamplerMixin(object):
 
         A synthetic phase is sampled as follows.
 
-            * Compute the waveform mu(theta, phase=0) for phase 0.
-            * Compute the likelihood for mu(theta, phase=0) * exp(2i*phase) on a
-              uniform grid of phase values in the range [0, 2pi).
-              Note that this is *not* equivalent to the actual likelihood for
-              (theta, phase) unless the waveform is fully dominated by the (2, 2) mode.
+            * Compute and cache the modes for the waveform mu(theta, phase=0) for
+              phase 0, organize them such that each contribution m transforms as
+              exp(-i * m * phase).
+            * Compute the likelihood on a phase grid, by computing mu(theta, phase) from
+              the cached modes. In principle this likelihood is exact, however, it can
+              deviate slightly from the likelihood computed without cached modes for
+              various technical reasons (e.g., slightly different windowing of cached
+              modes compared to full waveform when transforming TD waveform to FD).
+              These small deviations can be fully accounted for by importance sampling.
+              *Note*: when approximation_22_mode=True, the entire waveform is assumed
+              to transform as exp(2i*phase), in which case the likelihood is only exact
+              if the waveform is fully dominated by the (2, 2) mode.
             * Build a synthetic conditional phase distribution based on this grid. We
               use an interpolated prior distribution bilby.core.prior.Interped,
               such that we can sample and also evaluate the log_prob. We add a constant
               background with weight self.synthetic_phase_kwargs to the kde to make
               sure that we keep a mass-covering property. With this, the importance
-              sampling will yield exact results even if the synthetic phase conditional is
-              just an approximation.
+              sampling will yield exact results even when the synthetic phase conditional
+              is just an approximation.
 
         Besides adding phase samples to samples['phase'], this method also modifies
         samples['log_prob'] by adding the log_prob of the synthetic phase conditional.
@@ -308,11 +315,6 @@ class GWSamplerMixin(object):
             phasor = np.exp(2j * phases)
             phase_log_posterior = np.outer(d_inner_h_complex, phasor).real
         else:
-            # Define higher order function for log_likelihood on phase grid.
-            # This let's us set the phases argument, and prepares the function for the
-            # multiprocessing wrapper.
-            # def log_likelihood_phase_grid(theta_frame):
-            #     return self.likelihood.log_likelihood_phase_grid(theta_frame, phases)
             self.likelihood.phase_grid = phases
 
             phase_log_posterior = apply_func_with_multiprocessing(
