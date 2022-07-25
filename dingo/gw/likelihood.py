@@ -253,6 +253,15 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
     def log_likelihood_phase_grid(self, theta, phases=None):
         # TODO: Implement for time marginalization
+        if self.phase_marginalization:
+            raise ValueError(
+                "Can't compute likelihood on a phase grid for "
+                "phase-marginalized posteriors"
+            )
+        if self.time_marginalization:
+            raise NotImplementedError(
+                "log_likelihood on phase grid not yet implemented."
+            )
 
         if self.waveform_generator.spin_conversion_phase != 0:
             raise ValueError(
