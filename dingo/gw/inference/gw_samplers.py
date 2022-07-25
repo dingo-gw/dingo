@@ -688,14 +688,6 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 )
             )
             self.gnpe_kernel = {**self.gnpe_kernel, **transform_pre[-1].kernel}
-        if gnpe_phase_settings:
-            transform_pre.append(
-                GNPEPhase(
-                    gnpe_phase_settings["kernel"],
-                    gnpe_phase_settings.get("random_pi_jump", False),
-                )
-            )
-            self.gnpe_kernel = {**self.gnpe_kernel, **transform_pre[-1].kernel}
         self.gnpe_kernel = PriorDict(self.gnpe_kernel)
         transform_pre.append(
             SelectStandardizeRepackageParameters(
