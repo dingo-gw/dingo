@@ -125,6 +125,7 @@ def parse_args():
         "--exit_command",
         type=str,
         default=None,
+        nargs="+",
         help="If set, run os.system(args.exit_command) before exiting.",
     )
 
@@ -243,7 +244,7 @@ def analyze_event():
                 filename=join(args.out_directory, f"cornerplot_{label}.pdf"),
             )
     if args.exit_command:
-        os.system(args.exit_command)
+        os.system(" ".join(args.exit_command))
 
 if __name__ == "__main__":
     analyze_event()
