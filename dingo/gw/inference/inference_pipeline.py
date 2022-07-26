@@ -121,6 +121,12 @@ def parse_args():
         help="Path to yaml file with settings for density estimation. Only used if "
         "log_prob is requested for a gnpe model.",
     )
+    parser.add_argument(
+        "--exit_command",
+        type=str,
+        default=None,
+        help="If set, run os.system(args.exit_command) before exiting.",
+    )
 
     args = parser.parse_args()
 
@@ -236,7 +242,8 @@ def analyze_event():
                 {"name": "dingo", "samples": sampler.samples, "color": "orange"},
                 filename=join(args.out_directory, f"cornerplot_{label}.pdf"),
             )
-
+    if args.exit_command:
+        os.system(args.exit_command)
 
 if __name__ == "__main__":
     analyze_event()
