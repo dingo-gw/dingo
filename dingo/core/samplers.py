@@ -386,7 +386,7 @@ class Sampler(object):
         # using the stored model. These form a normalized probability distribution.
         log_prob_proposal = self.samples["log_prob"].to_numpy()
 
-        delta_log_prob_target = 0
+        delta_log_prob_target = np.zeros(len(self.samples))
         if "delta_log_prob_target" in self.samples.columns:
             delta_log_prob_target = self.samples["delta_log_prob_target"].to_numpy()
 
