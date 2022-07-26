@@ -103,7 +103,15 @@ def parse_args():
     parser.add_argument(
         "--get_log_prob",
         action="store_true",
-        help="If set, log_probs of samples are saved. Will not work for GNPE.",
+        help="If set, log_probs of samples are saved. For GNPE models, this invokes "
+        "training of an unconditional density estimator to recover the density.",
+    )
+    parser.add_argument(
+        "--save_low_latency",
+        action="store_true",
+        help="Only relevant for GNPE models and if args.get_log_prob is set. In that "
+        "case, and if save_low_latency is set, intermediate results without log_prob "
+        "are saved.",
     )
     parser.add_argument(
         "--density_settings",
@@ -169,6 +177,12 @@ def analyze_event():
             args.time_buffer,
             args.event_dataset,
         )
+        if ref is None or time_event not in ref:
+            label = f"gps-{time_event}{args.suffix}"
+        else:
+            name_event = ref[time_event]["event_name"]
+            label = name_event + args.suffix
+
         sampler.context = event_data
         sampler.event_metadata = {
             "time_event": time_event,
@@ -181,8 +195,14 @@ def analyze_event():
             # If requested, need to train an initialization model for the GNPE proxies.
             with open(args.density_settings) as f:
                 density_settings = yaml.safe_load(f)
+            if args.save_low_latency:
+                low_latency_label = label + "_low-latency"
+            else:
+                low_latency_label = None
             sampler.prepare_log_prob(
                 batch_size=args.batch_size,
+                low_latency_label=low_latency_label,
+                outdir=args.out_directory,
                 **density_settings,
             )
 
@@ -193,25 +213,20 @@ def analyze_event():
 
         # if no reference samples are available, simply save the dingo samples
         if ref is None or time_event not in ref:
-            label = f"gps-{time_event}{args.suffix}"
             sampler.to_hdf5(label=label, outdir=args.out_directory)
 
         # if reference samples are available, save dingo samples and additionally
         # compare to the reference method in a corner plot
         else:
-            name_event = ref[time_event]["event_name"]
             ref_samples_file = ref[time_event]["reference_samples"]["file"]
             ref_method = ref[time_event]["reference_samples"]["method"]
-
-            sampler.to_hdf5(label=name_event + args.suffix, outdir=args.out_directory)
-
+            sampler.to_hdf5(label=label, outdir=args.out_directory)
             ref_samples = load_ref_samples(ref_samples_file)
-
             generate_cornerplot(
                 {"name": ref_method, "samples": ref_samples, "color": "blue"},
                 {"name": "dingo", "samples": sampler.samples, "color": "orange"},
                 filename=join(
-                    args.out_directory, f"cornerplot_{name_event}{args.suffix}.pdf"
+                    args.out_directory, f"cornerplot_{label}.pdf"
                 ),
             )
 

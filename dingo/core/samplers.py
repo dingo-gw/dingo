@@ -607,6 +607,8 @@ class GNPESampler(Sampler):
         nde_settings: dict,
         batch_size: Optional[int] = None,
         threshold_std: Optional[float] = np.inf,
+        low_latency_label: str = None,
+        outdir: str = None,
     ):
         """
         Prepare gnpe sampling with log_prob. This is required, since in its vanilla
@@ -634,9 +636,17 @@ class GNPESampler(Sampler):
         threshold_std: float = np.inf
             gnpe proxies deviating by more then threshold_std standard deviations from
             the proxy mean (along any axis) are discarded.
+        low_latency_label: str = None
+            File label for low latency samples (= samples used for training nde).
+            If None, these samples are not saved.
+        outdir: str = None
+            Directory in which low latency samples are saved. Needs to be set if
+            low_latency_label is not None.
         """
         self.run_sampler(num_samples, batch_size)
         gnpe_proxy_keys = [k for k in self.samples.keys() if k.startswith("GNPE:")]
+        if low_latency_label is not None:
+            self.to_hdf5(label=low_latency_label, outdir=outdir)
         gnpe_proxy_pd = self.samples[gnpe_proxy_keys].rename(columns=lambda x: x[5:])
         gnpe_proxy_dataset = SamplesDataset(dictionary={"samples": gnpe_proxy_pd})
         # filter outliers, as they decrease the performance of the density estimator
