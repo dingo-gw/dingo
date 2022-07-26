@@ -1,20 +1,47 @@
 from scipy.stats import kstest, gaussian_kde
 import numpy as np
 
-class ConvergenceTracker:
-    def __init__(self, x=None):
-        self.x = x
-        self.ks_result = None
 
-    def update(self, y):
-        if self.x is not None:
+class IterationTracker:
+    def __init__(self, data=None, store_data=False):
+        self.data = data
+        self.ks_result = None
+        self.store_data = store_data
+
+    def update(self, new_data):
+        """
+        Append new_data to self.data.
+
+        Parameters
+        ----------
+        new_data: dict
+            dict with numpy arrays to append to data
+
+        Returns
+        -------
+
+        """
+        if self.data is None:
+            self.data = {k: v.copy()[None, :] for k, v in new_data.items()}
+
+        else:
+            x = {k: v[-1, :] for k, v in self.data.items()}
+            y = new_data
+            # get ks
             statistic, pvalue = [], []
             for k in y.keys():
-                ks_result = kstest(self.x[k], y[k])
+                ks_result = kstest(x[k], y[k])
                 statistic.append(ks_result[0])
                 pvalue.append(ks_result[1])
             self.ks_result = {"statistics": statistic, "pvalue": pvalue}
-        self.x = y
+
+            if not self.store_data:
+                self.data = {k: v.copy()[None, :] for k, v in y.items()}
+            else:
+                self.data = {
+                k: np.concatenate((v, y[k][None, :]), axis=0)
+                for k, v in self.data.items()
+            }
 
     @property
     def pvalue_min(self):

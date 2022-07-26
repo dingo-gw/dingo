@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 import argparse
 import os
 from os.path import dirname, join
@@ -205,6 +206,14 @@ def analyze_event():
                 outdir=args.out_directory,
                 **density_settings,
             )
+            if low_latency_label is not None and sampler.iteration_tracker.store_data:
+                np.save(
+                    join(
+                        args.out_directory,
+                        f"gnpe_trajectories_{low_latency_label}.npy",
+                    ),
+                    sampler.iteration_tracker.data,
+                )
 
         sampler.run_sampler(
             args.num_samples,
@@ -225,9 +234,7 @@ def analyze_event():
             generate_cornerplot(
                 {"name": ref_method, "samples": ref_samples, "color": "blue"},
                 {"name": "dingo", "samples": sampler.samples, "color": "orange"},
-                filename=join(
-                    args.out_directory, f"cornerplot_{label}.pdf"
-                ),
+                filename=join(args.out_directory, f"cornerplot_{label}.pdf"),
             )
 
 

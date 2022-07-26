@@ -16,7 +16,7 @@ from bilby.core.prior import Constraint
 from dingo.core.models import PosteriorModel
 from dingo.core.samples_dataset import SamplesDataset
 from dingo.core.density import train_unconditional_density_estimator
-from dingo.core.utils import torch_detach_to_cpu, ConvergenceTracker
+from dingo.core.utils import torch_detach_to_cpu, IterationTracker
 
 # FIXME: transform below should be in core
 from dingo.gw.transforms import SelectStandardizeRepackageParameters
@@ -578,6 +578,7 @@ class GNPESampler(Sampler):
         self.gnpe_parameters = None  # Should be set in subclass.
         self.gnpe_proxy_sampler = None
         self.log_prob_correction = None  # log_prob correction, accounting for std
+        self.iteration_tracker = None
 
     @property
     def init_sampler(self):
@@ -690,7 +691,7 @@ class GNPESampler(Sampler):
 
         if not use_gnpe_proxy_sampler:
             # Run gnpe iterations to jointly infer gnpe proxies and inference parameters.
-            convergence_tracker = ConvergenceTracker()
+            self.iteration_tracker = IterationTracker(store_data=True)
             x = {
                 "extrinsic_parameters": self.init_sampler._run_sampler(
                     num_samples, context
@@ -701,7 +702,7 @@ class GNPESampler(Sampler):
                 x["extrinsic_parameters"] = {
                     k: x["extrinsic_parameters"][k] for k in self.gnpe_parameters
                 }
-                convergence_tracker.update(
+                self.iteration_tracker.update(
                     {k: v.cpu().numpy() for k, v in x["extrinsic_parameters"].items()}
                 )
                 d = data_.clone()
@@ -712,7 +713,7 @@ class GNPESampler(Sampler):
                 x = self.transform_post(x)
                 samples = x["parameters"]
                 print(
-                    f"it {i}.\tmin pvalue: {convergence_tracker.pvalue_min:.3f}"
+                    f"it {i}.\tmin pvalue: {self.iteration_tracker.pvalue_min:.3f}"
                     f"\tproxy mean: ",
                     *[
                         f"{torch.mean(v).item():.5f}"
