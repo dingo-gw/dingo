@@ -138,6 +138,22 @@ def main():
     #
     # to obtain weighted samples from the proposal distribution.
 
+    # log_evidences = []
+    # log_evidences_std = []
+    # for idx in range(20):
+    #     nde_sampler.run_sampler(num_samples=settings["num_samples"])
+    #     nde_sampler.importance_sample(
+    #         num_processes=settings.get("num_processes", 1),
+    #         time_marginalization_kwargs=time_marginalization_kwargs,
+    #         phase_marginalization_kwargs=phase_marginalization_kwargs,
+    #     )
+    #     log_evidences.append(nde_sampler.log_evidence)
+    #     log_evidences_std.append(nde_sampler.log_evidence_std)
+    # import numpy as np
+    # log_evidences = np.array(log_evidences)
+    # log_evidences_std = np.array(log_evidences_std)
+    # print(np.std(log_evidences) / np.mean(log_evidences_std))
+
     print(f"Importance sampling.")
     nde_sampler.importance_sample(
         num_processes=settings.get("num_processes", 1),
