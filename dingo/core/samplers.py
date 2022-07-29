@@ -1,15 +1,25 @@
 import time
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Union, Dict
+import sys
 
+import numpy
 import numpy as np
 import pandas as pd
+import math
 import torch
 from scipy.special import logsumexp
 from torchvision.transforms import Compose
+import tempfile
+from bilby.core.prior import Constraint
 
 from dingo.core.models import PosteriorModel
 from dingo.core.samples_dataset import SamplesDataset
+from dingo.core.density import train_unconditional_density_estimator
+from dingo.core.utils import torch_detach_to_cpu, IterationTracker
+
+# FIXME: transform below should be in core
+from dingo.gw.transforms import SelectStandardizeRepackageParameters
 
 #
 # Sampler classes are motivated by the approach of Bilby.
@@ -34,41 +44,71 @@ class Sampler(object):
         print_summary
     """
 
-    def __init__(self, model: PosteriorModel):
+    def __init__(
+        self,
+        model: PosteriorModel = None,
+        samples_dataset: SamplesDataset = None,
+    ):
         """
         Parameters
         ----------
         model : PosteriorModel
         """
+        if (model is None) + (samples_dataset is None) != 1:
+            raise ValueError(
+                "Sampler should be initialized with either a model, or samples_dataset."
+            )
+
         self.model = model
-        self.metadata = self.model.metadata.copy()
+        self.samples_dataset = samples_dataset
 
-        if "parameter_samples" in self.metadata["train_settings"]["data"]:
+        if self.model is not None:
+            self.metadata = self.model.metadata.copy()
+
+            if "parameter_samples" in self.metadata["train_settings"]["data"]:
+                self.unconditional_model = True
+                # For unconditional models, the context will be stored with the model. It
+                # is needed for calculating the likelihood for importance sampling.
+                # However, it will not be used when sampling from the model, since it is
+                # unconditional.
+                self.context = self.model.context
+            else:
+                self.unconditional_model = False
+                self.context = None
+
+            if "base" in self.metadata:
+                self.base_model_metadata = self.metadata["base"]
+            else:
+                self.base_model_metadata = self.metadata
+
+            self.inference_parameters = self.metadata["train_settings"]["data"][
+                "inference_parameters"
+            ]
+
+        elif self.samples_dataset is not None:
+            self.metadata = None
             self.unconditional_model = True
-
-            # For unconditional models, the context will be stored with the model. It
-            # is needed for calculating the likelihood for importance sampling.
-            # However, it will not be used when sampling from the model, since it is
-            # unconditional.
-            self.context = self.model.context
-        else:
-            self.unconditional_model = False
-            self.context = None
-
-        if "base" in self.metadata:
-            self.base_model_metadata = self.metadata["base"]
-        else:
-            self.base_model_metadata = self.metadata
+            self.context = self.samples_dataset.context
+            self.base_model_metadata = self.samples_dataset.settings
+            self.samples = self.samples_dataset.samples
+            data_settings = self.base_model_metadata["train_settings"]["data"]
+            self.inference_parameters = data_settings["inference_parameters"]
 
         self.transform_pre = Compose([])
         self.transform_post = Compose([])
-        self.inference_parameters = self.metadata["train_settings"]["data"][
-            "inference_parameters"
-        ]
         self._build_prior()
         self._build_domain()
         self._reset_result()
 
+        # keys with attributes to be saved by self.to_hdf5()
+        self.samples_dataset_keys = [
+            "settings",
+            "samples",
+            "context",
+            "log_evidence",
+            "n_eff",
+            "effective_sample_size",
+        ]
         self._pesummary_package = "core"
 
     def _reset_result(self):
@@ -77,6 +117,7 @@ class Sampler(object):
         self.samples = None
         self.log_evidence = None
         self.effective_sample_size = None
+        self.n_eff = None
 
     @property
     def context(self):
@@ -107,7 +148,15 @@ class Sampler(object):
     def event_metadata(self, value):
         self.base_model_metadata["event"] = value
 
-    def _run_sampler(self, num_samples: int, context: Optional[dict] = None) -> dict:
+    def prepare_log_prob(self, *args, **kwargs):
+        pass
+
+    def _run_sampler(
+        self,
+        num_samples: int,
+        context: Optional[dict] = None,
+        **kwargs,
+    ) -> dict:
         if not self.unconditional_model:
             if context is None:
                 raise ValueError("Context required to run sampler.")
@@ -149,6 +198,7 @@ class Sampler(object):
         self,
         num_samples: int,
         batch_size: Optional[int] = None,
+        **kwargs,
     ):
         """
         Generates samples and stores them as class attribute.
@@ -162,8 +212,23 @@ class Sampler(object):
             Number of samples requested.
         batch_size : int, optional
             Batch size for sampler.
+        get_log_prob  :  bool = False
+            If set, compute log_prob for each sample
         """
         self._reset_result()
+
+        if self.samples_dataset is not None:
+            # if self.samples_dataset is set, running the
+            samples = self.samples_dataset.samples.sample(
+                num_samples, ignore_index=True
+            )
+            samples = {k: np.array(samples[k]) for k in samples.columns}
+            self._post_process(samples)
+            self.samples = pd.DataFrame(samples)
+            return
+
+        print(f"Running sampler to generate {num_samples} samples.")
+        t0 = time.time()
         if not self.unconditional_model:
             if self.context is None:
                 raise ValueError("Context must be set in order to run sampler.")
@@ -176,16 +241,27 @@ class Sampler(object):
         if batch_size is None:
             batch_size = num_samples
         full_batches, remainder = divmod(num_samples, batch_size)
-        samples = [self._run_sampler(batch_size, context) for _ in range(full_batches)]
+        samples = [
+            self._run_sampler(batch_size, context, **kwargs)
+            for _ in range(full_batches)
+        ]
         if remainder > 0:
             samples.append(self._run_sampler(remainder, context))
         samples = {p: torch.cat([s[p] for s in samples]) for p in samples[0].keys()}
+        # get_log_prob = True
+        # if get_log_prob and "log_prob" not in samples.keys():
+        #     log_prob = self.log_prob_mc(
+        #         samples, n_mc=1000, batch_size=batch_size,
+        #     )
+        # # samples = {p: torch.cat([s[p] for s in samples]) for p in k_parameters}
         samples = {k: v.cpu().numpy() for k, v in samples.items()}
 
         # Apply any post-sampling transformation to sampled parameters (e.g.,
         # correction for t_ref or sampling of synthetic phase), and place on CPU.
         self._post_process(samples)
         self.samples = pd.DataFrame(samples)
+        print(f"Done. This took {time.time() - t0:.1f} s.")
+        sys.stdout.flush()
 
     def log_prob(self, samples: pd.DataFrame) -> np.ndarray:
         """
@@ -237,10 +313,13 @@ class Sampler(object):
         log_prob -= np.sum(np.log(std))
 
         # Pre-processing step may have included a log_prob with the samples.
-        if 'log_prob' in samples:
-            log_prob += samples['log_prob'].to_numpy()
+        if "log_prob" in samples:
+            log_prob += samples["log_prob"].to_numpy()
 
         return log_prob
+
+    def log_prob_mc(self, *args, **kwargs):
+        pass
 
     def _post_process(self, samples: Union[dict, pd.DataFrame], inverse: bool = False):
         pass
@@ -277,8 +356,8 @@ class Sampler(object):
         size of the importance sampled points.
 
         This method modifies the samples pd.DataFrame in-place, adding new columns for
-        log_likelihood, log_prior, and weights. It also stores log_evidence and
-        effective_sample_size attributes.
+        log_likelihood, log_prior, and weights. It also stores log_evidence,
+        effective_sample_size and n_eff attributes.
 
         Parameters
         ----------
@@ -306,7 +385,15 @@ class Sampler(object):
         # Proposal samples and associated log probability have already been calculated
         # using the stored model. These form a normalized probability distribution.
         log_prob_proposal = self.samples["log_prob"].to_numpy()
-        theta = self.samples.drop(columns="log_prob")
+
+        delta_log_prob_target = np.zeros(len(self.samples))
+        if "delta_log_prob_target" in self.samples.columns:
+            delta_log_prob_target = self.samples["delta_log_prob_target"].to_numpy()
+
+        # select parameters in self.samples (required as log_prob and potentially gnpe
+        # proxies are also stored in self.samples, but are not needed for the likelihood.
+        param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
+        theta = self.samples[param_keys]
 
         # Calculate the (un-normalized) target density as prior times likelihood,
         # evaluated at the same sample points.
@@ -323,9 +410,11 @@ class Sampler(object):
         # no point in keeping these samples, we simply drop them; this means we do not
         # have to make special exceptions for outside-prior samples elsewhere in the
         # code. They do not contribute directly to the evidence or the effective sample
-        # size, so we are not losing anything useful.
+        # size, so we are not losing anything useful. However, it is important to count
+        # them in num_samples when computing the evidence, since they contribute to the
+        # normalization of the proposal distribution.
 
-        within_prior = log_prior != -np.inf
+        within_prior = (log_prior + delta_log_prob_target) != -np.inf
         num_samples = len(self.samples)
         if num_samples != np.sum(within_prior):
             print(
@@ -336,6 +425,7 @@ class Sampler(object):
             theta = theta.iloc[within_prior].reset_index(drop=True)
             log_prob_proposal = log_prob_proposal[within_prior]
             log_prior = log_prior[within_prior]
+            delta_log_prob_target = delta_log_prob_target[within_prior]
 
         print(f"Calculating {len(theta)} likelihoods.")
         t0 = time.time()
@@ -345,7 +435,9 @@ class Sampler(object):
         print(f"Done. This took {time.time() - t0:.2f} seconds.")
 
         # Calculate weights and normalize them to have mean 1.
-        log_weights = log_prior + log_likelihood - log_prob_proposal
+        log_weights = (
+            log_prior + log_likelihood + delta_log_prob_target - log_prob_proposal
+        )
         weights = np.exp(log_weights - np.max(log_weights))
         weights /= np.mean(weights)
 
@@ -354,6 +446,7 @@ class Sampler(object):
         self.samples["weights"] = weights
         self.samples["log_likelihood"] = log_likelihood
         self.samples["log_prior"] = log_prior
+        # self.samples["delta_log_prob_target"] = delta_log_prob_target
 
         # The evidence
         #           Z = \int d\theta \pi(\theta) L(\theta),
@@ -383,8 +476,23 @@ class Sampler(object):
         #   * q, \pi, L must be distributions in the same parameter space (the same
         #     coordinates). We have undone any standardizations so this is the case.
 
+        self.n_eff = np.sum(weights) ** 2 / np.sum(weights ** 2)
+        # ESS computed with len(weights) in denominator instead of num_samples,
+        # since we are interested in ESS per *likelihood evaluation*, not per
+        # Dingo sample.
+        self.effective_sample_size = self.n_eff / len(weights)
+
         self.log_evidence = logsumexp(log_weights) - np.log(num_samples)
-        self.effective_sample_size = np.sum(weights) ** 2 / np.sum(weights ** 2)
+        log_weights_all = np.pad(
+            log_weights - self.log_evidence,
+            (num_samples - len(log_weights), 0),
+            constant_values=-np.inf,
+        )
+        assert np.allclose(np.mean(np.exp(log_weights_all)), 1)
+        # log_evidence_std = 1/sqrt(n) (evidence_std / evidence)
+        self.log_evidence_std = np.sqrt(
+            (num_samples - self.n_eff) / (num_samples * self.n_eff)
+        )
 
     def write_pesummary(self, filename):
         from pesummary.io import write
@@ -399,15 +507,14 @@ class Sampler(object):
         )
         # TODO: Save much more information.
 
+    @property
+    def settings(self):
+        return self.metadata
+
     def to_samples_dataset(self) -> SamplesDataset:
-        data_dict = {
-            "settings": self.metadata,
-            "samples": self.samples,
-            "context": self.context,
-            "log_evidence": self.log_evidence,
-            "effective_sample_size": self.effective_sample_size,
-        }
-        return SamplesDataset(dictionary=data_dict)
+        data_dict = {k: getattr(self, k) for k in self.samples_dataset_keys}
+        data_keys = [k for k in data_dict.keys() if k != "settings"]
+        return SamplesDataset(dictionary=data_dict, data_keys=data_keys)
 
     def to_hdf5(self, label="", outdir="."):
         dataset = self.to_samples_dataset()
@@ -417,11 +524,31 @@ class Sampler(object):
     def print_summary(self):
         print("Number of samples:", len(self.samples))
         if self.log_evidence is not None:
-            print("Log(evidence):", self.log_evidence)
             print(
-                f"Effective sample size: {self.effective_sample_size:.1f} "
-                f"({100 * self.effective_sample_size / len(self.samples):.2f}%)"
+                f"Log(evidence): {self.log_evidence:.3f} +-{self.log_evidence_std:.3f}"
             )
+            print(
+                f"Effective samples {self.n_eff:.1f}: "
+                f"(ESS = {100 * self.effective_sample_size:.2f}%)"
+            )
+
+
+class UnconditionalSampler(Sampler):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.unconditional_model = True
+        self._initialize_transforms()
+
+    def _initialize_transforms(self):
+        # Postprocessing transform only:
+        #   * De-standardize data and extract inference parameters. Be careful to use
+        #     the standardization of the correct model, not the base model.
+        self.transform_post = SelectStandardizeRepackageParameters(
+            {"inference_parameters": self.inference_parameters},
+            self.metadata["train_settings"]["data"]["standardization"],
+            inverse=True,
+            as_type="dict",
+        )
 
 
 class GNPESampler(Sampler):
@@ -449,6 +576,9 @@ class GNPESampler(Sampler):
         self.init_sampler = init_sampler
         self.num_iterations = num_iterations
         self.gnpe_parameters = None  # Should be set in subclass.
+        self.gnpe_proxy_sampler = None
+        self.log_prob_correction = None  # log_prob correction, accounting for std
+        self.iteration_tracker = None
 
     @property
     def init_sampler(self):
@@ -469,33 +599,177 @@ class GNPESampler(Sampler):
         self._num_iterations = value
         self.metadata["num_iterations"] = self._num_iterations
 
-    def _run_sampler(self, num_samples: int, context: Optional[dict] = None) -> dict:
+    def _kernel_log_prob(self, samples):
+        raise NotImplementedError("To be implemented in subclass.")
+
+    def prepare_log_prob(
+        self,
+        num_samples: int,
+        nde_settings: dict,
+        batch_size: Optional[int] = None,
+        threshold_std: Optional[float] = np.inf,
+        low_latency_label: str = None,
+        outdir: str = None,
+    ):
+        """
+        Prepare gnpe sampling with log_prob. This is required, since in its vanilla
+        form gnpe does not provide the density for its samples.
+
+        Specifically, we train an unconditional neural density estimator (nde) for the
+        gnpe proxies. This requires running the gnpe sampler till convergence, and
+        extracting the gnpe proxies after the final gnpe iteration. The nde is trained
+        to match the distribution over gnpe proxies, which provides a way of rapidly
+        sampling (converged!) gnpe proxies *and* evaluating the log_prob.
+
+        After this preparation step, self.run_sampler can leverage
+        self.gnpe_proxy_sampler (which is based on the aforementioned trained nde) to
+        sample gnpe proxies, such that one gnpe iteration is sufficient. The log_prob of
+        the samples in the *joint* space (inference parameters + gnpe proxies) is then
+        simply given by the sum of the corresponding log_probs (from self.model and
+        self.gnpe_proxy_sampler.model).
+
+        Parameters
+        ----------
+        num_samples: int
+            number of samples for training of nde
+        batch_size: int = None
+            batch size for sampler
+        threshold_std: float = np.inf
+            gnpe proxies deviating by more then threshold_std standard deviations from
+            the proxy mean (along any axis) are discarded.
+        low_latency_label: str = None
+            File label for low latency samples (= samples used for training nde).
+            If None, these samples are not saved.
+        outdir: str = None
+            Directory in which low latency samples are saved. Needs to be set if
+            low_latency_label is not None.
+        """
+        self.run_sampler(num_samples, batch_size)
+        gnpe_proxy_keys = [k for k in self.samples.keys() if k.startswith("GNPE:")]
+        if low_latency_label is not None:
+            self.to_hdf5(label=low_latency_label, outdir=outdir)
+        gnpe_proxy_pd = self.samples[gnpe_proxy_keys].rename(columns=lambda x: x[5:])
+        gnpe_proxy_dataset = SamplesDataset(dictionary={"samples": gnpe_proxy_pd})
+        # filter outliers, as they decrease the performance of the density estimator
+        mean = np.mean(gnpe_proxy_dataset.samples, axis=0)
+        std = np.std(gnpe_proxy_dataset.samples, axis=0)
+        lower, upper = mean - threshold_std * std, mean + threshold_std * std
+        inds = np.where(
+            np.all((lower <= gnpe_proxy_dataset.samples), axis=1)
+            * np.all((gnpe_proxy_dataset.samples <= upper), axis=1)
+        )[0]
+        if len(inds) / len(gnpe_proxy_dataset.samples) < 0.95:
+            raise ValueError("Too many proxy samples outside of specified range.")
+        gnpe_proxy_dataset.samples = gnpe_proxy_dataset.samples.iloc[inds]
+        nde_settings["data"] = {
+            "inference_parameters": [k[5:] for k in gnpe_proxy_keys]
+        }
+        nde_settings["training"]["device"] = str(self.model.device)
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            gnpe_proxy_model = train_unconditional_density_estimator(
+                gnpe_proxy_dataset,
+                nde_settings,
+                tmpdirname,
+            )
+        self.gnpe_proxy_sampler = UnconditionalSampler(model=gnpe_proxy_model)
+
+        # Note: self.gnpe_proxy_sampler.transform_post, and self.transform_post *must*
+        # contain the SelectStandardizeRepackageParameters transformation, such that
+        # the log_prob is correctly de-standardized!
+
+    def _run_sampler(
+        self,
+        num_samples: int,
+        context: Optional[dict] = None,
+        use_gnpe_proxy_sampler=False,
+    ) -> dict:
         if context is None:
             raise ValueError("self.context must be set to run sampler.")
+        use_gnpe_proxy_sampler = self.gnpe_proxy_sampler is not None
 
         data_ = self.init_sampler.transform_pre(context)
 
-        x = {
-            "extrinsic_parameters": self.init_sampler._run_sampler(
-                num_samples, context
-            ),
-            "parameters": {},
-        }
-        for i in range(self.num_iterations):
-            print(i)
-            x["extrinsic_parameters"] = {
-                k: x["extrinsic_parameters"][k] for k in self.gnpe_parameters
+        if not use_gnpe_proxy_sampler:
+            # Run gnpe iterations to jointly infer gnpe proxies and inference parameters.
+            self.iteration_tracker = IterationTracker(store_data=True)
+            x = {
+                "extrinsic_parameters": self.init_sampler._run_sampler(
+                    num_samples, context
+                ),
+                "parameters": {},
             }
+            for i in range(self.num_iterations):
+                x["extrinsic_parameters"] = {
+                    k: x["extrinsic_parameters"][k] for k in self.gnpe_parameters
+                }
+                self.iteration_tracker.update(
+                    {k: v.cpu().numpy() for k, v in x["extrinsic_parameters"].items()}
+                )
+                d = data_.clone()
+                x["data"] = d.expand(num_samples, *d.shape)
+
+                x = self.transform_pre(x)
+                x["parameters"] = self.model.sample(x["data"], x["context_parameters"])
+                x = self.transform_post(x)
+                samples = x["parameters"]
+                print(
+                    f"it {i}.\tmin pvalue: {self.iteration_tracker.pvalue_min:.3f}"
+                    f"\tproxy mean: ",
+                    *[
+                        f"{torch.mean(v).item():.5f}"
+                        for v in x["gnpe_proxies"].values()
+                    ],
+                    "\tproxy std:",
+                    *[f"{torch.std(v).item():.5f}" for v in x["gnpe_proxies"].values()],
+                )
+        else:
+            # Infer gnpe proxies based on trained model in gnpe_proxy sampler.
+            # With this, we can infer the inference parameters with a single pass
+            # through the gnpe network.
             d = data_.clone()
-            x["data"] = d.expand(num_samples, *d.shape)
 
+            gnpe_proxies_in = self.gnpe_proxy_sampler._run_sampler(
+                num_samples=num_samples, batch_size=num_samples
+            )
+            log_prob_gnpe_proxies = gnpe_proxies_in.pop("log_prob")
+            # log_prob_gnpe_proxies is already standardized, since it is covered in
+            # _run_sampler by self.transform_post [SelectStandardizeRepackageParameters]
+
+            x = {
+                "extrinsic_parameters": {},
+                "parameters": {},
+                "gnpe_proxies_in": gnpe_proxies_in,
+                "data": d.expand(num_samples, *d.shape),
+            }
             x = self.transform_pre(x)
-            x["parameters"] = self.model.sample(x["data"], x["context_parameters"])
-            x = self.transform_post(x)
+            with torch.no_grad():
+                x["parameters"], x["log_prob"] = self.model.model.sample_and_log_prob(
+                    x["data"],
+                    x["context_parameters"],
+                )
+            x = self.transform_post(x)  # this also standardizes x["log_prob"]!
 
-        samples = x["parameters"]
+            samples = x["parameters"]
+            samples["log_prob"] = x["log_prob"] + log_prob_gnpe_proxies
+
+            # The log_prob returned by gnpe is not just the log_prob over parmeters
+            # theta, but instead the log_prob in the *joint* space q(theta,theta^|x),
+            # including the proxies theta^. For importance sampling this means,
+            # that the target density is
+            #
+            #       p(theta,theta^|x) = p(theta^|theta) * p(theta|x).
+            #
+            # We compute log[p(theta^|theta)] below and store it as
+            # samples["delta_log_prob_target"], such that for importance sampling we
+            # only need to evaluate log[p(theta|x)] and add this correction.
+            all_params = {**x["extrinsic_parameters"], **samples, **x["gnpe_proxies"]}
+            all_params = {k: torch_detach_to_cpu(v) for k, v in all_params.items()}
+            kernel_log_prob = self._kernel_log_prob(all_params)
+            samples["delta_log_prob_target"] = torch.Tensor(kernel_log_prob)
+
+        # add gnpe parameters:
+        for k, v in x["gnpe_proxies"].items():
+            assert k.endswith("_proxy")
+            samples["GNPE:" + k] = x["gnpe_proxies"][k]
 
         return samples
-
-    # with GNPE the log_prob becomes intractable, so we drop the log_prob method
-    log_prob = None

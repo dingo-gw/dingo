@@ -4,7 +4,7 @@ import time
 import numpy as np
 import pandas as pd
 from astropy.time import Time
-from bilby.core.prior import Uniform
+from bilby.core.prior import Uniform, PriorDict, Constraint
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 
@@ -16,7 +16,7 @@ from dingo.gw.gwutils import get_window_factor, get_extrinsic_prior_dict
 from dingo.gw.likelihood import (
     StationaryGaussianGWLikelihood,
 )
-from dingo.core.density.kde import (
+from dingo.core.density import (
     interpolated_sample_and_log_prob_multi,
     interpolated_log_prob_multi,
 )
@@ -196,6 +196,7 @@ class GWSamplerMixin(object):
         if self.event_metadata is not None:
             t_event = self.event_metadata.get("time_event")
             if t_event is not None and t_event != self.t_ref:
+                assert self.samples_dataset is None, "t_ref correction should be needed"
                 ra = samples["ra"]
                 time_reference = Time(self.t_ref, format="gps", scale="utc")
                 time_event = Time(t_event, format="gps", scale="utc")
@@ -216,23 +217,30 @@ class GWSamplerMixin(object):
         """
         Sample a synthetic phase for the waveform. This is a post-processing step
         applicable to samples theta in the full parameter space, except for the phase
-        parameter (i.e., 14D samples). This step adds a theta parameter to the samples
+        parameter (i.e., 14D samples). This step adds a phase parameter to the samples
         based on likelihood evaluations.
 
         A synthetic phase is sampled as follows.
 
-            * Compute the waveform mu(theta, phase=0) for phase 0.
-            * Compute the likelihood for mu(theta, phase=0) * exp(2i*phase) on a
-              uniform grid of phase values in the range [0, 2pi).
-              Note that this is *not* equivalent to the actual likelihood for
-              (theta, phase) unless the waveform is fully dominated by the (2, 2) mode.
+            * Compute and cache the modes for the waveform mu(theta, phase=0) for
+              phase 0, organize them such that each contribution m transforms as
+              exp(-i * m * phase).
+            * Compute the likelihood on a phase grid, by computing mu(theta, phase) from
+              the cached modes. In principle this likelihood is exact, however, it can
+              deviate slightly from the likelihood computed without cached modes for
+              various technical reasons (e.g., slightly different windowing of cached
+              modes compared to full waveform when transforming TD waveform to FD).
+              These small deviations can be fully accounted for by importance sampling.
+              *Note*: when approximation_22_mode=True, the entire waveform is assumed
+              to transform as exp(2i*phase), in which case the likelihood is only exact
+              if the waveform is fully dominated by the (2, 2) mode.
             * Build a synthetic conditional phase distribution based on this grid. We
               use an interpolated prior distribution bilby.core.prior.Interped,
               such that we can sample and also evaluate the log_prob. We add a constant
               background with weight self.synthetic_phase_kwargs to the kde to make
               sure that we keep a mass-covering property. With this, the importance
-              sampling will yield exact results even if the synthetic phase conditional is
-              just an approximation.
+              sampling will yield exact results even when the synthetic phase conditional
+              is just an approximation.
 
         Besides adding phase samples to samples['phase'], this method also modifies
         samples['log_prob'] by adding the log_prob of the synthetic phase conditional.
@@ -265,7 +273,8 @@ class GWSamplerMixin(object):
         # phase-marginalized likelihood.
 
         # Restrict to samples that are within the prior.
-        theta = pd.DataFrame(samples).drop(columns="log_prob", errors="ignore")
+        param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
+        theta = pd.DataFrame(samples)[param_keys]
         log_prior = self.prior.ln_prob(theta, axis=0)
         constraints = self.prior.evaluate_constraints(theta)
         np.putmask(log_prior, constraints == 0, -np.inf)
@@ -307,17 +316,12 @@ class GWSamplerMixin(object):
             phasor = np.exp(2j * phases)
             phase_log_posterior = np.outer(d_inner_h_complex, phasor).real
         else:
-            # Define higher order function for log_likelihood on phase grid.
-            # This let's us set the phases argument, and prepares the function for the
-            # multiprocessing wrapper.
-            # def log_likelihood_phase_grid(theta_frame):
-            #     return self.likelihood.log_likelihood_phase_grid(theta_frame, phases)
             self.likelihood.phase_grid = phases
 
             phase_log_posterior = apply_func_with_multiprocessing(
                 self.likelihood.log_likelihood_phase_grid,
                 theta.iloc[within_prior],
-                num_processes=num_processes
+                num_processes=num_processes,
             )
 
         phase_posterior = np.exp(
@@ -583,7 +587,8 @@ class GWSampler(GWSamplerMixin, Sampler):
         model : PosteriorModel
         """
         super().__init__(**kwargs)
-        self._initialize_transforms()
+        if self.model is not None:
+            self._initialize_transforms()
 
     def _initialize_transforms(self):
 
@@ -667,6 +672,7 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
         #   * shifting the strain by - gnpe proxies
         #   * repackaging & standardizing proxies to sample['context_parameters']
         #     for conditioning of the inference network
+        self.gnpe_kernel = {}
         transform_pre = [RenameKey("data", "waveform")]
         if gnpe_time_settings:
             transform_pre.append(
@@ -677,6 +683,7 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                     inference=True,
                 )
             )
+            self.gnpe_kernel = {**self.gnpe_kernel, **transform_pre[-1].kernel}
             transform_pre.append(TimeShiftStrain(ifo_list, self.domain))
         if gnpe_chirp_settings:
             transform_pre.append(
@@ -686,6 +693,7 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                     gnpe_chirp_settings.get("order", 0),
                 )
             )
+            self.gnpe_kernel = {**self.gnpe_kernel, **transform_pre[-1].kernel}
         if gnpe_phase_settings:
             transform_pre.append(
                 GNPEPhase(
@@ -693,6 +701,7 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                     gnpe_phase_settings.get("random_pi_jump", False),
                 )
             )
+        self.gnpe_kernel = PriorDict(self.gnpe_kernel)
         transform_pre.append(
             SelectStandardizeRepackageParameters(
                 {"context_parameters": data_settings["context_parameters"]},
@@ -730,6 +739,17 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 GetDetectorTimes(ifo_list, data_settings["ref_time"]),
             ]
         )
+
+    def _kernel_log_prob(self, samples):
+        if len({"chirp_mass", "mass_ratio", "phase"} & self.gnpe_kernel.keys()) > 0:
+            raise NotImplementedError(
+                "kernel log_prob only implemented for time gnpe."
+            )
+        gnpe_proxies_diff = {
+            k: np.array(samples[k] - samples[f"{k}_proxy"])
+            for k in self.gnpe_kernel.keys()
+        }
+        return self.gnpe_kernel.ln_prob(gnpe_proxies_diff, axis=0)
 
 
 class GWSamplerUnconditional(GWSampler):

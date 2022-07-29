@@ -113,6 +113,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 n_grid = phase_marginalization_kwargs.get("n_grid", 1_000)
                 # use endpoint = False for grid, since phase = 0/2pi are equivalent
                 self.phase_grid = np.linspace(0, 2 * np.pi, n_grid, endpoint=False)
+            else:
+                print("Using phase marginalization with (2,2) mode approximation.")
 
     def initialize_time_marginalization(self, t_lower, t_upper, n_fft=1):
         """
@@ -253,6 +255,15 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
     def log_likelihood_phase_grid(self, theta, phases=None):
         # TODO: Implement for time marginalization
+        if self.phase_marginalization:
+            raise ValueError(
+                "Can't compute likelihood on a phase grid for "
+                "phase-marginalized posteriors"
+            )
+        if self.time_marginalization:
+            raise NotImplementedError(
+                "log_likelihood on phase grid not yet implemented."
+            )
 
         if self.waveform_generator.spin_conversion_phase != 0:
             raise ValueError(
@@ -341,6 +352,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             rho2opt_all.append(rho2opt)
             kappa2_all.append(kappa2)
 
+            log_likelihoods[idx] = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+
             # # comment out for cross check:
             # mu = sum_contributions_m(pol_m, phase_shift=phase)
             # rho2opt_ref = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
@@ -352,8 +365,6 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             # )
             # assert rho2opt - rho2opt_ref < 1e-10
             # assert kappa2 - kappa2_ref < 1e-10
-
-            log_likelihoods[idx] = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
         # # Test that this works:
         # idx = len(phases) // 3

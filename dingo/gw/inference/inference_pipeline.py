@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 import argparse
 import os
 from os.path import dirname, join
@@ -103,7 +104,29 @@ def parse_args():
     parser.add_argument(
         "--get_log_prob",
         action="store_true",
-        help="If set, log_probs of samples are saved. Will not work for GNPE.",
+        help="If set, log_probs of samples are saved. For GNPE models, this invokes "
+        "training of an unconditional density estimator to recover the density.",
+    )
+    parser.add_argument(
+        "--save_low_latency",
+        action="store_true",
+        help="Only relevant for GNPE models and if args.get_log_prob is set. In that "
+        "case, and if save_low_latency is set, intermediate results without log_prob "
+        "are saved.",
+    )
+    parser.add_argument(
+        "--density_settings",
+        type=str,
+        default=None,
+        help="Path to yaml file with settings for density estimation. Only used if "
+        "log_prob is requested for a gnpe model.",
+    )
+    parser.add_argument(
+        "--exit_command",
+        type=str,
+        default=None,
+        nargs="+",
+        help="If set, run os.system(args.exit_command) before exiting.",
     )
 
     args = parser.parse_args()
@@ -136,6 +159,7 @@ def analyze_event():
         ref = None
 
     if args.model_init is not None:
+        gnpe = True
         init_model = PosteriorModel(
             args.model_init, device=device, load_training_info=False
         )
@@ -146,6 +170,7 @@ def analyze_event():
             num_iterations=args.num_gnpe_iterations,
         )
     else:
+        gnpe = False
         sampler = GWSampler(model=model)
 
     # sample posterior for events
@@ -160,12 +185,43 @@ def analyze_event():
             args.time_buffer,
             args.event_dataset,
         )
+        if ref is None or time_event not in ref:
+            label = f"gps-{time_event}{args.suffix}"
+        else:
+            name_event = ref[time_event]["event_name"]
+            label = name_event + args.suffix
+
         sampler.context = event_data
         sampler.event_metadata = {
             "time_event": time_event,
             "time_psd": args.time_psd,
             "time_buffer": args.time_buffer,
         }
+
+        if gnpe and args.get_log_prob:
+            # GNPE generally does not provide straightforward access to the log_prob.
+            # If requested, need to train an initialization model for the GNPE proxies.
+            with open(args.density_settings) as f:
+                density_settings = yaml.safe_load(f)
+            if args.save_low_latency:
+                low_latency_label = label + "_low-latency"
+            else:
+                low_latency_label = None
+            sampler.prepare_log_prob(
+                batch_size=args.batch_size,
+                low_latency_label=low_latency_label,
+                outdir=args.out_directory,
+                **density_settings,
+            )
+            if low_latency_label is not None and sampler.iteration_tracker.store_data:
+                np.save(
+                    join(
+                        args.out_directory,
+                        f"gnpe_trajectories_{low_latency_label}.npy",
+                    ),
+                    sampler.iteration_tracker.data,
+                )
+
         sampler.run_sampler(
             args.num_samples,
             batch_size=args.batch_size,
@@ -173,28 +229,22 @@ def analyze_event():
 
         # if no reference samples are available, simply save the dingo samples
         if ref is None or time_event not in ref:
-            label = f"gps-{time_event}{args.suffix}"
             sampler.to_hdf5(label=label, outdir=args.out_directory)
 
         # if reference samples are available, save dingo samples and additionally
         # compare to the reference method in a corner plot
         else:
-            name_event = ref[time_event]["event_name"]
             ref_samples_file = ref[time_event]["reference_samples"]["file"]
             ref_method = ref[time_event]["reference_samples"]["method"]
-
-            sampler.to_hdf5(label=name_event, outdir=args.out_directory)
-
+            sampler.to_hdf5(label=label, outdir=args.out_directory)
             ref_samples = load_ref_samples(ref_samples_file)
-
             generate_cornerplot(
                 {"name": ref_method, "samples": ref_samples, "color": "blue"},
                 {"name": "dingo", "samples": sampler.samples, "color": "orange"},
-                filename=join(
-                    args.out_directory, f"cornerplot_{name_event}{args.suffix}.pdf"
-                ),
+                filename=join(args.out_directory, f"cornerplot_{label}.pdf"),
             )
-
+    if args.exit_command:
+        os.system(" ".join(args.exit_command))
 
 if __name__ == "__main__":
     analyze_event()

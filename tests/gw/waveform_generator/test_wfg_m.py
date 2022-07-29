@@ -72,7 +72,13 @@ def test_generate_hplus_hcross_m_SEOBNRv4PHM(uniform_fd_domain, intrinsic_prior)
     pol_ref = wfg.generate_hplus_hcross({**p, "phase": p["phase"] + phase_shift})
 
     mismatches = [
-        get_mismatch(pol[pol_name], pol_ref[pol_name], wfg.domain) for pol_name in pol
+        get_mismatch(
+            pol[pol_name],
+            pol_ref[pol_name],
+            wfg.domain,
+            asd_file="aLIGO_ZERO_DET_high_P_asd.txt",
+        )
+        for pol_name in pol
     ]
 
     # The mismatches are typically be of order 1e-5. This is exclusively due to
@@ -106,7 +112,12 @@ def test_generate_hplus_hcross_m_IMRPhenomXPHM(uniform_fd_domain, intrinsic_prio
 
         mismatches.append(
             [
-                get_mismatch(pol[pol_name], pol_ref[pol_name], wfg.domain)
+                get_mismatch(
+                    pol[pol_name],
+                    pol_ref[pol_name],
+                    wfg.domain,
+                    asd_file="aLIGO_ZERO_DET_high_P_asd.txt",
+                )
                 for pol_name in pol
             ]
         )

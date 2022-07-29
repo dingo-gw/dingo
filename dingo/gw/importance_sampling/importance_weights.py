@@ -5,6 +5,7 @@ Step 2: Set up likelihood and prior
 import yaml
 from os import rename, makedirs
 from os.path import dirname, join, isfile, exists
+from types import SimpleNamespace
 import argparse
 
 from dingo.core.models import PosteriorModel
@@ -43,9 +44,13 @@ def main():
     args = parse_args()
     with open(args.settings, "r") as fp:
         settings = yaml.safe_load(fp)
-    samples_dataset = SamplesDataset(
-        file_name=settings["nde"]["data"]["parameter_samples"]
-    )
+    try:
+        samples_dataset = SamplesDataset(file_name=settings["parameter_samples"])
+    except KeyError:
+        # except statement for backward compatibility
+        samples_dataset = SamplesDataset(
+            file_name=settings["nde"]["data"]["parameter_samples"]
+        )
     metadata = samples_dataset.settings
     samples = samples_dataset.samples
     # for time marginalization, we drop geocent time from the samples
@@ -58,20 +63,21 @@ def main():
     phase_marginalization = phase_marginalization_kwargs is not None
     synthetic_phase_kwargs = settings.get("synthetic_phase", None)
     synthetic_phase = synthetic_phase_kwargs is not None
-    #if sum([time_marginalization, phase_marginalization, synthetic_phase]) > 1:
+    # if sum([time_marginalization, phase_marginalization, synthetic_phase]) > 1:
     #    raise NotImplementedError(
     #        "Only one of time_marginalization, phase_marginalization and"
     #        "synthetic_phase can be set to True."
     #    )
     if time_marginalization and "geocent_time" in samples:
-        if 'geocent_time' in inference_parameters:
+        if "geocent_time" in inference_parameters:
             samples.drop("geocent_time", axis=1, inplace=True)
             inference_parameters.remove("geocent_time")
     if phase_marginalization or synthetic_phase:
-        if 'phase' in inference_parameters:
+        if "phase" in inference_parameters:
             samples.drop("phase", axis=1, inplace=True)
             inference_parameters.remove("phase")
-    settings["nde"]["data"]["inference_parameters"] = inference_parameters
+    if "nde" in settings:
+        settings["nde"]["data"]["inference_parameters"] = inference_parameters
 
     # Step 1: Build proposal distribution.
     #
@@ -104,18 +110,18 @@ def main():
             )
             print(f"Renaming trained nde model to {nde_name}.")
             rename(join(args.outdir, "model_latest.pt"), nde_name)
+            nde_sampler = GWSamplerUnconditional(
+                model=nde, synthetic_phase_kwargs=synthetic_phase_kwargs
+            )
+
     else:
-        raise NotImplementedError(
-            "Cannot currently perform importance sampling based "
-            "on just a samples dataset, even with log_prob "
-            "included. Please start with a posterior model."
+        nde_sampler = GWSamplerUnconditional(
+            samples_dataset=samples_dataset,
+            synthetic_phase_kwargs=synthetic_phase_kwargs,
         )
 
     # Step 2: Sample from proposal.
 
-    nde_sampler = GWSamplerUnconditional(
-        model=nde, synthetic_phase_kwargs=synthetic_phase_kwargs
-    )
     print(f'Generating {settings["num_samples"]} samples from proposal distribution.')
     nde_sampler.run_sampler(num_samples=settings["num_samples"])
 
@@ -131,6 +137,22 @@ def main():
     #       w_i = p(theta_i|d) / q(theta_i|d)
     #
     # to obtain weighted samples from the proposal distribution.
+
+    # log_evidences = []
+    # log_evidences_std = []
+    # for idx in range(20):
+    #     nde_sampler.run_sampler(num_samples=settings["num_samples"])
+    #     nde_sampler.importance_sample(
+    #         num_processes=settings.get("num_processes", 1),
+    #         time_marginalization_kwargs=time_marginalization_kwargs,
+    #         phase_marginalization_kwargs=phase_marginalization_kwargs,
+    #     )
+    #     log_evidences.append(nde_sampler.log_evidence)
+    #     log_evidences_std.append(nde_sampler.log_evidence_std)
+    # import numpy as np
+    # log_evidences = np.array(log_evidences)
+    # log_evidences_std = np.array(log_evidences_std)
+    # print(np.std(log_evidences) / np.mean(log_evidences_std))
 
     print(f"Importance sampling.")
     nde_sampler.importance_sample(
