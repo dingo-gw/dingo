@@ -29,11 +29,16 @@ pm = SimpleNamespace(metadata=sd.settings)
 injection_gen = Injection.from_posterior_model(pm)
 injection_gen.asd = sd.context["asds"]
 
+try:
+    idx = np.argmax(sd.samples["log_likelihood"])
+except KeyError:
+    idx = 0
 theta_injection = {
     k: v
-    for k, v in sd.samples.iloc[0].to_dict().items()
+    for k, v in sd.samples.iloc[idx].to_dict().items()
     if k in injection_gen.prior.keys()
 }
+print(f"Injection with sample {idx}. Parameters: {theta_injection}")
 injection_data = injection_gen.injection(theta_injection)
 injection_data.pop("extrinsic_parameters")
 
