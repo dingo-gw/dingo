@@ -86,7 +86,7 @@ class Sampler(object):
             ]
 
         elif self.samples_dataset is not None:
-            self.metadata = None
+            self.metadata = self.samples_dataset.settings.copy()
             self.unconditional_model = True
             self.context = self.samples_dataset.context
             self.base_model_metadata = self.samples_dataset.settings
