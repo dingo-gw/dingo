@@ -3,9 +3,11 @@ import numpy as np
 import argparse
 import os
 from os.path import dirname, join
+from pathlib import Path
 import yaml
 
 from dingo.core.models import PosteriorModel
+from dingo.core.dataset import DingoDataset
 from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
 from dingo.gw.inference.data_preparation import get_event_data_and_domain
 from dingo.gw.inference.visualization import load_ref_samples, generate_cornerplot
@@ -34,12 +36,14 @@ def parse_args():
         "gnpe is used.",
     )
     parser.add_argument(
+        # TODO: this should be renamed --events or similar
         "--gps_time_event",
-        type=float,
+        type=str,
         required=True,
         nargs="+",
         help="List of GPS times of the events to be analyzed. Used to download the GW "
-        "event data, or search for it in the dataset file.",
+        "event data, or search for it in the dataset file. Can also be a string with "
+        "the path to a file containing the event data.",
     )
     parser.add_argument(
         "--event_dataset",
@@ -134,6 +138,47 @@ def parse_args():
     return args
 
 
+def get_event_data(event, args, model, ref=None):
+    # if event is a float: interpret it as gps time, download the data
+    # else: interpret it as path to file with event data
+    try:
+        time_event = float(event)
+    except ValueError:
+        time_event = None
+
+    if time_event is not None:
+        # get raw event data, and prepare it for the network domain
+        event_data, _ = get_event_data_and_domain(
+            model.metadata,
+            time_event,
+            args.time_psd,
+            args.time_buffer,
+            args.event_dataset,
+        )
+        event_metadata = {
+            "time_event": time_event,
+            "time_psd": args.time_psd,
+            "time_buffer": args.time_buffer,
+        }
+
+        if ref is None or time_event not in ref:
+            label = f"gps-{time_event}{args.suffix}"
+        else:
+            name_event = ref[time_event]["event_name"]
+            label = name_event + args.suffix
+
+    else:
+        # load file with event data
+        event_dataset = DingoDataset(event, data_keys=["event_data", "event_metadata"])
+        event_data = event_dataset.event_data
+        event_metadata = event_dataset.event_metadata
+        label = Path(event).stem + args.suffix
+        # TODO: add check that model metadata and injection are compatible, e.g.,
+        #  same frequecy range and waveform model
+
+    return event_data, event_metadata, label
+
+
 def analyze_event():
     args = parse_args()
 
@@ -175,28 +220,12 @@ def analyze_event():
 
     # sample posterior for events
     for time_event in args.gps_time_event:
-        print(f"Analyzing event at gps time {time_event}.")
+        print(f"Analyzing event at {time_event}.")
 
-        # get raw event data, and prepare it for the network domain
-        event_data, _ = get_event_data_and_domain(
-            model.metadata,
-            time_event,
-            args.time_psd,
-            args.time_buffer,
-            args.event_dataset,
-        )
-        if ref is None or time_event not in ref:
-            label = f"gps-{time_event}{args.suffix}"
-        else:
-            name_event = ref[time_event]["event_name"]
-            label = name_event + args.suffix
+        event_data, event_metadata, label = get_event_data(time_event, args, model, ref)
 
         sampler.context = event_data
-        sampler.event_metadata = {
-            "time_event": time_event,
-            "time_psd": args.time_psd,
-            "time_buffer": args.time_buffer,
-        }
+        sampler.event_metadata = event_metadata
 
         if gnpe and args.get_log_prob:
             # GNPE generally does not provide straightforward access to the log_prob.
@@ -245,6 +274,7 @@ def analyze_event():
             )
     if args.exit_command:
         os.system(" ".join(args.exit_command))
+
 
 if __name__ == "__main__":
     analyze_event()
