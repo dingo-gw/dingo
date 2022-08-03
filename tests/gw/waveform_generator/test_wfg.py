@@ -1,5 +1,5 @@
 from dingo.gw.domains import FrequencyDomain
-from dingo.gw.waveform_generator import WaveformGenerator
+from dingo.gw.waveform_generator.waveform_generator import WaveformGenerator
 from dingo.gw.transforms.parameter_transforms import StandardizeParameters
 import pytest
 import numpy as np

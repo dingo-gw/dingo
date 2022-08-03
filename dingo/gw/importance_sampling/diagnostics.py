@@ -53,15 +53,25 @@ def plot_posterior_slice(
     outname=None,
     num_processes=1,
     n_grid=200,
+    parameters=None,
+    normalize_conditionals=False,
 ):
+    # Put a cap on number of processes to avoid overhead.
+    # num_processes = min(num_processes, n_grid // 50)
+
     # repeat theta n_grid times
     theta_grid = pd.DataFrame(
         np.repeat(np.array(theta)[np.newaxis], n_grid, axis=0),
         columns=theta.keys(),
     )
     plt.clf()
-    fig, ax = plt.subplots(3, 5, figsize=(30, 12))
-    for idx, param in enumerate(theta.keys()):
+    if parameters is None:
+        parameters = theta.keys()
+    # rows, columns = 3, 5
+    columns = math.ceil(np.sqrt(len(parameters)))
+    rows = math.ceil(len(parameters) / columns)
+    fig, ax = plt.subplots(rows, columns, figsize=(columns*6, rows*4), squeeze=False)
+    for idx, param in enumerate(parameters):
         # axis with scan for param
         param_axis = np.linspace(theta_range[param][0], theta_range[param][1], n_grid)
         # build theta_grid for param
@@ -78,11 +88,16 @@ def plot_posterior_slice(
         log_probs_proposal = sampler.log_prob(theta_param)
 
         # plot
-        i, j = idx // 5, idx % 5
+        target = np.exp(log_probs_target)
+        proposal = np.exp(log_probs_proposal)
+        if normalize_conditionals:
+            target /= target.sum()
+            proposal /= proposal.sum()
+        i, j = idx // columns, idx % columns
         ax[i, j].set_xlabel(param)
         ax[i, j].axvline([theta[param]], color="black", label="theta")
-        ax[i, j].plot(param_axis, np.exp(log_probs_target), label="target")
-        ax[i, j].plot(param_axis, np.exp(log_probs_proposal), label="proposal")
+        ax[i, j].plot(param_axis, target, label="target")
+        ax[i, j].plot(param_axis, proposal, label="proposal")
 
     plt.legend()
     if outname is not None:
@@ -108,8 +123,10 @@ def plot_diagnostics(
     log_likelihood = theta["log_likelihood"].to_numpy()
     log_probs_target = log_prior + log_likelihood
 
+    n_eff = sampler.n_eff
     ESS = sampler.effective_sample_size
     log_evidence = sampler.log_evidence
+    log_evidence_std = sampler.log_evidence_std
 
     # Plot weights
     plt.clf()
@@ -126,7 +143,7 @@ def plot_diagnostics(
     plt.yscale("log")
     plt.title(
         f"IS Weights. {n_below} below {y_lower}. "
-        f"ESS {ESS:.0f} ({100 * ESS / len(weights):.2f}%)."
+        f"Effective samples: {n_eff:.0f} (ESS = {100 * ESS:.2f}%)."
     )
     plt.scatter(x, y, s=0.5)
     plt.savefig(join(outdir, "weights.png"))
@@ -142,7 +159,7 @@ def plot_diagnostics(
     n_below = len(np.where(y < y_lower)[0])
     plt.title(
         f"Target log_probs. {n_below} below {y_lower:.2f}. "
-        f"Log_evidence {log_evidence:.2f}."
+        f"Log_evidence {log_evidence:.3f} +- {log_evidence_std:.3f}."
     )
     plt.scatter(x, y, s=0.5)
     plt.plot([y_upper - 20, y_upper], [y_upper - 20, y_upper], color="black")

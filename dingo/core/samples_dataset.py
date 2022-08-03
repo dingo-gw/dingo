@@ -15,14 +15,12 @@ class SamplesDataset(DingoDataset):
     log_evidence : float
     effective_sample_size : float
     """
-    def __init__(self, file_name=None, dictionary=None):
+
+    def __init__(self, file_name=None, dictionary=None, data_keys=None):
+        if data_keys is None:
+            data_keys = ["samples", "context", "log_evidence", "effective_sample_size"]
         super().__init__(
             file_name=file_name,
             dictionary=dictionary,
-            data_keys=[
-                "samples",
-                "context",
-                "log_evidence",
-                "effective_sample_size",
-            ],
+            data_keys=data_keys,
         )
