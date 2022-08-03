@@ -23,7 +23,7 @@ copyright = '2022, Stephen Green'
 author = 'Stephen Green'
 
 # The full version, including alpha/beta/rc tags
-release = '1.0'
+release = '0.2.0'
 
 
 # -- General configuration ---------------------------------------------------
@@ -35,7 +35,34 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.mathjax',
     'sphinx.ext.napoleon',
+    'myst_nb',
+    'sphinxcontrib.mermaid',
+    'sphinxcontrib.bibtex',
 ]
+
+myst_enable_extensions = [
+    "amsmath",
+    "colon_fence",
+    "deflist",
+    "dollarmath",
+    "fieldlist",
+    "html_admonition",
+    "html_image",
+    "linkify",
+    "replacements",
+    "smartquotes",
+    "strikethrough",
+    "substitution",
+    "tasklist",
+]
+
+myst_heading_anchors = 2
+
+bibtex_bibfiles = ['refs.bib']
+bibtex_default_style = 'unsrt'
+
+# Include the __init__ docstring with the autoclass
+autoclass_content = 'both'
 
 # Napolean Settings
 napoleon_google_docstring = False

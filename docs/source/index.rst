@@ -7,8 +7,8 @@
    to make sure you are using the correct python module. If you want to generate API-docs ie all of those 
    dingo.core.nn.rst files just run `sphinx-apidoc -o dingo-devel/docs/source dingo-devel/dingo`
 
-Welcome to dingo's documentation!
-=================================
+Dingo
+=====
 
 **Dingo** is a Python program for analyzing gravitational wave data using neural posterior estimation. It is based on the ideas presented in https://arxiv.org/abs/2106.12594.
 
@@ -17,14 +17,27 @@ Welcome to dingo's documentation!
 
 .. toctree::
    :caption: Getting started
+   :maxdepth: 2
    
    installation
    overview
    quickstart
 
+.. toctree::
    :caption: User guide
+   :maxdepth: 2
 
    sbi
+   design_philosophy
+   generating_waveforms
+   waveform_dataset
+   training_transforms
+   noise_dataset
+   network_architecture
+   training
+   inference
+   gnpe
+   importance_sampling
 
 
 Indices and tables
