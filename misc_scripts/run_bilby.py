@@ -141,9 +141,9 @@ if __name__ == "__main__":
         ifo_list,
         waveform_generator,
         priors=prior,
-        time_marginalization=True,
-        phase_marginalization=False,
-        distance_marginalization=True,
+        time_marginalization=settings.get("time_marginalization", True),
+        phase_marginalization=settings.get("phase_marginalization", False),
+        distance_marginalization=settings.get("distance_marginalization", True),
     )
 
     # Finally, we run the sampler. This function takes the likelihood and prior
