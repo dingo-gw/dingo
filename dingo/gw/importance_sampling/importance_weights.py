@@ -78,6 +78,9 @@ def main():
             inference_parameters.remove("phase")
     if "nde" in settings:
         settings["nde"]["data"]["inference_parameters"] = inference_parameters
+        settings["nde"]["data"]["parameters"] = inference_parameters
+        # TODO: train_unconditional_density_estimator should not accept
+        #  settings["data"]["parameters"], such that the line above can be removed.
 
     # Step 1: Build proposal distribution.
     #
