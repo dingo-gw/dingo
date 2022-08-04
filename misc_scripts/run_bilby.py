@@ -19,6 +19,8 @@ import pycbc.psd
 from scipy.signal import tukey
 import numpy as np
 import yaml
+from shutil import copyfile
+
 from dingo.gw.prior import default_intrinsic_dict, default_extrinsic_dict
 
 
@@ -30,7 +32,14 @@ def parse_args():
         "--outdir",
         type=str,
         required=True,
-        help="Directory for output of plots. Contains bilby_settings.yaml",
+        help="Directory for output of plots.",
+    )
+    parser.add_argument(
+        "--settings_file",
+        type=str,
+        default=None,
+        help="Yaml file with bilby settings. If None, use bilby_settings.yaml in "
+        "args.outdir.",
     )
 
     args = parser.parse_args()
@@ -43,6 +52,9 @@ if __name__ == "__main__":
     args = parse_args()
     logger = bilby.core.utils.logger
     outdir = args.outdir
+    bilby.core.utils.check_directory_exists_and_if_not_mkdir(outdir)
+    if args.settings_file is not None:
+        copyfile(args.settings_file, join(outdir, "bilby_settings.yaml"))
     with open(join(outdir, "bilby_settings.yaml")) as f:
         settings = yaml.safe_load(f)
 
@@ -89,7 +101,6 @@ if __name__ == "__main__":
         ifo_list.append(ifo)
 
     logger.info("Saving data plots to {}".format(outdir))
-    bilby.core.utils.check_directory_exists_and_if_not_mkdir(outdir)
     ifo_list.plot_data(outdir=outdir, label=settings["event_label"])
 
     ifo_list.save_data(outdir, settings["event_label"])
