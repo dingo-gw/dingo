@@ -1,6 +1,7 @@
 import numpy as np
 from gwpy.timeseries import TimeSeries
 import pycbc.psd
+import math
 
 from dingo.gw.gwutils import get_window
 
