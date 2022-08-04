@@ -37,7 +37,22 @@ def download_psd(det, time_start, time_psd, window, f_s):
     psd_strain = TimeSeries.fetch_open_data(
         det, time_start, time_end, sample_rate=f_s, cache=True
     )
-    # print("Done.")
+
+    # if strain for PSD data contains nan, shift segment for PSD
+    if np.max(np.isnan(psd_strain)):
+        dt = math.ceil(np.where(np.isnan(psd_strain))[0][-1] / f_s)
+        print(
+            f"Nan encountered in strain data for PSD estimation for detector {det}. "
+            f"Shifting strain segment by {dt} seconds."
+        )
+        psd_strain = TimeSeries.fetch_open_data(
+            det, time_start + dt, time_end + dt, sample_rate=f_s, cache=True
+        )
+        if np.max(np.isnan(psd_strain)):
+            raise ValueError(
+                f"Nan encountered in strain data for PSD estimation for detector {det}."
+            )
+
     psd_strain = psd_strain.to_pycbc()
 
     # generate window
