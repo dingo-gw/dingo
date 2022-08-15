@@ -579,6 +579,8 @@ class GNPESampler(Sampler):
         self.gnpe_proxy_sampler = None
         self.log_prob_correction = None  # log_prob correction, accounting for std
         self.iteration_tracker = None
+        # remove self.remove_init_outliers of lowest log_prob init samples before gnpe
+        self.remove_init_outliers = 0.0
 
     @property
     def init_sampler(self):
@@ -608,6 +610,7 @@ class GNPESampler(Sampler):
         nde_settings: dict,
         batch_size: Optional[int] = None,
         threshold_std: Optional[float] = np.inf,
+        remove_init_outliers: Optional[float] = 0.0,
         low_latency_label: str = None,
         outdir: str = None,
     ):
@@ -644,6 +647,7 @@ class GNPESampler(Sampler):
             Directory in which low latency samples are saved. Needs to be set if
             low_latency_label is not None.
         """
+        self.remove_init_outliers = remove_init_outliers
         self.run_sampler(num_samples, batch_size)
         gnpe_proxy_keys = [k for k in self.samples.keys() if k.startswith("GNPE:")]
         if low_latency_label is not None:
@@ -692,12 +696,18 @@ class GNPESampler(Sampler):
         if not use_gnpe_proxy_sampler:
             # Run gnpe iterations to jointly infer gnpe proxies and inference parameters.
             self.iteration_tracker = IterationTracker(store_data=True)
-            x = {
-                "extrinsic_parameters": self.init_sampler._run_sampler(
-                    num_samples, context
-                ),
-                "parameters": {},
-            }
+            if self.remove_init_outliers == 0.0:
+                init_samples = self.init_sampler._run_sampler(num_samples, context)
+            else:
+                init_samples = self.init_sampler._run_sampler(
+                    math.ceil(num_samples / (1 - self.remove_init_outliers)), context
+                )
+                thr = torch.quantile(
+                    init_samples["log_prob"], self.remove_init_outliers
+                )
+                inds = torch.where(init_samples["log_prob"] >= thr)[0][:num_samples]
+                init_samples = {k: v[inds] for k, v in init_samples.items()}
+            x = {"extrinsic_parameters": init_samples, "parameters": {}}
             for i in range(self.num_iterations):
                 x["extrinsic_parameters"] = {
                     k: x["extrinsic_parameters"][k] for k in self.gnpe_parameters

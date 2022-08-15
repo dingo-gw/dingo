@@ -21,7 +21,30 @@ import numpy as np
 import yaml
 from shutil import copyfile
 
-from dingo.gw.prior import default_intrinsic_dict, default_extrinsic_dict
+default_extrinsic_dict = {
+    "dec": "bilby.core.prior.Cosine(minimum=-np.pi/2, maximum=np.pi/2)",
+    "ra": 'bilby.core.prior.Uniform(minimum=0., maximum=2*np.pi, boundary="periodic")',
+    "geocent_time": "bilby.core.prior.Uniform(minimum=-0.1, maximum=0.1)",
+    "psi": 'bilby.core.prior.Uniform(minimum=0.0, maximum=np.pi, boundary="periodic")',
+    "luminosity_distance": "bilby.core.prior.Uniform(minimum=100.0, maximum=6000.0)",
+}
+
+default_intrinsic_dict = {
+    "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
+    "mass_2": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
+    "mass_ratio": "bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.125, maximum=1.0)",
+    "chirp_mass": "bilby.gw.prior.UniformInComponentsChirpMass(minimum=25.0, maximum=100.0)",
+    "luminosity_distance": 1000.0,
+    "theta_jn": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
+    "phase": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
+    "a_1": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.99)",
+    "a_2": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.99)",
+    "tilt_1": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
+    "tilt_2": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
+    "phi_12": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
+    "phi_jl": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
+    "geocent_time": 0.0,
+}
 
 
 def parse_args():
