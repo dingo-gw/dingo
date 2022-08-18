@@ -31,8 +31,12 @@ def max_likelihood_injection(samples_file, injection_file):
     for ifo in sd.context["waveform"]:
         wf_white_0 = sd.context["waveform"][ifo] / sd.context["asds"][ifo]
         wf_white_1 = injection_data["waveform"][ifo] / injection_data["asds"][ifo]
-        assert abs(1 - np.std(wf_white_0.real) / np.std(wf_white_1.real)) < 0.05
-        assert abs(1 - np.std(wf_white_0.imag) / np.std(wf_white_1.imag)) < 0.05
+        assert (
+            abs(1 - np.std(wf_white_0.real) / np.std(wf_white_1.real)) < 0.10
+        ), f"noise std: {np.std(wf_white_0.real)} vs. {np.std(wf_white_0.real)}"
+        assert (
+            abs(1 - np.std(wf_white_0.imag) / np.std(wf_white_1.imag)) < 0.10
+        ), f"noise std: {np.std(wf_white_0.real)} vs. {np.std(wf_white_0.real)}"
         assert np.all(sd.context["asds"][ifo] == injection_data["asds"][ifo])
     assert theta_injection == {
         k: injection_data["parameters"][k] for k in theta_injection.keys()
