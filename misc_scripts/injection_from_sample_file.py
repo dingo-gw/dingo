@@ -57,21 +57,27 @@ if __name__ == "__main__":
         description="Generate injection based off of a dingo samples file.",
     )
     parser.add_argument(
-        "--samples_file",
+        "--samples_files",
         type=str,
+        nargs="+",
         required=True,
-        help="Path to dingo samples file. Used to extract asds and metadata.",
+        help="(List of) path(s) to dingo samples file(s). Used to extract asds and "
+        "metadata.",
     )
     parser.add_argument(
-        "--injection_file",
+        "--injection_files",
         type=str,
+        nargs="+",
         required=True,
-        help="Name of out file. If only a filename and not a full path, use same "
-        "directory as args.samples_file.",
+        help="(List with) name(s) of out file(s). If only a filename and not a full "
+        "path, use same directory as samples_file.",
     )
     args = parser.parse_args()
 
-    if dirname(args.injection_file) == "":
-        args.injection_file = join(dirname(args.samples_file), args.injection_file)
+    if len(args.injection_files) == 1:
+        args.injection_files = args.injection_files * len(args.samples_files)
 
-    max_likelihood_injection(args.samples_file, args.injection_file)
+    for samples_file, injection_file in zip(args.samples_files, args.injection_files):
+        if dirname(injection_file) == "":
+            injection_file = join(dirname(samples_file), injection_file)
+        max_likelihood_injection(samples_file, injection_file)
