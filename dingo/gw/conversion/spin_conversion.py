@@ -154,6 +154,7 @@ def change_spin_conversion_phase(p, f_ref, sc_phase_old, sc_phase_new):
     p_new:
         parameters with changed spin conversion phase
     """
+    p = p.astype(float)
     if sc_phase_old == sc_phase_new:
         return p
 
