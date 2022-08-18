@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from dingo.gw.conversion import cartesian_spins, pe_spins, change_spin_conversion_phase
 
+
 @pytest.fixture
 def param_setup():
     f_ref = 20
@@ -22,6 +23,7 @@ def param_setup():
     }
     return f_ref, params
 
+
 def test_spin_conversions(param_setup):
     f_ref, params = param_setup
     params_cart = cartesian_spins(params, f_ref)
@@ -32,19 +34,15 @@ def test_spin_conversions(param_setup):
     assert np.sum([np.abs(v - params_pe[k]) for k, v in params.items()]) < 1e-10
     assert np.sum([np.abs(v - params_pe_wrong[k]) for k, v in params.items()]) > 1e-3
 
+
 def test_change_of_spin_conversion_phase(param_setup):
     f_ref, params = param_setup
-    params_pd = pd.DataFrame(
-        {k: np.array([v, v / 1.2]) for k, v in params.items()}
-    )
+    params_pd = pd.DataFrame({k: np.array([v, v / 1.2]) for k, v in params.items()})
 
     # 1) check that only theta_jn and phi_jl are impacted
-    params_pd_new = change_spin_conversion_phase(
-        params_pd, f_ref, "real_phase", 0
-    )
+    params_pd_new = change_spin_conversion_phase(params_pd, f_ref, "real_phase", 0)
     diff = {
-        k: np.sum(np.abs(params_pd_new[k] - params_pd[k]))
-        for k in params_pd.keys()
+        k: np.sum(np.abs(params_pd_new[k] - params_pd[k])) for k in params_pd.keys()
     }
     for k in ["theta_jn", "phi_jl"]:
         assert diff[k] > 1e-3
@@ -57,8 +55,7 @@ def test_change_of_spin_conversion_phase(param_setup):
     params_pd_new = change_spin_conversion_phase(params_pd_new, f_ref, 0, 1)
     params_pd_new = change_spin_conversion_phase(params_pd_new, f_ref, 1, "real_phase")
     diff = {
-        k: np.sum(np.abs(params_pd_new[k] - params_pd[k]))
-        for k in params_pd.keys()
+        k: np.sum(np.abs(params_pd_new[k] - params_pd[k])) for k in params_pd.keys()
     }
     for v in diff.values():
         assert v < 1e-10
