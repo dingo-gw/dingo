@@ -30,7 +30,8 @@ class IterationTracker:
             # get ks
             statistic, pvalue = [], []
             for k in y.keys():
-                ks_result = kstest(x[k], y[k])
+                N = len(x[k]) // 2
+                ks_result = kstest(x[k][:N], y[k][N:])
                 statistic.append(ks_result[0])
                 pvalue.append(ks_result[1])
             self.ks_result = {"statistics": statistic, "pvalue": pvalue}
