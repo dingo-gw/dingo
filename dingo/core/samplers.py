@@ -392,8 +392,11 @@ class Sampler(object):
 
         # select parameters in self.samples (required as log_prob and potentially gnpe
         # proxies are also stored in self.samples, but are not needed for the likelihood.
+        # TODO: replace by self.metadata["train_settings"]["data"]["inference_parameters"]
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
+        aux_keys = list(set(self.samples.keys()).difference(param_keys))
         theta = self.samples[param_keys]
+        aux_params = self.samples[aux_keys]
 
         # Calculate the (un-normalized) target density as prior times likelihood,
         # evaluated at the same sample points.
@@ -423,6 +426,7 @@ class Sampler(object):
                 f"Dropping these."
             )
             theta = theta.iloc[within_prior].reset_index(drop=True)
+            aux_params = aux_params.iloc[within_prior].reset_index(drop=True)
             log_prob_proposal = log_prob_proposal[within_prior]
             log_prior = log_prior[within_prior]
             delta_log_prob_target = delta_log_prob_target[within_prior]
@@ -446,6 +450,8 @@ class Sampler(object):
         self.samples["weights"] = weights
         self.samples["log_likelihood"] = log_likelihood
         self.samples["log_prior"] = log_prior
+        for k in aux_keys:
+            self.samples[k] = aux_params[k]
         # self.samples["delta_log_prob_target"] = delta_log_prob_target
 
         # The evidence
@@ -761,6 +767,7 @@ class GNPESampler(Sampler):
 
             samples = x["parameters"]
             samples["log_prob"] = x["log_prob"] + log_prob_gnpe_proxies
+            samples["log_prob_gnpe_proxies"] = log_prob_gnpe_proxies
 
             # The log_prob returned by gnpe is not just the log_prob over parmeters
             # theta, but instead the log_prob in the *joint* space q(theta,theta^|x),
