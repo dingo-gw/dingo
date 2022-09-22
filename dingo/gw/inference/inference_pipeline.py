@@ -13,10 +13,17 @@ from dingo.gw.inference.data_preparation import get_event_data_and_domain
 from dingo.gw.inference.visualization import load_ref_samples, generate_cornerplot
 
 
-def parse_args():
+def parse_args(arguments=None):
     parser = argparse.ArgumentParser(
         description="Infer the posterior of a GW event using a trained dingo model.",
     )
+
+    parser.add_argument('--settings',
+                        type=str,
+                        default=None,
+                        help="Optionally pass settings via a yaml file instead of command"
+                             " line arguments")
+
     parser.add_argument(
         "--out_directory",
         type=str,
@@ -39,7 +46,6 @@ def parse_args():
         # TODO: this should be renamed --events or similar
         "--gps_time_event",
         type=str,
-        required=True,
         nargs="+",
         help="List of GPS times of the events to be analyzed. Used to download the GW "
         "event data, or search for it in the dataset file. Can also be a string with "
@@ -133,6 +139,9 @@ def parse_args():
         help="If set, run os.system(args.exit_command) before exiting.",
     )
 
+    if arguments is not None:
+        parser.set_defaults(**arguments)
+
     args = parser.parse_args()
 
     return args
@@ -180,7 +189,16 @@ def get_event_data(event, args, model, ref=None):
 
 
 def analyze_event():
+
     args = parse_args()
+    if args.settings is not None:
+        with open(args.settings, "r") as fp:
+            settings = yaml.safe_load(fp)
+
+        args = parse_args(settings)
+
+    if args.gps_time_event is None:
+        raise ValueError("Please provide the gps time of an event to analyze")
 
     if torch.cuda.is_available():
         device = "cuda"
