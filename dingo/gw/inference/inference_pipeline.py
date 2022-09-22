@@ -147,7 +147,7 @@ def parse_args(arguments=None):
     return args
 
 
-def get_event_data(event, args, model, ref=None):
+def get_event_data(event, args, model, ref=None, psd_files=None):
     # if event is a float: interpret it as gps time, download the data
     # else: interpret it as path to file with event data
     try:
@@ -163,6 +163,7 @@ def get_event_data(event, args, model, ref=None):
             args.time_psd,
             args.time_buffer,
             args.event_dataset,
+            psd_files=psd_files
         )
         event_metadata = {
             "time_event": time_event,
@@ -191,11 +192,14 @@ def get_event_data(event, args, model, ref=None):
 def analyze_event():
 
     args = parse_args()
+
     if args.settings is not None:
         with open(args.settings, "r") as fp:
             settings = yaml.safe_load(fp)
+        # Currently only a single psd for all gps times is supported
+        psd_files = settings.get("psd", None)
 
-        args = parse_args(settings)
+        args = parse_args(settings["arguments"])
 
     if args.gps_time_event is None:
         raise ValueError("Please provide the gps time of an event to analyze")
@@ -240,7 +244,7 @@ def analyze_event():
     for time_event in args.gps_time_event:
         print(f"Analyzing event at {time_event}.")
 
-        event_data, event_metadata, label = get_event_data(time_event, args, model, ref)
+        event_data, event_metadata, label = get_event_data(time_event, args, model, ref, psd_files=psd_files)
 
         sampler.context = event_data
         sampler.event_metadata = event_metadata

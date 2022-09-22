@@ -8,7 +8,7 @@ from dingo.gw.gwutils import get_window
 from dingo.gw.domains import build_domain_from_model_metadata, FrequencyDomain
 
 
-def load_raw_data(time_event, settings, event_dataset=None):
+def load_raw_data(time_event, settings, event_dataset=None, psd_files=None):
     """
     Load raw event data.
 
@@ -38,9 +38,24 @@ def load_raw_data(time_event, settings, event_dataset=None):
             print(f"Data for event at {event} found in {event_dataset}.")
             return data
 
-    # if this did not work, download the data
-    print(f"Downloading data for event at {event}.")
-    data = download_raw_data(time_event, **settings)
+    elif psd_files is not None:
+        print(f"Data for event at {event} found in {event_dataset}.")
+        data = {"strain": {}, "psd": {}}
+        for det in settings["detectors"]:
+            data["strain"][det] = TimeSeries.fetch_open_data(
+                det,
+                time_event + settings["time_buffer"] - settings["time_segment"],
+                time_event + settings["time_buffer"],
+                sample_rate=settings["f_s"],
+                cache=True,
+            )
+
+            data["psd"][det] = np.load(psd_files[det], allow_pickle=True).item()["psd"]
+
+    else:
+        # if this did not work, download the data
+        print(f"Downloading data for event at {event}.")
+        data = download_raw_data(time_event, **settings)
 
     # optionally save this data to event_dataset
     if event_dataset is not None:
@@ -120,13 +135,14 @@ def get_event_data_and_domain(
     time_psd,
     time_buffer,
     event_dataset=None,
+    psd_files=None,
 ):
     # step 1: download raw event data
     settings_raw_data = parse_settings_for_raw_data(
         model_metadata, time_psd, time_buffer
     )
     raw_data = load_raw_data(
-        time_event, settings=settings_raw_data, event_dataset=event_dataset
+        time_event, settings=settings_raw_data, event_dataset=event_dataset, psd_files=psd_files
     )
 
     # step 2: prepare the data for the network domain
