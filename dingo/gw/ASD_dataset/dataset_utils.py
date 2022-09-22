@@ -228,7 +228,7 @@ def create_dataset_from_files(data_dir: str, settings: dict):
             "f_min": f_min,
             "f_max": f_max,
             "delta_f": delta_f,
-            "window_factor": None,
+            "window_factor": 1.0,
         }
     )
     ind_min, ind_max = domain.min_idx, domain.max_idx

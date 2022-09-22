@@ -129,7 +129,7 @@ class FrequencyDomain(Domain):
             if k not in ["f_min", "f_max", "delta_f", "window_factor"]:
                 raise KeyError(f"Invalid key for domain update: {k}.")
             if k == "window_factor" and v != self._window_factor:
-                raise ValueError("Cannot update window_factor.")
+                raise ValueError(f"Cannot update window_factor from {v} to {self._window_factor}.")
             if k == "delta_f" and v != self._delta_f:
                 raise ValueError("Cannot update delta_f.")
         self.set_new_range(
