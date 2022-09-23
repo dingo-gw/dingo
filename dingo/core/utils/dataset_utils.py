@@ -4,6 +4,7 @@ from os.path import isfile
 import h5py
 
 from dingo.core.dataset import DingoDataset
+from dingo.gw.inference.data_download import download_strain
 from dingo.core.dataset import recursive_hdf5_save, recursive_hdf5_load
 
 
@@ -22,6 +23,34 @@ def recursive_check_dicts_are_equal(dict_a, dict_b):
                 return False
     return True
 
+def load_psds_from_file(filename):
+
+    if filename.endswith("npy"):
+        return np.load(filename, allow_pickle=True).item()["psd"]
+
+    elif filename.endswith(".txt"):
+        raise NotImplementedError("invalid file extension at the moment")
+
+def fetch_raw_data(time_event, time_segment, time_psd, time_buffer, detectors, window, f_s, psd_files=None):
+
+    data = {"strain": {}, "psd": {}}
+
+    for det in detectors:
+        data["strain"][det] = download_strain(det, time_event, time_buffer, time_segment, f_s)
+
+        if psd_files is not None:
+            data["psd"][det] = load_psds_from_file(psd_files[det])
+
+        else:
+            data["psd"][det] = download_psd(
+                det,
+                time_start=time_event + time_buffer - time_psd - time_segment,
+                time_psd=time_psd,
+                window=window,
+                f_s=f_s,
+            )
+
+    return data
 
 def load_data_from_file(file_name, data_key, settings=None):
     """

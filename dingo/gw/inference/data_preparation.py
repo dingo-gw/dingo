@@ -2,8 +2,7 @@ import numpy as np
 from gwpy.timeseries import TimeSeries
 
 from dingo.core.dataset import DingoDataset
-from dingo.core.utils import load_data_from_file
-from dingo.gw.inference.data_download import download_raw_data
+from dingo.core.utils import load_data_from_file, fetch_raw_data
 from dingo.gw.gwutils import get_window
 from dingo.gw.domains import build_domain_from_model_metadata, FrequencyDomain
 
@@ -38,24 +37,9 @@ def load_raw_data(time_event, settings, event_dataset=None, psd_files=None):
             print(f"Data for event at {event} found in {event_dataset}.")
             return data
 
-    elif psd_files is not None:
-        print(f"Data for event at {event} found in {event_dataset}.")
-        data = {"strain": {}, "psd": {}}
-        for det in settings["detectors"]:
-            data["strain"][det] = TimeSeries.fetch_open_data(
-                det,
-                time_event + settings["time_buffer"] - settings["time_segment"],
-                time_event + settings["time_buffer"],
-                sample_rate=settings["f_s"],
-                cache=True,
-            )
+    print(f"Fetching data for event at {event}")
 
-            data["psd"][det] = np.load(psd_files[det], allow_pickle=True).item()["psd"]
-
-    else:
-        # if this did not work, download the data
-        print(f"Downloading data for event at {event}.")
-        data = download_raw_data(time_event, **settings)
+    data = fetch_raw_data(time_event, **settings, psd_files=psd_files)
 
     # optionally save this data to event_dataset
     if event_dataset is not None:

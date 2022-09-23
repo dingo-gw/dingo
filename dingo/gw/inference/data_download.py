@@ -71,32 +71,14 @@ def download_psd(det, time_start, time_psd, window, f_s):
     return np.array(psd)
 
 
-def download_raw_data(
-    time_event, time_segment, time_psd, time_buffer, detectors, window, f_s
-):
-    # parse settings
-    # time_segment = settings["window"]["T"]  # for now; change later for non-FD data
-    # time_psd = settings["time_psd"]
-    # time_buffer = settings["time_buffer"]
-    # detectors = settings["detectors"]
-    # window = settings["window"]
+def download_strain(det, time_event, time_buffer, time_segment, f_s):
+    strain = TimeSeries.fetch_open_data(
+        det,
+        time_event + time_buffer - time_segment,
+        time_event + time_buffer,
+        sample_rate=f_s,
+        cache=True,
+    )
+    return strain
 
-    data = {"strain": {}, "psd": {}}
 
-    for det in detectors:
-        data["strain"][det] = TimeSeries.fetch_open_data(
-            det,
-            time_event + time_buffer - time_segment,
-            time_event + time_buffer,
-            sample_rate=f_s,
-            cache=True,
-        )
-        data["psd"][det] = download_psd(
-            det,
-            time_start=time_event + time_buffer - time_psd - time_segment,
-            time_psd=time_psd,
-            window=window,
-            f_s=f_s,
-        )
-
-    return data
