@@ -4,7 +4,7 @@ from os.path import isfile
 import h5py
 
 from dingo.core.dataset import DingoDataset
-from dingo.gw.inference.data_download import download_strain
+from dingo.gw.inference.data_download import download_strain, download_psd
 from dingo.core.dataset import recursive_hdf5_save, recursive_hdf5_load
 
 
@@ -23,26 +23,38 @@ def recursive_check_dicts_are_equal(dict_a, dict_b):
                 return False
     return True
 
-def load_psds_from_file(filename,  det=None):
+
+def load_psds_from_file(filename, det=None):
 
     if filename.endswith("npy"):
         return np.load(filename, allow_pickle=True).item()["psd"]
 
-    elif filename.endswith(".txt"):
-        raise NotImplementedError("invalid file extension at the moment")
-
     elif filename.endswith(".h5"):
         with h5py.File(filename, "r") as f:
-            # hack since data is only contained up to 1023.875 and not 1024 Hz
-            return np.append(f["C01:IMRPhenomXPHM"]["psds"][det][:,1], [f["C01:IMRPhenomXPHM"]["psds"][det][-1,1]])
-    # TODO: check that data is consistent with frequency domain
+            # contains both psds in a single hdf5 file, so need to pass detector ...
+            return f["C01:IMRPhenomXPHM"]["psds"][det][:, 1]
 
-def fetch_raw_data(time_event, time_segment, time_psd, time_buffer, detectors, window, f_s, psd_files=None):
+    else:
+        raise NotImplementedError("Unknown file extension for the PSD files.")
+
+
+def fetch_raw_data(
+    time_event,
+    time_segment,
+    time_psd,
+    time_buffer,
+    detectors,
+    window,
+    f_s,
+    psd_files=None,
+):
 
     data = {"strain": {}, "psd": {}}
 
     for det in detectors:
-        data["strain"][det] = download_strain(det, time_event, time_buffer, time_segment, f_s)
+        data["strain"][det] = download_strain(
+            det, time_event, time_buffer, time_segment, f_s
+        )
 
         if psd_files is not None:
             data["psd"][det] = load_psds_from_file(psd_files[det], det=det)
@@ -57,6 +69,7 @@ def fetch_raw_data(time_event, time_segment, time_psd, time_buffer, detectors, w
             )
 
     return data
+
 
 def load_data_from_file(file_name, data_key, settings=None):
     """

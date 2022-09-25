@@ -80,5 +80,3 @@ def download_strain(det, time_event, time_buffer, time_segment, f_s):
         cache=True,
     )
     return strain
-
-

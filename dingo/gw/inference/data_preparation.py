@@ -1,4 +1,5 @@
 import numpy as np
+import warnings
 from gwpy.timeseries import TimeSeries
 
 from dingo.core.dataset import DingoDataset
@@ -103,7 +104,15 @@ def data_to_domain(raw_data, settings_raw_data, domain, **kwargs):
 
         # convert psds to asds
         for det, psd in raw_data["psd"].items():
-            asd = psd ** 0.5
+            asd = psd**0.5
+
+            if len(asd) < domain.max_idx + 1:
+                warnings.warn(
+                    "The frequency range of the provided PSD is too small for the domain. Appending values..."
+                )
+                diff = domain.max_idx - len(asd) + 1
+                asd = np.hstack((asd, diff * [asd[-1]]))
+
             asd = domain.update_data(asd, low_value=1.0)
             data["asds"][det] = asd
 
@@ -126,7 +135,10 @@ def get_event_data_and_domain(
         model_metadata, time_psd, time_buffer
     )
     raw_data = load_raw_data(
-        time_event, settings=settings_raw_data, event_dataset=event_dataset, psd_files=psd_files
+        time_event,
+        settings=settings_raw_data,
+        event_dataset=event_dataset,
+        psd_files=psd_files,
     )
 
     # step 2: prepare the data for the network domain

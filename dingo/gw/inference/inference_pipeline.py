@@ -18,11 +18,13 @@ def parse_args(arguments=None):
         description="Infer the posterior of a GW event using a trained dingo model.",
     )
 
-    parser.add_argument('--settings',
-                        type=str,
-                        default=None,
-                        help="Optionally pass settings via a yaml file instead of command"
-                             " line arguments")
+    parser.add_argument(
+        "--settings",
+        type=str,
+        default=None,
+        help="Optionally pass settings via a yaml file instead of command"
+        " line arguments",
+    )
 
     parser.add_argument(
         "--out_directory",
@@ -163,13 +165,19 @@ def get_event_data(event, args, model, ref=None, psd_files=None):
             args.time_psd,
             args.time_buffer,
             args.event_dataset,
-            psd_files=psd_files
+            psd_files=psd_files,
         )
+
         event_metadata = {
             "time_event": time_event,
-            "time_psd": args.time_psd,
             "time_buffer": args.time_buffer,
         }
+
+        psd_key, psd_value = "time_psd", args.time_psd
+        if psd_files is not None:
+            psd_key, psd_value = "psds", psd_files
+
+        event_metadata.update({psd_key: psd_value})
 
         if ref is None or time_event not in ref:
             label = f"gps-{time_event}{args.suffix}"
@@ -244,7 +252,9 @@ def analyze_event():
     for time_event in args.gps_time_event:
         print(f"Analyzing event at {time_event}.")
 
-        event_data, event_metadata, label = get_event_data(time_event, args, model, ref, psd_files=psd_files)
+        event_data, event_metadata, label = get_event_data(
+            time_event, args, model, ref, psd_files=psd_files
+        )
 
         sampler.context = event_data
         sampler.event_metadata = event_metadata

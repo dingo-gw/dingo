@@ -1,0 +1,9 @@
+arguments:
+  gps_time_event: [1265361792.9, 1265361792.8]
+  out_directory: /home/jonas/Desktop/dingo-devel/examples/training/inference
+  model: /home/jonas/Desktop/dingo-devel/examples/training/model_latest.pt
+  model_init: /home/jonas/Desktop/dingo-devel/examples/training_init/model_latest.pt
+  batch_size: 512
+psd:
+  H1: /home/jonas/Downloads/IGWN-GWTC2p1-v2-GW190408_181802_PEDataRelease_mixed_cosmo.h5
+  L1: /home/jonas/Desktop/dingo-devel/examples/dataset_generation/tmp/O2/L1/1024_0/psd_00000.npy
