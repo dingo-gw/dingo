@@ -1,7 +1,7 @@
 from dingo.core.dataset import DingoDataset
 
 
-class SamplesDataset(DingoDataset):
+class Result(DingoDataset):
     """
     A dataset class to hold a collection of samples, implementing I/O.
 

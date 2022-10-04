@@ -351,7 +351,7 @@ class GWSamplerMixin(object):
             samples["phase"] = phase_array
             samples["log_prob"] += delta_log_prob_array
 
-            # Insert the phase prior in the prior, since now now the phase is present.
+            # Insert the phase prior in the prior, since now the phase is present.
             self.prior["phase"] = self.phase_prior
             # reset likelihood for safety
             # TODO: Can this be removed?

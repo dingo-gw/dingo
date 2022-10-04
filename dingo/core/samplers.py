@@ -14,7 +14,7 @@ import tempfile
 from bilby.core.prior import Constraint
 
 from dingo.core.models import PosteriorModel
-from dingo.core.samples_dataset import SamplesDataset
+from dingo.core.result import Result
 from dingo.core.density import train_unconditional_density_estimator
 from dingo.core.utils import torch_detach_to_cpu, IterationTracker
 
@@ -47,7 +47,7 @@ class Sampler(object):
     def __init__(
         self,
         model: PosteriorModel = None,
-        samples_dataset: SamplesDataset = None,
+        samples_dataset: Result = None,
     ):
         """
         Parameters
@@ -517,10 +517,10 @@ class Sampler(object):
     def settings(self):
         return self.metadata
 
-    def to_samples_dataset(self) -> SamplesDataset:
+    def to_samples_dataset(self) -> Result:
         data_dict = {k: getattr(self, k) for k in self.samples_dataset_keys}
         data_keys = [k for k in data_dict.keys() if k != "settings"]
-        return SamplesDataset(dictionary=data_dict, data_keys=data_keys)
+        return Result(dictionary=data_dict, data_keys=data_keys)
 
     def to_hdf5(self, label="", outdir="."):
         dataset = self.to_samples_dataset()
@@ -659,7 +659,7 @@ class GNPESampler(Sampler):
         if low_latency_label is not None:
             self.to_hdf5(label=low_latency_label, outdir=outdir)
         gnpe_proxy_pd = self.samples[gnpe_proxy_keys].rename(columns=lambda x: x[5:])
-        gnpe_proxy_dataset = SamplesDataset(dictionary={"samples": gnpe_proxy_pd})
+        gnpe_proxy_dataset = Result(dictionary={"samples": gnpe_proxy_pd})
         # filter outliers, as they decrease the performance of the density estimator
         mean = np.mean(gnpe_proxy_dataset.samples, axis=0)
         std = np.std(gnpe_proxy_dataset.samples, axis=0)

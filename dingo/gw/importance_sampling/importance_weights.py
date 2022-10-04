@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import argparse
 
 from dingo.core.models import PosteriorModel
-from dingo.core.samples_dataset import SamplesDataset
+from dingo.core.result import Result
 from dingo.gw.inference.gw_samplers import GWSamplerUnconditional
 from dingo.core.density import train_unconditional_density_estimator
 from dingo.gw.importance_sampling.diagnostics import plot_diagnostics
@@ -45,10 +45,10 @@ def main():
     with open(args.settings, "r") as fp:
         settings = yaml.safe_load(fp)
     try:
-        samples_dataset = SamplesDataset(file_name=settings["parameter_samples"])
+        samples_dataset = Result(file_name=settings["parameter_samples"])
     except KeyError:
         # except statement for backward compatibility
-        samples_dataset = SamplesDataset(
+        samples_dataset = Result(
             file_name=settings["nde"]["data"]["parameter_samples"]
         )
     metadata = samples_dataset.settings

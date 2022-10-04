@@ -4,12 +4,12 @@ from os.path import join, dirname
 import argparse
 
 from dingo.core.dataset import DingoDataset
-from dingo.core.samples_dataset import SamplesDataset
+from dingo.core.result import Result
 from dingo.gw.inference.injection import Injection
 
 
 def max_likelihood_injection(samples_file, injection_file):
-    sd = SamplesDataset(samples_file)
+    sd = Result(samples_file)
     pm = SimpleNamespace(metadata=sd.settings)
     injection_gen = Injection.from_posterior_model(pm)
     injection_gen.asd = sd.context["asds"]
