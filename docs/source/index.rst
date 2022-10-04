@@ -10,22 +10,28 @@
 Dingo
 =====
 
-**Dingo** is a Python program for analyzing gravitational wave data using neural posterior estimation. It is based on the ideas presented in https://arxiv.org/abs/2106.12594.
+**Dingo** is a Python program for analyzing gravitational wave data using neural posterior estimation. It contains code for
+
+* building training datasets,
+* training normalizing flows to estimate the posterior density, and
+* performing inference on real or simulated data.
+
+As training a network from scratch can be expensive, we intend to also distribute trained networks that can be used directly for inference.
 
 .. note::
    This project is under active development.
 
 .. toctree::
    :caption: Getting started
-   :maxdepth: 2
-   
+   :maxdepth: 1
+
    installation
    overview
    quickstart
 
 .. toctree::
-   :caption: User guide
-   :maxdepth: 2
+   :caption: Advanced guide
+   :maxdepth: 1
 
    sbi
    design_philosophy
@@ -39,9 +45,27 @@ Dingo
    gnpe
    importance_sampling
 
+References
+----------
+
+Dingo is based on a series of papers developing NPE for GW parameter inference, starting from proof of concept :cite:p:`Green:2020hst`, to inclusion of all 15 parameters and analysis of real data :cite:p:`Green:2020dnx`, noise conditioning and full amortization :cite:p:`Dax:2021tsq`, and group-equivariant NPE :cite:p:`Dax:2021myb`.
+
+.. bibliography::
+
+If you use Dingo, we ask that you cite at least :cite:p:`Dax:2021tsq`.
+
+Dingo also makes use of several 3rd party packages, including
+
+* `Bilby <https://lscsoft.docs.ligo.org/bilby/>`_
+* `LALSimulation <https://lscsoft.docs.ligo.org/lalsuite/lalsimulation/>`_
+* `PyTorch <https://pytorch.org>`_
+* `nflows <https://github.com/bayesiains/nflows>`_
+
+
+
 
 Indices and tables
-==================
+------------------
 
 * :ref:`genindex`
 * :ref:`modindex`

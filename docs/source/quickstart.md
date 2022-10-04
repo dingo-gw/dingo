@@ -1,12 +1,51 @@
 # Quickstart tutorial
 
 To learn to use Dingo, we recommend starting with the examples provided in the `/examples`
-folder. The `.yaml` files contained in this directory (and subdirectories) contain
-configuration
-settings for the various Dingo tasks. These files are typically provided as input to the
+folder. The YAML files contained in this directory (and subdirectories) contain
+configuration settings for the various Dingo tasks (constructing training data, training networks, and performing inference). These files should be provided as input to the
 command-line scripts, which then run Dingo and save output files. These output files
 contain as metadata the settings in the `.yaml` files, and they may usually be inspected
 by running `dingo_ls`.
+
+```{mermaid}
+flowchart TB
+    dataset_settings[dataset_settings.yaml]
+    dataset_settings-->generate_dataset(["dingo_generate_dataset
+    #nbsp; #nbsp; --settings_file dataset_settings.yaml
+    #nbsp; #nbsp; --out_file waveform_dataset.hdf5"])
+    style generate_dataset text-align:left
+    asd_settings[asd_dataset_settings.yaml]
+    asd_settings-->generate_asd(["generate_asd_dataset
+    #nbsp; #nbsp; --settings_file dataset_settings.yaml
+    #nbsp; #nbsp; --data_dir asd_dataset"])
+    style generate_asd text-align:left
+    train_init(["dingo_train 
+    #nbsp; #nbsp; --settings_file train_settings_init.yaml
+    #nbsp; #nbsp; --train_dir model_init"])
+    style train_init text-align:left
+    train_settings_init[train_settings_init.yaml]
+    train_settings_init-->train_init
+    generate_dataset--->train_init
+    generate_asd--->train_init
+    generate_dataset--->train_main(["dingo_train 
+    #nbsp; #nbsp; --settings_file train_settings_main.yaml
+    #nbsp; #nbsp; --train_dir model_main"])
+    style train_main text-align:left
+    train_settings_main[train_settings_main.yaml]
+    generate_asd--->train_main
+    train_settings_main-->train_main
+    train_init-->inference(["dingo_analyze_event
+    #nbsp; #nbsp; --model model_main/model_stage_1.pt
+    #nbsp; #nbsp; --model_init model_init/model_stage_1.pt
+    #nbsp; #nbsp; --num_samples 50000
+    #nbsp; #nbsp; --gps_time_event 1126259462.4"])
+    style inference text-align:left
+    train_main-->inference
+    inference-->samples[dingo_samples-1126259462.4.hdf5]
+```
+
+
+
 
 After configuring the settings files, the scripts may be used as follows, assuming the
 Dingo `venv` is active.
