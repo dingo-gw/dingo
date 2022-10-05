@@ -1,3 +1,5 @@
+from typing import Optional
+
 import torch
 import numpy as np
 import argparse
@@ -8,8 +10,9 @@ import yaml
 
 from dingo.core.models import PosteriorModel
 from dingo.core.dataset import DingoDataset
+from dingo.core.samplers import UnconditionalSampler
 from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
-from dingo.gw.inference.data_preparation import get_event_data_and_domain
+from dingo.gw.data.data_preparation import get_event_data_and_domain
 from dingo.gw.inference.visualization import load_ref_samples, generate_cornerplot
 
 
@@ -179,6 +182,65 @@ def get_event_data(event, args, model, ref=None):
     return event_data, event_metadata, label
 
 
+def prepare_log_prob(
+    sampler,
+    num_samples: int,
+    nde_settings: dict,
+    batch_size: Optional[int] = None,
+    threshold_std: Optional[float] = np.inf,
+    remove_init_outliers: Optional[float] = 0.0,
+    low_latency_label: str = None,
+    outdir: str = None,
+):
+    """
+    Prepare gnpe sampling with log_prob. This is required, since in its vanilla
+    form gnpe does not provide the density for its samples.
+
+    Specifically, we train an unconditional neural density estimator (nde) for the
+    gnpe proxies. This requires running the gnpe sampler till convergence, and
+    extracting the gnpe proxies after the final gnpe iteration. The nde is trained
+    to match the distribution over gnpe proxies, which provides a way of rapidly
+    sampling (converged!) gnpe proxies *and* evaluating the log_prob.
+
+    After this preparation step, self.run_sampler can leverage
+    self.gnpe_proxy_sampler (which is based on the aforementioned trained nde) to
+    sample gnpe proxies, such that one gnpe iteration is sufficient. The
+    log_prob of
+    the samples in the *joint* space (inference parameters + gnpe proxies) is then
+    simply given by the sum of the corresponding log_probs (from self.model and
+    self.gnpe_proxy_sampler.model).
+
+    Parameters
+    ----------
+    num_samples: int
+        number of samples for training of nde
+    batch_size: int = None
+        batch size for sampler
+    threshold_std: float = np.inf
+        gnpe proxies deviating by more then threshold_std standard deviations from
+        the proxy mean (along any axis) are discarded.
+    low_latency_label: str = None
+        File label for low latency samples (= samples used for training nde).
+        If None, these samples are not saved.
+    outdir: str = None
+        Directory in which low latency samples are saved. Needs to be set if
+        low_latency_label is not None.
+    """
+    sampler.run_sampler(num_samples, batch_size)
+    gnpe_proxy_keys = [k for k in sampler.samples.keys() if k.startswith("GNPE:")]
+    if low_latency_label is not None:
+        sampler.to_hdf5(label=low_latency_label, outdir=outdir)
+    result = sampler.to_samples_dataset()
+    unconditional_model = result.train_unconditional_flow(
+        gnpe_proxy_keys,
+        nde_settings,
+        sampler.model.device,
+        threshold_std=threshold_std,
+    )
+    sampler.gnpe_proxy_sampler = UnconditionalSampler(model=unconditional_model)
+    sampler.remove_init_outliers = remove_init_outliers
+
+
 def analyze_event():
     args = parse_args()
 
@@ -236,7 +298,8 @@ def analyze_event():
                 low_latency_label = label + "_low-latency"
             else:
                 low_latency_label = None
-            sampler.prepare_log_prob(
+            prepare_log_prob(
+                sampler,
                 batch_size=args.batch_size,
                 low_latency_label=low_latency_label,
                 outdir=args.out_directory,

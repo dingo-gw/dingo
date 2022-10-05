@@ -5,7 +5,7 @@ import argparse
 
 from dingo.core.dataset import DingoDataset
 from dingo.core.result import Result
-from dingo.gw.inference.injection import Injection
+from dingo.gw.injection import Injection
 
 
 def max_likelihood_injection(samples_file, injection_file):

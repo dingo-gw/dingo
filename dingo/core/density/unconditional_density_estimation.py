@@ -4,7 +4,6 @@ import torch
 import yaml
 from os.path import dirname, join
 
-from dingo.core.result import Result
 from dingo.core.utils import build_train_and_test_loaders
 from dingo.core.utils.trainutils import RuntimeLimits
 import numpy as np
@@ -36,7 +35,7 @@ class SampleDataset(torch.utils.data.Dataset):
 
 
 def train_unconditional_density_estimator(
-    samples_dataset: Result,
+    samples_dataset,
     settings: dict,
     train_dir: str,
 ):

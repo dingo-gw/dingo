@@ -3,7 +3,7 @@ import numpy as np
 
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_mismatch
-from dingo.gw.inference.injection import GWSignal
+from dingo.gw.injection import GWSignal
 from dingo.gw.waveform_generator import sum_contributions_m
 
 
