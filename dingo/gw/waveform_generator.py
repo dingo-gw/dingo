@@ -7,7 +7,7 @@ from typing import Dict, List, Tuple, Union
 from numbers import Number
 import warnings
 import lal
-import lalsimulation as LS
+import lalsimulation as lalsim
 import pandas as pd
 from bilby.gw.conversion import (
     convert_to_lal_binary_black_hole_parameters,
@@ -55,7 +55,7 @@ class WaveformGenerator:
             raise ValueError("approximant should be a string, but got", approximant)
         else:
             self.approximant_str = approximant
-            self.approximant = LS.GetApproximantFromString(approximant)
+            self.approximant = lalsim.GetApproximantFromString(approximant)
 
         if not issubclass(type(domain), Domain):
             raise ValueError(
@@ -280,11 +280,11 @@ class WaveformGenerator:
             A lal parameter dictionary
         """
         lal_params = lal.CreateDict()
-        ma = LS.SimInspiralCreateModeArray()
+        ma = lalsim.SimInspiralCreateModeArray()
         for (ell, m) in mode_list:
-            LS.SimInspiralModeArrayActivateMode(ma, ell, m)
-            LS.SimInspiralModeArrayActivateMode(ma, ell, -m)
-        LS.SimInspiralWaveformParamsInsertModeArray(lal_params, ma)
+            lalsim.SimInspiralModeArrayActivateMode(ma, ell, m)
+            lalsim.SimInspiralModeArrayActivateMode(ma, ell, -m)
+        lalsim.SimInspiralWaveformParamsInsertModeArray(lal_params, ma)
         return lal_params
 
     def generate_FD_waveform(self, parameters_lal: Tuple) -> Dict[str, np.ndarray]:
@@ -316,7 +316,7 @@ class WaveformGenerator:
         # calling XLALSimInspiralChooseTDWaveform().
         # See https://git.ligo.org/waveforms/reviews/lalsuite/-/commit/195f9127682de19f5fce19cc5828116dd2d23461
         #
-        # LS.SimInspiralFD takes parameters:
+        # lalsim.SimInspiralFD takes parameters:
         #   m1, m2, S1x, S1y, S1z, S2x, S2y, S2z,
         #   distance, inclination, phiRef,
         #   longAscNodes, eccentricity, meanPerAno,
@@ -333,7 +333,7 @@ class WaveformGenerator:
             )
 
         # Depending on whether the domain is uniform or non-uniform call the appropriate wf generator
-        hp, hc = LS.SimInspiralFD(*parameters_lal)
+        hp, hc = lalsim.SimInspiralFD(*parameters_lal)
         # The check below filters for unphysical waveforms:
         # For IMRPhenomXPHM, the LS.SimInspiralFD result is numerically instable
         # for rare parameter configurations (~1 in 1M), leading to bins with very
@@ -341,7 +341,7 @@ class WaveformGenerator:
         # the parameters.
         if max(np.max(np.abs(hp.data.data)), np.max(np.abs(hc.data.data))) > 1e-17:
             print(f"Perturbing parameters {parameters_lal} due to instability.")
-            hp, hc = LS.SimInspiralFD(
+            hp, hc = lalsim.SimInspiralFD(
                 parameters_lal[0] * 1.0000001, *parameters_lal[1:]
             )
 
@@ -402,7 +402,7 @@ class WaveformGenerator:
         #   deltaT, f_min, f_ref
         #   lal_params, approximant
 
-        hp, hc = LS.SimInspiralTD(*parameters_lal)
+        hp, hc = lalsim.SimInspiralTD(*parameters_lal)
         h_plus = (hp.data.data,)
         h_cross = hc.data.data
         pol_dict = {"h_plus": h_plus, "h_cross": h_cross}
