@@ -54,7 +54,7 @@ I.e. you need to train a second model with:
 ```
 dingo_train --settings_file training/train_settings_init.yaml --train_dir train_dir_init/
 ```
-This model infers initial estimates for the coalescence times in the individual detectors and is trained just like any other dingo model. See `training/train_settings_init.yaml` for an example settings file. To perform inference using GNPE, the script must be pointed to this model:
+Note such a network is usually much smaller than the main network. This model infers initial estimates for the coalescence times in the individual detectors and is trained just like any other dingo model. See `training/train_settings_init.yaml` for an example settings file. To perform inference using GNPE, the script must be pointed to this model:
 ```
 dingo_analyze_event 
   --model train_dir/model.pt 
