@@ -14,6 +14,7 @@ from dingo.gw.transforms import (
     GetDetectorTimes,
     ProjectOntoDetectors,
     WhitenAndScaleStrain,
+    MultiplyCalibrationUncertainty
 )
 from dingo.gw.waveform_generator.waveform_generator import WaveformGenerator
 
@@ -63,6 +64,7 @@ class GWSignal(object):
         self.ifo_list = InterferometerList(ifo_list)
 
         # When we set self.whiten, the projection transforms are automatically prepared.
+        self._calibration_lookup_table = None
         self.whiten = False
 
         self.asd = None
@@ -88,11 +90,27 @@ class GWSignal(object):
         self._whiten = value
         self._initialize_transform()
 
+    @property
+    def calibration_lookup_table(self):
+        """ 
+        Either None, str 'generate' or a dict with 
+        {"H1": filepath, "L1":filepath, ...} with locations of 
+        lookup tables for the calibration uncertainty curves
+        """
+        return self._calibration_lookup_table
+
+    @calibration_lookup_table.setter
+    def calibration_lookup_table(self, value):
+        self._calibration_lookup_table = value
+        self._initialize_transform()
+
     def _initialize_transform(self):
         transforms = [
             GetDetectorTimes(self.ifo_list, self.t_ref),
             ProjectOntoDetectors(self.ifo_list, self.data_domain, self.t_ref),
         ]
+        if self.calibration_lookup_table is not None:
+            transforms.append(MultiplyCalibrationUncertainty(self.ifo_list, self.data_domain, self.calibration_lookup_table))
         if self.whiten:
             transforms.append(WhitenAndScaleStrain(self.data_domain.noise_std))
         self.projection_transforms = Compose(transforms)
@@ -139,7 +157,7 @@ class GWSignal(object):
         asd = self.asd
         if asd is not None:
             sample["asds"] = asd
-
+        
         return self.projection_transforms(sample)
 
     # It would be good to have an ASD class to handle all of this functionality,
@@ -260,16 +278,16 @@ class Injection(GWSignal):
         self.prior = prior
 
     @classmethod
-    def from_posterior_model(cls, pm):
+    def from_posterior_model_metadata(cls, metadata):
         """
         Instantiate an Injection based on a posterior model. The prior, waveform
         settings, etc., will all be consistent with what the model was trained with.
 
         Parameters
         ----------
-        pm : PosteriorModel
+        metadata : dict
+            Dict which you can get via PosteriorModel.metadata
         """
-        metadata = pm.metadata
         intrinsic_prior = metadata["dataset_settings"]["intrinsic_prior"]
         extrinsic_prior = get_extrinsic_prior_dict(
             metadata["train_settings"]["data"]["extrinsic_prior"]
@@ -278,11 +296,11 @@ class Injection(GWSignal):
 
         return cls(
             prior=prior,
-            wfg_kwargs=pm.metadata["dataset_settings"]["waveform_generator"],
-            wfg_domain=build_domain(pm.metadata["dataset_settings"]["domain"]),
-            data_domain=build_domain_from_model_metadata(pm.metadata),
-            ifo_list=pm.metadata["train_settings"]["data"]["detectors"],
-            t_ref=pm.metadata["train_settings"]["data"]["ref_time"],
+            wfg_kwargs=metadata["dataset_settings"]["waveform_generator"],
+            wfg_domain=build_domain(metadata["dataset_settings"]["domain"]),
+            data_domain=build_domain_from_model_metadata(metadata),
+            ifo_list=metadata["train_settings"]["data"]["detectors"],
+            t_ref=metadata["train_settings"]["data"]["ref_time"],
         )
 
     def injection(self, theta):

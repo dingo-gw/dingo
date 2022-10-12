@@ -1,5 +1,8 @@
 import numpy as np
+import os
 import torch
+
+from bilby.gw.detector import calibration
 
 
 class GetDetectorTimes(object):
@@ -147,5 +150,64 @@ class TimeShiftStrain(object):
 
         sample["waveform"] = strains
         sample["extrinsic_parameters"] = extrinsic_parameters
+
+        return sample
+
+
+class MultiplyCalibrationUncertainty(object):
+    """
+    calibration_marginalization_kwargs: dict
+        Calibration marginalization kwargs. If None no calibration marginalization is
+        used. This should contain a dict with
+        {"num_calibration_curves": 100, "calibration_lookup_table": {"H1": filepath, "L1"...}}.
+        Optionally, you can also set "calibration_lookup_table" to None
+    """
+
+    def __init__(self, ifo_list, data_domain, calibration_lookup_table):
+        """
+        Initialize calibration marginalization. This store the calibration curve prior will later be applied to
+        the waveform. We can either specify what the calibration values are via a lookup table or randomly generate
+        the fake curves based on a prior. The former is useful for when you have an event you are interested in.
+        """
+
+        self.ifo_list = ifo_list
+        self.calibration_lookup_table = calibration_lookup_table
+        self.data_domain = data_domain
+        if self.calibration_lookup_table == "generate":
+            raise NotImplementedError(
+                "Random Generation of calibration curves not implemented yet"
+            )
+        else:
+            self.calibration_lookup_table = calibration_lookup_table
+
+    def __call__(self, input_sample):
+        sample = input_sample.copy()
+        sample["calibration_draw"] = {ifo.name:None for ifo in self.ifo_list}
+        for ifo in self.ifo_list:
+            if os.path.exists(self.calibration_lookup_table[ifo.name]):
+                calibration_draw = calibration.read_calibration_file(
+                    self.calibration_lookup_table[ifo.name],
+                    self.data_domain.sample_frequencies,
+                    number_of_response_curves=1,  # NOTE for now we are just pulling 1 calibration curve per posterior point
+                    # In the future it may be beneficial to marginalize over this in a different way
+                    starting_index=0,
+                ).flatten() # Since we only have 1 response curve
+            else:
+                raise Exception(
+                    f"Could not find calibration file '{self.calibration_lookup_table[ifo.name]}'"
+                )
+
+
+            # Multiplying the sample waveform in the interferometer according to the calibration curve
+            # This is done by following the perscription here:
+            #
+            # https://dcc.ligo.org/LIGO-T1400682 Eq 3 and 4
+            # 
+            # We take the waveform h(f) and multiply it by C = (1 + \delta A(f)) \exp(i \delta \psi) 
+            # i.e. h_obs(f) = C * h(f)
+            # Here C is "calibration_draws"
+
+            sample["waveform"][ifo.name] *= calibration_draw
+            sample["calibration_draw"][ifo.name] = calibration_draw
 
         return sample
