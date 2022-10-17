@@ -46,6 +46,23 @@ class Result(DingoDataset):
         self._build_prior()
         self._build_domain()
 
+    @property
+    def base_model_metadata(self):
+        """Metadata for an underlying "base" model. E.g., for samples obtained from an
+        unconditional model."""
+        pass
+
+    @property
+    def event_metadata(self):
+        """Metadata for data analyzed. Can in principle influence any post-sampling
+        parameter transformations (e.g., sky position correction), as well as the
+        likelihood detector positions."""
+        return self.base_model_metadata.get("event")
+
+    @event_metadata.setter
+    def event_metadata(self, value):
+        self.base_model_metadata["event"] = value
+
     def _build_domain(self):
         self.domain = None
 
@@ -247,33 +264,30 @@ class Result(DingoDataset):
         device,
         threshold_std: Optional[float] = np.inf,
     ):
-        # TODO: This assumes parameters start with "GNPE:". Remove this.
-        gnpe_proxy_dataset = self.subset(parameters)
-        gnpe_proxy_dataset.samples = gnpe_proxy_dataset.samples.rename(columns=lambda x: x[5:])
+        sub_result = self.subset(parameters)
+        # sub_result.samples = sub_result.samples.rename(columns=lambda x: x[5:])
 
         # filter outliers, as they decrease the performance of the density estimator
-        mean = np.mean(gnpe_proxy_dataset.samples, axis=0)
-        std = np.std(gnpe_proxy_dataset.samples, axis=0)
+        mean = np.mean(sub_result.samples, axis=0)
+        std = np.std(sub_result.samples, axis=0)
         lower, upper = mean - threshold_std * std, mean + threshold_std * std
         inds = np.where(
-            np.all((lower <= gnpe_proxy_dataset.samples), axis=1)
-            * np.all((gnpe_proxy_dataset.samples <= upper), axis=1)
+            np.all((lower <= sub_result.samples), axis=1)
+            * np.all((sub_result.samples <= upper), axis=1)
         )[0]
-        if len(inds) / len(gnpe_proxy_dataset.samples) < 0.95:
+        if len(inds) / len(sub_result.samples) < 0.95:
             raise ValueError("Too many proxy samples outside of specified range.")
-        gnpe_proxy_dataset.samples = gnpe_proxy_dataset.samples.iloc[inds]
-        nde_settings["data"] = {
-            "inference_parameters": [k[5:] for k in parameters]
-        }
+        sub_result.samples = sub_result.samples.iloc[inds]
+        nde_settings["data"] = {"inference_parameters": parameters}
         nde_settings["training"]["device"] = str(device)
         with tempfile.TemporaryDirectory() as tmpdirname:
-            gnpe_proxy_model = train_unconditional_density_estimator(
-                gnpe_proxy_dataset,
+            unconditional_model = train_unconditional_density_estimator(
+                sub_result,
                 nde_settings,
                 tmpdirname,
             )
-        gnpe_proxy_model.save_model("temp_model.pt")
-        return gnpe_proxy_model
+        unconditional_model.save_model("temp_model.pt")
+        return unconditional_model
 
         # Note: self.gnpe_proxy_sampler.transform_post, and self.transform_post *must*
         # contain the SelectStandardizeRepackageParameters transformation, such that

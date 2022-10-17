@@ -107,8 +107,6 @@ class GWSamplerMixin(object):
                 else:
                     samples["ra"] = (ra - ra_correction) % (2 * np.pi)
 
-
-
     def _post_process(self, samples: Union[dict, pd.DataFrame], inverse: bool = False):
         """
         Post processing of parameter samples.
@@ -161,8 +159,6 @@ class GWSampler(GWSamplerMixin, Sampler):
 
     def _initialize_transforms(self):
 
-        data_settings = self.metadata["train_settings"]["data"]
-
         # preprocessing transforms:
         #   * whiten and scale strain (since the inference network expects standardized
         #   data)
@@ -172,8 +168,11 @@ class GWSampler(GWSamplerMixin, Sampler):
         self.transform_pre = Compose(
             [
                 WhitenAndScaleStrain(self.domain.noise_std),
+                # Use base metadata so that unconditional samplers still know how to
+                # transform data, since this transform is used by the GNPE sampler as
+                # well.
                 RepackageStrainsAndASDS(
-                    data_settings["detectors"],
+                    self.base_model_metadata["train_settings"]["data"]["detectors"],
                     first_index=self.domain.min_idx,
                 ),
                 ToTorch(device=self.model.device),
@@ -185,7 +184,7 @@ class GWSampler(GWSamplerMixin, Sampler):
         #   * de-standardize data and extract inference parameters
         self.transform_post = SelectStandardizeRepackageParameters(
             {"inference_parameters": self.inference_parameters},
-            data_settings["standardization"],
+            self.metadata["train_settings"]["data"]["standardization"],
             inverse=True,
             as_type="dict",
         )
@@ -241,7 +240,6 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
         #   * shifting the strain by - gnpe proxies
         #   * repackaging & standardizing proxies to sample['context_parameters']
         #     for conditioning of the inference network
-        self.gnpe_kernel = {}
         transform_pre = [RenameKey("data", "waveform")]
         if gnpe_time_settings:
             transform_pre.append(
@@ -252,7 +250,6 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                     inference=True,
                 )
             )
-            self.gnpe_kernel = {**self.gnpe_kernel, **transform_pre[-1].kernel}
             transform_pre.append(TimeShiftStrain(ifo_list, self.domain))
         if gnpe_chirp_settings:
             transform_pre.append(
@@ -262,7 +259,6 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                     gnpe_chirp_settings.get("order", 0),
                 )
             )
-            self.gnpe_kernel = {**self.gnpe_kernel, **transform_pre[-1].kernel}
         if gnpe_phase_settings:
             transform_pre.append(
                 GNPEPhase(
@@ -270,7 +266,6 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                     gnpe_phase_settings.get("random_pi_jump", False),
                 )
             )
-        self.gnpe_kernel = PriorDict(self.gnpe_kernel)
         transform_pre.append(
             SelectStandardizeRepackageParameters(
                 {"context_parameters": data_settings["context_parameters"]},
@@ -280,11 +275,17 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
         )
         transform_pre.append(RenameKey("waveform", "data"))
 
+        # Extract GNPE information (list of parameters, dict of kernels) from the
+        # transforms.
         self.gnpe_parameters = []
+        self.gnpe_kernel = PriorDict()
         for transform in transform_pre:
             if isinstance(transform, GNPEBase):
                 self.gnpe_parameters += transform.input_parameter_names
+                for k, v in transform.kernel.items():
+                    self.gnpe_kernel[k] = v
         print("GNPE parameters: ", self.gnpe_parameters)
+        print("GNPE kernel: ", self.gnpe_kernel)
 
         self.transform_pre = Compose(transform_pre)
 
@@ -310,6 +311,7 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
         )
 
     def _kernel_log_prob(self, samples):
+        # TODO: Reimplement as a method of GNPEBase.
         if len({"chirp_mass", "mass_ratio", "phase"} & self.gnpe_kernel.keys()) > 0:
             raise NotImplementedError(
                 "kernel log_prob only implemented for time gnpe."

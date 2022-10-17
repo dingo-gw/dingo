@@ -63,13 +63,14 @@ class Sampler(object):
         if self.model is not None:
             self.metadata = self.model.metadata.copy()
 
-            if "parameter_samples" in self.metadata["train_settings"]["data"]:
+            if self.metadata["train_settings"]["data"].get("unconditional", False):
                 self.unconditional_model = True
                 # For unconditional models, the context will be stored with the model. It
                 # is needed for calculating the likelihood for importance sampling.
                 # However, it will not be used when sampling from the model, since it is
                 # unconditional.
                 self.context = self.model.context
+                # TODO: Set the event metadata -> for GNPESampler or all? Here?
             else:
                 self.unconditional_model = False
                 self.context = None
@@ -153,7 +154,7 @@ class Sampler(object):
         self,
         num_samples: int,
         context: Optional[dict] = None,
-        **kwargs,
+        # **kwargs,
     ) -> dict:
         if not self.unconditional_model:
             if context is None:
@@ -173,9 +174,7 @@ class Sampler(object):
             num_samples = 1
         else:
             if context is not None:
-                raise ValueError(
-                    "Context should not be passed to an unconditional sampler."
-                )
+                print("Unconditional model. Ignoring context.")
             x = []
 
         # For a normalizing flow, we get the log_prob for "free" when sampling,
@@ -392,7 +391,7 @@ class GNPESampler(Sampler):
         self,
         model: PosteriorModel,
         init_sampler: Sampler,
-        num_iterations: int,
+        num_iterations: int = 1,
     ):
         """
         Parameters
@@ -422,6 +421,8 @@ class GNPESampler(Sampler):
         self._init_sampler = value
         # Copy this so it persists if we delete the init model.
         self.metadata["init_model"] = self._init_sampler.model.metadata.copy()
+        if self._init_sampler.unconditional_model:
+            self.context = self._init_sampler.context
 
     @property
     def num_iterations(self):
@@ -440,85 +441,75 @@ class GNPESampler(Sampler):
         self,
         num_samples: int,
         context: Optional[dict] = None,
-        use_gnpe_proxy_sampler=False,
+        # use_gnpe_proxy_sampler=False,
     ) -> dict:
         if context is None:
             raise ValueError("self.context must be set to run sampler.")
-        use_gnpe_proxy_sampler = self.gnpe_proxy_sampler is not None
+        # use_gnpe_proxy_sampler = self.gnpe_proxy_sampler is not None
 
         data_ = self.init_sampler.transform_pre(context)
+        init_samples = self.init_sampler._run_sampler(num_samples, context)
 
-        if not use_gnpe_proxy_sampler:
-            # Run gnpe iterations to jointly infer gnpe proxies and inference parameters.
-            self.iteration_tracker = IterationTracker(store_data=True)
-            if self.remove_init_outliers == 0.0:
-                init_samples = self.init_sampler._run_sampler(num_samples, context)
+        # We could be starting with either the GNPE parameters *or* their proxies,
+        # depending on the nature of the initialization network.
+
+        start_with_proxies = False
+        proxy_log_prob = None
+        proxies = {}
+
+        if {p + '_proxy' for p in self.gnpe_parameters}.issubset(init_samples.keys()):
+            start_with_proxies = True
+            proxy_log_prob = init_samples["log_prob"]
+            proxies = {
+                    k + '_proxy': init_samples[k + '_proxy'] for k in
+                    self.gnpe_parameters
+                }
+            init_proxies = proxies.copy()
+
+        # TODO: Possibly remove outliers from init_samples. Only do this if running
+        #  several Gibbs iterations.
+
+        x = {"extrinsic_parameters": init_samples, "parameters": {}}
+
+        #
+        # Gibbs sample.
+        #
+
+        for i in range(self.num_iterations):
+            print(i)
+            if start_with_proxies and i == 0:
+                x["extrinsic_parameters"] = proxies.copy()
             else:
-                init_samples = self.init_sampler._run_sampler(
-                    math.ceil(num_samples / (1 - self.remove_init_outliers)), context
-                )
-                thr = torch.quantile(
-                    init_samples["log_prob"], self.remove_init_outliers
-                )
-                inds = torch.where(init_samples["log_prob"] >= thr)[0][:num_samples]
-                init_samples = {k: v[inds] for k, v in init_samples.items()}
-            x = {"extrinsic_parameters": init_samples, "parameters": {}}
-            for i in range(self.num_iterations):
                 x["extrinsic_parameters"] = {
                     k: x["extrinsic_parameters"][k] for k in self.gnpe_parameters
                 }
-                self.iteration_tracker.update(
-                    {k: v.cpu().numpy() for k, v in x["extrinsic_parameters"].items()}
-                )
-                d = data_.clone()
-                x["data"] = d.expand(num_samples, *d.shape)
 
-                x = self.transform_pre(x)
-                x["parameters"] = self.model.sample(x["data"], x["context_parameters"])
-                x = self.transform_post(x)
-                samples = x["parameters"]
-                print(
-                    f"it {i}.\tmin pvalue: {self.iteration_tracker.pvalue_min:.3f}"
-                    f"\tproxy mean: ",
-                    *[
-                        f"{torch.mean(v).item():.5f}"
-                        for v in x["gnpe_proxies"].values()
-                    ],
-                    "\tproxy std:",
-                    *[f"{torch.std(v).item():.5f}" for v in x["gnpe_proxies"].values()],
-                )
-        else:
-            # Infer gnpe proxies based on trained model in gnpe_proxy sampler.
-            # With this, we can infer the inference parameters with a single pass
-            # through the gnpe network.
             d = data_.clone()
+            x["data"] = d.expand(num_samples, *d.shape)
 
-            gnpe_proxies_in = self.gnpe_proxy_sampler._run_sampler(
-                num_samples=num_samples, batch_size=num_samples
-            )
-            log_prob_gnpe_proxies = gnpe_proxies_in.pop("log_prob")
-            # log_prob_gnpe_proxies is already standardized, since it is covered in
-            # _run_sampler by self.transform_post [SelectStandardizeRepackageParameters]
-
-            x = {
-                "extrinsic_parameters": {},
-                "parameters": {},
-                "gnpe_proxies_in": gnpe_proxies_in,
-                "data": d.expand(num_samples, *d.shape),
-            }
             x = self.transform_pre(x)
+
+            self.model.model.eval()
             with torch.no_grad():
-                x["parameters"], x["log_prob"] = self.model.model.sample_and_log_prob(
-                    x["data"],
-                    x["context_parameters"],
+                y, log_prob = self.model.model.sample_and_log_prob(
+                    x["data"], x["context_parameters"]
                 )
-            x = self.transform_post(x)  # this also standardizes x["log_prob"]!
+
+            x['parameters'] = y
+            x['log_prob'] = log_prob
+            x = self.transform_post(x)
+
+        #
+        # Prepare final result.
+        #
+
+        if start_with_proxies and self.num_iterations == 1:
+            # In this case it makes sense to save the log_prob and the proxy parameters.
 
             samples = x["parameters"]
-            samples["log_prob"] = x["log_prob"] + log_prob_gnpe_proxies
-            samples["log_prob_gnpe_proxies"] = log_prob_gnpe_proxies
+            samples["log_prob"] = x["log_prob"] + proxy_log_prob
 
-            # The log_prob returned by gnpe is not just the log_prob over parmeters
+            # The log_prob returned by gnpe is not just the log_prob over parameters
             # theta, but instead the log_prob in the *joint* space q(theta,theta^|x),
             # including the proxies theta^. For importance sampling this means,
             # that the target density is
@@ -528,14 +519,131 @@ class GNPESampler(Sampler):
             # We compute log[p(theta^|theta)] below and store it as
             # samples["delta_log_prob_target"], such that for importance sampling we
             # only need to evaluate log[p(theta|x)] and add this correction.
-            all_params = {**x["extrinsic_parameters"], **samples, **x["gnpe_proxies"]}
+
+            # Proxies should be sitting in extrinsic_parameters.
+            all_params = {**x["extrinsic_parameters"], **samples}
             all_params = {k: torch_detach_to_cpu(v) for k, v in all_params.items()}
             kernel_log_prob = self._kernel_log_prob(all_params)
             samples["delta_log_prob_target"] = torch.Tensor(kernel_log_prob)
 
-        # add gnpe parameters:
-        for k, v in x["gnpe_proxies"].items():
-            assert k.endswith("_proxy")
-            samples["GNPE:" + k] = x["gnpe_proxies"][k]
+        else:
+            # Otherwise we only save the inference parameters, and no log_prob.
+            # Alternatively we could save the entire chain and the log_prob, but this
+            # is not useful for our purposes.
+
+            # Note that we do not have access to the detector_time proxy variables if
+            # there is more than one iteration, since the GNPECoalescenceTimes transform
+            # subtracts off the absolute time shift. Perhaps it would make sense to
+            # rename the relative time shifts as H1_time_proxy_relative, etc.,
+            # to preserve this information more easily.
+
+            samples = x['parameters']
+
+        # Extract the proxy parameters from x["extrinsic_parameters"]. These have
+        # not been standardized. They are persistent from prior to inference,
+        # since this is when they were placed here and their values should not have
+        # changed.
+        for k, v in x["extrinsic_parameters"].items():
+            if k.endswith('_proxy'):
+                proxies[k] = v
+
+        samples.update(proxies)
+
+        # Safety check for unconditional flows. Make sure the proxies haven't changed.
+        if start_with_proxies and self.num_iterations == 1:
+            for k in proxies:
+                assert torch.equal(proxies[k], init_proxies[k])
 
         return samples
+
+        # if not use_gnpe_proxy_sampler:
+        #     # Run gnpe iterations to jointly infer gnpe proxies and inference parameters.
+        #     self.iteration_tracker = IterationTracker(store_data=True)
+        #     if self.remove_init_outliers == 0.0:
+        #         init_samples = self.init_sampler._run_sampler(num_samples, context)
+        #     else:
+        #         init_samples = self.init_sampler._run_sampler(
+        #             math.ceil(num_samples / (1 - self.remove_init_outliers)), context
+        #         )
+        #         thr = torch.quantile(
+        #             init_samples["log_prob"], self.remove_init_outliers
+        #         )
+        #         inds = torch.where(init_samples["log_prob"] >= thr)[0][:num_samples]
+        #         init_samples = {k: v[inds] for k, v in init_samples.items()}
+        #     x = {"extrinsic_parameters": init_samples, "parameters": {}}
+        #     for i in range(self.num_iterations):
+        #         x["extrinsic_parameters"] = {
+        #             k: x["extrinsic_parameters"][k] for k in self.gnpe_parameters
+        #         }
+        #         self.iteration_tracker.update(
+        #             {k: v.cpu().numpy() for k, v in x["extrinsic_parameters"].items()}
+        #         )
+        #         d = data_.clone()
+        #         x["data"] = d.expand(num_samples, *d.shape)
+        #
+        #         x = self.transform_pre(x)
+        #         x["parameters"] = self.model.sample(x["data"], x["context_parameters"])
+        #         x = self.transform_post(x)
+        #         samples = x["parameters"]
+        #         print(
+        #             f"it {i}.\tmin pvalue: {self.iteration_tracker.pvalue_min:.3f}"
+        #             f"\tproxy mean: ",
+        #             *[
+        #                 f"{torch.mean(v).item():.5f}"
+        #                 for v in x["gnpe_proxies"].values()
+        #             ],
+        #             "\tproxy std:",
+        #             *[f"{torch.std(v).item():.5f}" for v in x["gnpe_proxies"].values()],
+        #         )
+        # else:
+        #     # Infer gnpe proxies based on trained model in gnpe_proxy sampler.
+        #     # With this, we can infer the inference parameters with a single pass
+        #     # through the gnpe network.
+        #     d = data_.clone()
+        #
+        #     gnpe_proxies_in = self.gnpe_proxy_sampler._run_sampler(
+        #         num_samples=num_samples, batch_size=num_samples
+        #     )
+        #     log_prob_gnpe_proxies = gnpe_proxies_in.pop("log_prob")
+        #     # log_prob_gnpe_proxies is already standardized, since it is covered in
+        #     # _run_sampler by self.transform_post [SelectStandardizeRepackageParameters]
+        #
+        #     x = {
+        #         "extrinsic_parameters": {},
+        #         "parameters": {},
+        #         "gnpe_proxies_in": gnpe_proxies_in,
+        #         "data": d.expand(num_samples, *d.shape),
+        #     }
+        #     x = self.transform_pre(x)
+        #     with torch.no_grad():
+        #         x["parameters"], x["log_prob"] = self.model.model.sample_and_log_prob(
+        #             x["data"],
+        #             x["context_parameters"],
+        #         )
+        #     x = self.transform_post(x)  # this also standardizes x["log_prob"]!
+        #
+        #     samples = x["parameters"]
+        #     samples["log_prob"] = x["log_prob"] + log_prob_gnpe_proxies
+        #     samples["log_prob_gnpe_proxies"] = log_prob_gnpe_proxies
+        #
+        #     # The log_prob returned by gnpe is not just the log_prob over parmeters
+        #     # theta, but instead the log_prob in the *joint* space q(theta,theta^|x),
+        #     # including the proxies theta^. For importance sampling this means,
+        #     # that the target density is
+        #     #
+        #     #       p(theta,theta^|x) = p(theta^|theta) * p(theta|x).
+        #     #
+        #     # We compute log[p(theta^|theta)] below and store it as
+        #     # samples["delta_log_prob_target"], such that for importance sampling we
+        #     # only need to evaluate log[p(theta|x)] and add this correction.
+        #     all_params = {**x["extrinsic_parameters"], **samples, **x["gnpe_proxies"]}
+        #     all_params = {k: torch_detach_to_cpu(v) for k, v in all_params.items()}
+        #     kernel_log_prob = self._kernel_log_prob(all_params)
+        #     samples["delta_log_prob_target"] = torch.Tensor(kernel_log_prob)
+        #
+        # # add gnpe parameters:
+        # for k, v in x["gnpe_proxies"].items():
+        #     assert k.endswith("_proxy")
+        #     samples["GNPE:" + k] = x["gnpe_proxies"][k]
+        #
+        # return samples

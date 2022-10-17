@@ -227,7 +227,7 @@ def prepare_log_prob(
         low_latency_label is not None.
     """
     sampler.run_sampler(num_samples, batch_size)
-    gnpe_proxy_keys = [k for k in sampler.samples.keys() if k.startswith("GNPE:")]
+    gnpe_proxy_keys = [k for k in sampler.samples.keys() if k.endswith("_proxy")]
     if low_latency_label is not None:
         sampler.to_hdf5(label=low_latency_label, outdir=outdir)
     result = sampler.to_samples_dataset()
@@ -237,8 +237,9 @@ def prepare_log_prob(
         sampler.model.device,
         threshold_std=threshold_std,
     )
-    sampler.gnpe_proxy_sampler = UnconditionalSampler(model=unconditional_model)
+    sampler.init_sampler = UnconditionalSampler(model=unconditional_model)
     sampler.remove_init_outliers = remove_init_outliers
+    sampler.num_iterations = 1
 
 
 def analyze_event():
