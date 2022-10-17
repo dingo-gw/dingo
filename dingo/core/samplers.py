@@ -44,52 +44,34 @@ class Sampler(object):
 
     def __init__(
         self,
-        model: PosteriorModel = None,
-        samples_dataset: Result = None,
+        model: PosteriorModel,
     ):
         """
         Parameters
         ----------
         model : PosteriorModel
         """
-        if (model is None) + (samples_dataset is None) != 1:
-            raise ValueError(
-                "Sampler should be initialized with either a model, or samples_dataset."
-            )
-
         self.model = model
-        self.samples_dataset = samples_dataset
 
-        if self.model is not None:
-            self.metadata = self.model.metadata.copy()
-
-            if self.metadata["train_settings"]["data"].get("unconditional", False):
-                self.unconditional_model = True
-                # For unconditional models, the context will be stored with the model. It
-                # is needed for calculating the likelihood for importance sampling.
-                # However, it will not be used when sampling from the model, since it is
-                # unconditional.
-                self.context = self.model.context
-                self.event_metadata = self.model.event_metadata
-                self.base_model_metadata = self.metadata["base"]
-            else:
-                self.unconditional_model = False
-                self.context = None
-                self.event_metadata = None
-                self.base_model_metadata = self.metadata
-
-            self.inference_parameters = self.metadata["train_settings"]["data"][
-                "inference_parameters"
-            ]
-
-        elif self.samples_dataset is not None:
-            self.metadata = self.samples_dataset.settings.copy()
+        self.metadata = self.model.metadata.copy()
+        if self.metadata["train_settings"]["data"].get("unconditional", False):
             self.unconditional_model = True
-            self.context = self.samples_dataset.context
-            self.base_model_metadata = self.samples_dataset.settings
-            self.samples = self.samples_dataset.samples
-            data_settings = self.base_model_metadata["train_settings"]["data"]
-            self.inference_parameters = data_settings["inference_parameters"]
+            # For unconditional models, the context will be stored with the model. It
+            # is needed for calculating the likelihood for importance sampling.
+            # However, it will not be used when sampling from the model, since it is
+            # unconditional.
+            self.context = self.model.context
+            self.event_metadata = self.model.event_metadata
+            self.base_model_metadata = self.metadata["base"]
+        else:
+            self.unconditional_model = False
+            self.context = None
+            self.event_metadata = None
+            self.base_model_metadata = self.metadata
+
+        self.inference_parameters = self.metadata["train_settings"]["data"][
+            "inference_parameters"
+        ]
 
         self.transform_pre = Compose([])
         self.transform_post = Compose([])
@@ -102,7 +84,6 @@ class Sampler(object):
             "samples",
             "context",
             "log_evidence",
-            "n_eff",
             "effective_sample_size",
             "event_metadata",
         ]
@@ -212,16 +193,6 @@ class Sampler(object):
             If set, compute log_prob for each sample
         """
         self._reset_result()
-
-        if self.samples_dataset is not None:
-            # if self.samples_dataset is set, running the
-            samples = self.samples_dataset.samples.sample(
-                num_samples, ignore_index=True
-            )
-            samples = {k: np.array(samples[k]) for k in samples.columns}
-            self._post_process(samples)
-            self.samples = pd.DataFrame(samples)
-            return
 
         print(f"Running sampler to generate {num_samples} samples.")
         t0 = time.time()
