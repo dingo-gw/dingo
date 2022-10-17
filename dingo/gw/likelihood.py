@@ -28,6 +28,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         t_ref=None,
         time_marginalization_kwargs=None,
         phase_marginalization_kwargs=None,
+        calibration_marginalization_kwargs=None,
         phase_grid=None,
     ):
         """
@@ -49,6 +50,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             Reference time; true geocent time for GW is t_ref + theta["geocent_time"].
         time_marginalization_kwargs: dict
             Time marginalization parameters. If None, no time marginalization is used.
+        calibration_marginalization_kwargs: dict
+            Calibration marginalization parameters. If None, no calibration marginalization is used.
         """
         super().__init__(
             wfg_kwargs=wfg_kwargs,
@@ -115,6 +118,25 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 self.phase_grid = np.linspace(0, 2 * np.pi, n_grid, endpoint=False)
             else:
                 print("Using phase marginalization with (2,2) mode approximation.")
+
+        # optionally initialize calibration marginalization
+        self.calibration_marginalization = False
+        if calibration_marginalization_kwargs is not None:
+            self.calibration_marginalization = True
+            self.initialize_calibration_marginalization(**calibration_marginalization_kwargs)
+
+    def initialize_calibration_marginalization(self, calibration_lookup_table):
+        """ 
+        Initialize calibration marginalization table which will use the files provided to 
+        multiply the signal by a calibration envelope. 
+
+        Parameters
+        ----------
+        calibration_lookup_table : dict
+            Dict with locations of .h5 files of calibration envelopes {"H1":, filepath,...}
+            optionally can be set to 'generate' 
+        """
+        self.calibration_lookup_table = calibration_lookup_table
 
     def initialize_time_marginalization(self, t_lower, t_upper, n_fft=1):
         """

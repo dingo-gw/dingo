@@ -40,6 +40,8 @@ def parse_args():
 
 
 def main():
+    import torch
+    torch.cuda.set_device(0)
     # parse args, load settings, load dingo parameter samples
     args = parse_args()
     with open(args.settings, "r") as fp:
@@ -61,6 +63,7 @@ def main():
     time_marginalization = time_marginalization_kwargs is not None
     phase_marginalization_kwargs = settings.get("phase_marginalization", None)
     phase_marginalization = phase_marginalization_kwargs is not None
+    calibration_marginalization_kwargs = settings.get("calibration_marginalization", None)
     synthetic_phase_kwargs = settings.get("synthetic_phase", None)
     synthetic_phase = synthetic_phase_kwargs is not None
     # if sum([time_marginalization, phase_marginalization, synthetic_phase]) > 1:
@@ -94,7 +97,7 @@ def main():
 
     if "log_prob" not in samples.columns:
         event_name = str(
-            metadata["event"]["time_event"]
+            metadata["base"]["event"]["time_event"]
         )  # use gps time as name for now
         nde_name = settings["nde"].get(
             "path", join(args.outdir, f"nde-{event_name}.pt")
@@ -113,9 +116,10 @@ def main():
             )
             print(f"Renaming trained nde model to {nde_name}.")
             rename(join(args.outdir, "model_latest.pt"), nde_name)
-            nde_sampler = GWSamplerUnconditional(
-                model=nde, synthetic_phase_kwargs=synthetic_phase_kwargs
-            )
+
+        nde_sampler = GWSamplerUnconditional(
+            model=nde, synthetic_phase_kwargs=synthetic_phase_kwargs
+        )
 
     else:
         nde_sampler = GWSamplerUnconditional(
@@ -162,9 +166,10 @@ def main():
         num_processes=settings.get("num_processes", 1),
         time_marginalization_kwargs=time_marginalization_kwargs,
         phase_marginalization_kwargs=phase_marginalization_kwargs,
+        calibration_marginalization_kwargs=calibration_marginalization_kwargs,
     )
     nde_sampler.print_summary()
-    nde_sampler.to_hdf5(label="weighted", outdir=args.outdir)
+    nde_sampler.to_hdf5(label="weighted_truth", outdir=args.outdir)
     samples = nde_sampler.samples
 
     # Diagnostics

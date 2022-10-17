@@ -184,6 +184,8 @@ class MultiplyCalibrationUncertainty(object):
         sample = input_sample.copy()
         sample["calibration_draw"] = {ifo.name:None for ifo in self.ifo_list}
         for ifo in self.ifo_list:
+
+            # If given 
             if os.path.exists(self.calibration_lookup_table[ifo.name]):
                 calibration_draw = calibration.read_calibration_file(
                     self.calibration_lookup_table[ifo.name],

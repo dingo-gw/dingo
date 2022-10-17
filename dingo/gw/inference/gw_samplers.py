@@ -108,6 +108,7 @@ class GWSamplerMixin(object):
         self,
         time_marginalization_kwargs: Optional[dict] = None,
         phase_marginalization_kwargs: Optional[dict] = None,
+        calibration_marginalization_kwargs: Optional[dict] = None,
         phase_grid: Optional[np.ndarray] = None,
     ):
         """
@@ -122,6 +123,10 @@ class GWSamplerMixin(object):
             accuracy, at the cost of longer computation time).
         phase_marginalization_kwargs: dict, optional
             kwargs for phase marginalization.
+        calibration_marginalization_kwargs: dict, optional
+            kwargs for calibration marginalization. This should include a dict with 
+            the calibration .h5 lookup files e.g. 
+            {calibration_lookup_table: {"H1": filepath, "L1":filepath, ...}}
         """
         if time_marginalization_kwargs is not None:
             if self.geocent_time_prior is None:
@@ -169,6 +174,7 @@ class GWSamplerMixin(object):
             t_ref=t_ref,
             time_marginalization_kwargs=time_marginalization_kwargs,
             phase_marginalization_kwargs=phase_marginalization_kwargs,
+            calibration_marginalization_kwargs=calibration_marginalization_kwargs,
             phase_grid=phase_grid,
         )
 
@@ -276,7 +282,8 @@ class GWSamplerMixin(object):
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
         theta = pd.DataFrame(samples)[param_keys]
         log_prior = self.prior.ln_prob(theta, axis=0)
-        constraints = self.prior.evaluate_constraints(theta)
+        # constraints = self.prior.evaluate_constraints(theta)
+        constraints = np.array([self.prior.evaluate_constraints(t) for _, t in theta.iterrows()])
         np.putmask(log_prior, constraints == 0, -np.inf)
         within_prior = log_prior != -np.inf
 
