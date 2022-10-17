@@ -70,7 +70,7 @@ class Sampler(object):
                 # However, it will not be used when sampling from the model, since it is
                 # unconditional.
                 self.context = self.model.context
-                # TODO: Set the event metadata -> for GNPESampler or all? Here?
+                self.event_metadata = self.model.event_metadata
             else:
                 self.unconditional_model = False
                 self.context = None
@@ -106,6 +106,7 @@ class Sampler(object):
             "log_evidence",
             "n_eff",
             "effective_sample_size",
+            "event_metadata",
         ]
         self._pesummary_package = "core"
         self._result_class = Result
@@ -141,11 +142,11 @@ class Sampler(object):
         """Metadata for data analyzed. Can in principle influence any post-sampling
         parameter transformations (e.g., sky position correction), as well as the
         likelihood detector positions."""
-        return self.base_model_metadata.get("event")
+        return self._event_metadata
 
     @event_metadata.setter
     def event_metadata(self, value):
-        self.base_model_metadata["event"] = value
+        self._event_metadata = value
 
     def prepare_log_prob(self, *args, **kwargs):
         pass
@@ -423,6 +424,7 @@ class GNPESampler(Sampler):
         self.metadata["init_model"] = self._init_sampler.model.metadata.copy()
         if self._init_sampler.unconditional_model:
             self.context = self._init_sampler.context
+            self.event_metadata = self._init_sampler.event_metadata
 
     @property
     def num_iterations(self):

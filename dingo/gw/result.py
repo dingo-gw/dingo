@@ -116,6 +116,7 @@ class Result(CoreResult):
         if self.event_metadata is not None and "time_event" in self.event_metadata:
             t_ref = self.event_metadata["time_event"]
         else:
+            # TODO: Set self.t_ref
             t_ref = self.t_ref
 
         self.likelihood = StationaryGaussianGWLikelihood(

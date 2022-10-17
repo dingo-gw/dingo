@@ -85,8 +85,10 @@ def train_unconditional_density_estimator(
     model.scheduler_kwargs = settings["training"]["scheduler"]
     model.initialize_optimizer_and_scheduler()
 
-    # Store context to keep a record, even though it will not be used in training.
+    # Store context and event metadata to keep a record, even though it will not be used
+    # in training.
     model.context = samples_dataset.context
+    model.event_metadata = samples_dataset.event_metadata
 
     # set up dataloaders
     train_loader, test_loader = build_train_and_test_loaders(

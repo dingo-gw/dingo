@@ -27,7 +27,13 @@ class Result(DingoDataset):
 
     def __init__(self, file_name=None, dictionary=None, data_keys=None):
         if data_keys is None:
-            data_keys = ["samples", "context", "log_evidence", "effective_sample_size"]
+            data_keys = [
+                "samples",
+                "context",
+                "event_metadata",
+                "log_evidence",
+                "effective_sample_size",
+            ]
         super().__init__(
             file_name=file_name,
             dictionary=dictionary,
@@ -45,23 +51,6 @@ class Result(DingoDataset):
 
         self._build_prior()
         self._build_domain()
-
-    @property
-    def base_model_metadata(self):
-        """Metadata for an underlying "base" model. E.g., for samples obtained from an
-        unconditional model."""
-        pass
-
-    @property
-    def event_metadata(self):
-        """Metadata for data analyzed. Can in principle influence any post-sampling
-        parameter transformations (e.g., sky position correction), as well as the
-        likelihood detector positions."""
-        return self.base_model_metadata.get("event")
-
-    @event_metadata.setter
-    def event_metadata(self, value):
-        self.base_model_metadata["event"] = value
 
     def _build_domain(self):
         self.domain = None
@@ -109,9 +98,7 @@ class Result(DingoDataset):
         """
 
         if self.samples is None:
-            raise KeyError(
-                "Proposal samples are required for importance sampling."
-            )
+            raise KeyError("Proposal samples are required for importance sampling.")
         if "log_prob" not in self.samples:
             raise KeyError(
                 "Stored samples do not include log probability, which is "
@@ -180,7 +167,7 @@ class Result(DingoDataset):
 
         # Calculate weights and normalize them to have mean 1.
         log_weights = (
-                log_prior + log_likelihood + delta_log_prob_target - log_prob_proposal
+            log_prior + log_likelihood + delta_log_prob_target - log_prob_proposal
         )
         weights = np.exp(log_weights - np.max(log_weights))
         weights /= np.mean(weights)
