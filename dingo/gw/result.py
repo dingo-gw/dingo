@@ -29,10 +29,10 @@ class Result(CoreResult):
         Called by __init__() immediately after _build_prior().
         """
         self.domain = build_domain(
-            self.base_model_metadata["dataset_settings"]["domain"]
+            self.metadata["dataset_settings"]["domain"]
         )
 
-        data_settings = self.base_model_metadata["train_settings"]["data"]
+        data_settings = self.metadata["train_settings"]["data"]
         if "domain_update" in data_settings:
             self.domain.update(data_settings["domain_update"])
 
@@ -40,11 +40,11 @@ class Result(CoreResult):
 
     def _build_prior(self):
         """Build the prior based on model metadata. Called by __init__()."""
-        intrinsic_prior = self.base_model_metadata["dataset_settings"][
+        intrinsic_prior = self.metadata["dataset_settings"][
             "intrinsic_prior"
         ]
         extrinsic_prior = get_extrinsic_prior_dict(
-            self.base_model_metadata["train_settings"]["data"]["extrinsic_prior"]
+            self.metadata["train_settings"]["data"]["extrinsic_prior"]
         )
         self.prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
 
@@ -116,15 +116,14 @@ class Result(CoreResult):
         if self.event_metadata is not None and "time_event" in self.event_metadata:
             t_ref = self.event_metadata["time_event"]
         else:
-            # TODO: Set self.t_ref
-            t_ref = self.t_ref
+            t_ref = self.metadata["train_settings"]["data"]["ref_time"]
 
         self.likelihood = StationaryGaussianGWLikelihood(
-            wfg_kwargs=self.base_model_metadata["dataset_settings"][
+            wfg_kwargs=self.metadata["dataset_settings"][
                 "waveform_generator"
             ],
             wfg_domain=build_domain(
-                self.base_model_metadata["dataset_settings"]["domain"]
+                self.metadata["dataset_settings"]["domain"]
             ),
             data_domain=self.domain,
             event_data=self.context,

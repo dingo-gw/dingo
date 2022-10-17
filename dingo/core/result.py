@@ -42,11 +42,9 @@ class Result(DingoDataset):
 
         # TODO: Do we need to copy this? Or set as a property.
         # TODO: Check that we really want to run all these lines.
-        # TODO: Why set base_model_metadata to be the same thing?
         self.metadata = self.settings.copy()
         self.unconditional_model = True
-        self.base_model_metadata = self.settings
-        data_settings = self.base_model_metadata["train_settings"]["data"]
+        data_settings = self.metadata["train_settings"]["data"]
         self.inference_parameters = data_settings["inference_parameters"]
 
         self._build_prior()
