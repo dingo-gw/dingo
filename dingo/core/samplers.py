@@ -71,13 +71,11 @@ class Sampler(object):
                 # unconditional.
                 self.context = self.model.context
                 self.event_metadata = self.model.event_metadata
+                self.base_model_metadata = self.metadata["base"]
             else:
                 self.unconditional_model = False
                 self.context = None
-
-            if "base" in self.metadata:
-                self.base_model_metadata = self.metadata["base"]
-            else:
+                self.event_metadata = None
                 self.base_model_metadata = self.metadata
 
             self.inference_parameters = self.metadata["train_settings"]["data"][
