@@ -34,6 +34,7 @@ setup(
         "lalsuite", # use >=7.3 if you run into errors with IMRPhenomXPHM generation
         "sklearn",
         "pesummary",
+        "cryptography==38.0.0",
         "pycondor",
         "gwpy",
         "pycbc",
