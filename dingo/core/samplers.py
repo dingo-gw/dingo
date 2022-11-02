@@ -293,24 +293,6 @@ class Sampler(object):
         dataset.to_file(file_name=Path(outdir, file_name))
 
 
-class UnconditionalSampler(Sampler):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.unconditional_model = True
-        self._initialize_transforms()
-
-    def _initialize_transforms(self):
-        # Postprocessing transform only:
-        #   * De-standardize data and extract inference parameters. Be careful to use
-        #     the standardization of the correct model, not the base model.
-        self.transform_post = SelectStandardizeRepackageParameters(
-            {"inference_parameters": self.inference_parameters},
-            self.metadata["train_settings"]["data"]["standardization"],
-            inverse=True,
-            as_type="dict",
-        )
-
-
 class GNPESampler(Sampler):
     """
     Base class for GNPE sampler. It wraps a PosteriorModel, and must contain also an NPE
@@ -337,7 +319,6 @@ class GNPESampler(Sampler):
         super().__init__(model)
         self.init_sampler = init_sampler
         self.num_iterations = num_iterations
-        self.log_prob_correction = None  # log_prob correction, accounting for std
         self.iteration_tracker = None
         # remove self.remove_init_outliers of lowest log_prob init samples before gnpe
         self.remove_init_outliers = 0.0

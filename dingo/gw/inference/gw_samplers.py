@@ -318,24 +318,3 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
             for k in self.gnpe_kernel.keys()
         }
         return self.gnpe_kernel.ln_prob(gnpe_proxies_diff, axis=0)
-
-
-class GWSamplerUnconditional(GWSampler):
-    def _initialize_transforms(self):
-        # Postprocessing transform only:
-        #   * De-standardize data and extract inference parameters. Be careful to use
-        #   the standardization of the correct model, not the base model.
-        self.transform_post = SelectStandardizeRepackageParameters(
-            {"inference_parameters": self.inference_parameters},
-            self.metadata["train_settings"]["data"]["standardization"],
-            inverse=True,
-            as_type="dict",
-        )
-
-    def _correct_reference_time(
-        self, samples: Union[dict, pd.DataFrame], inverse: bool = False
-    ):
-        # We do not want to correct for t_ref because we assume that the unconditional
-        # model will have been trained on samples for which this correction was already
-        # implemented.
-        pass

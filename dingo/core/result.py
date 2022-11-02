@@ -265,7 +265,7 @@ class Result(DingoDataset):
         Result
         """
         result_dict = self.to_dictionary()
-        result_dict["samples"] = self.samples[parameters]  # Drops log_probs and weights
+        result_dict["samples"] = self.samples[parameters]  # Drop log_probs, weights, etc.
         return type(self)(dictionary=result_dict)
 
     def train_unconditional_flow(
@@ -276,9 +276,8 @@ class Result(DingoDataset):
         threshold_std: Optional[float] = np.inf,
     ):
         sub_result = self.subset(parameters)
-        # sub_result.samples = sub_result.samples.rename(columns=lambda x: x[5:])
 
-        # filter outliers, as they decrease the performance of the density estimator
+        # Filter outliers, as they decrease the performance of the density estimator.
         mean = np.mean(sub_result.samples, axis=0)
         std = np.std(sub_result.samples, axis=0)
         lower, upper = mean - threshold_std * std, mean + threshold_std * std
@@ -320,6 +319,6 @@ class Result(DingoDataset):
                 f"Log(evidence): {self.log_evidence:.3f} +- {self.log_evidence_std:.3f}"
             )
             print(
-                # f"Effective samples {self.n_eff:.1f}: "
+                f"Effective samples {self.n_eff:.1f}: "
                 f"(Sample efficiency = {100 * self.sample_efficiency:.2f}%)"
             )
