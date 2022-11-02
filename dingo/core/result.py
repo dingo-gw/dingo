@@ -16,7 +16,6 @@ DATA_KEYS = [
     "event_metadata",
     "log_evidence",
     "log_evidence_std",
-    "effective_sample_size",
 ]
 
 
@@ -66,6 +65,21 @@ class Result(DingoDataset):
 
     def _build_likelihood(self, **likelihood_kwargs):
         self.likelihood = None
+
+    @property
+    def effective_sample_size(self):
+        if 'weights' in self.samples:
+            weights = self.samples['weights']
+            return np.sum(weights) ** 2 / np.sum(weights ** 2)
+
+    @property
+    def n_eff(self):
+        return self.effective_sample_size
+
+    @property
+    def sample_efficiency(self):
+        if 'weights' in self.samples:
+            return self.effective_sample_size / len(self.samples)
 
     def importance_sample(self, num_processes: int = 1, **likelihood_kwargs):
         """
@@ -215,11 +229,11 @@ class Result(DingoDataset):
         #   * q, \pi, L must be distributions in the same parameter space (the same
         #     coordinates). We have undone any standardizations so this is the case.
 
-        self.n_eff = np.sum(weights) ** 2 / np.sum(weights ** 2)
-        # ESS computed with len(weights) in denominator instead of num_samples,
-        # since we are interested in ESS per *likelihood evaluation*, not per
-        # Dingo sample.
-        self.effective_sample_size = self.n_eff / len(weights)
+        # self.n_eff = np.sum(weights) ** 2 / np.sum(weights ** 2)
+        # # ESS computed with len(weights) in denominator instead of num_samples,
+        # # since we are interested in ESS per *likelihood evaluation*, not per
+        # # Dingo sample.
+        # self.effective_sample_size = self.n_eff / len(weights)
 
         self.log_evidence = logsumexp(log_weights) - np.log(num_samples)
         log_weights_all = np.pad(
@@ -229,6 +243,10 @@ class Result(DingoDataset):
         )
         assert np.allclose(np.mean(np.exp(log_weights_all)), 1)
         # log_evidence_std = 1/sqrt(n) (evidence_std / evidence)
+
+        # With the weights saved, the property self.n_eff is defined. The uncertainty
+        # in the log evidence also depends on the original num_samples, so we have to
+        # preserve this.
         self.log_evidence_std = np.sqrt(
             (num_samples - self.n_eff) / (num_samples * self.n_eff)
         )
@@ -254,7 +272,7 @@ class Result(DingoDataset):
         self,
         parameters,
         nde_settings: dict,
-        device,
+        train_dir: Optional[str] = None,
         threshold_std: Optional[float] = np.inf,
     ):
         sub_result = self.subset(parameters)
@@ -272,14 +290,23 @@ class Result(DingoDataset):
             raise ValueError("Too many proxy samples outside of specified range.")
         sub_result.samples = sub_result.samples.iloc[inds]
         nde_settings["data"] = {"inference_parameters": parameters}
-        nde_settings["training"]["device"] = str(device)
-        with tempfile.TemporaryDirectory() as tmpdirname:
+
+        # TODO: Combine these into single call. I had trouble getting the temporary
+        #  directory to work without the context manager.
+        if train_dir is not None:
             unconditional_model = train_unconditional_density_estimator(
                 sub_result,
                 nde_settings,
-                tmpdirname,
+                train_dir,
             )
-        unconditional_model.save_model("temp_model.pt")
+        else:
+            with tempfile.TemporaryDirectory() as tmpdirname:
+                unconditional_model = train_unconditional_density_estimator(
+                    sub_result,
+                    nde_settings,
+                    tmpdirname,
+                )
+        # unconditional_model.save_model("temp_model.pt")
         return unconditional_model
 
         # Note: self.gnpe_proxy_sampler.transform_post, and self.transform_post *must*
@@ -290,9 +317,9 @@ class Result(DingoDataset):
         print("Number of samples:", len(self.samples))
         if self.log_evidence is not None:
             print(
-                f"Log(evidence): {self.log_evidence:.3f} +-{self.log_evidence_std:.3f}"
+                f"Log(evidence): {self.log_evidence:.3f} +- {self.log_evidence_std:.3f}"
             )
             print(
                 # f"Effective samples {self.n_eff:.1f}: "
-                f"(ESS = {100 * self.effective_sample_size:.2f}%)"
+                f"(Sample efficiency = {100 * self.sample_efficiency:.2f}%)"
             )

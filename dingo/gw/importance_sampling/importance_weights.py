@@ -2,6 +2,8 @@
 Step 1: Train unconditional nde
 Step 2: Set up likelihood and prior
 """
+from pathlib import Path
+
 import yaml
 from os import rename, makedirs
 from os.path import dirname, join, isfile, exists
@@ -9,8 +11,7 @@ import argparse
 
 from dingo.core.models import PosteriorModel
 from dingo.gw.result import Result
-from dingo.gw.inference.gw_samplers import GWSamplerUnconditional
-from dingo.core.density import train_unconditional_density_estimator
+from dingo.gw.inference.gw_samplers import GWSampler
 from dingo.gw.importance_sampling.diagnostics import plot_diagnostics
 
 
@@ -47,9 +48,7 @@ def main():
         result = Result(file_name=settings["parameter_samples"])
     except KeyError:
         # except statement for backward compatibility
-        result = Result(
-            file_name=settings["nde"]["data"]["parameter_samples"]
-        )
+        result = Result(file_name=settings["nde"]["data"]["parameter_samples"])
     metadata = result.settings
     samples = result.samples
     # for time marginalization, we drop geocent time from the samples
@@ -92,9 +91,8 @@ def main():
     # nde to recover the posterior density.
 
     if "log_prob" not in samples.columns:
-        event_name = str(
-            metadata["event"]["time_event"]
-        )  # use gps time as name for now
+        # Use GPS time as name for now.
+        event_name = str(result.event_metadata["time_event"])
         nde_name = settings["nde"].get(
             "path", join(args.outdir, f"nde-{event_name}.pt")
         )
@@ -107,27 +105,31 @@ def main():
             )
         else:
             print(f"Training new nde for event {event_name}.")
-            nde = train_unconditional_density_estimator(
-                result, settings["nde"], args.outdir
+            nde = result.train_unconditional_flow(
+                inference_parameters,
+                settings["nde"],
+                train_dir=args.outdir,
             )
             print(f"Renaming trained nde model to {nde_name}.")
             rename(join(args.outdir, "model_latest.pt"), nde_name)
-            nde_sampler = GWSamplerUnconditional(
-                model=nde, synthetic_phase_kwargs=synthetic_phase_kwargs
-            )
 
-    else:
-        nde_sampler = GWSamplerUnconditional(
-            result=result,
-            synthetic_phase_kwargs=synthetic_phase_kwargs,
-        )
+        # Step 1a: Sample from proposal.
+        nde_sampler = GWSampler(model=nde)
+        nde_sampler.run_sampler(num_samples=settings["num_samples"])
+        result = nde_sampler.to_result()
 
-    # Step 2: Sample from proposal.
+    # else:
+    #     nde_sampler = GWSamplerUnconditional(
+    #         result=result,
+    #         synthetic_phase_kwargs=synthetic_phase_kwargs,
+    #     )
+    #
+    # # Step 2: Sample from proposal.
+    #
+    # print(f'Generating {settings["num_samples"]} samples from proposal distribution.')
+    # nde_sampler.run_sampler(num_samples=settings["num_samples"])
 
-    print(f'Generating {settings["num_samples"]} samples from proposal distribution.')
-    nde_sampler.run_sampler(num_samples=settings["num_samples"])
-
-    # Step 3: Importance sample.
+    # Step 2: Importance sample.
     #
     # Our target distribution is the posterior p(theta|d) = p(d|theta) * p(theta) / p(
     # d). For importance sampling, we need to evaluate the *unnormalized* posterior,
@@ -156,15 +158,18 @@ def main():
     # log_evidences_std = np.array(log_evidences_std)
     # print(np.std(log_evidences) / np.mean(log_evidences_std))
 
+    if synthetic_phase:
+        print(f"Sampling synthetic phase.")
+        result.sample_synthetic_phase(synthetic_phase_kwargs)
+
     print(f"Importance sampling.")
-    nde_sampler.importance_sample(
+    result.importance_sample(
         num_processes=settings.get("num_processes", 1),
         time_marginalization_kwargs=time_marginalization_kwargs,
         phase_marginalization_kwargs=phase_marginalization_kwargs,
     )
-    nde_sampler.print_summary()
-    nde_sampler.to_hdf5(label="weighted", outdir=args.outdir)
-    samples = nde_sampler.samples
+    result.print_summary()
+    result.to_file(file_name=Path(args.outdir, "dingo_samples_weighted.hdf5"))
 
     # Diagnostics
     diagnostics_dir = join(args.outdir, "IS-diagnostics")
@@ -172,7 +177,7 @@ def main():
         makedirs(diagnostics_dir)
     print("Plotting diagnostics.")
     plot_diagnostics(
-        nde_sampler,
+        result,
         diagnostics_dir,
         num_processes=settings.get("num_processes", 1),
         **settings.get("slice_plots", {}),

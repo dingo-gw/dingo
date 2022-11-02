@@ -126,9 +126,8 @@ class Result(CoreResult):
             phase_grid=phase_grid,
         )
 
-    def _sample_synthetic_phase(
+    def sample_synthetic_phase(
         self,
-        samples: Union[dict, pd.DataFrame],
         synthetic_phase_kwargs,
         inverse: bool = False,
     ):
@@ -160,19 +159,19 @@ class Result(CoreResult):
               sampling will yield exact results even when the synthetic phase conditional
               is just an approximation.
 
-        Besides adding phase samples to samples['phase'], this method also modifies
-        samples['log_prob'] by adding the log_prob of the synthetic phase conditional.
+        Besides adding phase samples to self.samples['phase'], this method also modifies
+        self.samples['log_prob'] by adding the log_prob of the synthetic phase
+        conditional.
 
-        This method modifies the samples in place.
+        This method modifies self.samples in place.
 
         Parameters
         ----------
-        samples : dict or pd.DataFrame
-        inverse : bool, default True
+        inverse : bool, default False
             Whether to apply instead the inverse transformation. This is used prior to
             calculating the log_prob. In inverse mode, the posterior probability over
-            phase is calculated for given samples. It is stored in sample['log_prob'].
-
+            phase is calculated for given samples. It is stored in self.samples[
+            'log_prob'].
         """
 
         # TODO: Possibly remove this class attribute. Decide where to store information.
@@ -196,7 +195,7 @@ class Result(CoreResult):
 
         # Restrict to samples that are within the prior.
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
-        theta = pd.DataFrame(samples)[param_keys]
+        theta = self.samples[param_keys]
         log_prior = self.prior.ln_prob(theta, axis=0)
         constraints = self.prior.evaluate_constraints(theta)
         np.putmask(log_prior, constraints == 0, -np.inf)
@@ -270,8 +269,8 @@ class Result(CoreResult):
             delta_log_prob_array = np.full(len(theta), -np.inf)
             delta_log_prob_array[within_prior] = delta_log_prob
 
-            samples["phase"] = phase_array
-            samples["log_prob"] += delta_log_prob_array
+            self.samples["phase"] = phase_array
+            self.samples["log_prob"] += delta_log_prob_array
 
             # Insert the phase prior in the prior, since now the phase is present.
             self.prior["phase"] = self.phase_prior
@@ -294,8 +293,8 @@ class Result(CoreResult):
             # Outside of prior, set log_prob to -np.inf.
             log_prob_array = np.full(len(theta), -np.inf)
             log_prob_array[within_prior] = log_prob
-            samples["log_prob"] = log_prob_array
-            del samples["phase"]
+            self.samples["log_prob"] = log_prob_array
+            del self.samples["phase"]
 
         if num_valid_samples > 1e4:
             print(f"Done. This took {time.time() - t0:.2f} s.")

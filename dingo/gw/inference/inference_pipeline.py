@@ -230,6 +230,7 @@ def prepare_log_prob(
     if low_latency_label is not None:
         sampler.to_hdf5(label=low_latency_label, outdir=outdir)
     result = sampler.to_result()
+    nde_settings["training"]["device"] = str(sampler.model.device)
     unconditional_model = result.train_unconditional_flow(
         gnpe_proxy_keys,
         nde_settings,
