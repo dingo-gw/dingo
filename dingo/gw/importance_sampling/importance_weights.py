@@ -5,11 +5,10 @@ Step 2: Set up likelihood and prior
 import yaml
 from os import rename, makedirs
 from os.path import dirname, join, isfile, exists
-from types import SimpleNamespace
 import argparse
 
 from dingo.core.models import PosteriorModel
-from dingo.core.result import Result
+from dingo.gw.result import Result
 from dingo.gw.inference.gw_samplers import GWSamplerUnconditional
 from dingo.core.density import train_unconditional_density_estimator
 from dingo.gw.importance_sampling.diagnostics import plot_diagnostics
@@ -45,14 +44,14 @@ def main():
     with open(args.settings, "r") as fp:
         settings = yaml.safe_load(fp)
     try:
-        samples_dataset = Result(file_name=settings["parameter_samples"])
+        result = Result(file_name=settings["parameter_samples"])
     except KeyError:
         # except statement for backward compatibility
-        samples_dataset = Result(
+        result = Result(
             file_name=settings["nde"]["data"]["parameter_samples"]
         )
-    metadata = samples_dataset.settings
-    samples = samples_dataset.samples
+    metadata = result.settings
+    samples = result.samples
     # for time marginalization, we drop geocent time from the samples
     inference_parameters = metadata["train_settings"]["data"][
         "inference_parameters"
@@ -109,7 +108,7 @@ def main():
         else:
             print(f"Training new nde for event {event_name}.")
             nde = train_unconditional_density_estimator(
-                samples_dataset, settings["nde"], args.outdir
+                result, settings["nde"], args.outdir
             )
             print(f"Renaming trained nde model to {nde_name}.")
             rename(join(args.outdir, "model_latest.pt"), nde_name)
@@ -119,7 +118,7 @@ def main():
 
     else:
         nde_sampler = GWSamplerUnconditional(
-            samples_dataset=samples_dataset,
+            result=result,
             synthetic_phase_kwargs=synthetic_phase_kwargs,
         )
 

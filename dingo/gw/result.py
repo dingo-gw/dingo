@@ -5,8 +5,10 @@ import numpy as np
 import pandas as pd
 from bilby.core.prior import Uniform, Constraint
 
-from dingo.core.density import interpolated_sample_and_log_prob_multi, \
-    interpolated_log_prob_multi
+from dingo.core.density import (
+    interpolated_sample_and_log_prob_multi,
+    interpolated_log_prob_multi,
+)
 from dingo.core.multiprocessing import apply_func_with_multiprocessing
 from dingo.core.result import Result as CoreResult
 from dingo.gw.domains import build_domain
@@ -16,7 +18,6 @@ from dingo.gw.prior import build_prior_with_defaults
 
 
 class Result(CoreResult):
-
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.synthetic_phase_kwargs = None
@@ -28,11 +29,9 @@ class Result(CoreResult):
 
         Called by __init__() immediately after _build_prior().
         """
-        self.domain = build_domain(
-            self.metadata["dataset_settings"]["domain"]
-        )
+        self.domain = build_domain(self.base_metadata["dataset_settings"]["domain"])
 
-        data_settings = self.metadata["train_settings"]["data"]
+        data_settings = self.base_metadata["train_settings"]["data"]
         if "domain_update" in data_settings:
             self.domain.update(data_settings["domain_update"])
 
@@ -40,11 +39,9 @@ class Result(CoreResult):
 
     def _build_prior(self):
         """Build the prior based on model metadata. Called by __init__()."""
-        intrinsic_prior = self.metadata["dataset_settings"][
-            "intrinsic_prior"
-        ]
+        intrinsic_prior = self.base_metadata["dataset_settings"]["intrinsic_prior"]
         extrinsic_prior = get_extrinsic_prior_dict(
-            self.metadata["train_settings"]["data"]["extrinsic_prior"]
+            self.base_metadata["train_settings"]["data"]["extrinsic_prior"]
         )
         self.prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
 
@@ -66,10 +63,10 @@ class Result(CoreResult):
     # _build_likelihood is called at the beginning of Sampler.importance_sample
 
     def _build_likelihood(
-            self,
-            time_marginalization_kwargs: Optional[dict] = None,
-            phase_marginalization_kwargs: Optional[dict] = None,
-            phase_grid: Optional[np.ndarray] = None,
+        self,
+        time_marginalization_kwargs: Optional[dict] = None,
+        phase_marginalization_kwargs: Optional[dict] = None,
+        phase_grid: Optional[np.ndarray] = None,
     ):
         """
         Build the likelihood function based on model metadata. This is called at the
@@ -100,9 +97,9 @@ class Result(CoreResult):
         if phase_marginalization_kwargs is not None:
             # check that phase prior is uniform [0, 2pi)
             if not (
-                    isinstance(self.phase_prior, Uniform)
-                    and (self.phase_prior._minimum, self.phase_prior._maximum)
-                    == (0, 2 * np.pi)
+                isinstance(self.phase_prior, Uniform)
+                and (self.phase_prior._minimum, self.phase_prior._maximum)
+                == (0, 2 * np.pi)
             ):
                 raise ValueError(
                     f"Phase prior should be uniform [0, 2pi) for phase "
@@ -116,15 +113,11 @@ class Result(CoreResult):
         if self.event_metadata is not None and "time_event" in self.event_metadata:
             t_ref = self.event_metadata["time_event"]
         else:
-            t_ref = self.metadata["train_settings"]["data"]["ref_time"]
+            t_ref = self.base_metadata["train_settings"]["data"]["ref_time"]
 
         self.likelihood = StationaryGaussianGWLikelihood(
-            wfg_kwargs=self.metadata["dataset_settings"][
-                "waveform_generator"
-            ],
-            wfg_domain=build_domain(
-                self.metadata["dataset_settings"]["domain"]
-            ),
+            wfg_kwargs=self.base_metadata["dataset_settings"]["waveform_generator"],
+            wfg_domain=build_domain(self.base_metadata["dataset_settings"]["domain"]),
             data_domain=self.domain,
             event_data=self.context,
             t_ref=t_ref,
@@ -134,8 +127,10 @@ class Result(CoreResult):
         )
 
     def _sample_synthetic_phase(
-        self, samples: Union[dict, pd.DataFrame], synthetic_phase_kwargs, inverse: bool
-            = False,
+        self,
+        samples: Union[dict, pd.DataFrame],
+        synthetic_phase_kwargs,
+        inverse: bool = False,
     ):
         """
         Sample a synthetic phase for the waveform. This is a post-processing step

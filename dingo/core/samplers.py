@@ -1,19 +1,16 @@
 import time
 from pathlib import Path
-from typing import Optional, Union, Dict
+from typing import Optional, Union
 import sys
 
-import numpy
 import numpy as np
 import pandas as pd
-import math
 import torch
 from torchvision.transforms import Compose
-import tempfile
 
 from dingo.core.models import PosteriorModel
 from dingo.core.result import Result
-from dingo.core.density import train_unconditional_density_estimator
+from dingo.core.result import DATA_KEYS as RESULT_DATA_KEYS
 from dingo.core.utils import torch_detach_to_cpu, IterationTracker
 
 # FIXME: transform below should be in core
@@ -73,30 +70,14 @@ class Sampler(object):
             "inference_parameters"
         ]
 
-        self.transform_pre = Compose([])
-        self.transform_post = Compose([])
+        self.samples = None
         self._build_domain()
-        self._reset_result()
 
-        # keys with attributes to be saved by self.to_hdf5()
-        self.samples_dataset_keys = [
-            "settings",
-            "samples",
-            "context",
-            "log_evidence",
-            "effective_sample_size",
-            "event_metadata",
-        ]
+        # Must be after _build_domain() since transforms can depend on domain.
+        self._initialize_transforms()
+
         self._pesummary_package = "core"
         self._result_class = Result
-
-    def _reset_result(self):
-        """Clear out all data produced by self.run_sampler(), to prepare for the next
-        sampler run."""
-        self.samples = None
-        self.log_evidence = None
-        self.effective_sample_size = None
-        self.n_eff = None
 
     @property
     def context(self):
@@ -106,15 +87,9 @@ class Sampler(object):
 
     @context.setter
     def context(self, value):
-        if value is not None:
-            self._check_context(value)
-            if "parameters" in value:
-                self.metadata["injection_parameters"] = value.pop("parameters")
+        if value is not None and "parameters" in value:
+            self.metadata["injection_parameters"] = value.pop("parameters")
         self._context = value
-
-    def _check_context(self, context: Optional[dict] = None):
-        # TODO: Add some checks that the context is appropriate.
-        pass
 
     @property
     def event_metadata(self):
@@ -127,8 +102,17 @@ class Sampler(object):
     def event_metadata(self, value):
         self._event_metadata = value
 
-    def prepare_log_prob(self, *args, **kwargs):
-        pass
+    def _initialize_transforms(self):
+        self.transform_pre = Compose([])
+
+        # De-standardize data and extract inference parameters. This needs to be here
+        # (and not just in subclasses) in order for run_sampler() to properly execute.
+        self.transform_post = SelectStandardizeRepackageParameters(
+            {"inference_parameters": self.inference_parameters},
+            self.metadata["train_settings"]["data"]["standardization"],
+            inverse=True,
+            as_type="dict",
+        )
 
     def _run_sampler(
         self,
@@ -192,7 +176,7 @@ class Sampler(object):
         get_log_prob  :  bool = False
             If set, compute log_prob for each sample
         """
-        self._reset_result()
+        self.samples = None
 
         print(f"Running sampler to generate {num_samples} samples.")
         t0 = time.time()
@@ -215,16 +199,10 @@ class Sampler(object):
         if remainder > 0:
             samples.append(self._run_sampler(remainder, context))
         samples = {p: torch.cat([s[p] for s in samples]) for p in samples[0].keys()}
-        # get_log_prob = True
-        # if get_log_prob and "log_prob" not in samples.keys():
-        #     log_prob = self.log_prob_mc(
-        #         samples, n_mc=1000, batch_size=batch_size,
-        #     )
-        # # samples = {p: torch.cat([s[p] for s in samples]) for p in k_parameters}
         samples = {k: v.cpu().numpy() for k, v in samples.items()}
 
         # Apply any post-sampling transformation to sampled parameters (e.g.,
-        # correction for t_ref or sampling of synthetic phase), and place on CPU.
+        # correction for t_ref) and represent as DataFrame.
         self._post_process(samples)
         self.samples = pd.DataFrame(samples)
         print(f"Done. This took {time.time() - t0:.1f} s.")
@@ -285,9 +263,6 @@ class Sampler(object):
 
         return log_prob
 
-    def log_prob_mc(self, *args, **kwargs):
-        pass
-
     def _post_process(self, samples: Union[dict, pd.DataFrame], inverse: bool = False):
         pass
 
@@ -307,30 +282,15 @@ class Sampler(object):
         )
         # TODO: Save much more information.
 
-    @property
-    def settings(self):
-        return self.metadata
-
-    def to_samples_dataset(self) -> Result:
-        data_dict = {k: getattr(self, k) for k in self.samples_dataset_keys}
-        data_keys = [k for k in data_dict.keys() if k != "settings"]
-        return self._result_class(dictionary=data_dict, data_keys=data_keys)
+    def to_result(self) -> Result:
+        data_dict = {k: getattr(self, k, None) for k in RESULT_DATA_KEYS}
+        data_dict["settings"] = self.metadata
+        return self._result_class(dictionary=data_dict)
 
     def to_hdf5(self, label="", outdir="."):
-        dataset = self.to_samples_dataset()
+        dataset = self.to_result()
         file_name = "dingo_samples_" + label + ".hdf5"
         dataset.to_file(file_name=Path(outdir, file_name))
-
-    def print_summary(self):
-        print("Number of samples:", len(self.samples))
-        if self.log_evidence is not None:
-            print(
-                f"Log(evidence): {self.log_evidence:.3f} +-{self.log_evidence_std:.3f}"
-            )
-            print(
-                f"Effective samples {self.n_eff:.1f}: "
-                f"(ESS = {100 * self.effective_sample_size:.2f}%)"
-            )
 
 
 class UnconditionalSampler(Sampler):
@@ -372,11 +332,11 @@ class GNPESampler(Sampler):
         num_iterations : int
             Number of GNPE iterations to be performed by sampler.
         """
+        self.gnpe_parameters = None  # Should be set in subclass _initialize_transform()
+
         super().__init__(model)
         self.init_sampler = init_sampler
         self.num_iterations = num_iterations
-        self.gnpe_parameters = None  # Should be set in subclass.
-        self.gnpe_proxy_sampler = None
         self.log_prob_correction = None  # log_prob correction, accounting for std
         self.iteration_tracker = None
         # remove self.remove_init_outliers of lowest log_prob init samples before gnpe
@@ -412,11 +372,9 @@ class GNPESampler(Sampler):
         self,
         num_samples: int,
         context: Optional[dict] = None,
-        # use_gnpe_proxy_sampler=False,
     ) -> dict:
         if context is None:
             raise ValueError("self.context must be set to run sampler.")
-        # use_gnpe_proxy_sampler = self.gnpe_proxy_sampler is not None
 
         data_ = self.init_sampler.transform_pre(context)
         init_samples = self.init_sampler._run_sampler(num_samples, context)
@@ -428,13 +386,12 @@ class GNPESampler(Sampler):
         proxy_log_prob = None
         proxies = {}
 
-        if {p + '_proxy' for p in self.gnpe_parameters}.issubset(init_samples.keys()):
+        if {p + "_proxy" for p in self.gnpe_parameters}.issubset(init_samples.keys()):
             start_with_proxies = True
             proxy_log_prob = init_samples["log_prob"]
             proxies = {
-                    k + '_proxy': init_samples[k + '_proxy'] for k in
-                    self.gnpe_parameters
-                }
+                k + "_proxy": init_samples[k + "_proxy"] for k in self.gnpe_parameters
+            }
             init_proxies = proxies.copy()
 
         # TODO: Possibly remove outliers from init_samples. Only do this if running
@@ -466,8 +423,8 @@ class GNPESampler(Sampler):
                     x["data"], x["context_parameters"]
                 )
 
-            x['parameters'] = y
-            x['log_prob'] = log_prob
+            x["parameters"] = y
+            x["log_prob"] = log_prob
             x = self.transform_post(x)
 
         #
@@ -502,20 +459,14 @@ class GNPESampler(Sampler):
             # Alternatively we could save the entire chain and the log_prob, but this
             # is not useful for our purposes.
 
-            # Note that we do not have access to the detector_time proxy variables if
-            # there is more than one iteration, since the GNPECoalescenceTimes transform
-            # subtracts off the absolute time shift. Perhaps it would make sense to
-            # rename the relative time shifts as H1_time_proxy_relative, etc.,
-            # to preserve this information more easily.
-
-            samples = x['parameters']
+            samples = x["parameters"]
 
         # Extract the proxy parameters from x["extrinsic_parameters"]. These have
         # not been standardized. They are persistent from prior to inference,
         # since this is when they were placed here and their values should not have
         # changed.
         for k, v in x["extrinsic_parameters"].items():
-            if k.endswith('_proxy'):
+            if k.endswith("_proxy"):
                 proxies[k] = v
 
         samples.update(proxies)

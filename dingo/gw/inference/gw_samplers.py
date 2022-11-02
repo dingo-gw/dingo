@@ -1,5 +1,4 @@
-from typing import Optional, Union
-import time
+from typing import Union
 
 import numpy as np
 import pandas as pd
@@ -36,19 +35,16 @@ class GWSamplerMixin(object):
         * correction for fixed detector locations during training (t_ref)
     """
 
-    def __init__(self, synthetic_phase_kwargs=None, **kwargs):
+    def __init__(self, **kwargs):
         """
         Parameters
         ----------
-        synthetic_phase_kwargs : dict = None
-            kwargs for synthetic phase generation.
         kwargs
             Keyword arguments that are forwarded to the superclass.
         """
         super().__init__(**kwargs)
         self.t_ref = self.base_model_metadata["train_settings"]["data"]["ref_time"]
         self._pesummary_package = "gw"
-        self.synthetic_phase_kwargs = synthetic_phase_kwargs
         self._result_class = Result
 
     def _build_domain(self):
@@ -89,10 +85,11 @@ class GWSamplerMixin(object):
             Whether to apply instead the inverse transformation. This is used prior to
             calculating the log_prob.
         """
+        # FIXME: Update this method to make sure that for models that do not include sky
+        #  position, it does not do anything.
         if self.event_metadata is not None:
             t_event = self.event_metadata.get("time_event")
             if t_event is not None and t_event != self.t_ref:
-                assert self.samples_dataset is None, "t_ref correction should be needed"
                 ra = samples["ra"]
                 time_reference = Time(self.t_ref, format="gps", scale="utc")
                 time_event = Time(t_event, format="gps", scale="utc")
@@ -123,19 +120,21 @@ class GWSamplerMixin(object):
             Whether to apply instead the inverse transformation. This is used prior to
             calculating the log_prob.
         """
-        if not inverse:
+        if not self.unconditional_model:
             self._correct_reference_time(samples, inverse)
-            if self.synthetic_phase_kwargs is not None:
-                print(f"Sampling synthetic phase.")
-                t0 = time.time()
-                self._sample_synthetic_phase(samples, inverse)
-                print(f"Done. This took {time.time() - t0:.2f} seconds.")
-
-        # If inverting, we go in reverse order.
-        else:
-            if self.synthetic_phase_kwargs is not None:
-                self._sample_synthetic_phase(samples, inverse)
-            self._correct_reference_time(samples, inverse)
+        # if not inverse:
+        #     self._correct_reference_time(samples, inverse)
+        #     # if self.synthetic_phase_kwargs is not None:
+        #     #     print(f"Sampling synthetic phase.")
+        #     #     t0 = time.time()
+        #     #     self._sample_synthetic_phase(samples, inverse)
+        #     #     print(f"Done. This took {time.time() - t0:.2f} seconds.")
+        #
+        # # If inverting, we go in reverse order.
+        # else:
+        #     # if self.synthetic_phase_kwargs is not None:
+        #     #     self._sample_synthetic_phase(samples, inverse)
+        #     self._correct_reference_time(samples, inverse)
 
 
 class GWSampler(GWSamplerMixin, Sampler):
@@ -147,15 +146,15 @@ class GWSampler(GWSamplerMixin, Sampler):
     initial sample points for a GNPE sampler.
     """
 
-    def __init__(self, **kwargs):
-        """
-        Parameters
-        ----------
-        model : PosteriorModel
-        """
-        super().__init__(**kwargs)
-        if self.model is not None:
-            self._initialize_transforms()
+    # def __init__(self, **kwargs):
+    #     """
+    #     Parameters
+    #     ----------
+    #     model : PosteriorModel
+    #     """
+    #     super().__init__(**kwargs)
+    #     if self.model is not None:
+    #         self._initialize_transforms()
 
     def _initialize_transforms(self):
 
@@ -199,20 +198,20 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
     samples for the GNPE loop.
     """
 
-    def __init__(self, **kwargs):
-        """
-
-        Parameters
-        ----------
-        model : PosteriorModel
-            GNPE model.
-        init_model : PosteriodModel
-            Used to produce samples for initializing the GNPE loop.
-        num_iterations :
-            Number of GNPE iterations to be performed by sampler.
-        """
-        super().__init__(**kwargs)
-        self._initialize_transforms()
+    # def __init__(self, **kwargs):
+    #     """
+    #
+    #     Parameters
+    #     ----------
+    #     model : PosteriorModel
+    #         GNPE model.
+    #     init_model : PosteriodModel
+    #         Used to produce samples for initializing the GNPE loop.
+    #     num_iterations :
+    #         Number of GNPE iterations to be performed by sampler.
+    #     """
+    #     super().__init__(**kwargs)
+    #     self._initialize_transforms()
 
     def _initialize_transforms(self):
         """
@@ -313,9 +312,7 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
     def _kernel_log_prob(self, samples):
         # TODO: Reimplement as a method of GNPEBase.
         if len({"chirp_mass", "mass_ratio", "phase"} & self.gnpe_kernel.keys()) > 0:
-            raise NotImplementedError(
-                "kernel log_prob only implemented for time gnpe."
-            )
+            raise NotImplementedError("kernel log_prob only implemented for time gnpe.")
         gnpe_proxies_diff = {
             k: np.array(samples[k] - samples[f"{k}_proxy"])
             for k in self.gnpe_kernel.keys()

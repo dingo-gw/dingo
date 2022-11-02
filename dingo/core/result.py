@@ -10,6 +10,16 @@ from dingo.core.dataset import DingoDataset
 from dingo.core.density import train_unconditional_density_estimator
 
 
+DATA_KEYS = [
+    "samples",
+    "context",
+    "event_metadata",
+    "log_evidence",
+    "log_evidence_std",
+    "effective_sample_size",
+]
+
+
 class Result(DingoDataset):
     """
     A dataset class to hold a collection of samples, implementing I/O.
@@ -25,30 +35,28 @@ class Result(DingoDataset):
     effective_sample_size : float
     """
 
-    def __init__(self, file_name=None, dictionary=None, data_keys=None):
-        if data_keys is None:
-            data_keys = [
-                "samples",
-                "context",
-                "event_metadata",
-                "log_evidence",
-                "effective_sample_size",
-            ]
+    def __init__(self, file_name=None, dictionary=None):
         super().__init__(
             file_name=file_name,
             dictionary=dictionary,
-            data_keys=data_keys,
+            data_keys=DATA_KEYS,
         )
 
         # TODO: Do we need to copy this? Or set as a property.
         # TODO: Check that we really want to run all these lines.
         self.metadata = self.settings.copy()
-        self.unconditional_model = True
         data_settings = self.metadata["train_settings"]["data"]
         self.inference_parameters = data_settings["inference_parameters"]
 
         self._build_prior()
         self._build_domain()
+
+    @property
+    def base_metadata(self):
+        if self.metadata["train_settings"]["data"].get("unconditional", False):
+            return self.metadata["base"]
+        else:
+            return self.metadata
 
     def _build_domain(self):
         self.domain = None
@@ -277,3 +285,14 @@ class Result(DingoDataset):
         # Note: self.gnpe_proxy_sampler.transform_post, and self.transform_post *must*
         # contain the SelectStandardizeRepackageParameters transformation, such that
         # the log_prob is correctly de-standardized!
+
+    def print_summary(self):
+        print("Number of samples:", len(self.samples))
+        if self.log_evidence is not None:
+            print(
+                f"Log(evidence): {self.log_evidence:.3f} +-{self.log_evidence_std:.3f}"
+            )
+            print(
+                # f"Effective samples {self.n_eff:.1f}: "
+                f"(ESS = {100 * self.effective_sample_size:.2f}%)"
+            )

@@ -10,7 +10,6 @@ import yaml
 
 from dingo.core.models import PosteriorModel
 from dingo.core.dataset import DingoDataset
-from dingo.core.samplers import UnconditionalSampler
 from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
 from dingo.gw.data.data_preparation import get_event_data_and_domain
 from dingo.gw.inference.visualization import load_ref_samples, generate_cornerplot
@@ -230,14 +229,14 @@ def prepare_log_prob(
     gnpe_proxy_keys = [k for k in sampler.samples.keys() if k.endswith("_proxy")]
     if low_latency_label is not None:
         sampler.to_hdf5(label=low_latency_label, outdir=outdir)
-    result = sampler.to_samples_dataset()
+    result = sampler.to_result()
     unconditional_model = result.train_unconditional_flow(
         gnpe_proxy_keys,
         nde_settings,
         sampler.model.device,
         threshold_std=threshold_std,
     )
-    sampler.init_sampler = UnconditionalSampler(model=unconditional_model)
+    sampler.init_sampler = GWSampler(model=unconditional_model)
     sampler.remove_init_outliers = remove_init_outliers
     sampler.num_iterations = 1
 
