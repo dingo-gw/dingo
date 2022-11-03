@@ -31,7 +31,7 @@ from dingo.gw.transforms import (
 class GWSamplerMixin(object):
     """
     Mixin class designed to add gravitational wave functionality to Sampler classes:
-        * builders for prior, domain, and likelihood
+        * builder for data domain
         * correction for fixed detector locations during training (t_ref)
     """
 
@@ -139,22 +139,28 @@ class GWSamplerMixin(object):
 
 class GWSampler(GWSamplerMixin, Sampler):
     """
-    Sampler for gravitational-wave inference using neural posterior estimation. Wraps a
-    PosteriorModel instance.
+    Sampler for gravitational-wave inference using neural posterior estimation.
+    Augments the base class by defining transform_pre and transform_post to prepare
+    data for the inference network.
+
+    transform_pre :
+        * Whitens strain.
+        * Repackages strain data and the inverse ASDs (suitably scaled) into a torch
+        tensor.
+
+    transform_post :
+        * Extract the desired inference parameters from the network output (
+        array-like), de-standardize them, and repackage as a dict.
+
+    Also mixes in GW functionality for building the domain and correcting the reference
+    time.
+
+    Allows for conditional and unconditional models, and draws samples from the model
+    based on (optional) context data.
 
     This is intended for use either as a standalone sampler, or as a sampler producing
     initial sample points for a GNPE sampler.
     """
-
-    # def __init__(self, **kwargs):
-    #     """
-    #     Parameters
-    #     ----------
-    #     model : PosteriorModel
-    #     """
-    #     super().__init__(**kwargs)
-    #     if self.model is not None:
-    #         self._initialize_transforms()
 
     def _initialize_transforms(self):
 
@@ -191,27 +197,47 @@ class GWSampler(GWSamplerMixin, Sampler):
 
 class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
     """
-    Sampler for graviational-wave inference using group-equivariant neural posterior
-    estimation (GNPE). Wraps a PosteriorModel instance.
+    Gravitational-wave GNPE sampler. It wraps a PosteriorModel and a standard Sampler for
+    initialization. The former is used to generate initial samples for Gibbs sampling.
 
-    This sampler also contains an NPE sampler, which is used to generate initial
-    samples for the GNPE loop.
+    Compared to the base class, this class implements the required transforms for
+    preparing data and parameters for the network. This includes GNPE transforms,
+    data processing transforms, and standardization/de-standardization of parameters.
+
+    A GNPE network is conditioned on additional "proxy" context theta^, i.e.,
+
+    p(theta | theta^, d)
+
+    The theta^ depend on theta via a fixed kernel p(theta^ | theta). Combining these
+    known distributions, this class uses Gibbs sampling to draw samples from the joint
+    distribution,
+
+    p(theta, theta^ | d)
+
+    The advantage of this approach is that we are allowed to perform any transformation of
+    d that depends on theta^. In particular, we can use this freedom to simplify the
+    data, e.g., by aligning data to have merger times = 0 in each detector. The merger
+    times are unknown quantities that must be inferred jointly with all other
+    parameters, and GNPE provides a means to do this iteratively. See
+    https://arxiv.org/abs/2111.13139 for additional details.
+
+    Gibbs sampling breaks access to the probability density, so this must be recovered
+    through other means. One way is to train an unconditional flow to represent p(theta^
+    | d) for fixed d based on the samples produced through the GNPE Gibbs sampling.
+    Starting from these, a single Gibbs iteration gives theta from the GNPE network,
+    along with the probability density in the joint space. This is implemented in
+    GNPESampler provided the init_sampler provides proxies directly and num_iterations
+    = 1.
+
+    Attributes (beyond those of Sampler)
+    ----------
+    init_sampler : Sampler
+        Used for providing initial samples for Gibbs sampling.
+    num_iterations : int
+        Number of Gibbs iterations to perform.
+    iteration_tracker : IterationTracker  **not set up**
+    remove_init_outliers : float  **not set up**
     """
-
-    # def __init__(self, **kwargs):
-    #     """
-    #
-    #     Parameters
-    #     ----------
-    #     model : PosteriorModel
-    #         GNPE model.
-    #     init_model : PosteriodModel
-    #         Used to produce samples for initializing the GNPE loop.
-    #     num_iterations :
-    #         Number of GNPE iterations to be performed by sampler.
-    #     """
-    #     super().__init__(**kwargs)
-    #     self._initialize_transforms()
 
     def _initialize_transforms(self):
         """

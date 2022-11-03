@@ -21,17 +21,34 @@ DATA_KEYS = [
 
 class Result(DingoDataset):
     """
-    A dataset class to hold a collection of samples, implementing I/O.
+    A dataset class to hold a collection of samples, implementing I/O, importance
+    sampling, and unconditional flow training.
+
+    Methods
+    -------
+    importance_sample
+    subset
+    train_unconditional_flow
 
     Attributes
     ----------
     samples : pd.Dataframe
         Contains parameter samples, as well as (possibly) log_prob, log_likelihood,
-        weights, log_prior.
+        weights, log_prior, delta_log_prob_target.
+    domain : Domain
+        Should be implemented in a subclass.
+    prior : PriorDict
+        Should be implemented in a subclass.
+    likelihood : Likelihood
+        Should be implemented in a subclass.
     context : dict
-        Context data on which the samples were produced (e.g., strain data, ASDs).
+        Context data from which the samples were produced (e.g., strain data, ASDs).
+    metadata : dict
+    event_metadata : dict
     log_evidence : float
-    effective_sample_size : float
+    log_evidence_std : float
+    effective_sample_size, n_eff : float (property)
+    sample_efficiency : float (property)
     """
 
     def __init__(self, file_name=None, dictionary=None):
@@ -253,7 +270,8 @@ class Result(DingoDataset):
 
     def subset(self, parameters):
         """
-        Return a new object of the same time, with only a subset of parameters.
+        Return a new object of the same type, with only a subset of parameters. Drops
+        all other columns in self.samples as well (e.g., log_prob, weights).
 
         Parameters
         ----------
@@ -275,6 +293,28 @@ class Result(DingoDataset):
         train_dir: Optional[str] = None,
         threshold_std: Optional[float] = np.inf,
     ):
+        """
+        Train an unconditional flow to represent the distribution of self.samples.
+
+        Parameters
+        ----------
+        parameters : list
+            List of parameters over which to train the flow. Can be a subset of the
+            existing parameters.
+        nde_settings : dict
+            Configuration settings for the neural density estimator.
+        train_dir : Optional[str]
+            Where to save the output of network training, e.g., logs, checkpoints. If
+            not provide, a temporary directory is used.
+        threshold_std : Optional[float]
+            Drop samples more than threshold_std standard deviations away from the mean
+            (in any parameter) before training the flow. This is meant to remove outlier
+            samples.
+
+        Returns
+        -------
+        PosteriorModel
+        """
         sub_result = self.subset(parameters)
 
         # Filter outliers, as they decrease the performance of the density estimator.
@@ -313,6 +353,10 @@ class Result(DingoDataset):
         # the log_prob is correctly de-standardized!
 
     def print_summary(self):
+        """
+        Display the number of samples, and (if importance sampling is complete) the log
+        evidence and number of effective samples.
+        """
         print("Number of samples:", len(self.samples))
         if self.log_evidence is not None:
             print(

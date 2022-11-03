@@ -26,17 +26,33 @@ class Sampler(object):
     Sampler class that wraps a PosteriorModel. Allows for conditional and unconditional
     models.
 
-    Draws samples from the model based on (optional) context data. Also implements
-    importance sampling.
+    Draws samples from the model based on (optional) context data.
+
+    This is intended for use either as a standalone sampler, or as a sampler producing
+    initial sample points for a GNPE sampler.
 
     Methods
     -------
-        run_sampler
-        log_prob
-        importance_sample
-        to_samples_dataset
-        to_hdf5
-        print_summary
+    run_sampler
+    log_prob
+    to_result
+    to_hdf5
+
+    Attributes
+    ----------
+    model : PosteriorModel
+    inference_parameters : list
+    samples : DataFrame
+        Samples produced from the model by run_sampler().
+    context : dict
+    metadata : dict
+    event_metadata : dict
+    unconditional_model : bool
+        Whether the model is unconditional, in which case it is not provided context
+        information.
+    transform_pre, transform_post : Transform
+        Transforms to be applied to data and parameters during inference. These are
+        typically implemented in a subclass.
     """
 
     def __init__(
@@ -118,7 +134,6 @@ class Sampler(object):
         self,
         num_samples: int,
         context: Optional[dict] = None,
-        # **kwargs,
     ) -> dict:
         if not self.unconditional_model:
             if context is None:
@@ -159,13 +174,20 @@ class Sampler(object):
         self,
         num_samples: int,
         batch_size: Optional[int] = None,
-        **kwargs,
     ):
         """
-        Generates samples and stores them as class attribute.
+        Generates samples and stores them in self.samples. Conditions the model on
+        self.context if appropriate (i.e., if the model is not unconditional).
 
-        Allows for batched sampling, e.g., if limited by GPU memory. Actual sampling is
-        performed by _run_sampler().
+        If possible, it also calculates the log_prob and saves it as a column in
+        self.samples. When using GNPE it is not possible to obtain the log_prob due to
+        the many Gibbs iterations. However, in the case of just one iteration, and when
+        starting from a sampler for the proxy, the GNPESampler does calculate the
+        log_prob.
+
+        Allows for batched sampling, e.g., if limited by GPU memory. Actual sampling
+        for each batch is performed by _run_sampler(), which will differ for Sampler
+        and GNPESampler.
 
         Parameters
         ----------
@@ -173,8 +195,6 @@ class Sampler(object):
             Number of samples requested.
         batch_size : int, optional
             Batch size for sampler.
-        get_log_prob  :  bool = False
-            If set, compute log_prob for each sample
         """
         self.samples = None
 
@@ -193,7 +213,7 @@ class Sampler(object):
             batch_size = num_samples
         full_batches, remainder = divmod(num_samples, batch_size)
         samples = [
-            self._run_sampler(batch_size, context, **kwargs)
+            self._run_sampler(batch_size, context)
             for _ in range(full_batches)
         ]
         if remainder > 0:
@@ -221,6 +241,7 @@ class Sampler(object):
         -------
         np.array of log probabilities.
         """
+        # TODO: Check / fix this method. It is likely broken, but is not critical.
         if self.context is None and not self.unconditional_model:
             raise ValueError("Context must be set in order to calculate log_prob.")
 
@@ -283,6 +304,15 @@ class Sampler(object):
         # TODO: Save much more information.
 
     def to_result(self) -> Result:
+        """
+        Export samples, metadata, and context information to a Result instance,
+        which can be used for saving or, e.g., importance sampling, training an
+        unconditional flow, etc.
+
+        Returns
+        -------
+        Result
+        """
         data_dict = {k: getattr(self, k, None) for k in RESULT_DATA_KEYS}
         data_dict["settings"] = self.metadata
         return self._result_class(dictionary=data_dict)
@@ -295,8 +325,42 @@ class Sampler(object):
 
 class GNPESampler(Sampler):
     """
-    Base class for GNPE sampler. It wraps a PosteriorModel, and must contain also an NPE
-    sampler, which is used to generate initial samples.
+    Base class for GNPE sampler. It wraps a PosteriorModel *and* a standard Sampler for
+    initialization. The former is used to generate initial samples for Gibbs sampling.
+
+    A GNPE network is conditioned on additional "proxy" context theta^, i.e.,
+
+    p(theta | theta^, d)
+
+    The theta^ depend on theta via a fixed kernel p(theta^ | theta). Combining these
+    known distributions, this class uses Gibbs sampling to draw samples from the joint
+    distribution,
+
+    p(theta, theta^ | d)
+
+    The advantage of this approach is that we are allowed to perform any transformation of
+    d that depends on theta^. In particular, we can use this freedom to simplify the
+    data, e.g., by aligning data to have merger times = 0 in each detector. The merger
+    times are unknown quantities that must be inferred jointly with all other
+    parameters, and GNPE provides a means to do this iteratively. See
+    https://arxiv.org/abs/2111.13139 for additional details.
+
+    Gibbs sampling breaks access to the probability density, so this must be recovered
+    through other means. One way is to train an unconditional flow to represent p(theta^
+    | d) for fixed d based on the samples produced through the GNPE Gibbs sampling.
+    Starting from these, a single Gibbs iteration gives theta from the GNPE network,
+    along with the probability density in the joint space. This is implemented in
+    GNPESampler provided the init_sampler provides proxies directly and num_iterations
+    = 1.
+
+    Attributes (beyond those of Sampler)
+    ----------
+    init_sampler : Sampler
+        Used for providing initial samples for Gibbs sampling.
+    num_iterations : int
+        Number of Gibbs iterations to perform.
+    iteration_tracker : IterationTracker  **not set up**
+    remove_init_outliers : float  **not set up**
     """
 
     def __init__(

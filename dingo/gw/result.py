@@ -18,6 +18,40 @@ from dingo.gw.prior import build_prior_with_defaults
 
 
 class Result(CoreResult):
+    """
+    A dataset class to hold a collection of gravitational-wave parameter samples and
+    perform various operations on them.
+
+    Compared to the base class, this class implements the domain, prior,
+    and likelihood. It also includes a method for sampling the binary reference phase
+    parameter based on the other parameters and the likelihood.
+
+    Methods
+    -------
+    importance_sample
+    subset
+    train_unconditional_flow
+    sample_synthetic_phase
+
+    Attributes
+    ----------
+    samples : pd.Dataframe
+        Contains parameter samples, as well as (possibly) log_prob, log_likelihood,
+        weights, log_prior, delta_log_prob_target.
+    domain : Domain
+    prior : PriorDict
+    likelihood : Likelihood
+    context : dict
+        Context data from which the samples were produced (e.g., strain data, ASDs).
+    metadata : dict
+    event_metadata : dict
+    log_evidence : float
+    log_evidence_std : float
+    effective_sample_size, n_eff : float (property)
+    sample_efficiency : float (property)
+    synthetic_phase_kwargs : dict
+    """
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.synthetic_phase_kwargs = None
