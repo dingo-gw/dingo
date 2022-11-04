@@ -85,9 +85,11 @@ class Result(DingoDataset):
 
     @property
     def effective_sample_size(self):
-        if 'weights' in self.samples:
-            weights = self.samples['weights']
+        if "weights" in self.samples:
+            weights = self.samples["weights"]
             return np.sum(weights) ** 2 / np.sum(weights ** 2)
+        else:
+            return None
 
     @property
     def n_eff(self):
@@ -95,8 +97,10 @@ class Result(DingoDataset):
 
     @property
     def sample_efficiency(self):
-        if 'weights' in self.samples:
+        if "weights" in self.samples:
             return self.effective_sample_size / len(self.samples)
+        else:
+            return None
 
     def importance_sample(self, num_processes: int = 1, **likelihood_kwargs):
         """
@@ -283,7 +287,9 @@ class Result(DingoDataset):
         Result
         """
         result_dict = self.to_dictionary()
-        result_dict["samples"] = self.samples[parameters]  # Drop log_probs, weights, etc.
+        result_dict["samples"] = self.samples[
+            parameters
+        ]  # Drop log_probs, weights, etc.
         return type(self)(dictionary=result_dict)
 
     def train_unconditional_flow(

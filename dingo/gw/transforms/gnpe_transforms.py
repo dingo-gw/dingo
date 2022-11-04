@@ -164,7 +164,7 @@ class GNPECoalescenceTimes(GNPEBase):
             # "preferred" proxy (typically H1). We give these a different name so that we
             # can keep track separately of the un-shifted proxies.
             del self.context_parameters[0]
-            self.context_parameters = [p + '_relative' for p in self.context_parameters]
+            self.context_parameters = [p + "_relative" for p in self.context_parameters]
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
@@ -224,7 +224,9 @@ class GNPECoalescenceTimes(GNPEBase):
             else:
                 new_parameters["geocent_time"] = -dt
             for k in self.ifo_time_labels[1:]:
-                new_parameters[k + "_proxy_relative"] = new_parameters[k + "_proxy"] - dt
+                new_parameters[k + "_proxy_relative"] = (
+                    new_parameters[k + "_proxy"] - dt
+                )
 
         extrinsic_parameters.update(new_parameters)
         sample["extrinsic_parameters"] = extrinsic_parameters
