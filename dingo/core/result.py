@@ -58,14 +58,15 @@ class Result(DingoDataset):
             data_keys=DATA_KEYS,
         )
 
-        # TODO: Do we need to copy this? Or set as a property.
-        # TODO: Check that we really want to run all these lines.
-        self.metadata = self.settings.copy()
         data_settings = self.metadata["train_settings"]["data"]
         self.inference_parameters = data_settings["inference_parameters"]
 
         self._build_prior()
         self._build_domain()
+
+    @property
+    def metadata(self):
+        return self.settings
 
     @property
     def base_metadata(self):
