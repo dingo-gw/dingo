@@ -1,3 +1,4 @@
+import copy
 from typing import Optional
 
 import torch
@@ -35,7 +36,7 @@ class SampleDataset(torch.utils.data.Dataset):
 
 
 def train_unconditional_density_estimator(
-    samples_dataset,
+    result,
     settings: dict,
     train_dir: str,
 ):
@@ -56,13 +57,12 @@ def train_unconditional_density_estimator(
     model: PosteriorModel
         trained density estimator
     """
-    samples = samples_dataset.samples
+    samples = result.samples
     # Process samples: select parameters, normalize, and convert to torch tensor
     if "parameters" in settings["data"] and settings["data"]["parameters"]:
         parameters = settings["data"]["parameters"]
     else:
         parameters = list(samples.keys())
-    base_metadata = samples_dataset.settings
     samples = np.array(samples[parameters])
     num_samples, num_params = samples.shape
     mean, std = np.mean(samples, axis=0), np.std(samples, axis=0)
@@ -78,7 +78,7 @@ def train_unconditional_density_estimator(
     settings["model"]["input_dim"] = num_params
     settings["model"]["context_dim"] = None
     model = PosteriorModel(
-        metadata={"train_settings": settings, "base": base_metadata},
+        metadata={"train_settings": settings, "base": copy.deepcopy(result.metadata)},
         device=settings["training"]["device"]
     )
     model.optimizer_kwargs = settings["training"]["optimizer"]
@@ -87,8 +87,8 @@ def train_unconditional_density_estimator(
 
     # Store context and event metadata to keep a record, even though it will not be used
     # in training.
-    model.context = samples_dataset.context
-    model.event_metadata = samples_dataset.event_metadata
+    model.context = result.context
+    model.event_metadata = result.event_metadata
 
     # set up dataloaders
     train_loader, test_loader = build_train_and_test_loaders(

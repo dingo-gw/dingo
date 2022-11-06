@@ -313,7 +313,8 @@ class Sampler(object):
         Result
         """
         data_dict = {k: getattr(self, k, None) for k in RESULT_DATA_KEYS}
-        data_dict["settings"] = self.metadata
+        # *COPY* the metadata to avoid recursion errors when creating new objects.
+        data_dict["settings"] = copy.deepcopy(self.metadata)
         return self._result_class(dictionary=data_dict)
 
     def to_hdf5(self, label="", outdir="."):
