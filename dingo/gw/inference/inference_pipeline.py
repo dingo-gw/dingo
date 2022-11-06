@@ -176,7 +176,7 @@ def get_event_data(event, args, model, ref=None):
         event_metadata = event_dataset.event_metadata
         label = Path(event).stem + args.suffix
         # TODO: add check that model metadata and injection are compatible, e.g.,
-        #  same frequecy range and waveform model
+        #  same frequency range and waveform model
 
     return event_data, event_metadata, label
 
@@ -225,7 +225,7 @@ def prepare_log_prob(
         Directory in which low latency samples are saved. Needs to be set if
         low_latency_label is not None.
     """
-    sampler.remove_init_outliers = remove_init_outliers  # TODO: Not implemented
+    sampler.remove_init_outliers = remove_init_outliers
     sampler.run_sampler(num_samples, batch_size)
     if low_latency_label is not None:
         sampler.to_hdf5(label=low_latency_label, outdir=outdir)
@@ -236,8 +236,12 @@ def prepare_log_prob(
         nde_settings,
         threshold_std=threshold_std,
     )
+
+    # Prepare sampler with unconditional model as initialization. This should only use
+    # one iteration and also not remove any outliers.
     sampler.init_sampler = GWSampler(model=unconditional_model)
     sampler.num_iterations = 1
+    sampler.remove_init_outliers = 0.0  # Turn off for final sampler.
 
 
 def analyze_event():

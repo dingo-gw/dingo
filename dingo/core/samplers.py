@@ -1,4 +1,5 @@
 import copy
+import math
 import time
 from pathlib import Path
 from typing import Optional, Union
@@ -424,7 +425,17 @@ class GNPESampler(Sampler):
             raise ValueError("self.context must be set to run sampler.")
 
         data_ = self.init_sampler.transform_pre(context)
-        init_samples = self.init_sampler._run_sampler(num_samples, context)
+
+        # TODO: Reimplement outlier removal in IterationTracker? Save setting somewhere.
+        if self.remove_init_outliers == 0.0:
+            init_samples = self.init_sampler._run_sampler(num_samples, context)
+        else:
+            init_samples = self.init_sampler._run_sampler(
+                math.ceil(num_samples / (1 - self.remove_init_outliers)), context
+            )
+            thr = torch.quantile(init_samples["log_prob"], self.remove_init_outliers)
+            inds = torch.where(init_samples["log_prob"] >= thr)[0][:num_samples]
+            init_samples = {k: v[inds] for k, v in init_samples.items()}
 
         # We could be starting with either the GNPE parameters *or* their proxies,
         # depending on the nature of the initialization network.
@@ -440,7 +451,6 @@ class GNPESampler(Sampler):
             # proxies is a dict of torch.Tensors, since it came from _run_sampler(),
             # not run_sampler(). Clone it for a later assertion check.
             init_proxies = {k: v.clone() for k, v in proxies.items()}
-            # init_proxies = proxies.copy()
 
         # TODO: Possibly remove outliers from init_samples. Only do this if running
         #  several Gibbs iterations.
@@ -551,95 +561,3 @@ class GNPESampler(Sampler):
                 assert torch.equal(proxies[k], init_proxies[k])
 
         return samples
-
-        # if not use_gnpe_proxy_sampler:
-        #     # Run gnpe iterations to jointly infer gnpe proxies and inference parameters.
-        #     self.iteration_tracker = IterationTracker(store_data=True)
-        #     if self.remove_init_outliers == 0.0:
-        #         init_samples = self.init_sampler._run_sampler(num_samples, context)
-        #     else:
-        #         init_samples = self.init_sampler._run_sampler(
-        #             math.ceil(num_samples / (1 - self.remove_init_outliers)), context
-        #         )
-        #         thr = torch.quantile(
-        #             init_samples["log_prob"], self.remove_init_outliers
-        #         )
-        #         inds = torch.where(init_samples["log_prob"] >= thr)[0][:num_samples]
-        #         init_samples = {k: v[inds] for k, v in init_samples.items()}
-        #     x = {"extrinsic_parameters": init_samples, "parameters": {}}
-        #     for i in range(self.num_iterations):
-        #         x["extrinsic_parameters"] = {
-        #             k: x["extrinsic_parameters"][k] for k in self.gnpe_parameters
-        #         }
-        #         self.iteration_tracker.update(
-        #             {k: v.cpu().numpy() for k, v in x["extrinsic_parameters"].items()}
-        #         )
-        #         d = data_.clone()
-        #         x["data"] = d.expand(num_samples, *d.shape)
-        #
-        #         x = self.transform_pre(x)
-        #         x["parameters"] = self.model.sample(x["data"], x["context_parameters"])
-        #         x = self.transform_post(x)
-        #         samples = x["parameters"]
-        #         print(
-        #             f"it {i}.\tmin pvalue: {self.iteration_tracker.pvalue_min:.3f}"
-        #             f"\tproxy mean: ",
-        #             *[
-        #                 f"{torch.mean(v).item():.5f}"
-        #                 for v in x["gnpe_proxies"].values()
-        #             ],
-        #             "\tproxy std:",
-        #             *[f"{torch.std(v).item():.5f}" for v in x["gnpe_proxies"].values()],
-        #         )
-        # else:
-        #     # Infer gnpe proxies based on trained model in gnpe_proxy sampler.
-        #     # With this, we can infer the inference parameters with a single pass
-        #     # through the gnpe network.
-        #     d = data_.clone()
-        #
-        #     gnpe_proxies_in = self.gnpe_proxy_sampler._run_sampler(
-        #         num_samples=num_samples, batch_size=num_samples
-        #     )
-        #     log_prob_gnpe_proxies = gnpe_proxies_in.pop("log_prob")
-        #     # log_prob_gnpe_proxies is already standardized, since it is covered in
-        #     # _run_sampler by self.transform_post [SelectStandardizeRepackageParameters]
-        #
-        #     x = {
-        #         "extrinsic_parameters": {},
-        #         "parameters": {},
-        #         "gnpe_proxies_in": gnpe_proxies_in,
-        #         "data": d.expand(num_samples, *d.shape),
-        #     }
-        #     x = self.transform_pre(x)
-        #     with torch.no_grad():
-        #         x["parameters"], x["log_prob"] = self.model.model.sample_and_log_prob(
-        #             x["data"],
-        #             x["context_parameters"],
-        #         )
-        #     x = self.transform_post(x)  # this also standardizes x["log_prob"]!
-        #
-        #     samples = x["parameters"]
-        #     samples["log_prob"] = x["log_prob"] + log_prob_gnpe_proxies
-        #     samples["log_prob_gnpe_proxies"] = log_prob_gnpe_proxies
-        #
-        #     # The log_prob returned by gnpe is not just the log_prob over parmeters
-        #     # theta, but instead the log_prob in the *joint* space q(theta,theta^|x),
-        #     # including the proxies theta^. For importance sampling this means,
-        #     # that the target density is
-        #     #
-        #     #       p(theta,theta^|x) = p(theta^|theta) * p(theta|x).
-        #     #
-        #     # We compute log[p(theta^|theta)] below and store it as
-        #     # samples["delta_log_prob_target"], such that for importance sampling we
-        #     # only need to evaluate log[p(theta|x)] and add this correction.
-        #     all_params = {**x["extrinsic_parameters"], **samples, **x["gnpe_proxies"]}
-        #     all_params = {k: torch_detach_to_cpu(v) for k, v in all_params.items()}
-        #     kernel_log_prob = self._kernel_log_prob(all_params)
-        #     samples["delta_log_prob_target"] = torch.Tensor(kernel_log_prob)
-        #
-        # # add gnpe parameters:
-        # for k, v in x["gnpe_proxies"].items():
-        #     assert k.endswith("_proxy")
-        #     samples["GNPE:" + k] = x["gnpe_proxies"][k]
-        #
-        # return samples
