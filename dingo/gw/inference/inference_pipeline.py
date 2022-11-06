@@ -225,20 +225,18 @@ def prepare_log_prob(
         Directory in which low latency samples are saved. Needs to be set if
         low_latency_label is not None.
     """
+    sampler.remove_init_outliers = remove_init_outliers  # TODO: Not implemented
     sampler.run_sampler(num_samples, batch_size)
-    gnpe_proxy_keys = [k for k in sampler.samples.keys() if k.endswith("_proxy")]
     if low_latency_label is not None:
         sampler.to_hdf5(label=low_latency_label, outdir=outdir)
     result = sampler.to_result()
     nde_settings["training"]["device"] = str(sampler.model.device)
     unconditional_model = result.train_unconditional_flow(
-        gnpe_proxy_keys,
+        sampler.gnpe_proxy_parameters,
         nde_settings,
-        sampler.model.device,
         threshold_std=threshold_std,
     )
     sampler.init_sampler = GWSampler(model=unconditional_model)
-    sampler.remove_init_outliers = remove_init_outliers
     sampler.num_iterations = 1
 
 

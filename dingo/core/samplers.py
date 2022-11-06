@@ -1,3 +1,4 @@
+import copy
 import time
 from pathlib import Path
 from typing import Optional, Union
@@ -212,10 +213,7 @@ class Sampler(object):
         if batch_size is None:
             batch_size = num_samples
         full_batches, remainder = divmod(num_samples, batch_size)
-        samples = [
-            self._run_sampler(batch_size, context)
-            for _ in range(full_batches)
-        ]
+        samples = [self._run_sampler(batch_size, context) for _ in range(full_batches)]
         if remainder > 0:
             samples.append(self._run_sampler(remainder, context))
         samples = {p: torch.cat([s[p] for s in samples]) for p in samples[0].keys()}
@@ -378,7 +376,7 @@ class GNPESampler(Sampler):
         num_iterations : int
             Number of GNPE iterations to be performed by sampler.
         """
-        self.gnpe_parameters = None  # Should be set in subclass _initialize_transform()
+        self.gnpe_parameters = []  # Should be set in subclass _initialize_transform()
 
         super().__init__(model)
         self.init_sampler = init_sampler
@@ -410,6 +408,10 @@ class GNPESampler(Sampler):
         self._num_iterations = value
         self.metadata["num_iterations"] = self._num_iterations
 
+    @property
+    def gnpe_proxy_parameters(self):
+        return [p + "_proxy" for p in self.gnpe_parameters]
+
     def _kernel_log_prob(self, samples):
         raise NotImplementedError("To be implemented in subclass.")
 
@@ -434,10 +436,11 @@ class GNPESampler(Sampler):
         if {p + "_proxy" for p in self.gnpe_parameters}.issubset(init_samples.keys()):
             start_with_proxies = True
             proxy_log_prob = init_samples["log_prob"]
-            proxies = {
-                k + "_proxy": init_samples[k + "_proxy"] for k in self.gnpe_parameters
-            }
-            init_proxies = proxies.copy()
+            proxies = {k: init_samples[k] for k in self.gnpe_proxy_parameters}
+            # proxies is a dict of torch.Tensors, since it came from _run_sampler(),
+            # not run_sampler(). Clone it for a later assertion check.
+            init_proxies = {k: v.clone() for k, v in proxies.items()}
+            # init_proxies = proxies.copy()
 
         # TODO: Possibly remove outliers from init_samples. Only do this if running
         #  several Gibbs iterations.
@@ -448,8 +451,12 @@ class GNPESampler(Sampler):
         # Gibbs sample.
         #
 
+        # Saving as an attribute so we can later access the intermediate Gibbs samples.
+        self.iteration_tracker = IterationTracker(store_data=True)
+
         for i in range(self.num_iterations):
-            print(i)
+            start_time = time.time()
+
             if start_with_proxies and i == 0:
                 x["extrinsic_parameters"] = proxies.copy()
             else:
@@ -457,20 +464,48 @@ class GNPESampler(Sampler):
                     k: x["extrinsic_parameters"][k] for k in self.gnpe_parameters
                 }
 
+            # TODO: Depending on whether start_with_proxies is True, this might end up
+            #  comparing proxies vs gnpe_parameters for the first iteration.
+            self.iteration_tracker.update(
+                {k: v.cpu().numpy() for k, v in x["extrinsic_parameters"].items()}
+            )
+
             d = data_.clone()
             x["data"] = d.expand(num_samples, *d.shape)
 
             x = self.transform_pre(x)
 
+            time_sample_start = time.time()
             self.model.model.eval()
             with torch.no_grad():
                 y, log_prob = self.model.model.sample_and_log_prob(
                     x["data"], x["context_parameters"]
                 )
+            time_sample_end = time.time()
 
             x["parameters"] = y
             x["log_prob"] = log_prob
             x = self.transform_post(x)
+
+            # Extract the proxy parameters from x["extrinsic_parameters"]. These have
+            # not been standardized. They are persistent from before sampling took place,
+            # since this is when they were placed here and their values should not have
+            # changed.
+            proxies = {
+                p: x["extrinsic_parameters"][p] for p in self.gnpe_proxy_parameters
+            }
+
+            print(
+                f"it {i}.\tmin pvalue: {self.iteration_tracker.pvalue_min:.3f}"
+                f"\tproxy mean: ",
+                *[f"{torch.mean(v).item():.5f}" for v in proxies.values()],
+                "\tproxy std:",
+                *[f"{torch.std(v).item():.5f}" for v in proxies.values()],
+                "\ttimes:",
+                time_sample_start - start_time,
+                time_sample_end - time_sample_start,
+                time.time() - time_sample_end,
+            )
 
         #
         # Prepare final result.
@@ -506,14 +541,8 @@ class GNPESampler(Sampler):
 
             samples = x["parameters"]
 
-        # Extract the proxy parameters from x["extrinsic_parameters"]. These have
-        # not been standardized. They are persistent from prior to inference,
-        # since this is when they were placed here and their values should not have
-        # changed.
-        for k, v in x["extrinsic_parameters"].items():
-            if k.endswith("_proxy"):
-                proxies[k] = v
-
+        # Include the proxies along with the inference parameters. The variable proxies
+        # gets set at the end of each Gibbs loop.
         samples.update(proxies)
 
         # Safety check for unconditional flows. Make sure the proxies haven't changed.

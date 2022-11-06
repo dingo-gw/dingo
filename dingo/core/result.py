@@ -337,21 +337,20 @@ class Result(DingoDataset):
         sub_result.samples = sub_result.samples.iloc[inds]
         nde_settings["data"] = {"inference_parameters": parameters}
 
-        # TODO: Combine these into single call. I had trouble getting the temporary
-        #  directory to work without the context manager.
-        if train_dir is not None:
-            unconditional_model = train_unconditional_density_estimator(
-                sub_result,
-                nde_settings,
-                train_dir,
-            )
-        else:
-            with tempfile.TemporaryDirectory() as tmpdirname:
-                unconditional_model = train_unconditional_density_estimator(
-                    sub_result,
-                    nde_settings,
-                    tmpdirname,
-                )
+        temporary_directory = None
+        if train_dir is None:
+            temporary_directory = tempfile.TemporaryDirectory()
+            train_dir = temporary_directory.name
+
+        unconditional_model = train_unconditional_density_estimator(
+            sub_result,
+            nde_settings,
+            train_dir,
+        )
+
+        if temporary_directory is not None:
+            temporary_directory.cleanup()
+
         # unconditional_model.save_model("temp_model.pt")
         return unconditional_model
 
