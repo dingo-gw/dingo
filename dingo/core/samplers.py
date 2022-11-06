@@ -430,6 +430,10 @@ class GNPESampler(Sampler):
         if self.remove_init_outliers == 0.0:
             init_samples = self.init_sampler._run_sampler(num_samples, context)
         else:
+            if self.num_iterations == 1:
+                print(f"Warning: Removing initial outliers, but only carrying out "
+                      f"{self.num_iterations} GNPE iteration. This risks biasing "
+                      f"results.")
             init_samples = self.init_sampler._run_sampler(
                 math.ceil(num_samples / (1 - self.remove_init_outliers)), context
             )
@@ -451,9 +455,6 @@ class GNPESampler(Sampler):
             # proxies is a dict of torch.Tensors, since it came from _run_sampler(),
             # not run_sampler(). Clone it for a later assertion check.
             init_proxies = {k: v.clone() for k, v in proxies.items()}
-
-        # TODO: Possibly remove outliers from init_samples. Only do this if running
-        #  several Gibbs iterations.
 
         x = {"extrinsic_parameters": init_samples, "parameters": {}}
 
