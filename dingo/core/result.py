@@ -14,6 +14,7 @@ DATA_KEYS = [
     "samples",
     "context",
     "event_metadata",
+    "importance_sampling_metadata",
     "log_evidence",
     "log_evidence_std",
 ]
@@ -57,6 +58,10 @@ class Result(DingoDataset):
             dictionary=dictionary,
             data_keys=DATA_KEYS,
         )
+
+        # Initialize as empty dict so we can fill it up later.
+        if self.importance_sampling_metadata is None:
+            self.importance_sampling_metadata = {}
 
         data_settings = self.metadata["train_settings"]["data"]
         self.inference_parameters = data_settings["inference_parameters"]

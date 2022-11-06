@@ -54,7 +54,30 @@ class Result(CoreResult):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.synthetic_phase_kwargs = None
+
+    @property
+    def synthetic_phase_kwargs(self):
+        return self.importance_sampling_metadata.get("synthetic_phase")
+
+    @synthetic_phase_kwargs.setter
+    def synthetic_phase_kwargs(self, value):
+        self.importance_sampling_metadata["synthetic_phase"] = value
+
+    @property
+    def time_marginalization_kwargs(self):
+        return self.importance_sampling_metadata.get("time_marginalization")
+
+    @time_marginalization_kwargs.setter
+    def time_marginalization_kwargs(self, value):
+        self.importance_sampling_metadata["time_marginalization"] = value
+
+    @property
+    def phase_marginalization_kwargs(self):
+        return self.importance_sampling_metadata.get("phase_marginalization")
+
+    @phase_marginalization_kwargs.setter
+    def phase_marginalization_kwargs(self, value):
+        self.importance_sampling_metadata["phase_marginalization"] = value
 
     def _build_domain(self):
         """
@@ -139,6 +162,10 @@ class Result(CoreResult):
                     f"Phase prior should be uniform [0, 2pi) for phase "
                     f"marginalization, but is {self.phase_prior}."
                 )
+
+        # This will save these settings when the Result instance is saved.
+        self.time_marginalization_kwargs = time_marginalization_kwargs
+        self.phase_marginalization_kwargs = phase_marginalization_kwargs
 
         # The detector reference positions during likelihood evaluation should be based
         # on the event time, since any post-correction to account for the training
