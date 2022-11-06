@@ -432,9 +432,11 @@ class GNPESampler(Sampler):
             init_samples = self.init_sampler._run_sampler(num_samples, context)
         else:
             if self.num_iterations == 1:
-                print(f"Warning: Removing initial outliers, but only carrying out "
-                      f"{self.num_iterations} GNPE iteration. This risks biasing "
-                      f"results.")
+                print(
+                    f"Warning: Removing initial outliers, but only carrying out "
+                    f"{self.num_iterations} GNPE iteration. This risks biasing "
+                    f"results."
+                )
             init_samples = self.init_sampler._run_sampler(
                 math.ceil(num_samples / (1 - self.remove_init_outliers)), context
             )
