@@ -86,6 +86,7 @@ class PosteriorModel:
         self.optimizer = None
         self.scheduler = None
         self.context = None
+        self.event_metadata = None
 
         # build model
         if model_filename is not None:
@@ -167,6 +168,9 @@ class PosteriorModel:
         if self.context is not None:
             model_dict["context"] = self.context
 
+        if self.event_metadata is not None:
+            model_dict["event_metadata"] = self.event_metadata
+
         if save_training_info:
             model_dict["optimizer_kwargs"] = self.optimizer_kwargs
             model_dict["scheduler_kwargs"] = self.scheduler_kwargs
@@ -211,6 +215,9 @@ class PosteriorModel:
 
         if "context" in d:
             self.context = d["context"]
+
+        if "event_metadata" in d:
+            self.event_metadata = d["event_metadata"]
 
         self.model_to_device(device)
 
