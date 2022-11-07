@@ -168,16 +168,19 @@ class WaveformGenerator:
         parameters = parameters.copy()
         parameters["f_ref"] = self.f_ref
 
-        # Convert to lalsimulation parameters according to the specified domain
-        parameters_lal = self._convert_parameters_to_lal_frame(
-            parameters, self.lal_params
-        )
-
         # Generate GW polarizations
         if isinstance(self.domain, FrequencyDomain):
             wf_generator = self.generate_FD_waveform
+            # Convert to lalsimulation parameters according to the specified domain
+            parameters_lal = self._convert_parameters_to_lal_frame(
+                parameters, self.lal_params, lal_target_function="SimInspiralFD"
+            )
         elif isinstance(self.domain, TimeDomain):
             wf_generator = self.generate_TD_waveform
+            # Convert to lalsimulation parameters according to the specified domain
+            parameters_lal = self._convert_parameters_to_lal_frame(
+                parameters, self.lal_params, lal_target_function="SimInspiralTD"
+            )
         else:
             raise ValueError(f"Unsupported domain type {type(self.domain)}.")
 
@@ -269,6 +272,7 @@ class WaveformGenerator:
             "SimInspiralChooseTDModes",
             "SimInspiralChooseFDModes",
             "SimIMRPhenomXPCalculateModelParametersFromSourceFrame",
+            "SimIMRSpinAlignedEOBModesEcc_opt"
         ]:
             raise ValueError(
                 f"Unsupported lalsimulation waveform function {lal_target_function}."
@@ -311,7 +315,7 @@ class WaveformGenerator:
         masses = (p["mass_1"], p["mass_2"])
         r = p["luminosity_distance"]
         phase = p["phase"]
-        ecc_params = (0.0, 0.0, 0.0)  # longAscNodes, eccentricity, meanPerAno
+        ecc_params = (0.0, parameter_dict.get("eccentricity", 0), 0.0)  # longAscNodes, eccentricity, meanPerAno (also called eccentric_anomaly)
 
         # Get domain parameters
         f_ref = p["f_ref"]
@@ -325,9 +329,6 @@ class WaveformGenerator:
             # parameters needed for TD waveforms
             delta_t = 0.5 / self.domain.f_max
         elif isinstance(self.domain, TimeDomain):
-            raise NotImplementedError("Time domain not supported yet.")
-            # FIXME: compute f_min from duration or specify it if SimInspiralTD
-            #  is used for a native FD waveform
             f_min = 20.0
             delta_t = self.domain.delta_t
             # parameters needed for FD waveforms
@@ -382,10 +383,7 @@ class WaveformGenerator:
                 + (lal_params, self.approximant)
             )
 
-        elif (
-            lal_target_function
-            == "SimIMRPhenomXPCalculateModelParametersFromSourceFrame"
-        ):
+        elif (lal_target_function== "SimIMRPhenomXPCalculateModelParametersFromSourceFrame"):
             lal_parameter_tuple = (
                 masses + (f_ref,) + (phase, iota) + spins_cartesian + (lal_params,)
             )
@@ -413,6 +411,52 @@ class WaveformGenerator:
                 + (lal_params, l_max, self.approximant)
             )
             # also pass iota, since this is needed for recombination of the modes
+            lal_parameter_tuple = (lal_parameter_tuple, iota)
+
+        elif lal_target_function == "SimIMRSpinAlignedEOBModesEcc_opt":
+            if self.approximant == 109:
+                approx = 4
+            domain_pars = (delta_t, f_min, f_ref)
+            lal_parameter_tuple = (
+                delta_t,
+                *masses,
+                domain_pars[1],
+                r, # Distance
+                s1z,
+                s2z,
+                ecc_params[1],
+                ecc_params[2],
+                approx,
+                p.get("lambda2Tidal1", 0),
+                p.get("lambda2Tidtal2", 0),
+                p.get("omega02Tidal1", 0),
+                p.get("omega02Tidal2", 0),
+                p.get("lambda3Tidal1", 0),
+                p.get("lambda3Tidal2", 0),
+                p.get("omega03Tidal1", 0),
+                p.get("omega03Tidal2", 0),
+                p.get("quadparam1", 1),
+                p.get("quadparam2", 1),
+                p.get("nqcCoeffsInput", None),
+                p.get("nqcFlag", 0),
+                # Defaults are taken from LALSimInspiralWaveformParams.c in lalsimulation/lib
+                p.get("EccFphiPNorder", 99),
+                p.get("EccFrPNorder", 99),
+                p.get("EccWaveformPNorder", 16),
+                p.get("EccPNFactorizedForm", 1),
+                p.get("EccBeta", 0.09),
+                p.get("Ecct0", 100.0),
+                p.get("EccNQCWaveform", 1),
+                p.get("EccPNRRForm", 1),
+                p.get("EccPNWfForm", 1),
+                p.get("EccAvNQCWaveform", 1), 
+                p.get("EcctAppend", 30.0),
+                p.get("EccIC", -2), # 0 periastron, 2 hyperbolic,  -1 instantaneous omega, -2 orbit-average omega
+                p.get("HypPphi0", 4.22),
+                p.get("HypR0", 10000.0),
+                p.get("HypE0", 1.012),
+            )
+            
             lal_parameter_tuple = (lal_parameter_tuple, iota)
 
         return lal_parameter_tuple
@@ -610,7 +654,7 @@ class WaveformGenerator:
             if LS.SimInspiralImplementedFDApproximants(self.approximant):
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: FD)
-                hlm_fd, iota = self.generate_FD_modes_LO(parameters)
+                hlm_fd, iota = self.generate_FD_modes_L0(parameters)
 
                 # Step 2: Transform modes to target domain.
                 # Not required here, as approximant domain and target domain are both FD.
@@ -640,7 +684,7 @@ class WaveformGenerator:
 
         return pol_m
 
-    def generate_FD_modes_LO(self, parameters):
+    def generate_FD_modes_L0(self, parameters):
         """
         Generate FD modes in the L0 frame.
 
@@ -712,13 +756,41 @@ class WaveformGenerator:
         """
         # TD approximants that are implemented in L0 frame. Currently tested for:
         #   52: SEOBNRv4PHM
-        if self.approximant in [52]:
-            parameters_lal_td_modes, iota = self._convert_parameters_to_lal_frame(
-                {**parameters, "f_ref": self.f_ref},
-                lal_target_function="SimInspiralChooseTDModes",
-            )
-            hlm_td = LS.SimInspiralChooseTDModes(*parameters_lal_td_modes)
-            return wfg_utils.linked_list_modes_to_dict_modes(hlm_td), iota
+        #   109: SEOBNRv4EHM_opt
+        if self.approximant in [52, 109]:
+            # Precessing Spins
+            if self.approximant in [52]:
+                parameters_lal_td_modes, iota = self._convert_parameters_to_lal_frame(
+                    {**parameters, "f_ref": self.f_ref},
+                    lal_target_function="SimInspiralChooseTDModes",
+                )
+                hlm_td = LS.SimInspiralChooseTDModes(*parameters_lal_td_modes)
+                return wfg_utils.linked_list_modes_to_dict_modes(hlm_td), iota
+            
+            # Aligned Spins
+            elif self.approximant in [109]:
+                parameters_lal_td_modes, iota = self._convert_parameters_to_lal_frame(
+                    {**parameters, "f_ref": self.f_ref},
+                    lal_target_function="SimIMRSpinAlignedEOBModesEcc_opt",
+                )
+                print(len(parameters_lal_td_modes))
+                print([(i, parameters_lal_td_modes[i]) for i in range(len(parameters_lal_td_modes))])
+                (
+                    hlm_td,
+                    low_samp_dynamics,
+                    high_samp_dynamics,
+                ) = LS.SimIMRSpinAlignedEOBModesEcc_opt(*parameters_lal_td_modes)
+                hlm_td = wfg_utils.linked_list_modes_to_dict_modes(hlm_td) # NOTE check if eccentricity wf model actually does this
+                # The output of SimIMRSpinAlignedEOBModes is in the EOB frame, but we need in the LAL frame so we do a coordinate rotation
+                # https://git.ligo.org/waveforms/reviews/SEOBNRv4HM/-/blob/master/tests/conventions/conventions.pdf
+                for (ell, m), hlm in hlm_td.items():
+                    h_plus, h_cross = wfg_utils.correct_for_eob_lal_frame_rotation(
+                        hlm.data.data.real, -hlm.data.data.imag
+                    )
+                    hlm_td[(ell, m)].data.data = h_plus - 1j * h_cross
+                # SimIMRSpinAlignedEOBModes gives only positive m modes, but we need positive and negative m modes
+                wfg_utils.get_aligned_spin_negative_modes_in_place(hlm_td)
+                return hlm_td, iota
         else:
             raise NotImplementedError(
                 f"Approximant {LS.GetApproximantFromString(self.approximant)} not "
