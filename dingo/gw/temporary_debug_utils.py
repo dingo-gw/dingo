@@ -27,7 +27,7 @@ def save_training_injection(outname, pm, data, idx=0):
     out_data = {"parameters": params, "asds": asds, "strains": strains}
     np.save(outname, out_data)
 
-    from dingo.gw.inference.injection import GWSignal
+    from dingo.gw.injection import GWSignal
 
     signal = GWSignal(
         pm.metadata["dataset_settings"]["waveform_generator"],

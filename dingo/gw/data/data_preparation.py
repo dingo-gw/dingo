@@ -3,7 +3,7 @@ from gwpy.timeseries import TimeSeries
 
 from dingo.core.dataset import DingoDataset
 from dingo.core.utils import load_data_from_file
-from dingo.gw.inference.data_download import download_raw_data
+from dingo.gw.data.data_download import download_raw_data
 from dingo.gw.gwutils import get_window
 from dingo.gw.domains import build_domain_from_model_metadata, FrequencyDomain
 
