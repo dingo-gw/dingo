@@ -35,7 +35,7 @@ Although the only current use case for Dingo is to analyze LVK data, we hope tha
 
 ### Data transforms
 
-We follow the [PyTorch guidelines](https://pytorch.org/tutorials/beginner/basics/transforms_tutorial.html) of pre-processing data using a sequence of transforms. Dingo includes [transforms](training_transforms.ipynb) for tasks such as sampling extrinsic parameters, projecting waveform polarizations to detectors, and adding noise. The same transforms are re-used at inference time, where a similar (but not always identical) sequence is required. Some transforms also behave differently at inference time, and thus have a flag to specify the mode.
+We follow the [PyTorch guidelines](https://pytorch.org/tutorials/beginner/basics/transforms_tutorial.html) of pre-processing data using a sequence of transforms. Dingo includes [transforms](training_transforms.ipynb) for tasks such as sampling extrinsic parameters, projecting waveform polarizations to detectors, and adding noise. The same transforms are re-used at inference time, where a similar (but always identical) sequence is required. Some transforms also behave differently at inference time, and thus have a flag to specify the mode.
 
 ### Data structures
 

@@ -12,9 +12,10 @@ Dingo
 
 **Dingo** is a Python program for analyzing gravitational wave data using neural posterior estimation. It contains code for
 
-* building training datasets,
-* training normalizing flows to estimate the posterior density, and
-* performing inference on real or simulated data.
+* building training datasets;
+* training normalizing flows to estimate the posterior density;
+* performing inference on real or simulated data; and
+* verifying and correcting model results using importance sampling (**Dingo-IS**).
 
 As training a network from scratch can be expensive, we intend to also distribute trained networks that can be used directly for inference.
 
@@ -48,7 +49,7 @@ As training a network from scratch can be expensive, we intend to also distribut
 References
 ----------
 
-Dingo is based on a series of papers developing NPE for GW parameter inference, starting from proof of concept :cite:p:`Green:2020hst`, to inclusion of all 15 parameters and analysis of real data :cite:p:`Green:2020dnx`, noise conditioning and full amortization :cite:p:`Dax:2021tsq`, and group-equivariant NPE :cite:p:`Dax:2021myb`.
+Dingo is based on a series of papers developing NPE for GW parameter inference, starting from proof of concept :cite:p:`Green:2020hst`, to inclusion of all 15 parameters and analysis of real data :cite:p:`Green:2020dnx`, noise conditioning and full amortization :cite:p:`Dax:2021tsq`, and group-equivariant NPE :cite:p:`Dax:2021myb`. Dingo results are augmented with importance sampling in :cite:p:`Dax:2022pxd`.
 
 .. bibliography::
 
