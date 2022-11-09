@@ -315,7 +315,7 @@ class WaveformGenerator:
         masses = (p["mass_1"], p["mass_2"])
         r = p["luminosity_distance"]
         phase = p["phase"]
-        ecc_params = (0.0, parameter_dict.get("eccentricity", 0), 0.0)  # longAscNodes, eccentricity, meanPerAno (also called eccentric_anomaly)
+        ecc_params = (0.0, parameter_dict.get("eccentricity", 0.0), parameter_dict.get("mean_anomaly", 0.0))  # longAscNodes, eccentricity, meanPerAno (also called eccentric_anomaly)
 
         # Get domain parameters
         f_ref = p["f_ref"]
