@@ -21,6 +21,7 @@ class GNPEBase(ABC):
         self.kernel = PriorDict(kernel_dict)
         self.operators = operators
         self.proxy_list = [k + "_proxy" for k in kernel_dict.keys()]
+        self.context_parameters = self.proxy_list.copy()
         self.input_parameter_names = list(self.kernel.keys())
 
     @abstractmethod
@@ -159,18 +160,32 @@ class GNPECoalescenceTimes(GNPEBase):
         self.inference = inference
         self.exact_global_equivariance = exact_global_equivariance
         if self.exact_global_equivariance:
-            del self.proxy_list[0]
+            # GNPE networks are conditioned on proxy variables relative to the
+            # "preferred" proxy (typically H1). We give these a different name so that we
+            # can keep track separately of the un-shifted proxies.
+            del self.context_parameters[0]
+            self.context_parameters = [p + "_relative" for p in self.context_parameters]
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
         extrinsic_parameters = sample["extrinsic_parameters"].copy()
-        new_parameters = self.sample_proxies(extrinsic_parameters)
+
+        # If proxies already exist, use them. Otherwise, sample them. Proxies may
+        # already exist if provided by an unconditional initialization network when
+        # attempting to recover the density from GNPE samples.
+
+        # TODO: Reimplement in GNPEBase.sample_proxies().
+        if set(self.proxy_list).issubset(extrinsic_parameters.keys()):
+            new_parameters = {p: extrinsic_parameters[p] for p in self.proxy_list}
+        else:
+            new_parameters = self.sample_proxies(extrinsic_parameters)
 
         # If we are in training mode, we assume that the time shifting due to different
         # arrival times of the signal in individual detectors has not yet been applied
         # to the data; instead the arrival times are stored in extrinsic_parameters.
         # Hence we subtract off the proxy times from these arrival times, so that time
         # shifting of the data only has to be done once.
+
         if not self.inference:
             for k in self.ifo_time_labels:
                 new_parameters[k] = (
@@ -194,8 +209,9 @@ class GNPECoalescenceTimes(GNPEBase):
         # Imposing the global time shift does not impact the transformation of the
         # data: we do not change the values of the true detector coalescence times
         # stored in extrinsic_parameters, only the proxies.
+
         if self.exact_global_equivariance:
-            dt = new_parameters.pop(self.ifo_time_labels[0] + "_proxy")
+            dt = new_parameters[self.ifo_time_labels[0] + "_proxy"]
             if not self.inference:
                 if "geocent_time" not in extrinsic_parameters:
                     raise KeyError(
@@ -208,7 +224,9 @@ class GNPECoalescenceTimes(GNPEBase):
             else:
                 new_parameters["geocent_time"] = -dt
             for k in self.ifo_time_labels[1:]:
-                new_parameters[k + "_proxy"] -= dt
+                new_parameters[k + "_proxy_relative"] = (
+                    new_parameters[k + "_proxy"] - dt
+                )
 
         extrinsic_parameters.update(new_parameters)
         sample["extrinsic_parameters"] = extrinsic_parameters

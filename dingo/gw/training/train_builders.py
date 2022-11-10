@@ -122,17 +122,17 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
                 inference=False,
             )
         )
-        extra_context_parameters += transforms[-1].proxy_list
+        extra_context_parameters += transforms[-1].context_parameters
     if "gnpe_chirp" in data_settings:
         d = data_settings["gnpe_chirp"]
         transforms.append(GNPEChirp(d["kernel"], domain, d.get("order", 0)))
-        extra_context_parameters += transforms[-1].proxy_list
+        extra_context_parameters += transforms[-1].context_parameters
     if "gnpe_phase" in data_settings:
         d = data_settings["gnpe_phase"]
         transforms.append(GNPEPhase(d["kernel"], d.get("random_pi_jump", False)))
-        extra_context_parameters += transforms[-1].proxy_list
+        extra_context_parameters += transforms[-1].context_parameters
 
-    # Add the GNPE proxies to context_parameters the first time the transforms are
+    # Add the GNPE context to context_parameters the first time the transforms are
     # constructed. We do not want to overwrite the ordering of the parameters in
     # subsequent runs.
     if "context_parameters" not in data_settings:

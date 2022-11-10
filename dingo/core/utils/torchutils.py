@@ -263,3 +263,9 @@ def set_requires_grad_flag(
             and name_contains in name
         ):
             param.requires_grad = requires_grad
+
+
+def torch_detach_to_cpu(x):
+    if isinstance(x, torch.Tensor):
+        return x.detach().cpu()
+    return x

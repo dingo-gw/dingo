@@ -1,0 +1,35 @@
+# Data
+event_label: GW150914
+trigger_time: 1126259462.4
+detectors: ["H1", "L1"]
+maximum_frequency: 1024
+minimum_frequency: 20
+reference_frequency: 20
+roll_off: 0.4  # Roll off duration of tukey window in seconds, default is 0.4s
+duration: 8  # Analysis segment duration
+post_trigger_duration: 2  # Time between trigger time and end of segment
+psd_duration: 1024
+waveform_model: IMRPhenomPv2
+prior:
+  mass_1: bilby.core.prior.Constraint(minimum=10.0, maximum=120.0)
+  mass_2: bilby.core.prior.Constraint(minimum=10.0, maximum=120.0)
+  mass_ratio: bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.125, maximum=1.0)
+  chirp_mass: bilby.gw.prior.UniformInComponentsChirpMass(minimum=15.0, maximum=100.0)
+  phase: default
+  a_1: bilby.core.prior.Uniform(minimum=0.0, maximum=0.99)
+  a_2: bilby.core.prior.Uniform(minimum=0.0, maximum=0.99)
+  tilt_1: default
+  tilt_2: default
+  phi_12: default
+  phi_jl: default
+  theta_jn: default
+  dec: default
+  ra: default
+  geocent_time: bilby.core.prior.Uniform(minimum=-0.10, maximum=0.10)
+  psi: default
+  luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=2000.0)
+
+
+# Sampler settings
+nlive: 2_000
+nact: 20

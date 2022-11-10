@@ -8,14 +8,15 @@ class PostCorrectGeocentTime(object):
     equivariance is enforced)
     """
 
-    def __init__(self):
-        pass
+    def __init__(self, inverse=False):
+        self.inverse = inverse
 
     def __call__(self, input_sample):
+        sign = (1, -1)[self.inverse]
         sample = input_sample.copy()
         parameters = sample["parameters"].copy()
         extrinsic_parameters = sample["extrinsic_parameters"].copy()
-        parameters["geocent_time"] -= extrinsic_parameters.pop("geocent_time")
+        parameters["geocent_time"] -= extrinsic_parameters.pop("geocent_time") * sign
         sample["parameters"] = parameters
         sample["extrinsic_parameters"] = extrinsic_parameters
         return sample

@@ -138,7 +138,11 @@ class LinearProjectionRB(nn.Module):
 
     def forward(self, x):
         if x.shape[1:] != (self.num_blocks, self.num_channels, self.num_bins):
-            raise ValueError('Invalid shape for projection layer.')
+            raise ValueError(
+                f"Invalid shape for projection layer. "
+                f"Expected {(self.num_blocks, self.num_channels, self.num_bins)}, "
+                f"got {tuple(x.shape[1:])}."
+            )
         out = []
         for ind in range(self.num_blocks):
             out.append(self.layers_rb[ind](x[:, ind, ...].flatten(start_dim=1)))
