@@ -2,7 +2,7 @@ from setuptools import setup
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
-VERSION = "0.0.1"
+VERSION = "0.3.0"
 
 setup(
     name="dingo",
@@ -30,8 +30,10 @@ setup(
         "pyyaml",
         "h5py",
         "bilby",
+        "bilby_pipe",
+        "configargparse",
         "astropy",
-        "lalsuite", # use >=7.3 if you run into errors with IMRPhenomXPHM generation
+        "lalsuite",  # use >=7.3 if you run into errors with IMRPhenomXPHM generation
         "sklearn",
         "pesummary",
         "tensorboard==2.10.1",
@@ -44,6 +46,7 @@ setup(
         "threadpoolctl",
         "chainconsumer",
         "wandb",
+        "scikit-learn",
     ],
     extras_require={
         "dev": [
@@ -64,6 +67,7 @@ setup(
             "dingo_append_training_stage=dingo.gw.training:append_stage",
             "dingo_analyze_event=dingo.gw.inference:analyze_event",
             "dingo_ls=dingo.gw.ls_cli:ls",
+            "dingo_pipe=dingo.gw.pipe.main:main",
         ]
     },
     classifiers=[
