@@ -1,8 +1,11 @@
+from sre_constants import INFO
 import numpy as np
 import os
 import torch
+import pandas as pd
 
 from bilby.gw.detector import calibration
+from bilby.gw.prior import CalibrationPriorDict
 
 
 class GetDetectorTimes(object):
@@ -163,42 +166,43 @@ class MultiplyCalibrationUncertainty(object):
         Optionally, you can also set "calibration_lookup_table" to None
     """
 
-    def __init__(self, ifo_list, data_domain, calibration_lookup_table):
+    def __init__(self, ifo_list, data_domain, calibration_envelope):
         """
         Initialize calibration marginalization. This store the calibration curve prior will later be applied to
         the waveform. We can either specify what the calibration values are via a lookup table or randomly generate
         the fake curves based on a prior. The former is useful for when you have an event you are interested in.
         """
-
         self.ifo_list = ifo_list
-        self.calibration_lookup_table = calibration_lookup_table
+        
         self.data_domain = data_domain
-        if self.calibration_lookup_table == "generate":
-            raise NotImplementedError(
-                "Random Generation of calibration curves not implemented yet"
-            )
+        if False not in [s.endswith(".txt") for s in  calibration_envelope.values()]:
+            # Generating .h5 lookup table from priors in .txt file
+            self.calibration_envelope = calibration_envelope
+            for i, ifo in enumerate(self.ifo_list):                       
+                # Setting calibration model to cubic spline
+                ifo.calibration_model = calibration.CubicSpline(f"recalib_{ifo.name}_", minimum_frequency=data_domain.f_min, maximum_frequency=data_domain.f_max, n_points=10)
         else:
-            self.calibration_lookup_table = calibration_lookup_table
+            raise Exception("Calibration envelope must be specified in a .txt file!")
 
     def __call__(self, input_sample):
+
         sample = input_sample.copy()
         sample["calibration_draw"] = {ifo.name:None for ifo in self.ifo_list}
         for ifo in self.ifo_list:
+            calibration_parameter_draws, calibration_draws = {}, {}
+            # Sampling from prior
+            calibration_priors = CalibrationPriorDict.from_envelope_file(
+                    self.calibration_envelope[ifo.name], self.data_domain.f_min, self.data_domain.f_max, 10, ifo.name)
 
-            # If given 
-            if os.path.exists(self.calibration_lookup_table[ifo.name]):
-                calibration_draw = calibration.read_calibration_file(
-                    self.calibration_lookup_table[ifo.name],
-                    self.data_domain.sample_frequencies,
-                    number_of_response_curves=1,  # NOTE for now we are just pulling 1 calibration curve per posterior point
-                    # In the future it may be beneficial to marginalize over this in a different way
-                    starting_index=0,
-                ).flatten() # Since we only have 1 response curve
-            else:
-                raise Exception(
-                    f"Could not find calibration file '{self.calibration_lookup_table[ifo.name]}'"
-                )
+            # Sample only 1 set of parameters
+            calibration_parameter_draws[ifo.name] = pd.DataFrame(calibration_priors.sample(1))
+            calibration_draws[ifo.name] = np.zeros((1, len(self.data_domain.sample_frequencies[self.data_domain.frequency_mask])), dtype=complex)
 
+            # 0 since we are only looking at 1 calibration curve, otherwise we'd iterate over this
+            calibration_draws[ifo.name][0, :] = ifo.calibration_model.get_calibration_factor(
+                        self.data_domain.sample_frequencies[self.data_domain.frequency_mask],
+                        prefix='recalib_{}_'.format(ifo.name),
+                        **calibration_parameter_draws[ifo.name].iloc[0])
 
             # Multiplying the sample waveform in the interferometer according to the calibration curve
             # This is done by following the perscription here:
@@ -209,7 +213,7 @@ class MultiplyCalibrationUncertainty(object):
             # i.e. h_obs(f) = C * h(f)
             # Here C is "calibration_draws"
 
-            sample["waveform"][ifo.name] *= calibration_draw
-            sample["calibration_draw"][ifo.name] = calibration_draw
+            # Padding 0's to everything outside the calibration array
+            sample["waveform"][ifo.name][self.data_domain.frequency_mask] *= calibration_draws[ifo.name][0, :]
 
         return sample

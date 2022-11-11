@@ -1,42 +1,54 @@
-num_samples: 1000
-event_dataset: <path/to/event_dataset>
-
-# to turn off time marginalization, simply
-time_marginalization: 
-  n_fft: 5
-
-slice_plots:
-  num_slice_plots: 10
-  params_slice2d: [[phase, geocent_time], [phase, tilt_1]]
-
-# settings for unconditional neural density estimator (nde)
 nde:
-  # training data: output dingo samples for nde
   data:
-    parameter_samples: <path/to/dingo-samples>
-    parameters: null # need all parameters for likelihood
-  # nde architecture
+    parameters:
+    - chirp_mass
+    - mass_ratio
+    - phase
+    - chi_1
+    - chi_2
+    - theta_jn
+    - dec
+    - ra
+    - geocent_time
+    - luminosity_distance
+    - psi
+    - domega220
+    - dtau220
+    parameter_samples: /data/nihargupte/projects/hotfixes/dingo-devel/devel_testing/is/dingo_samples_training_samples.hdf5
+    path: /data/nihargupte/projects/hotfixes/dingo-devel/devel_testing/is/nde-1126259462.4.pt
   model:
-    type: nsf
-    num_flow_steps: 10
     base_transform_kwargs:
-      hidden_dim: 128
-      num_transform_blocks: 2
       activation: elu
-      dropout_probability: 0.1
-      batch_norm: true
-      num_bins: 8
       base_transform_type: rq-coupling
-  # nde training
+      batch_norm: true
+      dropout_probability: 0.1
+      hidden_dim: 128
+      num_bins: 8
+      num_transform_blocks: 10
+    num_flow_steps: 8
+    type: nsf
   training:
-    device: cpu
-    num_workers: 0
-    train_fraction: 0.9
-    batch_size: 512
+    batch_size: 4096
+    device: cuda
     epochs: 20
+    num_workers: 0
     optimizer:
+      lr: 0.000835
       type: adam
-      lr: 0.003
     scheduler:
-      type: cosine
       T_max: 20
+      type: cosine
+    train_fraction: 0.9
+num_processes: 8
+num_samples: 1000
+synthetic_phase:
+  approximation_22_mode: false
+  n_grid: 501
+  num_processes: 8
+  uniform_weight: 0.01
+calibration_marginalization:
+  calibration_lookup_table:
+    H1: "/data/nihargupte/projects/hotfixes/generic-calibration-reweighting-master/examples/GW150914/GWTC1_GW150914_H_CalEnv.txt"
+    L1: "/data/nihargupte/projects/hotfixes/generic-calibration-reweighting-master/examples/GW150914/GWTC1_GW150914_L_CalEnv.txt"
+    # H1: "/data/nihargupte/projects/hotfixes/generic-calibration-reweighting-master/examples/GW150914/backup/H1_calibration_file.h5"
+    # L1: "/data/nihargupte/projects/hotfixes/generic-calibration-reweighting-master/examples/GW150914/backup/L1_calibration_file.h5"
