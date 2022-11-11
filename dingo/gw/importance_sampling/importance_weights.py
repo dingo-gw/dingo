@@ -41,6 +41,7 @@ def parse_args():
 
 def main():
     import torch
+
     torch.cuda.set_device(0)
     # parse args, load settings, load dingo parameter samples
     args = parse_args()
@@ -61,7 +62,9 @@ def main():
     time_marginalization = time_marginalization_kwargs is not None
     phase_marginalization_kwargs = settings.get("phase_marginalization", None)
     phase_marginalization = phase_marginalization_kwargs is not None
-    calibration_marginalization_kwargs = settings.get("calibration_marginalization", None)
+    calibration_marginalization_kwargs = settings.get(
+        "calibration_marginalization", None
+    )
     synthetic_phase_kwargs = settings.get("synthetic_phase", None)
     synthetic_phase = synthetic_phase_kwargs is not None
     # if sum([time_marginalization, phase_marginalization, synthetic_phase]) > 1:

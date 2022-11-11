@@ -123,20 +123,22 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         self.calibration_marginalization = False
         if calibration_marginalization_kwargs is not None:
             self.calibration_marginalization = True
-            self.initialize_calibration_marginalization(**calibration_marginalization_kwargs)
+            self.initialize_calibration_marginalization(
+                **calibration_marginalization_kwargs
+            )
 
-    def initialize_calibration_marginalization(self, calibration_lookup_table):
-        """ 
-        Initialize calibration marginalization table which will use the files provided to 
-        multiply the signal by a calibration envelope. 
+    def initialize_calibration_marginalization(self, calibration_envelope):
+        """
+        Initialize calibration marginalization table which will use the files provided to
+        multiply the signal by a calibration envelope.
 
         Parameters
         ----------
         calibration_lookup_table : dict
             Dict with locations of .h5 files of calibration envelopes {"H1":, filepath,...}
-            optionally can be set to 'generate' 
+            optionally can be set to 'generate'
         """
-        self.calibration_lookup_table = calibration_lookup_table
+        self.calibration_envelope = calibration_envelope
 
     def initialize_time_marginalization(self, t_lower, t_upper, n_fft=1):
         """

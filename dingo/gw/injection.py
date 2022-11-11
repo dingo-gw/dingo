@@ -14,7 +14,7 @@ from dingo.gw.transforms import (
     GetDetectorTimes,
     ProjectOntoDetectors,
     WhitenAndScaleStrain,
-    MultiplyCalibrationUncertainty
+    MultiplyCalibrationUncertainty,
 )
 from dingo.gw.waveform_generator.waveform_generator import WaveformGenerator
 
@@ -64,7 +64,7 @@ class GWSignal(object):
         self.ifo_list = InterferometerList(ifo_list)
 
         # When we set self.whiten, the projection transforms are automatically prepared.
-        self._calibration_lookup_table = None
+        self._calibration_envelope = None
         self.whiten = False
 
         self.asd = None
@@ -91,17 +91,17 @@ class GWSignal(object):
         self._initialize_transform()
 
     @property
-    def calibration_lookup_table(self):
-        """ 
-        Either None, str 'generate' or a dict with 
-        {"H1": filepath, "L1":filepath, ...} with locations of 
+    def calibration_envelope(self):
+        """
+        Either None, str 'generate' or a dict with
+        {"H1": filepath, "L1":filepath, ...} with locations of
         lookup tables for the calibration uncertainty curves
         """
-        return self._calibration_lookup_table
+        return self._calibration_envelope
 
-    @calibration_lookup_table.setter
-    def calibration_lookup_table(self, value):
-        self._calibration_lookup_table = value
+    @calibration_envelope.setter
+    def calibration_envelope(self, value):
+        self._calibration_envelope = value
         self._initialize_transform()
 
     def _initialize_transform(self):
@@ -109,8 +109,12 @@ class GWSignal(object):
             GetDetectorTimes(self.ifo_list, self.t_ref),
             ProjectOntoDetectors(self.ifo_list, self.data_domain, self.t_ref),
         ]
-        if self.calibration_lookup_table is not None:
-            transforms.append(MultiplyCalibrationUncertainty(self.ifo_list, self.data_domain, self.calibration_lookup_table))
+        if self.calibration_envelope is not None:
+            transforms.append(
+                MultiplyCalibrationUncertainty(
+                    self.ifo_list, self.data_domain, self.calibration_envelope
+                )
+            )
         if self.whiten:
             transforms.append(WhitenAndScaleStrain(self.data_domain.noise_std))
         self.projection_transforms = Compose(transforms)
@@ -157,7 +161,7 @@ class GWSignal(object):
         asd = self.asd
         if asd is not None:
             sample["asds"] = asd
-        
+
         return self.projection_transforms(sample)
 
     # It would be good to have an ASD class to handle all of this functionality,
@@ -331,10 +335,10 @@ class Injection(GWSignal):
         try:
             # Be careful to use the ASD included with the signal, since each time
             # self.asd is accessed it gives a different ASD (if using an ASD dataset).
-            asd = signal['asds']
+            asd = signal["asds"]
         except KeyError:
             raise ValueError("self.asd must be set in order to produce injections.")
-        
+
         if self.whiten:
             print("self.whiten was set to True. Resetting to False.")
             self.whiten = False
