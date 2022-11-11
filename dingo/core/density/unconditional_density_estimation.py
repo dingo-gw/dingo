@@ -1,10 +1,10 @@
+import copy
 from typing import Optional
 
 import torch
 import yaml
 from os.path import dirname, join
 
-from dingo.core.samples_dataset import SamplesDataset
 from dingo.core.utils import build_train_and_test_loaders
 from dingo.core.utils.trainutils import RuntimeLimits
 import numpy as np
@@ -36,7 +36,7 @@ class SampleDataset(torch.utils.data.Dataset):
 
 
 def train_unconditional_density_estimator(
-    samples_dataset: SamplesDataset,
+    result,
     settings: dict,
     train_dir: str,
 ):
@@ -57,13 +57,12 @@ def train_unconditional_density_estimator(
     model: PosteriorModel
         trained density estimator
     """
-    samples = samples_dataset.samples
+    samples = result.samples
     # Process samples: select parameters, normalize, and convert to torch tensor
     if "parameters" in settings["data"] and settings["data"]["parameters"]:
         parameters = settings["data"]["parameters"]
     else:
         parameters = list(samples.keys())
-    base_metadata = samples_dataset.settings
     samples = np.array(samples[parameters])
     num_samples, num_params = samples.shape
     mean, std = np.mean(samples, axis=0), np.std(samples, axis=0)
@@ -71,6 +70,7 @@ def train_unconditional_density_estimator(
         "mean": {param: mean[i].item() for i, param in enumerate(parameters)},
         "std": {param: std[i].item() for i, param in enumerate(parameters)},
     }
+    settings["data"]["unconditional"] = True
     # normalized torch samples
     samples_torch = torch.from_numpy((samples - mean) / std).float()
 
@@ -78,15 +78,17 @@ def train_unconditional_density_estimator(
     settings["model"]["input_dim"] = num_params
     settings["model"]["context_dim"] = None
     model = PosteriorModel(
-        metadata={"train_settings": settings, "base": base_metadata},
-        device=settings["training"]["device"]
+        metadata={"train_settings": settings, "base": copy.deepcopy(result.metadata)},
+        device=settings["training"]["device"],
     )
     model.optimizer_kwargs = settings["training"]["optimizer"]
     model.scheduler_kwargs = settings["training"]["scheduler"]
     model.initialize_optimizer_and_scheduler()
 
-    # Store context to keep a record, even though it will not be used in training.
-    model.context = samples_dataset.context
+    # Store context and event metadata to keep a record, even though it will not be used
+    # in training.
+    model.context = result.context
+    model.event_metadata = result.event_metadata
 
     # set up dataloaders
     train_loader, test_loader = build_train_and_test_loaders(

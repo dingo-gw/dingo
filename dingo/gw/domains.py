@@ -164,9 +164,9 @@ class FrequencyDomain(Domain):
         """
         Adjusts data to be compatible with the domain:
 
-            * Below f_min, it sets the data to low_value (typically 0.0 for a waveform,
-            but for a PSD this might be a large value).
-            * Above f_max, it truncates the data array.
+        * Below f_min, it sets the data to low_value (typically 0.0 for a waveform,
+          but for a PSD this might be a large value).
+        * Above f_max, it truncates the data array.
 
         Parameters
         ----------
@@ -199,7 +199,8 @@ class FrequencyDomain(Domain):
         Time translate frequency-domain data by dt. Time translation corresponds (in
         frequency domain) to multiplication by
 
-        exp(-2j * pi * dt * f).
+        .. math::
+            \exp(-2 \pi i \, f \, dt).
 
         This method allows for multiple batch dimensions. For torch.Tensor data,
         allow for either a complex or a (real, imag) representation.
@@ -208,10 +209,12 @@ class FrequencyDomain(Domain):
         ----------
         data : array-like (numpy, torch)
             Shape (B, C, N), where
-                B corresponds to any dimension >= 0,
-                C is either absent (for complex data) or has dimension >= 2 (for data
-                represented as real and imaginary parts), and
-                N is either len(self) or len(self)-self.min_idx (for truncated data),
+
+                - B corresponds to any dimension >= 0,
+                - C is either absent (for complex data) or has dimension >= 2 (for data
+                  represented as real and imaginary parts), and
+                - N is either len(self) or len(self)-self.min_idx (for truncated data).
+
         dt : torch tensor, or scalar (if data is numpy)
             Shape (B)
 

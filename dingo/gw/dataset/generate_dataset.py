@@ -144,8 +144,7 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
 
     Returns
     -------
-    A dictionary consisting of a parameters DataFrame and a polarizations dictionary of
-    numpy arrays.
+    A WaveformDataset based on the settings.
     """
 
     prior = build_prior_with_defaults(settings["intrinsic_prior"])

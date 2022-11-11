@@ -8,10 +8,10 @@ from bilby.gw.utils import ln_i0
 from threadpoolctl import threadpool_limits
 
 from dingo.core.likelihood import Likelihood
-from dingo.gw.inference.injection import GWSignal
-from dingo.gw.waveform_generator import WaveformGenerator, sum_contributions_m
+from dingo.gw.injection import GWSignal
+from dingo.gw.waveform_generator import WaveformGenerator
 from dingo.gw.domains import build_domain
-from dingo.gw.inference.data_preparation import get_event_data_and_domain
+from dingo.gw.data.data_preparation import get_event_data_and_domain
 
 
 class StationaryGaussianGWLikelihood(GWSignal, Likelihood):

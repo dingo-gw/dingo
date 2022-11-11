@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 from chainconsumer import ChainConsumer
 import scipy
 from dingo.core.samplers import Sampler
+from dingo.gw.result import Result
+
 
 def plot_posterior_slice2d(
     sampler, theta, theta_range, n_grid=100, num_processes=1, outname=None
@@ -70,7 +72,9 @@ def plot_posterior_slice(
     # rows, columns = 3, 5
     columns = math.ceil(np.sqrt(len(parameters)))
     rows = math.ceil(len(parameters) / columns)
-    fig, ax = plt.subplots(rows, columns, figsize=(columns*6, rows*4), squeeze=False)
+    fig, ax = plt.subplots(
+        rows, columns, figsize=(columns * 6, rows * 4), squeeze=False
+    )
     for idx, param in enumerate(parameters):
         # axis with scan for param
         param_axis = np.linspace(theta_range[param][0], theta_range[param][1], n_grid)
@@ -107,7 +111,7 @@ def plot_posterior_slice(
 
 
 def plot_diagnostics(
-    sampler: Sampler,
+    result: Result,
     outdir,
     num_processes=1,
     num_slice_plots=0,
@@ -115,7 +119,8 @@ def plot_diagnostics(
     n_grid_slice2d=100,
     params_slice2d=None,
 ):
-    theta = sampler.samples
+    theta = result.samples
+    theta = theta.drop(columns="delta_log_prob_target", errors="ignore")
     weights = theta["weights"].to_numpy()
     log_probs_proposal = theta["log_prob"].to_numpy()
 
@@ -123,10 +128,10 @@ def plot_diagnostics(
     log_likelihood = theta["log_likelihood"].to_numpy()
     log_probs_target = log_prior + log_likelihood
 
-    n_eff = sampler.n_eff
-    ESS = sampler.effective_sample_size
-    log_evidence = sampler.log_evidence
-    log_evidence_std = sampler.log_evidence_std
+    n_eff = result.n_eff
+    sample_efficiency = result.sample_efficiency
+    log_evidence = result.log_evidence
+    log_evidence_std = result.log_evidence_std
 
     # Plot weights
     plt.clf()
@@ -143,7 +148,7 @@ def plot_diagnostics(
     plt.yscale("log")
     plt.title(
         f"IS Weights. {n_below} below {y_lower}. "
-        f"Effective samples: {n_eff:.0f} (ESS = {100 * ESS:.2f}%)."
+        f"Effective samples: {n_eff:.0f} (Efficiency = {100 * sample_efficiency:.2f}%)."
     )
     plt.scatter(x, y, s=0.5)
     plt.savefig(join(outdir, "weights.png"))
@@ -165,50 +170,50 @@ def plot_diagnostics(
     plt.plot([y_upper - 20, y_upper], [y_upper - 20, y_upper], color="black")
     plt.savefig(join(outdir, "log_probs.png"))
 
-    # plot slice plots
-    if num_slice_plots > 0:
-        theta_slice_plots = theta.sample(num_slice_plots).drop(
-            columns=["weights", "log_prob", "log_prior", "log_likelihood"]
-        )
-        # global range for 1D parameter scan
-        theta_range_1d = {
-            k: (np.min(theta[k]), np.max(theta[k])) for k in theta_slice_plots.columns
-        }
-        # generate slice plots for each theta sample
-        for idx, (_, theta_idx) in enumerate(theta_slice_plots.iterrows()):
-            # 1d slice plots
-            plot_posterior_slice(
-                sampler,
-                theta_idx,
-                theta_range_1d,
-                num_processes=num_processes,
-                n_grid=n_grid_slice1d,
-                outname=join(outdir, f"theta_{idx}_posterior_slice1d.pdf"),
-            )
-            # optionally, plot 2d slice plots
-            if params_slice2d is not None:
-                # Get parameter ranges for 2d scan.
-                # We set this as a 1 std area around the respective parameter values,
-                # except for the phase which we scan in [0, 2pi].
-                stds = {k: np.std(theta[k]) for k in theta.keys()}
-                theta_range_2d = {
-                    k: (theta_idx[k] - stds[k], theta_idx[k] + stds[k])
-                    for k in theta_idx.keys()
-                }
-                theta_range_2d["phase"] = (0, 2 * np.pi)
-                for param_pair in params_slice2d:
-                    plot_posterior_slice2d(
-                        sampler,
-                        theta_idx,
-                        {k: theta_range_2d[k] for k in param_pair},
-                        num_processes=num_processes,
-                        n_grid=n_grid_slice2d,
-                        outname=join(
-                            outdir,
-                            f"theta_{idx}_posterior_slice2d_"
-                            f"{param_pair[0]}-{param_pair[1]}.pdf",
-                        ),
-                    )
+    # # plot slice plots
+    # if num_slice_plots > 0:
+    #     theta_slice_plots = theta.sample(num_slice_plots).drop(
+    #         columns=["weights", "log_prob", "log_prior", "log_likelihood"]
+    #     )
+    #     # global range for 1D parameter scan
+    #     theta_range_1d = {
+    #         k: (np.min(theta[k]), np.max(theta[k])) for k in theta_slice_plots.columns
+    #     }
+    #     # generate slice plots for each theta sample
+    #     for idx, (_, theta_idx) in enumerate(theta_slice_plots.iterrows()):
+    #         # 1d slice plots
+    #         plot_posterior_slice(
+    #             sampler,
+    #             theta_idx,
+    #             theta_range_1d,
+    #             num_processes=num_processes,
+    #             n_grid=n_grid_slice1d,
+    #             outname=join(outdir, f"theta_{idx}_posterior_slice1d.pdf"),
+    #         )
+    #         # optionally, plot 2d slice plots
+    #         if params_slice2d is not None:
+    #             # Get parameter ranges for 2d scan.
+    #             # We set this as a 1 std area around the respective parameter values,
+    #             # except for the phase which we scan in [0, 2pi].
+    #             stds = {k: np.std(theta[k]) for k in theta.keys()}
+    #             theta_range_2d = {
+    #                 k: (theta_idx[k] - stds[k], theta_idx[k] + stds[k])
+    #                 for k in theta_idx.keys()
+    #             }
+    #             theta_range_2d["phase"] = (0, 2 * np.pi)
+    #             for param_pair in params_slice2d:
+    #                 plot_posterior_slice2d(
+    #                     sampler,
+    #                     theta_idx,
+    #                     {k: theta_range_2d[k] for k in param_pair},
+    #                     num_processes=num_processes,
+    #                     n_grid=n_grid_slice2d,
+    #                     outname=join(
+    #                         outdir,
+    #                         f"theta_{idx}_posterior_slice2d_"
+    #                         f"{param_pair[0]}-{param_pair[1]}.pdf",
+    #                     ),
+    #                 )
 
     # cornerplot with unweighted vs. weighted samples
     weights = weights / np.mean(weights)
