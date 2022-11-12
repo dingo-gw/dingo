@@ -7,8 +7,12 @@ import numpy as np
 import pandas as pd
 from bilby_pipe.input import Input
 from bilby_pipe.main import MainInput as BilbyMainInput
-from bilby_pipe.utils import parse_args, get_command_line_arguments, BilbyPipeError, \
-    logger
+from bilby_pipe.utils import (
+    parse_args,
+    get_command_line_arguments,
+    BilbyPipeError,
+    logger,
+)
 
 from .dag_creator import generate_dag
 from .parser import create_parser
@@ -17,8 +21,65 @@ from ..domains import build_domain_from_model_metadata
 from ...core.models import PosteriorModel
 
 
+def fill_in_arguments_from_model(args):
+    # FIXME: It would be better if we did not have to load an entire model just to
+    #  gain access to the metadata. Store a copy of metadata separately?
+    logger.info(f"Loading dingo model from {args.model} in order to access settings.")
+    model = PosteriorModel(args.model, device="cpu", load_training_info=False)
+    model_metadata = model.metadata
+
+    domain = build_domain_from_model_metadata(model_metadata)
+
+    data_settings = model_metadata["train_settings"]["data"]
+
+    model_args = {
+        "duration": domain.duration,
+        "minimum_frequency": domain.f_min,
+        "maximum_frequency": domain.f_max,
+        "detectors": data_settings["detectors"],
+        "sampling_frequency": data_settings["window"]["f_s"],
+        "tukey_roll_off": data_settings["window"]["roll_off"],
+    }
+
+    changed_args = {}
+    for k, v in model_args.items():
+        if vars(args)[k] is not None:
+
+            # Convert type from str to enable comparison.
+            args_v = vars(args)[k]
+            try:
+                if isinstance(v, float):
+                    args_v = float(args_v)
+                elif isinstance(v, int):
+                    args_v = int(args_v)
+            except ValueError:
+                pass
+
+            if args_v != v:
+                logger.warning(
+                    f"Argument {k} provided to dingo_pipe as {vars(args)[k]} "
+                    f"does not match value {v} in model file. Using {k} = "
+                    f"{v} for inference, and will attempt to change this "
+                    f"during importance sampling."
+                )
+                changed_args[k] = vars(args)[k]
+
+        vars(args)[k] = v
+
+    # TODO: Also check consistency between model and init_model settings.
+
+    return changed_args
+
+
 class MainInput(BilbyMainInput):
     def __init__(self, args, unknown_args):
+
+        # Settings added for dingo.
+
+        self.model = args.model
+        self.init_model = args.init_model
+        self.num_gnpe_iterations = args.num_gnpe_iterations
+
         Input.__init__(self, args, unknown_args, print_msg=False)
 
         self.known_args = args
@@ -82,14 +143,14 @@ class MainInput(BilbyMainInput):
         # self.deltaT = args.deltaT
         # self.gps_tuple = args.gps_tuple
         # self.gps_file = args.gps_file
-        # self.timeslide_file = args.timeslide_file
+        self.timeslide_file = args.timeslide_file
         # self.gaussian_noise = args.gaussian_noise
         # self.zero_noise = args.zero_noise
         # self.n_simulation = args.n_simulation
         #
         # self.injection = args.injection
         # self.injection_numbers = args.injection_numbers
-        # self.injection_file = args.injection_file
+        self.injection_file = args.injection_file
         # self.injection_dict = args.injection_dict
         # self.injection_waveform_arguments = args.injection_waveform_arguments
         # self.injection_waveform_approximant = args.injection_waveform_approximant
@@ -144,47 +205,6 @@ class MainInput(BilbyMainInput):
         self.extra_lines = []
         self.requirements = []
 
-        # Settings added for dingo.
-
-        self.model = args.model
-        self.init_model = args.init_model
-        self.num_gnpe_iterations = args.num_gnpe_iterations
-
-        self.maximum_frequency = None
-        self.sampling_frequency = None
-        self.tukey_roll_off = None
-
-        self.fill_in_arguments_from_model()
-
-    def fill_in_arguments_from_model(self):
-        # FIXME: It would be better if we did not have to load an entire model just to
-        #  gain access to the metadata. Store a copy of metadata separately?
-        model = PosteriorModel(self.model, device="cpu", load_training_info=False)
-        model_metadata = model.metadata
-
-        domain = build_domain_from_model_metadata(model_metadata)
-
-        data_settings = model_metadata["train_settings"]["data"]
-
-        model_args = {
-            'duration': domain.duration,
-            'minimum_frequency': domain.f_min,
-            'maximum_frequency': domain.f_max,
-            'detectors': data_settings["detectors"],
-            'sampling_frequency': data_settings['window']['f_s'],
-            'tukey_roll_off': data_settings["window"]["roll_off"],
-        }
-
-        for k, v in model_args.items():
-            if vars(self)[k] is not None and vars(self)[k] != v:
-                logger.warning(f"Argument {k} provided to dingo_pipe as {vars(self)[k]} "
-                               f"does not match value {v} in model file. Using {k} = "
-                               f"{v} for inference, and will attempt to change this "
-                               f"during importance sampling.")
-            vars(self)[k] = v
-
-        # TODO: Also check consistency between model and init_model settings.
-
 
 def write_complete_config_file(parser, args, inputs, input_cls=MainInput):
     args_dict = vars(args).copy()
@@ -207,44 +227,45 @@ def write_complete_config_file(parser, args, inputs, input_cls=MainInput):
     )
 
     # Verify that the written complete config is identical to the source config
-    complete_args = parser.parse([inputs.complete_ini_file])
-    complete_inputs = input_cls(complete_args, "")
-    ignore_keys = ["scheduler_module", "submit"]
-    differences = []
-    for key, val in inputs.__dict__.items():
-        if key in ignore_keys:
-            continue
-        if key not in complete_args:
-            continue
-        if isinstance(val, pd.DataFrame) and all(val == complete_inputs.__dict__[key]):
-            continue
-        if isinstance(val, np.ndarray) and all(
-            np.array(val) == np.array(complete_inputs.__dict__[key])
-        ):
-            continue
-        if isinstance(val, str) and os.path.isfile(val):
-            # Check if it is relpath vs abspath
-            if os.path.abspath(val) == os.path.abspath(complete_inputs.__dict__[key]):
-                continue
-        if val == complete_inputs.__dict__[key]:
-            continue
-
-        differences.append(key)
-
-    if len(differences) > 0:
-        for key in differences:
-            print(key, f"{inputs.__dict__[key]} -> {complete_inputs.__dict__[key]}")
-        # raise BilbyPipeError(
-        #     "The written config file {} differs from the source {} in {}".format(
-        #         inputs.ini, inputs.complete_ini_file, differences
-        #     )
-        # )
+    # complete_args = parser.parse([inputs.complete_ini_file])
+    # complete_inputs = input_cls(complete_args, "")
+    # ignore_keys = ["scheduler_module", "submit"]
+    # differences = []
+    # for key, val in inputs.__dict__.items():
+    #     if key in ignore_keys:
+    #         continue
+    #     if key not in complete_args:
+    #         continue
+    #     if isinstance(val, pd.DataFrame) and all(val == complete_inputs.__dict__[key]):
+    #         continue
+    #     if isinstance(val, np.ndarray) and all(
+    #         np.array(val) == np.array(complete_inputs.__dict__[key])
+    #     ):
+    #         continue
+    #     if isinstance(val, str) and os.path.isfile(val):
+    #         # Check if it is relpath vs abspath
+    #         if os.path.abspath(val) == os.path.abspath(complete_inputs.__dict__[key]):
+    #             continue
+    #     if val == complete_inputs.__dict__[key]:
+    #         continue
+    #
+    #     differences.append(key)
+    #
+    # if len(differences) > 0:
+    #     for key in differences:
+    #         print(key, f"{inputs.__dict__[key]} -> {complete_inputs.__dict__[key]}")
+    # raise BilbyPipeError(
+    #     "The written config file {} differs from the source {} in {}".format(
+    #         inputs.ini, inputs.complete_ini_file, differences
+    #     )
+    # )
 
 
 def main():
     parser = create_parser(top_level=True)
     args, unknown_args = parse_args(get_command_line_arguments(), parser)
 
+    changed_args = fill_in_arguments_from_model(args)
     inputs = MainInput(args, unknown_args)
     write_complete_config_file(parser, args, inputs)
 

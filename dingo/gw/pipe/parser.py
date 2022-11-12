@@ -122,15 +122,15 @@ def create_parser(top_level=True):
         description="How to generate the data, e.g., from a list of gps times or simulated Gaussian noise.",
     )
 
-    # data_gen_pars.add(
-    #     "--ignore-gwpy-data-quality-check",
-    #     action=StoreBoolean,
-    #     default=True,
-    #     help=(
-    #         "Ignores the check to see if data queried from GWpy (ie not gaussian "
-    #         "noise) is obtained from time when the IFOs are in science mode."
-    #     ),
-    # )
+    data_gen_pars.add(
+        "--ignore-gwpy-data-quality-check",
+        action=StoreBoolean,
+        default=True,
+        help=(
+            "Ignores the check to see if data queried from GWpy (ie not gaussian "
+            "noise) is obtained from time when the IFOs are in science mode."
+        ),
+    )
     #
     # data_gen_pars.add(
     #     "--gps-tuple",
@@ -152,17 +152,17 @@ def create_parser(top_level=True):
     #     ),
     #     default=None,
     # )
-    # data_gen_pars.add(
-    #     "--timeslide-file",
-    #     type=nonestr,
-    #     help=(
-    #         "File containing detector timeslides. "
-    #         "Requires a GPS time file to also be provided. One column for each "
-    #         "detector. Order of detectors specified by `--detectors` argument. "
-    #         "Number of timeslides must correspond to the number of GPS times provided."
-    #     ),
-    #     default=None,
-    # )
+    data_gen_pars.add(
+        "--timeslide-file",
+        type=nonestr,
+        help=(
+            "File containing detector timeslides. "
+            "Requires a GPS time file to also be provided. One column for each "
+            "detector. Order of detectors specified by `--detectors` argument. "
+            "Number of timeslides must correspond to the number of GPS times provided."
+        ),
+        default=None,
+    )
     # data_gen_pars.add(
     #     "--timeslide-dict",
     #     type=nonestr,
@@ -370,32 +370,32 @@ def create_parser(top_level=True):
         help="Resampling method to use: lal matches the resampling used by lalinference/BayesWave",
     )
 
-    # injection_parser = parser.add_argument_group(
-    #     title="Injection arguments",
-    #     description="Whether to include software injections and how to generate them.",
-    # )
+    injection_parser = parser.add_argument_group(
+        title="Injection arguments",
+        description="Whether to include software injections and how to generate them.",
+    )
     # injection_parser.add(
     #     "--injection",
     #     action="store_true",
     #     default=False,
     #     help="Create data from an injection file",
     # )
-    # injection_parser_input = injection_parser.add_mutually_exclusive_group()
-    # injection_parser_input.add(
-    #     "--injection-dict",
-    #     type=nonestr,
-    #     default=None,
-    #     help="A single injection dictionary given in the ini file",
-    # )
-    # injection_parser_input.add(
-    #     "--injection-file",
-    #     type=nonestr,
-    #     default=None,
-    #     help=(
-    #         "Injection file to use. See `bilby_pipe_create_injection_file --help`"
-    #         " for supported formats"
-    #     ),
-    # )
+    injection_parser_input = injection_parser.add_mutually_exclusive_group()
+    injection_parser_input.add(
+        "--injection-dict",
+        type=nonestr,
+        default=None,
+        help="A single injection dictionary given in the ini file",
+    )
+    injection_parser_input.add(
+        "--injection-file",
+        type=nonestr,
+        default=None,
+        help=(
+            "Injection file to use. See `bilby_pipe_create_injection_file --help`"
+            " for supported formats"
+        ),
+    )
     # injection_parser.add(
     #     "--injection-numbers",
     #     action="append",
@@ -497,7 +497,8 @@ def create_parser(top_level=True):
     submission_parser.add(
         "--request-memory-generation",
         type=nonefloat,
-        default=None,
+        # default=None,
+        default=8.0,  # Change this to None if possibility of ROQ (likely remove ROQ)
         help="Memory allocation request (GB) for data generation step",
     )
     # submission_parser.add(
@@ -741,21 +742,21 @@ def create_parser(top_level=True):
     #     action="store_true",
     #     help="Create traceplots during the run",
     # )
-    # output_parser.add_argument(
-    #     "--plot-data",
-    #     action="store_true",
-    #     help="Create plot of the frequency domain data",
-    # )
+    output_parser.add_argument(
+        "--plot-data",
+        action="store_true",
+        help="Create plot of the frequency domain data",
+    )
     # output_parser.add_argument(
     #     "--plot-injection",
     #     action="store_true",
     #     help="Create time-domain plot of the injection",
     # )
-    # output_parser.add_argument(
-    #     "--plot-spectrogram",
-    #     action="store_true",
-    #     help="Create spectrogram plot",
-    # )
+    output_parser.add_argument(
+        "--plot-spectrogram",
+        action="store_true",
+        help="Create spectrogram plot",
+    )
     # output_parser.add_argument(
     #     "--plot-calibration",
     #     action="store_true",
@@ -784,9 +785,9 @@ def create_parser(top_level=True):
     #     "If specified format is not supported, will default to png.",
     # )
     #
-    # output_parser.add(
-    #     "--create-summary", action="store_true", help="Create a PESummary page"
-    # )
+    output_parser.add(
+        "--create-summary", action="store_true", help="Create a PESummary page"
+    )
     output_parser.add("--email", type=nonestr, help="Email for notifications")
     output_parser.add(
         "--notification",

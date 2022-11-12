@@ -8,11 +8,11 @@ from bilby_pipe.utils import log_version_information, logger
 from bilby_pipe.data_generation import DataGenerationInput as BilbyDataGenerationInput
 
 from dingo.gw.data.event_dataset import EventDataset
+from dingo.gw.domains import FrequencyDomain
 from dingo.gw.pipe.parser import create_parser
 
 
 class DataGenerationInput(BilbyDataGenerationInput):
-
     def __init__(self, args, unknown_args, create_data=True):
         Input.__init__(self, args, unknown_args)
 
@@ -134,8 +134,8 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # self.jitter_time = args.jitter_time
         #
         # # Plotting
-        # self.plot_data = args.plot_data
-        # self.plot_spectrogram = args.plot_spectrogram
+        self.plot_data = args.plot_data
+        self.plot_spectrogram = args.plot_spectrogram
         # self.plot_injection = args.plot_injection
 
         if create_data:
@@ -153,20 +153,35 @@ class DataGenerationInput(BilbyDataGenerationInput):
         """Save frequency-domain strain and ASDs as DingoDataset HDF5 format."""
 
         # PSD and strain data.
-        data = {'waveform': {}, 'asds': {}}  # TODO: Rename these keys.
+        data = {"waveform": {}, "asds": {}}  # TODO: Rename these keys.
         for ifo in self.interferometers:
 
             strain = ifo.strain_data.frequency_domain_strain
             frequency_array = ifo.strain_data.frequency_array
+            asd = ifo.power_spectral_density.get_amplitude_spectral_density_array(
+                frequency_array
+            )
+
+            # These arrays extend up to self.sampling_frequency. Truncate them to
+            # self.maximum_frequency, and also set the asd to 1.0 below
+            # self.minimum_frequency.
+            domain = FrequencyDomain(f_min=self.minimum_frequency,
+                                     f_max=self.maximum_frequency,
+                                     delta_f=1/self.duration)
+            strain = domain.update_data(strain)
+            asd = domain.update_data(asd, low_value=1.0)
 
             # Dingo expects data to have trigger time 0, so we apply a cyclic time shift
-            # by the post-trigger duration. TODO: Check the shift is correct.
-            strain *= np.exp(-2j*np.pi*frequency_array*self.post_trigger_duration)
+            # by the post-trigger duration.
+            strain = domain.time_translate_data(strain, self.post_trigger_duration)
 
-            data['waveform'][ifo.name] = strain
-            data['asds'][ifo.name] = \
-                ifo.power_spectral_density.get_amplitude_spectral_density(
-                    frequency_array)
+            # Note that the ASD estimated by the Bilby Interferometer differs ever so
+            # slightly from the ASDs we computed before using pycbc. In addition,
+            # there is no handling of NaNs in the strain data from which the ASD is
+            # estimated.
+
+            data["waveform"][ifo.name] = strain
+            data["asds"][ifo.name] = asd
 
         # Data conditioning settings.
         # TODO: Improve choice of settings and event metadata.
@@ -199,6 +214,10 @@ class DataGenerationInput(BilbyDataGenerationInput):
         dataset.to_file(
             os.path.join(self.data_directory, "_".join([self.label, "event_data.hdf5"]))
         )
+
+    @property
+    def maximum_frequency_index(self):
+        return int(self.maximum_frequency * self.duration)
 
 
 def create_generation_parser():
