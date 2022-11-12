@@ -68,6 +68,7 @@ setup(
             "dingo_analyze_event=dingo.gw.inference:analyze_event",
             "dingo_ls=dingo.gw.ls_cli:ls",
             "dingo_pipe=dingo.gw.pipe.main:main",
+            "dingo_pipe_generation=dingo.gw.pipe.data_generation:main",
         ]
     },
     classifiers=[
