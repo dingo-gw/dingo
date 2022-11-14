@@ -4,10 +4,13 @@
 
 import copy
 
+from bilby_pipe.job_creation.bilby_pipe_dag_creator import get_detectors_list
 from bilby_pipe.job_creation.dag import Dag
+from bilby_pipe.job_creation.overview import create_overview
 from bilby_pipe.utils import BilbyPipeError, logger
 
 from .generation_node import GenerationNode
+from .nodes.sampling_node import SamplingNode
 
 
 def get_trigger_time_list(inputs):
@@ -34,6 +37,10 @@ def generate_dag(inputs):
     dag = Dag(inputs)
     trigger_times = get_trigger_time_list(inputs)
 
+    #
+    # 1. Generate data for inference.
+    #
+
     # Iterate over all generation nodes and store them in a list
     generation_node_list = []
     for idx, trigger_time in enumerate(trigger_times):
@@ -46,6 +53,54 @@ def generate_dag(inputs):
         generation_node = GenerationNode(inputs, **kwargs)
         generation_node_list.append(generation_node)
 
-    # breakpoint()
+    #
+    # 2. Sample the posterior using Dingo.
+    #
+    # Reconstruct the posterior density if necessary. This requires training a new
+    # network and sampling from it.
 
-    return
+    sampling_node_list = []
+    for generation_node in generation_node_list:
+        sampling_node = SamplingNode(
+            inputs,
+            generation_node=generation_node,
+            dag=dag,
+        )
+        sampling_node_list.append(sampling_node)
+
+    #
+    # 3. Generate new data for importance sampling **if different settings requested**.
+    #
+    # If injecting into simulated noise, be sure to use consistent noise realization.
+
+    #
+    # 4. Importance sample
+    #
+
+    # 4.(a) (If necessary) Split the proposal samples into sub-Results for
+    # parallelization across jobs.
+
+    # 4.(b) Calculate importance weights.
+    #
+    # If the phase is not present and phase marginalization is not being used,
+    # sample the phase synthetically. This adds between 1x and 50x to the cost of
+    # importance sampling, depending on the waveform model. Indeed, IMRPhenomXPHM
+    # waveform modes are much more expensive to generate than polarizations.
+
+    # 4.(c) (If necessary) Recombine jobs into single Result.
+
+    # 4.(d) Calculate evidence.  POSSIBLY COMBINE WITH 4B IF ONLY ONE JOB.
+
+    #
+    # 5. PESummary
+    #
+
+
+    dag.build()
+    # create_overview(
+    #     inputs,
+    #     generation_node_list,
+    #     all_parallel_node_list,
+    #     merged_node_list,
+    #     plot_nodes_list,
+    # )

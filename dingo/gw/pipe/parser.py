@@ -1095,20 +1095,57 @@ def create_parser(top_level=True):
         "--model",
         type=str,
         required=True,
-        help="Neural network model for generating posterior samples."
+        help="Neural network model for generating posterior samples.",
     )
     sampler_parser.add(
-        "--init-model",
+        "--model-init",
         type=nonestr,
         default=None,
         help="Neural network model for generating samples to initialize Gibbs sampling."
-             "Must be provided if the main model is a GNPE model. "
+             "Must be provided if the main model is a GNPE model. ",
+    )
+    sampler_parser.add(
+        "--recover-log-prob",
+        action=StoreBoolean,
+        default=True,
+        help="For GNPE models, whether to recover the log probability by training an "
+             "unconditional flow for the GNPE proxies.",
+    )
+    sampler_parser.add(
+        "--device",
+        type=str,
+        default="cuda",
+        choices=["cuda", "cpu"],
+        help="Device to use for sampling. Choices are 'cpu' and 'cuda'. Default 'cuda'.",
     )
     sampler_parser.add(
         "--num-gnpe-iterations",
         type=int,
         default=30,
-        help="Number of GNPE iterations to perform when using a GNPE model. Default 30."
+        help="Number of GNPE iterations to perform when using a GNPE model. Default 30.",
+    )
+    sampler_parser.add(
+        "--num-samples",
+        type=int,
+        default=50000,
+        help="Number of posterior samples desired. Default is 50000",
+    )
+    sampler_parser.add(
+        "--batch-size",
+        type=int,
+        default=50000,
+        help="Number of samples per batch. This is limited by the amount of GPU RAM. "
+             "Default is 50000",
+    )
+    sampler_parser.add(
+        "--density-recovery-kwargs",
+        type=str,
+        default="ProxyRecoveryDefault",
+        help=(
+            "Dictionary of density-recovery-kwargs to pass in, e.g., {num_samples: "
+            "400_000, nde_settings: (...)} OR pass pre-defined set of "
+            "density-recovery-kwargs {ProxyRecoveryDefault}"
+        ),
     )
 
     return parser

@@ -77,7 +77,7 @@ class MainInput(BilbyMainInput):
         # Settings added for dingo.
 
         self.model = args.model
-        self.init_model = args.init_model
+        self.model_init = args.model_init
         self.num_gnpe_iterations = args.num_gnpe_iterations
 
         Input.__init__(self, args, unknown_args, print_msg=False)
@@ -96,7 +96,7 @@ class MainInput(BilbyMainInput):
         self.accounting_user = args.accounting_user
         # self.sampler = args.sampler
         self.detectors = args.detectors
-        # self.coherence_test = args.coherence_test
+        self.coherence_test = False  # dingo mod: Cannot use different sets of detectors.
         self.n_parallel = 1
         # self.transfer_files = args.transfer_files
         self.osg = args.osg
