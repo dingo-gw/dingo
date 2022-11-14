@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 
+from dingo.gw.gwutils import time_delay_from_geocenter
+
 
 class GetDetectorTimes(object):
     """
@@ -25,7 +27,7 @@ class GetDetectorTimes(object):
                 # computation does not work on gpu, so do it on cpu
                 ra = ra.cpu()
                 dec = dec.cpu()
-            dt = ifo.time_delay_from_geocenter(ra, dec, self.ref_time)
+            dt = time_delay_from_geocenter(ifo, ra, dec, self.ref_time)
             if type(dt) == torch.Tensor:
                 dt = dt.to(geocent_time.device)
             ifo_time = geocent_time + dt
