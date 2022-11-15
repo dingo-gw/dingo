@@ -79,7 +79,7 @@ def time_delay_from_geocenter(
         costheta = torch.cos(theta)
         sinphi = torch.sin(phi)
         cosphi = torch.cos(phi)
-        detector_1 = ifo.vertex
+        detector_1 = torch.Tensor(ifo.vertex)
         detector_2 = torch.zeros(3)
         return (
             (detector_2[0] - detector_1[0]) * sintheta * cosphi
