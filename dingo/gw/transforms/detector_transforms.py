@@ -6,6 +6,9 @@ from lal import GreenwichMeanSiderealTime
 from typing import Union
 
 
+CC = 299792458.0
+
+
 def time_delay_from_geocenter(
     ifo: Interferometer,
     ra: Union[float, np.ndarray, torch.Tensor],
@@ -55,39 +58,32 @@ def time_delay_from_geocenter(
     elif isinstance(ra, (np.ndarray, torch.Tensor)) and len(ra) == 1:
         return ifo.time_delay_from_geocenter(ra[0], dec[0], time)
 
-    elif isinstance(ra, np.ndarray):
+    else:
+        if isinstance(ra, np.ndarray):
+            sin = np.sin
+            cos = np.cos
+        elif isinstance(ra, torch.Tensor):
+            sin = torch.sin
+            cos = torch.cos
+        else:
+            raise NotImplementedError(
+                "ra, dec must be either float, np.ndarray, or torch.Tensor."
+            )
+
         gmst = math.fmod(GreenwichMeanSiderealTime(float(time)), 2 * np.pi)
         phi = ra - gmst
         theta = np.pi / 2 - dec
-        sintheta = np.sin(theta)
-        costheta = np.cos(theta)
-        sinphi = np.sin(phi)
-        cosphi = np.cos(phi)
+        sintheta = sin(theta)
+        costheta = cos(theta)
+        sinphi = sin(phi)
+        cosphi = cos(phi)
         detector_1 = ifo.vertex
         detector_2 = np.zeros(3)
         return (
             (detector_2[0] - detector_1[0]) * sintheta * cosphi
             + (detector_2[1] - detector_1[1]) * sintheta * sinphi
             + (detector_2[2] - detector_1[2]) * costheta
-        ) / 299792458.0
-
-    elif isinstance(ra, torch.Tensor):
-        gmst = math.fmod(GreenwichMeanSiderealTime(float(time)), 2 * torch.pi)
-        phi = ra - gmst
-        theta = torch.pi / 2 - dec
-        sintheta = torch.sin(theta)
-        costheta = torch.cos(theta)
-        sinphi = torch.sin(phi)
-        cosphi = torch.cos(phi)
-        detector_1 = torch.Tensor(ifo.vertex)
-        detector_2 = torch.zeros(3)
-        return (
-            (detector_2[0] - detector_1[0]) * sintheta * cosphi
-            + (detector_2[1] - detector_1[1]) * sintheta * sinphi
-            + (detector_2[2] - detector_1[2]) * costheta
-        ) / 299792458.0
-    else:
-        raise NotImplementedError()
+        ) / CC
 
 
 class GetDetectorTimes(object):
