@@ -100,7 +100,7 @@ class MainInput(BilbyMainInput):
         self.n_parallel = 1
         # self.transfer_files = args.transfer_files
         self.osg = args.osg
-        # self.desired_sites = args.desired_sites
+        self.desired_sites = args.desired_sites
         # self.analysis_executable = args.analysis_executable
         # self.analysis_executable_parser = args.analysis_executable_parser
         # self.result_format = args.result_format
@@ -159,9 +159,9 @@ class MainInput(BilbyMainInput):
         #     self.check_injection()
 
         self.request_disk = args.request_disk
-        # self.request_memory = args.request_memory
+        self.request_memory = args.request_memory
         self.request_memory_generation = args.request_memory_generation
-        # self.request_cpus = args.request_cpus
+        self.request_cpus = args.request_cpus
         # self.sampler_kwargs = args.sampler_kwargs
         # self.mpi_samplers = ["pymultinest"]
         # self.use_mpi = (self.sampler in self.mpi_samplers) and (self.request_cpus > 1)

@@ -38,8 +38,8 @@ class SamplingNode(AnalysisNode):
         #  file.)  Other settings needed?
 
         self.extra_lines.extend(self._checkpoint_submit_lines())
-        if self.request_cpus > 1:
-            self.extra_lines.extend(['environment = "OMP_NUM_THREADS=1"'])
+        # if self.request_cpus > 1:
+        #     self.extra_lines.extend(['environment = "OMP_NUM_THREADS=1"'])
 
         self.process_node()
         self.job.add_parent(generation_node.job)

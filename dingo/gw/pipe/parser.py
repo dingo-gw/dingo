@@ -6,7 +6,13 @@ import argparse
 
 import configargparse
 from bilby_pipe.bilbyargparser import BilbyArgParser
-from bilby_pipe.utils import get_version_information, logger, nonefloat, noneint, nonestr
+from bilby_pipe.utils import (
+    get_version_information,
+    logger,
+    nonefloat,
+    noneint,
+    nonestr,
+)
 
 
 class StoreBoolean(argparse.Action):
@@ -115,6 +121,13 @@ def create_parser(top_level=True):
             type=nonestr,
             default=None,
             help="Filename for the data dump: only used internally by data_analysis",
+        )
+        parser.add(
+            "--event-data-file",
+            type=nonestr,
+            default=None,
+            help="Filename for the event: only used internally by sampling and "
+            "importance_sampling",
         )
 
     data_gen_pars = parser.add_argument_group(
@@ -488,12 +501,12 @@ def create_parser(top_level=True):
         default=5,
         help="Disk allocation request in GB. Default is 5GB.",
     )
-    # submission_parser.add(
-    #     "--request-memory",
-    #     type=float,
-    #     default=8.0,
-    #     help="Memory allocation request (GB). Default is 8GB",
-    # )
+    submission_parser.add(
+        "--request-memory",
+        type=float,
+        default=8.0,
+        help="Memory allocation request (GB). Default is 8GB",
+    )
     submission_parser.add(
         "--request-memory-generation",
         type=nonefloat,
@@ -501,17 +514,17 @@ def create_parser(top_level=True):
         default=8.0,  # Change this to None if possibility of ROQ (likely remove ROQ)
         help="Memory allocation request (GB) for data generation step",
     )
-    # submission_parser.add(
-    #     "--request-cpus",
-    #     type=int,
-    #     default=1,
-    #     help=(
-    #         "Use multi-processing. This options sets the number of cores to "
-    #         "request. To use a pool of 8 threads on an 8-core CPU, set "
-    #         "request-cpus=8. For the dynesty, ptemcee, cpnest, and "
-    #         "bilby_mcmc samplers, no additional sampler-kwargs are required"
-    #     ),
-    # )
+    submission_parser.add(
+        "--request-cpus",
+        type=int,
+        default=1,
+        help=(
+            "Use multi-processing. This options sets the number of cores to "
+            "request. To use a pool of 8 threads on an 8-core CPU, set "
+            "request-cpus=8. For the dynesty, ptemcee, cpnest, and "
+            "bilby_mcmc samplers, no additional sampler-kwargs are required"
+        ),
+    )
     submission_parser.add(
         "--conda-env",
         type=nonestr,
@@ -966,10 +979,10 @@ def create_parser(top_level=True):
     #     ),
     # )
 
-    # # Waveform arguments
-    # waveform_parser = parser.add_argument_group(
-    #     title="Waveform arguments", description="Setting for the waveform generator"
-    # )
+    # Waveform arguments
+    waveform_parser = parser.add_argument_group(
+        title="Waveform arguments", description="Setting for the waveform generator"
+    )
     # waveform_parser.add(
     #     "--waveform-generator",
     #     default="bilby.gw.waveform_generator.LALCBCWaveformGenerator",
@@ -977,9 +990,12 @@ def create_parser(top_level=True):
     #     help="The waveform generator class, should be a python path. This will "
     #     "not be able to use any arguments not passed to the default.",
     # )
-    # waveform_parser.add(
-    #     "--reference-frequency", default=20, type=float, help="The reference frequency"
-    # )
+    waveform_parser.add(
+        "--reference-frequency",
+        default=None,
+        type=nonefloat,
+        help="The reference " "frequency",
+    )
     # waveform_parser.add(
     #     "--waveform-approximant",
     #     default="IMRPhenomPv2",
@@ -1102,14 +1118,14 @@ def create_parser(top_level=True):
         type=nonestr,
         default=None,
         help="Neural network model for generating samples to initialize Gibbs sampling."
-             "Must be provided if the main model is a GNPE model. ",
+        "Must be provided if the main model is a GNPE model. ",
     )
     sampler_parser.add(
         "--recover-log-prob",
         action=StoreBoolean,
         default=True,
         help="For GNPE models, whether to recover the log probability by training an "
-             "unconditional flow for the GNPE proxies.",
+        "unconditional flow for the GNPE proxies.",
     )
     sampler_parser.add(
         "--device",
@@ -1135,14 +1151,14 @@ def create_parser(top_level=True):
         type=int,
         default=50000,
         help="Number of samples per batch. This is limited by the amount of GPU RAM. "
-             "Default is 50000",
+        "Default is 50000",
     )
     sampler_parser.add(
-        "--density-recovery-kwargs",
+        "--density-recovery-settings",
         type=str,
         default="ProxyRecoveryDefault",
         help=(
-            "Dictionary of density-recovery-kwargs to pass in, e.g., {num_samples: "
+            "Dictionary of density-recovery-settings to pass in, e.g., {num_samples: "
             "400_000, nde_settings: (...)} OR pass pre-defined set of "
             "density-recovery-kwargs {ProxyRecoveryDefault}"
         ),

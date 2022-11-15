@@ -11,5 +11,5 @@ class GenerationNode(BilbyGenerationNode):
     @property
     def event_data_file(self):
         return os.path.join(
-            self.inputs.data_directory, "_".join([self.inputs.label, "event_data.hdf5"])
+            self.inputs.data_directory, "_".join([self.label, "event_data.hdf5"])
         )

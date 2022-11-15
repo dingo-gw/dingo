@@ -53,10 +53,10 @@ class SamplingInput(Input):
         # self.sampling_seed = args.sampling_seed
 
         # Frequencies
-        self.sampling_frequency = args.sampling_frequency
-        self.minimum_frequency = args.minimum_frequency
-        self.maximum_frequency = args.maximum_frequency
-        self.reference_frequency = args.reference_frequency
+        # self.sampling_frequency = args.sampling_frequency
+        # self.minimum_frequency = args.minimum_frequency
+        # self.maximum_frequency = args.maximum_frequency
+        # self.reference_frequency = args.reference_frequency
 
         # # Waveform, source model and likelihood
         # self.waveform_generator_class = args.waveform_generator
@@ -112,7 +112,7 @@ class SamplingInput(Input):
                 self.model_init, device=self.device, load_training_info=False
             )
             init_sampler = GWSampler(model=init_model)
-            self.sampler = GWSamplerGNPE(
+            self.dingo_sampler = GWSamplerGNPE(
                 model=model,
                 init_sampler=init_sampler,
                 num_iterations=self.num_gnpe_iterations,
@@ -120,10 +120,10 @@ class SamplingInput(Input):
 
         else:
             self.gnpe = False
-            self.sampler = GWSampler(model=model)
+            self.dingo_sampler = GWSampler(model=model)
 
-        self.sampler.context = self.context
-        self.sampler.event_metadata = self.event_metadata
+        self.dingo_sampler.context = self.context
+        self.dingo_sampler.event_metadata = self.event_metadata
 
     @property
     def density_recovery_settings(self):
@@ -161,13 +161,13 @@ class SamplingInput(Input):
 
             # Note that this will not save any low latency samples at present.
             prepare_log_prob(
-                self.sampler,
+                self.dingo_sampler,
                 batch_size=self.batch_size,
                 **self.density_recovery_settings,
             )
 
-        self.sampler.run_sampler(self.num_samples, batch_size=self.batch_size)
-        self.sampler.to_hdf5(label=self.label, outdir=self.result_directory)
+        self.dingo_sampler.run_sampler(self.num_samples, batch_size=self.batch_size)
+        self.dingo_sampler.to_hdf5(label=self.label, outdir=self.result_directory)
 
 
 def create_sampling_parser():
