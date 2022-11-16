@@ -5,9 +5,35 @@ dataset_settings:
   window:
     roll_off: 0.4
     type: tukey
-  T_gap: 0          # specifies the time skipped between to consecutive PSD estimates. If set < 0, the time segments overlap
-  num_psds_max: 2   # if set > 0, only a subset of all available PSDs will be used
+  T_gap: 1024          # specifies the time skipped between to consecutive PSD estimates. If set < 0, the time segments overlap
+  num_psds_max: 4   # if set > 0, only a subset of all available PSDs will be used
   detectors:
     - H1
     - L1
-  observing_run: O2
+  observing_run: O3
+
+# parameterization_settings:
+#   num_spline_positions: 30
+#   num_spectral_segments: 400
+#   scale_factor: 1.e50
+#   # spectral_fit: curve
+
+
+# sampling_settings:
+#     method: kde
+#     bw_spectral: 0.5
+#     bw_spline: 0.25
+#     num_samples: 50_000
+#     split_frequencies:
+#       - 30
+#       - 100
+#     rescaling_psd_paths:
+#       H1: /work/jwildberger/dingo-dev/datasets/ASDs/O3_first/tmp/O3_first/H1/1024_1024/p_rescaling_psd.npy
+#       L1: /work/jwildberger/dingo-dev/datasets/ASDs/O3_first/tmp/O3_first/L1/1024_1024/p_rescaling_psd.npy
+local:
+  num_processes: 1
+  condor:
+    num_jobs: 4
+    num_cpus: 16
+    memory_cpus: 16000
+    bid: 200

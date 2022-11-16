@@ -5,7 +5,7 @@ import textwrap
 
 from dingo.gw.ASD_dataset.dataset_utils import (
     download_and_estimate_PSDs,
-    create_dataset_from_files,
+    get_time_segments
 )
 
 
@@ -21,11 +21,15 @@ def generate_dataset():
         with open(join(args.data_dir, "asd_dataset_settings.yaml"), "r") as f:
             settings = yaml.safe_load(f)
 
+    data_dir = args.data_dir
+
+    time_segments = get_time_segments(data_dir, settings["dataset_settings"])
+
     download_and_estimate_PSDs(
-        args.data_dir, settings["dataset_settings"], verbose=args.verbose
+        args.data_dir, settings, time_segments, verbose=args.verbose
     )
 
-    create_dataset_from_files(args.data_dir, settings["dataset_settings"])
+    # merge_datasets(data_dir)
 
 
 def parse_args():

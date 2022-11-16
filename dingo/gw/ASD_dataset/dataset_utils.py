@@ -19,7 +19,7 @@ from dingo.gw.gwutils import get_window
 from dingo.gw.download_strain_data import download_psd
 
 """
-Contains links for PSD segment lists with quality label BURST_CAT2 from the Gravitationa Wave Open Science Center.
+Contains links for PSD segment lists with quality label BURST_CAT2 from the Gravitational Wave Open Science Center.
 Some events are split up into multiple chunks such that there are multiple URLs for one observing run
 """
 URL_DIRECTORY = {
@@ -53,84 +53,35 @@ URL_DIRECTORY = {
 }
 
 
-def get_valid_segments(segs, T_PSD, T_gap):
+def get_time_segments(data_dir, settings):
     """
     Given the segments `segs` and the time constraints `T_PSD`, `delta_T`, return all segments
     that can be used to estimate a PSD
 
     Parameters
     ----------
-    segs : Tuple[int, int, int]
-        Contains the start- and end gps_times as well as their difference that have been fetched from the GWOSC website
-    T_PSD : int
-        number of seconds used to estimate PSD
-    T_gap : int
-        number of seconds between two adjacent PSDs. May be negative to indicate an overlap
+    settings : dict
+        Contains all settings necessary
 
     Returns
     -------
     All segments that can be used to estimate a PSD
     """
-    segs = np.array(segs, dtype=int)
-    segs = segs[segs[:, 2] >= T_PSD]
 
-    valid_segs = []
-    for idx in range(segs.shape[0]):
-        seg = segs[idx, :]
-        start_time = seg[0]
-        end_time = start_time + T_PSD
+    time_segments = dict(zip(settings["detectors"], [[] * len(settings["detectors"])]))
 
-        while end_time in range(seg[0], seg[1] + 1):
-            valid_segs.append((start_time, end_time))
-            start_time = end_time + T_gap
-            end_time = start_time + T_PSD
-
-    return valid_segs
-
-
-def get_path_raw_data(data_dir, run, detector, T_PSD=1024, T_gap=0):
-    """
-    Return the directory where the PSD data is to be stored
-    Parameters
-    ----------
-    data_dir : str
-        Path to the directory where the PSD dataset will be stored
-    run : str
-        Observing run that is used for the PSD dataset generation
-    detector : str
-        Detector that is used for the PSD dataset generation
-    T_PSD : str
-        number of seconds used to estimate PSD
-    T_gap : str
-        number of seconds between two adjacent PSDs
-
-    Returns
-    -------
-    the path where the data is stored
-    """
-    return join(data_dir, "tmp", run, detector, str(T_PSD) + "_" + str(T_gap))
-
-
-def download_and_estimate_PSDs(data_dir: str, settings: dict, verbose=False):
-    """
-    Download segment lists from the official GWOSC website that have the BURST_CAT_2 quality label. A .npy file
-    is created for every PSD that will be in the final dataset. These are stored in data_dir/tmp and may be removed
-    once the final dataset has been created.
-
-    Parameters
-    ----------
-    data_dir : str
-        Path to the directory where the PSD dataset will be stored
-    settings : dict
-        Dictionary of settings that are used for the dataset generation
-    verbose : bool
-        If true, there will be a progress bar indicating 
-
-    -------
-
-    """ ""
     run = settings["observing_run"]
+    T_PSD = settings["T_PSD"]
+    T_gap = settings["T_gap"]
+    T = settings["T"]
+    f_s = settings["f_s"]
+    num_psds_max = settings.get("num_psds_max")
+
     for detector in settings["detectors"]:
+
+        path_raw_psds = get_path_raw_data(data_dir, run, detector)
+        os.makedirs(path_raw_psds, exist_ok=True)
+
         key = run + "_" + detector
         urls = URL_DIRECTORY[key]
 
@@ -145,81 +96,101 @@ def download_and_estimate_PSDs(data_dir: str, settings: dict, verbose=False):
             stops = np.hstack([stops, stops_seg])
             durations = np.hstack([durations, durations_seg])
 
-        T_PSD = settings["T_PSD"]
-        T_gap = settings["T_gap"]
-        T = settings["T"]
-        f_s = settings["f_s"]
+        segs = np.array(list(zip(starts, stops, durations)), dtype=int)
+        segs = segs[segs[:, 2] >= T_PSD]
 
-        window_kwargs = {
-            "f_s": f_s,
-            "roll_off": settings["window"]["roll_off"],
-            "type": settings["window"]["type"],
-            "T": T,
-        }
-        w = get_window(window_kwargs)
+        valid_segments = []
+        for idx in range(segs.shape[0]):
+            seg = segs[idx, :]
+            start_time = seg[0]
+            end_time = start_time + T_PSD
 
-        path_raw_psds = get_path_raw_data(data_dir, run, detector, T_PSD, T_gap)
-        os.makedirs(path_raw_psds, exist_ok=True)
+            while end_time in range(seg[0], seg[1] + 1):
+                valid_segments.append((start_time, end_time))
+                start_time = end_time + T_gap
+                end_time = start_time + T_PSD
 
-        valid_segments = get_valid_segments(
-            list(zip(starts, stops, durations)), T_PSD=T_PSD, T_gap=T_gap
-        )
-
-        num_psds_max = settings.get("num_psds_max")
+        # randomly sample a subset of time segments to estimate PSDs
         if num_psds_max is not None and num_psds_max > 0:
-            valid_segments = random.sample(valid_segments, num_psds_max)
+            valid_segments = valid_segments[:num_psds_max] #random.sample(valid_segments, num_psds_max)
 
-        print(
-            f"Fetching data and computing Welch's estimate of {len(valid_segments)} valid segments:\n"
-        )
+        time_segments[detector] = valid_segments
 
-        for index, (start, end) in enumerate(tqdm(valid_segments, disable=not verbose)):
-            filename = join(path_raw_psds, "psd_{:05d}.npy".format(index))
-
-            if not os.path.exists(filename):
-                psd = download_psd(
-                    det=detector,
-                    time_start=start,
-                    time_segment=T,
-                    window=w,
-                    f_s=f_s,
-                    num_segments=int(T_PSD / T),
-                )
-                np.save(
-                    filename,
-                    {
-                        "detector": detector,
-                        "segment": (index, start, end),
-                        "time": (start, end),
-                        "psd": psd,
-                        "tukey window": {
-                            "f_s": f_s,
-                            "roll_off": settings["window"]["roll_off"],
-                            "T": T,
-                        },
-                    },
-                )
+    return time_segments
 
 
-def create_dataset_from_files(data_dir: str, settings: dict):
-
+def get_path_raw_data(data_dir, run, detector):
     """
-    Creates a .hdf5 ASD datset file for an observing run using the estimated detector PSDs.
-
+    Return the directory where the PSD data is to be stored
     Parameters
     ----------
     data_dir : str
         Path to the directory where the PSD dataset will be stored
-    settings : dict
-        Dictionary of settings that are used for the dataset generation
+    run : str
+        Observing run that is used for the PSD dataset generation
+    detector : str
+        Detector that is used for the PSD dataset generation
+
+    Returns
     -------
+    the path where the data is stored
     """
+    return join(data_dir, "tmp", run, detector)
+
+
+def estimate_func(seg, run, domain, estimation_kwargs, psd_path, settings):
+
+    dataset_dict = {
+        "settings": {
+            "dataset_settings": settings["dataset_settings"],
+            "domain_dict": domain.domain_dict,
+        }
+    }
+
+    start, end = seg[0], seg[1]
+    filename = join(psd_path, f"asd_{start}.hdf5")
+
+    parameterize = settings.get("parameterization_settings", False)
+    # TODO: more elegant way to do this?
+    if not os.path.exists(filename) or parameterize:
+
+        if not os.path.exists(filename):
+            psd = download_psd(
+                time_start=start,
+                **estimation_kwargs
+            )
+
+        # otherwise parameterization settings are passed
+        else:
+            pass
+
+        asd = np.sqrt(psd[domain.min_idx: domain.max_idx + 1])
+        gps_time = start
+        dataset_dict["asds"] = {estimation_kwargs["det"]: np.array([asd])}
+        dataset_dict["gps_times"] = {estimation_kwargs["det"]: np.array([gps_time])}
+
+        dataset = ASDDataset(dictionary=dataset_dict)
+        dataset.to_file(file_name=filename)
+
+
+def download_and_estimate_PSDs(
+    data_dir: str,
+    settings: dict,
+    time_segments: dict,
+    verbose=False,
+):
+
+    dataset_settings = settings["dataset_settings"]
+    run = dataset_settings["observing_run"]
+    detectors = (
+        time_segments.keys()
+    )  # time_segments may only contain a subset of all detectors for parallelization
 
     f_min = 0
-    f_max = settings["f_s"] / 2
-    T_PSD = settings["T_PSD"]
-    T_gap = settings["T_gap"]
-    T = settings["T"]
+    f_max = dataset_settings.get("f_max", (dataset_settings["f_s"] / 2))
+    T = dataset_settings["T"]
+    T_PSD = dataset_settings["T_PSD"]
+    f_s = dataset_settings["f_s"]
 
     delta_f = 1 / T
     domain = build_domain(
@@ -231,35 +202,191 @@ def create_dataset_from_files(data_dir: str, settings: dict):
             "window_factor": None,
         }
     )
-    ind_min, ind_max = domain.min_idx, domain.max_idx
 
-    dataset_dict = {
-        "settings": {"dataset_settings": settings, "domain_dict": domain.domain_dict}
+    window_kwargs = {
+        "f_s": f_s,
+        "roll_off": dataset_settings["window"]["roll_off"],
+        "type": dataset_settings["window"]["type"],
+        "T": T,
     }
-    asds_dict = {}
-    gps_times_dict = {}
+    w = get_window(window_kwargs)
 
-    for ifo in settings["detectors"]:
-
-        path_raw_psds = get_path_raw_data(
-            data_dir, settings["observing_run"], ifo, T_PSD, T_gap
+    for det in detectors:
+        psd_path = get_path_raw_data(data_dir, run, det)
+        estimation_kwargs = {
+            "det": det,
+            "time_segment": T,
+            "window": w,
+            "f_s": f_s,
+            "num_segments": int(T_PSD / T),
+        }
+        task_func = partial(
+            estimate_func,
+            run=run,
+            domain=domain,
+            estimation_kwargs=estimation_kwargs,
+            psd_path=psd_path,
+            settings=settings
         )
-        filenames = [el for el in os.listdir(path_raw_psds) if el.endswith(".npy")]
+        num_processes = settings["local"]["num_processes"]
+        if num_processes > 1:
+            with Pool(processes=num_processes) as pool:
+                with tqdm(total=len(time_segments[det]), disable=not verbose) as pbar:
+                    for _, i in enumerate(pool.imap_unordered(task_func, time_segments[det])):
+                        pbar.update()
 
-        Nf = ind_max - ind_min + 1
-        asds = np.zeros((len(filenames), Nf))
-        times = np.zeros(len(filenames))
+        else:
+            with tqdm(total=len(time_segments[det]), disable=not verbose) as pbar:
+                for _, i in enumerate(map(task_func, time_segments[det])):
+                    pbar.update()
 
-        for ind, filename in enumerate(filenames):
-            psd = np.load(join(path_raw_psds, filename), allow_pickle=True).item()
-            asds[ind, :] = np.sqrt(psd["psd"][ind_min : ind_max + 1])
-            times[ind] = psd["time"][0]
+def lorentzian_eval(x, f0, A, Q):
+    if f0 == 0 or A < 0:
+        return np.zeros_like(x)
+    delta_f = (x[-1] - x[0]) / 4
+    truncate = np.where(np.abs(x - f0) <= delta_f, 1, np.exp(-np.abs(x - f0) / delta_f))
+    # equivalent to a large delta_f. This helps fit adjacent spectral features without a gap in between
+    # truncate = 1
+    return truncate * A * (f0**4) / ((x * f0) ** 2 + Q**2 * (f0**2 - x**2) ** 2)
 
-        asds_dict[ifo] = asds
-        gps_times_dict[ifo] = times
 
-    dataset_dict["asds"] = asds_dict
-    dataset_dict["gps_times"] = gps_times_dict
+def get_psds_from_params_dict(params, frequencies, scale_factor, smoothen=False):
 
-    dataset = ASDDataset(dictionary=dataset_dict)
-    dataset.to_file(file_name=join(data_dir, f"asds_{settings['observing_run']}.hdf5"))
+    xs = params["x_positions"]
+    ys = params["y_values"]
+    spectral_features = params["spectral_features"]
+    variance = params["variance"]
+
+    num_psds = ys.shape[0]
+    num_spectral_segments = params["spectral_features"].shape[1]
+    frequency_segments = np.array_split(
+        np.arange(frequencies.shape[0]), num_spectral_segments
+    )
+
+    psds = np.zeros((num_psds, len(frequencies)))
+    for i in range(num_psds):
+        spline = scipy.interpolate.CubicSpline(xs, ys[i, :])
+        base_noise = spline(frequencies)
+
+        lorentzians = np.array([])
+        for j, seg in enumerate(frequency_segments):
+            f0, A, Q = spectral_features[i, j, :]
+            lorentzian = lorentzian_eval(frequencies[seg], f0, A, Q)
+            # small amplitudes are not modeled to maintain smoothness
+            if np.max(lorentzian) <= 3 * variance:
+                lorentzian = np.zeros_like(frequencies[seg])
+            lorentzians = np.concatenate((lorentzians, lorentzian), axis=0)
+        assert lorentzians.shape == frequencies.shape
+
+        if smoothen:
+            psds[i, :] = np.exp(base_noise + lorentzians) / scale_factor
+        else:
+            psds[i, :] = (
+                np.exp(np.random.normal(base_noise + lorentzians, variance))
+                / scale_factor
+            )
+        # import matplotlib.pyplot as plt
+        # plt.figure(figsize=(16,9))
+        # plt.xlim(20, 2000)
+        # plt.ylim(1.e-47, 1.e-42)
+        # # plt.loglog(frequencies, np.exp(np.random.normal(base_noise + lorentzians, variance)) / scale_factor)
+        # plt.loglog(frequencies, psds[i, :])
+        # plt.savefig("/work/jwildberger/dingo-dev/review/ASD_datasets/debug.pdf")
+        # exit(1)
+    return psds
+
+
+# TODO: make this more generic to load arbitrary numpy files as dict
+def load_params_from_files(psd_paths):
+    times = np.zeros(len(psd_paths))
+    # initialize parameter dict
+    psd = np.load(join(psd_paths[0]), allow_pickle=True).item()
+
+    parameters = {
+        "x_positions": psd["parameters"]["x_positions"],
+        "y_values": np.zeros(
+            (len(psd_paths), psd["parameters"]["x_positions"].shape[0])
+        ),
+        "spectral_features": np.zeros(
+            (
+                len(psd_paths),
+                psd["parameters"]["spectral_features"].shape[0],
+                psd["parameters"]["spectral_features"].shape[1],
+            )
+        ),
+        "variance": psd["parameters"]["variance"],
+    }
+
+    for ind, filename in enumerate(psd_paths):
+        psd = np.load(filename, allow_pickle=True).item()
+        parameters["spectral_features"][ind, :, :] = psd["parameters"][
+            "spectral_features"
+        ]
+        parameters["y_values"][ind, :] = psd["parameters"]["y_values"]
+        times[ind] = psd["time"][0]
+
+    return parameters, times
+
+
+# def create_dataset_from_files(data_dir: str, settings: dict):
+#
+#     """
+#     Creates a .hdf5 ASD datset file for an observing run using the estimated detector PSDs.
+#
+#     Parameters
+#     ----------
+#     data_dir : str
+#         Path to the directory where the PSD dataset will be stored
+#     settings : dict
+#         Dictionary of settings that are used for the dataset generation
+#     -------
+#     """
+#
+#     f_min = 0
+#     f_max = settings["dataset_settings"].get("f_max", (settings["dataset_settings"]["f_s"] / 2))
+#     T_PSD = settings["dataset_settings"]["T_PSD"]
+#     T_gap = settings["dataset_settings"]["T_gap"]
+#     T = settings["dataset_settings"]["T"]
+#
+#     delta_f = 1 / T
+#     domain = build_domain(
+#         {
+#             "type": "FrequencyDomain",
+#             "f_min": f_min,
+#             "f_max": f_max,
+#             "delta_f": delta_f,
+#             "window_factor": None,
+#         }
+#     )
+#     ind_min, ind_max = domain.min_idx, domain.max_idx
+#
+#     dataset_dict = {
+#         "settings": {"dataset_settings": settings["dataset_settings"], "domain_dict": domain.domain_dict}
+#     }
+#     asds_dict = {}
+#     gps_times_dict = {}
+#
+#     for ifo in settings["dataset_settings"]["detectors"]:
+#
+#         path_raw_psds = get_path_raw_data(
+#             data_dir, settings["dataset_settings"]["observing_run"], ifo, T_PSD, T_gap
+#         )
+#         filenames = [el for el in os.listdir(path_raw_psds) if el.endswith(".npy")]
+#
+#         Nf = ind_max - ind_min + 1
+#         asds = np.zeros((len(filenames), Nf))
+#         times = np.zeros(len(filenames))
+#
+#         for ind, filename in enumerate(filenames):
+#             psd = np.load(join(path_raw_psds, filename), allow_pickle=True).item()
+#             asds[ind, :] = np.sqrt(psd["psd"][ind_min : ind_max + 1])
+#             times[ind] = psd["time"][0]
+#
+#         asds_dict[ifo] = asds
+#         gps_times_dict[ifo] = times
+#
+#     dataset_dict["asds"] = asds_dict
+#     dataset_dict["gps_times"] = gps_times_dict
+#
+#     dataset = ASDDataset(dictionary=dataset_dict)
+#     dataset.to_file(file_name=join(data_dir, f"asds_{settings['dataset_settings']['observing_run']}.hdf5"))
