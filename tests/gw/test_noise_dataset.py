@@ -3,7 +3,7 @@ import h5py
 import numpy as np
 
 from dingo.gw.domains import build_domain
-from dingo.gw.ASD_dataset.noise_dataset import ASDDataset
+from dingo.gw.noise_dataset.ASD_dataset import ASDDataset
 
 
 @pytest.fixture

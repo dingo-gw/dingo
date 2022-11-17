@@ -1,16 +1,25 @@
+import os
+from functools import partial
+from multiprocessing import Pool
+
 import numpy as np
 import scipy
 import scipy.optimize
-import os
-from os.path import join, exists
-from multiprocessing import Pool
-import matplotlib.pyplot as plt
-from functools import partial
-from tqdm import tqdm
 from threadpoolctl import threadpool_limits
+from tqdm import tqdm
 
 from dingo.gw.domains import build_domain
-from dingo.gw.ASD_dataset.dataset_utils import get_path_raw_data, lorentzian_eval
+from dingo.gw.noise_dataset.utils import get_path_raw_data
+
+
+def lorentzian_eval(x, f0, A, Q):
+    if f0 == 0 or A < 0:
+        return np.zeros_like(x)
+    delta_f = (x[-1] - x[0]) / 4
+    truncate = np.where(np.abs(x - f0) <= delta_f, 1, np.exp(-np.abs(x - f0) / delta_f))
+    # equivalent to a large delta_f. This helps fit adjacent spectral features without a gap in between
+    # truncate = 1
+    return truncate * A * (f0**4) / ((x * f0) ** 2 + Q**2 * (f0**2 - x**2) ** 2)
 
 
 def apply_parameterization(

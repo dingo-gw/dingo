@@ -24,7 +24,7 @@ from dingo.gw.transforms import (
     SampleExtrinsicParameters,
     GetDetectorTimes, GNPEPhase,
 )
-from dingo.gw.ASD_dataset.noise_dataset import ASDDataset
+from dingo.gw.noise_dataset.ASD_dataset import ASDDataset
 from dingo.gw.prior import default_inference_parameters
 from dingo.gw.gwutils import *
 from dingo.core.utils import *

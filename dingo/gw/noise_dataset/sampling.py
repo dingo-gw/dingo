@@ -3,7 +3,7 @@ import copy
 import numpy as np
 from scipy import stats
 from abc import ABC, abstractmethod
-from dingo.gw.ASD_dataset.parameterization import parameterize_single_psd
+from dingo.gw.noise_dataset.parameterization import parameterize_single_psd
 from gwpy.time import tconvert
 
 
