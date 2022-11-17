@@ -54,17 +54,15 @@ URL_DIRECTORY = {
 
 def get_time_segments(data_dir, settings):
     """
-    Given the segments `segs` and the time constraints `T_PSD`, `delta_T`, return all segments
-    that can be used to estimate a PSD
 
     Parameters
     ----------
-    settings : dict
-        Contains all settings necessary
+    data_dir
+    settings
 
     Returns
     -------
-    All segments that can be used to estimate a PSD
+
     """
 
     time_segments = dict(zip(settings["detectors"], [[] * len(settings["detectors"])]))
@@ -72,8 +70,6 @@ def get_time_segments(data_dir, settings):
     run = settings["observing_run"]
     T_PSD = settings["T_PSD"]
     T_gap = settings["T_gap"]
-    T = settings["T"]
-    f_s = settings["f_s"]
     num_psds_max = settings.get("num_psds_max")
 
     for detector in settings["detectors"]:
@@ -111,14 +107,19 @@ def get_time_segments(data_dir, settings):
 
         # randomly sample a subset of time segments to estimate PSDs
         if num_psds_max is not None and num_psds_max > 0:
-            valid_segments = valid_segments[:num_psds_max] #random.sample(valid_segments, num_psds_max)
+            valid_segments = valid_segments[
+                :num_psds_max
+            ]  # random.sample(valid_segments, num_psds_max)
 
         time_segments[detector] = valid_segments
 
+    filename = join(data_dir, "tmp", run, "psd_time_segments.pkl")
+    with open(filename, "wb") as f:
+        pickle.dump(time_segments, f)
     return time_segments
 
 
-def estimate_func(seg, run, domain, estimation_kwargs, psd_path, settings):
+def estimate_func(seg, domain, estimation_kwargs, psd_path, settings):
 
     dataset_dict = {
         "settings": {
@@ -136,17 +137,16 @@ def estimate_func(seg, run, domain, estimation_kwargs, psd_path, settings):
     if not os.path.exists(filename) or parameterize:
 
         if not os.path.exists(filename):
-            psd = download_psd(
-                time_start=start,
-                **estimation_kwargs
-            )
+            psd = download_psd(time_start=start, **estimation_kwargs)
 
         # otherwise parameterization settings are passed
         if parameterize:
-            dataset_dict["settings"]["parameterization_settings"] = settings["parameterization_settings"]
+            dataset_dict["settings"]["parameterization_settings"] = settings[
+                "parameterization_settings"
+            ]
             pass
 
-        asd = np.sqrt(psd[domain.min_idx: domain.max_idx + 1])
+        asd = np.sqrt(psd[domain.min_idx : domain.max_idx + 1])
         gps_time = start
         dataset_dict["asds"] = {estimation_kwargs["det"]: np.array([asd])}
         dataset_dict["gps_times"] = {estimation_kwargs["det"]: np.array([gps_time])}
@@ -204,17 +204,18 @@ def download_and_estimate_psds(
         }
         task_func = partial(
             estimate_func,
-            run=run,
             domain=domain,
             estimation_kwargs=estimation_kwargs,
             psd_path=psd_path,
-            settings=settings
+            settings=settings,
         )
         num_processes = settings["local"]["num_processes"]
         if num_processes > 1:
             with Pool(processes=num_processes) as pool:
                 with tqdm(total=len(time_segments[det]), disable=not verbose) as pbar:
-                    for _, i in enumerate(pool.imap_unordered(task_func, time_segments[det])):
+                    for _, i in enumerate(
+                        pool.imap_unordered(task_func, time_segments[det])
+                    ):
                         pbar.update()
 
         else:
@@ -255,4 +256,3 @@ def download_and_estimate_cli():
         time_segments = pickle.load(f)
 
     download_and_estimate_psds(args.data_dir, settings, time_segments)
-

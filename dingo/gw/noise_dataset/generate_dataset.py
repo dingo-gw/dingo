@@ -4,7 +4,10 @@ from os.path import join
 
 import yaml
 
-from dingo.gw.noise_dataset.estimation import download_and_estimate_psds, get_time_segments
+from dingo.gw.noise_dataset.estimation import (
+    download_and_estimate_psds,
+    get_time_segments,
+)
 from dingo.gw.noise_dataset.generate_dataset_dag import create_dag
 from dingo.gw.noise_dataset.utils import merge_datasets
 
@@ -30,6 +33,12 @@ def parse_args():
         default=None,
         help="Optional path to a settings file in case two different datasets are generated in the sam directory",
     )
+    parser.add_argument(
+        "--out_name",
+        type=str,
+        default=None,
+        help="File name of resulting ASD dataset",
+    )
     parser.add_argument("--verbose", action="store_true")
 
     return parser.parse_args()
@@ -54,10 +63,12 @@ def generate_dataset():
 
     if "condor" in settings["local"]:
         # configure_runs(time_segments_file)
-        dagman = create_dag(data_dir, settings_file, time_segments)
+        dagman = create_dag(data_dir, settings_file, time_segments, args.out_name)
 
         try:
-            dagman.visualize(join(data_dir, "tmp", "condor", "ASD_dataset_generation_workflow.png"))
+            dagman.visualize(
+                join(data_dir, "tmp", "condor", "ASD_dataset_generation_workflow.png")
+            )
         except:
             pass
 
@@ -68,4 +79,6 @@ def generate_dataset():
         download_and_estimate_psds(
             args.data_dir, settings, time_segments, verbose=args.verbose
         )
-        merge_datasets(data_dir)
+        merge_datasets(
+            args.data_dir, settings["dataset_settings"], time_segments, args.out_name
+        )

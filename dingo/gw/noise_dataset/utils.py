@@ -1,3 +1,7 @@
+import copy
+import yaml
+import pickle
+import argparse
 from os.path import join
 from typing import List
 
@@ -103,46 +107,53 @@ def load_params_from_files(psd_paths):
     return parameters, times
 
 
-def merge_datasets(dataset_list: List[ASDDataset]) -> ASDDataset:
+def merge_datasets(data_dir, dataset_settings, time_segments, merged_name=None):
     """
-    Merge a collection of datasets into one.
 
     Parameters
     ----------
-    dataset_list : list[ASDDataset]
-        A list of ASDDatasets. Each item should be a dictionary containing
-        parameters and polarizations.
+    data_dir
+    dataset_settings
+    time_segments
+    merged_name
 
     Returns
     -------
-    ASDDataset containing the merged data.
+
     """
 
-    print(f"Merging {len(dataset_list)} datasets into one.")
+    print(f"Merging {len(time_segments)} datasets into one.")
 
-    # This ensures that all of the keys are copied into the new dataset. The
-    # "extensive" parts of the dataset (parameters, waveforms) will be overwritten by
-    # the combined datasets, whereas the "intensive" parts (e.g., SVD basis, settings)
-    # will take the values in the *first* dataset in the list.
-    merged_dict = copy.deepcopy(dataset_list[0].to_dictionary())
+    detectors = dataset_settings["detectors"]
+    run = dataset_settings["observing_run"]
 
-    merged_dict["parameters"] = pd.concat([d.parameters for d in dataset_list])
-    merged_dict["polarizations"] = {}
-    polarizations = list(dataset_list[0].polarizations.keys())
-    for pol in polarizations:
-        # We pop the data array off of each of the polarizations dicts to save memory.
-        # Otherwise this operation doubles the total amount of memory used. This is
-        # destructive to the original datasets.
-        merged_dict["polarizations"][pol] = np.vstack(
-            [d.polarizations.pop(pol) for d in dataset_list]
-        )
+    asds_dict = dict(zip(detectors, [[] for i in range(len(detectors))]))
+    gps_times_dict = dict(zip(detectors, [[] for i in range(len(detectors))]))
+    merged_dict = {"asds": asds_dict, "gps_times": gps_times_dict}
 
-    # Update the settings based on the total number of samples.
-    merged_dict["settings"]["num_samples"] = len(merged_dict["parameters"])
+    for det in detectors:
+        file_dir = get_path_raw_data(data_dir, run, det)
+        for seg in time_segments[det]:
+            start_time = seg[0]
+            filename = join(file_dir, f"asd_{start_time}.hdf5")
+            try:
+                # TODO: should this structure be kept? Or e.g. tuples of GPS time and ASD?
+                dataset = ASDDataset(filename)
+                asds_dict[det].append(dataset.asds[det][0])
+                gps_times_dict[det].append(dataset.gps_times[det])
+            except FileNotFoundError:
+                print(f"file {filename} not found. Skipping it...")
+
+        asds_dict[det] = np.array(asds_dict[det])
+        gps_times_dict[det] = np.array(gps_times_dict[det])
+
+    # copy settings from last dataset
+    merged_dict["settings"] = copy.deepcopy(dataset.settings)
 
     merged = ASDDataset(dictionary=merged_dict)
-
-    return merged
+    if merged_name is None:
+        merged_name = f"asds_{run}.hdf5"
+    merged.to_file(join(data_dir, merged_name))
 
 
 def merge_datasets_cli():
@@ -151,102 +162,39 @@ def merge_datasets_cli():
     parallelized waveform generation.
     """
 
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        description=textwrap.dedent(
-            """\
-        Combine a collection of datasets into one.
-
-        Datasets must be in sequentially-labeled HDF5 files with a fixed prefix. 
-        The settings for the new dataset will be based on those of the first file. 
-        Optionally, replace the settings with those specified in a YAML file.
-        """
-        ),
-    )
+    parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--prefix", type=str, required=True, help="Prefix of sequential files names."
-    )
-    parser.add_argument(
-        "--num_parts",
-        type=int,
-        required=True,
-        help="Total number of datasets to merge.",
-    )
-    parser.add_argument(
-        "--out_file", type=str, required=True, help="Name of file for new dataset."
-    )
-    parser.add_argument(
-        "--settings_file", type=str, help="YAML file containing new dataset settings."
-    )
-    args = parser.parse_args()
-
-    dataset_list = []
-    for i in range(args.num_parts):
-        file_name = args.prefix + str(i) + ".hdf5"
-        dataset_list.append(ASDDataset(file_name=file_name))
-    merged_dataset = merge_datasets(dataset_list)
-
-    # Optionally, update the settings file based on that provided at command line.
-    if args.settings_file is not None:
-        with open(args.settings_file, "r") as f:
-            settings = yaml.safe_load(f)
-        # Make sure num_samples is correct
-        settings["num_samples"] = len(merged_dataset.parameters)
-        merged_dataset.settings = settings
-
-    merged_dataset.to_file(args.out_file)
-    print(
-        f"Complete. New dataset consists of {merged_dataset.settings['num_samples']} "
-        f"samples."
-    )
-
-
-def build_svd_cli():
-    """
-    Command-line function to build an SVD based on an uncompressed dataset file.
-    """
-
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        description=textwrap.dedent(
-            """\
-        Build an SVD basis based on a set of waveforms.
-        """
-        ),
-    )
-    parser.add_argument(
-        "--dataset_file",
+        "--data_dir",
         type=str,
         required=True,
-        help="HDF5 file containing training waveforms.",
+        help="Path where the PSD data is to be stored. Must contain a 'settings.yaml' file.",
     )
     parser.add_argument(
-        "--size", type=int, required=True, help="Number of basis elements to keep."
+        "--settings_file",
+        type=str,
+        required=True,
+        help="Path to a settings file in case two different datasets are generated in the sam directory",
     )
     parser.add_argument(
-        "--out_file", type=str, required=True, help="Name of file for saving SVD."
+        "--time_segments_file",
+        type=str,
+        required=True,
+        help="Path to a file containing the time segments for which PSDs should be estimated",
     )
     parser.add_argument(
-        "--num_train",
-        type=int,
-        help="Number of waveforms to use for training SVD. "
-             "Remainder are used for validation.",
+        "--out_name",
+        type=str,
+        default=None,
+        help="File name of merged dataset",
     )
     args = parser.parse_args()
 
-    dataset = ASDDataset(file_name=args.dataset_file)
-    if args.num_train is None:
-        n_train = len(ASDDataset)
-    else:
-        n_train = args.num_train
+    with open(args.settings_file, "r") as f:
+        settings = yaml.safe_load(f)
 
-    basis, n_train, n_test = train_svd_basis(dataset, args.size, n_train)
-    # FIXME: This is not an ideal treatment. We should update the waveform generation
-    #  to always provide the requested number of waveforms.
-    print(
-        f"SVD basis trained based on {n_train} waveforms and validated on {n_test} "
-        f"waveforms. Note that if this differs from number requested, it will not be "
-        f"reflected in the settings file. This is likely due to EOB failure to "
-        f"generate certain waveforms."
+    with open(args.time_segments_file, "rb") as f:
+        time_segments = pickle.load(f)
+
+    merge_datasets(
+        args.data_dir, settings["dataset_settings"], time_segments, args.out_name
     )
-    basis.to_file(args.out_file)
