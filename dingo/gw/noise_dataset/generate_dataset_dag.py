@@ -107,10 +107,12 @@ def create_dag(data_dir, settings_file, time_segments, out_name):
         "data_dir": data_dir,
         "settings_file": settings_file,
         "time_segments_file": join(
-            data_dir, "tmp", settings["dataset_settings"]["observing_run"]
-        ),
-        "out_name": out_name,
+            data_dir, "tmp", settings["dataset_settings"]["observing_run"], "psd_time_segments.pkl"
+        )
     }
+    if out_name is not None:
+        args_dict["out_name"] = out_name
+
     args_str = create_args_string(args_dict)
     consolidate_dataset = Job(
         name="consolidate_dataset",
