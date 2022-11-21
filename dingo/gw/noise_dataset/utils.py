@@ -137,7 +137,8 @@ def merge_datasets(data_dir, dataset_settings, time_segments, merged_name=None):
             start_time = seg[0]
             filename = join(file_dir, f"asd_{start_time}.hdf5")
             try:
-                # TODO: should this structure be kept? Or e.g. tuples of GPS time and ASD?
+                # TODO: should this structure be kept? Or e.g. tuples of GPS time and ASD? They shouldn't be modified
+                # TODO: independently
                 dataset = ASDDataset(filename)
                 asds_dict[det].append(dataset.asds[det][0])
                 gps_times_dict[det].append(dataset.gps_times[det])

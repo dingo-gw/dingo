@@ -16,6 +16,7 @@ from dingo.gw.download_strain_data import download_psd
 from dingo.gw.gwutils import get_window
 from dingo.gw.noise_dataset.ASD_dataset import ASDDataset
 from dingo.gw.noise_dataset.utils import get_path_raw_data
+from dingo.gw.noise_dataset.parameterization import parameterize_single_psd
 
 """
 Contains links for PSD segment lists with quality label BURST_CAT2 from the Gravitational Wave Open Science Center.
@@ -108,8 +109,8 @@ def get_time_segments(data_dir, settings):
         # randomly sample a subset of time segments to estimate PSDs
         if num_psds_max is not None and num_psds_max > 0:
             valid_segments = valid_segments[
-                :num_psds_max
-            ]  # random.sample(valid_segments, num_psds_max)
+                             :num_psds_max
+                             ]  # random.sample(valid_segments, num_psds_max)
 
         time_segments[detector] = valid_segments
 
@@ -120,7 +121,6 @@ def get_time_segments(data_dir, settings):
 
 
 def estimate_func(seg, domain, estimation_kwargs, psd_path, settings):
-
     dataset_dict = {
         "settings": {
             "dataset_settings": settings["dataset_settings"],
@@ -131,44 +131,52 @@ def estimate_func(seg, domain, estimation_kwargs, psd_path, settings):
     start, end = seg[0], seg[1]
     filename = join(psd_path, f"asd_{start}.hdf5")
 
-    parameterize = settings.get("parameterization_settings", False)
+    parameterization_settings = settings.get("parameterization_settings", None)
 
     # TODO: more elegant way to do this?
-    if not os.path.exists(filename) or parameterize:
+    if not os.path.exists(filename) or parameterization_settings:
 
+        psd = None
+        det = estimation_kwargs["det"]
         if not os.path.exists(filename):
             psd = download_psd(time_start=start, **estimation_kwargs)
 
         # otherwise parameterization settings are passed
-        if parameterize:
+        if parameterization_settings:
             dataset_dict["settings"]["parameterization_settings"] = settings[
                 "parameterization_settings"
             ]
-            pass
+            if psd is None:
+                dataset = ASDDataset(file_name=filename)
+                # Update domain if the settings have changed
+                dataset.update_domain(domain.domain_dict)
+                psd = dataset.asds[det][0] ** 2
+            params, p_psd = parameterize_single_psd(psd, domain, parameterization_settings)
+            dataset_dict["parameters"] = {det: params}
 
-        asd = np.sqrt(psd[domain.min_idx : domain.max_idx + 1])
+        asd = np.sqrt(psd[domain.min_idx: domain.max_idx + 1])
         gps_time = start
-        dataset_dict["asds"] = {estimation_kwargs["det"]: np.array([asd])}
-        dataset_dict["gps_times"] = {estimation_kwargs["det"]: np.array([gps_time])}
+        dataset_dict["asds"] = {det: np.array([asd])}
+        dataset_dict["gps_times"] = {det: np.array([gps_time])}
+
 
         dataset = ASDDataset(dictionary=dataset_dict)
         dataset.to_file(file_name=filename)
 
 
 def download_and_estimate_psds(
-    data_dir: str,
-    settings: dict,
-    time_segments: dict,
-    verbose=False,
+        data_dir: str,
+        settings: dict,
+        time_segments: dict,
+        verbose=False,
 ):
-
     dataset_settings = settings["dataset_settings"]
     run = dataset_settings["observing_run"]
     detectors = (
         time_segments.keys()
     )  # time_segments may only contain a subset of all detectors for parallelization
 
-    f_min = 0
+    f_min =  dataset_settings.get("f_min", 0)
     f_max = dataset_settings.get("f_max", (dataset_settings["f_s"] / 2))
     T = dataset_settings["T"]
     T_PSD = dataset_settings["T_PSD"]
@@ -214,7 +222,7 @@ def download_and_estimate_psds(
             with Pool(processes=num_processes) as pool:
                 with tqdm(total=len(time_segments[det]), disable=not verbose) as pbar:
                     for _, i in enumerate(
-                        pool.imap_unordered(task_func, time_segments[det])
+                            pool.imap_unordered(task_func, time_segments[det])
                     ):
                         pbar.update()
 
@@ -225,7 +233,6 @@ def download_and_estimate_psds(
 
 
 def download_and_estimate_cli():
-
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--data_dir",

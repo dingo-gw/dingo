@@ -90,7 +90,6 @@ def create_dag(data_dir, settings_file, time_segments, out_name):
         }
         args_str = create_args_string(args_dict)
 
-        # TODO: doublecheck if we need to add index to name as identifier
         psd_job = Job(
             name="psd_estimation",
             executable=executable,
