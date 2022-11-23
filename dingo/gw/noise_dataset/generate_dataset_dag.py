@@ -72,6 +72,7 @@ def create_dag(data_dir, settings_file, time_segments, out_name):
     env_path = os.path.join(settings["local"]["env_path"], "bin")
     executable = os.path.join(env_path, "dingo_estimate_psds")
     num_jobs = settings["local"]["condor"]["num_jobs"]
+
     time_segment_path_list = split_time_segments(time_segments, condor_dir, num_jobs)
 
     # DAG ---------------------------------------------------------------------
@@ -81,12 +82,12 @@ def create_dag(data_dir, settings_file, time_segments, out_name):
 
     # --- (a) Download and estimate PSDs corresponding to each time segment
     job_list = []
-    for seg in time_segment_path_list:
+    for seg_path in time_segment_path_list:
 
         args_dict = {
             "data_dir": data_dir,
             "settings_file": settings_file,
-            "time_segments_file": seg,
+            "time_segments_file": seg_path,
         }
         args_str = create_args_string(args_dict)
 
@@ -122,5 +123,26 @@ def create_dag(data_dir, settings_file, time_segments, out_name):
     )
     for job in job_list:
         consolidate_dataset.add_parent(job)
+
+    # --- (c) Resample dataset
+    executable = os.path.join(env_path, "dingo_resample_ASD_dataset")
+    args_dict = {
+        "data_dir": data_dir,
+        "settings_file": settings_file,
+    }
+
+    if out_name is not None:
+        args_dict["out_name"] = out_name
+
+    args_str = create_args_string(args_dict)
+    resample_dataset = Job(
+        name="resample_dataset",
+        executable=executable,
+        dag=dagman,
+        arguments=args_str,
+        **kwargs,
+    )
+
+    resample_dataset.add_parent(consolidate_dataset)
 
     return dagman

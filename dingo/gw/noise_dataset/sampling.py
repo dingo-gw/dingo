@@ -1,139 +1,173 @@
 import copy
+import argparse
+import yaml
+from os.path import join
 
 import numpy as np
 from scipy import stats
 from abc import ABC, abstractmethod
 from dingo.gw.noise_dataset.parameterization import parameterize_single_psd
+from dingo.gw.noise_dataset.ASD_dataset import ASDDataset
+from dingo.gw.noise_dataset.utils import (
+    get_index_for_elem,
+    reconstruct_psds_from_parameters,
+)
 from gwpy.time import tconvert
 
 
-class Sampler(ABC):
-    @abstractmethod
-    def __init__(self, settings):
-        self.settings = settings
+def load_rescaling_psd(filename, detector, parameterization_settings=None):
+    rescaling_psd_dataset = ASDDataset(filename)
+    try:
+        params = rescaling_psd_dataset.parameters[detector]
+    except:
+        dataset_dict = rescaling_psd_dataset.to_dictionary()
+        psd = rescaling_psd_dataset.asds[detector][0] ** 2
+        params = parameterize_single_psd(
+            psd, rescaling_psd_dataset.domain, parameterization_settings
+        )
+        dataset_dict["parameters"] = {detector: params}
+        new_dataset = ASDDataset(dictionary=dataset_dict)
+        new_dataset.to_file(filename)
 
-    @abstractmethod
-    def __call__(self, *args, **kwargs):
-        pass
+    return params
 
 
-class KDE(Sampler):
-    def __init__(self, settings, frequencies, data_dict=None, rescaling_psd=None):
-        super().__init__(settings)
-        self.frequencies = frequencies
-        self.spectral_fit = None
-        self.y_fit = None
-        self.rescaled_psd = rescaling_psd
+class KDE:
+    def __init__(self, asd_dataset, sampling_settings):
+        self.asd_dataset = asd_dataset
+        self.domain = asd_dataset.domain
+        # try:
+        self.parameter_dicts = asd_dataset.parameters
+        self.sampling_settings = sampling_settings
 
-        if data_dict is not None:
-            self.data_dict = data_dict
-            self.fit(data_dict)
+        detectors = asd_dataset.parameters.keys()
+        self.spectral_kde = dict(zip(detectors, [[] * len(detectors)]))
+        self.broadband_kde = dict(zip(detectors, [[] * len(detectors)]))
 
-    def __call__(self, *args, **kwargs):
-        pass
+    def fit(self, weights=None):
 
-    def fit(self, data_dict):
+        for det, param_dict in self.parameter_dicts.items():
+            y_values = param_dict["y_values"]
+            x_positions = param_dict["x_positions"]
+            spectral_features = param_dict["spectral_features"]
 
-        y_values = data_dict["y_values"]
-        spectral_features = data_dict["spectral_features"]
-        num_spectral_segments = spectral_features.shape[1]
+            self.spectral_kde[det] = [
+                stats.gaussian_kde(
+                    spectral_features[:, i, :].T,
+                    bw_method=float(self.sampling_settings["bw_spectral"]),
+                    weights=weights,
+                )
+                for i in range(spectral_features.shape[1])
+            ]
 
-        weights = None
+            split_indices = [0, len(x_positions)]
+            split_indices += [
+                get_index_for_elem(x_positions, f) + 1
+                for f in self.sampling_settings["split_frequencies"]
+            ]
+            split_indices = sorted(split_indices)
 
-        if self.rescaled_psd:
-            spectral_features = np.concatenate(
-                (
-                    spectral_features,
-                    np.expand_dims(
-                        self.rescaled_psd["parameters"]["spectral_features"],
-                        0,
-                    ),
-                ),
-                axis=0,
+            for i in range(len(split_indices) - 1):
+                vals = y_values[:, split_indices[i]: split_indices[i + 1]].T
+                kde_vals = stats.gaussian_kde(
+                    vals, bw_method=float(self.sampling_settings["bw_spline"])
+                )
+                self.broadband_kde[det].append(kde_vals)
+
+    def sample(self):
+
+        num_samples = self.sampling_settings["num_samples"]
+        smoothen = self.sampling_settings.get("smoothen", False)
+        domain = self.asd_dataset.domain
+
+        parameters_dicts = copy.deepcopy(self.parameter_dicts)
+        asds_dict = {}
+
+        for det, param_dict in self.parameter_dicts.items():
+            asds_dict[det] = []
+            xs = param_dict["x_positions"]
+
+            features = np.zeros((num_samples, len(self.spectral_kde[det]), 3))
+            for i, kde in enumerate(self.spectral_kde[det]):
+                features[:, i, :] = kde.resample(size=num_samples).T
+
+            parameters_dicts[det]["spectral_features"] = features
+
+            y_values = np.zeros((num_samples, 0))
+
+            for i, kde in enumerate(self.broadband_kde[det]):
+                y_values = np.concatenate(
+                    (y_values, kde.resample(size=num_samples).T), axis=1
+                )
+
+            # rescale base noise if a psd has been passed
+            if "rescaling_psd_paths" in self.sampling_settings:
+                try:
+                    rescaling_params = load_rescaling_psd(
+                        self.sampling_settings["rescaling_psd_paths"][det],
+                        det,
+                        self.asd_dataset.settings["parameterization_settings"],
+                    )
+                except KeyError:
+                    continue
+
+                y_values_mean = np.mean(y_values, axis=0)
+                y_values = (
+                    y_values - y_values_mean[None, :] + rescaling_params["y_values"]
+                )
+            parameters_dicts[det]["y_values"] = y_values
+
+            # reconstruct sampled parameters back to frequency space
+
+            psds = reconstruct_psds_from_parameters(
+                parameters_dicts[det],
+                domain,
+                self.asd_dataset.settings["parameterization_settings"],
+                smoothen=smoothen,
             )
+            asds_dict[det] = np.sqrt(psds[:, domain.min_idx: domain.max_idx + 1])
 
-            weights = [1.0] * spectral_features.shape[0]
-            weights[-1] = (
-                spectral_features.shape[0] / 4
-            )  # 20% weighting on the last sample
-
-        if spectral_features.shape[0] < 2:
-            raise RuntimeError(
-                "At least 2 PSDs are needed for computing the KDEs and {} were "
-                "supplied".format(spectral_features.shape[0])
-            )
-
-        self.spectral_fit = [
-            stats.gaussian_kde(
-                spectral_features[:, i, :].T,
-                bw_method=float(self.settings["bw_spectral"]),
-                weights=weights,
-            )
-            for i in range(spectral_features.shape[1])
-        ]
-
-        y_fit = []
-
-        def get_index_for_elem(arr, elem):
-            return (np.abs(arr - elem)).argmin()
-
-        split_indices = [get_index_for_elem(data_dict["x_positions"], f) + 1 for f in self.settings["split_frequencies"]]
-        split_indices.append(len(data_dict["x_positions"]))
-        split_indices.insert(0, 0)
-
-        for i in range(len(split_indices) - 1):
-            vals = y_values[:, split_indices[i]:split_indices[i+1]].T
-            kde_vals = stats.gaussian_kde(
-                vals, bw_method=float(self.settings["bw_spline"])
-            )
-            y_fit.append(kde_vals)
-
-        self.y_fit = y_fit
-
-    def sample(self, size=5000):
-
-        data_dict = {}  # copy.deepcopy(self.data_dict)
-        data_dict["x_positions"] = self.data_dict["x_positions"]
-        data_dict["variance"] = self.data_dict["variance"]
-
-        if not (self.y_fit and self.spectral_fit):
-            raise ValueError("KDEs have not been fit yet. Please run fit first.")
-
-        features = np.zeros((size, len(self.spectral_fit), 3))
-        for i, kde in enumerate(self.spectral_fit):
-            features[:, i, :] = kde.resample(size=size).T
-        data_dict["spectral_features"] = features
-
-        y_values = np.zeros((size, 0))
-        for i, kde in enumerate(self.y_fit):
-            y_values = np.concatenate((y_values, kde.resample(size=size).T), axis=1)
-
-        # rescale base noise if a psd has been passed
-        if self.rescaled_psd:
-            assert np.array_equal(
-                self.rescaled_psd["parameters"]["x_positions"],
-                data_dict["x_positions"],
-            )
-            assert (
-                self.rescaled_psd["parameters"]["spectral_features"].shape[0]
-                == data_dict["spectral_features"].shape[1]
-            )
-            y_values_mean = np.mean(y_values, axis=0)
-            y_values = (
-                y_values
-                - y_values_mean[None, :]
-                + self.rescaled_psd["parameters"]["y_values"]
-            )
-        data_dict["y_values"] = y_values
-
-        return data_dict
+        dataset_dict = {}
+        dataset_dict["settings"] = copy.deepcopy(self.asd_dataset.settings)
+        dataset_dict["asds"] = asds_dict
+        dataset_dict["parameters"] = parameters_dicts
+        return ASDDataset(dataset_dict)
 
 
-def build_sampler(settings, frequencies, data_dict, rescaling_psd=None):
-    if "method" not in settings:
-        raise ValueError('Missing key "method" in sampling settings')
-    sampling_method = settings["method"]
-    if sampling_method.lower() == "kde":
-        return KDE(settings, frequencies, data_dict, rescaling_psd=rescaling_psd)
-    else:
-        raise NotImplementedError("Unknown sampling method")
+def resample_dataset_cli():
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--data_dir",
+        type=str,
+        required=True,
+        help="Path where the PSD data is to be stored. Must contain a 'settings.yaml' file.",
+    )
+    parser.add_argument(
+        "--settings_file",
+        type=str,
+        required=True,
+        help="Path to a settings file in case two different datasets are generated in the sam directory",
+    )
+    parser.add_argument(
+        "--out_name",
+        type=str,
+        default=None,
+        help="File name of merged dataset",
+    )
+    args = parser.parse_args()
+
+    with open(args.settings_file, "r") as f:
+        settings = yaml.safe_load(f)
+
+    run = settings["dataset_settings"]["observing_run"]
+    filename = args.out_name if args.out_name else join(args.data_dir, f"asds_{run}.hdf5")
+
+    sampling_settings = settings.get("sampling_settings", None)
+
+    asd_dataset = ASDDataset(filename)
+    if sampling_settings:
+        kde = KDE(asd_dataset, sampling_settings)
+        kde.fit()
+        dataset = kde.sample()
+        dataset.to_file(args.out_name)

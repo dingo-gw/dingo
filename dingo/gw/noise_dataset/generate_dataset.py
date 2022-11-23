@@ -10,6 +10,7 @@ from dingo.gw.noise_dataset.estimation import (
 )
 from dingo.gw.noise_dataset.generate_dataset_dag import create_dag
 from dingo.gw.noise_dataset.utils import merge_datasets
+from dingo.gw.noise_dataset.sampling import KDE
 
 
 def parse_args():
@@ -40,6 +41,7 @@ def parse_args():
         help="File name of resulting ASD dataset",
     )
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--override", action="store_true")
 
     return parser.parse_args()
 
@@ -62,7 +64,7 @@ def generate_dataset():
     time_segments = get_time_segments(data_dir, settings["dataset_settings"])
 
     if "condor" in settings["local"]:
-        # configure_runs(time_segments_file)
+
         dagman = create_dag(data_dir, settings_file, time_segments, args.out_name)
 
         try:
@@ -76,9 +78,22 @@ def generate_dataset():
         print(f"DAG submission file written.")
 
     else:
+
         download_and_estimate_psds(
-            args.data_dir, settings, time_segments, verbose=args.verbose
+            args.data_dir, settings, time_segments, verbose=args.verbose, override=args.override
         )
-        merge_datasets(
-            args.data_dir, settings["dataset_settings"], time_segments, args.out_name
+        dataset = merge_datasets(
+            args.data_dir,
+            settings["dataset_settings"],
+            time_segments,
+            args.out_name,
         )
+
+        sampling_settings = settings.get("sampling_settings", None)
+        if sampling_settings:
+            kde = KDE(dataset, sampling_settings)
+            kde.fit()
+            dataset = kde.sample()
+
+            dataset.to_file(args.out_name)
+
