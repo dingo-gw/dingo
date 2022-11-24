@@ -145,7 +145,6 @@ def estimate_func(seg, domain, estimation_kwargs, psd_path, settings, override=F
     try:
         dataset = ASDDataset(file_name=filename)
         parameterized = hasattr(dataset, "parameters") and not override
-        print(parameterized)
         if parameterized:
             return
 
