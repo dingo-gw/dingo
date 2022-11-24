@@ -137,6 +137,9 @@ def create_dag(data_dir, settings_file, time_segments, out_name, override=False)
         args_dict["out_name"] = out_name
 
     args_str = create_args_string(args_dict)
+
+    kwargs["request_memory"] = settings["local"]["condor"].get("memory_cpus_high", 64000)
+
     resample_dataset = Job(
         name="resample_dataset",
         executable=executable,

@@ -8,10 +8,10 @@ dataset_settings:
     roll_off: 0.4
     type: tukey
   T_gap: 1024          # specifies the time skipped between to consecutive PSD estimates. If set < 0, the time segments overlap
-  num_psds_max: 40   # if set > 0, only a subset of all available PSDs will be used
+  num_psds_max: 25   # if set > 0, only a subset of all available PSDs will be used
   detectors:
     - H1
-    # - L1
+    - L1
   observing_run: O2
   smoothen: True
 
@@ -25,7 +25,7 @@ sampling_settings:
     method: kde
     bw_spectral: 0.5
     bw_spline: 0.25
-    num_samples: 50_000
+    num_samples: 500
     split_frequencies:
       - 30
       - 100

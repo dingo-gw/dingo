@@ -66,7 +66,7 @@ def get_time_segments(data_dir, settings):
 
     """
 
-    time_segments = dict(zip(settings["detectors"], [[] * len(settings["detectors"])]))
+    time_segments = {}
 
     run = settings["observing_run"]
     T_PSD = settings["T_PSD"]
