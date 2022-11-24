@@ -65,7 +65,7 @@ def generate_dataset():
 
     if "condor" in settings["local"]:
 
-        dagman = create_dag(data_dir, settings_file, time_segments, args.out_name)
+        dagman = create_dag(data_dir, settings_file, time_segments, args.out_name, args.override)
 
         try:
             dagman.visualize(
@@ -79,9 +79,9 @@ def generate_dataset():
 
     else:
 
-        # download_and_estimate_psds(
-        #     args.data_dir, settings, time_segments, verbose=args.verbose, override=args.override
-        # )
+        download_and_estimate_psds(
+            args.data_dir, settings, time_segments, verbose=args.verbose, override=args.override
+        )
         dataset = merge_datasets(
             args.data_dir,
             settings["dataset_settings"],

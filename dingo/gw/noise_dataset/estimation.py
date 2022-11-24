@@ -264,6 +264,7 @@ def download_and_estimate_cli():
         help="Path to a file containing the time segments for which PSDs should be estimated",
     )
 
+    parser.add_argument("--override", action="store_true")
     args = parser.parse_args()
 
     # Load settings
@@ -273,4 +274,4 @@ def download_and_estimate_cli():
     with open(args.time_segments_file, "rb") as f:
         time_segments = pickle.load(f)
 
-    download_and_estimate_psds(args.data_dir, settings, time_segments)
+    download_and_estimate_psds(args.data_dir, settings, time_segments, override=args.override)
