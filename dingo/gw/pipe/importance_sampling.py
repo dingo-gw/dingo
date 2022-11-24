@@ -111,9 +111,9 @@ class ImportanceSamplingInput(Input):
             self._importance_sampling_settings = dict()
 
         if settings is not None:
-            if settings.lower() == ["default"]:
+            if settings.lower() == "default":
                 pass
-            elif settings.lower() in ["phaserecoverydefault"]:
+            elif settings.lower() == "phaserecoverydefault":
                 self._importance_sampling_settings.update(
                     IMPORTANCE_SAMPLING_SETTINGS["PhaseRecoveryDefault"]
                 )

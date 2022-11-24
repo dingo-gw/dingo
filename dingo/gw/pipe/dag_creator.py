@@ -10,6 +10,7 @@ from bilby_pipe.job_creation.overview import create_overview
 from bilby_pipe.utils import BilbyPipeError, logger
 
 from .generation_node import GenerationNode
+from .nodes.importance_sampling_node import ImportanceSamplingNode
 from .nodes.sampling_node import SamplingNode
 
 
