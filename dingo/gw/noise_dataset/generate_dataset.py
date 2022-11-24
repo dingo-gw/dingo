@@ -79,9 +79,9 @@ def generate_dataset():
 
     else:
 
-        download_and_estimate_psds(
-            args.data_dir, settings, time_segments, verbose=args.verbose, override=args.override
-        )
+        # download_and_estimate_psds(
+        #     args.data_dir, settings, time_segments, verbose=args.verbose, override=args.override
+        # )
         dataset = merge_datasets(
             args.data_dir,
             settings["dataset_settings"],
@@ -95,5 +95,9 @@ def generate_dataset():
             kde.fit()
             dataset = kde.sample()
 
-            dataset.to_file(args.out_name)
+            filename = args.out_name
+            if filename is None:
+                run = settings["dataset_settings"]["observing_run"]
+                filename = join(data_dir, f"asds_{run}.hdf5")
+            dataset.to_file(filename)
 

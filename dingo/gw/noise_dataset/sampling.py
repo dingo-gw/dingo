@@ -51,14 +51,22 @@ class KDE:
             x_positions = param_dict["x_positions"]
             spectral_features = param_dict["spectral_features"]
 
-            self.spectral_kde[det] = [
-                stats.gaussian_kde(
+            for i in range(spectral_features.shape[1]):
+                try:
+                    spectral_kde = stats.gaussian_kde(
                     spectral_features[:, i, :].T,
                     bw_method=float(self.sampling_settings["bw_spectral"]),
                     weights=weights,
                 )
-                for i in range(spectral_features.shape[1])
-            ]
+                except np.linalg.LinAlgError:
+                    print("Warning: Singular Matrix encountered in spectral KDE. Adding small Gaussian noise...")
+                    perturbed_features = spectral_features[:, i, :] + np.random.normal(0, 1.e-4, size=spectral_features[:, i, :].shape)
+                    spectral_kde = stats.gaussian_kde(
+                        perturbed_features.T,
+                        bw_method=float(self.sampling_settings["bw_spectral"]),
+                        weights=weights,
+                    )
+                self.spectral_kde[det].append(spectral_kde)
 
             split_indices = [0, len(x_positions)]
             split_indices += [
@@ -129,9 +137,11 @@ class KDE:
 
         dataset_dict = {}
         dataset_dict["settings"] = copy.deepcopy(self.asd_dataset.settings)
+        dataset_dict["settings"]["sampling_settings"] = self.sampling_settings
         dataset_dict["asds"] = asds_dict
+        dataset_dict["gps_times"] = self.asd_dataset.gps_times
         dataset_dict["parameters"] = parameters_dicts
-        return ASDDataset(dataset_dict)
+        return ASDDataset(dictionary=dataset_dict)
 
 
 def resample_dataset_cli():
@@ -170,4 +180,4 @@ def resample_dataset_cli():
         kde = KDE(asd_dataset, sampling_settings)
         kde.fit()
         dataset = kde.sample()
-        dataset.to_file(args.out_name)
+        dataset.to_file(filename)
