@@ -33,7 +33,7 @@ setup(
         "bilby_pipe",
         "configargparse",
         "astropy",
-        "lalsuite",  # use >=7.3 if you run into errors with IMRPhenomXPHM generation
+        "lalsuite>=7.11",  # use >=7.3 if you run into errors with IMRPhenomXPHM generation
         "sklearn",
         "pesummary",
         "tensorboard==2.10.1",

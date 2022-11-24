@@ -65,14 +65,17 @@ def test_waveform_generator_FD_f_max_failure(precessing_spin_wf_parameters):
 
 
     # (1)
-    # Check that generating this waveform **fails** as expected
-    # due to the choice of f_max and using a TD waveform.
-    p_FAIL = {'f_min': 20.0, 'f_max': 896.0, 'delta_f': 1.0/8.0}
-    domain_FAIL = FrequencyDomain(**p_FAIL)
+    # For lalsuite >= 7.11 when calling SimInspiralFD() f_max is rounded
+    # to the next power-of-two multiple of deltaF -- see
+    # https://git.ligo.org/lscsoft/lalsuite/-/commit/aaf02bc5aa9b13d32fccc077db6aa59e9bdaff4f
+    # Check that generating a waveform with f_max not a power of two succeeds.
+    # This includes a check in WaveformGenerator.generate_FD_waveform() which ensures
+    # that the generated waveform agrees with the frequency grid defined in the domain.
+    p_OK1 = {'f_min': 20.0, 'f_max': 896.0, 'delta_f': 1.0/8.0}
+    domain_OK1 = FrequencyDomain(**p_OK1)
 
-    with pytest.raises(ValueError):
-        wf_gen = WaveformGenerator(approximant, domain_FAIL, f_ref)
-        wf_dict = wf_gen.generate_hplus_hcross(parameters)
+    wf_gen = WaveformGenerator(approximant, domain_OK1, f_ref)
+    wf_dict = wf_gen.generate_hplus_hcross(parameters)
 
     # (2)
     # Check that generating this waveform **succeeds** as expected.

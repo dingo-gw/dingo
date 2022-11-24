@@ -16,6 +16,7 @@ class SampleExtrinsicParameters(object):
     def __call__(self, input_sample):
         sample = input_sample.copy()
         extrinsic_parameters = self.prior.sample()
+        extrinsic_parameters = {k: float(v) for k, v in extrinsic_parameters.items()}
         sample["extrinsic_parameters"] = extrinsic_parameters
         return sample
 
