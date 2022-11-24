@@ -14,7 +14,6 @@ from dingo.core.models import PosteriorModel
 from dingo.core.result import Result
 from dingo.core.result import DATA_KEYS as RESULT_DATA_KEYS
 from dingo.core.utils import torch_detach_to_cpu, IterationTracker
-from dingo.core.utils.logging_utils import check_directory_exists_and_if_not_mkdir
 
 # FIXME: transform below should be in core
 from dingo.gw.transforms import SelectStandardizeRepackageParameters
@@ -320,7 +319,7 @@ class Sampler(object):
 
     def to_hdf5(self, label="", outdir="."):
         dataset = self.to_result()
-        file_name = "dingo_samples_" + label + ".hdf5"
+        file_name = label + "_result.hdf5"
         Path(outdir).mkdir(parents=True, exist_ok=True)
         dataset.to_file(file_name=Path(outdir, file_name))
 

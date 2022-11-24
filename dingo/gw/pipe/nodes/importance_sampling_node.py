@@ -1,18 +1,15 @@
-import os
-
 from bilby_pipe.job_creation.nodes import AnalysisNode
 
 
-class SamplingNode(AnalysisNode):
-
-    def __init__(self, inputs, generation_node, dag):
+class ImportanceSamplingNode(AnalysisNode):
+    def __init__(self, inputs, sampling_node, dag):
         super(AnalysisNode, self).__init__(inputs)
         self.dag = dag
-        self.generation_node = generation_node
-        self.request_cpus = inputs.request_cpus
+        self.sampling_node = sampling_node
+        self.request_cpus = inputs.request_cpus_importance_sampling
 
-        data_label = generation_node.job_name
-        base_name = data_label.replace("generation", "sampling")
+        data_label = sampling_node.job_name
+        base_name = data_label.replace("sampling", "importance_sampling")
         self.job_name = base_name
         self.label = self.job_name
 
@@ -34,24 +31,15 @@ class SamplingNode(AnalysisNode):
 
         # Add extra arguments for dingo
         self.arguments.add("label", self.label)
-        self.arguments.add("event-data-file", generation_node.event_data_file)
-
-        # TODO: Set whether to recover the log probability. (Config should be in input
-        #  file.)  Other settings needed?
+        self.arguments.add("proposal-samples-file", sampling_node.samples_file)
 
         self.extra_lines.extend(self._checkpoint_submit_lines())
         # if self.request_cpus > 1:
         #     self.extra_lines.extend(['environment = "OMP_NUM_THREADS=1"'])
 
         self.process_node()
-        self.job.add_parent(generation_node.job)
+        self.job.add_parent(sampling_node.job)
 
     @property
     def executable(self):
-        return self._get_executable_path("dingo_pipe_sampling")
-
-    @property
-    def samples_file(self):
-        return os.path.join(
-            self.inputs.result_directory, "_".join([self.label, "result.hdf5"])
-        )
+        return self._get_executable_path("dingo_pipe_importance_sampling")

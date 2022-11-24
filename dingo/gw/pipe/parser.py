@@ -129,6 +129,13 @@ def create_parser(top_level=True):
             help="Filename for the event: only used internally by sampling and "
             "importance_sampling",
         )
+        parser.add(
+            "--proposal-samples-file",
+            type=nonestr,
+            default=None,
+            help="Filename for the proposal samples: only used internally by "
+            "importance_sampling",
+        )
 
     data_gen_pars = parser.add_argument_group(
         "Data generation arguments",
@@ -523,6 +530,16 @@ def create_parser(top_level=True):
             "request. To use a pool of 8 threads on an 8-core CPU, set "
             "request-cpus=8. For the dynesty, ptemcee, cpnest, and "
             "bilby_mcmc samplers, no additional sampler-kwargs are required"
+        ),
+    )
+    submission_parser.add(
+        "--request-cpus-importance-sampling",
+        type=int,
+        default=1,
+        help=(
+            "Use multi-processing. This options sets the number of cores to "
+            "request per job when performing importance sampling. To use a pool of 8 "
+            "threads on an 8-core CPU, set request-cpus-importance-sampling=8."
         ),
     )
     submission_parser.add(
@@ -1160,7 +1177,17 @@ def create_parser(top_level=True):
         help=(
             "Dictionary of density-recovery-settings to pass in, e.g., {num_samples: "
             "400_000, nde_settings: (...)} OR pass pre-defined set of "
-            "density-recovery-kwargs {ProxyRecoveryDefault}"
+            "density-recovery-settings {ProxyRecoveryDefault}"
+        ),
+    )
+    sampler_parser.add(
+        "--importance-sampling-settings",
+        type=str,
+        default="Default",
+        help=(
+            "Dictionary of importance-sampling-settings to pass in, e.g., "
+            "{synthetic_phase: {approximation_22_mode: False, (...)}} OR pass"
+            "pre-defined set of density-recovery-settings {PhaseRecoveryDefault}"
         ),
     )
 

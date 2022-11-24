@@ -70,6 +70,7 @@ setup(
             "dingo_pipe=dingo.gw.pipe.main:main",
             "dingo_pipe_generation=dingo.gw.pipe.data_generation:main",
             "dingo_pipe_sampling=dingo.gw.pipe.sampling:main",
+            "dingo_pipe_importance_sampling=dingo.gw.pipe.importance_sampling:main",
         ]
     },
     classifiers=[

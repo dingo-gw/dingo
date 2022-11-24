@@ -87,6 +87,15 @@ def generate_dag(inputs):
     # importance sampling, depending on the waveform model. Indeed, IMRPhenomXPHM
     # waveform modes are much more expensive to generate than polarizations.
 
+    importance_sampling_node_list = []
+    for sampling_node in sampling_node_list:
+        importance_sampling_node = ImportanceSamplingNode(
+            inputs,
+            sampling_node=sampling_node,
+            dag=dag,
+        )
+        importance_sampling_node_list.append(importance_sampling_node)
+
     # 4.(c) (If necessary) Recombine jobs into single Result.
 
     # 4.(d) Calculate evidence.  POSSIBLY COMBINE WITH 4B IF ONLY ONE JOB.

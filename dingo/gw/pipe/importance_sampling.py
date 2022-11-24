@@ -1,19 +1,19 @@
 #!/usr/bin/env python
-""" Script to sample from a Dingo model. Based on bilby_pipe data analysis script. """
+""" Script to importance sample based on Dingo samples. Based on bilby_pipe data
+analysis script. """
+import os
 import sys
 
 from bilby_pipe.input import Input
 from bilby_pipe.utils import parse_args, logger, convert_string_to_dict
 
-from dingo.core.models import PosteriorModel
-from dingo.gw.data.event_dataset import EventDataset
-from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
 from dingo.gw.inference.inference_pipeline import prepare_log_prob
-from dingo.gw.pipe.default_settings import DENSITY_RECOVERY_SETTINGS
+from dingo.gw.pipe.default_settings import IMPORTANCE_SAMPLING_SETTINGS
 from dingo.gw.pipe.parser import create_parser
+from dingo.gw.result import Result
 
 
-class SamplingInput(Input):
+class ImportanceSamplingInput(Input):
     def __init__(self, args, unknown_args):
         super().__init__(args, unknown_args)
 
@@ -25,26 +25,18 @@ class SamplingInput(Input):
         self.ini = args.ini
         self.scheduler = args.scheduler
         # self.periodic_restart_time = args.periodic_restart_time
-        self.request_cpus = args.request_cpus
+        self.request_cpus = args.request_cpus_importance_sampling
 
         # Naming arguments
         self.outdir = args.outdir
         self.label = args.label
         self.result_format = args.result_format
 
-        # Event file to run on
-        self.event_data_file = args.event_data_file
+        # Samples to run on
+        self.proposal_samples_file = args.proposal_samples_file
 
         # Choices for running
-        self.detectors = args.detectors
-        self.model = args.model
-        self.model_init = args.model_init
-        self.recover_log_prob = args.recover_log_prob
-        self.device = args.device
-        self.num_gnpe_iterations = args.num_gnpe_iterations
-        self.num_samples = args.num_samples
-        self.batch_size = args.batch_size
-        self.density_recovery_settings = args.density_recovery_settings
+        # self.detectors = args.detectors
 
         # self.sampler = args.sampler
         # self.sampler_kwargs = args.sampler_kwargs
@@ -92,80 +84,70 @@ class SamplingInput(Input):
         # self.time_marginalization = args.time_marginalization
         # self.jitter_time = args.jitter_time
 
-        self._load_event()
-        self._load_sampler()
+        self._load_proposal()
+        self.importance_sampling_settings = args.importance_sampling_settings
 
-    def _load_event(self):
-        event_dataset = EventDataset(file_name=self.event_data_file)
-        self.context = event_dataset.data
-        self.event_metadata = event_dataset.event_metadata
-
-    def _load_sampler(self):
-        """Load the sampler and set its context based on event data."""
-        model = PosteriorModel(self.model, device=self.device, load_training_info=False)
-
-        if self.model_init is not None:
-            self.gnpe = True
-            init_model = PosteriorModel(
-                self.model_init, device=self.device, load_training_info=False
+    def _load_proposal(self):
+        self.result = Result(file_name=self.proposal_samples_file)
+        if "log_prob" not in self.result.samples.columns:
+            raise KeyError(
+                "log_prob is not present in proposal samples. This is "
+                "required for importance sampling."
             )
-            init_sampler = GWSampler(model=init_model)
-            self.dingo_sampler = GWSamplerGNPE(
-                model=model,
-                init_sampler=init_sampler,
-                num_iterations=self.num_gnpe_iterations,
-            )
-
-        else:
-            self.gnpe = False
-            self.dingo_sampler = GWSampler(model=model)
-
-        self.dingo_sampler.context = self.context
-        self.dingo_sampler.event_metadata = self.event_metadata
 
     @property
-    def density_recovery_settings(self):
-        return self._density_recovery_settings
+    def importance_sampling_settings(self):
+        return self._importance_sampling_settings
 
-    @density_recovery_settings.setter
-    def density_recovery_settings(self, settings):
-        if self.recover_log_prob:
-            self._density_recovery_settings = DENSITY_RECOVERY_SETTINGS[
-                "ProxyRecoveryDefault"
+    @importance_sampling_settings.setter
+    def importance_sampling_settings(self, settings):
+
+        # Set up defaults.
+        if "phase" not in self.result.samples.columns:
+            self._importance_sampling_settings = IMPORTANCE_SAMPLING_SETTINGS[
+                "PhaseRecoveryDefault"
             ]
         else:
-            self._density_recovery_settings = dict()
+            self._importance_sampling_settings = dict()
 
         if settings is not None:
-            if settings.lower() in ["default", "proxyrecoverydefault"]:
-                self._density_recovery_settings.update(
-                    DENSITY_RECOVERY_SETTINGS["ProxyRecoveryDefault"]
+            if settings.lower() == ["default"]:
+                pass
+            elif settings.lower() in ["phaserecoverydefault"]:
+                self._importance_sampling_settings.update(
+                    IMPORTANCE_SAMPLING_SETTINGS["PhaseRecoveryDefault"]
                 )
             else:
-                self._density_recovery_settings.update(convert_string_to_dict(settings))
-
-    # @property
-    # def result_directory(self):
-    #     result_dir = os.path.join(self.outdir, "result")
-    #     return os.path.relpath(result_dir)
+                self._importance_sampling_settings.update(
+                    convert_string_to_dict(settings)
+                )
+        else:
+            self._importance_sampling_settings = dict()
 
     def run_sampler(self):
 
-        if self.gnpe and self.recover_log_prob:
-            logger.info(
-                "GNPE network does not provide log probability. Generating "
-                "samples and training a new network to recover it."
-            )
+        if "synthetic_phase" in self.importance_sampling_settings:
+            logger.info("Sampling synthetic phase.")
+            synthetic_phase_kwargs = {
+                **self.importance_sampling_settings["synthetic_phase"],
+                "num_processes": self.request_cpus,
+            }
+            self.result.sample_synthetic_phase(synthetic_phase_kwargs)
 
-            # Note that this will not save any low latency samples at present.
-            prepare_log_prob(
-                self.dingo_sampler,
-                batch_size=self.batch_size,
-                **self.density_recovery_settings,
-            )
+        self.result.importance_sample(
+            num_processes=self.request_cpus,
+            time_marginalization_kwargs=self.importance_sampling_settings.get(
+                "time_marginalization"
+            ),
+            phase_marginalization_kwargs=self.importance_sampling_settings.get(
+                "phase_marginalization"
+            ),
+        )
 
-        self.dingo_sampler.run_sampler(self.num_samples, batch_size=self.batch_size)
-        self.dingo_sampler.to_hdf5(label=self.label, outdir=self.result_directory)
+        self.result.print_summary()
+        self.result.to_file(
+            os.path.join(self.result_directory, "_".join([self.label, "result.hdf5"]))
+        )
 
 
 def create_sampling_parser():
@@ -177,6 +159,6 @@ def main():
     """Data analysis main logic"""
     args, unknown_args = parse_args(sys.argv[1:], create_sampling_parser())
     # log_version_information()
-    analysis = SamplingInput(args, unknown_args)
+    analysis = ImportanceSamplingInput(args, unknown_args)
     analysis.run_sampler()
     sys.exit(0)

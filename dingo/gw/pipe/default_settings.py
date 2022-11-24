@@ -33,3 +33,13 @@ DENSITY_RECOVERY_SETTINGS = {
         },
     },
 }
+
+IMPORTANCE_SAMPLING_SETTINGS = {
+    "PhaseRecoveryDefault": {
+        "synthetic_phase": {
+            "approximation_22_mode": False,
+            "n_grid": 5001,
+            "uniform_weight": 0.01,
+        },
+    },
+}

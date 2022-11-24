@@ -162,6 +162,7 @@ class MainInput(BilbyMainInput):
         self.request_memory = args.request_memory
         self.request_memory_generation = args.request_memory_generation
         self.request_cpus = args.request_cpus
+        self.request_cpus_importance_sampling = args.request_cpus_importance_sampling
         # self.sampler_kwargs = args.sampler_kwargs
         # self.mpi_samplers = ["pymultinest"]
         # self.use_mpi = (self.sampler in self.mpi_samplers) and (self.request_cpus > 1)
@@ -204,6 +205,16 @@ class MainInput(BilbyMainInput):
 
         self.extra_lines = []
         self.requirements = []
+
+    @property
+    def request_cpus_importance_sampling(self):
+        return self._request_cpus_importance_sampling
+
+    @request_cpus_importance_sampling.setter
+    def request_cpus_importance_sampling(self, request_cpus_importance_sampling):
+        logger.info(f"Setting analysis request_cpus_importance_sampling = "
+                    f"{request_cpus_importance_sampling}")
+        self._request_cpus_importance_sampling = request_cpus_importance_sampling
 
 
 def write_complete_config_file(parser, args, inputs, input_cls=MainInput):

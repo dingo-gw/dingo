@@ -214,10 +214,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
         dataset.to_file(self.event_data_file)
 
     @property
-    def maximum_frequency_index(self):
-        return int(self.maximum_frequency * self.duration)
-
-    @property
     def event_data_file(self):
         return os.path.join(
             self.data_directory, "_".join([self.label, "event_data.hdf5"])
