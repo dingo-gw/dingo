@@ -65,7 +65,7 @@ def generate_dataset():
 
     if "condor" in settings["local"]:
 
-        dagman = create_dag(data_dir, settings_file, time_segments, args.out_name)
+        dagman = create_dag(data_dir, settings_file, time_segments, args.out_name, args.override)
 
         try:
             dagman.visualize(
@@ -95,5 +95,9 @@ def generate_dataset():
             kde.fit()
             dataset = kde.sample()
 
-            dataset.to_file(args.out_name)
+            filename = args.out_name
+            if filename is None:
+                run = settings["dataset_settings"]["observing_run"]
+                filename = join(data_dir, f"asds_{run}.hdf5")
+            dataset.to_file(filename)
 

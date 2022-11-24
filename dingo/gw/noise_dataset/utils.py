@@ -116,8 +116,8 @@ def merge_datasets(data_dir, dataset_settings, time_segments, merged_name=None):
     detectors = dataset_settings["detectors"]
     run = dataset_settings["observing_run"]
 
-    asds_dict = dict(zip(detectors, [[] for i in range(len(detectors))]))
-    gps_times_dict = dict(zip(detectors, [[] for i in range(len(detectors))]))
+    asds_dict = dict(zip(detectors, [[] for _ in range(len(detectors))]))
+    gps_times_dict = dict(zip(detectors, [[] for _ in range(len(detectors))]))
 
     smoothen = dataset_settings.get("smoothen", False)
     parameters_dict = dict(zip(detectors, [{} for i in range(len(detectors))]))

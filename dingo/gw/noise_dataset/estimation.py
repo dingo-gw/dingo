@@ -66,7 +66,7 @@ def get_time_segments(data_dir, settings):
 
     """
 
-    time_segments = dict(zip(settings["detectors"], [[] * len(settings["detectors"])]))
+    time_segments = {}
 
     run = settings["observing_run"]
     T_PSD = settings["T_PSD"]
@@ -144,15 +144,19 @@ def estimate_func(seg, domain, estimation_kwargs, psd_path, settings, override=F
     parameterized = False
     try:
         dataset = ASDDataset(file_name=filename)
+        parameterized = hasattr(dataset, "parameters") and not override
+        print(parameterized)
+        if parameterized:
+            return
+
         dataset.update_domain(domain.domain_dict)
         psd = dataset.asds[det][0] ** 2
-        parameterized = hasattr(dataset, "parameters") and not override
 
     # if file doesn't exist or new domain is incompatible, download PSD
     except (FileNotFoundError, ValueError):
         psd = download_psd(time_start=start, **estimation_kwargs)
     # only parameterize, if settings are passed and any existing parameterization should be overwritten
-    if parameterization_settings and not parameterized:
+    if parameterization_settings:
         dataset_dict["settings"]["parameterization_settings"] = parameterization_settings
         params = parameterize_single_psd(psd, domain, parameterization_settings)
         dataset_dict["parameters"] = {det: params}
@@ -166,7 +170,7 @@ def estimate_func(seg, domain, estimation_kwargs, psd_path, settings, override=F
     dataset = ASDDataset(dictionary=dataset_dict)
     dataset.to_file(file_name=filename)
 
-    return dataset
+    return
 
 
 def download_and_estimate_psds(
@@ -260,6 +264,7 @@ def download_and_estimate_cli():
         help="Path to a file containing the time segments for which PSDs should be estimated",
     )
 
+    parser.add_argument("--override", action="store_true")
     args = parser.parse_args()
 
     # Load settings
@@ -269,4 +274,4 @@ def download_and_estimate_cli():
     with open(args.time_segments_file, "rb") as f:
         time_segments = pickle.load(f)
 
-    download_and_estimate_psds(args.data_dir, settings, time_segments)
+    download_and_estimate_psds(args.data_dir, settings, time_segments, override=args.override)

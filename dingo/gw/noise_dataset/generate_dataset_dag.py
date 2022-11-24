@@ -49,7 +49,7 @@ def split_time_segments(time_segments, condor_dir, num_jobs):
     return time_segments_path_list
 
 
-def create_dag(data_dir, settings_file, time_segments, out_name):
+def create_dag(data_dir, settings_file, time_segments, out_name, override=False):
     """
     Create a Condor DAG to (a) download, estimate, parameterize
     individual PSDs and (b) merge them into one dataset
@@ -89,6 +89,8 @@ def create_dag(data_dir, settings_file, time_segments, out_name):
             "settings_file": settings_file,
             "time_segments_file": seg_path,
         }
+        if override:
+            args_dict["override"] = ""
         args_str = create_args_string(args_dict)
 
         psd_job = Job(
@@ -135,6 +137,9 @@ def create_dag(data_dir, settings_file, time_segments, out_name):
         args_dict["out_name"] = out_name
 
     args_str = create_args_string(args_dict)
+
+    kwargs["request_memory"] = settings["local"]["condor"].get("memory_cpus_high", 64000)
+
     resample_dataset = Job(
         name="resample_dataset",
         executable=executable,
