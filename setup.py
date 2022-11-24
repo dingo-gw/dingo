@@ -31,7 +31,7 @@ setup(
         "h5py",
         "bilby",
         "astropy",
-        "lalsuite", # use >=7.3 if you run into errors with IMRPhenomXPHM generation
+        "lalsuite>=7.11",
         "sklearn",
         "pesummary",
         "tensorboard==2.10.1",
