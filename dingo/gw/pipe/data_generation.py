@@ -185,6 +185,12 @@ class DataGenerationInput(BilbyDataGenerationInput):
 
         # Data conditioning settings.
         # TODO: Improve choice of settings and event metadata.
+
+        if self.psd_dict is None:
+            psd_duration = self.psd_duration
+        else:
+            psd_duration = None
+
         settings = {
             "window": {
                 "type": "tukey",
@@ -194,13 +200,13 @@ class DataGenerationInput(BilbyDataGenerationInput):
             },
             "detectors": self.detectors,
             "time_segment": self.duration,
-            "time_psd": self.psd_duration,
+            "time_psd": psd_duration,
             "f_s": self.sampling_frequency,
         }
 
         event_metadata = {
             "time_event": self.trigger_time,
-            "time_psd": self.psd_duration,
+            "time_psd": psd_duration,
             "time_buffer": self.post_trigger_duration,
         }
 
