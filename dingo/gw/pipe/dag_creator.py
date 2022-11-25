@@ -4,12 +4,10 @@
 
 import copy
 
-from bilby_pipe.job_creation.bilby_pipe_dag_creator import get_detectors_list
 from bilby_pipe.job_creation.dag import Dag
-from bilby_pipe.job_creation.overview import create_overview
 from bilby_pipe.utils import BilbyPipeError, logger
 
-from .generation_node import GenerationNode
+from dingo.gw.pipe.nodes.generation_node import GenerationNode
 from .nodes.importance_sampling_node import ImportanceSamplingNode
 from .nodes.sampling_node import SamplingNode
 
