@@ -112,7 +112,10 @@ class GWSignal(object):
         if self.calibration_envelope is not None:
             transforms.append(
                 MultiplyCalibrationUncertainty(
-                    self.ifo_list, self.data_domain, self.calibration_envelope, self.num_calibration_curves
+                    self.ifo_list,
+                    self.data_domain,
+                    self.calibration_envelope,
+                    self.num_calibration_curves,
                 )
             )
         if self.whiten:

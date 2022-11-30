@@ -274,7 +274,9 @@ class MultiplyCalibrationUncertainty(object):
                 )
 
                 # Setting priors
-                self.calibration_priors[ifo.name] = CalibrationPriorDict.from_envelope_file(
+                self.calibration_priors[
+                    ifo.name
+                ] = CalibrationPriorDict.from_envelope_file(
                     self.calibration_envelope[ifo.name],
                     self.data_domain.f_min,
                     self.data_domain.f_max,
@@ -298,14 +300,22 @@ class MultiplyCalibrationUncertainty(object):
             calibration_draws[ifo.name] = np.zeros(
                 (
                     self.num_calibration_curves,
-                    len(self.data_domain.sample_frequencies[self.data_domain.frequency_mask]),
+                    len(
+                        self.data_domain.sample_frequencies[
+                            self.data_domain.frequency_mask
+                        ]
+                    ),
                 ),
                 dtype=complex,
             )
 
             for i in range(self.num_calibration_curves):
-                calibration_draws[ifo.name][i, :] = ifo.calibration_model.get_calibration_factor(
-                    self.data_domain.sample_frequencies[self.data_domain.frequency_mask],
+                calibration_draws[ifo.name][
+                    i, :
+                ] = ifo.calibration_model.get_calibration_factor(
+                    self.data_domain.sample_frequencies[
+                        self.data_domain.frequency_mask
+                    ],
                     prefix="recalib_{}_".format(ifo.name),
                     **calibration_parameter_draws[ifo.name].iloc[i],
                 )
@@ -320,8 +330,18 @@ class MultiplyCalibrationUncertainty(object):
             # Here C is "calibration_draws"
 
             # Padding 0's to everything outside the calibration array
-            calibration_waveforms = np.tile(sample["waveform"][ifo.name][self.data_domain.frequency_mask], (self.num_calibration_curves, 1)) * calibration_draws[ifo.name]
-            sample["waveform"][ifo.name] = np.tile(sample["waveform"][ifo.name], (self.num_calibration_curves, 1))
-            sample["waveform"][ifo.name][:, self.data_domain.frequency_mask] = calibration_waveforms
+            calibration_waveforms = (
+                np.tile(
+                    sample["waveform"][ifo.name][self.data_domain.frequency_mask],
+                    (self.num_calibration_curves, 1),
+                )
+                * calibration_draws[ifo.name]
+            )
+            sample["waveform"][ifo.name] = np.tile(
+                sample["waveform"][ifo.name], (self.num_calibration_curves, 1)
+            )
+            sample["waveform"][ifo.name][
+                :, self.data_domain.frequency_mask
+            ] = calibration_waveforms
 
         return sample

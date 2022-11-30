@@ -127,7 +127,9 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 **calibration_marginalization_kwargs
             )
 
-    def initialize_calibration_marginalization(self, calibration_envelope, num_calibration_curves=1):
+    def initialize_calibration_marginalization(
+        self, calibration_envelope, num_calibration_curves=1
+    ):
         """
         Initialize calibration marginalization table which will use the files provided to
         multiply the signal by a calibration envelope.
@@ -202,7 +204,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 [
                     self.time_marginalization,
                     self.phase_marginalization,
-                    self.calibration_marginalization
+                    self.calibration_marginalization,
                 ]
             )
             > 1
@@ -281,7 +283,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             [
                 inner_product(d_ifo, mu_ifo)
                 for d_ifo, mu_ifo in zip(d.values(), mu.values())
-            ], 
+            ],
         )
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
@@ -546,19 +548,21 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         # Step 1: Compute whitened GW strain mu(theta) for parameters theta.
         mu = self.signal(theta)["waveform"]
         d = self.whitened_strains
-        d = {ifo:np.tile(v, (self.num_calibration_curves,1)) for ifo, v in d.items()}
+        d = {ifo: np.tile(v, (self.num_calibration_curves, 1)) for ifo, v in d.items()}
 
         # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to
         # compute the remaining terms rho2opt and kappa2
-        rho2opt = np.sum([inner_product(mu_ifo.T, mu_ifo.T) for mu_ifo in mu.values()], axis=0)
+        rho2opt = np.sum(
+            [inner_product(mu_ifo.T, mu_ifo.T) for mu_ifo in mu.values()], axis=0
+        )
         kappa2 = np.sum(
             [
                 inner_product(d_ifo.T, mu_ifo.T)
                 for d_ifo, mu_ifo in zip(d.values(), mu.values())
-            ], 
-            axis=0
+            ],
+            axis=0,
         )
-        
+
         likelihoods = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
         # Return the average over calibration envelopes
         return np.average(likelihoods)

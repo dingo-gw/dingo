@@ -93,7 +93,7 @@ class Result(DingoDataset):
     def effective_sample_size(self):
         if "weights" in self.samples:
             weights = self.samples["weights"]
-            return np.sum(weights) ** 2 / np.sum(weights ** 2)
+            return np.sum(weights) ** 2 / np.sum(weights**2)
         else:
             return None
 
