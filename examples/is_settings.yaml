@@ -39,14 +39,15 @@ nde:
       T_max: 20
       type: cosine
     train_fraction: 0.9
-num_processes: 8
-num_samples: 10000
+num_processes: 16
+num_samples: 50000
 synthetic_phase:
   approximation_22_mode: false
   n_grid: 501
   num_processes: 8
   uniform_weight: 0.01
-calibration_marginalization:
-  calibration_envelope:
-    H1: "/data/nihargupte/projects/hotfixes/generic-calibration-reweighting-master/examples/GW150914/GWTC1_GW150914_H_CalEnv.txt"
-    L1: "/data/nihargupte/projects/hotfixes/generic-calibration-reweighting-master/examples/GW150914/GWTC1_GW150914_L_CalEnv.txt"
+# calibration_marginalization:
+#   num_calibration_curves: 100
+#   calibration_envelope:
+#     H1: "/data/nihargupte/projects/hotfixes/generic-calibration-reweighting-master/examples/GW150914/GWTC1_GW150914_H_CalEnv.txt"
+#     L1: "/data/nihargupte/projects/hotfixes/generic-calibration-reweighting-master/examples/GW150914/GWTC1_GW150914_L_CalEnv.txt"

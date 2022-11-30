@@ -166,54 +166,102 @@ class MultiplyCalibrationUncertainty(object):
         Optionally, you can also set "calibration_lookup_table" to None
     """
 
-    def __init__(self, ifo_list, data_domain, calibration_envelope):
+    def __init__(
+        self, ifo_list, data_domain, calibration_envelope, num_calibration_curves
+    ):
         """
         Initialize calibration marginalization. This store the calibration curve prior will later be applied to
         the waveform. We can either specify what the calibration values are via a lookup table or randomly generate
         the fake curves based on a prior. The former is useful for when you have an event you are interested in.
         """
         self.ifo_list = ifo_list
-        
+        self.num_calibration_curves = num_calibration_curves
+
         self.data_domain = data_domain
-        if False not in [s.endswith(".txt") for s in  calibration_envelope.values()]:
+        self.calibration_priors = {}
+        if False not in [s.endswith(".txt") for s in calibration_envelope.values()]:
             # Generating .h5 lookup table from priors in .txt file
             self.calibration_envelope = calibration_envelope
-            for i, ifo in enumerate(self.ifo_list):                       
+            for i, ifo in enumerate(self.ifo_list):
                 # Setting calibration model to cubic spline
-                ifo.calibration_model = calibration.CubicSpline(f"recalib_{ifo.name}_", minimum_frequency=data_domain.f_min, maximum_frequency=data_domain.f_max, n_points=10)
+                ifo.calibration_model = calibration.CubicSpline(
+                    f"recalib_{ifo.name}_",
+                    minimum_frequency=data_domain.f_min,
+                    maximum_frequency=data_domain.f_max,
+                    n_points=10,
+                )
+
+                # Setting priors
+                self.calibration_priors[ifo.name] = CalibrationPriorDict.from_envelope_file(
+                    self.calibration_envelope[ifo.name],
+                    self.data_domain.f_min,
+                    self.data_domain.f_max,
+                    10,
+                    ifo.name,
+                )
+
         else:
             raise Exception("Calibration envelope must be specified in a .txt file!")
 
     def __call__(self, input_sample):
 
         sample = input_sample.copy()
-        sample["calibration_draw"] = {ifo.name:None for ifo in self.ifo_list}
+        sample["calibration_draw"] = {ifo.name: None for ifo in self.ifo_list}
         for ifo in self.ifo_list:
             calibration_parameter_draws, calibration_draws = {}, {}
             # Sampling from prior
-            calibration_priors = CalibrationPriorDict.from_envelope_file(
-                    self.calibration_envelope[ifo.name], self.data_domain.f_min, self.data_domain.f_max, 10, ifo.name)
+            calibration_parameter_draws[ifo.name] = pd.DataFrame(
+                self.calibration_priors[ifo.name].sample(self.num_calibration_curves)
+            )
+            calibration_draws[ifo.name] = np.zeros(
+                (
+                    self.num_calibration_curves,
+                    len(self.data_domain.sample_frequencies[self.data_domain.frequency_mask]),
+                ),
+                dtype=complex,
+            )
 
-            # Sample only 1 set of parameters
-            calibration_parameter_draws[ifo.name] = pd.DataFrame(calibration_priors.sample(1))
-            calibration_draws[ifo.name] = np.zeros((1, len(self.data_domain.sample_frequencies[self.data_domain.frequency_mask])), dtype=complex)
-
-            # 0 since we are only looking at 1 calibration curve, otherwise we'd iterate over this
-            calibration_draws[ifo.name][0, :] = ifo.calibration_model.get_calibration_factor(
-                        self.data_domain.sample_frequencies[self.data_domain.frequency_mask],
-                        prefix='recalib_{}_'.format(ifo.name),
-                        **calibration_parameter_draws[ifo.name].iloc[0])
+            for i in range(self.num_calibration_curves):
+                calibration_draws[ifo.name][i, :] = ifo.calibration_model.get_calibration_factor(
+                    self.data_domain.sample_frequencies[self.data_domain.frequency_mask],
+                    prefix="recalib_{}_".format(ifo.name),
+                    **calibration_parameter_draws[ifo.name].iloc[i],
+                )
 
             # Multiplying the sample waveform in the interferometer according to the calibration curve
             # This is done by following the perscription here:
             #
             # https://dcc.ligo.org/LIGO-T1400682 Eq 3 and 4
-            # 
-            # We take the waveform h(f) and multiply it by C = (1 + \delta A(f)) \exp(i \delta \psi) 
+            #
+            # We take the waveform h(f) and multiply it by C = (1 + \delta A(f)) \exp(i \delta \psi)
             # i.e. h_obs(f) = C * h(f)
             # Here C is "calibration_draws"
 
             # Padding 0's to everything outside the calibration array
-            sample["waveform"][ifo.name][self.data_domain.frequency_mask] *= calibration_draws[ifo.name][0, :]
+            calibration_waveforms = np.tile(sample["waveform"][ifo.name][self.data_domain.frequency_mask], (self.num_calibration_curves, 1)) * calibration_draws[ifo.name]
+            sample["waveform"][ifo.name] = np.tile(sample["waveform"][ifo.name], (self.num_calibration_curves, 1))
+            sample["waveform"][ifo.name][:, self.data_domain.frequency_mask] = calibration_waveforms
 
+            # import matplotlib.pyplot as plt
+            # if ifo.name == "H1":
+            #     fig, axes = plt.subplots(1, 2)
+            #     axes[0].set_xscale("log")
+            #     axes[0].set_xlabel("Freq (Hz)")
+            #     axes[0].set_ylabel("Strain")
+            #     for i in range(self.num_calibration_curves):
+            #         axes[0].plot(self.data_domain.sample_frequencies, np.abs(sample["waveform"]["H1"][i]), label=i)
+            #         axes[1].plot(self.data_domain.sample_frequencies, np.unwrap(np.angle(sample["waveform"]["H1"][i])))
+            #     axes[0].legend()
+            #     fig.savefig("/data/nihargupte/projects/hotfixes/dingo-devel/devel_testing/calibrated_wfs.png")
+
+            #     fig, axes = plt.subplots(1, 2)
+            #     axes[0].set_xscale("log")
+            #     axes[0].set_xlabel("Freq (Hz)")
+            #     axes[0].set_ylabel("Strain")
+            #     for i in range(self.num_calibration_curves):
+            #         axes[0].plot(self.data_domain.sample_frequencies[self.data_domain.frequency_mask], calibration_draws["H1"][i], label=i)
+            #         axes[1].plot(self.data_domain.sample_frequencies[self.data_domain.frequency_mask], np.unwrap(np.angle(calibration_draws["H1"][i])))
+            #     axes[0].legend()
+            #     fig.savefig("/data/nihargupte/projects/hotfixes/dingo-devel/devel_testing/calibration_curves.png")
+            #     raise Exception()
         return sample

@@ -127,17 +127,22 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 **calibration_marginalization_kwargs
             )
 
-    def initialize_calibration_marginalization(self, calibration_envelope):
+    def initialize_calibration_marginalization(self, calibration_envelope, num_calibration_curves=1):
         """
         Initialize calibration marginalization table which will use the files provided to
         multiply the signal by a calibration envelope.
 
         Parameters
         ----------
+        num_calibration_curves : int
+            The number of calibration curves to average over. Will default to 1. Increasing this will
+            decrease the sample efficiency due to the calibration errors.
+
         calibration_lookup_table : dict
             Dict with locations of .h5 files of calibration envelopes {"H1":, filepath,...}
             optionally can be set to 'generate'
         """
+        self.num_calibration_curves = num_calibration_curves
         self.calibration_envelope = calibration_envelope
 
     def initialize_time_marginalization(self, t_lower, t_upper, n_fft=1):
@@ -197,12 +202,13 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 [
                     self.time_marginalization,
                     self.phase_marginalization,
+                    self.calibration_marginalization
                 ]
             )
             > 1
         ):
             raise NotImplementedError(
-                "Only one out of time-marginalization and phase-marginalization "
+                "Only one out of time-marginalization, phase-marginalization and calibration-marginalization "
                 "can be used at a time."
             )
 
@@ -210,6 +216,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             return self._log_likelihood_time_marginalized(theta)
         elif self.phase_marginalization:
             return self._log_likelihood_phase_marginalized(theta)
+        elif self.calibration_marginalization:
+            return self._log_likelihood_calibration_marginalized(theta)
         else:
             return self._log_likelihood(theta)
 
@@ -273,7 +281,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             [
                 inner_product(d_ifo, mu_ifo)
                 for d_ifo, mu_ifo in zip(d.values(), mu.values())
-            ]
+            ], 
         )
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
@@ -520,6 +528,40 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         kappa2 = alpha + np.log(np.sum(np.exp(exponent - alpha)))
 
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+
+    def _log_likelihood_calibration_marginalized(self, theta):
+        """
+        Computes log likelihood with calibration_marginalization
+
+        Parameters
+        ----------
+        theta: dict
+            BBH parameters.
+
+        Returns
+        -------
+        log_likelihood: float
+        """
+
+        # Step 1: Compute whitened GW strain mu(theta) for parameters theta.
+        mu = self.signal(theta)["waveform"]
+        d = self.whitened_strains
+        d = {ifo:np.tile(v, (self.num_calibration_curves,1)) for ifo, v in d.items()}
+
+        # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to
+        # compute the remaining terms rho2opt and kappa2
+        rho2opt = np.sum([inner_product(mu_ifo.T, mu_ifo.T) for mu_ifo in mu.values()], axis=0)
+        kappa2 = np.sum(
+            [
+                inner_product(d_ifo.T, mu_ifo.T)
+                for d_ifo, mu_ifo in zip(d.values(), mu.values())
+            ], 
+            axis=0
+        )
+        
+        likelihoods = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+        # Return the average over calibration envelopes
+        return np.average(likelihoods)
 
     def d_inner_h_complex_multi(
         self, theta: pd.DataFrame, num_processes: int = 1
