@@ -7,32 +7,6 @@ from dingo.gw.prior import default_extrinsic_dict
 from dingo.gw.prior import BBHExtrinsicPriorDict
 
 
-
-def find_axis(array, dim):
-    """Looks for axis with dimension dim in array, and returns its index."""
-    indices = np.where(np.array(array.shape) == dim)[0]
-    if len(indices) > 1:
-        raise ValueError(
-            f"Automatic axis detection ambiguous. Array of shape "
-            f"{array.shape} has {len(indices)} axes of dimension "
-            f"{dim}."
-        )
-    if len(indices) < 1:
-        raise ValueError(
-            f"Automatic axis detection failed. Array of shape "
-            f"{array.shape} has no axis of dimension {dim}."
-        )
-    else:
-        return indices[0]
-
-
-def truncate_array(array, axis, lower, upper):
-    """Truncate array to [lower:upper] along selected axis."""
-    sl = [slice(None)] * array.ndim
-    sl[axis] = slice(lower, upper)
-    return array[tuple(sl)]
-
-
 def get_window(window_kwargs):
     """Compute window from window_kwargs."""
     type = window_kwargs["type"]
@@ -50,17 +24,8 @@ def get_window(window_kwargs):
 
 
 def get_window_factor(window):
-    """
-    TODO
-    Parameters
-    ----------
-    window
-
-    Returns
-    -------
-
-    """
-    """Compute window factor."""
+    """Compute window factor. If window is not provided as array or tensor but as
+    window_kwargs, first build the window."""
     if type(window) == dict:
         window = get_window(window)
     return np.sum(window ** 2) / len(window)
@@ -69,7 +34,8 @@ def get_window_factor(window):
 def get_extrinsic_prior_dict(extrinsic_prior):
     """Build dict for extrinsic prior by starting with
     default_extrinsic_dict, and overwriting every element for which
-    extrinsic_prior is not default."""
+    extrinsic_prior is not default.
+    TODO: Move to dingo.gw.prior.py?"""
     extrinsic_prior_dict = default_extrinsic_dict.copy()
     for k, v in extrinsic_prior.items():
         if v.lower() != "default":
@@ -109,6 +75,7 @@ def get_mismatch(a, b, domain, asd_file=None):
     inner_bb = np.sum((b.conj() * b)[min_idx:], axis=0).real
     overlap = inner_ab / np.sqrt(inner_aa * inner_bb)
     return 1 - overlap
+
 
 def get_standardization_dict(
     extrinsic_prior_dict, wfd, selected_parameters, transform=None
@@ -158,7 +125,7 @@ def get_standardization_dict(
         num_samples = min(100_000, len(wfd.parameters))
         samples = {p: np.empty(num_samples) for p in additional_parameters}
         for n in range(num_samples):
-            sample = {'parameters': wfd.parameters.iloc[n].to_dict()}
+            sample = {"parameters": wfd.parameters.iloc[n].to_dict()}
             sample = transform(sample)
             for p in additional_parameters:
                 # This assumes all of the additional parameters are contained within

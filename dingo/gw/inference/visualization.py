@@ -31,7 +31,7 @@ def generate_cornerplot(*sample_sets, filename=None):
     c.plotter.plot(filename=filename)
 
 
-def load_ref_samples(ref_samples_file):
+def load_ref_samples(ref_samples_file, drop_geocent_time=True):
     # Todo: this function should be made more flexible for other formats and parameters
     from bilby.gw.conversion import component_masses_to_chirp_mass
 
@@ -52,12 +52,13 @@ def load_ref_samples(ref_samples_file):
         "ra",
         "dec",
     ]
-    samples = np.load(ref_samples_file, allow_pickle=True)["samples"]
+    samples = np.load(ref_samples_file, allow_pickle=True)["samples"][:,:15]
     samples = pd.DataFrame(data=samples, columns=columns)
     # add chirp mass and mass ratio.
     Mc = component_masses_to_chirp_mass(samples["mass_1"], samples["mass_2"])
     q = samples["mass_2"] / samples["mass_1"]
     samples.insert(loc=0, column="chirp_mass", value=Mc)
     samples.insert(loc=0, column="mass_ratio", value=q)
-    samples.drop(columns="geocent_time", inplace=True)
+    if drop_geocent_time:
+        samples.drop(columns="geocent_time", inplace=True)
     return samples
