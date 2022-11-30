@@ -324,26 +324,4 @@ class MultiplyCalibrationUncertainty(object):
             sample["waveform"][ifo.name] = np.tile(sample["waveform"][ifo.name], (self.num_calibration_curves, 1))
             sample["waveform"][ifo.name][:, self.data_domain.frequency_mask] = calibration_waveforms
 
-            # import matplotlib.pyplot as plt
-            # if ifo.name == "H1":
-            #     fig, axes = plt.subplots(1, 2)
-            #     axes[0].set_xscale("log")
-            #     axes[0].set_xlabel("Freq (Hz)")
-            #     axes[0].set_ylabel("Strain")
-            #     for i in range(self.num_calibration_curves):
-            #         axes[0].plot(self.data_domain.sample_frequencies, np.abs(sample["waveform"]["H1"][i]), label=i)
-            #         axes[1].plot(self.data_domain.sample_frequencies, np.unwrap(np.angle(sample["waveform"]["H1"][i])))
-            #     axes[0].legend()
-            #     fig.savefig("/data/nihargupte/projects/hotfixes/dingo-devel/devel_testing/calibrated_wfs.png")
-
-            #     fig, axes = plt.subplots(1, 2)
-            #     axes[0].set_xscale("log")
-            #     axes[0].set_xlabel("Freq (Hz)")
-            #     axes[0].set_ylabel("Strain")
-            #     for i in range(self.num_calibration_curves):
-            #         axes[0].plot(self.data_domain.sample_frequencies[self.data_domain.frequency_mask], calibration_draws["H1"][i], label=i)
-            #         axes[1].plot(self.data_domain.sample_frequencies[self.data_domain.frequency_mask], np.unwrap(np.angle(calibration_draws["H1"][i])))
-            #     axes[0].legend()
-            #     fig.savefig("/data/nihargupte/projects/hotfixes/dingo-devel/devel_testing/calibration_curves.png")
-            #     raise Exception()
         return sample
