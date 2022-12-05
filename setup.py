@@ -71,7 +71,8 @@ setup(
             "dingo_pipe_generation=dingo.gw.pipe.data_generation:main",
             "dingo_pipe_sampling=dingo.gw.pipe.sampling:main",
             "dingo_pipe_importance_sampling=dingo.gw.pipe.importance_sampling:main",
-        ]
+        ],
+        "asimov.pipelines": ["dingopipeline = dingp.gw.pipe.asimov:Dingo"]
     },
     classifiers=[
         "Programming Language :: Python :: 3.6",
