@@ -1,15 +1,18 @@
-import os
+import configparser
 import glob
-import subprocess
-from asimov.pipeline import Pipeline, PipelineException, PipelineLogger
-from asimov.ini import RunConfiguration
-from asimov import config
-from asimov import logging
+import os
 import re
-import numpy as np
+import subprocess
 
 
-class LALInference(Pipeline):
+from asimov import config, logger
+from asimov.utils import set_directory
+
+from asimov.pipeline import Pipeline, PipelineException, PipelineLogger
+
+
+
+class Dingo(Pipeline):
     """
     The LALInference Pipeline.
 
@@ -22,12 +25,13 @@ class LALInference(Pipeline):
         Defaults to "C01_offline".
     """
 
+    name = "dingo"
     STATUS = {"wait", "stuck", "stopped", "running", "finished"}
 
     def __init__(self, production, category=None):
-        super(LALInference, self).__init__(production, category)
-        self.logger = logger = logging.AsimovLogger(event=production.event)
-        if not production.pipeline.lower() == "lalinference":
+        super(Dingo, self).__init__(production, category)
+        self.logger = logger
+        if not production.pipeline.lower() == self.name:
             raise PipelineException
 
     def detect_completion(self):
