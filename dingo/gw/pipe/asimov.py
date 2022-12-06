@@ -3,6 +3,7 @@ import glob
 import os
 import re
 import subprocess
+import time
 
 
 from asimov import config, logger
@@ -38,19 +39,29 @@ class Dingo(Pipeline):
         """
         Check for the production of the posterior file to signal that the job has completed.
         """
+        self.logger.info("Checking if the dingo job has completed")
         results_dir = glob.glob(f"{self.production.rundir}/posterior_samples")
         if len(results_dir) > 0:
             if len(glob.glob(os.path.join(results_dir[0], f"posterior_*.hdf5"))) > 0:
+                self.logger.info("Results files found, the job is finished.")
                 return True
             else:
+                self.logger.info("No results files found.")
                 return False
         else:
+            self.logger.info("No results directory found")
             return False
 
-    def build_dag(self, psds=None, user=None, clobber_psd=False):
+    def before_submit(self):
+        """Pre-submit hook."""
+        self.logger.info("Running the before_submit hook")
+        pass
+
+
+    def build_dag(self, psds=None, user=None, clobber_psd=False, dryrun=False):
         """
         Construct a DAG file in order to submit a production to the
-        condor scheduler using LALInferencePipe.
+        condor scheduler using DingoPipe.
 
         Parameters
         ----------
@@ -62,6 +73,10 @@ class Dingo(Pipeline):
            instead.
         user : str
            The user accounting tag which should be used to run the job.
+        dryrun: bool
+           If set to true the commands will not be run, but will be printed to standard output. Defaults to False.
+
+
 
         Raises
         ------
@@ -69,75 +84,102 @@ class Dingo(Pipeline):
            Raised if the construction of the DAG fails.
         """
 
-        # Change to the location of the ini file.
-        os.chdir(os.path.join(self.production.event.repository.directory,
-                              self.category))
+        cwd = os.getcwd()
+        self.logger.info(f"Working in {cwd}")
+
+        if self.production.event.repository:
+            ini = self.production.event.repository.find_prods(
+                self.production.name, self.category
+            )[0]
+            ini = os.path.join(cwd, ini)
+        else:
+            ini = f"{self.production.name}.ini"
+
+
         gps_file = self.production.get_timefile()
 
         if self.production.rundir:
             rundir = self.production.rundir
         else:
-            rundir = os.path.join(os.path.expanduser("~"),
-                                  self.production.event.name,
-                                  self.production.name)
+            rundir = os.path.join(
+                os.path.expanduser("~"),
+                self.production.event.name,
+                self.production.name,
+            )
             self.production.rundir = rundir
 
-        # os.mkdir(self.production.rundir, exist_ok=True)
-        ini = f"{self.production.name}.ini"
-        command = [
-            os.path.join(config.get("pipelines", "environment"),
-                         "bin",
-                         "lalinference_pipe"),
-            "-g", f"{gps_file}",
-            "-r", self.production.rundir,
-            ini
-        ]
-        self.logger.info(" ".join(command))
-        pipe = subprocess.Popen(command,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT)
-        out, err = pipe.communicate()
-        if err or "Successfully created DAG file." not in str(out):
-            self.production.status = "stuck"
-            if hasattr(self.production.event, "issue_object"):
-                self.logger.error(f"DAG file could not be created.\n{command}\n{out}\n\n{err}")
-                raise PipelineException(f"DAG file could not be created.\n{command}\n{out}\n\n{err}",
-                                        issue=self.production.event.issue_object,
-                                        production=self.production.name)
-            else:
-                self.logger.error(f"DAG file could not be created.\n{command}\n{out}\n\n{err}")
-                raise PipelineException(f"DAG file could not be created.\n{command}\n{out}\n\n{err}",
-                                        production=self.production.name)
+        if "job label" in self.production.meta:
+            job_label = self.production.meta["job label"]
         else:
-            self.logger.info("DAG created")
-            if hasattr(self.production.event, "issue_object"):
-                return PipelineLogger(message=out,
-                                      issue=self.production.event.issue_object,
-                                      production=self.production.name)
+            job_label = self.production.name
+
+
+        command = [
+            os.path.join(config.get("pipelines", "environment"), "bin", "dingo_pipe"),
+            ini,
+            "--label",
+            job_label,
+            "--outdir",
+            f"{cwd}/{self.production.rundir}",
+            # "--accounting",
+            # f"{self.production.meta['scheduler']['accounting group']}",
+        ]
+
+        if dryrun:
+            print(" ".join(command))
+        else:
+            self.logger.info(" ".join(command))
+            pipe = subprocess.Popen(
+                command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+            )
+            out, err = pipe.communicate()
+            self.logger.info(out)
+
+            if err or "DAG generation complete, to submit jobs" not in str(out):
+#                exit(1)
+                # self.production.status = "stuck"
+                self.logger.error(err)
+                raise PipelineException(
+                    f"DAG file could not be created.\n{command}\n{out}\n\n{err}",
+                    production=self.production.name,
+                )
+                
             else:
-                return PipelineLogger(message=out,
-                                      production=self.production.name)
+                time.sleep(10)
+                return PipelineLogger(message=out, production=self.production.name)
+
 
     def samples(self):
         """
-        Collect the combined samples file for PESummary.
+        Collect the combined samples files for PESummary.
         """
         return glob.glob(os.path.join(self.production.rundir, "posterior_samples", "posterior*.hdf5"))
+
 
     def collect_logs(self):
         """
         Collect all of the log files which have been produced by this production and
         return their contents as a dictionary.
         """
-        logs = glob.glob(f"{self.production.rundir}/log/*.err") + glob.glob(f"{self.production.rundir}/*.err")
+        logs = glob.glob(f"{self.production.rundir}/submit/*.err") + glob.glob(
+            f"{self.production.rundir}/log*/*.err"
+        )
+        logs += glob.glob(f"{self.production.rundir}/*/*.out")
         messages = {}
         for log in logs:
-            with open(log, "r") as log_f:
-                message = log_f.read()
-                messages[log.split("/")[-1]] = message
+            try:
+                with open(log, "r") as log_f:
+                    message = log_f.read()
+                    message = message.split("\n")
+                    messages[log.split("/")[-1]] = "\n".join(message[-100:])
+            except FileNotFoundError:
+                messages[
+                    log.split("/")[-1]
+                ] = "There was a problem opening this log file."
         return messages
 
-    def submit_dag(self):
+
+    def submit_dag(self, dryrun=False):
         """
         Submit a DAG file to the condor cluster.
 
@@ -162,32 +204,62 @@ class Dingo(Pipeline):
            This will be raised if the pipeline fails to submit the job.
         """
 
-        os.chdir(self.production.rundir)
+        cwd = os.getcwd()
+        self.logger.info(f"Working in {cwd}")
 
         self.before_submit()
 
         try:
-            command = ["condor_submit_dag",
-                       "-batch-name", f"lalinf/{self.production.event.name}/{self.production.name}",
-                       os.path.join(self.production.rundir, f"multidag.dag")]
-            dagman = subprocess.Popen(command,
-                                      stdout=subprocess.PIPE,
-                                      stderr=subprocess.STDOUT)
+            if "job label" in self.production.meta:
+                job_label = self.production.meta["job label"]
+            else:
+                job_label = self.production.name
+            dag_filename = f"dag_{job_label}.submit"
+            command = [
+                "condor_submit_dag",
+                "-batch-name",
+                f"dingo/{self.production.event.name}/{self.production.name}",
+                os.path.join(self.production.rundir, "submit", dag_filename),
+            ]
+
+            if dryrun:
+                print(" ".join(command))
+                exit(1)
+            else:
+                dagman = subprocess.Popen(
+                    command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+                )
+
+                self.logger.info(" ".join(command))
+
+                stdout, stderr = dagman.communicate()
+
+                if "submitted to cluster" in str(stdout):
+                    cluster = re.search(
+                        r"submitted to cluster ([\d]+)", str(stdout)
+                    ).groups()[0]
+                    self.logger.info(
+                        f"Submitted successfully. Running with job id {int(cluster)}"
+                    )
+                    self.production.status = "running"
+                    self.production.job_id = int(cluster)
+                    return cluster, PipelineLogger(stdout)
+                else:
+                    self.logger.error("Could not submit the job to the cluster")
+                    self.logger.info(stdout)
+                    self.logger.error(stderr)
+
+                    raise PipelineException(
+                        "The DAG file could not be submitted.",
+                    )
+
         except FileNotFoundError as error:
-            raise PipelineException("It looks like condor isn't installed on this system.\n"
-                                    f"""I wanted to run {" ".join(command)}.""")
+            self.logger.exception(error)
+            raise PipelineException(
+                "It looks like condor isn't installed on this system.\n"
+                f"""I wanted to run {" ".join(command)}."""
+            ) from error
 
-        stdout, stderr = dagman.communicate()
-
-        if "submitted to cluster" in str(stdout):
-            cluster = re.search("submitted to cluster ([\d]+)", str(stdout)).groups()[0]
-            self.production.status = "running"
-            self.production.job_id = cluster
-            return cluster, PipelineLogger(stdout)
-        else:
-            raise PipelineException(f"The DAG file could not be submitted.\n\n{stdout}\n\n{stderr}",
-                                    issue=self.production.event.issue_object,
-                                    production=self.production.name)
 
     def after_completion(self):
         cluster = self.run_pesummary()
