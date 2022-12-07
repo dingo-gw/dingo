@@ -40,6 +40,7 @@ class Dingo(Pipeline):
         Check for the production of the posterior file to signal that the job has completed.
         """
         self.logger.info("Checking if the dingo job has completed")
+        # TODO: correct results directory
         results_dir = glob.glob(f"{self.production.rundir}/posterior_samples")
         if len(results_dir) > 0:
             if len(glob.glob(os.path.join(results_dir[0], f"posterior_*.hdf5"))) > 0:
@@ -136,8 +137,6 @@ class Dingo(Pipeline):
             self.logger.info(out)
 
             if err or "DAG generation complete, to submit jobs" not in str(out):
-#                exit(1)
-                # self.production.status = "stuck"
                 self.logger.error(err)
                 raise PipelineException(
                     f"DAG file could not be created.\n{command}\n{out}\n\n{err}",
@@ -224,7 +223,6 @@ class Dingo(Pipeline):
 
             if dryrun:
                 print(" ".join(command))
-                exit(1)
             else:
                 dagman = subprocess.Popen(
                     command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
@@ -281,9 +279,7 @@ class Dingo(Pipeline):
     @classmethod
     def read_ini(cls, filepath):
         """
-        Read and parse a bilby configuration file.
-
-        Note that bilby configurations are property files and not compliant ini configs.
+        Read and parse a dingo configuration file.
 
         Parameters
         ----------
