@@ -10,6 +10,7 @@ from asimov import config, logger
 from asimov.utils import set_directory
 
 from asimov.pipeline import Pipeline, PipelineException, PipelineLogger
+from asimov.storage import Store
 
 
 
@@ -41,9 +42,9 @@ class Dingo(Pipeline):
         """
         self.logger.info("Checking if the dingo job has completed")
         # TODO: correct results directory
-        results_dir = glob.glob(f"{self.production.rundir}/posterior_samples")
+        results_dir = glob.glob(f"{self.production.rundir}/result")
         if len(results_dir) > 0:
-            if len(glob.glob(os.path.join(results_dir[0], f"posterior_*.hdf5"))) > 0:
+            if len(glob.glob(os.path.join(results_dir[0], f"*sampling_result.hdf5"))) > 0:
                 self.logger.info("Results files found, the job is finished.")
                 return True
             else:
@@ -152,7 +153,53 @@ class Dingo(Pipeline):
         """
         Collect the combined samples files for PESummary.
         """
-        return glob.glob(os.path.join(self.production.rundir, "posterior_samples", "posterior*.hdf5"))
+
+        results_dir = os.path.join(self.production.rundir, "result")
+        results_filenames = sorted(os.listdir(results_dir))
+        return os.path.join(results_dir, results_filenames[0])
+
+
+    def upload_assets(self):
+        """
+        Upload the PSDs from this job.
+        """
+
+        asset = self.collect_assets()["samples"]
+        self.production.event.repository.add_file(
+            asset,
+            "posterior_samples.hdf5",
+            commit_message=f"Added posterior_samples.",
+        )
+
+
+    def store_assets(self):
+        """
+        Add the assets to the store.
+        """
+
+        self.logger.info(self.collect_assets())
+        asset = self.collect_assets()["samples"]
+        store = Store(root=config.get("storage", "directory"))
+
+        try:
+            store.add_file(
+                self.production.event.name,
+                self.production.name,
+                file=asset,
+                new_name="posterior_samples.hdf5"
+            )
+        except Exception as e:
+            self.logger.error(
+                f"There was a problem committing the posterior samples to the store."
+            )
+            self.logger.exception(e)
+
+
+    def collect_assets(self):
+        """
+        Gather all of the results assets for this job.
+        """
+        return {"samples": self.samples()}
 
 
     def collect_logs(self):
@@ -259,10 +306,31 @@ class Dingo(Pipeline):
             ) from error
 
 
+    # TODO: start pesummary here
     def after_completion(self):
-        cluster = self.run_pesummary()
-        self.production.meta['job id'] = int(cluster)
-        self.production.status = "processing"
+
+        try:
+            self.store_assets()
+            self.upload_assets()
+
+        except Exception as e:
+            self.logger.error("Failed to store the posterior results")
+            self.logger.exception(e)
+
+        # cluster = self.run_pesummary()
+
+        # this is the default implementation
+        self.production.status = "finished"
+        try:
+            self.production.meta.pop("job id")
+        except KeyError:
+            pass
+
+
+    def detect_completion_processing(self):
+        # no post processing currently performed
+        return True
+
 
     def resurrect(self):
         """
@@ -275,6 +343,7 @@ class Dingo(Pipeline):
         if (count < 5) and (len(glob.glob(os.path.join(self.production.rundir, "submit", "*.rescue*"))) > 0):
             count += 1
             self.submit_dag()
+
 
     @classmethod
     def read_ini(cls, filepath):
