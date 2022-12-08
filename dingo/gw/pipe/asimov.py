@@ -13,7 +13,6 @@ from asimov.pipeline import Pipeline, PipelineException, PipelineLogger
 from asimov.storage import Store
 
 
-
 class Dingo(Pipeline):
     """
     The LALInference Pipeline.
@@ -44,7 +43,10 @@ class Dingo(Pipeline):
         # TODO: correct results directory
         results_dir = glob.glob(f"{self.production.rundir}/result")
         if len(results_dir) > 0:
-            if len(glob.glob(os.path.join(results_dir[0], f"*sampling_result.hdf5"))) > 0:
+            if (
+                len(glob.glob(os.path.join(results_dir[0], f"*sampling_result.hdf5")))
+                > 0
+            ):
                 self.logger.info("Results files found, the job is finished.")
                 return True
             else:
@@ -58,7 +60,6 @@ class Dingo(Pipeline):
         """Pre-submit hook."""
         self.logger.info("Running the before_submit hook")
         pass
-
 
     def build_dag(self, psds=None, user=None, clobber_psd=False, dryrun=False):
         """
@@ -97,7 +98,6 @@ class Dingo(Pipeline):
         else:
             ini = f"{self.production.name}.ini"
 
-
         gps_file = self.production.get_timefile()
 
         if self.production.rundir:
@@ -114,7 +114,6 @@ class Dingo(Pipeline):
             job_label = self.production.meta["job label"]
         else:
             job_label = self.production.name
-
 
         command = [
             os.path.join(config.get("pipelines", "environment"), "bin", "dingo_pipe"),
@@ -143,11 +142,10 @@ class Dingo(Pipeline):
                     f"DAG file could not be created.\n{command}\n{out}\n\n{err}",
                     production=self.production.name,
                 )
-                
+
             else:
                 time.sleep(10)
                 return PipelineLogger(message=out, production=self.production.name)
-
 
     def samples(self):
         """
@@ -157,7 +155,6 @@ class Dingo(Pipeline):
         results_dir = os.path.join(self.production.rundir, "result")
         results_filenames = sorted(os.listdir(results_dir))
         return os.path.join(results_dir, results_filenames[0])
-
 
     def upload_assets(self):
         """
@@ -170,7 +167,6 @@ class Dingo(Pipeline):
             "posterior_samples.hdf5",
             commit_message=f"Added posterior_samples.",
         )
-
 
     def store_assets(self):
         """
@@ -186,7 +182,7 @@ class Dingo(Pipeline):
                 self.production.event.name,
                 self.production.name,
                 file=asset,
-                new_name="posterior_samples.hdf5"
+                new_name="posterior_samples.hdf5",
             )
         except Exception as e:
             self.logger.error(
@@ -194,13 +190,11 @@ class Dingo(Pipeline):
             )
             self.logger.exception(e)
 
-
     def collect_assets(self):
         """
         Gather all of the results assets for this job.
         """
         return {"samples": self.samples()}
-
 
     def collect_logs(self):
         """
@@ -223,7 +217,6 @@ class Dingo(Pipeline):
                     log.split("/")[-1]
                 ] = "There was a problem opening this log file."
         return messages
-
 
     def submit_dag(self, dryrun=False):
         """
@@ -305,7 +298,6 @@ class Dingo(Pipeline):
                 f"""I wanted to run {" ".join(command)}."""
             ) from error
 
-
     # TODO: start pesummary here
     def after_completion(self):
 
@@ -326,24 +318,24 @@ class Dingo(Pipeline):
         except KeyError:
             pass
 
-
     def detect_completion_processing(self):
         # no post processing currently performed
         return True
-
 
     def resurrect(self):
         """
         Attempt to ressurrect a failed job.
         """
         try:
-            count = self.production.meta['resurrections']
+            count = self.production.meta["resurrections"]
         except:
             count = 0
-        if (count < 5) and (len(glob.glob(os.path.join(self.production.rundir, "submit", "*.rescue*"))) > 0):
+        if (count < 5) and (
+            len(glob.glob(os.path.join(self.production.rundir, "submit", "*.rescue*")))
+            > 0
+        ):
             count += 1
             self.submit_dag()
-
 
     @classmethod
     def read_ini(cls, filepath):
@@ -363,4 +355,3 @@ class Dingo(Pipeline):
         config_parser.read_string(file_content)
 
         return config_parser
-
