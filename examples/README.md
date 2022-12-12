@@ -42,18 +42,23 @@ If using CUDA on a machine with several GPUs, be sure to first select the desire
 Once a Dingo model is trained, inference for real events can be performed with 
 ```
 dingo_analyze_event 
-  --model model.pt 
+  --model train_dir/model.pt 
   --gps_time_event gps_time_event
   --num_samples num_samples
   --batch_size batch_size
 ```
-where `model.pt` is the path of the trained Dingo mode, `gps_time_event` is the GPS time of the event to be analyzed (e.g., 1126259462.4 for GW150914), `num_samples` is the number of desired samples and `batch_size` is the batch size (the larger the faster the computation, but limited by GPU memory). Dingo downloads the event data from GWOSC. It also estimates the noise ASD from data prior to the event.
+where `model.pt` is the path of the trained Dingo model, `gps_time_event` is the GPS time of the event to be analyzed (e.g., 1126259462.4 for GW150914), `num_samples` is the number of desired samples and `batch_size` is the batch size (the larger the faster the computation, but limited by GPU memory). Dingo downloads the event data from GWOSC. It also estimates the noise ASD from data prior to the event.
 
-If Dingo was trained using GNPE (with the `data/gnpe_time_shifts` option in the settings file) then one must train an additional Dingo model to initialize the Gibbs sampler. This model infers initial estimates for the coalescence times in the individual detectors and is trained just like any other dingo model. See `training/train_settings_init.yaml` for an example settings file. To perform inference using GNPE, the script must be pointed to this model:
+If Dingo was trained using GNPE (with the `data/gnpe_time_shifts` option in the settings file) then one must train an additional Dingo model to initialize the Gibbs sampler. 
+I.e. you need to train a second model with:
+```
+dingo_train --settings_file training/train_settings_init.yaml --train_dir train_dir_init/
+```
+Note such a network is usually much smaller than the main network. This model infers initial estimates for the coalescence times in the individual detectors and is trained just like any other dingo model. See `training/train_settings_init.yaml` for an example settings file. To perform inference using GNPE, the script must be pointed to this model:
 ```
 dingo_analyze_event 
-  --model model 
-  --model_init model_init
+  --model train_dir/model.pt 
+  --model_init train_dir_init/model.pt
   --gps_time_event gps_time_event
   --num_samples num_samples
   --num_gnpe_iterations num_gnpe_iterations
