@@ -319,7 +319,8 @@ class Sampler(object):
 
     def to_hdf5(self, label="", outdir="."):
         dataset = self.to_result()
-        file_name = "dingo_samples_" + label + ".hdf5"
+        file_name = label + "_result.hdf5"
+        Path(outdir).mkdir(parents=True, exist_ok=True)
         dataset.to_file(file_name=Path(outdir, file_name))
 
 
