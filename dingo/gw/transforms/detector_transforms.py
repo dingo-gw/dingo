@@ -255,7 +255,18 @@ class MultiplyCalibrationUncertainty(object):
         Initialize calibration marginalization. This store the calibration curve prior will later be applied to
         the waveform. We can either specify what the calibration values are via a lookup table or randomly generate
         the fake curves based on a prior. The former is useful for when you have an event you are interested in.
+
+        Calibration marginalization takes a median and sigma (of amplitude and phase) for each point in frequency space. Then it creates a spline
+        on the median and sigma. NOTE this is a DIFFERENT spline from the cubic spline that will be generated later. This spline is just needed to 
+        create priors on the the node points for the calibration cubic spline. This spline will give you the node points, i.e. f_i (log spaced) and 
+        Priors(\delta A_i, \delta \psi_i). 
+
+        These node points are the calibration parameters. From these node points and priors you can draw values for \delta A_i and \delta \psi_i which
+        will give you a calibration curve. This is the calibration curve which you then multiply against the waveform.
         """
+
+
+
         self.ifo_list = ifo_list
         self.num_calibration_curves = num_calibration_curves
 
@@ -274,6 +285,9 @@ class MultiplyCalibrationUncertainty(object):
                 )
 
                 # Setting priors
+                # What this will do is take the the calibration envelope and set a spline on the median and sigma of the amplitude and phase. 
+                # Let's focus on the amplitude here, the phase is analogous. Then in log frequency it will setup node points say at frequency points
+                # $f_i$. Then for each node point f_i, it will create a gaussian prior according to the spline of the median and sigma found earlier 
                 self.calibration_priors[
                     ifo.name
                 ] = CalibrationPriorDict.from_envelope_file(
@@ -300,22 +314,14 @@ class MultiplyCalibrationUncertainty(object):
             calibration_draws[ifo.name] = np.zeros(
                 (
                     self.num_calibration_curves,
-                    len(
-                        self.data_domain.sample_frequencies[
-                            self.data_domain.frequency_mask
-                        ]
-                    ),
+                    len(self.data_domain.sample_frequencies[self.data_domain.frequency_mask]),
                 ),
                 dtype=complex,
             )
 
             for i in range(self.num_calibration_curves):
-                calibration_draws[ifo.name][
-                    i, :
-                ] = ifo.calibration_model.get_calibration_factor(
-                    self.data_domain.sample_frequencies[
-                        self.data_domain.frequency_mask
-                    ],
+                calibration_draws[ifo.name][i, :] = ifo.calibration_model.get_calibration_factor(
+                    self.data_domain.sample_frequencies[self.data_domain.frequency_mask],
                     prefix="recalib_{}_".format(ifo.name),
                     **calibration_parameter_draws[ifo.name].iloc[i],
                 )

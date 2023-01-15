@@ -14,8 +14,8 @@ nde:
     - psi
     - domega220
     - dtau220
-    parameter_samples: /data/nihargupte/projects/hotfixes/dingo-devel/devel_testing/is/dingo_samples_training_samples.hdf5
-    path: /data/nihargupte/projects/hotfixes/dingo-devel/devel_testing/is/nde-1126259462.4.pt
+    parameter_samples: /data/nihargupte/projects/hotfixes/dingo-devel/devel_testing/calibration_marginalization/is/dingo_samples_training_samples.hdf5
+    path: /data/nihargupte/projects/hotfixes/dingo-devel/devel_testing/calibration_marginalization/is/nde-1126259462.4.pt
   model:
     base_transform_kwargs:
       activation: elu
@@ -46,8 +46,8 @@ synthetic_phase:
   n_grid: 501
   num_processes: 8
   uniform_weight: 0.01
-# calibration_marginalization:
-#   num_calibration_curves: 100
-#   calibration_envelope:
-#     H1: "/data/nihargupte/projects/hotfixes/generic-calibration-reweighting-master/examples/GW150914/GWTC1_GW150914_H_CalEnv.txt"
-#     L1: "/data/nihargupte/projects/hotfixes/generic-calibration-reweighting-master/examples/GW150914/GWTC1_GW150914_L_CalEnv.txt"
+calibration_marginalization:
+  num_calibration_curves: 10
+  calibration_envelope:
+    H1: "/data/nihargupte/projects/hotfixes/generic-calibration-reweighting-master/examples/GW150914/GWTC1_GW150914_H_CalEnv.txt"
+    L1: "/data/nihargupte/projects/hotfixes/generic-calibration-reweighting-master/examples/GW150914/GWTC1_GW150914_L_CalEnv.txt"
