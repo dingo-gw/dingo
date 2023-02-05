@@ -35,7 +35,16 @@ def ls():
             svd.print_validation_summary()
 
         except KeyError:
-            dataset = DingoDataset(file_name=args.file_name, data_keys=["svd"])
+            dataset = DingoDataset(
+                file_name=args.file_name,
+                data_keys=[
+                    "svd",
+                    "importance_sampling_metadata",
+                    "event_metadata",
+                    "log_evidence",
+                    "log_evidence_std",
+                ],
+            )
             if dataset.settings is not None:
                 print(
                     yaml.dump(
@@ -48,6 +57,37 @@ def ls():
                 svd = SVDBasis(dictionary=dataset.svd)
                 print("SVD validation summary:")
                 svd.print_validation_summary()
+            if dataset.importance_sampling_metadata is not None:
+                print(
+                    "Importance sampling:\n"
+                    + "====================\n"
+                    + yaml.dump(
+                        dataset.importance_sampling_metadata,
+                        default_flow_style=False,
+                        sort_keys=False,
+                    ),
+                )
+            if dataset.event_metadata:
+                print(
+                    "Event information:\n"
+                    + "==================\n"
+                    + yaml.dump(
+                        dataset.event_metadata,
+                        default_flow_style=False,
+                        sort_keys=False,
+                    ),
+                )
+            if (
+                dataset.log_evidence is not None
+                and dataset.log_evidence_std is not None
+            ):
+                # TODO: Better to load the Result class so this code does not have to
+                #  be copied. To do this we have to encode the type of DingoDataset in
+                #  the HDF5 file. The current approach is a temporary workaround.
+                print(
+                    f"Log(evidence): {dataset.log_evidence:.3f} +- "
+                    f"{dataset.log_evidence_std:.3f}"
+                )
 
     elif path.suffix == ".yaml":
         with open(path, "r") as f:
