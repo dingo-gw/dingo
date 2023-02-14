@@ -7,6 +7,7 @@ import sys
 from bilby_pipe.input import Input
 from bilby_pipe.utils import parse_args, logger, convert_string_to_dict
 
+from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.inference.inference_pipeline import prepare_log_prob
 from dingo.gw.pipe.default_settings import IMPORTANCE_SAMPLING_SETTINGS
 from dingo.gw.pipe.parser import create_parser
@@ -34,6 +35,7 @@ class ImportanceSamplingInput(Input):
 
         # Samples to run on
         self.proposal_samples_file = args.proposal_samples_file
+        self.event_data_file = args.event_data_file
 
         # Choices for running
         # self.detectors = args.detectors
@@ -85,6 +87,7 @@ class ImportanceSamplingInput(Input):
         # self.jitter_time = args.jitter_time
 
         self._load_proposal()
+        self._load_event()  # Must be called after _load_proposal().
         self.importance_sampling_settings = args.importance_sampling_settings
 
     def _load_proposal(self):
@@ -94,6 +97,10 @@ class ImportanceSamplingInput(Input):
                 "log_prob is not present in proposal samples. This is "
                 "required for importance sampling."
             )
+
+    def _load_event(self):
+        event_dataset = EventDataset(file_name=self.event_data_file)
+        self.result.reset_event(event_dataset)
 
     @property
     def importance_sampling_settings(self):

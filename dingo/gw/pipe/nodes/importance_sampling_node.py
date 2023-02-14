@@ -2,10 +2,11 @@ from bilby_pipe.job_creation.nodes import AnalysisNode
 
 
 class ImportanceSamplingNode(AnalysisNode):
-    def __init__(self, inputs, sampling_node, dag):
+    def __init__(self, inputs, sampling_node, generation_node, dag):
         super(AnalysisNode, self).__init__(inputs)
         self.dag = dag
         self.sampling_node = sampling_node
+        self.generation_node = generation_node
         self.request_cpus = inputs.request_cpus_importance_sampling
 
         data_label = sampling_node.job_name
@@ -32,13 +33,19 @@ class ImportanceSamplingNode(AnalysisNode):
         # Add extra arguments for dingo
         self.arguments.add("label", self.label)
         self.arguments.add("proposal-samples-file", sampling_node.samples_file)
+        self.arguments.add("event-data-file", generation_node.event_data_file)
 
         self.extra_lines.extend(self._checkpoint_submit_lines())
         # if self.request_cpus > 1:
         #     self.extra_lines.extend(['environment = "OMP_NUM_THREADS=1"'])
 
         self.process_node()
+
+        # We need both of these as parents because importance sampling can in principle
+        # use different data than sampling. In that case, the generation node will not
+        # be a parent of the sampling node.
         self.job.add_parent(sampling_node.job)
+        self.job.add_parent(generation_node.job)
 
     @property
     def executable(self):

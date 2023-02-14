@@ -98,7 +98,7 @@ class SamplingInput(Input):
     def _load_event(self):
         event_dataset = EventDataset(file_name=self.event_data_file)
         self.context = event_dataset.data
-        self.event_metadata = event_dataset.event_metadata
+        self.event_metadata = event_dataset.settings
 
     def _load_sampler(self):
         """Load the sampler and set its context based on event data."""

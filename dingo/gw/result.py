@@ -3,6 +3,7 @@ from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
+import yaml
 from bilby.core.prior import Uniform, Constraint
 
 from dingo.core.density import (
@@ -94,6 +95,44 @@ class Result(CoreResult):
 
         self.domain.window_factor = get_window_factor(data_settings["window"])
 
+    def _rebuild_domain(self):
+        """Rebuild the domain based on settings updated for importance sampling.
+
+        These settings should be saved in self.importance_sampling_metadata["updates"],
+        which is expected to be populated by reset_event()."""
+        updates = self.importance_sampling_metadata["updates"].copy()
+
+        # Assume that updates can contain T, f_s, roll_off, f_min, f_max, but no other
+        # quantities that define a new domain (e.g., delta_f). Typical event metadata
+        # will be constructed in this way.
+
+        if "f_s" in updates or "T" in updates or "roll_off" in updates:
+            window_settings = self.base_metadata["train_settings"]["data"][
+                "window"
+            ].copy()
+            window_settings.update(
+                (k, updates[k]) for k in set(window_settings).intersection(updates)
+            )
+            updates["window_factor"] = float(get_window_factor(window_settings))
+
+        if "T" in updates:
+            updates["delta_f"] = 1.0 / updates["T"]
+
+        domain_dict = self.domain.domain_dict  # Existing settings
+        domain_dict.update(
+            (k, updates[k]) for k in set(domain_dict).intersection(updates)
+        )
+
+        print("Rebuilding domain as follows:")
+        print(
+            yaml.dump(
+                domain_dict,
+                default_flow_style=False,
+                sort_keys=False,
+            )
+        )
+        self.domain = build_domain(domain_dict)
+
     def _build_prior(self):
         """Build the prior based on model metadata. Called by __init__()."""
         intrinsic_prior = self.base_metadata["dataset_settings"]["intrinsic_prior"]
@@ -176,9 +215,18 @@ class Result(CoreResult):
         else:
             t_ref = self.base_metadata["train_settings"]["data"]["ref_time"]
 
+        # FIXME: This is a quick hack because I didn't know how to choose the wfg
+        #  domain in the case of a changing domain during importance sampling. It could
+        #  only pose problems for EOB, where sometimes one wants to start integrating
+        #  from lower f_min. But even in that case, f_start should override it.
+        if self.importance_sampling_metadata.get("updates") is None:
+            wfg_domain = build_domain(self.base_metadata["dataset_settings"]["domain"])
+        else:
+            wfg_domain = self.domain
+
         self.likelihood = StationaryGaussianGWLikelihood(
             wfg_kwargs=self.base_metadata["dataset_settings"]["waveform_generator"],
-            wfg_domain=build_domain(self.base_metadata["dataset_settings"]["domain"]),
+            wfg_domain=wfg_domain,
             data_domain=self.domain,
             event_data=self.context,
             t_ref=t_ref,

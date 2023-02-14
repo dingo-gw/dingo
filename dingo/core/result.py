@@ -53,6 +53,8 @@ class Result(DingoDataset):
     """
 
     def __init__(self, file_name=None, dictionary=None):
+        self.event_metadata = None
+        self.context = None
         super().__init__(
             file_name=file_name,
             dictionary=dictionary,
@@ -89,11 +91,58 @@ class Result(DingoDataset):
     def _build_likelihood(self, **likelihood_kwargs):
         self.likelihood = None
 
+    def reset_event(self, event_dataset):
+        """
+        Set the Result context and event_metadata based on an EventDataset.
+
+        If these attributes already exist, perform a comparison to check for changes.
+        Update relevant objects appropriately. Note that setting context and
+        event_metadata attributes directly would not perform these additional checks and
+        updates.
+
+        Parameters
+        ----------
+        event_dataset: EventDataset
+            New event to be used for importance sampling.
+        """
+        context = event_dataset.data
+        event_metadata = event_dataset.settings
+
+        if self.context is not None and not check_equal_dict_of_arrays(
+            self.context, context
+        ):
+            # This is really just for notification. Actions are only taken if the
+            # event metadata differ.
+            print("\nNew event data differ from existing.")
+        self.context = context
+
+        if self.event_metadata is not None and self.event_metadata != event_metadata:
+            print("Changes")
+            print("=======")
+            old_minus_new = dict(freeze(self.event_metadata) - freeze(event_metadata))
+            print("Old event metadata:")
+            for k in sorted(old_minus_new):
+                print(f"  {k}:  {self.event_metadata[k]}")
+
+            new_minus_old = dict(freeze(event_metadata) - freeze(self.event_metadata))
+            print("New event metadata:")
+            if self.importance_sampling_metadata.get("updates") is None:
+                self.importance_sampling_metadata["updates"] = {}
+            for k in sorted(new_minus_old):
+                print(f"  {k}:  {event_metadata[k]}")
+                self.importance_sampling_metadata["updates"][k] = event_metadata[k]
+
+            self._rebuild_domain()
+        self.event_metadata = event_metadata
+
+    def _rebuild_domain(self):
+        pass
+
     @property
     def effective_sample_size(self):
         if "weights" in self.samples:
             weights = self.samples["weights"]
-            return np.sum(weights) ** 2 / np.sum(weights ** 2)
+            return np.sum(weights) ** 2 / np.sum(weights**2)
         else:
             return None
 
@@ -377,3 +426,35 @@ class Result(DingoDataset):
                 f"Effective samples {self.n_eff:.1f}: "
                 f"(Sample efficiency = {100 * self.sample_efficiency:.2f}%)"
             )
+
+
+def check_equal_dict_of_arrays(a, b):
+
+    if type(a) != type(b):
+        return False
+
+    if isinstance(a, dict):
+        a_keys = set(a.keys())
+        b_keys = set(b.keys())
+        if a_keys != b_keys:
+            return False
+
+        for k in a_keys:
+            if not check_equal_dict_of_arrays(a[k], b[k]):
+                return False
+
+        return True
+
+    elif isinstance(a, np.ndarray):
+        return np.array_equal(a, b)
+
+    else:
+        raise TypeError(f"Cannot compare items of type {type(a)}")
+
+
+def freeze(d):
+    if isinstance(d, dict):
+        return frozenset((key, freeze(value)) for key, value in d.items())
+    elif isinstance(d, list):
+        return tuple(freeze(value) for value in d)
+    return d

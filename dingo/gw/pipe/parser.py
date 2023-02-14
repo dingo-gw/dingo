@@ -136,6 +136,14 @@ def create_parser(top_level=True):
             help="Filename for the proposal samples: only used internally by "
             "importance_sampling",
         )
+        parser.add(
+            "--importance-sampling-generation",
+            action="store_true",
+            help="Whether to prepare data based on the updated importance sampling "
+                 "settings rather than network settings. This is used internally for "
+                 "data generation, when preparing different data for the importance "
+                 "sampling stage.",
+        )
 
     data_gen_pars = parser.add_argument_group(
         "Data generation arguments",
@@ -1013,12 +1021,12 @@ def create_parser(top_level=True):
         type=nonefloat,
         help="The reference " "frequency",
     )
-    # waveform_parser.add(
-    #     "--waveform-approximant",
-    #     default="IMRPhenomPv2",
-    #     type=str,
-    #     help="The name of the waveform approximant to use for PE.",
-    # )
+    waveform_parser.add(
+        "--waveform-approximant",
+        default=None,
+        type=nonestr,
+        help="The name of the waveform approximant to use for PE.",
+    )
     # waveform_parser.add(
     #     "--catch-waveform-errors",
     #     default=True,
@@ -1188,6 +1196,18 @@ def create_parser(top_level=True):
             "Dictionary of importance-sampling-settings to pass in, e.g., "
             "{synthetic_phase: {approximation_22_mode: False, (...)}} OR pass"
             "pre-defined set of density-recovery-settings {PhaseRecoveryDefault}"
+        ),
+    )
+    sampler_parser.add(
+        "--importance-sampling-updates",
+        type=str,
+        default="{}",
+        help=(
+            "Dictionary of updated settings to be used for importance sampling, "
+            "including new prior, data conditioning, and waveform approximant. This "
+            "will get populated with any settings provided elsewhere that would "
+            "otherwise override model settings. This is useful for tweaking settings "
+            "that networks were trained with."
         ),
     )
 

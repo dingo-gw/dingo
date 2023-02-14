@@ -72,6 +72,22 @@ def generate_dag(inputs):
     #
     # If injecting into simulated noise, be sure to use consistent noise realization.
 
+    if len(inputs.importance_sampling_updates) > 0:
+        # importance_sampling_generation = True
+        # Iterate over all generation nodes and store them in a list
+        importance_sampling_generation_node_list = []
+        for idx, trigger_time in enumerate(trigger_times):
+            kwargs = dict(trigger_time=trigger_time, idx=idx, dag=dag)
+            if idx > 0:
+                # Make all generation nodes depend on the 0th generation node
+                # Ensures any cached files (e.g. the distance-marginalization
+                # lookup table) are only built once.
+                kwargs["parent"] = generation_node_list[0]
+            generation_node = GenerationNode(inputs, importance_sampling=True, **kwargs)
+            importance_sampling_generation_node_list.append(generation_node)
+    else:
+        importance_sampling_generation_node_list = generation_node_list
+
     #
     # 4. Importance sample
     #
@@ -87,10 +103,13 @@ def generate_dag(inputs):
     # waveform modes are much more expensive to generate than polarizations.
 
     importance_sampling_node_list = []
-    for sampling_node in sampling_node_list:
+    for sampling_node, generation_node in zip(
+        sampling_node_list, importance_sampling_generation_node_list
+    ):
         importance_sampling_node = ImportanceSamplingNode(
             inputs,
             sampling_node=sampling_node,
+            generation_node=generation_node,
             dag=dag,
         )
         importance_sampling_node_list.append(importance_sampling_node)
@@ -102,7 +121,6 @@ def generate_dag(inputs):
     #
     # 5. PESummary
     #
-
 
     dag.build()
     # create_overview(

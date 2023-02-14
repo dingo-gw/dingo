@@ -4,7 +4,7 @@ import sys
 import numpy as np
 from bilby_pipe.input import Input
 from bilby_pipe.main import parse_args
-from bilby_pipe.utils import log_version_information, logger
+from bilby_pipe.utils import log_version_information, logger, convert_string_to_dict
 from bilby_pipe.data_generation import DataGenerationInput as BilbyDataGenerationInput
 
 from dingo.gw.data.event_dataset import EventDataset
@@ -46,6 +46,15 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # self.prior_dict = args.prior_dict
         # self.deltaT = args.deltaT
         # self.default_prior = args.default_prior
+
+        # Whether to generate data for importance sampling. This must be done when
+        # desired data settings differ from those used for network training. If this is
+        # the case, save the new data to a different file name.
+
+        self.importance_sampling = args.importance_sampling_generation
+        self.importance_sampling_updates = args.importance_sampling_updates
+        if self.importance_sampling:
+            vars(args).update(self.importance_sampling_updates)
 
         # Data arguments
         self.ignore_gwpy_data_quality_check = args.ignore_gwpy_data_quality_check
@@ -165,9 +174,11 @@ class DataGenerationInput(BilbyDataGenerationInput):
             # These arrays extend up to self.sampling_frequency. Truncate them to
             # self.maximum_frequency, and also set the asd to 1.0 below
             # self.minimum_frequency.
-            domain = FrequencyDomain(f_min=self.minimum_frequency,
-                                     f_max=self.maximum_frequency,
-                                     delta_f=1/self.duration)
+            domain = FrequencyDomain(
+                f_min=self.minimum_frequency,
+                f_max=self.maximum_frequency,
+                delta_f=1 / self.duration,
+            )
             strain = domain.update_data(strain)
             asd = domain.update_data(asd, low_value=1.0)
 
@@ -186,34 +197,61 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # Data conditioning settings.
         # TODO: Improve choice of settings and event metadata.
 
-        if self.psd_dict is None:
-            psd_duration = self.psd_duration
-        else:
-            psd_duration = None
+        # if self.psd_dict is None:
+        #     psd_duration = self.psd_duration
+        # else:
+        #     psd_duration = None
+
+        # settings = {
+        #     "window": {
+        #         "type": "tukey",
+        #         "f_s": self.sampling_frequency,
+        #         "T": self.duration,
+        #         "roll_off": self.tukey_roll_off,
+        #     },
+        #     "detectors": self.detectors,
+        #     "time_segment": self.duration,
+        #     "time_psd": psd_duration,
+        #     "f_s": self.sampling_frequency,
+        #     "f_min": self.minimum_frequency,
+        #     "f_max": self.maximum_frequency,
+        # }
+
+        # event_metadata = {
+        #     "time_event": self.trigger_time,
+        #     "time_psd": psd_duration,
+        #     "time_buffer": self.post_trigger_duration,
+        # }
 
         settings = {
-            "window": {
-                "type": "tukey",
-                "f_s": self.sampling_frequency,
-                "T": self.duration,
-                "roll_off": self.tukey_roll_off,
-            },
+            "time_event": self.trigger_time,
+            "time_buffer": self.post_trigger_duration,
             "detectors": self.detectors,
-            "time_segment": self.duration,
-            "time_psd": psd_duration,
             "f_s": self.sampling_frequency,
+            "T": self.duration,
+            "f_min": self.minimum_frequency,
+            "f_max": self.maximum_frequency,
+            "window_type": "tukey",
+            "roll_off": self.tukey_roll_off,
         }
 
-        event_metadata = {
-            "time_event": self.trigger_time,
-            "time_psd": psd_duration,
-            "time_buffer": self.post_trigger_duration,
-        }
+        for k in [
+            "psd_duration",
+            "psd_dict",
+            "psd_fractional_overlap",
+            "psd_start_time",
+            "psd_method",
+            "channel_dict",
+            "data_dict",
+        ]:
+            v = getattr(self, k)
+            if v is not None:
+                settings[k] = v
 
         dataset = EventDataset(
             dictionary={
                 "data": data,
-                "event_metadata": event_metadata,
+                # "event_metadata": event_metadata,
                 "settings": settings,
             }
         )
@@ -224,6 +262,19 @@ class DataGenerationInput(BilbyDataGenerationInput):
         return os.path.join(
             self.data_directory, "_".join([self.label, "event_data.hdf5"])
         )
+
+    @property
+    def importance_sampling_updates(self):
+        return self._importance_sampling_updates
+
+    @importance_sampling_updates.setter
+    def importance_sampling_updates(self, setting):
+        if setting is not None:
+            self._importance_sampling_updates = convert_string_to_dict(
+                setting, "importance-sampling-updates"
+            )
+        else:
+            self._importance_sampling_updates = None
 
 
 def create_generation_parser():
