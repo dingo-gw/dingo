@@ -819,7 +819,6 @@ class GWSignalWaveformGenerator:
             raise ValueError("approximant should be a string, but got", approximant)
         else:
             self.approximant_str = approximant
-            self.generator = gwsignal_get_waveform_generator(approximant)
             #self.approximant = LS.GetApproximantFromString(approximant)
 
         if not issubclass(type(domain), Domain):
@@ -1086,7 +1085,8 @@ class GWSignalWaveformGenerator:
         #    )
 
         # Depending on whether the domain is uniform or non-uniform call the appropriate wf generator
-        hpc = gws_wfm.GenerateFDWaveform(parameters_gwsignal, self.generator)
+        generator = gwsignal_get_waveform_generator(self.approximant_str)
+        hpc = gws_wfm.GenerateFDWaveform(parameters_gwsignal, generator)
         hp = hpc.hp
         hc = hpc.hc
         
@@ -1298,7 +1298,8 @@ class GWSignalWaveformGenerator:
             parameters, self.lal_params
         )
 
-        hlm_td = gws_wfm.GenerateTDModes(parameters_gwsignal, self.generator)
+        generator = gwsignal_get_waveform_generator(self.approximant_str)
+        hlm_td = gws_wfm.GenerateTDModes(parameters_gwsignal, generator)
         hlms_lal = {}
         
         for key, value in hlm_td.items():
@@ -1337,7 +1338,8 @@ class GWSignalWaveformGenerator:
         #   deltaT, f_min, f_ref
         #   lal_params, approximant
 
-        hpc = gws_wfm.GenerateTDWaveform(parameters_gwsignal, self.generator)
+        generator = gwsignal_get_waveform_generator(self.approximant_str)
+        hpc = gws_wfm.GenerateTDWaveform(parameters_gwsignal, generator)
 
         h_plus = hpc.hp.value
         h_cross = hpc.hc.value
@@ -1421,6 +1423,7 @@ def generate_waveforms_parallel(
         generate_waveforms_task_func, waveform_generator=waveform_generator
     )
     task_data = parameter_samples.iterrows()
+
     if pool is not None:
         polarizations_list = pool.map(task_func, task_data)
     else:
