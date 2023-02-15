@@ -552,6 +552,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
         # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to
         # compute the remaining terms rho2opt and kappa2
+
         rho2opt = np.sum(
             [inner_product(mu_ifo.T, mu_ifo.T) for mu_ifo in mu.values()], axis=0
         )
@@ -565,7 +566,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
         likelihoods = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
         # Return the average over calibration envelopes
-        return np.average(likelihoods)
+        return np.mean(likelihoods)
 
     def d_inner_h_complex_multi(
         self, theta: pd.DataFrame, num_processes: int = 1

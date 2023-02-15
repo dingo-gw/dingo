@@ -40,9 +40,6 @@ def parse_args():
 
 
 def main():
-    import torch
-
-    torch.cuda.set_device(0)
     # parse args, load settings, load dingo parameter samples
     args = parse_args()
     with open(args.settings, "r") as fp:

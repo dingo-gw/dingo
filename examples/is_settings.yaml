@@ -12,8 +12,6 @@ nde:
     - geocent_time
     - luminosity_distance
     - psi
-    - domega220
-    - dtau220
     parameter_samples: /data/nihargupte/projects/hotfixes/dingo-devel/devel_testing/calibration_marginalization/is/dingo_samples_training_samples.hdf5
     path: /data/nihargupte/projects/hotfixes/dingo-devel/devel_testing/calibration_marginalization/is/nde-1126259462.4.pt
   model:
@@ -44,7 +42,7 @@ num_samples: 50000
 synthetic_phase:
   approximation_22_mode: false
   n_grid: 501
-  num_processes: 8
+  num_processes: 16
   uniform_weight: 0.01
 calibration_marginalization:
   num_calibration_curves: 10
