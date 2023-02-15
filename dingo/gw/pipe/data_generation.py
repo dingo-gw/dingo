@@ -1,7 +1,6 @@
 import os
 import sys
 
-import numpy as np
 from bilby_pipe.input import Input
 from bilby_pipe.main import parse_args
 from bilby_pipe.utils import log_version_information, logger, convert_string_to_dict
@@ -195,34 +194,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
             data["asds"][ifo.name] = asd
 
         # Data conditioning settings.
-        # TODO: Improve choice of settings and event metadata.
-
-        # if self.psd_dict is None:
-        #     psd_duration = self.psd_duration
-        # else:
-        #     psd_duration = None
-
-        # settings = {
-        #     "window": {
-        #         "type": "tukey",
-        #         "f_s": self.sampling_frequency,
-        #         "T": self.duration,
-        #         "roll_off": self.tukey_roll_off,
-        #     },
-        #     "detectors": self.detectors,
-        #     "time_segment": self.duration,
-        #     "time_psd": psd_duration,
-        #     "f_s": self.sampling_frequency,
-        #     "f_min": self.minimum_frequency,
-        #     "f_max": self.maximum_frequency,
-        # }
-
-        # event_metadata = {
-        #     "time_event": self.trigger_time,
-        #     "time_psd": psd_duration,
-        #     "time_buffer": self.post_trigger_duration,
-        # }
-
         settings = {
             "time_event": self.trigger_time,
             "time_buffer": self.post_trigger_duration,
@@ -244,7 +215,10 @@ class DataGenerationInput(BilbyDataGenerationInput):
             "channel_dict",
             "data_dict",
         ]:
-            v = getattr(self, k)
+            try:
+                v = getattr(self, k)
+            except AttributeError:
+                continue
             if v is not None:
                 settings[k] = v
 

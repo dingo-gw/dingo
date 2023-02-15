@@ -1,8 +1,7 @@
 import time
-from typing import Optional, Union
+from typing import Optional
 
 import numpy as np
-import pandas as pd
 import yaml
 from bilby.core.prior import Uniform, Constraint
 
@@ -52,6 +51,8 @@ class Result(CoreResult):
     sample_efficiency : float (property)
     synthetic_phase_kwargs : dict
     """
+
+    dataset_type = "gw_result"
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -143,20 +144,63 @@ class Result(CoreResult):
 
         # Split off prior over geocent_time if samples appear to be time-marginalized.
         # This needs to be saved to initialize the likelihood.
-        if (
-            "geocent_time" in self.prior.keys()
-            and "geocent_time" not in self.inference_parameters
-        ):
+        if "geocent_time" in self.prior.keys() and "geocent_time" not in self.samples:
             self.geocent_time_prior = self.prior.pop("geocent_time")
         else:
             self.geocent_time_prior = None
         # Split off prior over phase if samples appear to be phase-marginalized.
-        if "phase" in self.prior.keys() and "phase" not in self.inference_parameters:
+        if "phase" in self.prior.keys() and "phase" not in self.samples:
             self.phase_prior = self.prior.pop("phase")
         else:
             self.phase_prior = None
 
-    # _build_likelihood is called at the beginning of Sampler.importance_sample
+    def update_prior(self, prior_update):
+        """
+        Update the prior based on a new PriorDict. Use the existing prior for
+        parameters not included in the new dict.
+
+        If class samples have not been importance sampled, then save new sample weights
+        based on the new prior. If class samples have been importance sampled,
+        then update the weights.
+
+        Parameters
+        ----------
+        prior_update : PriorDict
+            New PriorDict specifying priors to update.
+        """
+        param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
+        theta = self.samples[param_keys]
+
+        if self.log_evidence is None:
+            # Save old prior evaluations.
+            log_prior_old = self.prior.ln_prob(theta, axis=0)
+
+        # Update the prior itself, careful to split off geocent_time and phase priors
+        # if necessary.
+        if self.geocent_time_prior is not None and "geocent_time" in prior_update:
+            self.geocent_time_prior = prior_update.pop("geocent_time")
+        if self.phase_prior is not None and "phase" in prior_update:
+            self.phase_prior = prior_update.pop("phase")
+        self.prior.update(
+            prior_update
+        )  # TODO: Does this update cached constraint ratio?
+
+        # Evaluate new prior.
+        log_prior = self.prior.ln_prob(theta, axis=0)
+        self.samples["log_prior"] = log_prior
+
+        if self.log_evidence is None:
+            # Save weights. Note that weights are 0 if outside the initial prior,
+            # regardless of new prior. This makes sense since there is no way to assign
+            # a sensible weight.
+            log_weights = log_prior - log_prior_old
+            weights = np.exp(log_weights - np.max(log_weights))
+            weights /= np.mean(weights)
+            self.samples["weights"] = weights
+
+        else:
+            # Recalculate the importance-sampling weights and log evidence.
+            self._calculate_evidence()
 
     def _build_likelihood(
         self,
@@ -282,8 +326,6 @@ class Result(CoreResult):
             phase is calculated for given samples. It is stored in self.samples[
             'log_prob'].
         """
-
-        # TODO: Possibly remove this class attribute. Decide where to store information.
         self.synthetic_phase_kwargs = synthetic_phase_kwargs
 
         approximation_22_mode = self.synthetic_phase_kwargs.get(
@@ -316,9 +358,8 @@ class Result(CoreResult):
             self.synthetic_phase_kwargs.get("num_processes", 1), num_valid_samples // 10
         )
 
-        if num_valid_samples > 1e4:
-            print(f"Estimating synthetic phase for {num_valid_samples} samples.")
-            t0 = time.time()
+        print(f"Estimating synthetic phase for {num_valid_samples} samples.")
+        t0 = time.time()
 
         if not inverse:
             # TODO: This can probably be removed.
@@ -375,7 +416,7 @@ class Result(CoreResult):
 
             phase_array = np.full(len(theta), 0.0)
             phase_array[within_prior] = new_phase
-            delta_log_prob_array = np.full(len(theta), -np.inf)
+            delta_log_prob_array = np.full(len(theta), -np.nan)
             delta_log_prob_array[within_prior] = delta_log_prob
 
             self.samples["phase"] = phase_array
@@ -383,6 +424,8 @@ class Result(CoreResult):
 
             # Insert the phase prior in the prior, since now the phase is present.
             self.prior["phase"] = self.phase_prior
+            self.phase_prior = None
+
             # reset likelihood for safety
             # TODO: Can this be removed?
             self.likelihood = None
@@ -399,11 +442,10 @@ class Result(CoreResult):
                 num_processes,
             )
 
-            # Outside of prior, set log_prob to -np.inf.
-            log_prob_array = np.full(len(theta), -np.inf)
+            # Outside of prior, set log_prob to -np.nan.
+            log_prob_array = np.full(len(theta), -np.nan)
             log_prob_array[within_prior] = log_prob
             self.samples["log_prob"] = log_prob_array
             del self.samples["phase"]
 
-        if num_valid_samples > 1e4:
-            print(f"Done. This took {time.time() - t0:.2f} s.")
+        print(f"Done. This took {time.time() - t0:.2f} s.")

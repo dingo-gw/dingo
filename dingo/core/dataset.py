@@ -57,6 +57,8 @@ class DingoDataset:
     subclassed directly.
     """
 
+    dataset_type = "dingo_dataset"
+
     def __init__(self, file_name=None, dictionary=None, data_keys=None):
         """
         For constructing, provide either file_name, or dictionary containing data and
@@ -97,6 +99,8 @@ class DingoDataset:
             recursive_hdf5_save(f, save_dict)
             if self.settings:
                 f.attrs["settings"] = str(self.settings)
+            if self.dataset_type:
+                f.attrs["dataset_type"] = self.dataset_type
 
     def from_file(self, file_name):
         print("\nLoading dataset from " + str(file_name) + ".")

@@ -897,9 +897,9 @@ def create_parser(top_level=True):
         help="Maximum number of samples to keep in the final results",
     )
 
-    # prior_parser = parser.add_argument_group(
-    #     title="Prior arguments", description="Specify the prior settings."
-    # )
+    prior_parser = parser.add_argument_group(
+        title="Prior arguments", description="Specify the prior settings."
+    )
     # prior_parser.add(
     #     "--default-prior",
     #     default="BBHPriorDict",

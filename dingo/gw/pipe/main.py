@@ -39,7 +39,7 @@ def fill_in_arguments_from_model(args):
         "tukey_roll_off": data_settings["window"]["roll_off"],
         "waveform_approximant": model_metadata["dataset_settings"][
             "waveform_generator"
-        ]["approximant"],
+        ]["approximant"],  # TODO: Update approximant in IS
     }
 
     changed_args = {}

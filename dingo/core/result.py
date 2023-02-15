@@ -52,9 +52,12 @@ class Result(DingoDataset):
     sample_efficiency : float (property)
     """
 
+    dataset_type = "core_result"
+
     def __init__(self, file_name=None, dictionary=None):
         self.event_metadata = None
         self.context = None
+        self.samples = None
         super().__init__(
             file_name=file_name,
             dictionary=dictionary,
@@ -139,6 +142,13 @@ class Result(DingoDataset):
         pass
 
     @property
+    def num_samples(self):
+        if self.samples is not None:
+            return len(self.samples)
+        else:
+            return 0
+
+    @property
     def effective_sample_size(self):
         if "weights" in self.samples:
             weights = self.samples["weights"]
@@ -154,6 +164,15 @@ class Result(DingoDataset):
     def sample_efficiency(self):
         if "weights" in self.samples:
             return self.effective_sample_size / len(self.samples)
+        else:
+            return None
+
+    @property
+    def log_evidence_std(self):
+        if "weights" in self.samples and self.log_evidence is not None:
+            return np.sqrt(
+                (self.num_samples - self.n_eff) / (self.num_samples * self.n_eff)
+            )
         else:
             return None
 
@@ -180,8 +199,8 @@ class Result(DingoDataset):
         size of the importance sampled points.
 
         This method modifies the samples pd.DataFrame in-place, adding new columns for
-        log_likelihood, log_prior, and weights. It also stores log_evidence,
-        effective_sample_size and n_eff attributes.
+        log_likelihood, log_prior, and weights. It also stores the log_evidence as an
+        attribute.
 
         Parameters
         ----------
@@ -205,54 +224,27 @@ class Result(DingoDataset):
 
         self._build_likelihood(**likelihood_kwargs)
 
-        # Proposal samples and associated log probability have already been calculated
-        # using the stored model. These form a normalized probability distribution.
-        log_prob_proposal = self.samples["log_prob"].to_numpy()
-
-        delta_log_prob_target = np.zeros(len(self.samples))
         if "delta_log_prob_target" in self.samples.columns:
             delta_log_prob_target = self.samples["delta_log_prob_target"].to_numpy()
+        else:
+            delta_log_prob_target = 0.0
 
         # select parameters in self.samples (required as log_prob and potentially gnpe
         # proxies are also stored in self.samples, but are not needed for the likelihood.
         # TODO: replace by self.metadata["train_settings"]["data"]["inference_parameters"]
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
-        aux_keys = list(set(self.samples.keys()).difference(param_keys))
         theta = self.samples[param_keys]
-        aux_params = self.samples[aux_keys]
 
         # Calculate the (un-normalized) target density as prior times likelihood,
         # evaluated at the same sample points.
         log_prior = self.prior.ln_prob(theta, axis=0)
 
-        # Check whether any constraints are violated that involve parameters not
-        # already present in theta.
-        constraints = self.prior.evaluate_constraints(theta)
-        np.putmask(log_prior, constraints == 0, -np.inf)
-
-        # The prior may evaluate to -inf for certain samples. For these, we do not want
-        # to evaluate the likelihood, in particular because it may not even be possible
-        # to generate data outside the prior (e.g., for BH spins > 1). Since there is
-        # no point in keeping these samples, we simply drop them; this means we do not
-        # have to make special exceptions for outside-prior samples elsewhere in the
-        # code. They do not contribute directly to the evidence or the effective sample
-        # size, so we are not losing anything useful. However, it is important to count
-        # them in num_samples when computing the evidence, since they contribute to the
-        # normalization of the proposal distribution.
-
-        within_prior = (log_prior + delta_log_prob_target) != -np.inf
-        num_samples = len(self.samples)
-        if num_samples != np.sum(within_prior):
-            print(
-                f"Of {num_samples} samples, "
-                f"{num_samples - np.sum(within_prior)} lie outside the prior. "
-                f"Dropping these."
-            )
-            theta = theta.iloc[within_prior].reset_index(drop=True)
-            aux_params = aux_params.iloc[within_prior].reset_index(drop=True)
-            log_prob_proposal = log_prob_proposal[within_prior]
-            log_prior = log_prior[within_prior]
-            delta_log_prob_target = delta_log_prob_target[within_prior]
+        # The prior or delta_log_prob_target may be -inf for certain samples.
+        # For these, we do not want to evaluate the likelihood, in particular because
+        # it may not even be possible to generate signals outside the prior (e.g.,
+        # for BH spins > 1).
+        valid_samples = (log_prior + delta_log_prob_target) != -np.inf
+        theta = theta.iloc[valid_samples]
 
         print(f"Calculating {len(theta)} likelihoods.")
         t0 = time.time()
@@ -261,71 +253,74 @@ class Result(DingoDataset):
         )
         print(f"Done. This took {time.time() - t0:.2f} seconds.")
 
-        # Calculate weights and normalize them to have mean 1.
-        log_weights = (
-            log_prior + log_likelihood + delta_log_prob_target - log_prob_proposal
-        )
-        weights = np.exp(log_weights - np.max(log_weights))
-        weights /= np.mean(weights)
-
-        self.samples = theta
-        self.samples["log_prob"] = log_prob_proposal  # Proposal log_prob, not target!
-        self.samples["weights"] = weights
-        self.samples["log_likelihood"] = log_likelihood
         self.samples["log_prior"] = log_prior
-        for k in aux_keys:
-            self.samples[k] = aux_params[k]
-        # self.samples["delta_log_prob_target"] = delta_log_prob_target
+        self.samples.loc[valid_samples, "log_likelihood"] = log_likelihood
+        self._calculate_evidence()
 
-        # The evidence
-        #           Z = \int d\theta \pi(\theta) L(\theta),
-        #
-        #                   where   \pi = prior,
-        #                           L = likelihood.
-        #
-        # For importance sampling, we estimate this using Monte Carlo integration using
-        # the proposal distribution q(\theta),
-        #
-        #           Z = \int d\theta q(\theta) \pi(\theta) L(\theta) / q(\theta)
-        #             ~ (1/N) \sum_i \pi(\theta_i) L(\theta_i) / q(\theta_i)
-        #
-        #                   where we are summing over samples \theta_i ~ q(\theta).
-        #
-        # The integrand is just the importance weight (prior to any normalization). It
-        # is more numerically stable to evaluate log(Z),
-        #
-        #           log Z ~ \log \sum_i \exp( log \pi_i + log L_i - log q_i ) - log N
-        #                 = logsumexp ( log_weights ) - log N
-        #
-        # Notes
-        # -----
-        #   * We use the logsumexp functions, which is more numerically stable.
-        #   * N = num_samples is the *original* number of samples (including the
-        #     zero-weight ones that we dropped).
-        #   * q, \pi, L must be distributions in the same parameter space (the same
-        #     coordinates). We have undone any standardizations so this is the case.
+    def _calculate_evidence(self):
+        """Calculate the Bayesian log evidence and sample weights.
 
-        # self.n_eff = np.sum(weights) ** 2 / np.sum(weights ** 2)
-        # # ESS computed with len(weights) in denominator instead of num_samples,
-        # # since we are interested in ESS per *likelihood evaluation*, not per
-        # # Dingo sample.
-        # self.effective_sample_size = self.n_eff / len(weights)
+        This is called at the end of importance sampling, when changing the prior,
+        and when combining Results.
 
-        self.log_evidence = logsumexp(log_weights) - np.log(num_samples)
-        log_weights_all = np.pad(
-            log_weights - self.log_evidence,
-            (num_samples - len(log_weights), 0),
-            constant_values=-np.inf,
-        )
-        assert np.allclose(np.mean(np.exp(log_weights_all)), 1)
-        # log_evidence_std = 1/sqrt(n) (evidence_std / evidence)
+        The evidence
 
-        # With the weights saved, the property self.n_eff is defined. The uncertainty
-        # in the log evidence also depends on the original num_samples, so we have to
-        # preserve this.
-        self.log_evidence_std = np.sqrt(
-            (num_samples - self.n_eff) / (num_samples * self.n_eff)
-        )
+            Z = \\int d\\theta \\pi(\\theta) L(\\theta),
+
+        where \\pi = prior, L = likelihood.
+
+        For importance sampling, we estimate this using Monte Carlo integration using
+        the proposal distribution q(\\theta),
+
+            Z = \\int d\\theta q(\\theta) \\pi(\\theta) L(\\theta) / q(\\theta)
+            \\sim (1/N) \\sum_i \\pi(\\theta_i) L(\\theta_i) / q(\\theta_i)
+
+        where we are summing over samples \\theta_i \\sim q(\\theta).
+
+        The integrand is just the importance weight (prior to any normalization). It
+        is more numerically stable to evaluate \\log(Z),
+
+            \\log Z \\sim \\log \\sum_i \\exp( \\log \\pi_i + \\log L_i - \\log q_i ) -
+            \\log N
+            = logsumexp ( log_weights ) - log N
+
+        Notes
+        -----
+        * We use the logsumexp function, which is more numerically stable.
+        * N = num_samples is the total number of samples (including the
+            zero-weight samples).
+        * q, \\pi, L must be distributions in the same parameter space (the same
+            coordinates). We have undone any standardizations so this is the case.
+        """
+        if (
+            "log_prob" in self.samples
+            and "log_likelihood" in self.samples
+            and "log_prior" in self.samples
+        ):
+            log_prob_proposal = self.samples["log_prob"]
+            log_prior = self.samples["log_prior"]
+            log_likelihood = self.samples["log_likelihood"]
+            if "delta_log_prob_target" in self.samples:
+                delta_log_prob_target = self.samples["delta_log_prob_target"]
+            else:
+                delta_log_prob_target = 0.0
+
+            # *Un-normalized* log weights are needed to calculate evidence.
+            log_weights = (
+                log_prior
+                + np.nan_to_num(log_likelihood)  # NaN = no log_likelihood evaluation
+                + delta_log_prob_target
+                - np.nan_to_num(
+                    log_prob_proposal
+                )  # NaN = outside prior so no synthetic
+                # phase
+            )
+            self.log_evidence = logsumexp(log_weights) - np.log(self.num_samples)
+
+            # Save the *normalized* weights.
+            weights = np.exp(log_weights - np.max(log_weights))
+            weights /= np.mean(weights)
+            self.samples["weights"] = weights
 
     def subset(self, parameters):
         """
