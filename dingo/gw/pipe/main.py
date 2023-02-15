@@ -136,13 +136,14 @@ class MainInput(BilbyMainInput):
         # self.waveform_approximant = args.waveform_approximant
         #
         # self.time_reference = args.time_reference
+        self.time_reference = "geocent"
         # self.reference_frame = args.reference_frame
         # self.likelihood_type = args.likelihood_type
         self.duration = args.duration
         # self.phase_marginalization = args.phase_marginalization
         # self.prior_file = args.prior_file
-        # self.prior_dict = args.prior_dict
-        # self.default_prior = args.default_prior
+        self.prior_dict = args.prior_dict
+        self.default_prior = "PriorDict"
         self.minimum_frequency = args.minimum_frequency
         # self.enforce_signal_duration = args.enforce_signal_duration
 
@@ -231,6 +232,13 @@ class MainInput(BilbyMainInput):
             f"{request_cpus_importance_sampling}"
         )
         self._request_cpus_importance_sampling = request_cpus_importance_sampling
+
+    @property
+    def priors(self):
+        """Read in and compose the prior at run-time"""
+        if getattr(self, "_priors", None) is None:
+            self._priors = self._get_priors(add_time=False)
+        return self._priors
 
 
 def write_complete_config_file(parser, args, inputs, input_cls=MainInput):

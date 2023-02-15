@@ -902,7 +902,7 @@ def create_parser(top_level=True):
     )
     # prior_parser.add(
     #     "--default-prior",
-    #     default="BBHPriorDict",
+    #     default="PriorDict",
     #     type=str,
     #     help=(
     #         "The name of the prior set to base the prior on. Can be one of"
@@ -919,20 +919,24 @@ def create_parser(top_level=True):
     #         " search over the coalescence time"
     #     ),
     # )
-    # prior_parser_main = prior_parser.add_mutually_exclusive_group()
+    prior_parser_main = prior_parser.add_mutually_exclusive_group()
     # prior_parser_main.add(
     #     "--prior-file", type=nonestr, default=None, help="The prior file"
     # )
-    # prior_parser_main.add(
-    #     "--prior-dict",
-    #     type=nonestr,
-    #     default=None,
-    #     help=(
-    #         "A dictionary of priors (alternative to prior-file). Multiline "
-    #         "dictionaries are supported, but each line must contain a single"
-    #         "parameter specification and finish with a comma."
-    #     ),
-    # )
+    prior_parser_main.add(
+        "--prior-dict",
+        type=nonestr,
+        default=None,
+        help=(
+            "A dictionary of priors (alternative to prior-file). Multiline "
+            "dictionaries are supported, but each line must contain a single"
+            "parameter specification and finish with a comma. Dingo priors are set at "
+            "network training time, so the prior-dict is used at importance sampling "
+            "time to re-weight to the new prior. The prior-dict does not have to be "
+            "a prior over the entire set of parameters, only the parameters for which "
+            "the prior is changed."
+        ),
+    )
     # prior_parser.add(
     #     "--enforce-signal-duration",
     #     action=StoreBoolean,

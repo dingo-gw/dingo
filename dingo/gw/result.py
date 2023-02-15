@@ -3,7 +3,7 @@ from typing import Optional
 
 import numpy as np
 import yaml
-from bilby.core.prior import Uniform, Constraint
+from bilby.core.prior import Uniform, Constraint, PriorDict
 
 from dingo.core.density import (
     interpolated_sample_and_log_prob_multi,
@@ -142,6 +142,11 @@ class Result(CoreResult):
         )
         self.prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
 
+        prior_update = self.importance_sampling_metadata.get("prior_update")
+        if prior_update is not None:
+            prior_update = PriorDict(prior_update.copy())
+            self.prior.update(prior_update)
+
         # Split off prior over geocent_time if samples appear to be time-marginalized.
         # This needs to be saved to initialize the likelihood.
         if "geocent_time" in self.prior.keys() and "geocent_time" not in self.samples:
@@ -156,7 +161,7 @@ class Result(CoreResult):
 
     def update_prior(self, prior_update):
         """
-        Update the prior based on a new PriorDict. Use the existing prior for
+        Update the prior based on a new dict of priors. Use the existing prior for
         parameters not included in the new dict.
 
         If class samples have not been importance sampled, then save new sample weights
@@ -165,9 +170,15 @@ class Result(CoreResult):
 
         Parameters
         ----------
-        prior_update : PriorDict
-            New PriorDict specifying priors to update.
+        prior_update : dict
+            Priors to update. This should be of the form {key : prior_str}, where str
+            is a string that can instantiate a prior via PriorDict(prior_update). The
+            prior_update is provided in this form so that it can be properly saved with
+            the Result and later instantiated.
         """
+        self.importance_sampling_metadata["prior_update"] = prior_update.copy()
+        prior_update = PriorDict(prior_update)
+
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
         theta = self.samples[param_keys]
 
