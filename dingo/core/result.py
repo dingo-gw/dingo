@@ -1,14 +1,17 @@
+import copy
 import tempfile
 import time
 
 import numpy as np
 from typing import Optional
+
+import pandas as pd
 from scipy.special import logsumexp
 from bilby.core.prior import Constraint
 
 from dingo.core.dataset import DingoDataset
 from dingo.core.density import train_unconditional_density_estimator
-
+from dingo.core.utils import recursive_check_dicts_are_equal
 
 DATA_KEYS = [
     "samples",
@@ -16,7 +19,6 @@ DATA_KEYS = [
     "event_metadata",
     "importance_sampling_metadata",
     "log_evidence",
-    "log_evidence_std",
 ]
 
 
@@ -64,7 +66,7 @@ class Result(DingoDataset):
             data_keys=DATA_KEYS,
         )
 
-        # Initialize as empty dict so we can fill it up later.
+        # Initialize as empty dict, so we can fill it up later.
         if self.importance_sampling_metadata is None:
             self.importance_sampling_metadata = {}
 
@@ -322,7 +324,7 @@ class Result(DingoDataset):
             weights /= np.mean(weights)
             self.samples["weights"] = weights
 
-    def subset(self, parameters):
+    def parameter_subset(self, parameters):
         """
         Return a new object of the same type, with only a subset of parameters. Drops
         all other columns in self.samples as well (e.g., log_prob, weights).
@@ -371,7 +373,7 @@ class Result(DingoDataset):
         -------
         PosteriorModel
         """
-        sub_result = self.subset(parameters)
+        sub_result = self.parameter_subset(parameters)
 
         # Filter outliers, as they decrease the performance of the density estimator.
         mean = np.mean(sub_result.samples, axis=0)
@@ -421,6 +423,86 @@ class Result(DingoDataset):
                 f"Effective samples {self.n_eff:.1f}: "
                 f"(Sample efficiency = {100 * self.sample_efficiency:.2f}%)"
             )
+
+    def split(self, num_parts):
+        """
+        Split the Result into a set of smaller results. The samples are evenly divided
+        among the sub-results. Additional information (metadata, context, etc.) are
+        copied into each.
+
+        This is useful for splitting expensive tasks such as importance sampling across
+        multiple jobs.
+
+        Parameters
+        ----------
+        num_parts : int
+            The number of parts to split the Result across.
+
+        Returns
+        -------
+        list of sub-Results.
+        """
+
+        # Prepare a dictionary of all contents except the samples.
+        dataset_dict_template = self.to_dictionary()
+        del dataset_dict_template["samples"]
+
+        part_size = self.num_samples // num_parts
+        parts = []
+        for i in range(num_parts):
+            part_dict = copy.deepcopy(dataset_dict_template)
+            if i < num_parts - 1:
+                samples = self.samples.iloc[i * part_size : (i + 1) * part_size].copy()
+            else:
+                samples = self.samples.iloc[i * part_size :].copy()
+            samples.reset_index(drop=True, inplace=True)
+            part_dict["samples"] = samples
+            part = type(self)(dictionary=part_dict)
+
+            # Re-calculate evidence since it will differ for the new set of samples.
+            part._calculate_evidence()
+            parts.append(part)
+
+        return parts
+
+    @classmethod
+    def merge(cls, parts):
+        """
+        Merge several Result instances into one. Check that they are compatible,
+        in the sense of having the same metadata. Finally, calculate a new log evidence
+        for the combined result.
+
+        This is useful when recombining separate importance sampling jobs.
+
+        Parameters
+        ----------
+        parts : list[Result]
+            List of sub-Results to be combined.
+
+        Returns
+        -------
+        Combined Result.
+        """
+        dataset_dict = parts[0].to_dictionary()
+        del dataset_dict["log_evidence"]
+        samples_parts = [dataset_dict.pop("samples")]
+
+        for part in parts[1:]:
+            part_dict = part.to_dictionary()
+            del part_dict["log_evidence"]
+            samples_parts.append(part_dict.pop("samples"))
+
+            # Make sure we are not merging incompatible results. We deleted the
+            # log_evidence since this can differ among the sub-results.
+            if not recursive_check_dicts_are_equal(part_dict, dataset_dict):
+                raise ValueError("Results to be merged must have same metadata.")
+
+        dataset_dict["samples"] = pd.concat(samples_parts, ignore_index=True)
+        merged_result = cls(dictionary=dataset_dict)
+
+        # Re-calculate the evidence based on the entire sample set.
+        merged_result._calculate_evidence()
+        return merged_result
 
 
 def check_equal_dict_of_arrays(a, b):
