@@ -278,6 +278,31 @@ class Result(DingoDataset):
             (num_samples - self.n_eff) / (num_samples * self.n_eff)
         )
 
+    def sampling_importance_resampling(self, num_samples: int = -1):
+        """ 
+        If you don't want weighted samples but instead only want samples from
+        the posterior, you can resample from the weighted posterior with a
+        probaility proportional to the weights. Note this must be done with
+        replacement. 
+
+        In this case a copy of the weighted posterior is kept but a new 
+        pd.DataFrame is created called self.unweighted_samples.
+        
+        Parameters
+        ----------
+        num_samples : list 
+            Number of samples to resample
+
+        """
+        if num_samples == -1:
+            num_samples = len(self.samples)
+        
+        if num_samples > len(self.samples):
+            raise Exception("Cannot sample more points than in the weighted posterior")
+        
+        self.unweighted_samples = self.samples.sample(n=num_samples, weights=self.samples["weights"], replace=True)
+        self.unweighted_samples = self.unweighted_samples.drop(["weights"], axis=1)
+
     def subset(self, parameters):
         """
         Return a new object of the same type, with only a subset of parameters. Drops
