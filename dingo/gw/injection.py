@@ -16,7 +16,7 @@ from dingo.gw.transforms import (
     WhitenAndScaleStrain,
     ApplyCalibrationUncertainty,
 )
-from dingo.gw.waveform_generator.waveform_generator import WaveformGenerator
+from dingo.gw.waveform_generator.waveform_generator import WaveformGenerator, GWSignalWaveformGenerator
 
 
 class GWSignal(object):
@@ -34,6 +34,7 @@ class GWSignal(object):
         data_domain: FrequencyDomain,
         ifo_list: list,
         t_ref: float,
+        waveform_generator: WaveformGenerator or GWSignalWaveformGenerator
     ):
         """
         Parameters
@@ -58,7 +59,7 @@ class GWSignal(object):
         # domain of the trained network / requested injection / etc. This is typically
         # the case for EOB waveforms, which require the larger range to generate
         # robustly. For this reason we have two domains.
-        self.waveform_generator = WaveformGenerator(domain=wfg_domain, **wfg_kwargs)
+        self.waveform_generator = waveform_generator(domain=wfg_domain, **wfg_kwargs)
 
         self.t_ref = t_ref
         self.ifo_list = InterferometerList(ifo_list)

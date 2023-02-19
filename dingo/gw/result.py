@@ -17,6 +17,7 @@ from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_extrinsic_prior_dict, get_window_factor
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 from dingo.gw.prior import build_prior_with_defaults
+from dingo.gw.waveform_generator import GWSignalWaveformGenerator, WaveformGenerator
 
 
 RANDOM_STATE = 150914
@@ -308,6 +309,21 @@ class Result(CoreResult):
         self.phase_marginalization_kwargs = phase_marginalization_kwargs
         self.calibration_marginalization_kwargs = calibration_marginalization_kwargs
 
+        # The detector reference positions during likelihood evaluation should be based
+        # on the event time, since any post-correction to account for the training
+        # reference time has already been applied to the samples.
+
+        if self.event_metadata is not None and "time_event" in self.event_metadata:
+            t_ref = self.event_metadata["time_event"]
+        else:
+            t_ref = self.base_metadata["train_settings"]["data"]["ref_time"]
+        
+        #Select waveform generator, LAL or GWSignal
+        if self.base_metadata["dataset_settings"]["gwsignal_generator"]:
+            waveform_generator = GWSignalWaveformGenerator
+        else:
+            waveform_generator = WaveformGenerator
+
         # FIXME: This is a quick hack because I didn't know how to choose the wfg
         #  domain in the case of a changing domain during importance sampling. It could
         #  only pose problems for EOB, where sometimes one wants to start integrating
@@ -327,6 +343,7 @@ class Result(CoreResult):
             phase_marginalization_kwargs=phase_marginalization_kwargs,
             calibration_marginalization_kwargs=calibration_marginalization_kwargs,
             phase_grid=phase_grid,
+            waveform_generator=waveform_generator,
         )
 
     def sample_synthetic_phase(
