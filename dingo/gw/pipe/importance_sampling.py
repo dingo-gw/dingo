@@ -169,7 +169,7 @@ class ImportanceSamplingInput(Input):
 
         self.result.print_summary()
         self.result.to_file(
-            os.path.join(self.result_directory, "_".join([self.label, "result.hdf5"]))
+            os.path.join(self.result_directory, self.label + ".hdf5")
         )
 
     @property

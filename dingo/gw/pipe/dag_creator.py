@@ -9,6 +9,7 @@ from bilby_pipe.utils import BilbyPipeError, logger
 
 from dingo.gw.pipe.nodes.generation_node import GenerationNode
 from .nodes.importance_sampling_node import ImportanceSamplingNode
+from .nodes.merge_node import MergeNode
 from .nodes.sampling_node import SamplingNode
 
 
@@ -29,6 +30,13 @@ def get_trigger_time_list(inputs):
         raise BilbyPipeError("Unable to determine input trigger times from ini file")
     logger.info(f"Setting segment trigger-times {trigger_times}")
     return trigger_times
+
+
+def get_parallel_list(inputs):
+    if inputs.n_parallel == 1:
+        return [""]
+    else:
+        return [f"part{idx}" for idx in range(inputs.n_parallel)]
 
 
 def generate_dag(inputs):
@@ -92,31 +100,42 @@ def generate_dag(inputs):
     # 4. Importance sample
     #
 
-    # 4.(a) (If necessary) Split the proposal samples into sub-Results for
-    # parallelization across jobs.
-
-    # 4.(b) Calculate importance weights.
+    # 4. Calculate importance weights.
     #
     # If the phase is not present and phase marginalization is not being used,
     # sample the phase synthetically. This adds between 1x and 50x to the cost of
     # importance sampling, depending on the waveform model. Indeed, IMRPhenomXPHM
     # waveform modes are much more expensive to generate than polarizations.
 
-    importance_sampling_node_list = []
+    merged_importance_sampling_node_list = []
+    parallel_list = get_parallel_list(inputs)
+    all_parallel_node_list = []
     for sampling_node, generation_node in zip(
         sampling_node_list, importance_sampling_generation_node_list
     ):
-        importance_sampling_node = ImportanceSamplingNode(
-            inputs,
-            sampling_node=sampling_node,
-            generation_node=generation_node,
-            dag=dag,
-        )
-        importance_sampling_node_list.append(importance_sampling_node)
+        parallel_node_list = []
+        for parallel_idx in parallel_list:
+            importance_sampling_node = ImportanceSamplingNode(
+                inputs,
+                sampling_node=sampling_node,
+                generation_node=generation_node,
+                parallel_idx=parallel_idx,
+                dag=dag,
+            )
+            parallel_node_list.append(importance_sampling_node)
+            all_parallel_node_list.append(importance_sampling_node)
 
-    # 4.(c) (If necessary) Recombine jobs into single Result.
-
-    # 4.(d) Calculate evidence.  POSSIBLY COMBINE WITH 4B IF ONLY ONE JOB.
+        if len(parallel_node_list) == 1:
+            merged_importance_sampling_node_list.append(importance_sampling_node)
+        else:
+            # 4.(b) Recombine jobs into single Result.
+            #       (Automatically calculates evidence.)
+            merge_node = MergeNode(
+                inputs=inputs,
+                parallel_node_list=parallel_node_list,
+                dag=dag,
+            )
+            merged_importance_sampling_node_list.append(merge_node)
 
     #
     # 5. PESummary

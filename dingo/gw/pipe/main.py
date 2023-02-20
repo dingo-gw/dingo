@@ -111,13 +111,13 @@ class MainInput(BilbyMainInput):
         self.coherence_test = (
             False  # dingo mod: Cannot use different sets of detectors.
         )
-        self.n_parallel = 1
+        self.n_parallel = args.n_parallel
         # self.transfer_files = args.transfer_files
         self.osg = args.osg
         self.desired_sites = args.desired_sites
         # self.analysis_executable = args.analysis_executable
         # self.analysis_executable_parser = args.analysis_executable_parser
-        # self.result_format = args.result_format
+        self.result_format = "hdf5"
         self.final_result = args.final_result
         self.final_result_nsamples = args.final_result_nsamples
 

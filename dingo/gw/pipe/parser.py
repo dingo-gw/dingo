@@ -992,12 +992,7 @@ def create_parser(top_level=True):
     # sampler_parser.add(
     #     "--sampling-seed", default=None, type=noneint, help="Random sampling seed"
     # )
-    # sampler_parser.add(
-    #     "--n-parallel",
-    #     type=int,
-    #     default=1,
-    #     help="Number of identical parallel jobs to run per event",
-    # )
+
     # sampler_parser.add(
     #     "--sampler-kwargs",
     #     type=str,
@@ -1212,6 +1207,17 @@ def create_parser(top_level=True):
             "will get populated with any settings provided elsewhere that would "
             "otherwise override model settings. This is useful for tweaking settings "
             "that networks were trained with."
+        ),
+    )
+    sampler_parser.add(
+        "--n-parallel",
+        type=int,
+        default=1,
+        help=(
+            "This sets the number of parallel condor jobs for importance sampling. Each"
+            "of these jobs can in turn be parallelized across several CPU cores. The "
+            "total number of processes is n-parallel * "
+            "request-cpus-importance-sampling."
         ),
     )
 

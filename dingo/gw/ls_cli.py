@@ -73,6 +73,10 @@ def ls():
                         ),
                     )
                 if result.log_evidence:
+                    print(
+                        "Summary:\n"
+                        + "--------"
+                    )
                     result.print_summary()
 
             else:
