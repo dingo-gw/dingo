@@ -560,20 +560,7 @@ class WaveformGenerator:
             )
 
         # Depending on whether the domain is uniform or non-uniform call the appropriate wf generator
-        for i in range(5):
-            try:
-                hp, hc = LS.SimInspiralFD(*parameters_lal)
-                break
-            except:
-                # Doing this strange digit changing to not get an error must be a lal precision thing?
-                print("NOTE TEMP")
-                print(parameters_lal)
-                num = parameters_lal[4]
-                len_num = len(str(num).split(".")[1])
-                new_num = (num * (10**len_num) + 1) / (10**len_num)
-                parameters_lal = list(parameters_lal)
-                parameters_lal[4] = new_num
-                parameters_lal = tuple(parameters_lal)
+        hp, hc = LS.SimInspiralFD(*parameters_lal)
 
         # the check below filters for unphysical waveforms:
         # For IMRPhenomXPHM, the LS.SimInspiralFD result is numerically instable
