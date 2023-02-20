@@ -1186,9 +1186,10 @@ class GWSignalWaveformGenerator:
         elif not isinstance(list(parameters.values())[0], float):
             raise ValueError("parameters dictionary must contain floats", parameters)
 
+        generator = gwsignal_get_waveform_generator(self.approximant_str)
         if isinstance(self.domain, FrequencyDomain):
             # Generate FD modes in for frequencies [-f_max, ..., 0, ..., f_max].
-            if self.generator.domain == 'FrequencyDomain':
+            if generator.domain == 'FrequencyDomain':
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: FD)
                 hlm_fd, iota = self.generate_FD_modes_LO(parameters)
