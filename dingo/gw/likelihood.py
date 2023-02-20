@@ -31,7 +31,6 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         phase_marginalization_kwargs=None,
         calibration_marginalization_kwargs=None,
         phase_grid=None,
-        waveform_generator=WaveformGenerator
     ):
         # TODO: Does the phase_grid argument ever get used?
         """
@@ -62,7 +61,6 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             data_domain=data_domain,
             ifo_list=list(event_data["waveform"].keys()),
             t_ref=t_ref,
-            waveform_generator=waveform_generator
         )
 
         self.asd = event_data["asds"]
