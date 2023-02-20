@@ -272,7 +272,8 @@ class WaveformGenerator:
             "SimInspiralChooseTDModes",
             "SimInspiralChooseFDModes",
             "SimIMRPhenomXPCalculateModelParametersFromSourceFrame",
-            "SimIMRSpinAlignedEOBModesEcc_opt"
+            "SimIMRSpinAlignedEOBModesEcc_opt",
+            "SimIMRSpinAlignedEOBWaveformEcc_opt",
         ]:
             raise ValueError(
                 f"Unsupported lalsimulation waveform function {lal_target_function}."
@@ -315,7 +316,11 @@ class WaveformGenerator:
         masses = (p["mass_1"], p["mass_2"])
         r = p["luminosity_distance"]
         phase = p["phase"]
-        ecc_params = (0.0, parameter_dict.get("eccentricity", 0.0), parameter_dict.get("mean_anomaly", 0.0))  # longAscNodes, eccentricity, meanPerAno (also called eccentric_anomaly)
+        ecc_params = (
+            0.0,
+            parameter_dict.get("eccentricity", 0.0),
+            parameter_dict.get("mean_anomaly", 0.0),
+        )  # longAscNodes, eccentricity, meanPerAno (also called eccentric_anomaly)
 
         # Get domain parameters
         f_ref = p["f_ref"]
@@ -383,7 +388,10 @@ class WaveformGenerator:
                 + (lal_params, self.approximant)
             )
 
-        elif (lal_target_function== "SimIMRPhenomXPCalculateModelParametersFromSourceFrame"):
+        elif (
+            lal_target_function
+            == "SimIMRPhenomXPCalculateModelParametersFromSourceFrame"
+        ):
             lal_parameter_tuple = (
                 masses + (f_ref,) + (phase, iota) + spins_cartesian + (lal_params,)
             )
@@ -413,15 +421,37 @@ class WaveformGenerator:
             # also pass iota, since this is needed for recombination of the modes
             lal_parameter_tuple = (lal_parameter_tuple, iota)
 
+        elif lal_target_function == "SimIMRSpinAlignedEOBWaveformEcc_opt":
+            if self.approximant == 109:
+                approx = 41
+            elif self.approximant == 107:
+                approxi = 4
+            lal_parameter_tuple = (
+                phase, 
+                delta_t,
+                *masses,
+                f_min,
+                r,
+                iota,
+                s1z, 
+                s2z,
+                ecc_params[1],
+                ecc_params[2],
+                approx,
+                None
+            )
+
         elif lal_target_function == "SimIMRSpinAlignedEOBModesEcc_opt":
             if self.approximant == 109:
-                approx = 4
+                approx = 41
             domain_pars = (delta_t, f_min, f_ref)
+            # This will be unused but it is neccesary
+            nqcCoeffsInput = lal.CreateREAL8Vector(50)
             lal_parameter_tuple = (
                 delta_t,
                 *masses,
                 domain_pars[1],
-                r, # Distance
+                r,  # Distance
                 s1z,
                 s2z,
                 ecc_params[1],
@@ -437,7 +467,7 @@ class WaveformGenerator:
                 p.get("omega03Tidal2", 0),
                 p.get("quadparam1", 1),
                 p.get("quadparam2", 1),
-                p.get("nqcCoeffsInput", None),
+                p.get("nqcCoeffsInput", nqcCoeffsInput),
                 p.get("nqcFlag", 0),
                 # Defaults are taken from LALSimInspiralWaveformParams.c in lalsimulation/lib
                 p.get("EccFphiPNorder", 99),
@@ -449,14 +479,16 @@ class WaveformGenerator:
                 p.get("EccNQCWaveform", 1),
                 p.get("EccPNRRForm", 1),
                 p.get("EccPNWfForm", 1),
-                p.get("EccAvNQCWaveform", 1), 
-                p.get("EcctAppend", 30.0),
-                p.get("EccIC", -2), # 0 periastron, 2 hyperbolic,  -1 instantaneous omega, -2 orbit-average omega
-                p.get("HypPphi0", 4.22),
-                p.get("HypR0", 10000.0),
-                p.get("HypE0", 1.012),
+                p.get("EccAvNQCWaveform", 1),
+                p.get("EcctAppend", 30), # 40 or 30?
+                p.get(
+                    "EccIC", -2
+                ),  # 0 periastron, 2 hyperbolic,  -1 instantaneous omega, -2 orbit-average omega
+                p.get("HypPphi0", 4.22), # 0 or 4.22?
+                p.get("HypR0", 10000.0), # 0 or 10000.0
+                p.get("HypE0", 1.012), # 0 or 1.012
             )
-            
+
             lal_parameter_tuple = (lal_parameter_tuple, iota)
 
         return lal_parameter_tuple
@@ -528,8 +560,22 @@ class WaveformGenerator:
             )
 
         # Depending on whether the domain is uniform or non-uniform call the appropriate wf generator
-        hp, hc = LS.SimInspiralFD(*parameters_lal)
-        # The check below filters for unphysical waveforms:
+        for i in range(5):
+            try:
+                hp, hc = LS.SimInspiralFD(*parameters_lal)
+                break
+            except:
+                # Doing this strange digit changing to not get an error must be a lal precision thing?
+                print("NOTE TEMP")
+                print(parameters_lal)
+                num = parameters_lal[4]
+                len_num = len(str(num).split(".")[1])
+                new_num = (num * (10**len_num) + 1) / (10**len_num)
+                parameters_lal = list(parameters_lal)
+                parameters_lal[4] = new_num
+                parameters_lal = tuple(parameters_lal)
+
+        # the check below filters for unphysical waveforms:
         # For IMRPhenomXPHM, the LS.SimInspiralFD result is numerically instable
         # for rare parameter configurations (~1 in 1M), leading to bins with very large
         # numbers if multibanding is used. If that happens, turn off multibanding to
@@ -603,27 +649,27 @@ class WaveformGenerator:
 
         Note:
             - pol_m[m] contains contributions of the m modes *and* and the -m modes.
-              This is because the frequency domain (FD) modes have a positive frequency
-              part which transforms as exp(-1j * m * phase), while the negative
-              frequency part transforms as exp(+1j * m * phase). Typically, one of these
-              dominates [e.g., the (2,2) mode is dominated by the negative frequency
-              part and the (-2,2) mode is dominated by the positive frequency part]
-              such that the sum of (l,|m|) and (l,-|m|) modes transforms approximately as
-              exp(1j * |m| * phase), which is e.g. used for phase marginalization in
-              bilby/lalinference. However, this is not exact. In this method we account
-              for this effect, such that each contribution pol_m[m] transforms
-              *exactly* as exp(-1j * m * phase).
+            This is because the frequency domain (FD) modes have a positive frequency
+            part which transforms as exp(-1j * m * phase), while the negative
+            frequency part transforms as exp(+1j * m * phase). Typically, one of these
+            dominates [e.g., the (2,2) mode is dominated by the negative frequency
+            part and the (-2,2) mode is dominated by the positive frequency part]
+            such that the sum of (l,|m|) and (l,-|m|) modes transforms approximately as
+            exp(1j * |m| * phase), which is e.g. used for phase marginalization in
+            bilby/lalinference. However, this is not exact. In this method we account
+            for this effect, such that each contribution pol_m[m] transforms
+            *exactly* as exp(-1j * m * phase).
             - Phase shifts contribute in two ways: Firstly via the spherical harmonics,
-              which we account for with the exp(-1j * m * phase) transformation.
-              Secondly, the phase determines how the PE spins transform to cartesian
-              spins, by rotating (sx,sy) by phase. This is *not* accounted for in this
-              function. Instead, the phase for computing the cartesian spins is fixed
-              to self.spin_conversion_phase (if not None). This effectively changes the
-              PE parameters {phi_jl, phi_12} to parameters {phi_jl_prime, phi_12_prime}.
-              For parameter estimation, a postprocessing operation can be applied to
-              account for this, {phi_jl_prime, phi_12_prime} -> {phi_jl, phi_12}.
-              See also documentation of __init__ method for more information on
-              self.spin_conversion_phase.
+            which we account for with the exp(-1j * m * phase) transformation.
+            Secondly, the phase determines how the PE spins transform to cartesian
+            spins, by rotating (sx,sy) by phase. This is *not* accounted for in this
+            function. Instead, the phase for computing the cartesian spins is fixed
+            to self.spin_conversion_phase (if not None). This effectively changes the
+            PE parameters {phi_jl, phi_12} to parameters {phi_jl_prime, phi_12_prime}.
+            For parameter estimation, a postprocessing operation can be applied to
+            account for this, {phi_jl_prime, phi_12_prime} -> {phi_jl, phi_12}.
+            See also documentation of __init__ method for more information on
+            self.spin_conversion_phase.
 
         Differences to self.generate_hplus_hcross:
         - We don't catch errors yet TODO
@@ -654,6 +700,7 @@ class WaveformGenerator:
             if LS.SimInspiralImplementedFDApproximants(self.approximant):
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: FD)
+                # Need to change the f_start for aligned spin waveforms 
                 hlm_fd, iota = self.generate_FD_modes_L0(parameters)
 
                 # Step 2: Transform modes to target domain.
@@ -663,11 +710,46 @@ class WaveformGenerator:
                 assert LS.SimInspiralImplementedTDApproximants(self.approximant)
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: TD)
+                if self.approximant_str == "SEOBNRv4EHM_opt":
+                    parameters_lal, iota = self._convert_parameters_to_lal_frame(
+                        {**parameters, "f_ref": self.f_ref},
+                        lal_target_function="SimIMRSpinAlignedEOBModesEcc_opt",
+                    )
+
+                    (
+                        f_start,
+                        extra_time_fraction,
+                        t_chirp,
+                        t_extra,
+                    ) = wfg_utils.get_aligned_spin_f_start(
+                        self.domain.f_min,
+                        parameters_lal[1],
+                        parameters_lal[2],
+                        parameters_lal[5],
+                        parameters_lal[6],
+                    )
+                    self.f_start = f_start
+
                 hlm_td, iota = self.generate_TD_modes_L0(parameters)
 
                 # Step 2: Transform modes to target domain.
                 # This requires tapering of TD modes, and FFT to transform to FD.
-                wfg_utils.taper_td_modes_in_place(hlm_td)
+                
+                # Tapering is different depending on if you use aligned spin or precessing waveforms
+                if self.approximant_str == "SEOBNRv4EHM_opt":
+                    self.f_start = None
+                    wfg_utils.taper_aligned_spin_td_modes_in_place(
+                        hlm_td,
+                        parameters_lal[1],
+                        parameters_lal[2],
+                        extra_time_fraction,
+                        t_chirp,
+                        t_extra,
+                        self.domain.f_min,
+                    )
+                else:
+                    wfg_utils.taper_td_modes_in_place(hlm_td)
+
                 hlm_fd = wfg_utils.td_modes_to_fd_modes(hlm_td, self.domain)
 
             # Step 3: Separate negative and positive frequency parts of the modes,
@@ -766,21 +848,20 @@ class WaveformGenerator:
                 )
                 hlm_td = LS.SimInspiralChooseTDModes(*parameters_lal_td_modes)
                 return wfg_utils.linked_list_modes_to_dict_modes(hlm_td), iota
-            
             # Aligned Spins
             elif self.approximant in [109]:
                 parameters_lal_td_modes, iota = self._convert_parameters_to_lal_frame(
                     {**parameters, "f_ref": self.f_ref},
                     lal_target_function="SimIMRSpinAlignedEOBModesEcc_opt",
                 )
-                print(len(parameters_lal_td_modes))
-                print([(i, parameters_lal_td_modes[i]) for i in range(len(parameters_lal_td_modes))])
                 (
                     hlm_td,
                     low_samp_dynamics,
                     high_samp_dynamics,
                 ) = LS.SimIMRSpinAlignedEOBModesEcc_opt(*parameters_lal_td_modes)
-                hlm_td = wfg_utils.linked_list_modes_to_dict_modes(hlm_td) # NOTE check if eccentricity wf model actually does this
+                hlm_td = wfg_utils.linked_list_modes_to_dict_modes(
+                    hlm_td
+                )  # NOTE check if eccentricity wf model actually does this
                 # The output of SimIMRSpinAlignedEOBModes is in the EOB frame, but we need in the LAL frame so we do a coordinate rotation
                 # https://git.ligo.org/waveforms/reviews/SEOBNRv4HM/-/blob/master/tests/conventions/conventions.pdf
                 for (ell, m), hlm in hlm_td.items():
@@ -835,7 +916,6 @@ class WaveformGenerator:
         pol_dict = {"h_plus": h_plus, "h_cross": h_cross}
         return pol_dict
 
-
 def SEOBNRv4PHM_maximum_starting_frequency(
     total_mass: float, fudge: float = 0.99
 ) -> float:
@@ -864,9 +944,9 @@ def SEOBNRv4PHM_maximum_starting_frequency(
     f_max_Hz = fudge * 10.5 ** (-1.5) / (np.pi * total_mass_sec)
     return f_max_Hz
 
-
 def generate_waveforms_task_func(
-    args: Tuple, waveform_generator: WaveformGenerator = None
+    args: Tuple, 
+    waveform_generator: WaveformGenerator = None
 ) -> Dict[str, np.ndarray]:
     """
     Picklable wrapper function for parallel waveform generation.
@@ -884,7 +964,6 @@ def generate_waveforms_task_func(
     """
     parameters = args[1].to_dict()
     return waveform_generator.generate_hplus_hcross(parameters)
-
 
 def generate_waveforms_parallel(
     waveform_generator: WaveformGenerator,
@@ -923,7 +1002,6 @@ def generate_waveforms_parallel(
     }
     return polarizations
 
-
 def sum_contributions_m(x_m, phase_shift=0.0):
     """
     Sum the contributions over m-components, optionally introducing a phase shift.
@@ -935,6 +1013,17 @@ def sum_contributions_m(x_m, phase_shift=0.0):
             result[key] += x[key] * np.exp(-1j * m * phase_shift)
     return result
 
+def sum_contributions_lm(x_m, phase_shift=0.0):
+    """
+    Sum the contributions over lm-components, optionally introducing a phase shift.
+    """
+    keys = next(iter(x_m.values())).keys()
+    result = {key: 0.0 for key in keys}
+    for key in keys:
+        for (l, m), x in x_m.items():
+            assert l >= m
+            result[key] += np.nan_to_num(x[key]) * np.exp(-1j * m * phase_shift)
+    return result
 
 if __name__ == "__main__":
     import pandas as pd

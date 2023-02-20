@@ -9,7 +9,7 @@ from threadpoolctl import threadpool_limits
 
 from dingo.core.likelihood import Likelihood
 from dingo.gw.injection import GWSignal
-from dingo.gw.waveform_generator import WaveformGenerator
+from dingo.gw.waveform_generator import WaveformGenerator, sum_contributions_m
 from dingo.gw.domains import build_domain
 from dingo.gw.data.data_preparation import get_event_data_and_domain
 
@@ -327,6 +327,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         #   (mu, mu) = sum(mu.conj() * mu).real,
         #
         # where the sum extends over frequency bins and detectors. Applying phase
+
         # transformations exp(-i * m * phi) to the individual modes will lead to
         # cross terms (the ^-symbol indicates the phase shift by phi)
         #
@@ -389,17 +390,17 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
             log_likelihoods[idx] = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
-            # # comment out for cross check:
-            # mu = sum_contributions_m(pol_m, phase_shift=phase)
-            # rho2opt_ref = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
-            # kappa2_ref = sum(
-            #     [
-            #         inner_product(d_ifo, mu_ifo)
-            #         for d_ifo, mu_ifo in zip(d.values(), mu.values())
-            #     ]
-            # )
-            # assert rho2opt - rho2opt_ref < 1e-10
-            # assert kappa2 - kappa2_ref < 1e-10
+            # comment out for cross check:
+            mu = sum_contributions_m(pol_m, phase_shift=phase)
+            rho2opt_ref = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
+            kappa2_ref = sum(
+                [
+                    inner_product(d_ifo, mu_ifo)
+                    for d_ifo, mu_ifo in zip(d.values(), mu.values())
+                ]
+            )
+            assert rho2opt - rho2opt_ref < 1e-10
+            assert kappa2 - kappa2_ref < 1e-10
 
         # # Test that this works:
         # idx = len(phases) // 3
