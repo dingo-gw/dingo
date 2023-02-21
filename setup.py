@@ -25,7 +25,7 @@ setup(
         "numpy",
         "torch",
         "torchvision",
-        "nflows",
+        "glasflow",
         "scipy",
         "pyyaml",
         "h5py",
