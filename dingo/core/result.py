@@ -280,13 +280,13 @@ class Result(DingoDataset):
 
     def sampling_importance_resampling(self, num_samples: int = -1):
         """ 
-        If you don't want weighted samples but instead only want samples from
-        the posterior, you can resample from the weighted posterior with a
-        probaility proportional to the weights. Note this must be done with
-        replacement. 
+        Generate unweighted posterior samples from weighted ones. New
+        samples are sampled with probability proportional to the sample weight.
+        Resampling is done with replacement, until the desired number of
+        unweighted samples is obtained.
 
-        In this case a copy of the weighted posterior is kept but a new 
-        pd.DataFrame is created called self.unweighted_samples.
+         Unweighted samples are saved in a new class attribute called
+         unweighted_samples, which is a pd.DataFrame.
         
         Parameters
         ----------
