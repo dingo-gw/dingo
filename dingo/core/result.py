@@ -1,4 +1,5 @@
 import copy
+import math
 import tempfile
 import time
 
@@ -6,7 +7,10 @@ import numpy as np
 from typing import Optional
 
 import pandas as pd
-from scipy.special import logsumexp
+import matplotlib.pyplot as plt
+from chainconsumer import ChainConsumer
+from scipy.constants import golden
+from scipy.special import logsumexp, erfinv
 from bilby.core.prior import Constraint
 
 from dingo.core.dataset import DingoDataset
@@ -503,6 +507,127 @@ class Result(DingoDataset):
         # Re-calculate the evidence based on the entire sample set.
         merged_result._calculate_evidence()
         return merged_result
+
+    #
+    # Plotting
+    #
+
+    def _cleaned_samples(self):
+        """Return samples that exclude -inf and nan. This is used primarily for
+        plotting."""
+
+        # Do not plot any samples with -inf or nan. -inf can occur in
+        # delta_log_prob_target or log_prior. nan occurs in log_likelihood when
+        # log_likelihood not actually evaluated due to -inf in other columns (i.e.,
+        # out of prior).
+
+        return self.samples.replace(-np.inf, np.nan).dropna(axis=0)
+
+    def plot_corner(self, parameters=None, filename="corner.pdf"):
+        """
+        Generate a corner plot of the samples.
+
+        Parameters
+        ----------
+        parameters : list[str]
+            List of parameters to include. If None, include all parameters.
+            (Default: None)
+        filename : str
+            Where to save samples.
+        """
+        theta = self._cleaned_samples()
+        # delta_log_prob_target is not interesting so never plot it.
+        theta = theta.drop(columns="delta_log_prob_target", errors="ignore")
+
+        # User option to plot specific parameters.
+        if parameters:
+            theta = theta[parameters]
+
+        c = ChainConsumer()
+
+        # Plot pre-importance sampling samples. I.e., drop weights, if present.
+        c.add_chain(theta, weights=None, color="orange", name="Dingo")
+        n = 1
+
+        if "weights" in theta:
+            c.add_chain(
+                theta, weights=theta["weights"].to_numpy(), color="red", name="Dingo-IS"
+            )
+            n = 2
+
+        c.configure(
+            linestyles=["-"] * n,
+            linewidths=[1.5] * n,
+            sigmas=[np.sqrt(2) * erfinv(x) for x in [0.5, 0.9]],
+            shade=[False] + [True] * (n - 1),
+            shade_alpha=0.3,
+            bar_shade=False,
+            label_font_size=10,
+            tick_font_size=10,
+            usetex=False,
+            legend_kwargs={"fontsize": 30},
+            kde=0.7,
+        )
+        c.plotter.plot(filename=filename)
+
+    def plot_log_probs(self, filename="log_probs.png"):
+        """
+        Make a scatter plot of the target versus proposal log probabilities. For the
+        target, subtract off the log evidence.
+        """
+        theta = self._cleaned_samples()
+        if "log_likelihood" in theta:
+            log_prob_proposal = theta["log_prob"].to_numpy()
+            if "delta_log_prob_target" in theta:
+                log_prob_proposal -= theta["delta_log_prob_target"].to_numpy()
+
+            log_prior = theta["log_prior"].to_numpy()
+            log_likelihood = theta["log_likelihood"].to_numpy()
+
+            x = log_prob_proposal
+            y = log_prior + log_likelihood - self.log_evidence
+
+            plt.figure(figsize=(6, 6))
+            plt.xlabel("proposal log_prob")
+            plt.ylabel("target log_prob - log_evidence")
+            y_lower, y_upper = np.max(y) - 20, np.max(y)
+            plt.ylim(y_lower, y_upper)
+            n_below = len(np.where(y < y_lower)[0])
+            plt.title(
+                f"Target log probabilities\n({n_below} below {y_lower:.2f})\n"
+                f"log(evidence) = {self.log_evidence:.3f} +- {self.log_evidence_std:.3f}"
+            )
+            plt.scatter(x, y, s=0.5)
+            plt.plot([y_upper - 20, y_upper], [y_upper - 20, y_upper], color="black")
+            plt.tight_layout()
+            plt.savefig(filename)
+
+    def plot_weights(self, filename="weights.png"):
+        """Make a scatter plot of samples weights vs log proposal."""
+        theta = self._cleaned_samples()
+        if "weights" in theta and "log_prob" in theta:
+            x = theta["log_prob"].to_numpy()
+            y = theta["weights"].to_numpy()
+            y /= y.mean()
+
+            plt.figure(figsize=(6 * golden, 6))
+            plt.xlabel("proposal log_prob")
+            plt.ylabel("weight (normalized)")
+            y_lower = 1e-4
+            y_upper = math.ceil(
+                np.max(y) / 10 ** math.ceil(np.log10(np.max(y)) - 1)
+            ) * 10 ** math.ceil(np.log10(np.max(y)) - 1)
+            plt.ylim(y_lower, y_upper)
+            n_below = len(np.where(y < y_lower)[0])
+            plt.yscale("log")
+            plt.title(
+                f"Importance sampling weights\n({n_below} below {y_lower})\n"
+                f"Effective samples: {self.n_eff:.0f} (Efficiency = "
+                f"{100 * self.sample_efficiency:.2f}%)."
+            )
+            plt.scatter(x, y, s=0.5)
+            plt.tight_layout()
+            plt.savefig(filename)
 
 
 def check_equal_dict_of_arrays(a, b):

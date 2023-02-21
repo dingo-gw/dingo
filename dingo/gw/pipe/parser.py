@@ -800,11 +800,21 @@ def create_parser(top_level=True):
     #     action="store_true",
     #     help="Create calibration posterior plot",
     # )
-    # output_parser.add_argument(
-    #     "--plot-corner",
-    #     action="store_true",
-    #     help="Create intrinsic and extrinsic posterior corner plots",
-    # )
+    output_parser.add_argument(
+        "--plot-corner",
+        action="store_true",
+        help="Create corner plot",
+    )
+    output_parser.add_argument(
+        "--plot-weights",
+        action="store_true",
+        help="Create scatter plot of importance weights",
+    )
+    output_parser.add_argument(
+        "--plot-log-probs",
+        action="store_true",
+        help="Create scatter plot of target versus proposal log probabilities",
+    )
     # output_parser.add_argument(
     #     "--plot-marginal",
     #     action="store_true",

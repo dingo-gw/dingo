@@ -183,18 +183,16 @@ class MainInput(BilbyMainInput):
         # self.use_mpi = (self.sampler in self.mpi_samplers) and (self.request_cpus > 1)
         #
         # # Set plotting options when need the plot node
-        # self.plot_node_needed = False
-        # for plot_attr in [
-        #     "calibration",
-        #     "corner",
-        #     "marginal",
-        #     "skymap",
-        #     "waveform",
-        # ]:
-        #     attr = f"plot_{plot_attr}"
-        #     setattr(self, attr, getattr(args, attr))
-        #     if getattr(self, attr):
-        #         self.plot_node_needed = True
+        self.plot_node_needed = False
+        for plot_attr in [
+            "corner",
+            "weights",
+            "log_probs",
+        ]:
+            attr = f"plot_{plot_attr}"
+            setattr(self, attr, getattr(args, attr))
+            if getattr(self, attr):
+                self.plot_node_needed = True
         #
         # # Set all other plotting options
         # for plot_attr in [

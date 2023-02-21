@@ -10,6 +10,7 @@ from bilby_pipe.utils import BilbyPipeError, logger
 from dingo.gw.pipe.nodes.generation_node import GenerationNode
 from .nodes.importance_sampling_node import ImportanceSamplingNode
 from .nodes.merge_node import MergeNode
+from .nodes.plot_node import PlotNode
 from .nodes.sampling_node import SamplingNode
 
 
@@ -81,7 +82,6 @@ def generate_dag(inputs):
     # If injecting into simulated noise, be sure to use consistent noise realization.
 
     if len(inputs.importance_sampling_updates) > 0:
-        # importance_sampling_generation = True
         # Iterate over all generation nodes and store them in a list
         importance_sampling_generation_node_list = []
         for idx, trigger_time in enumerate(trigger_times):
@@ -99,10 +99,7 @@ def generate_dag(inputs):
     #
     # 4. Importance sample
     #
-
-    # 4. Calculate importance weights.
-    #
-    # If the phase is not present and phase marginalization is not being used,
+    # If the phase is not present and phase marginalization is not being used, also
     # sample the phase synthetically. This adds between 1x and 50x to the cost of
     # importance sampling, depending on the waveform model. Indeed, IMRPhenomXPHM
     # waveform modes are much more expensive to generate than polarizations.
@@ -138,7 +135,16 @@ def generate_dag(inputs):
             merged_importance_sampling_node_list.append(merge_node)
 
     #
-    # 5. PESummary
+    # 5. Plotting
+    #
+
+    plot_nodes_list = []
+    for merged_node in merged_importance_sampling_node_list:
+        if inputs.plot_node_needed:
+            plot_nodes_list.append(PlotNode(inputs, merged_node, dag=dag))
+
+    #
+    # 6. PESummary
     #
 
     dag.build()
