@@ -20,6 +20,5 @@ In this virtual environment, install dingo.
 
 ```bash
 $ pip install wheel
-$ python setup.py bdist_wheel
 $ pip install -e ."[dev]"
 ```
