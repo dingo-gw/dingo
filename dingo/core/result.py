@@ -278,7 +278,7 @@ class Result(DingoDataset):
             (num_samples - self.n_eff) / (num_samples * self.n_eff)
         )
 
-    def sampling_importance_resampling(self, num_samples: int = -1):
+    def sampling_importance_resampling(self, num_samples = None):
         """ 
         Generate unweighted posterior samples from weighted ones. New
         samples are sampled with probability proportional to the sample weight.
@@ -290,15 +290,15 @@ class Result(DingoDataset):
         
         Parameters
         ----------
-        num_samples : list 
+        num_samples : int
             Number of samples to resample
 
         """
-        if num_samples == -1:
+        if num_samples == None:
             num_samples = len(self.samples)
         
         if num_samples > len(self.samples):
-            raise Exception("Cannot sample more points than in the weighted posterior")
+            raise ValueError("Cannot sample more points than in the weighted posterior")
         
         self.unweighted_samples = self.samples.sample(n=num_samples, weights=self.samples["weights"], replace=True)
         self.unweighted_samples = self.unweighted_samples.drop(["weights"], axis=1)
