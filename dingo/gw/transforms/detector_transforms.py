@@ -252,15 +252,21 @@ class MultiplyCalibrationUncertainty(object):
         self, ifo_list, data_domain, calibration_envelope, num_calibration_curves
     ):
         """
-        Initialize calibration marginalization. This requires the user to give an event specific calibration curve.
+        Initialize calibration marginalization. This requires the user to give
+        an event specific calibration curve.
 
-        Calibration marginalization takes a median and sigma (of amplitude and phase) for each point in frequency space. Then it creates a spline
-        on the median and sigma. NOTE this is a DIFFERENT spline from the cubic spline that will be generated later. This spline is just needed to
-        create priors on the the node points for the calibration cubic spline. This spline will give you the node points, i.e. f_i (log spaced) and
+        Calibration marginalization takes a median and sigma (of amplitude and
+        phase) for each point in frequency space. Then it creates a spline on
+        the median and sigma. NOTE this is a DIFFERENT spline from the cubic
+        spline that will be generated later. This spline is just needed to
+        create priors on the the node points for the calibration cubic spline.
+        This spline will give you the node points, i.e. f_i (log spaced) and
         Priors(\delta A_i, \delta \psi_i).
 
-        These node points are the calibration parameters. From these node points and priors you can draw values for \delta A_i and \delta \psi_i which
-        will give you a calibration curve. This is the calibration curve which you then multiply against the waveform.
+        These node points are the calibration parameters. From these node points
+        and priors you can draw values for \delta A_i and \delta \psi_i which
+        will give you a calibration curve. This is the calibration curve which
+        you then multiply against the waveform.
         """
 
         self.ifo_list = ifo_list
@@ -281,9 +287,12 @@ class MultiplyCalibrationUncertainty(object):
                 )
 
                 # Setting priors
-                # What this will do is take the the calibration envelope and set a spline on the median and sigma of the amplitude and phase.
-                # Then in log frequency it will setup node points say at frequency points, $f_i$.
-                # Then for each node point f_i, it will create a gaussian prior according to the spline of the median and sigma found earlier
+                # What this will do is take the the calibration envelope and set
+                # a spline on the median and sigma of the amplitude and phase.
+                # Then in log frequency it will setup node points say at
+                # frequency points, $f_i$.  Then for each node point f_i, it
+                # will create a gaussian prior according to the spline of the
+                # median and sigma found earlier
                 self.calibration_priors[
                     ifo.name
                 ] = CalibrationPriorDict.from_envelope_file(
@@ -308,18 +317,14 @@ class MultiplyCalibrationUncertainty(object):
             calibration_draws[ifo.name] = np.zeros(
                 (
                     self.num_calibration_curves,
-                    len(
-                        self.data_domain.sample_frequencies[
-                            self.data_domain.frequency_mask
-                        ]
-                    ),
+                    len(self.data_domain.sample_frequencies),
                 ),
                 dtype=complex,
             )
 
             for i in range(self.num_calibration_curves):
                 calibration_draws[ifo.name][
-                    i, :
+                    i, self.data_domain.frequency_mask
                 ] = ifo.calibration_model.get_calibration_factor(
                     self.data_domain.sample_frequencies[
                         self.data_domain.frequency_mask
@@ -328,26 +333,20 @@ class MultiplyCalibrationUncertainty(object):
                     **calibration_parameter_draws[ifo.name].iloc[i],
                 )
 
-            # Multiplying the sample waveform in the interferometer according to the calibration curve
-            # This is done by following the perscription here:
+            # Multiplying the sample waveform in the interferometer according to
+            # the calibration curve.  This is done by following the perscription
+            # here:
             #
             # https://dcc.ligo.org/LIGO-T1400682 Eq 3 and 4
             #
-            # We take the waveform h(f) and multiply it by C = (1 + \delta A(f)) \exp(i \delta \psi)
-            # i.e. h_obs(f) = C * h(f)
+            # We take the waveform h(f) and multiply it by C = (1 + \delta A(f))
+            # \exp(i \delta \psi) i.e. h_obs(f) = C * h(f)
             # Here C is "calibration_draws"
 
             # Padding 0's to everything in the calibration array which is below f_min
 
-            calibration_waveforms = (
-                sample["waveform"][ifo.name][self.data_domain.frequency_mask]
-                * calibration_draws[ifo.name]
+            sample["waveform"][ifo.name] = (
+                sample["waveform"][ifo.name] * calibration_draws[ifo.name]
             )
-            sample["waveform"][ifo.name] = np.tile(
-                sample["waveform"][ifo.name], (self.num_calibration_curves, 1)
-            )
-            sample["waveform"][ifo.name][
-                :, self.data_domain.frequency_mask
-            ] = calibration_waveforms
 
         return sample
