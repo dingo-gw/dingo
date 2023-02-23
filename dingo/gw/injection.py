@@ -2,7 +2,7 @@ import numpy as np
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 
-from dingo.gw.noise_dataset.ASD_dataset import ASDDataset
+from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.domains import (
     FrequencyDomain,
     build_domain,

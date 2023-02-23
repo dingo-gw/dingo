@@ -2,36 +2,36 @@ dataset_settings:
   f_s: 4096
   # f_min: 20
   # f_max: 1024
-  T_PSD: 1024
+  time_psd: 1024  # segment length used for estimating a PSD, should be an integer
   T: 8
   window:
     roll_off: 0.4
     type: tukey
-  T_gap: 1024          # specifies the time skipped between to consecutive PSD estimates. If set < 0, the time segments overlap
-  num_psds_max: 25   # if set > 0, only a subset of all available PSDs will be used
+  time_gap: 1024          # specifies the time skipped between to consecutive PSD estimates. If set < 0, the time segments overlap
+  num_psds_max: 5   # if set > 0, only a subset of all available PSDs will be used
   detectors:
     - H1
     - L1
   observing_run: O2
-  smoothen: True
+#  smoothen: True
 
 parameterization_settings:
   num_spline_positions: 30
   num_spectral_segments: 400
   sigma: 0.14       # std of the Normal distribution parameterizing p(S_n|z)
   delta_f: -1     # optional truncation parameter for the spectral lines
-
-sampling_settings:
-    method: kde
-    bw_spectral: 0.5
-    bw_spline: 0.25
-    num_samples: 500
-    split_frequencies:
-      - 30
-      - 100
-    rescaling_psd_paths:
-      H1: /Users/jwildberger/Desktop/dingo-devel/examples/dataset_generation/tmp/O3/H1/asd_1238167251.hdf5
-      L1: /Users/jwildberger/Desktop/dingo-devel/examples/dataset_generation/tmp/O3/L1/asd_1238168344.hdf5
+#
+#sampling_settings:
+#    method: kde
+#    bandwidth_spline: 0.5
+#    bandwidth_spline: 0.25
+#    num_samples: 500
+#    split_frequencies:
+#      - 30
+#      - 100
+#    rescaling_psd_paths:
+#      H1: /Users/jwildberger/Desktop/dingo-devel/examples/dataset_generation/tmp/O3/H1/asd_1238167251.hdf5
+#      L1: /Users/jwildberger/Desktop/dingo-devel/examples/dataset_generation/tmp/O3/L1/asd_1238168344.hdf5
 local:
   env_path: /opt/anaconda3/envs/dingo/
   num_processes: 3

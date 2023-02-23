@@ -7,10 +7,10 @@ import numpy as np
 import scipy
 import yaml
 
-from dingo.gw.noise_dataset.ASD_dataset import ASDDataset
+from dingo.gw.noise.asd_dataset import ASDDataset
 
 
-def get_path_raw_data(data_dir, run, detector):
+def psd_data_path(data_dir, run, detector):
     """
     Return the directory where the PSD data is to be stored
     Parameters
@@ -111,25 +111,22 @@ def merge_datasets(data_dir, dataset_settings, time_segments, merged_name=None):
 
     """
 
-    print(f"Merging {len(time_segments)} datasets into one.")
-
     detectors = dataset_settings["detectors"]
     run = dataset_settings["observing_run"]
 
-    asds_dict = dict(zip(detectors, [[] for _ in range(len(detectors))]))
-    gps_times_dict = dict(zip(detectors, [[] for _ in range(len(detectors))]))
+    asds_dict = {det: [] for det in detectors}
+    gps_times_dict = {det: [] for det in detectors}
 
     smoothen = dataset_settings.get("smoothen", False)
-    parameters_dict = dict(zip(detectors, [{} for i in range(len(detectors))]))
+    parameters_dict = {det: {} for det in detectors}
 
     for det in detectors:
-        file_dir = get_path_raw_data(data_dir, run, det)
+        print(f"Merging {len(time_segments[det])} datasets into one for detector {det}.")
+        file_dir = psd_data_path(data_dir, run, det)
         filenames = [join(file_dir, f"asd_{seg[0]}.hdf5") for seg in time_segments[det]]
         datasets = [ASDDataset(filename) for filename in filenames]
 
-        parameters = dict(
-            zip(["x_positions", "y_values", "spectral_features"], [None, [], []])
-        )
+        parameters = {'x_positions': None, 'y_values': [], 'spectral_features': []}
 
         for dataset in datasets:
             asds_dict[det].append(dataset.asds[det][0])
@@ -150,16 +147,10 @@ def merge_datasets(data_dir, dataset_settings, time_segments, merged_name=None):
 
             parameters["x_positions"] = dataset.parameters[det]["x_positions"]
             parameters_dict[det] = parameters
+        # TODO put this in the estimation file and append as attribute to .hdf5 "smooth_psd" the just use flag to decide
+        # which is loaded
         if smoothen:
-            psds = reconstruct_psds_from_parameters(
-                parameters,
-                dataset.domain,
-                dataset.settings["parameterization_settings"],
-                smoothen=True,
-            )
-            asds_dict[det] = np.sqrt(
-                psds[:, dataset.domain.min_idx : dataset.domain.max_idx + 1]
-            )
+
         else:
             asds_dict[det] = np.array(asds_dict[det])
         gps_times_dict[det] = np.array(gps_times_dict[det])

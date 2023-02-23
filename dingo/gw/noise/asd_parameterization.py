@@ -5,7 +5,12 @@ import scipy
 import scipy.optimize
 from threadpoolctl import threadpool_limits
 
-from dingo.gw.noise_dataset.utils import get_index_for_elem, lorentzian_eval
+from dingo.gw.noise.utils import get_index_for_elem, lorentzian_eval
+
+P0_A, P0_Q = 5, 100
+MIN_A, MIN_Q = 0, 10
+MAX_A, MAX_Q = 12, 1000
+MAXFEV = 5000000
 
 
 def parameterize_single_psd(real_psd, domain, parameterization_settings):
@@ -74,7 +79,7 @@ def fit_broadband_noise(domain, psd, num_spline_positions, sigma):
         if i == 0:
             ind_min, ind_max = ind, int((ind + xs_indices[i + 1]) / 2)
         elif i == len(xs_indices) - 1:
-            ind_min, ind_max = int((ind + xs_indices[i - 1]) / 2), ind
+            ind_min, ind_max = int((ind + xs_indices[i - 1]) / 2), ind + 1
         else:
             ind_min, ind_max = int((ind + xs_indices[i - 1]) / 2), int(
                 (ind + xs_indices[i + 1]) / 2
@@ -162,7 +167,6 @@ def fit_spectral(
     return lorentzians, spectral_features
 
 
-# TODO: should the parameters here also be optionally passed via settings file?
 def curve_fit(data, std, delta_f=None):
 
     func = partial(lorentzian_eval, delta_f=delta_f)
@@ -171,10 +175,10 @@ def curve_fit(data, std, delta_f=None):
         func,
         data["frequencies"],
         data["psd"] - data["broadband_noise"],
-        p0=[(data["lower_freq"] + data["upper_freq"]) / 2, 5, 100],
+        p0=[(data["lower_freq"] + data["upper_freq"]) / 2, P0_A, P0_Q],
         sigma=[std] * len(data["frequencies"]),
-        bounds=[[data["lower_freq"], 0, 10], [data["upper_freq"], 12, 1000]],
-        maxfev=5000000,
+        bounds=[[data["lower_freq"], MIN_A, MIN_Q], [data["upper_freq"], MAX_A, MAX_Q]],
+        maxfev=MAXFEV,
     )
     return popt
 

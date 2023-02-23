@@ -4,13 +4,13 @@ from os.path import join
 
 import yaml
 
-from dingo.gw.noise_dataset.estimation import (
+from dingo.gw.noise.asd_estimation import (
     download_and_estimate_psds,
     get_time_segments,
 )
-from dingo.gw.noise_dataset.generate_dataset_dag import create_dag
-from dingo.gw.noise_dataset.utils import merge_datasets
-from dingo.gw.noise_dataset.sampling import KDE
+from dingo.gw.noise.generate_dataset_dag import create_dag
+from dingo.gw.noise.utils import merge_datasets
+from dingo.gw.noise.asd_sampling import KDE
 
 
 def parse_args():

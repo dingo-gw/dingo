@@ -21,7 +21,7 @@ from dingo.gw.domains import FrequencyDomain, build_domain
 from dingo.gw.transforms import WhitenAndScaleStrain
 
 
-def download_psd(
+def estimate_psd(
     det, time_start, time_segment, window, f_s=4096, num_segments: int = 128
 ):
     """
@@ -170,14 +170,14 @@ def download_event_data_in_FD(
             det, time_event, time_segment, time_buffer, window
         )
         data["asds"][det] = (
-            download_psd(
+                estimate_psd(
                 det,
                 time_event + time_buffer - time_segment * (num_segments_psd + 1),
                 time_segment,
                 window,
                 num_segments_psd,
             )
-            ** 0.5
+                ** 0.5
         )
 
     # build domain object

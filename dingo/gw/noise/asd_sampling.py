@@ -6,9 +6,9 @@ from os.path import join
 import numpy as np
 from scipy import stats
 from abc import ABC, abstractmethod
-from dingo.gw.noise_dataset.parameterization import parameterize_single_psd
-from dingo.gw.noise_dataset.ASD_dataset import ASDDataset
-from dingo.gw.noise_dataset.utils import (
+from dingo.gw.noise.asd_parameterization import parameterize_single_psd
+from dingo.gw.noise.asd_dataset import ASDDataset
+from dingo.gw.noise.utils import (
     get_index_for_elem,
     reconstruct_psds_from_parameters,
 )
@@ -41,8 +41,8 @@ class KDE:
         self.sampling_settings = sampling_settings
 
         detectors = asd_dataset.parameters.keys()
-        self.spectral_kde = dict(zip(detectors, [[] for _ in range(len(detectors))]))
-        self.broadband_kde = dict(zip(detectors, [[] for _ in range(len(detectors))]))
+        self.spectral_kde = {det: [] for det in detectors}
+        self.broadband_kde = {det: [] for det in detectors}
 
     def fit(self, weights=None):
 
@@ -55,7 +55,7 @@ class KDE:
                 try:
                     spectral_kde = stats.gaussian_kde(
                         spectral_features[:, i, :].T,
-                        bw_method=float(self.sampling_settings["bw_spectral"]),
+                        bw_method=float(self.sampling_settings["bandwidth_spectral"]),
                         weights=weights,
                     )
                 except np.linalg.LinAlgError:
@@ -67,7 +67,7 @@ class KDE:
                     )
                     spectral_kde = stats.gaussian_kde(
                         perturbed_features.T,
-                        bw_method=float(self.sampling_settings["bw_spectral"]),
+                        bw_method=float(self.sampling_settings["bandwidth_spectral"]),
                         weights=weights,
                     )
                 self.spectral_kde[det].append(spectral_kde)
@@ -82,7 +82,7 @@ class KDE:
             for i in range(len(split_indices) - 1):
                 vals = y_values[:, split_indices[i] : split_indices[i + 1]].T
                 kde_vals = stats.gaussian_kde(
-                    vals, bw_method=float(self.sampling_settings["bw_spline"])
+                    vals, bw_method=float(self.sampling_settings["bandwidth_spline"])
                 )
                 self.broadband_kde[det].append(kde_vals)
 

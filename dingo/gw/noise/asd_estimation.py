@@ -12,11 +12,11 @@ import yaml
 from tqdm import tqdm
 
 from dingo.gw.domains import build_domain
-from dingo.gw.download_strain_data import download_psd
+from dingo.gw.download_strain_data import estimate_psd
 from dingo.gw.gwutils import get_window
-from dingo.gw.noise_dataset.ASD_dataset import ASDDataset
-from dingo.gw.noise_dataset.parameterization import parameterize_single_psd
-from dingo.gw.noise_dataset.utils import get_path_raw_data
+from dingo.gw.noise.asd_dataset import ASDDataset
+from dingo.gw.noise.asd_parameterization import parameterize_single_psd
+from dingo.gw.noise.utils import psd_data_path
 
 """
 Contains links for PSD segment lists with quality label BURST_CAT2 from the Gravitational Wave Open Science Center.
@@ -69,14 +69,11 @@ def get_time_segments(data_dir, settings):
     time_segments = {}
 
     run = settings["observing_run"]
-    T_PSD = settings["T_PSD"]
-    T_gap = settings["T_gap"]
+    time_psd = settings["time_psd"]
+    time_gap = settings["time_gap"]
     num_psds_max = settings.get("num_psds_max")
 
     for detector in settings["detectors"]:
-
-        path_raw_psds = get_path_raw_data(data_dir, run, detector)
-        os.makedirs(path_raw_psds, exist_ok=True)
 
         key = run + "_" + detector
         urls = URL_DIRECTORY[key]
@@ -93,24 +90,23 @@ def get_time_segments(data_dir, settings):
             durations = np.hstack([durations, durations_seg])
 
         segs = np.array(list(zip(starts, stops, durations)), dtype=int)
-        segs = segs[segs[:, 2] >= T_PSD]
+        segs = segs[segs[:, 2] >= time_psd]
 
         valid_segments = []
         for idx in range(segs.shape[0]):
             seg = segs[idx, :]
             start_time = seg[0]
-            end_time = start_time + T_PSD
+            end_time = start_time + time_psd
 
-            while end_time in range(seg[0], seg[1] + 1):
+            while end_time <= seg[1]:
                 valid_segments.append((start_time, end_time))
-                start_time = end_time + T_gap
-                end_time = start_time + T_PSD
+                start_time = end_time + time_gap
+                end_time = start_time + time_psd
 
-        # randomly sample a subset of time segments to estimate PSDs
         if num_psds_max is not None and num_psds_max > 0:
             valid_segments = valid_segments[
                 :num_psds_max
-            ]  # random.sample(valid_segments, num_psds_max)
+            ]
 
         time_segments[detector] = valid_segments
 
@@ -121,6 +117,21 @@ def get_time_segments(data_dir, settings):
 
 
 def estimate_func(seg, domain, estimation_kwargs, psd_path, settings, override=False):
+    """
+
+    Parameters
+    ----------
+    seg
+    domain
+    estimation_kwargs
+    psd_path
+    settings
+    override
+
+    Returns
+    -------
+
+    """
 
     start, end = seg[0], seg[1]
     filename = join(psd_path, f"asd_{start}.hdf5")
@@ -151,14 +162,26 @@ def estimate_func(seg, domain, estimation_kwargs, psd_path, settings, override=F
         dataset.update_domain(domain.domain_dict)
         psd = dataset.asds[det][0] ** 2
 
-    # if file doesn't exist or new domain is incompatible, download PSD
+    # if file doesn't exist or new domain is incompatible, download strain and estimate PSD
     except (FileNotFoundError, ValueError):
-        psd = download_psd(time_start=start, **estimation_kwargs)
-    # only parameterize, if settings are passed and any existing parameterization should be overwritten
+        psd = estimate_psd(time_start=start, **estimation_kwargs)
+
+    # only parameterize if settings are passed and any existing parameterization should be overwritten
     if parameterization_settings:
         dataset_dict["settings"]["parameterization_settings"] = parameterization_settings
         params = parameterize_single_psd(psd, domain, parameterization_settings)
         dataset_dict["parameters"] = {det: params}
+        # save smooth PSD version based on reconstruction
+        smooth_psd = reconstruct_psds_from_parameters(
+            params,
+            domain,
+            parameterization_settings,
+            smoothen=True,
+        )
+        dataset_dict["smooth_asds"] =
+        asds_dict[det] = np.sqrt(
+            psds[:, dataset.domain.min_idx: dataset.domain.max_idx + 1]
+        )
 
     asd = np.sqrt(psd[domain.min_idx: domain.max_idx + 1])
     gps_time = start
@@ -179,6 +202,20 @@ def download_and_estimate_psds(
     verbose=False,
     override=False
 ):
+    """
+
+    Parameters
+    ----------
+    data_dir
+    settings
+    time_segments
+    verbose
+    override
+
+    Returns
+    -------
+
+    """
     dataset_settings = settings["dataset_settings"]
     run = dataset_settings["observing_run"]
     detectors = (
@@ -188,7 +225,7 @@ def download_and_estimate_psds(
     f_min = dataset_settings.get("f_min", 0)
     f_max = dataset_settings.get("f_max", (dataset_settings["f_s"] / 2))
     T = dataset_settings["T"]
-    T_PSD = dataset_settings["T_PSD"]
+    time_psd = dataset_settings["time_psd"]
     f_s = dataset_settings["f_s"]
 
     delta_f = 1 / T
@@ -211,13 +248,14 @@ def download_and_estimate_psds(
     w = get_window(window_kwargs)
 
     for det in detectors:
-        psd_path = get_path_raw_data(data_dir, run, det)
+        psd_path = psd_data_path(data_dir, run, det)
+        os.makedirs(psd_path, exist_ok=True)
         estimation_kwargs = {
             "det": det,
             "time_segment": T,
             "window": w,
             "f_s": f_s,
-            "num_segments": int(T_PSD / T),
+            "num_segments": int(time_psd / T),
         }
         task_func = partial(
             estimate_func,
@@ -243,6 +281,12 @@ def download_and_estimate_psds(
 
 
 def download_and_estimate_cli():
+    """
+
+    Returns
+    -------
+
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--data_dir",

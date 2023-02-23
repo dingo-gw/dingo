@@ -7,7 +7,7 @@ import numpy as np
 import yaml
 from pycondor import Job, Dagman
 
-from dingo.gw.noise_dataset.estimation import get_time_segments
+from dingo.gw.noise.asd_estimation import get_time_segments
 
 
 def create_args_string(args_dict: Dict):
