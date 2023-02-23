@@ -106,6 +106,8 @@ class ASDDataset(DingoDataset):
     def sample_random_asds(self):
         """
         Sample a random asd for each detector.
-        :return: Dict with a random asd from the dataset for each detector.
+        Returns
+        -------
+        Dict with a random asd from the dataset for each detector.
         """
         return {k: v[np.random.choice(len(v), 1)[0]] for k, v in self.asds.items()}
