@@ -551,6 +551,15 @@ def create_parser(top_level=True):
         ),
     )
     submission_parser.add(
+        "--requirements",
+        type=str,
+        default=None,
+        help=(
+            "Extra requirements for submitting sampling, can be used to specify GPU "
+            "memory via TARGET.CUDAGlobalMemoryMb>40000."
+        ),
+    )
+    submission_parser.add(
         "--conda-env",
         type=nonestr,
         default=None,

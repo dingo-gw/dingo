@@ -5,7 +5,7 @@ import torch
 import numpy as np
 import torch.nn as nn
 from torch.nn import functional as F
-from nflows.nn.nets.resnet import ResidualBlock
+from glasflow.nflows.nn.nets.resnet import ResidualBlock
 from dingo.core.utils import torchutils
 
 
@@ -36,11 +36,12 @@ class LinearProjectionRB(nn.Module):
         output dimension:   (batch_size, 2 * n_rb * num_blocks)
     """
 
-    def __init__(self,
-                 input_dims: Tuple[int, int, int],
-                 n_rb: int,
-                 V_rb_list: Union[Tuple, None],
-                 ):
+    def __init__(
+        self,
+        input_dims: Tuple[int, int, int],
+        n_rb: int,
+        V_rb_list: Union[Tuple, None],
+    ):
         """
         Parameters
         ----------
@@ -66,14 +67,13 @@ class LinearProjectionRB(nn.Module):
         # define a linear projection layer for each block
         layers = []
         for _ in range(self.num_blocks):
-            layers.append(
-                nn.Linear(self.num_bins * self.num_channels, self.n_rb * 2))
+            layers.append(nn.Linear(self.num_bins * self.num_channels, self.n_rb * 2))
         self.layers_rb = nn.ModuleList(layers)
 
         # initialize layers with reduced basis
         if V_rb_list is not None:
             if type(V_rb_list[0]) == str:
-                V_rb_list = [np.load(el) for el in V_rb_list] 
+                V_rb_list = [np.load(el) for el in V_rb_list]
             self.test_dimensions(V_rb_list)
             self.init_layers(V_rb_list)
 
@@ -90,23 +90,27 @@ class LinearProjectionRB(nn.Module):
         other, and the reduced basis matrices V."""
         if self.num_channels < 2:
             raise ValueError(
-                'Number of channels needs to be at least 2, for real and '
-                'imaginary parts.')
+                "Number of channels needs to be at least 2, for real and "
+                "imaginary parts."
+            )
         if len(V_rb_list) != self.num_blocks:
             raise ValueError(
-                'There must be exactly one reduced basis matrix V for each '
-                'block.')
+                "There must be exactly one reduced basis matrix V for each " "block."
+            )
         for V in V_rb_list:
             if not isinstance(V, np.ndarray) or len(V.shape) != 2:
                 raise ValueError(
-                    'Reduced basis matrix V must be a numpy array with 2 axes.')
+                    "Reduced basis matrix V must be a numpy array with 2 axes."
+                )
             if V.shape[0] != self.num_bins:
                 raise ValueError(
-                    'Number of input bins and number of rows in rb matrix V '
-                    'need to match.')
+                    "Number of input bins and number of rows in rb matrix V "
+                    "need to match."
+                )
             if V.shape[1] < self.n_rb:
                 raise ValueError(
-                    'More reduced basis elements requested than available.')
+                    "More reduced basis elements requested than available."
+                )
 
     def init_layers(self, V_rb_list):
         """
@@ -123,8 +127,10 @@ class LinearProjectionRB(nn.Module):
 
             # truncate V to n_rb basis elements
             V = V[:, :n]
-            V_real, V_imag = torch.from_numpy(V.real).float(), \
-                             torch.from_numpy(V.imag).float()
+            V_real, V_imag = (
+                torch.from_numpy(V.real).float(),
+                torch.from_numpy(V.imag).float(),
+            )
 
             # initialize all weights and biases with zero
             layer.weight.data = torch.zeros_like(layer.weight.data)
@@ -133,8 +139,8 @@ class LinearProjectionRB(nn.Module):
             # load matrix V into weights
             layer.weight.data[:n, :k] = torch.transpose(V_real, 1, 0)
             layer.weight.data[n:, :k] = torch.transpose(V_imag, 1, 0)
-            layer.weight.data[:n, k:2 * k] = - torch.transpose(V_imag, 1, 0)
-            layer.weight.data[n:, k:2 * k] = torch.transpose(V_real, 1, 0)
+            layer.weight.data[:n, k : 2 * k] = -torch.transpose(V_imag, 1, 0)
+            layer.weight.data[n:, k : 2 * k] = torch.transpose(V_real, 1, 0)
 
     def forward(self, x):
         if x.shape[1:] != (self.num_blocks, self.num_channels, self.num_bins):
@@ -163,14 +169,15 @@ class DenseResidualNet(nn.Module):
         output dimension:   (batch_size, output_dim)
     """
 
-    def __init__(self,
-                 input_dim: int,
-                 output_dim: int,
-                 hidden_dims: Tuple,
-                 activation: Callable = F.elu,
-                 dropout: float = 0.0,
-                 batch_norm: bool = True,
-                 ):
+    def __init__(
+        self,
+        input_dim: int,
+        output_dim: int,
+        hidden_dims: Tuple,
+        activation: Callable = F.elu,
+        dropout: float = 0.0,
+        batch_norm: bool = True,
+    ):
         """
         Parameters
         ----------
@@ -244,9 +251,10 @@ class ModuleMerger(nn.Module):
         output dimension:   (batch_size, ?)
     """
 
-    def __init__(self,
-                 module_list: Tuple,
-                 ):
+    def __init__(
+        self,
+        module_list: Tuple,
+    ):
         """
         Parameters
         ----------
@@ -259,22 +267,22 @@ class ModuleMerger(nn.Module):
 
     def forward(self, *x):
         if len(x) != len(self.enets):
-            raise ValueError('Invalid number of input tensors provided.')
+            raise ValueError("Invalid number of input tensors provided.")
         x = [module(xi) for module, xi in zip(self.enets, x)]
         return torch.cat(x, axis=1)
 
 
 def create_enet_with_projection_layer_and_dense_resnet(
-        input_dims: Tuple[int, int, int],
-        # n_rb: int,
-        V_rb_list: Union[Tuple, None],
-        output_dim: int,
-        hidden_dims: Tuple,
-        svd: dict,
-        activation: str = 'elu',
-        dropout: float = 0.0,
-        batch_norm: bool = True,
-        added_context: bool = False,
+    input_dims: Tuple[int, int, int],
+    # n_rb: int,
+    V_rb_list: Union[Tuple, None],
+    output_dim: int,
+    hidden_dims: Tuple,
+    svd: dict,
+    activation: str = "elu",
+    dropout: float = 0.0,
+    batch_norm: bool = True,
+    added_context: bool = False,
 ):
     """
     Builder function for 2-stage embedding network for 1D data with multiple
@@ -335,14 +343,15 @@ def create_enet_with_projection_layer_and_dense_resnet(
     :return: nn.Module
     """
     activation_fn = torchutils.get_activation_function_from_string(activation)
-    module_1 = LinearProjectionRB(input_dims, svd['size'], V_rb_list)
-    module_2 = DenseResidualNet(input_dim=module_1.output_dim,
-                                output_dim=output_dim,
-                                hidden_dims=hidden_dims,
-                                activation=activation_fn,
-                                dropout=dropout,
-                                batch_norm=batch_norm
-                                )
+    module_1 = LinearProjectionRB(input_dims, svd["size"], V_rb_list)
+    module_2 = DenseResidualNet(
+        input_dim=module_1.output_dim,
+        output_dim=output_dim,
+        hidden_dims=hidden_dims,
+        activation=activation_fn,
+        dropout=dropout,
+        batch_norm=batch_norm,
+    )
     enet = nn.Sequential(module_1, module_2)
 
     if not added_context:
@@ -351,5 +360,5 @@ def create_enet_with_projection_layer_and_dense_resnet(
         return ModuleMerger((enet, nn.Identity()))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     pass

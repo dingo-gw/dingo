@@ -487,14 +487,27 @@ class WaveformGenerator:
         hp, hc = LS.SimInspiralFD(*parameters_lal)
         # The check below filters for unphysical waveforms:
         # For IMRPhenomXPHM, the LS.SimInspiralFD result is numerically instable
-        # for rare parameter configurations (~1 in 1M), leading to bins with very
-        # numbers if multibanding is used. As a preliminary fix, we slightly perturb
-        # the parameters.
-        if max(np.max(np.abs(hp.data.data)), np.max(np.abs(hc.data.data))) > 1e-17:
-            print(f"Perturbing parameters {parameters_lal} due to instability.")
-            hp, hc = LS.SimInspiralFD(
-                parameters_lal[0] * 1.0000001, *parameters_lal[1:]
+        # for rare parameter configurations (~1 in 1M), leading to bins with very large
+        # numbers if multibanding is used. If that happens, turn off multibanding to
+        # fix this.
+        if max(np.max(np.abs(hp.data.data)), np.max(np.abs(hc.data.data))) > 1e-20:
+            print(
+                f"Generation with parameters {parameters_lal} likely numerically "
+                f"unstable due to multibanding, turn off multibanding."
             )
+            lal_dict = parameters_lal[-2]
+            if lal_dict is None:
+                lal_dict = lal.CreateDict()
+            LS.SimInspiralWaveformParamsInsertPhenomXHMThresholdMband(lal_dict, 0)
+            LS.SimInspiralWaveformParamsInsertPhenomXPHMThresholdMband(lal_dict, 0)
+            hp, hc = LS.SimInspiralFD(
+                *parameters_lal[:-2], lal_dict, parameters_lal[-1]
+            )
+            if max(np.max(np.abs(hp.data.data)), np.max(np.abs(hc.data.data))) > 1e-20:
+                print(
+                    f"Warning: turning off multibanding for parameters {parameters_lal}"
+                    f"likely numerically might not have fixed it, check manually."
+                )
 
         # Ensure that the waveform agrees with the frequency grid defined in the domain.
         if not isclose(self.domain.delta_f, hp.deltaF, rel_tol=1e-6):
