@@ -93,7 +93,7 @@ class Result(DingoDataset):
     def effective_sample_size(self):
         if "weights" in self.samples:
             weights = self.samples["weights"]
-            return np.sum(weights) ** 2 / np.sum(weights ** 2)
+            return np.sum(weights) ** 2 / np.sum(weights**2)
         else:
             return None
 
@@ -278,8 +278,8 @@ class Result(DingoDataset):
             (num_samples - self.n_eff) / (num_samples * self.n_eff)
         )
 
-    def sampling_importance_resampling(self, num_samples = None):
-        """ 
+    def sampling_importance_resampling(self, num_samples=None):
+        """
         Generate unweighted posterior samples from weighted ones. New
         samples are sampled with probability proportional to the sample weight.
         Resampling is done with replacement, until the desired number of
@@ -287,20 +287,22 @@ class Result(DingoDataset):
 
          Unweighted samples are saved in a new class attribute called
          unweighted_samples, which is a pd.DataFrame.
-        
+
         Parameters
         ----------
         num_samples : int
             Number of samples to resample
 
         """
-        if num_samples == None:
+        if num_samples is None:
             num_samples = len(self.samples)
-        
+
         if num_samples > len(self.samples):
             raise ValueError("Cannot sample more points than in the weighted posterior")
-        
-        self.unweighted_samples = self.samples.sample(n=num_samples, weights=self.samples["weights"], replace=True)
+
+        self.unweighted_samples = self.samples.sample(
+            n=num_samples, weights=self.samples["weights"], replace=True
+        )
         self.unweighted_samples = self.unweighted_samples.drop(["weights"], axis=1)
 
     def subset(self, parameters):
