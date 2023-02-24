@@ -132,8 +132,6 @@ def get_time_segments(data_dir, settings):
                 # check that no event is present in the segments
                 if not any(start_time <= event <= end_time for event in event_list):
                     valid_segments.append((start_time, end_time))
-                else:
-                    print(start_time, end_time)
                 start_time = end_time + time_gap
                 end_time = start_time + time_psd
 

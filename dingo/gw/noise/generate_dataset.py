@@ -45,7 +45,7 @@ def parse_args():
         "--out_name",
         type=str,
         default=None,
-        help="File name of resulting ASD dataset",
+        help="Path to resulting ASD dataset",
     )
     parser.add_argument("--verbose", action="store_true")
 
