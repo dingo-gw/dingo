@@ -10,8 +10,8 @@ import warnings
 import lal
 import lalsimulation as LS
 import pandas as pd
-from gwsignal.core import waveform as gws_wfm
-from gwsignal.models import pyseobnr 
+from lalsimulation.gwsignal.core import waveform as gws_wfm
+from lalsimulation.gwsignal.models import pyseobnr 
 from bilby.gw.conversion import (
     convert_to_lal_binary_black_hole_parameters,
     bilby_to_lalsimulation_spins,
