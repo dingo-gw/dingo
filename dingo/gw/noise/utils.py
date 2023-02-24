@@ -140,9 +140,6 @@ def get_time_segments(data_dir, settings):
 
         time_segments[detector] = valid_segments
 
-    filename = join(data_dir, "tmp", run, "psd_time_segments.pkl")
-    with open(filename, "wb") as f:
-        pickle.dump(time_segments, f)
     return time_segments
 
 

@@ -2,6 +2,7 @@ import argparse
 import textwrap
 from os.path import join
 
+import os
 import yaml
 import pickle
 
@@ -39,7 +40,7 @@ def parse_args():
         type=str,
         default=None,
         help="Optional file containing a dictionary of a list of time segments that should be used for estimating PSDs."
-             "This has to be a pickle file.",
+        "This has to be a pickle file.",
     )
     parser.add_argument(
         "--out_name",
@@ -74,6 +75,12 @@ def generate_dataset():
             time_segments = pickle.load(f)
     else:
         time_segments = get_time_segments(data_dir, settings["dataset_settings"])
+        time_segments_path = join(
+            data_dir, "tmp", settings["dataset_settings"]["observing_run"]
+        )
+        os.makedirs(time_segments_path, exist_ok=True)
+        with open(join(time_segments_path, "psd_time_segments.pkl"), "wb") as f:
+            pickle.dump(time_segments, f)
 
     if "condor" in settings["local"]:
 
