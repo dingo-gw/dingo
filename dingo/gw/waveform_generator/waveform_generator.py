@@ -1003,6 +1003,7 @@ class GWSignalWaveformGenerator:
             float(self._convert_to_scalar(x)) for x in iota_and_cart_spins
         ]
 
+        f_ref = p["f_ref"]
         delta_f = self.domain.delta_f
         f_max = self.domain.f_max
         if self.f_start is not None:
@@ -1022,7 +1023,7 @@ class GWSignalWaveformGenerator:
               'spin2z' : s2z*u.dimensionless_unscaled,
               'deltaT' : delta_t*u.s,
               'f22_start' : f_min*u.Hz,
-              'f22_ref': p["f_ref"]*u.Hz,
+              'f22_ref': f_ref*u.Hz,
               'f_max': f_max*u.Hz,
               'deltaF' : delta_f*u.Hz,
               'phi_ref' : p["phase"]*u.rad,
@@ -1296,7 +1297,7 @@ class GWSignalWaveformGenerator:
         #   52: SEOBNRv4PHM
 
         parameters_gwsignal = self._convert_parameters_gwsignal(
-            parameters, self.lal_params
+            {**parameters, "f_ref": self.f_ref}, self.lal_params
         )
 
         generator = gwsignal_get_waveform_generator(self.approximant_str)
