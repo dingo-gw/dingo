@@ -72,9 +72,16 @@ homepage = "https://github.com/dingo-gw/dingo-devel"
 
 [project.optional-dependencies]
 dev = [
-        "pytest",
-        "pylint",
-        "black",
+    "pytest",
+    "pylint",
+    "black",
+    "sphinx",
+    "sphinx-rtd-theme",
+    "myst-nb",
+    "sphinxcontrib-mermaid",
+    "sphinxcontrib-bibtex",
+    "myst-parser",
+    "linkify-it-py"
 ]
 
 
