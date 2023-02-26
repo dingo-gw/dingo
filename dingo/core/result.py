@@ -31,31 +31,24 @@ class Result(DingoDataset):
     A dataset class to hold a collection of samples, implementing I/O, importance
     sampling, and unconditional flow training.
 
-    Methods
-    -------
-    importance_sample
-    subset
-    train_unconditional_flow
-
-    Attributes
-    ----------
-    samples : pd.Dataframe
-        Contains parameter samples, as well as (possibly) log_prob, log_likelihood,
-        weights, log_prior, delta_log_prob_target.
-    domain : Domain
-        Should be implemented in a subclass.
-    prior : PriorDict
-        Should be implemented in a subclass.
-    likelihood : Likelihood
-        Should be implemented in a subclass.
-    context : dict
-        Context data from which the samples were produced (e.g., strain data, ASDs).
-    metadata : dict
-    event_metadata : dict
-    log_evidence : float
-    log_evidence_std : float
-    effective_sample_size, n_eff : float (property)
-    sample_efficiency : float (property)
+    Attributes:
+        samples : pd.Dataframe
+            Contains parameter samples, as well as (possibly) log_prob, log_likelihood,
+            weights, log_prior, delta_log_prob_target.
+        domain : Domain
+            Should be implemented in a subclass.
+        prior : PriorDict
+            Should be implemented in a subclass.
+        likelihood : Likelihood
+            Should be implemented in a subclass.
+        context : dict
+            Context data from which the samples were produced (e.g., strain data, ASDs).
+        metadata : dict
+        event_metadata : dict
+        log_evidence : float
+        log_evidence_std : float (property)
+        effective_sample_size, n_eff : float (property)
+        sample_efficiency : float (property)
     """
 
     dataset_type = "core_result"

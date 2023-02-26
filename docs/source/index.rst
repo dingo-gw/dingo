@@ -44,7 +44,8 @@ As training a network from scratch can be expensive, we intend to also distribut
    training
    inference
    gnpe
-   importance_sampling
+   result
+   dingo_pipe
 
 References
 ----------
@@ -55,15 +56,7 @@ Dingo is based on a series of papers developing NPE for GW parameter inference, 
 
 If you use Dingo, we ask that you cite at least :cite:p:`Dax:2021tsq`.
 
-Dingo also makes use of several 3rd party packages, including
-
-* `Bilby <https://lscsoft.docs.ligo.org/bilby/>`_
-* `LALSimulation <https://lscsoft.docs.ligo.org/lalsuite/lalsimulation/>`_
-* `PyTorch <https://pytorch.org>`_
-* `nflows <https://github.com/bayesiains/nflows>`_
-
-
-
+Dingo also makes use of several 3rd party packages, including `Bilby <https://lscsoft.docs.ligo.org/bilby/>`_, `LALSimulation <https://lscsoft.docs.ligo.org/lalsuite/lalsimulation/>`_, `PyTorch <https://pytorch.org>`_, and `nflows <https://github.com/bayesiains/nflows>`_.
 
 Indices and tables
 ------------------

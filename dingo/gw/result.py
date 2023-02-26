@@ -26,30 +26,35 @@ class Result(CoreResult):
     and likelihood. It also includes a method for sampling the binary reference phase
     parameter based on the other parameters and the likelihood.
 
-    Methods
-    -------
-    importance_sample
-    subset
-    train_unconditional_flow
-    sample_synthetic_phase
-
-    Attributes
-    ----------
-    samples : pd.Dataframe
-        Contains parameter samples, as well as (possibly) log_prob, log_likelihood,
-        weights, log_prior, delta_log_prob_target.
-    domain : Domain
-    prior : PriorDict
-    likelihood : Likelihood
-    context : dict
-        Context data from which the samples were produced (e.g., strain data, ASDs).
-    metadata : dict
-    event_metadata : dict
-    log_evidence : float
-    log_evidence_std : float
-    effective_sample_size, n_eff : float (property)
-    sample_efficiency : float (property)
-    synthetic_phase_kwargs : dict
+    Attributes:
+        samples : pd.Dataframe
+            Contains parameter samples, as well as (possibly) log_prob, log_likelihood,
+            weights, log_prior, delta_log_prob_target.
+        domain : Domain
+            The domain of the data (e.g., FrequencyDomain), needed for calculating
+            likelihoods.
+        prior : PriorDict
+            The prior distribution, used for importance sampling.
+        likelihood : Likelihood
+            The Likelihood object, needed for importance sampling.
+        context : dict
+            Context data from which the samples were produced (e.g., strain data, ASDs).
+        metadata : dict
+            Metadata inherited from the Sampler object. This describes the neural
+            networks and sampling settings used.
+        event_metadata : dict
+            Metadata for the event analyzed, including time, data conditioning, channel,
+            and detector information.
+        log_evidence : float
+            Calculated log(evidence) after importance sampling.
+        log_evidence_std : float (property)
+            Standard deviation of the log(evidence)
+        effective_sample_size, n_eff : float (property)
+            Number of effective samples, (\\sum_i w_i)^2 / \\sum_i w_i^2
+        sample_efficiency : float (property)
+            Number of effective samples / Number of samples
+        synthetic_phase_kwargs : dict
+            kwargs describing the synthetic phase sampling.
     """
 
     dataset_type = "gw_result"
@@ -331,6 +336,12 @@ class Result(CoreResult):
 
         Parameters
         ----------
+        synthetic_phase_kwargs : dict
+            This should consist of the kwargs
+                approximation_22_mode (optional)
+                num_processes (optional)
+                n_grid
+                uniform_weight (optional)
         inverse : bool, default False
             Whether to apply instead the inverse transformation. This is used prior to
             calculating the log_prob. In inverse mode, the posterior probability over
