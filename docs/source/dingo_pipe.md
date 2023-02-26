@@ -74,13 +74,13 @@ Dingo models are typically trained using Welch PSDs. For this reason we do not r
 
 ## Sampling
 
-The next step is sampling from the Dingo model. The model is loaded into a `GWSampler` or `GWSamplerGNPE` object. (If using [GNPE](gnpe) it is necessary to specify a `model-init`.) The Sampler `context` is then set from the `EventDataset` prepared in the previous step. `num-samples` samples are then generated in batches of size `batch-size`. The samples (and context) are stored in a [Result](result) object and saved in HDF5 format.
+The next step is sampling from the Dingo model. The model is loaded into a [GWSampler](dingo.gw.inference.gw_samplers.GWSampler) or [GWSamplerGNPE](dingo.gw.inference.gw_samplers.GWSamplerGNPE) object. (If using [GNPE](gnpe) it is necessary to specify a `model-init`.) The Sampler `context` is then set from the EventDataset prepared in the previous step. `num-samples` samples are then generated in batches of size `batch-size`. The samples (and context) are stored in a [Result](dingo.gw.result.Result) object and saved in HDF5 format.
 
 If using GNPE, one can optionally specify `num-gnpe-iterations` (it defaults to 30). Importantly, obtaining the log probability when using GNPE requires an [extra step of training an unconditional flow](result.md#density-recovery). This is done using the `recover-log-prob` flag, which defaults to `True`. The default density recovery settings can be overwritten by providing a `density-recovery-settings` dictionary in the `.ini` file.
 
 ## Importance sampling
 
-For importance sampling, the `Result` saved in the previous step is loaded. Since this contains the strain data and ASDs, as well as all settings used for training the network, the likelihood and prior can be evaluated for each sample point. If it is necessary to change data conditioning or PSD for importance sampling (i.e., if the `importance-sampling-updates` dictionary is non-empty), then a second [data generation](#data-generation) step is first carried using the new settings, and used as importance sampling context. The importance sampled result is finally saved as HDF5, including the estimated Bayesian evidence.
+For importance sampling, the Result saved in the previous step is loaded. Since this contains the strain data and ASDs, as well as all settings used for training the network, the likelihood and prior can be evaluated for each sample point. If it is necessary to change data conditioning or PSD for importance sampling (i.e., if the `importance-sampling-updates` dictionary is non-empty), then a second [data generation](#data-generation) step is first carried using the new settings, and used as importance sampling context. The importance sampled result is finally saved as HDF5, including the estimated Bayesian evidence.
 
 If a `prior-dict` is specified in the `.ini` file, then this will be used for the importance sampling prior. One example where this is useful is for the luminosity distance prior. Indeed, Dingo tends to train better using a uniform prior over luminosity distance, but physically one would prefer a uniform in volume prior. By specifying a `prior-dict` this change can be made in importance sampling.
 
@@ -88,10 +88,10 @@ If a `prior-dict` is specified in the `.ini` file, then this will be used for th
 If extending the prior support during importance sampling, be sure that the posterior does not rail up against the prior boundary being extended.
 ```
 
-By default, `dingo_pipe` assumes that it is necessary to sample the phase synthetically, so it will do so before importance sampling. This can be turned off by passing an empty dictionary to `importance-sampling-settings`.
+By default, dingo_pipe assumes that it is necessary to sample the phase synthetically, so it will do so before importance sampling. This can be turned off by passing an empty dictionary to `importance-sampling-settings`.
 
-Importance sampling (including synthetic phase sampling) is an expensive step, so `dingo_pipe` allows for parallelization: this step is split over `n-parallel` jobs, each of which uses `request-cpus-importance-sampling` processes. In the backend, this makes use of the `Result.split()` and `Result.merge()` methods.
+Importance sampling (including synthetic phase sampling) is an expensive step, so dingo_pipe allows for parallelization: this step is split over `n-parallel` jobs, each of which uses `request-cpus-importance-sampling` processes. In the backend, this makes use of the Result [split()](dingo.core.result.Result.split) and [merge()](dingo.core.result.Result.merge) methods.
 
 ## Plotting
 
-The standard `Result` [plots](result.md#plotting) are turned on using the `plot-corner`, `plot-weights`, and `plot-log-probs` flags.
+The standard Result [plots](result.md#plotting) are turned on using the `plot-corner`, `plot-weights`, and `plot-log-probs` flags.

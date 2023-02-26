@@ -56,7 +56,7 @@ Dingo is based on a series of papers developing NPE for GW parameter inference, 
 
 If you use Dingo, we ask that you cite at least :cite:p:`Dax:2021tsq`.
 
-Dingo also makes use of several 3rd party packages, including `Bilby <https://lscsoft.docs.ligo.org/bilby/>`_, `LALSimulation <https://lscsoft.docs.ligo.org/lalsuite/lalsimulation/>`_, `PyTorch <https://pytorch.org>`_, and `nflows <https://github.com/bayesiains/nflows>`_.
+Dingo also makes use of several 3rd party packages, including `Bilby <https://lscsoft.docs.ligo.org/bilby/>`_, `bilby_pipe <https://lscsoft.docs.ligo.org/bilby_pipe/master/index.html>`_, `LALSimulation <https://lscsoft.docs.ligo.org/lalsuite/lalsimulation/>`_, `PyTorch <https://pytorch.org>`_, and `nflows <https://github.com/bayesiains/nflows>`_.
 
 Indices and tables
 ------------------
