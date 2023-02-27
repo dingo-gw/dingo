@@ -217,6 +217,7 @@ class MainInput(BilbyMainInput):
         # self.check_source_model(args)
 
         self.requirements = []
+        self.device = args.device
         self.simple_submission = args.simple_submission
 
         if args.extra_lines:
