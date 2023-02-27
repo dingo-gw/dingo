@@ -40,6 +40,9 @@ class SamplingNode(AnalysisNode):
         # if self.request_cpus > 1:
         #     self.extra_lines.extend(['environment = "OMP_NUM_THREADS=1"'])
 
+        for req in inputs.sampling_requirements:
+            self.requirements.append(req)
+
         self.process_node()
         self.job.add_parent(generation_node.job)
 

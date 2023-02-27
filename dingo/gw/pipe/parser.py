@@ -551,9 +551,9 @@ def create_parser(top_level=True):
         ),
     )
     submission_parser.add(
-        "--requirements",
+        "--sampling-requirements",
         type=str,
-        default=None,
+        action="append",
         help=(
             "Extra requirements for submitting sampling, can be used to specify GPU "
             "memory via TARGET.CUDAGlobalMemoryMb>40000."
