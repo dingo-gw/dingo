@@ -2,12 +2,17 @@ import os
 
 from bilby_pipe.job_creation.nodes import GenerationNode as BilbyGenerationNode
 
+from dingo.gw.pipe.utils import _strip_unwanted_submission_keys
+
 
 class GenerationNode(BilbyGenerationNode):
 
     def __init__(self, inputs, importance_sampling=False, **kwargs):
         self.importance_sampling = importance_sampling
         super().__init__(inputs, **kwargs)
+
+        if self.inputs.simple_submission:
+            _strip_unwanted_submission_keys(self.job)
 
     @property
     def executable(self):

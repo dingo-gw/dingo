@@ -2,6 +2,8 @@ import os
 
 from bilby_pipe.job_creation.nodes import AnalysisNode
 
+from dingo.gw.pipe.utils import _strip_unwanted_submission_keys
+
 
 class SamplingNode(AnalysisNode):
 
@@ -10,6 +12,7 @@ class SamplingNode(AnalysisNode):
         self.dag = dag
         self.generation_node = generation_node
         self.request_cpus = inputs.request_cpus
+        self.device = inputs.device
 
         data_label = generation_node.job_name
         base_name = data_label.replace("generation", "sampling")
@@ -40,8 +43,17 @@ class SamplingNode(AnalysisNode):
         # if self.request_cpus > 1:
         #     self.extra_lines.extend(['environment = "OMP_NUM_THREADS=1"'])
 
+        for req in inputs.sampling_requirements:
+            self.requirements.append(req)
+
+        if self.device == "cuda":
+            self.extra_lines.append("request_gpus = 1")
+
         self.process_node()
         self.job.add_parent(generation_node.job)
+
+        if self.inputs.simple_submission:
+            _strip_unwanted_submission_keys(self.job)
 
     @property
     def executable(self):

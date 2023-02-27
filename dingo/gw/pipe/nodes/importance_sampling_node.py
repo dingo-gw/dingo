@@ -2,6 +2,8 @@ import os
 
 from bilby_pipe.job_creation.nodes import AnalysisNode
 
+from dingo.gw.pipe.utils import _strip_unwanted_submission_keys
+
 
 class ImportanceSamplingNode(AnalysisNode):
     def __init__(self, inputs, sampling_node, generation_node, parallel_idx, dag):
@@ -58,6 +60,9 @@ class ImportanceSamplingNode(AnalysisNode):
         # be a parent of the sampling node.
         self.job.add_parent(sampling_node.job)
         self.job.add_parent(generation_node.job)
+
+        if self.inputs.simple_submission:
+            _strip_unwanted_submission_keys(self.job)
 
     @property
     def executable(self):
