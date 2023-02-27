@@ -39,7 +39,9 @@ def fill_in_arguments_from_model(args):
         "tukey_roll_off": data_settings["window"]["roll_off"],
         "waveform_approximant": model_metadata["dataset_settings"][
             "waveform_generator"
-        ]["approximant"],  # TODO: Update approximant in IS
+        ][
+            "approximant"
+        ],  # TODO: Update approximant in IS
     }
 
     changed_args = {}
@@ -228,8 +230,7 @@ class MainInput(BilbyMainInput):
         if args.sampling_requirements:
             self.sampling_requirements = args.sampling_requirements
         else:
-            args.sampling_requirements = []
-
+            self.sampling_requirements = []
 
     @property
     def request_cpus_importance_sampling(self):
