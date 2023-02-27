@@ -36,8 +36,6 @@ class SamplingNode(AnalysisNode):
         self.arguments.add("event-data-file", generation_node.event_data_file)
 
         self.extra_lines.extend(self._checkpoint_submit_lines())
-        if inputs.known_args.device == "cuda":
-            self.extra_lines.extend(["request_gpus = 1"])
         # if self.request_cpus > 1:
         #     self.extra_lines.extend(['environment = "OMP_NUM_THREADS=1"'])
 
