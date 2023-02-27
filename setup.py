@@ -71,6 +71,8 @@ setup(
             "dingo_pipe_generation=dingo.gw.pipe.data_generation:main",
             "dingo_pipe_sampling=dingo.gw.pipe.sampling:main",
             "dingo_pipe_importance_sampling=dingo.gw.pipe.importance_sampling:main",
+            "dingo_result=dingo.gw.pipe.dingo_result:main",
+            "dingo_pipe_plot=dingo.gw.pipe.plot:main",
         ]
     },
     classifiers=[

@@ -317,9 +317,9 @@ class Sampler(object):
         data_dict["settings"] = copy.deepcopy(self.metadata)
         return self._result_class(dictionary=data_dict)
 
-    def to_hdf5(self, label="", outdir="."):
+    def to_hdf5(self, label="result", outdir="."):
         dataset = self.to_result()
-        file_name = label + "_result.hdf5"
+        file_name = label + ".hdf5"
         Path(outdir).mkdir(parents=True, exist_ok=True)
         dataset.to_file(file_name=Path(outdir, file_name))
 

@@ -30,9 +30,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         phase_marginalization_kwargs=None,
         phase_grid=None,
     ):
+        # TODO: Does the phase_grid argument ever get used?
         """
-        Initialize the likelihood.
-
         Parameters
         ----------
         wfg_kwargs: dict
@@ -49,6 +48,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             Reference time; true geocent time for GW is t_ref + theta["geocent_time"].
         time_marginalization_kwargs: dict
             Time marginalization parameters. If None, no time marginalization is used.
+        phase_marginalization_kwargs: dict
+            Phase marginalization parameters. If None, no phase marginalization is used.
         """
         super().__init__(
             wfg_kwargs=wfg_kwargs,
