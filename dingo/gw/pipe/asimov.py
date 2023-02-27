@@ -1,3 +1,4 @@
+# adapted from the Asimov Bilby Pipeline interface
 import configparser
 import glob
 import os
@@ -15,7 +16,7 @@ from asimov.storage import Store
 
 class Dingo(Pipeline):
     """
-    The LALInference Pipeline.
+    The Dingo Pipeline.
 
     Parameters
     ----------
@@ -158,7 +159,7 @@ class Dingo(Pipeline):
 
     def upload_assets(self):
         """
-        Upload the PSDs from this job.
+        Upload the samples from this job.
         """
 
         asset = self.collect_assets()["samples"]
@@ -167,28 +168,6 @@ class Dingo(Pipeline):
             "posterior_samples.hdf5",
             commit_message=f"Added posterior_samples.",
         )
-
-    def store_assets(self):
-        """
-        Add the assets to the store.
-        """
-
-        self.logger.info(self.collect_assets())
-        asset = self.collect_assets()["samples"]
-        store = Store(root=config.get("storage", "directory"))
-
-        try:
-            store.add_file(
-                self.production.event.name,
-                self.production.name,
-                file=asset,
-                new_name="posterior_samples.hdf5",
-            )
-        except Exception as e:
-            self.logger.error(
-                f"There was a problem committing the posterior samples to the store."
-            )
-            self.logger.exception(e)
 
     def collect_assets(self):
         """
@@ -224,11 +203,10 @@ class Dingo(Pipeline):
 
         Parameters
         ----------
-        category : str, optional
-           The category of the job.
-           Defaults to "C01_offline".
-        production : str
-           The production name.
+        dryrun : bool
+           If set to true the DAG will not be submitted,
+           but all commands will be printed to standard
+           output instead. Defaults to False.
 
         Returns
         -------
@@ -300,17 +278,6 @@ class Dingo(Pipeline):
 
     # TODO: start pesummary here
     def after_completion(self):
-
-        try:
-            self.store_assets()
-            self.upload_assets()
-
-        except Exception as e:
-            self.logger.error("Failed to store the posterior results")
-            self.logger.exception(e)
-
-        # cluster = self.run_pesummary()
-
         # this is the default implementation
         self.production.status = "finished"
         try:
@@ -351,7 +318,7 @@ class Dingo(Pipeline):
         with open(filepath, "r") as f:
             file_content = f.read()
 
-        config_parser = ConfigParser.RawConfigParser()
+        config_parser = configparser.RawConfigParser()
         config_parser.read_string(file_content)
 
         return config_parser
