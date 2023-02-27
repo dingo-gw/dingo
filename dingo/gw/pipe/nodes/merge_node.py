@@ -1,9 +1,13 @@
 from bilby_pipe.job_creation.nodes import MergeNode as BilbyMergeNode
 
+from dingo.gw.pipe.utils import _strip_unwanted_submission_keys
+
 
 class MergeNode(BilbyMergeNode):
     def __init__(self, **kwargs):
         super().__init__(**kwargs, detectors=[])
+        if self.inputs.simple_submission:
+            _strip_unwanted_submission_keys(self.job)
 
     @property
     def executable(self):

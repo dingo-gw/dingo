@@ -2,6 +2,8 @@ import os
 
 from bilby_pipe.job_creation.nodes import AnalysisNode
 
+from dingo.gw.pipe.utils import _strip_unwanted_submission_keys
+
 
 class SamplingNode(AnalysisNode):
 
@@ -47,6 +49,9 @@ class SamplingNode(AnalysisNode):
 
         self.process_node()
         self.job.add_parent(generation_node.job)
+
+        if self.inputs.simple_submission:
+            _strip_unwanted_submission_keys(self.job)
 
     @property
     def executable(self):

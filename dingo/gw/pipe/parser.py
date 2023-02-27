@@ -568,6 +568,14 @@ def create_parser(top_level=True):
         ),
     )
     submission_parser.add(
+        "--simple-submission",
+        action="store_true",
+        help=(
+            "Strip off the following lines from submission files: getenv, universe, "
+            "accounting_group, priority."
+        ),
+    )
+    submission_parser.add(
         "--conda-env",
         type=nonestr,
         default=None,

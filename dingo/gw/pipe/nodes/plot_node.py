@@ -1,5 +1,7 @@
 from bilby_pipe.job_creation.nodes import PlotNode as BilbyPlotNode
 
+from dingo.gw.pipe.utils import _strip_unwanted_submission_keys
+
 
 class PlotNode(BilbyPlotNode):
     def __init__(self, inputs, merged_node, dag):
@@ -20,6 +22,9 @@ class PlotNode(BilbyPlotNode):
         # self.arguments.add("format", inputs.plot_format)
         self.process_node()
         self.job.add_parent(merged_node.job)
+
+        if self.inputs.simple_submission:
+            _strip_unwanted_submission_keys(self.job)
 
     @property
     def executable(self):
