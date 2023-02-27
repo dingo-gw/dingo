@@ -136,6 +136,14 @@ def create_parser(top_level=True):
             help="Filename for the proposal samples: only used internally by "
             "importance_sampling",
         )
+        parser.add(
+            "--importance-sampling-generation",
+            action="store_true",
+            help="Whether to prepare data based on the updated importance sampling "
+                 "settings rather than network settings. This is used internally for "
+                 "data generation, when preparing different data for the importance "
+                 "sampling stage.",
+        )
 
     data_gen_pars = parser.add_argument_group(
         "Data generation arguments",
@@ -543,6 +551,15 @@ def create_parser(top_level=True):
         ),
     )
     submission_parser.add(
+        "--requirements",
+        type=str,
+        default=None,
+        help=(
+            "Extra requirements for submitting sampling, can be used to specify GPU "
+            "memory via TARGET.CUDAGlobalMemoryMb>40000."
+        ),
+    )
+    submission_parser.add(
         "--conda-env",
         type=nonestr,
         default=None,
@@ -792,11 +809,21 @@ def create_parser(top_level=True):
     #     action="store_true",
     #     help="Create calibration posterior plot",
     # )
-    # output_parser.add_argument(
-    #     "--plot-corner",
-    #     action="store_true",
-    #     help="Create intrinsic and extrinsic posterior corner plots",
-    # )
+    output_parser.add_argument(
+        "--plot-corner",
+        action="store_true",
+        help="Create corner plot",
+    )
+    output_parser.add_argument(
+        "--plot-weights",
+        action="store_true",
+        help="Create scatter plot of importance weights",
+    )
+    output_parser.add_argument(
+        "--plot-log-probs",
+        action="store_true",
+        help="Create scatter plot of target versus proposal log probabilities",
+    )
     # output_parser.add_argument(
     #     "--plot-marginal",
     #     action="store_true",
@@ -889,12 +916,12 @@ def create_parser(top_level=True):
         help="Maximum number of samples to keep in the final results",
     )
 
-    # prior_parser = parser.add_argument_group(
-    #     title="Prior arguments", description="Specify the prior settings."
-    # )
+    prior_parser = parser.add_argument_group(
+        title="Prior arguments", description="Specify the prior settings."
+    )
     # prior_parser.add(
     #     "--default-prior",
-    #     default="BBHPriorDict",
+    #     default="PriorDict",
     #     type=str,
     #     help=(
     #         "The name of the prior set to base the prior on. Can be one of"
@@ -911,20 +938,24 @@ def create_parser(top_level=True):
     #         " search over the coalescence time"
     #     ),
     # )
-    # prior_parser_main = prior_parser.add_mutually_exclusive_group()
+    prior_parser_main = prior_parser.add_mutually_exclusive_group()
     # prior_parser_main.add(
     #     "--prior-file", type=nonestr, default=None, help="The prior file"
     # )
-    # prior_parser_main.add(
-    #     "--prior-dict",
-    #     type=nonestr,
-    #     default=None,
-    #     help=(
-    #         "A dictionary of priors (alternative to prior-file). Multiline "
-    #         "dictionaries are supported, but each line must contain a single"
-    #         "parameter specification and finish with a comma."
-    #     ),
-    # )
+    prior_parser_main.add(
+        "--prior-dict",
+        type=nonestr,
+        default=None,
+        help=(
+            "A dictionary of priors (alternative to prior-file). Multiline "
+            "dictionaries are supported, but each line must contain a single"
+            "parameter specification and finish with a comma. Dingo priors are set at "
+            "network training time, so the prior-dict is used at importance sampling "
+            "time to re-weight to the new prior. The prior-dict does not have to be "
+            "a prior over the entire set of parameters, only the parameters for which "
+            "the prior is changed."
+        ),
+    )
     # prior_parser.add(
     #     "--enforce-signal-duration",
     #     action=StoreBoolean,
@@ -980,12 +1011,7 @@ def create_parser(top_level=True):
     # sampler_parser.add(
     #     "--sampling-seed", default=None, type=noneint, help="Random sampling seed"
     # )
-    # sampler_parser.add(
-    #     "--n-parallel",
-    #     type=int,
-    #     default=1,
-    #     help="Number of identical parallel jobs to run per event",
-    # )
+
     # sampler_parser.add(
     #     "--sampler-kwargs",
     #     type=str,
@@ -1013,12 +1039,12 @@ def create_parser(top_level=True):
         type=nonefloat,
         help="The reference " "frequency",
     )
-    # waveform_parser.add(
-    #     "--waveform-approximant",
-    #     default="IMRPhenomPv2",
-    #     type=str,
-    #     help="The name of the waveform approximant to use for PE.",
-    # )
+    waveform_parser.add(
+        "--waveform-approximant",
+        default=None,
+        type=nonestr,
+        help="The name of the waveform approximant to use for PE.",
+    )
     # waveform_parser.add(
     #     "--catch-waveform-errors",
     #     default=True,
@@ -1188,6 +1214,29 @@ def create_parser(top_level=True):
             "Dictionary of importance-sampling-settings to pass in, e.g., "
             "{synthetic_phase: {approximation_22_mode: False, (...)}} OR pass"
             "pre-defined set of density-recovery-settings {PhaseRecoveryDefault}"
+        ),
+    )
+    sampler_parser.add(
+        "--importance-sampling-updates",
+        type=str,
+        default="{}",
+        help=(
+            "Dictionary of updated settings to be used for importance sampling, "
+            "including new prior, data conditioning, and waveform approximant. This "
+            "will get populated with any settings provided elsewhere that would "
+            "otherwise override model settings. This is useful for tweaking settings "
+            "that networks were trained with."
+        ),
+    )
+    sampler_parser.add(
+        "--n-parallel",
+        type=int,
+        default=1,
+        help=(
+            "This sets the number of parallel condor jobs for importance sampling. Each"
+            "of these jobs can in turn be parallelized across several CPU cores. The "
+            "total number of processes is n-parallel * "
+            "request-cpus-importance-sampling."
         ),
     )
 

@@ -35,9 +35,6 @@ class SamplingNode(AnalysisNode):
         self.arguments.add("label", self.label)
         self.arguments.add("event-data-file", generation_node.event_data_file)
 
-        # TODO: Set whether to recover the log probability. (Config should be in input
-        #  file.)  Other settings needed?
-
         self.extra_lines.extend(self._checkpoint_submit_lines())
         if inputs.known_args.device == "cuda":
             self.extra_lines.extend(["request_gpus = 1"])
@@ -55,6 +52,7 @@ class SamplingNode(AnalysisNode):
 
     @property
     def samples_file(self):
+        # TODO: Maybe remove -- not needed.
         return os.path.join(
-            self.inputs.result_directory, "_".join([self.label, "result.hdf5"])
+            self.inputs.result_directory, self.label + ".hdf5"
         )

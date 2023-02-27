@@ -1,9 +1,9 @@
 import time
-from typing import Optional, Union
+from typing import Optional
 
 import numpy as np
-import pandas as pd
-from bilby.core.prior import Uniform, Constraint
+import yaml
+from bilby.core.prior import Uniform, Constraint, PriorDict
 
 from dingo.core.density import (
     interpolated_sample_and_log_prob_multi,
@@ -26,31 +26,38 @@ class Result(CoreResult):
     and likelihood. It also includes a method for sampling the binary reference phase
     parameter based on the other parameters and the likelihood.
 
-    Methods
-    -------
-    importance_sample
-    subset
-    train_unconditional_flow
-    sample_synthetic_phase
-
-    Attributes
-    ----------
-    samples : pd.Dataframe
-        Contains parameter samples, as well as (possibly) log_prob, log_likelihood,
-        weights, log_prior, delta_log_prob_target.
-    domain : Domain
-    prior : PriorDict
-    likelihood : Likelihood
-    context : dict
-        Context data from which the samples were produced (e.g., strain data, ASDs).
-    metadata : dict
-    event_metadata : dict
-    log_evidence : float
-    log_evidence_std : float
-    effective_sample_size, n_eff : float (property)
-    sample_efficiency : float (property)
-    synthetic_phase_kwargs : dict
+    Attributes:
+        samples : pd.Dataframe
+            Contains parameter samples, as well as (possibly) log_prob, log_likelihood,
+            weights, log_prior, delta_log_prob_target.
+        domain : Domain
+            The domain of the data (e.g., FrequencyDomain), needed for calculating
+            likelihoods.
+        prior : PriorDict
+            The prior distribution, used for importance sampling.
+        likelihood : Likelihood
+            The Likelihood object, needed for importance sampling.
+        context : dict
+            Context data from which the samples were produced (e.g., strain data, ASDs).
+        metadata : dict
+            Metadata inherited from the Sampler object. This describes the neural
+            networks and sampling settings used.
+        event_metadata : dict
+            Metadata for the event analyzed, including time, data conditioning, channel,
+            and detector information.
+        log_evidence : float
+            Calculated log(evidence) after importance sampling.
+        log_evidence_std : float (property)
+            Standard deviation of the log(evidence)
+        effective_sample_size, n_eff : float (property)
+            Number of effective samples, (\\sum_i w_i)^2 / \\sum_i w_i^2
+        sample_efficiency : float (property)
+            Number of effective samples / Number of samples
+        synthetic_phase_kwargs : dict
+            kwargs describing the synthetic phase sampling.
     """
+
+    dataset_type = "gw_result"
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -94,6 +101,44 @@ class Result(CoreResult):
 
         self.domain.window_factor = get_window_factor(data_settings["window"])
 
+    def _rebuild_domain(self):
+        """Rebuild the domain based on settings updated for importance sampling.
+
+        These settings should be saved in self.importance_sampling_metadata["updates"],
+        which is expected to be populated by reset_event()."""
+        updates = self.importance_sampling_metadata["updates"].copy()
+
+        # Assume that updates can contain T, f_s, roll_off, f_min, f_max, but no other
+        # quantities that define a new domain (e.g., delta_f). Typical event metadata
+        # will be constructed in this way.
+
+        if "f_s" in updates or "T" in updates or "roll_off" in updates:
+            window_settings = self.base_metadata["train_settings"]["data"][
+                "window"
+            ].copy()
+            window_settings.update(
+                (k, updates[k]) for k in set(window_settings).intersection(updates)
+            )
+            updates["window_factor"] = float(get_window_factor(window_settings))
+
+        if "T" in updates:
+            updates["delta_f"] = 1.0 / updates["T"]
+
+        domain_dict = self.domain.domain_dict  # Existing settings
+        domain_dict.update(
+            (k, updates[k]) for k in set(domain_dict).intersection(updates)
+        )
+
+        print("Rebuilding domain as follows:")
+        print(
+            yaml.dump(
+                domain_dict,
+                default_flow_style=False,
+                sort_keys=False,
+            )
+        )
+        self.domain = build_domain(domain_dict)
+
     def _build_prior(self):
         """Build the prior based on model metadata. Called by __init__()."""
         intrinsic_prior = self.base_metadata["dataset_settings"]["intrinsic_prior"]
@@ -102,22 +147,76 @@ class Result(CoreResult):
         )
         self.prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
 
+        prior_update = self.importance_sampling_metadata.get("prior_update")
+        if prior_update is not None:
+            prior_update = PriorDict(prior_update.copy())
+            self.prior.update(prior_update)
+
         # Split off prior over geocent_time if samples appear to be time-marginalized.
         # This needs to be saved to initialize the likelihood.
-        if (
-            "geocent_time" in self.prior.keys()
-            and "geocent_time" not in self.inference_parameters
-        ):
+        if "geocent_time" in self.prior.keys() and "geocent_time" not in self.samples:
             self.geocent_time_prior = self.prior.pop("geocent_time")
         else:
             self.geocent_time_prior = None
         # Split off prior over phase if samples appear to be phase-marginalized.
-        if "phase" in self.prior.keys() and "phase" not in self.inference_parameters:
+        if "phase" in self.prior.keys() and "phase" not in self.samples:
             self.phase_prior = self.prior.pop("phase")
         else:
             self.phase_prior = None
 
-    # _build_likelihood is called at the beginning of Sampler.importance_sample
+    def update_prior(self, prior_update):
+        """
+        Update the prior based on a new dict of priors. Use the existing prior for
+        parameters not included in the new dict.
+
+        If class samples have not been importance sampled, then save new sample weights
+        based on the new prior. If class samples have been importance sampled,
+        then update the weights.
+
+        Parameters
+        ----------
+        prior_update : dict
+            Priors to update. This should be of the form {key : prior_str}, where str
+            is a string that can instantiate a prior via PriorDict(prior_update). The
+            prior_update is provided in this form so that it can be properly saved with
+            the Result and later instantiated.
+        """
+        self.importance_sampling_metadata["prior_update"] = prior_update.copy()
+        prior_update = PriorDict(prior_update)
+
+        param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
+        theta = self.samples[param_keys]
+
+        if self.log_evidence is None:
+            # Save old prior evaluations.
+            log_prior_old = self.prior.ln_prob(theta, axis=0)
+
+        # Update the prior itself, careful to split off geocent_time and phase priors
+        # if necessary.
+        if self.geocent_time_prior is not None and "geocent_time" in prior_update:
+            self.geocent_time_prior = prior_update.pop("geocent_time")
+        if self.phase_prior is not None and "phase" in prior_update:
+            self.phase_prior = prior_update.pop("phase")
+        self.prior.update(
+            prior_update
+        )  # TODO: Does this update cached constraint ratio?
+
+        # Evaluate new prior.
+        log_prior = self.prior.ln_prob(theta, axis=0)
+        self.samples["log_prior"] = log_prior
+
+        if self.log_evidence is None:
+            # Save weights. Note that weights are 0 if outside the initial prior,
+            # regardless of new prior. This makes sense since there is no way to assign
+            # a sensible weight.
+            log_weights = log_prior - log_prior_old
+            weights = np.exp(log_weights - np.max(log_weights))
+            weights /= np.mean(weights)
+            self.samples["weights"] = weights
+
+        else:
+            # Recalculate the importance-sampling weights and log evidence.
+            self._calculate_evidence()
 
     def _build_likelihood(
         self,
@@ -176,9 +275,18 @@ class Result(CoreResult):
         else:
             t_ref = self.base_metadata["train_settings"]["data"]["ref_time"]
 
+        # FIXME: This is a quick hack because I didn't know how to choose the wfg
+        #  domain in the case of a changing domain during importance sampling. It could
+        #  only pose problems for EOB, where sometimes one wants to start integrating
+        #  from lower f_min. But even in that case, f_start should override it.
+        if self.importance_sampling_metadata.get("updates") is None:
+            wfg_domain = build_domain(self.base_metadata["dataset_settings"]["domain"])
+        else:
+            wfg_domain = self.domain
+
         self.likelihood = StationaryGaussianGWLikelihood(
             wfg_kwargs=self.base_metadata["dataset_settings"]["waveform_generator"],
-            wfg_domain=build_domain(self.base_metadata["dataset_settings"]["domain"]),
+            wfg_domain=wfg_domain,
             data_domain=self.domain,
             event_data=self.context,
             t_ref=t_ref,
@@ -228,14 +336,18 @@ class Result(CoreResult):
 
         Parameters
         ----------
+        synthetic_phase_kwargs : dict
+            This should consist of the kwargs
+                approximation_22_mode (optional)
+                num_processes (optional)
+                n_grid
+                uniform_weight (optional)
         inverse : bool, default False
             Whether to apply instead the inverse transformation. This is used prior to
             calculating the log_prob. In inverse mode, the posterior probability over
             phase is calculated for given samples. It is stored in self.samples[
             'log_prob'].
         """
-
-        # TODO: Possibly remove this class attribute. Decide where to store information.
         self.synthetic_phase_kwargs = synthetic_phase_kwargs
 
         approximation_22_mode = self.synthetic_phase_kwargs.get(
@@ -268,9 +380,8 @@ class Result(CoreResult):
             self.synthetic_phase_kwargs.get("num_processes", 1), num_valid_samples // 10
         )
 
-        if num_valid_samples > 1e4:
-            print(f"Estimating synthetic phase for {num_valid_samples} samples.")
-            t0 = time.time()
+        print(f"Estimating synthetic phase for {num_valid_samples} samples.")
+        t0 = time.time()
 
         if not inverse:
             # TODO: This can probably be removed.
@@ -327,7 +438,7 @@ class Result(CoreResult):
 
             phase_array = np.full(len(theta), 0.0)
             phase_array[within_prior] = new_phase
-            delta_log_prob_array = np.full(len(theta), -np.inf)
+            delta_log_prob_array = np.full(len(theta), -np.nan)
             delta_log_prob_array[within_prior] = delta_log_prob
 
             self.samples["phase"] = phase_array
@@ -335,6 +446,8 @@ class Result(CoreResult):
 
             # Insert the phase prior in the prior, since now the phase is present.
             self.prior["phase"] = self.phase_prior
+            self.phase_prior = None
+
             # reset likelihood for safety
             # TODO: Can this be removed?
             self.likelihood = None
@@ -351,11 +464,10 @@ class Result(CoreResult):
                 num_processes,
             )
 
-            # Outside of prior, set log_prob to -np.inf.
-            log_prob_array = np.full(len(theta), -np.inf)
+            # Outside of prior, set log_prob to -np.nan.
+            log_prob_array = np.full(len(theta), -np.nan)
             log_prob_array[within_prior] = log_prob
             self.samples["log_prob"] = log_prob_array
             del self.samples["phase"]
 
-        if num_valid_samples > 1e4:
-            print(f"Done. This took {time.time() - t0:.2f} s.")
+        print(f"Done. This took {time.time() - t0:.2f} s.")
