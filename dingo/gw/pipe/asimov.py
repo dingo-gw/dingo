@@ -45,7 +45,7 @@ class Dingo(Pipeline):
         results_dir = glob.glob(f"{self.production.rundir}/result")
         if len(results_dir) > 0:
             if (
-                len(glob.glob(os.path.join(results_dir[0], f"*sampling_result.hdf5")))
+                len(glob.glob(os.path.join(results_dir[0], f"*importance_sampling.hdf5")))
                 > 0
             ):
                 self.logger.info("Results files found, the job is finished.")
@@ -154,7 +154,7 @@ class Dingo(Pipeline):
         """
 
         results_dir = os.path.join(self.production.rundir, "result")
-        results_filenames = sorted(os.listdir(results_dir))
+        results_filenames = glob.glob(os.path.join(results_dir, f"*importance_sampling.hdf5"))
         return os.path.join(results_dir, results_filenames[0])
 
     def upload_assets(self):
