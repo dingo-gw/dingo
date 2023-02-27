@@ -31,9 +31,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         calibration_marginalization_kwargs=None,
         phase_grid=None,
     ):
+        # TODO: Does the phase_grid argument ever get used?
         """
-        Initialize the likelihood.
-
         Parameters
         ----------
         wfg_kwargs: dict
@@ -52,6 +51,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             Time marginalization parameters. If None, no time marginalization is used.
         calibration_marginalization_kwargs: dict
             Calibration marginalization parameters. If None, no calibration marginalization is used.
+        phase_marginalization_kwargs: dict
+            Phase marginalization parameters. If None, no phase marginalization is used.
         """
         super().__init__(
             wfg_kwargs=wfg_kwargs,

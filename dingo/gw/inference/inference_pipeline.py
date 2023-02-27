@@ -9,9 +9,10 @@ from pathlib import Path
 import yaml
 
 from dingo.core.models import PosteriorModel
-from dingo.core.dataset import DingoDataset
+from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
-from dingo.gw.data.data_preparation import get_event_data_and_domain
+from dingo.gw.data.data_preparation import get_event_data_and_domain, \
+    parse_settings_for_raw_data
 from dingo.gw.inference.visualization import load_ref_samples, generate_cornerplot
 
 
@@ -157,11 +158,21 @@ def get_event_data(event, args, model, ref=None):
             args.time_buffer,
             args.event_dataset,
         )
-        event_metadata = {
-            "time_event": time_event,
-            "time_psd": args.time_psd,
-            "time_buffer": args.time_buffer,
-        }
+
+        event_metadata = parse_settings_for_raw_data(model.metadata, args.time_psd,
+                                                     args.time_buffer)
+
+        # Put the metadata in the same format as provided by dingo_pipe data_generation.
+        # (This is a bit ad hoc, should be improved.)
+        event_metadata["time_event"] = time_event
+        event_metadata["psd_duration"] = event_metadata.pop("time_psd")
+        window = event_metadata.pop("window")
+        event_metadata["T"] = window["T"]
+        del event_metadata["time_segment"]
+        event_metadata["window_type"] = window["type"]
+        event_metadata["roll_off"] = window["roll_off"]
+        event_metadata["f_min"] = model.metadata["dataset_settings"]["domain"]["f_min"]
+        event_metadata["f_max"] = model.metadata["dataset_settings"]["domain"]["f_max"]
 
         if ref is None or time_event not in ref:
             label = f"gps-{time_event}{args.suffix}"
@@ -171,12 +182,10 @@ def get_event_data(event, args, model, ref=None):
 
     else:
         # load file with event data
-        event_dataset = DingoDataset(event, data_keys=["event_data", "event_metadata"])
-        event_data = event_dataset.event_data
-        event_metadata = event_dataset.event_metadata
+        event_dataset = EventDataset(file_name=event)
+        event_data = event_dataset.data
+        event_metadata = event_dataset.settings
         label = Path(event).stem + args.suffix
-        # TODO: add check that model metadata and injection are compatible, e.g.,
-        #  same frequency range and waveform model
 
     return event_data, event_metadata, label
 

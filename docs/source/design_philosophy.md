@@ -39,7 +39,7 @@ We follow the [PyTorch guidelines](https://pytorch.org/tutorials/beginner/basics
 
 ### Data structures
 
-Dingo uses several dataset classes, all of which inherit from `dingo.core.dataset.DingoDataset`. This provides a common IO (to save/load from HDF5 as well as dictionaries). It also stores the settings dictionary as an attribute.
+Dingo uses several dataset classes, all of which inherit from {py:class}`dingo.core.dataset.DingoDataset`. This provides a common IO (to save/load from HDF5 as well as dictionaries). It also stores the settings dictionary as an attribute.
 
 ## Command-line scripts vs libraries
 
