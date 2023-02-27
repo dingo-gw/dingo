@@ -555,8 +555,16 @@ def create_parser(top_level=True):
         type=str,
         action="append",
         help=(
-            "Extra requirements for submitting sampling, can be used to specify GPU "
-            "memory via TARGET.CUDAGlobalMemoryMb>40000."
+            "List of extra requirements for submitting sampling. Can be used to specify "
+            "GPU memory, e.g., [TARGET.CUDAGlobalMemoryMb>40000]."
+        ),
+    )
+    submission_parser.add(
+        "--extra-lines",
+        type=str,
+        action="append",
+        help=(
+            "List of additional lines to include for all HTCondor submissions."
         ),
     )
     submission_parser.add(

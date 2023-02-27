@@ -43,6 +43,8 @@ class SamplingNode(AnalysisNode):
         for req in inputs.sampling_requirements:
             self.requirements.append(req)
 
+        self.extra_lines.append("request_gpus = 1")
+
         self.process_node()
         self.job.add_parent(generation_node.job)
 
