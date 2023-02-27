@@ -216,10 +216,19 @@ class MainInput(BilbyMainInput):
 
         # self.check_source_model(args)
 
-        self.extra_lines = args.extra_lines
         self.requirements = []
-        self.sampling_requirements = args.sampling_requirements
         self.simple_submission = args.simple_submission
+
+        if args.extra_lines:
+            self.extra_lines = args.extra_lines
+        else:
+            self.extra_lines = []
+
+        if args.sampling_requirements:
+            self.sampling_requirements = args.sampling_requirements
+        else:
+            args.sampling_requirements = []
+
 
     @property
     def request_cpus_importance_sampling(self):

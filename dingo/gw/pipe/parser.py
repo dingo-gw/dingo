@@ -552,7 +552,6 @@ def create_parser(top_level=True):
     )
     submission_parser.add(
         "--sampling-requirements",
-        type=str,
         action="append",
         help=(
             "List of extra requirements for submitting sampling. Can be used to specify "
@@ -561,7 +560,6 @@ def create_parser(top_level=True):
     )
     submission_parser.add(
         "--extra-lines",
-        type=str,
         action="append",
         help=(
             "List of additional lines to include for all HTCondor submissions."
