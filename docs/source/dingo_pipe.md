@@ -18,6 +18,9 @@ local = True
 accounting = dingo
 request-cpus-importance-sampling = 16
 n-parallel = 4
+sampling-requirements = [TARGET.CUDAGlobalMemoryMb>40000]
+extra-lines = [+WantsGPUNode = True]
+simple-submission = false
 
 ################################################################################
 ##  Sampler arguments
@@ -78,6 +81,8 @@ The next step is sampling from the Dingo model. The model is loaded into a [GWSa
 
 If using GNPE, one can optionally specify `num-gnpe-iterations` (it defaults to 30). Importantly, obtaining the log probability when using GNPE requires an [extra step of training an unconditional flow](result.md#density-recovery). This is done using the `recover-log-prob` flag, which defaults to `True`. The default density recovery settings can be overwritten by providing a `density-recovery-settings` dictionary in the `.ini` file.
 
+Since sampling uses GPU hardware, there is an additional key `sampling-requirements` for HTCondor requirements during the sampling stage. This is intended for specifying GPU requirements such as memory or CUDA version.
+
 ## Importance sampling
 
 For importance sampling, the Result saved in the previous step is loaded. Since this contains the strain data and ASDs, as well as all settings used for training the network, the likelihood and prior can be evaluated for each sample point. If it is necessary to change data conditioning or PSD for importance sampling (i.e., if the `importance-sampling-updates` dictionary is non-empty), then a second [data generation](#data-generation) step is first carried using the new settings, and used as importance sampling context. The importance sampled result is finally saved as HDF5, including the estimated Bayesian evidence.
@@ -95,3 +100,11 @@ Importance sampling (including synthetic phase sampling) is an expensive step, s
 ## Plotting
 
 The standard Result [plots](result.md#plotting) are turned on using the `plot-corner`, `plot-weights`, and `plot-log-probs` flags.
+
+## Additional options
+
+extra-lines
+: Additional lines for all submission scripts. This could be useful for particular cluster configurations.
+
+simple-submission
+: Strip the keys `accounting_tag`, `getenv`, `priority`, and `universe` from submission scripts. Again useful for particular cluster configurations.
