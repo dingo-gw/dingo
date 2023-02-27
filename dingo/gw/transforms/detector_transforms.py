@@ -11,6 +11,7 @@ from bilby.gw.prior import CalibrationPriorDict
 
 
 CC = 299792458.0
+NUM_CALIBRATION_NODES = 10
 
 
 def time_delay_from_geocenter(
@@ -239,8 +240,35 @@ class TimeShiftStrain(object):
         return sample
 
 
-class MultiplyCalibrationUncertainty(object):
+class ApplyCalibrationUncertainty(object):
     """
+    Based off: 
+
+    https://dcc.ligo.org/LIGO-T1400682/public
+
+    Usually gravitational wave data is in the form 
+    
+    d(f) = h_obs(f) + n(f)                                          (1)
+
+    Where d is the data, h is the waveform and n is the noise. However, since
+    the detector is not perfectly calibrated, there are corrections to the
+    waveform in the form
+    
+    h_obs(f) = h(f) * (1 + \delta A(f)) * exp(i \delta \phi(f))      (2)
+
+    We can parameterize A(f) and \phi(f) with a cubic spline i.e.
+
+    \delta A(f) = spline(f; {f_i, \delta A_i})                       (3)
+    \delta \phi(f) = spline(f; {f_i, \delta \phi_i})                 (4)
+
+    The \A_i and \phi_i are drawn from gaussians centered at 0 with standard
+    deviations determined by the calibration envelope which varies event to
+    event. This method draws multiple splines and multiplies the waveform 
+    by the splines. Later when computing the likelihoods, we can marginalize
+    over these waveforms thereby mitigating the effects of calibration 
+    uncertainties in the detectors.  
+    
+
     calibration_marginalization_kwargs: dict
         Calibration marginalization kwargs. If None no calibration marginalization is
         used. This should contain a dict with
@@ -273,8 +301,8 @@ class MultiplyCalibrationUncertainty(object):
         self.num_calibration_curves = num_calibration_curves
 
         self.data_domain = data_domain
-        self.calibration_priors = {}
-        if False not in [s.endswith(".txt") for s in calibration_envelope.values()]:
+        self.calibration_prior = {}
+        if all([s.endswith(".txt") for s in calibration_envelope.values()]):
             # Generating .h5 lookup table from priors in .txt file
             self.calibration_envelope = calibration_envelope
             for i, ifo in enumerate(self.ifo_list):
@@ -283,7 +311,7 @@ class MultiplyCalibrationUncertainty(object):
                     f"recalib_{ifo.name}_",
                     minimum_frequency=data_domain.f_min,
                     maximum_frequency=data_domain.f_max,
-                    n_points=10,
+                    n_points=NUM_CALIBRATION_NODES,
                 )
 
                 # Setting priors
@@ -293,13 +321,13 @@ class MultiplyCalibrationUncertainty(object):
                 # frequency points, $f_i$.  Then for each node point f_i, it
                 # will create a gaussian prior according to the spline of the
                 # median and sigma found earlier
-                self.calibration_priors[
+                self.calibration_prior[
                     ifo.name
                 ] = CalibrationPriorDict.from_envelope_file(
                     self.calibration_envelope[ifo.name],
                     self.data_domain.f_min,
                     self.data_domain.f_max,
-                    10,
+                    NUM_CALIBRATION_NODES,
                     ifo.name,
                 )
 
@@ -312,7 +340,7 @@ class MultiplyCalibrationUncertainty(object):
             calibration_parameter_draws, calibration_draws = {}, {}
             # Sampling from prior
             calibration_parameter_draws[ifo.name] = pd.DataFrame(
-                self.calibration_priors[ifo.name].sample(self.num_calibration_curves)
+                self.calibration_prior[ifo.name].sample(self.num_calibration_curves)
             )
             calibration_draws[ifo.name] = np.zeros(
                 (

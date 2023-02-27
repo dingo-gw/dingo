@@ -131,7 +131,7 @@ class Result(CoreResult):
         self,
         time_marginalization_kwargs: Optional[dict] = None,
         phase_marginalization_kwargs: Optional[dict] = None,
-        calibration_marginalization_kwargs=None,
+        calibration_marginalization_kwargs: Optional[dict] = None,
         phase_grid: Optional[np.ndarray] = None,
     ):
         """
