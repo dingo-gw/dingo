@@ -11,7 +11,7 @@ from dingo.gw.injection import Injection
 def max_likelihood_injection(samples_file, injection_file):
     sd = Result(samples_file)
     pm = SimpleNamespace(metadata=sd.settings)
-    injection_gen = Injection.from_posterior_model(pm)
+    injection_gen = Injection.from_posterior_model_metadata(pm.metadata)
     injection_gen.asd = sd.context["asds"]
 
     try:

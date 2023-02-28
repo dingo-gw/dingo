@@ -86,6 +86,14 @@ class Result(CoreResult):
     def phase_marginalization_kwargs(self, value):
         self.importance_sampling_metadata["phase_marginalization"] = value
 
+    @property
+    def calibration_marginalization_kwargs(self):
+        return self.importance_sampling_metadata.get("calibration_marginalization")
+
+    @calibration_marginalization_kwargs.setter
+    def calibration_marginalization_kwargs(self, value):
+        self.importance_sampling_metadata["calibration_marginalization"] = value
+
     def _build_domain(self):
         """
         Construct the domain object based on model metadata. Includes the window factor
@@ -222,6 +230,7 @@ class Result(CoreResult):
         self,
         time_marginalization_kwargs: Optional[dict] = None,
         phase_marginalization_kwargs: Optional[dict] = None,
+        calibration_marginalization_kwargs: Optional[dict] = None,
         phase_grid: Optional[np.ndarray] = None,
     ):
         """
@@ -236,6 +245,8 @@ class Result(CoreResult):
             accuracy, at the cost of longer computation time).
         phase_marginalization_kwargs: dict, optional
             kwargs for phase marginalization.
+        calibration_marginalization_kwargs: dict
+            Calibration marginalization parameters. If None, no calibration marginalization is used.
         """
         if time_marginalization_kwargs is not None:
             if self.geocent_time_prior is None:
@@ -265,6 +276,7 @@ class Result(CoreResult):
         # This will save these settings when the Result instance is saved.
         self.time_marginalization_kwargs = time_marginalization_kwargs
         self.phase_marginalization_kwargs = phase_marginalization_kwargs
+        self.calibration_marginalization_kwargs = calibration_marginalization_kwargs
 
         # The detector reference positions during likelihood evaluation should be based
         # on the event time, since any post-correction to account for the training
@@ -292,6 +304,7 @@ class Result(CoreResult):
             t_ref=t_ref,
             time_marginalization_kwargs=time_marginalization_kwargs,
             phase_marginalization_kwargs=phase_marginalization_kwargs,
+            calibration_marginalization_kwargs=calibration_marginalization_kwargs,
             phase_grid=phase_grid,
         )
 
