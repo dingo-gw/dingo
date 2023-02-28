@@ -174,12 +174,6 @@ class Result(CoreResult):
                     f"marginalization, but is {self.phase_prior}."
                 )
 
-        # optionally initialize calibration marginalization
-        if calibration_marginalization_kwargs is not None:
-            self.calibration_envelope = calibration_marginalization_kwargs[
-                "calibration_envelope"
-            ]
-
         # This will save these settings when the Result instance is saved.
         self.time_marginalization_kwargs = time_marginalization_kwargs
         self.phase_marginalization_kwargs = phase_marginalization_kwargs
