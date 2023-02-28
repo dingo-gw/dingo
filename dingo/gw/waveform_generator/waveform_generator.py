@@ -1190,7 +1190,7 @@ class GWSignalWaveformGenerator:
         generator = gwsignal_get_waveform_generator(self.approximant_str)
         if isinstance(self.domain, FrequencyDomain):
             # Generate FD modes in for frequencies [-f_max, ..., 0, ..., f_max].
-            if generator.domain == 'FrequencyDomain':
+            if generator.domain == 'freq':
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: FD)
                 hlm_fd, iota = self.generate_FD_modes_LO(parameters)
@@ -1242,15 +1242,25 @@ class GWSignalWaveformGenerator:
         """
         # TD approximants that are implemented in J frame. Currently tested for:
         #   101: IMRPhenomXPHM
-        if self.approximant in [101]:
-            parameters_lal_fd_modes = self._convert_parameters_to_lal_frame(
-                {**parameters, "f_ref": self.f_ref},
-                lal_target_function="SimInspiralChooseFDModes",
+        if self.approximant_str in ["IMRPhenomXPHM"]:
+            parameters_gwsignal = self._convert_parameters_gwsignal(
+            {**parameters, "f_ref": self.f_ref}, self.lal_params
             )
-            iota = parameters_lal_fd_modes[14]
-            hlm_fd = LS.SimInspiralChooseFDModes(*parameters_lal_fd_modes)
+            iota = parameters_gwsignal["inclination"]
+            generator = gwsignal_get_waveform_generator(self.approximant_str)
+            hlm_fd = gws_wfm.GenerateFDModes(parameters_gwsignal, generator)
             # unpack linked list, convert lal objects to arrays
-            hlm_fd = wfg_utils.linked_list_modes_to_dict_modes(hlm_fd)
+
+            hlms_lal = {}
+            for key, value in hlm_fd.items():
+                if type(key)!=str:
+                    hlm_lal = lal.CreateCOMPLEX16TimeSeries(
+                    "hplus", value.epoch.value, 0, value.dt.value, lal.DimensionlessUnit, len(value)
+                )
+                    hlm_lal.data.data = value.value
+                    hlms_lal[key] = hlm_lal
+
+            hlm_fd = wfg_utils.linked_list_modes_to_dict_modes(hlms_lal)
             hlm_fd = {k: v.data.data for k, v in hlm_fd.items()}
             # For the waveform models considered here (e.g., IMRPhenomXPHM), the modes
             # are returned in the J frame (where the observer is at inclination=theta_JN,
