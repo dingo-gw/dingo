@@ -230,13 +230,15 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
     = 1.
 
     Attributes (beyond those of Sampler)
-    ----------
+    ------------------------------------
     init_sampler : Sampler
         Used for providing initial samples for Gibbs sampling.
     num_iterations : int
         Number of Gibbs iterations to perform.
-    iteration_tracker : IterationTracker  **not set up**
-    remove_init_outliers : float  **not set up**
+    iteration_tracker : IterationTracker
+        **not set up**
+    remove_init_outliers : float
+        **not set up**
     """
 
     def _initialize_transforms(self):

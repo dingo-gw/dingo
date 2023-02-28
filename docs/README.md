@@ -19,5 +19,5 @@ This creates a directory `build/` containing HTML doc pages. The main index is a
 To remove generated docs, execute
 ```
 make clean
-rm source/dingo.*
+rm source/dingo.* source/modules.rst
 ```

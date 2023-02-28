@@ -1,0 +1,1 @@
+This module is closely based on the lscsoft [`bilby_pipe`](https://git.ligo.org/lscsoft/bilby_pipe) package, which is licensed under the MIT License. It reuses code from `bilby_pipe` and inherits from `bilby_pipe` classes, with suitable modifications to work with Dingo instead of Bilby.
