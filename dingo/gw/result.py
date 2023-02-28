@@ -319,10 +319,10 @@ class Result(CoreResult):
             t_ref = self.base_metadata["train_settings"]["data"]["ref_time"]
         
         #Select waveform generator, LAL or GWSignal
-        #if self.base_metadata["dataset_settings"]["gwsignal_generator"]:
-        #    waveform_generator = GWSignalWaveformGenerator
-        #else:
-        #    waveform_generator = WaveformGenerator
+        if self.base_metadata["dataset_settings"].get("gwsignal_generator") is None:
+            waveform_generator = WaveformGenerator
+        else:
+            waveform_generator = GWSignalWaveformGenerator
 
         # FIXME: This is a quick hack because I didn't know how to choose the wfg
         #  domain in the case of a changing domain during importance sampling. It could
@@ -343,6 +343,7 @@ class Result(CoreResult):
             phase_marginalization_kwargs=phase_marginalization_kwargs,
             calibration_marginalization_kwargs=calibration_marginalization_kwargs,
             phase_grid=phase_grid,
+            waveform_generator=waveform_generator,
         )
 
     def sample_synthetic_phase(

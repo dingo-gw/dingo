@@ -150,7 +150,8 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
     prior = build_prior_with_defaults(settings["intrinsic_prior"])
     domain = build_domain(settings["domain"])
 
-    if settings["gwsignal_generator"]:
+    gwsignalflag = settings.get("gwsignal_generator",False)
+    if gwsignalflag:
         waveform_generator = GWSignalWaveformGenerator(
             domain=domain,
             **settings["waveform_generator"],

@@ -11,7 +11,7 @@ import lal
 import lalsimulation as LS
 import pandas as pd
 from lalsimulation.gwsignal.core import waveform as gws_wfm
-from lalsimulation.gwsignal.models import pyseobnr 
+from lalsimulation.gwsignal.models import gwsignal_get_waveform_generator 
 from bilby.gw.conversion import (
     convert_to_lal_binary_black_hole_parameters,
     bilby_to_lalsimulation_spins,
@@ -1029,14 +1029,14 @@ class GWSignalWaveformGenerator:
               'phi_ref' : p["phase"]*u.rad,
               'distance' : p["luminosity_distance"]*u.Mpc,
               'inclination' : iota*u.rad,
-              'ModeArray': self.mode_list,
-              'condition':True*u.dimensionless_unscaled}
+              #'ModeArray': self.mode_list,
+              'condition':1}
         
-        if ('postadiabatic' in p):
-             params_gwsignal['postadiabatic'] = p['postadiabatic']
+        #if ('postadiabatic' in p):
+        #     params_gwsignal['postadiabatic'] = p['postadiabatic']
 
-             if ('postadiabatic_type' in p):
-                 params_gwsignal['postadiabatic_type'] = p['postadiabatic_type']
+        #     if ('postadiabatic_type' in p):
+        #         params_gwsignal['postadiabatic_type'] = p['postadiabatic_type']
 
         return params_gwsignal
 
@@ -1457,15 +1457,6 @@ def sum_contributions_m(x_m, phase_shift=0.0):
         for m, x in x_m.items():
             result[key] += x[key] * np.exp(-1j * m * phase_shift)
     return result
-
-def gwsignal_get_waveform_generator(waveform_approximant):
-
-    if waveform_approximant == 'SEOBNRv5HM':
-        wf_gen = pyseobnr.SEOBNRv5HM()
-    elif waveform_approximant == 'SEOBNRv5PHM':
-        wf_gen = pyseobnr.SEOBNRv5PHM()
-
-    return wf_gen
 
 if __name__ == "__main__":
     import pandas as pd
