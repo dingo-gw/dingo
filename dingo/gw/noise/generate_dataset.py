@@ -33,7 +33,7 @@ def parse_args():
         "--settings_file",
         type=str,
         default=None,
-        help="Optional path to a settings file in case two different datasets are generated in the sam directory",
+        help="Path to a settings file in case two different datasets are generated in the same directory",
     )
     parser.add_argument(
         "--time_segments_file",
@@ -74,7 +74,7 @@ def generate_dataset():
         with open(args.time_segments_file, "rb") as f:
             time_segments = pickle.load(f)
     else:
-        time_segments = get_time_segments(data_dir, settings["dataset_settings"])
+        time_segments = get_time_segments(settings["dataset_settings"])
         time_segments_path = join(
             data_dir, "tmp", settings["dataset_settings"]["observing_run"]
         )
@@ -82,7 +82,7 @@ def generate_dataset():
         with open(join(time_segments_path, "psd_time_segments.pkl"), "wb") as f:
             pickle.dump(time_segments, f)
 
-    if "condor" in settings["local"]:
+    if "condor" in settings:
 
         dagman = create_dag(data_dir, settings_file, time_segments, args.out_name)
 

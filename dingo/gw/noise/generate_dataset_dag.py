@@ -7,8 +7,6 @@ import numpy as np
 import yaml
 from pycondor import Job, Dagman
 
-from dingo.gw.noise.utils import get_time_segments
-
 
 def create_args_string(args_dict: Dict):
     """Generate argument string from dictionary of argument names and arguments."""
@@ -75,8 +73,8 @@ def create_dag(data_dir, settings_file, time_segments, out_name):
 
     condor_dir = join(data_dir, "tmp", "condor")
     kwargs = {
-        "request_cpus": settings["local"]["condor"]["num_cpus"],
-        "request_memory": settings["local"]["condor"]["memory_cpus"],
+        "request_cpus": settings["condor"]["num_cpus"],
+        "request_memory": settings["condor"]["memory_cpus"],
         "submit": os.path.join(condor_dir, "submit"),
         "error": os.path.join(condor_dir, "error"),
         "output": os.path.join(condor_dir, "output"),
@@ -84,9 +82,9 @@ def create_dag(data_dir, settings_file, time_segments, out_name):
         "getenv": True,
     }
     # scripts are installed in the env's bin directory
-    env_path = os.path.join(settings["local"]["env_path"], "bin")
+    env_path = os.path.join(settings["condor"]["env_path"], "bin")
     executable = os.path.join(env_path, "dingo_estimate_psds")
-    num_jobs = settings["local"]["condor"]["num_jobs"]
+    num_jobs = settings["condor"]["num_jobs"]
 
     time_segment_path_list = split_time_segments(time_segments, condor_dir, num_jobs)
 

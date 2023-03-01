@@ -25,31 +25,31 @@ Some events are split up into multiple chunks such that there are multiple URLs 
 """
 URL_DIRECTORY = {
     "O1_L1": [
-        "https://www.gw-openscience.org/timeline/segments/O1/L1_BURST_CAT2/1126051217/11203200/"
+        "https://www.gw-openscience.org/timeline/segments/O1/L1_BURST_CAT2/1126051217/1137254417/"
     ],
     "O1_H1": [
-        "https://www.gw-openscience.org/timeline/segments/O1/H1_BURST_CAT2/1126051217/11203200/"
+        "https://www.gw-openscience.org/timeline/segments/O1/H1_BURST_CAT2/1126051217/1137254417/"
     ],
     "O2_L1": [
-        "https://www.gw-openscience.org/timeline/segments/O2_16KHZ_R1/L1_BURST_CAT2/1164556817/23176801/"
+        "https://www.gw-openscience.org/timeline/segments/O2_16KHZ_R1/L1_BURST_CAT2/1164556817/1187733618/"
     ],
     "O2_H1": [
-        "https://www.gw-openscience.org/timeline/segments/O2_16KHZ_R1/H1_BURST_CAT2/1164556817/23176801/"
+        "https://www.gw-openscience.org/timeline/segments/O2_16KHZ_R1/H1_BURST_CAT2/1164556817/1187733618/"
     ],
     "O2_V1": [
-        "https://www.gw-openscience.org/timeline/segments/O2_16KHZ_R1/V1_BURST_CAT2/1164556817/23176801/"
+        "https://www.gw-openscience.org/timeline/segments/O2_16KHZ_R1/V1_BURST_CAT2/1164556817/1187733618/"
     ],
     "O3_L1": [
-        "https://www.gw-openscience.org/timeline/segments/O3a_16KHZ_R1/L1_BURST_CAT2/1238166018/15811200/",
-        "https://www.gw-openscience.org/timeline/segments/O3b_16KHZ_R1/L1_BURST_CAT2/1256655618/12708000/",
+        "https://www.gw-openscience.org/timeline/segments/O3a_16KHZ_R1/L1_BURST_CAT2/1238166018/1253977218/",
+        "https://www.gw-openscience.org/timeline/segments/O3b_16KHZ_R1/L1_BURST_CAT2/1256655618/1269363618/",
     ],
     "O3_H1": [
-        "https://www.gw-openscience.org/timeline/segments/O3a_16KHZ_R1/H1_BURST_CAT2/1238166018/15811200/",
-        "https://www.gw-openscience.org/timeline/segments/O3b_16KHZ_R1/H1_BURST_CAT2/1256655618/12708000/",
+        "https://www.gw-openscience.org/timeline/segments/O3a_16KHZ_R1/H1_BURST_CAT2/1238166018/1253977218/",
+        "https://www.gw-openscience.org/timeline/segments/O3b_16KHZ_R1/H1_BURST_CAT2/1256655618/1269363618/",
     ],
     "O3_V1": [
-        "https://www.gw-openscience.org/timeline/segments/O3a_16KHZ_R1/V1_BURST_CAT2/1238166018/15811200/",
-        "https://www.gw-openscience.org/timeline/segments/O3b_16KHZ_R1/V1_BURST_CAT2/1256655618/12708000/",
+        "https://www.gw-openscience.org/timeline/segments/O3a_16KHZ_R1/V1_BURST_CAT2/1238166018/1253977218/",
+        "https://www.gw-openscience.org/timeline/segments/O3b_16KHZ_R1/V1_BURST_CAT2/1256655618/1269363618/",
     ],
 }
 
@@ -80,13 +80,11 @@ def get_event_gps_times():
     return event_list
 
 
-def get_time_segments(data_dir, settings):
+def get_time_segments(settings):
     """
     Creates a dictionary storing time segments used for estimating PSDs
     Parameters
     ----------
-    data_dir : str
-        Path to the directory where the PSD dataset will be stored
     settings : dict
         Settings that determine the segments
     Returns
