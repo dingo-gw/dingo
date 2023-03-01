@@ -133,7 +133,7 @@ def change_spin_conversion_phase(p, f_ref, sc_phase_old, sc_phase_new):
     are independent of the spin conversion phase. When converting from cartesian spins
     to PE spins, the phase value has an impact on theta_jn and phi_jl.
 
-    The usual convention for the PE spins is to use the real phase for the conversion
+    The usual convention for the PE spins is to use the phase parameter for the conversion
     (cart. spins <--> PE spins), but for dingo-IS with the synthetic phase extension we
     need to use another convention, where the PE spins are defined with spin conversion
     phase 0. This function transforms between the different conventions.
@@ -141,13 +141,14 @@ def change_spin_conversion_phase(p, f_ref, sc_phase_old, sc_phase_new):
     Parameters
     ----------
     p: pd.Dataframe
-        parameters
+        Parameters.
     f_ref: float
-        reference frequency for definition of spins
-    sc_phase_old: float or str
-        spin conversion phase used for input parameters
-    sc_phase_new: float or str
-        spin conversion phase used for output parameters
+        Reference frequency for definition of spins.
+    sc_phase_old: float or None
+        Spin conversion phase used for input parameters. If None, use the phase parameter.
+    sc_phase_new: float or None
+        Spin conversion phase used for output parameters. If None, use the phase
+        parameter.
 
     Returns
     -------
@@ -160,29 +161,25 @@ def change_spin_conversion_phase(p, f_ref, sc_phase_old, sc_phase_new):
 
     # check validity of phases
     for sc_phase in [sc_phase_old, sc_phase_new]:
-        if isinstance(sc_phase, str):
-            if not sc_phase == "real_phase":
+        if sc_phase is None:
+            if "phase" not in p:
                 raise ValueError(
-                    f"Phase for spin conversion needs to be either a number, "
-                    f'or the string "real_phase", got {sc_phase}.'
+                    "Using phase parameter for spin conversion, but phase not in "
+                    "parameters."
                 )
-            if not "phase" in p:
-                raise ValueError(
-                    "Using real phase for spin conversion, but phase not in parameters."
-                )
-        elif not type(sc_phase) in (int, float):
+        elif type(sc_phase) not in (int, float):
             raise ValueError(
-                f"Phase for spin conversion needs to be either a number, "
-                f'or the string "real_phase", got {sc_phase}.'
+                f"Phase for spin conversion needs to be either a number or None; got"
+                f"{sc_phase}."
             )
 
     phase_old = sc_phase_old
     phase_new = sc_phase_new
     p_new = {k: [] for k in p.keys()}
     for idx in range(len(p)):
-        if sc_phase_old == "real_phase":
+        if sc_phase_old is None:
             phase_old = p["phase"][idx]
-        if sc_phase_new == "real_phase":
+        if sc_phase_new is None:
             phase_new = p["phase"][idx]
 
         params_idx = {k: v[idx] for k, v in p.items()}
