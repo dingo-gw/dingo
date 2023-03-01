@@ -65,6 +65,7 @@ setup(
             "dingo_generate_asd_dataset=dingo.gw.noise.generate_dataset:generate_dataset",
             "dingo_estimate_psds=dingo.gw.noise.asd_estimation:download_and_estimate_cli",
             "dingo_merge_asd_datasets=dingo.gw.noise.utils:merge_datasets_cli",
+            "dingo_generate_synthetic_asd_dataset=dingo.gw.noise.synthetic_noise.generate_dataset:main",
             "dingo_train=dingo.gw.training:train_local",
             "dingo_train_condor=dingo.gw.training.train_pipeline_condor:train_condor",
             "dingo_append_training_stage=dingo.gw.training:append_stage",
