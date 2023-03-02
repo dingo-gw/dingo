@@ -1,6 +1,5 @@
 import math
 import numpy as np
-import os
 import torch
 import pandas as pd
 from bilby.gw.detector.interferometer import Interferometer
@@ -57,7 +56,7 @@ def time_delay_from_geocenter(
                 f"Shapes of ra ({ra.shape}) and dec ({dec.shape}) don't match."
             )
 
-    if isinstance(ra, float):
+    if isinstance(ra, (float, np.float32, np.float64)):
         return ifo.time_delay_from_geocenter(ra, dec, time)
 
     elif isinstance(ra, (np.ndarray, torch.Tensor)) and len(ra) == 1:

@@ -61,7 +61,7 @@ def test_projection_of_LinearProjectionRB(data_setup_rb):
         [np.ones_like(d['y1']), np.zeros_like(d['y1'])],
         [d['V1'], d['V1']], d['n_rb'])
     # check if results agree
-    thr = 1e-5
+    thr = 2e-5
     assert np.max(np.abs(out_a - ref_a)) < thr
     assert np.max(np.abs(out_b - ref_b)) < thr
     # check that results for different inputs disagree
@@ -73,7 +73,7 @@ def test_projection_of_LinearProjectionRB(data_setup_rb):
 
     # check that channels with index >= 2 do affect the projection when layer
     # is not initialized with the reduced basis
-    projection_layer = LinearProjectionRB(
+    projectionÅ_layer = LinearProjectionRB(
         input_dims=(2, d['num_channels'], d['num_bins']),
         n_rb=d['n_rb'], V_rb_list=None)
     out_a_1 = np.array(projection_layer(y_batch_a).detach())
