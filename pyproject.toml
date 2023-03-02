@@ -56,18 +56,14 @@ dependencies = [
 ]
 
 
-[tool.setuptools]
-packages = [
-    "dingo",
-    "dingo.core",
-    "dingo.core.nn",
-    "dingo.gw",
-    "dingo.api",
-]
+[tool.setuptools.packages.find]
+include = ["dingo*"]
+namespaces = false
 
 
 [tool.setuptools_scm]
 write_to = "dingo/_version.py"
+
 
 [project.urls]
 homepage = "https://github.com/dingo-gw/dingo"
