@@ -38,6 +38,15 @@ def parse_args():
     return parser.parse_args()
 
 
+def change_dict_elements_recursively(d, target_key, f, previous_keys=()):
+    for k, el in d.items():
+        if k == target_key:
+            print(f"Changing {previous_keys + (k,)} from {el} to {f(el)}.")
+            d[k] = f(el)
+        elif type(el) == dict:
+            change_dict_elements_recursively(el, target_key, f, previous_keys + (k,))
+
+
 def main():
     args = parse_args()
 
@@ -60,20 +69,7 @@ def main():
     if args.results_file is not None:
         print(f"Updating results file {args.results_file}.")
         res = Result(file_name=args.results_file)
-        res.settings["init_model"]["train_settings"]["model"]["embedding_net_kwargs"][
-            "input_dims"
-        ] = list(
-            res.settings["init_model"]["train_settings"]["model"][
-                "embedding_net_kwargs"
-            ]["input_dims"]
-        )
-        res.settings["train_settings"]["model"]["embedding_net_kwargs"][
-            "input_dims"
-        ] = list(
-            res.settings["train_settings"]["model"]["embedding_net_kwargs"][
-                "input_dims"
-            ]
-        )
+        change_dict_elements_recursively(res.settings, "input_dims", list)
         res.to_file(file_name=args.results_file)
 
 
