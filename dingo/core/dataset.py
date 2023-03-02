@@ -15,12 +15,11 @@ def recursive_hdf5_save(group, d):
             group.create_dataset(k, data=v)
         elif isinstance(v, pd.DataFrame):
             group.create_dataset(k, data=v.to_records(index=False))
-        elif isinstance(v, (int, float)):
-            # TODO: Set as an attribute, not a scalar dataset. Maybe do the same for
-            #  the entire contents of the settings dict.
+        elif isinstance(v, (int, float, str, list)):
+            # TODO: Set scalars as attributes?
             group.create_dataset(k, data=v)
         else:
-            raise TypeError("Cannot save datatype {} as hdf5 dataset.".format(type(v)))
+            raise TypeError(f"Cannot save datatype {type(v)} as hdf5 dataset.")
 
 
 def recursive_hdf5_load(group, keys=None):
@@ -35,8 +34,15 @@ def recursive_hdf5_load(group, keys=None):
                 if d[k].dtype.names is not None:
                     d[k] = pd.DataFrame(d[k])
                 # Convert arrays of size 1 to scalars
-                if d[k].size == 1:
+                elif d[k].size == 1:
                     d[k] = d[k].item()
+                    if isinstance(d[k], bytes):
+                        # Assume this is a string.
+                        d[k] = d[k].decode()
+                # If an array is 1D and of type object, assume it originated as a list
+                # of strings.
+                elif d[k].ndim == 1 and d[k].dtype == 'O':
+                    d[k] = [x.decode() for x in d[k]]
     return d
 
 
@@ -50,6 +56,8 @@ class DingoDataset:
     Alternatively, if the torch Dataset is not needed, then DingoDataset can be
     subclassed directly.
     """
+
+    dataset_type = "dingo_dataset"
 
     def __init__(self, file_name=None, dictionary=None, data_keys=None):
         """
@@ -91,9 +99,11 @@ class DingoDataset:
             recursive_hdf5_save(f, save_dict)
             if self.settings:
                 f.attrs["settings"] = str(self.settings)
+            if self.dataset_type:
+                f.attrs["dataset_type"] = self.dataset_type
 
     def from_file(self, file_name):
-        print("\nLoading dataset from " + str(file_name) + ".")
+        print("Loading dataset from " + str(file_name) + ".")
         with h5py.File(file_name, "r") as f:
             # Load only the keys that the class expects
             loaded_dict = recursive_hdf5_load(f, keys=self._data_keys)

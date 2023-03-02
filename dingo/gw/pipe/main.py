@@ -3,15 +3,13 @@
 #
 import os
 
-import numpy as np
-import pandas as pd
 from bilby_pipe.input import Input
 from bilby_pipe.main import MainInput as BilbyMainInput
 from bilby_pipe.utils import (
     parse_args,
     get_command_line_arguments,
-    BilbyPipeError,
     logger,
+    convert_string_to_dict,
 )
 
 from .dag_creator import generate_dag
@@ -39,14 +37,19 @@ def fill_in_arguments_from_model(args):
         "detectors": data_settings["detectors"],
         "sampling_frequency": data_settings["window"]["f_s"],
         "tukey_roll_off": data_settings["window"]["roll_off"],
+        "waveform_approximant": model_metadata["dataset_settings"][
+            "waveform_generator"
+        ][
+            "approximant"
+        ],  # TODO: Update approximant in IS
     }
 
     changed_args = {}
     for k, v in model_args.items():
-        if vars(args)[k] is not None:
+        args_v = getattr(args, k)
+        if args_v is not None:
 
             # Convert type from str to enable comparison.
-            args_v = vars(args)[k]
             try:
                 if isinstance(v, float):
                     args_v = float(args_v)
@@ -57,28 +60,39 @@ def fill_in_arguments_from_model(args):
 
             if args_v != v:
                 logger.warning(
-                    f"Argument {k} provided to dingo_pipe as {vars(args)[k]} "
-                    f"does not match value {v} in model file. Using {k} = "
-                    f"{v} for inference, and will attempt to change this "
-                    f"during importance sampling."
+                    f"Argument {k} provided to dingo_pipe as {args_v} "
+                    f"does not match value {v} in model file. Using model value for "
+                    f"inference, and will attempt to change this during importance "
+                    f"sampling."
                 )
-                changed_args[k] = vars(args)[k]
+                changed_args[k] = args_v
 
-        vars(args)[k] = v
+        setattr(args, k, v)
 
     # TODO: Also check consistency between model and init_model settings.
 
-    return changed_args
+    # Updates that are explicitly provided take priority.
+    if args.importance_sampling_updates is None:
+        importance_sampling_updates = {}
+    else:
+        importance_sampling_updates = convert_string_to_dict(
+            args.importance_sampling_updates
+        )
+        importance_sampling_updates = {
+            k.replace("-", "_"): v for k, v in importance_sampling_updates.items()
+        }
+    return {**changed_args, **importance_sampling_updates}
 
 
 class MainInput(BilbyMainInput):
-    def __init__(self, args, unknown_args):
+    def __init__(self, args, unknown_args, importance_sampling_updates):
 
         # Settings added for dingo.
 
         self.model = args.model
         self.model_init = args.model_init
         self.num_gnpe_iterations = args.num_gnpe_iterations
+        self.importance_sampling_updates = importance_sampling_updates
 
         Input.__init__(self, args, unknown_args, print_msg=False)
 
@@ -96,14 +110,16 @@ class MainInput(BilbyMainInput):
         self.accounting_user = args.accounting_user
         # self.sampler = args.sampler
         self.detectors = args.detectors
-        self.coherence_test = False  # dingo mod: Cannot use different sets of detectors.
-        self.n_parallel = 1
+        self.coherence_test = (
+            False  # dingo mod: Cannot use different sets of detectors.
+        )
+        self.n_parallel = args.n_parallel
         # self.transfer_files = args.transfer_files
         self.osg = args.osg
         self.desired_sites = args.desired_sites
         # self.analysis_executable = args.analysis_executable
         # self.analysis_executable_parser = args.analysis_executable_parser
-        # self.result_format = args.result_format
+        self.result_format = "hdf5"
         self.final_result = args.final_result
         self.final_result_nsamples = args.final_result_nsamples
 
@@ -122,13 +138,14 @@ class MainInput(BilbyMainInput):
         # self.waveform_approximant = args.waveform_approximant
         #
         # self.time_reference = args.time_reference
+        self.time_reference = "geocent"
         # self.reference_frame = args.reference_frame
         # self.likelihood_type = args.likelihood_type
         self.duration = args.duration
         # self.phase_marginalization = args.phase_marginalization
         # self.prior_file = args.prior_file
-        # self.prior_dict = args.prior_dict
-        # self.default_prior = args.default_prior
+        self.prior_dict = args.prior_dict
+        self.default_prior = "PriorDict"
         self.minimum_frequency = args.minimum_frequency
         # self.enforce_signal_duration = args.enforce_signal_duration
 
@@ -168,18 +185,16 @@ class MainInput(BilbyMainInput):
         # self.use_mpi = (self.sampler in self.mpi_samplers) and (self.request_cpus > 1)
         #
         # # Set plotting options when need the plot node
-        # self.plot_node_needed = False
-        # for plot_attr in [
-        #     "calibration",
-        #     "corner",
-        #     "marginal",
-        #     "skymap",
-        #     "waveform",
-        # ]:
-        #     attr = f"plot_{plot_attr}"
-        #     setattr(self, attr, getattr(args, attr))
-        #     if getattr(self, attr):
-        #         self.plot_node_needed = True
+        self.plot_node_needed = False
+        for plot_attr in [
+            "corner",
+            "weights",
+            "log_probs",
+        ]:
+            attr = f"plot_{plot_attr}"
+            setattr(self, attr, getattr(args, attr))
+            if getattr(self, attr):
+                self.plot_node_needed = True
         #
         # # Set all other plotting options
         # for plot_attr in [
@@ -203,8 +218,19 @@ class MainInput(BilbyMainInput):
 
         # self.check_source_model(args)
 
-        self.extra_lines = []
-        self.requirements = args.requirements
+        self.requirements = []
+        self.device = args.device
+        self.simple_submission = args.simple_submission
+
+        if args.extra_lines:
+            self.extra_lines = args.extra_lines
+        else:
+            self.extra_lines = []
+
+        if args.sampling_requirements:
+            self.sampling_requirements = args.sampling_requirements
+        else:
+            self.sampling_requirements = []
 
     @property
     def request_cpus_importance_sampling(self):
@@ -212,9 +238,18 @@ class MainInput(BilbyMainInput):
 
     @request_cpus_importance_sampling.setter
     def request_cpus_importance_sampling(self, request_cpus_importance_sampling):
-        logger.info(f"Setting analysis request_cpus_importance_sampling = "
-                    f"{request_cpus_importance_sampling}")
+        logger.info(
+            f"Setting analysis request_cpus_importance_sampling = "
+            f"{request_cpus_importance_sampling}"
+        )
         self._request_cpus_importance_sampling = request_cpus_importance_sampling
+
+    @property
+    def priors(self):
+        """Read in and compose the prior at run-time"""
+        if getattr(self, "_priors", None) is None:
+            self._priors = self._get_priors(add_time=False)
+        return self._priors
 
 
 def write_complete_config_file(parser, args, inputs, input_cls=MainInput):
@@ -229,6 +264,7 @@ def write_complete_config_file(parser, args, inputs, input_cls=MainInput):
             if isinstance(val[0], str):
                 setattr(args, key, f"[{', '.join(val)}]")
     # args.sampler_kwargs = str(inputs.sampler_kwargs)
+    args.importance_sampling_updates = str(inputs.importance_sampling_updates)
     args.submit = False
     parser.write_to_file(
         filename=inputs.complete_ini_file,
@@ -276,8 +312,8 @@ def main():
     parser = create_parser(top_level=True)
     args, unknown_args = parse_args(get_command_line_arguments(), parser)
 
-    changed_args = fill_in_arguments_from_model(args)
-    inputs = MainInput(args, unknown_args)
+    importance_sampling_updates = fill_in_arguments_from_model(args)
+    inputs = MainInput(args, unknown_args, importance_sampling_updates)
     write_complete_config_file(parser, args, inputs)
 
     # TODO: Use two sets of inputs! The first must match the network; the second is

@@ -1,12 +1,16 @@
 import math
 import numpy as np
 import torch
+import pandas as pd
 from bilby.gw.detector.interferometer import Interferometer
 from lal import GreenwichMeanSiderealTime
 from typing import Union
+from bilby.gw.detector import calibration
+from bilby.gw.prior import CalibrationPriorDict
 
 
 CC = 299792458.0
+NUM_CALIBRATION_NODES = 10
 
 
 def time_delay_from_geocenter(
@@ -52,7 +56,7 @@ def time_delay_from_geocenter(
                 f"Shapes of ra ({ra.shape}) and dec ({dec.shape}) don't match."
             )
 
-    if isinstance(ra, float):
+    if isinstance(ra, (float, np.float32, np.float64)):
         return ifo.time_delay_from_geocenter(ra, dec, time)
 
     elif isinstance(ra, (np.ndarray, torch.Tensor)) and len(ra) == 1:
@@ -231,5 +235,145 @@ class TimeShiftStrain(object):
 
         sample["waveform"] = strains
         sample["extrinsic_parameters"] = extrinsic_parameters
+
+        return sample
+
+
+class ApplyCalibrationUncertainty(object):
+    """
+    Based off: 
+
+    https://dcc.ligo.org/LIGO-T1400682/public
+
+    Usually gravitational wave data is in the form 
+    
+    d(f) = h_obs(f) + n(f)                                          (1)
+
+    Where d is the data, h is the waveform and n is the noise. However, since
+    the detector is not perfectly calibrated, there are corrections to the
+    waveform in the form
+    
+    h_obs(f) = h(f) * (1 + \delta A(f)) * exp(i \delta \phi(f))      (2)
+
+    We can parameterize A(f) and \phi(f) with a cubic spline i.e.
+
+    \delta A(f) = spline(f; {f_i, \delta A_i})                       (3)
+    \delta \phi(f) = spline(f; {f_i, \delta \phi_i})                 (4)
+
+    The \A_i and \phi_i are drawn from gaussians centered at 0 with standard
+    deviations determined by the calibration envelope which varies event to
+    event. This method draws multiple splines and multiplies the waveform 
+    by the splines. Later when computing the likelihoods, we can marginalize
+    over these waveforms thereby mitigating the effects of calibration 
+    uncertainties in the detectors.  
+    
+
+    calibration_marginalization_kwargs: dict
+        Calibration marginalization kwargs. If None no calibration marginalization is
+        used. This should contain a dict with
+        {"num_calibration_curves": 100, "calibration_lookup_table": {"H1": filepath, "L1"...}}.
+        Optionally, you can also set "calibration_lookup_table" to None
+    """
+
+    def __init__(
+        self, ifo_list, data_domain, calibration_envelope, num_calibration_curves
+    ):
+        """
+        Initialize calibration marginalization. This requires the user to give
+        an event specific calibration curve.
+
+        Calibration marginalization takes a median and sigma (of amplitude and
+        phase) for each point in frequency space. Then it creates a spline on
+        the median and sigma. NOTE this is a DIFFERENT spline from the cubic
+        spline that will be generated later. This spline is just needed to
+        create priors on the the node points for the calibration cubic spline.
+        This spline will give you the node points, i.e. f_i (log spaced) and
+        Priors(\delta A_i, \delta \psi_i).
+
+        These node points are the calibration parameters. From these node points
+        and priors you can draw values for \delta A_i and \delta \psi_i which
+        will give you a calibration curve. This is the calibration curve which
+        you then multiply against the waveform.
+        """
+
+        self.ifo_list = ifo_list
+        self.num_calibration_curves = num_calibration_curves
+
+        self.data_domain = data_domain
+        self.calibration_prior = {}
+        if all([s.endswith(".txt") for s in calibration_envelope.values()]):
+            # Generating .h5 lookup table from priors in .txt file
+            self.calibration_envelope = calibration_envelope
+            for i, ifo in enumerate(self.ifo_list):
+                # Setting calibration model to cubic spline
+                ifo.calibration_model = calibration.CubicSpline(
+                    f"recalib_{ifo.name}_",
+                    minimum_frequency=data_domain.f_min,
+                    maximum_frequency=data_domain.f_max,
+                    n_points=NUM_CALIBRATION_NODES,
+                )
+
+                # Setting priors
+                # What this will do is take the the calibration envelope and set
+                # a spline on the median and sigma of the amplitude and phase.
+                # Then in log frequency it will setup node points say at
+                # frequency points, $f_i$.  Then for each node point f_i, it
+                # will create a gaussian prior according to the spline of the
+                # median and sigma found earlier
+                self.calibration_prior[
+                    ifo.name
+                ] = CalibrationPriorDict.from_envelope_file(
+                    self.calibration_envelope[ifo.name],
+                    self.data_domain.f_min,
+                    self.data_domain.f_max,
+                    NUM_CALIBRATION_NODES,
+                    ifo.name,
+                )
+
+        else:
+            raise Exception("Calibration envelope must be specified in a .txt file!")
+
+    def __call__(self, input_sample):
+        sample = input_sample.copy()
+        for ifo in self.ifo_list:
+            calibration_parameter_draws, calibration_draws = {}, {}
+            # Sampling from prior
+            calibration_parameter_draws[ifo.name] = pd.DataFrame(
+                self.calibration_prior[ifo.name].sample(self.num_calibration_curves)
+            )
+            calibration_draws[ifo.name] = np.zeros(
+                (
+                    self.num_calibration_curves,
+                    len(self.data_domain.sample_frequencies),
+                ),
+                dtype=complex,
+            )
+
+            for i in range(self.num_calibration_curves):
+                calibration_draws[ifo.name][
+                    i, self.data_domain.frequency_mask
+                ] = ifo.calibration_model.get_calibration_factor(
+                    self.data_domain.sample_frequencies[
+                        self.data_domain.frequency_mask
+                    ],
+                    prefix="recalib_{}_".format(ifo.name),
+                    **calibration_parameter_draws[ifo.name].iloc[i],
+                )
+
+            # Multiplying the sample waveform in the interferometer according to
+            # the calibration curve.  This is done by following the perscription
+            # here:
+            #
+            # https://dcc.ligo.org/LIGO-T1400682 Eq 3 and 4
+            #
+            # We take the waveform h(f) and multiply it by C = (1 + \delta A(f))
+            # \exp(i \delta \psi) i.e. h_obs(f) = C * h(f)
+            # Here C is "calibration_draws"
+
+            # Padding 0's to everything in the calibration array which is below f_min
+
+            sample["waveform"][ifo.name] = (
+                sample["waveform"][ifo.name] * calibration_draws[ifo.name]
+            )
 
         return sample

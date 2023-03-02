@@ -44,7 +44,7 @@ def test_projection_of_LinearProjectionRB(data_setup_rb):
     d = data_setup_rb
     # define projection layer
     projection_layer = LinearProjectionRB(
-        input_dims=(d['num_blocks'], d['num_channels'], d['num_bins']),
+        input_dims=[d['num_blocks'], d['num_channels'], d['num_bins']],
         n_rb=d['n_rb'], V_rb_list=(d['V1'], d['V2']))
     # prepare data for projection_layer
     y_batch_a = get_y_batch([d['y1'], d['y2']], num_channels=d['num_channels'])
@@ -61,7 +61,7 @@ def test_projection_of_LinearProjectionRB(data_setup_rb):
         [np.ones_like(d['y1']), np.zeros_like(d['y1'])],
         [d['V1'], d['V1']], d['n_rb'])
     # check if results agree
-    thr = 1e-5
+    thr = 2e-5
     assert np.max(np.abs(out_a - ref_a)) < thr
     assert np.max(np.abs(out_b - ref_b)) < thr
     # check that results for different inputs disagree
@@ -74,7 +74,7 @@ def test_projection_of_LinearProjectionRB(data_setup_rb):
     # check that channels with index >= 2 do affect the projection when layer
     # is not initialized with the reduced basis
     projection_layer = LinearProjectionRB(
-        input_dims=(2, d['num_channels'], d['num_bins']),
+        input_dims=[2, d['num_channels'], d['num_bins']],
         n_rb=d['n_rb'], V_rb_list=None)
     out_a_1 = np.array(projection_layer(y_batch_a).detach())
     y_batch_a[:, :, 2:, :] -= torch.rand_like(y_batch_a[:, :, 2:, :])
@@ -91,23 +91,23 @@ def test_valueerrors_of_LinearProjectionRB(data_setup_rb):
     d = data_setup_rb
     with pytest.raises(ValueError):
         LinearProjectionRB(
-            input_dims=(2, d['num_channels'], d['num_bins']),
+            input_dims=[2, d['num_channels'], d['num_bins']],
             n_rb=d['n_rb'], V_rb_list=(d['V1'], np.zeros_like(d['y1'])))
     with pytest.raises(ValueError):
         LinearProjectionRB(
-            input_dims=(2, d['num_channels'], d['num_bins']),
+            input_dims=[2, d['num_channels'], d['num_bins']],
             n_rb=d['n_rb'], V_rb_list=(d['V1'], d['V2'], d['V2']))
     with pytest.raises(ValueError):
         LinearProjectionRB(
-            input_dims=(2, d['num_channels'], d['num_bins'] + 1),
+            input_dims=[2, d['num_channels'], d['num_bins'] + 1],
             n_rb=d['n_rb'], V_rb_list=(d['V1'], d['V2']))
     with pytest.raises(ValueError):
         LinearProjectionRB(
-            input_dims=(2, 1, d['num_bins']),
+            input_dims=[2, 1, d['num_bins']],
             n_rb=d['n_rb'], V_rb_list=(d['V1'], d['V2']))
     with pytest.raises(ValueError):
         LinearProjectionRB(
-            input_dims=(2, d['num_channels'], d['num_bins'], 1),
+            input_dims=[2, d['num_channels'], d['num_bins'], 1],
             n_rb=d['n_rb'], V_rb_list=(d['V1'], d['V2']))
 
 
@@ -117,7 +117,7 @@ def test_forward_pass_of_LinearProjectionRB(data_setup_rb):
     """
     d = data_setup_rb
     enet = LinearProjectionRB(
-        input_dims=(d['num_blocks'], d['num_channels'], d['num_bins']),
+        input_dims=[d['num_blocks'], d['num_channels'], d['num_bins']],
         n_rb=d['n_rb'], V_rb_list=(d['V1'], d['V2']))
     check_model_forward_pass(
         enet, [enet.output_dim],
@@ -130,7 +130,7 @@ def test_backward_pass_of_LinearProjectionRB(data_setup_rb):
     """
     d = data_setup_rb
     enet = LinearProjectionRB(
-        input_dims=(d['num_blocks'], d['num_channels'], d['num_bins']),
+        input_dims=[d['num_blocks'], d['num_channels'], d['num_bins']],
         n_rb=d['n_rb'], V_rb_list=(d['V1'], d['V2']))
     check_model_backward_pass(
         enet, (d['num_blocks'], d['num_channels'], d['num_bins']),

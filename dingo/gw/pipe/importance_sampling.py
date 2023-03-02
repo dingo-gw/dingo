@@ -4,9 +4,11 @@ analysis script. """
 import os
 import sys
 
+import yaml
 from bilby_pipe.input import Input
 from bilby_pipe.utils import parse_args, logger, convert_string_to_dict
 
+from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.inference.inference_pipeline import prepare_log_prob
 from dingo.gw.pipe.default_settings import IMPORTANCE_SAMPLING_SETTINGS
 from dingo.gw.pipe.parser import create_parser
@@ -34,6 +36,12 @@ class ImportanceSamplingInput(Input):
 
         # Samples to run on
         self.proposal_samples_file = args.proposal_samples_file
+        self.event_data_file = args.event_data_file
+
+        # Prior
+        self.prior_dict = args.prior_dict
+        self.default_prior = "PriorDict"
+        self.time_reference = "geocent"
 
         # Choices for running
         # self.detectors = args.detectors
@@ -85,6 +93,7 @@ class ImportanceSamplingInput(Input):
         # self.jitter_time = args.jitter_time
 
         self._load_proposal()
+        self._load_event()  # Must be called after _load_proposal().
         self.importance_sampling_settings = args.importance_sampling_settings
 
     def _load_proposal(self):
@@ -94,6 +103,10 @@ class ImportanceSamplingInput(Input):
                 "log_prob is not present in proposal samples. This is "
                 "required for importance sampling."
             )
+
+    def _load_event(self):
+        event_dataset = EventDataset(file_name=self.event_data_file)
+        self.result.reset_event(event_dataset)
 
     @property
     def importance_sampling_settings(self):
@@ -125,7 +138,6 @@ class ImportanceSamplingInput(Input):
             self._importance_sampling_settings = dict()
 
     def run_sampler(self):
-
         if "synthetic_phase" in self.importance_sampling_settings:
             logger.info("Sampling synthetic phase.")
             synthetic_phase_kwargs = {
@@ -144,10 +156,28 @@ class ImportanceSamplingInput(Input):
             ),
         )
 
+        if self.prior_dict:
+            logger.info("Updating prior from network prior. Changes:")
+            logger.info(
+                yaml.dump(
+                    self.prior_dict,
+                    default_flow_style=False,
+                    sort_keys=False,
+                )
+            )
+            self.result.update_prior(self.prior_dict)
+
         self.result.print_summary()
         self.result.to_file(
-            os.path.join(self.result_directory, "_".join([self.label, "result.hdf5"]))
+            os.path.join(self.result_directory, self.label + ".hdf5")
         )
+
+    @property
+    def priors(self):
+        """Read in and compose the prior at run-time"""
+        if getattr(self, "_priors", None) is None:
+            self._priors = self._get_priors(add_time=False)
+        return self._priors
 
 
 def create_sampling_parser():

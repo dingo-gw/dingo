@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """ Script to sample from a Dingo model. Based on bilby_pipe data analysis script. """
 import sys
+from pathlib import Path
 
 from bilby_pipe.input import Input
 from bilby_pipe.utils import parse_args, logger, convert_string_to_dict
@@ -26,6 +27,7 @@ class SamplingInput(Input):
         self.scheduler = args.scheduler
         # self.periodic_restart_time = args.periodic_restart_time
         self.request_cpus = args.request_cpus
+        self.n_parallel = args.n_parallel
 
         # Naming arguments
         self.outdir = args.outdir
@@ -98,7 +100,7 @@ class SamplingInput(Input):
     def _load_event(self):
         event_dataset = EventDataset(file_name=self.event_data_file)
         self.context = event_dataset.data
-        self.event_metadata = event_dataset.event_metadata
+        self.event_metadata = event_dataset.settings
 
     def _load_sampler(self):
         """Load the sampler and set its context based on event data."""
@@ -166,6 +168,16 @@ class SamplingInput(Input):
 
         self.dingo_sampler.run_sampler(self.num_samples, batch_size=self.batch_size)
         self.dingo_sampler.to_hdf5(label=self.label, outdir=self.result_directory)
+
+        if self.n_parallel > 1:
+            logger.info(f"Splitting Result into {self.n_parallel} parts.")
+            result = self.dingo_sampler.to_result()
+            sub_results = result.split(self.n_parallel)
+            outdir = Path(self.result_directory)
+            outdir.mkdir(parents=True, exist_ok=True)
+            for n, r in enumerate(sub_results):
+                file_name = self.label + f"_part{n}.hdf5"
+                r.to_file(file_name=outdir / file_name)
 
 
 def create_sampling_parser():
