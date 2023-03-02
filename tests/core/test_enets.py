@@ -73,7 +73,7 @@ def test_projection_of_LinearProjectionRB(data_setup_rb):
 
     # check that channels with index >= 2 do affect the projection when layer
     # is not initialized with the reduced basis
-    projectionÅ_layer = LinearProjectionRB(
+    projection_layer = LinearProjectionRB(
         input_dims=(2, d['num_channels'], d['num_bins']),
         n_rb=d['n_rb'], V_rb_list=None)
     out_a_1 = np.array(projection_layer(y_batch_a).detach())
