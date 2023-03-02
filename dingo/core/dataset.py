@@ -59,6 +59,8 @@ class DingoDataset:
 
     dataset_type = "dingo_dataset"
 
+    # TODO: Save Dingo version
+
     def __init__(self, file_name=None, dictionary=None, data_keys=None):
         """
         For constructing, provide either file_name, or dictionary containing data and
