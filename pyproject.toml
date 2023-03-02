@@ -1,11 +1,10 @@
 [build-system]
-requires = ["setuptools>=62.0"]
+requires = ["setuptools>=62.0", "setuptools_scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
 
 
 [project]
 name = "dingo-gw"
-version = "0.3.0"
 authors = [ 
     {name = "Maximilian Dax", email = "maximilian.dax@tuebingen.mpg.de"},
     {name = "Stephen Green", email = "Stephen.Green2@nottingham.ac.uk"},
@@ -13,16 +12,17 @@ authors = [
     {name = "Michael Puerrer", email = "mpuerrer@uri.edu"},
     {name = "Jonas Wildberger", email = "wildberger.jonas@tuebingen.mpg.de"},
 ]
-description = "\"Gravitational wave parameter inference using neural posterior estimation.\""
+description = "Gravitational wave parameter inference using neural posterior estimation."
 license = {text = "MIT"}
 readme = "README.md"
-requires-python = ">=3.6"
+requires-python = ">=3.8"
+dynamic = ["version"]
 
 classifiers = [
-    "Programming Language :: Python :: 3.6",
-    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent"
 ]
@@ -66,8 +66,11 @@ packages = [
 ]
 
 
+[tool.setuptools_scm]
+write_to = "dingo/_version.py"
+
 [project.urls]
-homepage = "https://github.com/dingo-gw/dingo-devel"
+homepage = "https://github.com/dingo-gw/dingo"
 
 
 [project.optional-dependencies]
@@ -102,4 +105,3 @@ dingo_pipe_sampling = "dingo.gw.pipe.sampling:main"
 dingo_pipe_importance_sampling = "dingo.gw.pipe.importance_sampling:main"
 dingo_result = "dingo.gw.pipe.dingo_result:main"
 dingo_pipe_plot = "dingo.gw.pipe.plot:main"
-
