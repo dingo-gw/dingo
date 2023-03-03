@@ -20,7 +20,7 @@ setup(
         "dingo.api",
     ],
     package_dir={"dingo": "dingo"},
-    python_requires=">=3.6",
+    python_requires=">=3.8, <=3.10",
     install_requires=[
         "numpy",
         "torch",
@@ -34,7 +34,6 @@ setup(
         "configargparse",
         "astropy",
         "lalsuite>=7.11",  # use >=7.3 if you run into errors with IMRPhenomXPHM generation
-        "sklearn",
         "pesummary",
         "tensorboard==2.10.1",
         "pyopenssl==21.0.0",
