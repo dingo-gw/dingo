@@ -1,10 +1,16 @@
-This file lists all the authors in first-name alphabetical order who have
-contributed (either by code contribution or indirectly). If your name is not
-listed here, please contact anyone on this list and raise your concern.
+This file lists all authors who contributed to the code (alphabetical in  each section).
+Please contact anyone on this list if you believe you should be included and your name is
+not listed.
 
-Jonas Wildberger
+## Lead developers
+
 Maximilian Dax
-Michael Puerrer
-Nihar Gupte
 Stephen Green
 
+## Major contributors
+
+Nihar Gupte
+Michael Puerrer
+Jonas Wildberger
+
+## Contributors

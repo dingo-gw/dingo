@@ -12,7 +12,7 @@
 #
 import os
 import sys
-import sphinx_rtd_theme
+from importlib.metadata import version as _version
 sys.path.insert(0, os.path.abspath('../../dingo'))
 
 
@@ -23,7 +23,6 @@ copyright = '2022-2023, Stephen Green'
 author = 'Stephen Green'
 
 # The full version, including alpha/beta/rc tags
-from importlib.metadata import version as _version
 version = _version('dingo-gw')
 
 

@@ -8,9 +8,6 @@ name = "dingo-gw"
 authors = [ 
     {name = "Maximilian Dax", email = "maximilian.dax@tuebingen.mpg.de"},
     {name = "Stephen Green", email = "Stephen.Green2@nottingham.ac.uk"},
-    {name = "Nihar Gupte", email = "nihar.gupte@aei.mpg.de"},
-    {name = "Michael Puerrer", email = "mpuerrer@uri.edu"},
-    {name = "Jonas Wildberger", email = "wildberger.jonas@tuebingen.mpg.de"},
 ]
 description = "Gravitational wave parameter inference using neural posterior estimation."
 license = {text = "MIT"}
