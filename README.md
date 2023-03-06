@@ -67,7 +67,8 @@ Dingo is based on the following series of papers:
 5. https://arxiv.org/abs/2210.05686: Importance sampling
 6. https://arxiv.org/abs/2211.08801: Noise forecasting
 
-If you use Dingo in your work, we ask that you cite at least https://arxiv.org/abs/2106.12594.
+If you use Dingo in your work, we ask that you please cite at least
+https://arxiv.org/abs/2106.12594.
 
 Contributors to the code are listed in [AUTHORS.md](AUTHORS.md). We thank Vivien Raymond
 and Rory Smith for acting as LIGO-Virgo-KAGRA (LVK) code reviewers. Dingo makes use of
