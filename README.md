@@ -1,24 +1,76 @@
-
-> **Notice:** This code is under development, and the authors plan to use it for several short-author papers before making it widely available. Feel free to peruse, use, or experiment with this code, but please do not distribute beyond the LSC. If you wish to publish work based on this code or the unpublished ideas therein, please contact [Stephen Green](mailto:stephen.green@aei.mpg.de) and [Maximilian Dax](mailto:maximilian.dax@tuebingen.mpg.de) beforehand. Comments are welcome!
-
 # Dingo: Deep inference for gravitational-wave observations
 
-This code is based on the inference framework described in https://arxiv.org/abs/2106.12594.
+**Dingo** is a Python program for analyzing gravitational wave data using neural posterior
+estimation. It dramatically speeds up inference of astrophysical source parameters from
+data measured at gravitational-wave observatories. Dingo aims to enable the routine
+use of the most advanced theoretical models in analyses, to make rapid predictions for
+multi-messenger counterparts, and to do so in the context of sensitive detectors with high
+event rates.
 
-# Developing dingo
 
-To install dingo, along with the tools for development and testing, do the following:
+The basic approach of Dingo is to train a neural network to represent the Bayesian
+posterior conditioned on data. This enables *amortized inference*: when new data are
+observed, they can be plugged in and results obtained in a small amount of time. Tasks
+handled by Dingo include
 
-Create and activate a virtual environment. By convention, the environment is called `venv` and is located in the `dingo-devel` directory. Some unit tests depend on this convention.
+* building training datasets;
+* training normalizing flows to estimate the posterior density;
+* performing inference on real or simulated data; and
+* verifying and correcting model results using importance sampling.
 
-```bash
-$ python3 -m venv venv
-$ source venv/bin/activate
+## Installation
+
+### Pip
+
+The easiest way to install Dingo is using pip. Within a suitable virtual environment, run
+the command
 ```
+$ pip install dingo-gw
+```
+This will install Dingo as well as all of its requirements, listed in [pyproject.toml].
 
-In this virtual environment, install dingo.
+### Development install
 
-```bash
-$ pip install wheel
+If you would like to make changes to Dingo, or to contribute to its development, you
+should install Dingo from source. To do so, first clone this repository:
+```
+$ git clone git@github.com:dingo-gw/dingo.git
+```
+Next create a virtual environment for Dingo, e.g.,
+```
+$ python3 -m venv dingo-venv
+$ source dingo-venv/bin/activate
+```
+This creates and activates a [venv](https://docs.python.org/3/library/venv.html) for Dingo
+called `dingo-venv`. In this virtual environment, install Dingo:
+```
+$ cd dingo
 $ pip install -e ."[dev]"
 ```
+This command installs an editable version of Dingo, meaning that any changes to the Dingo
+source are reflected immediately in the installation. The inclusion of `dev` installs
+extra packages needed for development (code formatting, compiling documentation, etc.)
+
+## Usage
+
+For instructions on using Dingo, please refer to the [documentation]().
+
+## References
+
+Dingo is based on the following series of papers:
+
+1. https://arxiv.org/abs/2002.07656: 5D toy model
+2. https://arxiv.org/abs/2008.03312: 15D binary black hole inference
+3. https://arxiv.org/abs/2106.12594: Amortized inference and group-equivariant neural posterior estimation
+4. https://arxiv.org/abs/2111.13139: Group-equivariant neural posterior estimation
+5. https://arxiv.org/abs/2210.05686: Importance sampling
+6. https://arxiv.org/abs/2211.08801: Noise forecasting
+
+If you use Dingo in your work, we ask that you cite at least https://arxiv.org/abs/2106.12594.
+
+Contributors to the code are listed in [AUTHORS.md]. Dingo makes use of many
+LIGO-Virgo-KAGRA software tools, including [Bilby](https://lscsoft.docs.ligo.org/bilby/),
+[bilby_pipe](https://lscsoft.docs.ligo.org/bilby_pipe/master/index.html), and
+[LALSimulation](https://lscsoft.docs.ligo.org/lalsuite/lalsimulation/), as well as third
+party tools such as [PyTorch](https://pytorch.org) and
+[nflows](https://github.com/bayesiains/nflows).

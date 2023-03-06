@@ -2,17 +2,17 @@ This file lists all authors who contributed to the code (alphabetical in  each s
 Please contact anyone on this list if you believe you should be included and your name is
 not listed.
 
-## Lead developers
+### Lead developers
 
-Maximilian Dax
-Stephen Green
+* Maximilian Dax
+* Stephen Green
 
-## Major contributors
+### Major contributors
 
-Nihar Gupte
-Michael Puerrer
-Jonas Wildberger
+* Nihar Gupte
+* Michael Puerrer
+* Jonas Wildberger
 
-## Contributors
+### Contributors
 
-Jonathan Gair
+* Jonathan Gair
