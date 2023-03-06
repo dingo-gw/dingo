@@ -3,7 +3,7 @@ import h5py
 import numpy as np
 import pandas as pd
 
-from dingo.core.utils.misc_utils import get_version
+from dingo.core.utils.misc import get_version
 
 
 def recursive_hdf5_save(group, d):
