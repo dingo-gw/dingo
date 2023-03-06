@@ -69,8 +69,9 @@ Dingo is based on the following series of papers:
 
 If you use Dingo in your work, we ask that you cite at least https://arxiv.org/abs/2106.12594.
 
-Contributors to the code are listed in [AUTHORS.md](AUTHORS.md). Dingo makes use of many
-LIGO-Virgo-KAGRA software tools, including [Bilby](https://lscsoft.docs.ligo.org/bilby/),
+Contributors to the code are listed in [AUTHORS.md](AUTHORS.md). We thank Vivien Raymond
+and Rory Smith for acting as LIGO-Virgo-KAGRA (LVK) code reviewers. Dingo makes use of
+many LVK software tools, including [Bilby](https://lscsoft.docs.ligo.org/bilby/),
 [bilby_pipe](https://lscsoft.docs.ligo.org/bilby_pipe/master/index.html), and
 [LALSimulation](https://lscsoft.docs.ligo.org/lalsuite/lalsimulation/), as well as third
 party tools such as [PyTorch](https://pytorch.org) and
