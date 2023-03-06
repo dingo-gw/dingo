@@ -3,9 +3,9 @@
 **Dingo** is a Python program for analyzing gravitational wave data using neural posterior
 estimation. It dramatically speeds up inference of astrophysical source parameters from
 data measured at gravitational-wave observatories. Dingo aims to enable the routine
-use of the most advanced theoretical models in analyses, to make rapid predictions for
-multi-messenger counterparts, and to do so in the context of sensitive detectors with high
-event rates.
+use of the most advanced theoretical models in analysing data, to make rapid predictions
+for multi-messenger counterparts, and to do so in the context of sensitive detectors with
+high event rates.
 
 
 The basic approach of Dingo is to train a neural network to represent the Bayesian
@@ -27,7 +27,8 @@ the command
 ```
 $ pip install dingo-gw
 ```
-This will install Dingo as well as all of its requirements, listed in [pyproject.toml].
+This will install Dingo as well as all of its requirements, listed in
+[pyproject.toml](pyproject.toml).
 
 ### Development install
 
@@ -68,7 +69,7 @@ Dingo is based on the following series of papers:
 
 If you use Dingo in your work, we ask that you cite at least https://arxiv.org/abs/2106.12594.
 
-Contributors to the code are listed in [AUTHORS.md]. Dingo makes use of many
+Contributors to the code are listed in [AUTHORS.md](AUTHORS.md). Dingo makes use of many
 LIGO-Virgo-KAGRA software tools, including [Bilby](https://lscsoft.docs.ligo.org/bilby/),
 [bilby_pipe](https://lscsoft.docs.ligo.org/bilby_pipe/master/index.html), and
 [LALSimulation](https://lscsoft.docs.ligo.org/lalsuite/lalsimulation/), as well as third
