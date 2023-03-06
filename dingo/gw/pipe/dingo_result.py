@@ -15,7 +15,6 @@ def main():
     args = parser.parse_args()
 
     if args.merge:
-
         print(f"Merging {len(args.result)} parts into complete Result.")
         sub_results = []
         for file_name in args.result:
@@ -24,5 +23,5 @@ def main():
         result = Result.merge(sub_results)
         result.print_summary()
 
-        output_file = Path(args.outdir) / (args.label.removesuffix("_merge") + ".hdf5")
+        output_file = Path(args.outdir) / (args.label.replace("_merge", "") + ".hdf5")
         result.to_file(output_file)

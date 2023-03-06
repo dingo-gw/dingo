@@ -7,8 +7,8 @@ class PlotNode(BilbyPlotNode):
     def __init__(self, inputs, merged_node, dag):
         super(BilbyPlotNode, self).__init__(inputs)
         self.dag = dag
-        self.job_name = merged_node.job_name.removesuffix("_merge") + "_plot"
-        self.label = merged_node.job_name.removesuffix("_merge") + "_plot"
+        self.job_name = merged_node.job_name.replace("_merge", "") + "_plot"
+        self.label = merged_node.job_name.replace("_merge", "") + "_plot"
         self.request_cpus = 1
         self.setup_arguments(
             add_ini=False, add_unknown_args=False, add_command_line_args=False
