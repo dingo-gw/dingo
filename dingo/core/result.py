@@ -15,7 +15,7 @@ from bilby.core.prior import Constraint, DeltaFunction
 
 from dingo.core.dataset import DingoDataset
 from dingo.core.density import train_unconditional_density_estimator
-from dingo.core.utils import recursive_check_dicts_are_equal
+from dingo.core.utils.misc import recursive_check_dicts_are_equal
 
 DATA_KEYS = [
     "samples",
