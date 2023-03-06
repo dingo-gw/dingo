@@ -556,7 +556,9 @@ class Result(DingoDataset):
             samples_parts.append(part_dict.pop("samples"))
 
             # Make sure we are not merging incompatible results. We deleted the
-            # log_evidence since this can differ among the sub-results.
+            # log_evidence since this can differ among the sub-results. Note that this
+            # will also raise an error if files were created with different versions of
+            # dingo.
             if not recursive_check_dicts_are_equal(part_dict, dataset_dict):
                 raise ValueError("Results to be merged must have same metadata.")
 

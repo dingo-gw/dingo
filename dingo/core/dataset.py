@@ -5,6 +5,7 @@ import pandas as pd
 
 from dingo.core.utils.misc_utils import get_version
 
+
 def recursive_hdf5_save(group, d):
     for k, v in d.items():
         if v is None:
@@ -42,7 +43,7 @@ def recursive_hdf5_load(group, keys=None):
                         d[k] = d[k].decode()
                 # If an array is 1D and of type object, assume it originated as a list
                 # of strings.
-                elif d[k].ndim == 1 and d[k].dtype == 'O':
+                elif d[k].ndim == 1 and d[k].dtype == "O":
                     d[k] = [x.decode() for x in d[k]]
     return d
 
