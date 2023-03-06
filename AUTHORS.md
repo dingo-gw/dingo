@@ -14,3 +14,5 @@ Michael Puerrer
 Jonas Wildberger
 
 ## Contributors
+
+Jonathan Gair
