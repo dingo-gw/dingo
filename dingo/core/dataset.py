@@ -3,6 +3,8 @@ import h5py
 import numpy as np
 import pandas as pd
 
+from dingo.core.utils.misc_utils import get_version
+
 
 def recursive_hdf5_save(group, d):
     for k, v in d.items():
@@ -41,7 +43,7 @@ def recursive_hdf5_load(group, keys=None):
                         d[k] = d[k].decode()
                 # If an array is 1D and of type object, assume it originated as a list
                 # of strings.
-                elif d[k].ndim == 1 and d[k].dtype == 'O':
+                elif d[k].ndim == 1 and d[k].dtype == "O":
                     d[k] = [x.decode() for x in d[k]]
     return d
 
@@ -76,11 +78,14 @@ class DingoDataset:
             additional variables beyond those that are saved. Typically, this list
             would be provided by any subclass.
         """
+        self._data_keys = list(data_keys)  # Make a copy before modifying.
+        self._data_keys.append("version")
+
         # Ensure all potential variables have None values to begin
-        for key in data_keys:
+        for key in self._data_keys:
             vars(self)[key] = None
-        self._data_keys = data_keys
         self.settings = None
+        self.version = None
 
         # If data provided, load it
         if file_name is not None:
@@ -127,3 +132,5 @@ class DingoDataset:
         for k, v in dictionary.items():
             if k in self._data_keys or k == "settings":
                 vars(self)[k] = v
+        if "version" not in dictionary:
+            self.version = f"dingo={get_version()}"

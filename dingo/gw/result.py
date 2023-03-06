@@ -1,3 +1,4 @@
+import copy
 import time
 from typing import Optional
 
@@ -11,10 +12,14 @@ from dingo.core.density import (
 )
 from dingo.core.multiprocessing import apply_func_with_multiprocessing
 from dingo.core.result import Result as CoreResult
+from dingo.gw.conversion import change_spin_conversion_phase
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_extrinsic_prior_dict, get_window_factor
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 from dingo.gw.prior import build_prior_with_defaults
+
+
+RANDOM_STATE = 150914
 
 
 class Result(CoreResult):
@@ -94,6 +99,30 @@ class Result(CoreResult):
     def calibration_marginalization_kwargs(self, value):
         self.importance_sampling_metadata["calibration_marginalization"] = value
 
+    @property
+    def f_ref(self):
+        return self.base_metadata["dataset_settings"]["waveform_generator"]["f_ref"]
+
+    @property
+    def approximant(self):
+        return self.base_metadata["dataset_settings"]["waveform_generator"][
+            "approximant"
+        ]
+
+    @property
+    def interferometers(self):
+        return list(self.context["waveform"].keys())
+
+    @property
+    def t_ref(self):
+        # The detector reference positions during likelihood evaluation should be
+        # based on the event time, since any post-correction to account for the training
+        # reference time has already been applied to the samples.
+        if self.event_metadata is not None and "time_event" in self.event_metadata:
+            return self.event_metadata["time_event"]
+        else:
+            return self.base_metadata["train_settings"]["data"]["ref_time"]
+
     def _build_domain(self):
         """
         Construct the domain object based on model metadata. Includes the window factor
@@ -109,7 +138,7 @@ class Result(CoreResult):
 
         self.domain.window_factor = get_window_factor(data_settings["window"])
 
-    def _rebuild_domain(self):
+    def _rebuild_domain(self, verbose=False):
         """Rebuild the domain based on settings updated for importance sampling.
 
         These settings should be saved in self.importance_sampling_metadata["updates"],
@@ -137,14 +166,15 @@ class Result(CoreResult):
             (k, updates[k]) for k in set(domain_dict).intersection(updates)
         )
 
-        print("Rebuilding domain as follows:")
-        print(
-            yaml.dump(
-                domain_dict,
-                default_flow_style=False,
-                sort_keys=False,
+        if verbose:
+            print("Rebuilding domain as follows:")
+            print(
+                yaml.dump(
+                    domain_dict,
+                    default_flow_style=False,
+                    sort_keys=False,
+                )
             )
-        )
         self.domain = build_domain(domain_dict)
 
     def _build_prior(self):
@@ -278,15 +308,6 @@ class Result(CoreResult):
         self.phase_marginalization_kwargs = phase_marginalization_kwargs
         self.calibration_marginalization_kwargs = calibration_marginalization_kwargs
 
-        # The detector reference positions during likelihood evaluation should be based
-        # on the event time, since any post-correction to account for the training
-        # reference time has already been applied to the samples.
-
-        if self.event_metadata is not None and "time_event" in self.event_metadata:
-            t_ref = self.event_metadata["time_event"]
-        else:
-            t_ref = self.base_metadata["train_settings"]["data"]["ref_time"]
-
         # FIXME: This is a quick hack because I didn't know how to choose the wfg
         #  domain in the case of a changing domain during importance sampling. It could
         #  only pose problems for EOB, where sometimes one wants to start integrating
@@ -301,7 +322,7 @@ class Result(CoreResult):
             wfg_domain=wfg_domain,
             data_domain=self.domain,
             event_data=self.context,
-            t_ref=t_ref,
+            t_ref=self.t_ref,
             time_marginalization_kwargs=time_marginalization_kwargs,
             phase_marginalization_kwargs=phase_marginalization_kwargs,
             calibration_marginalization_kwargs=calibration_marginalization_kwargs,
@@ -484,3 +505,64 @@ class Result(CoreResult):
             del self.samples["phase"]
 
         print(f"Done. This took {time.time() - t0:.2f} s.")
+
+    @property
+    def pesummary_samples(self):
+        """Samples in a form suitable for PESummary.
+
+        These samples are adjusted to undo certain conventions used internally by
+        Dingo:
+            * Times are corrected by the reference time t_ref.
+            * Samples are unweighted, using a fixed random seed for sampling importance
+            resampling.
+            * The spin angles phi_jl and theta_jn are transformed to account for a
+            difference in phase definition.
+            * Some columns are dropped: delta_log_prob_target, log_prob
+        """
+        # Unweighted samples.
+        samples = self.sampling_importance_resampling(random_state=RANDOM_STATE)
+
+        # Remove unwanted columns.
+        samples.drop(
+            ["delta_log_prob_target", "log_prob"], axis=1, errors="ignore", inplace=True
+        )
+        for col in samples.columns:
+            if col.endswith("_proxy"):
+                samples.drop(col, axis=1, inplace=True)
+
+        # Shift times. This requires double precision. There *should* be no non-numeric
+        # values in the samples dataframe since resampling will have excluded
+        # zero-weight samples (which could have nan likelihood).
+        samples = samples.astype(float)
+        for col in samples.columns:
+            if "time" in col:
+                samples.loc[:, col] += self.t_ref
+
+        spin_conversion_phase_old = self.base_metadata["dataset_settings"][
+            "waveform_generator"
+        ].get("spin_conversion_phase")
+
+        # Redefine phase parameter to be consistent with Bilby. COMMENTED BECAUSE SLOW
+        # samples = change_spin_conversion_phase(
+        #     samples, self.f_ref, spin_conversion_phase_old, None
+        # )
+
+        return samples
+
+    @property
+    def pesummary_prior(self):
+        """The prior in a form suitable for PESummary.
+
+        By convention, Dingo stores all times *relative* to a reference time, typically
+        the trigger time for an event. The prior returned here corrects for that offset to
+        be consistent with other codes.
+        """
+        prior = copy.deepcopy(self.prior)
+        for p in prior:
+            if "time" in p:
+                try:
+                    prior[p].maximum += self.t_ref
+                    prior[p].minimum += self.t_ref
+                except AttributeError:
+                    continue
+        return prior

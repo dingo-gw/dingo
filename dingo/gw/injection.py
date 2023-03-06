@@ -361,7 +361,7 @@ class Injection(GWSignal):
 
     def random_injection(self):
         """
-        Generate an random injection.
+        Generate a random injection.
 
         This is a signal + noise  consistent with the amplitude spectral density in
         self.asd. If self.asd is an ASDDataset, then it uses a random ASD from this
