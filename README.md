@@ -71,7 +71,7 @@ If you use Dingo in your work, we ask that you please cite at least
 https://arxiv.org/abs/2106.12594.
 
 Contributors to the code are listed in [AUTHORS.md](https://github.com/dingo-gw/dingo/blob/main/AUTHORS.md). We thank Vivien Raymond
-and Rory Smith for acting as LIGO-Virgo-KAGRA (LVK) code reviewers. Dingo makes use of
+and Rory Smith for acting as LIGO-Virgo-KAGRA (LVK) review chairs. Dingo makes use of
 many LVK software tools, including [Bilby](https://lscsoft.docs.ligo.org/bilby/),
 [bilby_pipe](https://lscsoft.docs.ligo.org/bilby_pipe/master/index.html), and
 [LALSimulation](https://lscsoft.docs.ligo.org/lalsuite/lalsimulation/), as well as third
