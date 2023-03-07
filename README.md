@@ -3,10 +3,9 @@
 **Dingo (Deep Inference for Gravitational-wave Observations)** is a Python program for analyzing gravitational wave data using neural posterior
 estimation. It dramatically speeds up inference of astrophysical source parameters from
 data measured at gravitational-wave observatories. Dingo aims to enable the routine
-use of the most advanced theoretical models in analysing data, to make rapid predictions
+use of the most advanced theoretical models in analyzing data, to make rapid predictions
 for multi-messenger counterparts, and to do so in the context of sensitive detectors with
 high event rates.
-
 
 The basic approach of Dingo is to train a neural network to represent the Bayesian
 posterior conditioned on data. This enables *amortized inference*: when new data are
