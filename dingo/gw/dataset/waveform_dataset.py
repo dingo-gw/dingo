@@ -204,7 +204,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
     def __getitem__(self, idx) -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
         """
         Return a nested dictionary containing parameters and waveform polarizations
-        for sample with index `idx`. If defined, a chain of transformations are applied to
+        for sample with index `idx`. If defined, a chain of transformations is applied to
         the waveform data.
         """
         parameters = self.parameters.iloc[idx].to_dict()
