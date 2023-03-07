@@ -1,4 +1,4 @@
-# Design philosophy
+# Code design
 
 ## Reproducibility
 
@@ -41,7 +41,7 @@ We follow the [PyTorch guidelines](https://pytorch.org/tutorials/beginner/basics
 
 Dingo uses several dataset classes, all of which inherit from {py:class}`dingo.core.dataset.DingoDataset`. This provides a common IO (to save/load from HDF5 as well as dictionaries). It also stores the settings dictionary as an attribute.
 
-## Command-line scripts vs libraries
+## Command-line scripts
 
 In general, Dingo is constructed around libraries and classes that are used to carry out various data processing tasks. There are a large number of configuration options, which are often passed as dictionaries, enabling the addition of new settings without breaking old code.
 

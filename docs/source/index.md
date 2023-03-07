@@ -43,7 +43,7 @@ As training a network from scratch can be expensive, we intend to also distribut
    :maxdepth: 1
 
    sbi
-   design_philosophy
+   code_design
    generating_waveforms
    waveform_dataset
    training_transforms
@@ -54,6 +54,12 @@ As training a network from scratch can be expensive, we intend to also distribut
    gnpe
    result
    dingo_pipe
+   
+.. toctree::
+   :caption: API
+   :maxdepth: 4
+   
+   modules
 ```
 
 References
