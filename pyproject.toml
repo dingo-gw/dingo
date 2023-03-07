@@ -9,7 +9,7 @@ authors = [
     {name = "Maximilian Dax", email = "maximilian.dax@tuebingen.mpg.de"},
     {name = "Stephen Green", email = "Stephen.Green2@nottingham.ac.uk"},
 ]
-description = "Gravitational wave parameter inference using neural posterior estimation."
+description = "Deep inference for gravitational-wave observations"
 license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.8"
