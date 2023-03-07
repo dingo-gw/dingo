@@ -24,29 +24,29 @@ handled by Dingo include
 
 The easiest way to install Dingo is using pip. Within a suitable virtual environment, run
 the command
-```
-$ pip install dingo-gw
+```sh
+pip install dingo-gw
 ```
 This will install Dingo as well as all of its requirements, listed in
-[pyproject.toml](pyproject.toml).
+[pyproject.toml](https://github.com/dingo-gw/dingo/blob/main/pyproject.toml).
 
 ### Development install
 
 If you would like to make changes to Dingo, or to contribute to its development, you
 should install Dingo from source. To do so, first clone this repository:
-```
-$ git clone git@github.com:dingo-gw/dingo.git
+```sh
+git clone git@github.com:dingo-gw/dingo.git
 ```
 Next create a virtual environment for Dingo, e.g.,
-```
-$ python3 -m venv dingo-venv
-$ source dingo-venv/bin/activate
+```sh
+python3 -m venv dingo-venv
+source dingo-venv/bin/activate
 ```
 This creates and activates a [venv](https://docs.python.org/3/library/venv.html) for Dingo
 called `dingo-venv`. In this virtual environment, install Dingo:
-```
-$ cd dingo
-$ pip install -e ."[dev]"
+```sh
+cd dingo
+pip install -e ."[dev]"
 ```
 This command installs an editable version of Dingo, meaning that any changes to the Dingo
 source are reflected immediately in the installation. The inclusion of `dev` installs
@@ -70,7 +70,7 @@ Dingo is based on the following series of papers:
 If you use Dingo in your work, we ask that you please cite at least
 https://arxiv.org/abs/2106.12594.
 
-Contributors to the code are listed in [AUTHORS.md](AUTHORS.md). We thank Vivien Raymond
+Contributors to the code are listed in [AUTHORS.md](https://github.com/dingo-gw/dingo/blob/main/AUTHORS.md). We thank Vivien Raymond
 and Rory Smith for acting as LIGO-Virgo-KAGRA (LVK) code reviewers. Dingo makes use of
 many LVK software tools, including [Bilby](https://lscsoft.docs.ligo.org/bilby/),
 [bilby_pipe](https://lscsoft.docs.ligo.org/bilby_pipe/master/index.html), and
