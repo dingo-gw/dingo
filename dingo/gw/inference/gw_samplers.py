@@ -19,12 +19,10 @@ from dingo.gw.transforms import (
     SelectStandardizeRepackageParameters,
     GNPECoalescenceTimes,
     TimeShiftStrain,
-    GNPEChirp,
     GNPEBase,
     PostCorrectGeocentTime,
     CopyToExtrinsicParameters,
     GetDetectorTimes,
-    GNPEPhase,
 )
 
 
@@ -278,21 +276,6 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 )
             )
             transform_pre.append(TimeShiftStrain(ifo_list, self.domain))
-        if gnpe_chirp_settings:
-            transform_pre.append(
-                GNPEChirp(
-                    gnpe_chirp_settings["kernel"],
-                    self.domain,
-                    gnpe_chirp_settings.get("order", 0),
-                )
-            )
-        if gnpe_phase_settings:
-            transform_pre.append(
-                GNPEPhase(
-                    gnpe_phase_settings["kernel"],
-                    gnpe_phase_settings.get("random_pi_jump", False),
-                )
-            )
         transform_pre.append(
             SelectStandardizeRepackageParameters(
                 {"context_parameters": data_settings["context_parameters"]},
