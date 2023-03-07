@@ -19,6 +19,7 @@ def ls():
     if path.suffix == ".pt":
         print("Extracting information about torch model.\n")
         d = torch.load(path, map_location=torch.device("cpu"))
+        print(f"Dingo version: {d.get('version')}\n")
         print(f"Model epoch: {d['epoch']}\n")
         print("Model metadata:")
         print(
@@ -73,10 +74,7 @@ def ls():
                         ),
                     )
                 if result.log_evidence:
-                    print(
-                        "Summary:\n"
-                        + "--------"
-                    )
+                    print("Summary:\n" + "--------")
                     result.print_summary()
 
             else:
