@@ -77,3 +77,9 @@ many LVK software tools, including [Bilby](https://lscsoft.docs.ligo.org/bilby/)
 [LALSimulation](https://lscsoft.docs.ligo.org/lalsuite/lalsimulation/), as well as third
 party tools such as [PyTorch](https://pytorch.org) and
 [nflows](https://github.com/bayesiains/nflows).
+
+## Contact
+
+For questions or comments please contact
+[Maximilian Dax](mailto:maximilian.dax@tuebingen.mpg.de) or
+[Stephen Green](mailto:stephen.green2@nottingham.ac.uk).
