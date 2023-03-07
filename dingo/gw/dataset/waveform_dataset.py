@@ -21,6 +21,8 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
     that implement a __call__() method.
     """
 
+    dataset_type = "waveform_dataset"
+
     def __init__(
         self,
         file_name=None,
