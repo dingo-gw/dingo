@@ -6,6 +6,9 @@ from dingo.core.dataset import DingoDataset
 
 
 class SVDBasis(DingoDataset):
+
+    dataset_type = "svd_basis"
+
     def __init__(
         self,
         file_name=None,
