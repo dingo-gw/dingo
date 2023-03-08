@@ -13,6 +13,8 @@ class ASDDataset(DingoDataset):
     neural density estimator.
     """
 
+    dataset_type = "asd_dataset"
+
     def __init__(
         self,
         file_name=None,
@@ -48,6 +50,7 @@ class ASDDataset(DingoDataset):
             for ifo in list(self.asds.keys()):
                 if ifo not in ifos:
                     self.asds.pop(ifo)
+                    self.gps_times.pop(ifo)
 
         self.domain = build_domain(self.settings["domain_dict"])
         if domain_update is not None:
@@ -65,6 +68,22 @@ class ASDDataset(DingoDataset):
                 raise TypeError(
                     'precision can only be changed to "single" or "double".'
                 )
+
+    @property
+    def length_info(self):
+        """The number of asd samples per detector."""
+        return {key: len(val) for key, val in self.asds.items()}
+
+    @property
+    def gps_info(self):
+        """Min/Max GPS time for each detector."""
+        gps_info_dict = {}
+        for key, val in self.gps_times.items():
+            if isinstance(val, int):
+                 gps_info_dict[key] = val
+            else:
+                gps_info_dict[key] = (min(val), max(val))
+        return gps_info_dict
 
     def update_domain(self, domain_update):
         """
