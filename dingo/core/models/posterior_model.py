@@ -16,6 +16,7 @@ from dingo.core.nn.nsf import (
     create_nsf_with_rb_projection_embedding_net,
     create_nsf_wrapped,
 )
+from dingo.core.utils.misc import get_version
 
 
 class PosteriorModel:
@@ -71,6 +72,8 @@ class PosteriorModel:
         metadata: dict = None
             dict with metadata, used to save dataset_settings and train_settings
         """
+        self.version = f"dingo={get_version()}" # dingo version
+
         self.optimizer_kwargs = None
         self.model_kwargs = None
         self.scheduler_kwargs = None
@@ -160,6 +163,7 @@ class PosteriorModel:
             "model_kwargs": self.model_kwargs,
             "model_state_dict": self.model.state_dict(),
             "epoch": self.epoch,
+            "version": self.version,
         }
 
         if self.metadata is not None:
@@ -204,6 +208,8 @@ class PosteriorModel:
         # device indicated in the saved metadata. External routines run on a cpu
         # machine may have moved the model from 'cuda' to 'cpu'.
         d = torch.load(model_filename, map_location=device)
+
+        self.version = d.get("version")
 
         self.model_kwargs = d["model_kwargs"]
         self.initialize_model()

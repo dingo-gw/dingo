@@ -59,6 +59,9 @@ def main():
     time_marginalization = time_marginalization_kwargs is not None
     phase_marginalization_kwargs = settings.get("phase_marginalization", None)
     phase_marginalization = phase_marginalization_kwargs is not None
+    calibration_marginalization_kwargs = settings.get(
+        "calibration_marginalization", None
+    )
     synthetic_phase_kwargs = settings.get("synthetic_phase", None)
     synthetic_phase = synthetic_phase_kwargs is not None
     # if sum([time_marginalization, phase_marginalization, synthetic_phase]) > 1:
@@ -167,6 +170,7 @@ def main():
         num_processes=settings.get("num_processes", 1),
         time_marginalization_kwargs=time_marginalization_kwargs,
         phase_marginalization_kwargs=phase_marginalization_kwargs,
+        calibration_marginalization_kwargs=calibration_marginalization_kwargs,
     )
     result.print_summary()
     result.to_file(file_name=Path(args.outdir, "dingo_samples_weighted.hdf5"))

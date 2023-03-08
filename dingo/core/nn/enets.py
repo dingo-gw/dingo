@@ -1,6 +1,6 @@
 """Implementation of embedding networks."""
 
-from typing import Tuple, Callable, Union
+from typing import Tuple, Callable, Union, List
 import torch
 import numpy as np
 import torch.nn as nn
@@ -38,16 +38,16 @@ class LinearProjectionRB(nn.Module):
 
     def __init__(
         self,
-        input_dims: Tuple[int, int, int],
+        input_dims: List[int],
         n_rb: int,
         V_rb_list: Union[Tuple, None],
     ):
         """
         Parameters
         ----------
-        input_dims : tuple
+        input_dims : list
             dimensions of input batch, omitting batch dimension
-            input_dims = (num_blocks, num_channels, num_bins)
+            input_dims = [num_blocks, num_channels, num_bins]
         n_rb : int
             number of reduced basis elements used for projection
             the output dimension of the layer is 2 * n_rb * num_blocks
@@ -273,7 +273,7 @@ class ModuleMerger(nn.Module):
 
 
 def create_enet_with_projection_layer_and_dense_resnet(
-    input_dims: Tuple[int, int, int],
+    input_dims: List[int],
     # n_rb: int,
     V_rb_list: Union[Tuple, None],
     output_dim: int,
@@ -315,7 +315,7 @@ def create_enet_with_projection_layer_and_dense_resnet(
                             (batch_size, N)
         output dimension:   (batch_size, output_dim + N)
 
-    :param input_dims:  tuple
+    :param input_dims:  list
         dimensions of input batch, omitting batch dimension
         input_dims = (num_blocks, num_channels, num_bins)
     :param n_rb: int

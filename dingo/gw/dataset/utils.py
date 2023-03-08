@@ -28,10 +28,10 @@ def merge_datasets(dataset_list: List[WaveformDataset]) -> WaveformDataset:
 
     print(f"Merging {len(dataset_list)} datasets into one.")
 
-    # This ensures that all of the keys are copied into the new dataset. The
-    # "extensive" parts of the dataset (parameters, waveforms) will be overwritten by
-    # the combined datasets, whereas the "intensive" parts (e.g., SVD basis, settings)
-    # will take the values in the *first* dataset in the list.
+    # This ensures that all the keys are copied into the new dataset. The "extensive"
+    # parts of the dataset (parameters, waveforms) will be overwritten by the combined
+    # datasets, whereas the "intensive" parts (e.g., SVD basis, settings) will take the
+    # values in the *first* dataset in the list.
     merged_dict = copy.deepcopy(dataset_list[0].to_dictionary())
 
     merged_dict["parameters"] = pd.concat([d.parameters for d in dataset_list])
@@ -39,7 +39,7 @@ def merge_datasets(dataset_list: List[WaveformDataset]) -> WaveformDataset:
     polarizations = list(dataset_list[0].polarizations.keys())
     for pol in polarizations:
         # We pop the data array off of each of the polarizations dicts to save memory.
-        # Otherwise this operation doubles the total amount of memory used. This is
+        # Otherwise, this operation doubles the total amount of memory used. This is
         # destructive to the original datasets.
         merged_dict["polarizations"][pol] = np.vstack(
             [d.polarizations.pop(pol) for d in dataset_list]
