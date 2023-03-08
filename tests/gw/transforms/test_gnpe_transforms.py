@@ -6,7 +6,7 @@ from bilby.core.prior import PriorDict
 from bilby.gw.detector import InterferometerList
 
 from dingo.gw.domains import FrequencyDomain
-from dingo.gw.transforms import GNPECoalescenceTimes, GNPEChirp
+from dingo.gw.transforms import GNPECoalescenceTimes
 
 
 @pytest.fixture
@@ -22,18 +22,6 @@ def gnpe_time_setup():
         }
     )
     return kernel, ifo_list, time_prior
-
-
-@pytest.fixture
-def gnpe_chirp_setup():
-    # Use a constant kernel for the tests.
-    kernel = "1.0"
-    prior = PriorDict(
-        {"chirp_mass": "bilby.core.prior.Uniform(minimum=20, maximum=30)"}
-    )
-    p = {"f_min": 20.0, "f_max": 1024.0, "delta_f": 1.0 / 4.0}
-    domain = FrequencyDomain(**p)
-    return GNPEChirp(kernel, domain), prior
 
 
 def test_gnpe_time_training(gnpe_time_setup):
@@ -122,76 +110,4 @@ def test_gnpe_time_inference(gnpe_time_setup):
     assert torch.equal(
         extrinsic_parameters_new["geocent_time"],
         extrinsic_parameters_new[f"{ifos[0]}_time"],
-    )
-
-
-def test_gnpe_chirp_training(gnpe_chirp_setup):
-    transform, prior = gnpe_chirp_setup
-    sample = {"parameters": prior.sample(), "extrinsic_parameters": {}, "waveform": {}}
-    chirp_mass = sample["parameters"]["chirp_mass"]
-    domain = transform.domain
-    f = domain.sample_frequencies
-    f = f.astype(np.float64)  # Check effect of changing precision.
-    mf = chirp_mass * f
-    mf[0] = 1.0
-    phase = (3 / 128) * (np.pi * lal.GMSUN_SI / lal.C_SI ** 3 * mf) ** (-5 / 3)
-    # Each detector gets the same waveform. The transform also uses the same fiducial
-    # waveform for each detector.
-    sample["waveform"]["H1"] = np.exp(-1j * phase).astype(np.complex64)
-    sample["waveform"]["L1"] = sample["waveform"]["H1"]
-    new_sample = transform(sample)
-    assert isinstance(new_sample["waveform"], dict)
-    for pol, data in new_sample["waveform"].items():
-        assert data.shape == sample["waveform"][pol].shape
-        assert isinstance(data, np.ndarray)
-
-        # Check that the transform removes the initial phase.
-        #
-        # For low frequencies, single-precision floats are not adequate to achieve
-        # phase accuracy. Since above f_min, things seem to work fine, we limit our
-        # test to this regime. Even above f_min, the tolerance must be raised to 1e-4.
-        #
-        # Oddly, the error all occurs in the imaginary part of the data.
-        # TODO: Figure out why. Maybe it's because the imaginary part is close to zero?
-        assert np.allclose(data[domain.min_idx :], 1.0, atol=1e-4)
-
-    assert new_sample["extrinsic_parameters"]["chirp_mass_proxy"] == chirp_mass
-
-
-def test_gnpe_chirp_inference(gnpe_chirp_setup):
-    transform, prior = gnpe_chirp_setup
-    sample = {"parameters": {}, "extrinsic_parameters": {}, "waveform": {}}
-    batch_size = 5
-    num_detectors = 2
-    chirp_mass = prior.sample(batch_size)["chirp_mass"]
-    chirp_mass = torch.tensor(chirp_mass)  # torch.float64
-    sample["extrinsic_parameters"]["chirp_mass"] = chirp_mass.type(torch.float32)
-    domain = transform.domain
-    f = domain.sample_frequencies_torch[domain.min_idx :]
-    mf = torch.outer(chirp_mass, f)
-    phase = (3 / 128) * (np.pi * lal.GMSUN_SI / lal.C_SI ** 3 * mf) ** (-5 / 3)
-    waveform = torch.exp(-1j * phase)
-    waveform = torch.stack((waveform.real, waveform.imag), dim=1)
-    waveform = waveform[:, None, :, :]
-    waveform = waveform.expand(-1, num_detectors, -1, -1)
-    sample["waveform"] = waveform.type(torch.float32)
-
-    new_sample = transform(sample)
-    assert isinstance(new_sample["waveform"], torch.Tensor)
-    assert new_sample["waveform"].dtype == torch.float32
-    assert new_sample["waveform"].shape == (
-        batch_size,
-        num_detectors,
-        2,
-        len(domain) - domain.min_idx,
-    )
-    # Verify real and complex parts of transformed waveform are 1, 0, respectively.
-    assert torch.allclose(new_sample["waveform"][..., 0, :], torch.tensor(1.0))
-    # TODO: Figure out why imaginary part has worse accuracy.
-    assert torch.allclose(
-        new_sample["waveform"][..., 1, :], torch.tensor(0.0), atol=1e-4
-    )
-    assert torch.equal(
-        new_sample["extrinsic_parameters"]["chirp_mass_proxy"],
-        sample["extrinsic_parameters"]["chirp_mass"],
     )
