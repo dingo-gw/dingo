@@ -111,7 +111,7 @@ def ls():
             print("\nASD dataset\n" + "================\n")
 
             print(f"Dataset size: {asd_dataset.length_info}\n")
-            print(f"GPS times: {asd_dataset.gps_info}")
+            print(f"GPS times (min/max): {asd_dataset.gps_info}")
 
             print(
                 "\nSettings\n"

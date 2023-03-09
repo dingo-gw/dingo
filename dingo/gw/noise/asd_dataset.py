@@ -1,4 +1,6 @@
 import copy
+from typing import Iterable
+
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import *
 from dingo.gw.dataset import DingoDataset
@@ -79,8 +81,8 @@ class ASDDataset(DingoDataset):
         """Min/Max GPS time for each detector."""
         gps_info_dict = {}
         for key, val in self.gps_times.items():
-            if isinstance(val, int):
-                 gps_info_dict[key] = val
+            if not isinstance(val, Iterable):
+                gps_info_dict[key] = val
             else:
                 gps_info_dict[key] = (min(val), max(val))
         return gps_info_dict
