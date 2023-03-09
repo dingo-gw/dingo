@@ -9,6 +9,7 @@ from dingo.core.dataset import DingoDataset
 from dingo.gw.SVD import SVDBasis
 from dingo.core.result import Result
 from dingo.gw.dataset import WaveformDataset
+from dingo.gw.noise.asd_dataset import ASDDataset
 
 
 def ls():
@@ -104,6 +105,23 @@ def ls():
                 print("\nSVD validation summary:\n" + "---------------------------")
                 svd.print_validation_summary()
 
+        elif dataset_type == "asd_dataset":
+            asd_dataset = ASDDataset(file_name=args.file_name)
+            print(f"Dingo version: {asd_dataset.version}")
+            print("\nASD dataset\n" + "================\n")
+
+            print(f"Dataset size: {asd_dataset.length_info}\n")
+            print(f"GPS times (min/max): {asd_dataset.gps_info}")
+
+            print(
+                "\nSettings\n"
+                + "--------\n"
+                + yaml.dump(
+                    asd_dataset.settings,
+                    default_flow_style=False,
+                    sort_keys=False,
+                )
+            )
         else:
             # Legacy (before dataset_type identifier).
             try:
