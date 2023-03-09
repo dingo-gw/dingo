@@ -144,11 +144,11 @@ class GWSampler(GWSamplerMixin, Sampler):
     transform_pre :
         * Whitens strain.
         * Repackages strain data and the inverse ASDs (suitably scaled) into a torch
-        tensor.
+          tensor.
 
     transform_post :
         * Extract the desired inference parameters from the network output (
-        array-like), de-standardize them, and repackage as a dict.
+          array-like), de-standardize them, and repackage as a dict.
 
     Also mixes in GW functionality for building the domain and correcting the reference
     time.

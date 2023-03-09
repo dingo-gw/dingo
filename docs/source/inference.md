@@ -46,7 +46,7 @@ The `GWSampler.metadata` attribute contains all settings that went into producin
 Injections (i.e., simulated data) are produced using the `Injection` class. It includes options for fixed or random parameters (drawn from a prior), and it returns injections in a format that can be directly set as `GWSampler.context`.
 
 ```{eval-rst}
-.. autoclass:: dingo.gw.inference.injection.Injection
+.. autoclass:: dingo.gw.injection.Injection
     :members:
     :show-inheritance:
 ```

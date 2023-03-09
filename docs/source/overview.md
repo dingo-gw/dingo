@@ -27,7 +27,7 @@ Here we provide a list of key user commands along with brief descriptions. The c
 |`dingo_generate_dataset`| Generate a training dataset of waveform polarizations. |
 |`dingo_generate_ASD_dataset`| Generate a training dataset of detector noise ASDs. |
 |`dingo_train`| Build and train a neural network. |
-|`dingo_pipe`| Perform inference on data (real or simulated), starting from an `INI` file. |
+|`dingo_pipe`| Perform inference on data (real or simulated), starting from an INI file. |
 ```
 
 Building a training dataset and training a model can be very expensive tasks. We therefore expect these to be frequently run on clusters, and for this reason provided [HTCondor](https://htcondor.readthedocs.io/en/latest/) versions of these commands (note that `dingo_pipe` is already HTCondor-compatible):

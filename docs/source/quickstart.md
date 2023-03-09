@@ -1,10 +1,10 @@
 # Quickstart tutorial
 
-To learn to use Dingo, we recommend starting with the examples provided in the `/examples`
+To learn to use Dingo, we recommend starting with the examples provided in the [examples/](https://github.com/dingo-gw/dingo/tree/main/examples)
 folder. The YAML files contained in this directory (and subdirectories) contain
 configuration settings for the various Dingo tasks (constructing training data, training networks, and performing inference). These files should be provided as input to the
 command-line scripts, which then run Dingo and save output files. These output files
-contain as metadata the settings in the `.yaml` files, and they may usually be inspected
+contain as metadata the settings in the YAML files, and they may usually be inspected
 by running `dingo_ls`.
 
 ```{mermaid}
@@ -34,14 +34,10 @@ flowchart TB
     train_settings_main[train_settings_main.yaml]
     generate_asd--->train_main
     train_settings_main-->train_main
-    train_init-->inference(["dingo_analyze_event
-    #nbsp; #nbsp; --model model_main/model_stage_1.pt
-    #nbsp; #nbsp; --model_init model_init/model_stage_1.pt
-    #nbsp; #nbsp; --num_samples 50000
-    #nbsp; #nbsp; --gps_time_event 1126259462.4"])
+    train_init-->inference(["dingo_pipe GW150914.ini"])
     style inference text-align:left
     train_main-->inference
-    inference-->samples[dingo_samples-1126259462.4.hdf5]
+    inference-->samples[GW150914_data0_1126259462-4_sampling.hdf5]
 ```
 
 
@@ -76,7 +72,7 @@ training sample. To generate this dataset based on noise observed during a run, 
 dingo_generate_ASD_dataset --data_dir data_dir --settings_file asd_dataset_settings.yaml
 ```
 
-This will download data from the GWOSC website and create a `/tmp` directory, in which the
+This will download data from [GWOSC](https://www.gw-openscience.org) and create a `/tmp` directory, in which the
 estimated PSDs are stored. Subsequently, these are collected together into a final `.hdf5`
 ASD dataset.
 If no `settings_file` is passed, the script will attempt to use the default
@@ -111,7 +107,7 @@ rather to get a feel for the Dingo pipeline. The production settings contain tes
 settings. Note that depending on the waveform model and event, these may need to occasionally
 be tuned. `train_settings_init_toy.yaml` and `train_settings_init_production.yaml` train
 flows to estimate the time of coalescence in the individual detectors. These two
-networks are needed to use [**GNPE**](gnpe.md). This is is the preferred and
+networks are needed to use [GNPE](gnpe.md). This is the preferred and
 most tested way of using Dingo. 
 
 Alternatively, the `train_settings_no_gnpe_toy.yaml` and
@@ -123,7 +119,7 @@ new ideas or doing a less expensive training.
 ## Inference
 
 Once a Dingo model is trained, inference for real events can be performed using
-[**dingo_pipe**](dingo_pipe.md). There are 3 main inference steps, downloading the data, 
+[dingo_pipe](dingo_pipe.md). There are 3 main inference steps, downloading the data, 
 running Dingo on this data and finally running importance sampling. The basic
 idea is to create a .ini file which contains the filepaths of the Dingo networks
 trained above and the segment of data to analyze. An example .ini file can be
@@ -161,7 +157,7 @@ event. -->
 
 A simple use case could be creating an injection consistent with what the
 network was trained on, and then running Dingo on it. First one can instantiate
-the :class:`dingo.gw.injection.Injection` using the metadata from the
+the {py:class}`dingo.gw.injection.Injection` using the metadata from the
 PosteriorModel (the trained network). An ASD dataset also needs to be specified,
 one can take the fiducial asd dataset the network was trained on. 
 
