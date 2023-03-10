@@ -39,6 +39,12 @@ As training a network from scratch can be expensive, we intend to also distribut
    quickstart
 
 .. toctree::
+   :caption: Examples
+   :maxdepth: 1
+   
+   example_injection
+
+.. toctree::
    :caption: Advanced guide
    :maxdepth: 1
 
