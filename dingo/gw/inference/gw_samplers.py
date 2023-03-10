@@ -42,7 +42,6 @@ class GWSamplerMixin(object):
         """
         super().__init__(**kwargs)
         self.t_ref = self.base_model_metadata["train_settings"]["data"]["ref_time"]
-        self._pesummary_package = "gw"
         self._result_class = Result
 
     def _build_domain(self):

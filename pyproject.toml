@@ -37,7 +37,6 @@ dependencies = [
     "configargparse",
     "astropy",
     "lalsuite>=7.11",
-    "pesummary",
     "tensorboard",
     "pyopenssl",
     "cryptography",

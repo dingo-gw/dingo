@@ -94,7 +94,6 @@ class Sampler(object):
         # Must be after _build_domain() since transforms can depend on domain.
         self._initialize_transforms()
 
-        self._pesummary_package = "core"
         self._result_class = Result
 
     @property
