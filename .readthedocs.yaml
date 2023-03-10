@@ -16,7 +16,7 @@ build:
     # golang: "1.19"
   jobs:
     post_install:
-      - pip install --force-reinstall docutils<0.17
+      - pip install --force-reinstall "docutils<0.17"
 
 # Build documentation in the docs/ directory with Sphinx
 sphinx:
