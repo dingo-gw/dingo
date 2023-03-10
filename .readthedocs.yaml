@@ -17,6 +17,8 @@ build:
   jobs:
     post_install:
       - pip install --force-reinstall "docutils<0.17"
+    pre_build:
+      - sphinx-apidoc -o docs/source dingo
 
 # Build documentation in the docs/ directory with Sphinx
 sphinx:
