@@ -53,7 +53,7 @@ extra packages needed for development (code formatting, compiling documentation,
 
 ## Usage
 
-For instructions on using Dingo, please refer to the [documentation]().
+For instructions on using Dingo, please refer to the [documentation](https://dingo-gw.readthedocs.io/en/latest/).
 
 ## References
 
