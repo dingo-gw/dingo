@@ -99,25 +99,28 @@ class WhitenFixedASD(object):
 
         self.inverse = inverse
 
-    def __call__(self, sample):
+    def __call__(self, input_sample):
         """
         Parameters
         ----------
-        sample : dict
-            Dictionary of numpy arrays, e.g., with keys corresponding to polarizations.
-            Method whitens each array with the same ASD.
+        input_sample : dict
+            input_sample["waveform"] is a dictionary of numpy arrays, e.g., with keys
+            corresponding to polarizations. Method whitens each array with the same ASD.
 
         Returns
         -------
-        dict of the same form as sample, but with whitened / un-whitened data.
+        dict of the same form as input_sample, but with input_sample["waveform"] with
+        whitened / un-whitened data.
         """
-        result = {}
-        for k, v in sample.items():
+        sample = input_sample.copy()
+        waveform = {}
+        for k, v in sample["waveform"].items():
             if self.inverse:
-                result[k] = v * self.asd_array
+                waveform[k] = v * self.asd_array
             else:
-                result[k] = v / self.asd_array
-        return result
+                waveform[k] = v / self.asd_array
+        sample["waveform"] = waveform
+        return sample
 
 
 class WhitenAndScaleStrain(object):

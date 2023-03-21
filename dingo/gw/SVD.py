@@ -230,19 +230,22 @@ class ApplySVD(object):
         self.svd_basis = svd_basis
         self.inverse = inverse
 
-    def __call__(self, waveform: dict):
+    def __call__(self, input_sample: dict):
         """
         Parameters
         ----------
-        waveform : dict
-            Values should be arrays containing waveforms to be transformed.
+        input_sample : dict
+            Values of sample["waveform"] should be arrays containing waveforms to be
+            transformed.
 
         Returns
         -------
         dict of the same form as the input, but with transformed waveforms.
         """
+        sample = input_sample.copy()
         if not self.inverse:
             func = self.svd_basis.compress
         else:
             func = self.svd_basis.decompress
-        return {k: func(v) for k, v in waveform.items()}
+        sample["waveform"] = {k: func(v) for k, v in sample["waveform"].items()}
+        return sample

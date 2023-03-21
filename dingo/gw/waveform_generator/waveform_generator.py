@@ -199,7 +199,8 @@ class WaveformGenerator:
                     raise
 
         if self.transform is not None:
-            return self.transform(wf_dict)
+            data_sample = {"waveform": wf_dict, "parameters": parameters}
+            return self.transform(data_sample)["waveform"]
         else:
             return wf_dict
 
