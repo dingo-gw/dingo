@@ -305,7 +305,7 @@ class MultibandedFrequencyDomain(Domain):
 
     @property
     def min_idx(self):
-        raise NotImplementedError()
+        return 0
 
     @property
     def max_idx(self):
