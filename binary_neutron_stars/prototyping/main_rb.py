@@ -40,7 +40,7 @@ if __name__ == "__main__":
 
     # generate polarizations
     parameters_het, polarizations_het = generate_parameters_and_polarizations(
-        waveform_generator_het, prior, 100, num_processes
+        waveform_generator_het, prior, 500, num_processes
     )
 
     bands = get_decimation_bands_adaptive(
@@ -50,6 +50,8 @@ if __name__ == "__main__":
         delta_f_max=3.0,
     )
     mfd = MultibandedFrequencyDomain(bands, ufd)
+    print(len(mfd))
+    print(bands)
 
     transforms = Compose([ApplyHeterodyning(ufd), ApplyDecimation(mfd)])
     waveform_generator_het_dec = WaveformGenerator(
@@ -91,8 +93,23 @@ if __name__ == "__main__":
     print(polarizations_het_dec["h_plus"].shape)
     print(pols_het_dec_svd["h_plus"].shape)
 
-    print(len(mfd))
-    print(bands)
+    # test tidal deformability
+    parameters = prior.sample()
+    pols_0 = waveform_generator_het_dec.generate_hplus_hcross(
+        {k: v for k, v in parameters.items() if k not in ["lambda_1", "lambda_2"]}
+    )
+    pols_1 = waveform_generator_het_dec.generate_hplus_hcross(parameters)
+    for pol_name in pols_0.keys():
+        plt.title(pol_name)
+        plt.plot(pols_0[pol_name], label="lambda=0")
+        plt.plot(
+            pols_1[pol_name],
+            label=f"lambda_1 = {parameters['lambda_1']:.1f}, lambda_2 ="
+            f" {parameters['lambda_2']:.1f}",
+        )
+        plt.legend()
+        plt.show()
+
     hp_het = polarizations_het["h_plus"]
     fig = plt.figure()
     fig.set_size_inches((8, 8))
