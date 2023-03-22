@@ -13,6 +13,10 @@ from bilby.gw.conversion import (
     convert_to_lal_binary_black_hole_parameters,
     bilby_to_lalsimulation_spins,
 )
+from bilby.gw.utils import (
+    lalsim_SimInspiralWaveformParamsInsertTidalLambda1,
+    lalsim_SimInspiralWaveformParamsInsertTidalLambda2,
+)
 
 import dingo.gw.waveform_generator.wfg_utils as wfg_utils
 import dingo.gw.waveform_generator.frame_utils as frame_utils
@@ -313,6 +317,16 @@ class WaveformGenerator:
         r = p["luminosity_distance"]
         phase = p["phase"]
         ecc_params = (0.0, 0.0, 0.0)  # longAscNodes, eccentricity, meanPerAno
+        # for BNS/NSBH: insert tidal deformability
+        if "lambda_1" in p or "lambda_2" in p:
+            if lal_params is None:
+                lal_params = lal.CreateDict()
+            lalsim_SimInspiralWaveformParamsInsertTidalLambda1(
+                lal_params, p.get("lambda_1", 0)
+            )
+            lalsim_SimInspiralWaveformParamsInsertTidalLambda2(
+                lal_params, p.get("lambda_2", 0)
+            )
 
         # Get domain parameters
         f_ref = p["f_ref"]
