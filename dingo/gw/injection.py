@@ -116,6 +116,7 @@ class GWSignal(object):
                     self.data_domain,
                     self.calibration_envelope,
                     self.num_calibration_curves,
+                    self.num_calibration_nodes,
                 )
             )
         if self.whiten:

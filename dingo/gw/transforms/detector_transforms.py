@@ -10,7 +10,6 @@ from bilby.gw.prior import CalibrationPriorDict
 
 
 CC = 299792458.0
-NUM_CALIBRATION_NODES = 10
 
 
 def time_delay_from_geocenter(
@@ -241,18 +240,18 @@ class TimeShiftStrain(object):
 
 class ApplyCalibrationUncertainty(object):
     """
-    Based off: 
+    Based off:
 
     https://dcc.ligo.org/LIGO-T1400682/public
 
-    Usually gravitational wave data is in the form 
-    
+    Usually gravitational wave data is in the form
+
     d(f) = h_obs(f) + n(f)                                          (1)
 
     Where d is the data, h is the waveform and n is the noise. However, since
     the detector is not perfectly calibrated, there are corrections to the
     waveform in the form
-    
+
     h_obs(f) = h(f) * (1 + \delta A(f)) * exp(i \delta \phi(f))      (2)
 
     We can parameterize A(f) and \phi(f) with a cubic spline i.e.
@@ -262,11 +261,11 @@ class ApplyCalibrationUncertainty(object):
 
     The \A_i and \phi_i are drawn from gaussians centered at 0 with standard
     deviations determined by the calibration envelope which varies event to
-    event. This method draws multiple splines and multiplies the waveform 
+    event. This method draws multiple splines and multiplies the waveform
     by the splines. Later when computing the likelihoods, we can marginalize
-    over these waveforms thereby mitigating the effects of calibration 
-    uncertainties in the detectors.  
-    
+    over these waveforms thereby mitigating the effects of calibration
+    uncertainties in the detectors.
+
 
     calibration_marginalization_kwargs: dict
         Calibration marginalization kwargs. If None no calibration marginalization is
@@ -276,7 +275,12 @@ class ApplyCalibrationUncertainty(object):
     """
 
     def __init__(
-        self, ifo_list, data_domain, calibration_envelope, num_calibration_curves
+        self,
+        ifo_list,
+        data_domain,
+        calibration_envelope,
+        num_calibration_curves,
+        num_calibration_nodes,
     ):
         """
         Initialize calibration marginalization. This requires the user to give
@@ -304,13 +308,13 @@ class ApplyCalibrationUncertainty(object):
         if all([s.endswith(".txt") for s in calibration_envelope.values()]):
             # Generating .h5 lookup table from priors in .txt file
             self.calibration_envelope = calibration_envelope
-            for i, ifo in enumerate(self.ifo_list):
+            for ifo in self.ifo_list:
                 # Setting calibration model to cubic spline
                 ifo.calibration_model = calibration.CubicSpline(
                     f"recalib_{ifo.name}_",
                     minimum_frequency=data_domain.f_min,
                     maximum_frequency=data_domain.f_max,
-                    n_points=NUM_CALIBRATION_NODES,
+                    n_points=num_calibration_nodes,
                 )
 
                 # Setting priors
@@ -326,7 +330,7 @@ class ApplyCalibrationUncertainty(object):
                     self.calibration_envelope[ifo.name],
                     self.data_domain.f_min,
                     self.data_domain.f_max,
-                    NUM_CALIBRATION_NODES,
+                    num_calibration_nodes,
                     ifo.name,
                 )
 

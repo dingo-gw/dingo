@@ -129,7 +129,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             )
 
     def initialize_calibration_marginalization(
-        self, calibration_envelope, num_calibration_curves=1
+        self, calibration_envelope, num_calibration_curves=1, num_calibration_nodes=10,
     ):
         """
         Initialize calibration marginalization table which will use the files provided to
@@ -146,6 +146,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             optionally can be set to 'generate'
         """
         self.num_calibration_curves = num_calibration_curves
+        self.num_calibration_nodes = num_calibration_nodes
         self.calibration_envelope = calibration_envelope
 
     def initialize_time_marginalization(self, t_lower, t_upper, n_fft=1):

@@ -80,10 +80,11 @@ class ImportanceSamplingInput(Input):
         # self.roq_folder = args.roq_folder
         # self.roq_scale_factor = args.roq_scale_factor
         #
-        # # Calibration
-        # self.calibration_model = args.calibration_model
-        # self.spline_calibration_nodes = args.spline_calibration_nodes
-        # self.spline_calibration_envelope_dict = args.spline_calibration_envelope_dict
+        # Calibration
+        self.calibration_model = args.calibration_model
+        self.spline_calibration_nodes = args.spline_calibration_nodes
+        self.spline_calibration_envelope_dict = args.spline_calibration_envelope_dict
+        self.spline_calibration_curves = args.spline_calibration_curves
 
         # # Marginalization
         # self.distance_marginalization = args.distance_marginalization
@@ -107,6 +108,15 @@ class ImportanceSamplingInput(Input):
     def _load_event(self):
         event_dataset = EventDataset(file_name=self.event_data_file)
         self.result.reset_event(event_dataset)
+
+    @property
+    def calibration_marginalization_kwargs(self):
+        if self.calibration_model == "CubicSpline":
+            return {
+                "calibration_envelope": self.spline_calibration_envelope_dict,
+                "num_calibration_nodes": self.spline_calibration_nodes,
+                "num_calibration_curves": self.spline_calibration_curves,
+            }
 
     @property
     def importance_sampling_settings(self):
@@ -154,6 +164,7 @@ class ImportanceSamplingInput(Input):
             phase_marginalization_kwargs=self.importance_sampling_settings.get(
                 "phase_marginalization"
             ),
+            calibration_marginalization_kwargs=self.calibration_marginalization_kwargs,
         )
 
         if self.prior_dict:
@@ -168,9 +179,7 @@ class ImportanceSamplingInput(Input):
             self.result.update_prior(self.prior_dict)
 
         self.result.print_summary()
-        self.result.to_file(
-            os.path.join(self.result_directory, self.label + ".hdf5")
-        )
+        self.result.to_file(os.path.join(self.result_directory, self.label + ".hdf5"))
 
     @property
     def priors(self):
