@@ -371,11 +371,8 @@ class MultibandedFrequencyDomain(Domain):
     @property
     def domain_dict(self):
         """Enables to rebuild the domain via calling build_domain(domain_dict)."""
-        raise NotImplementedError()
-        # return {
-        #     "type": "MultibandedFrequencyDomain",
-        #     "f_min": self.f_min,
-        #     "f_max": self.f_max,
-        #     "delta_f": self.delta_f,
-        #     "window_factor": self.window_factor,
-        # }
+        return {
+            "type": "MultibandedFrequencyDomain",
+            "bands": self.bands,
+            "original_domain": self.original_domain.domain_dict(),
+        }
