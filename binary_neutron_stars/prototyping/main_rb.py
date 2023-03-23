@@ -40,18 +40,37 @@ if __name__ == "__main__":
 
     # generate polarizations
     parameters_het, polarizations_het = generate_parameters_and_polarizations(
-        waveform_generator_het, prior, 500, num_processes
+        waveform_generator_het, prior, 100, num_processes
     )
 
     bands = get_decimation_bands_adaptive(
         ufd,
         np.concatenate(list(polarizations_het.values())),
-        min_num_bins_per_period=8,
+        min_num_bins_per_period=16,
         delta_f_max=3.0,
     )
     mfd = MultibandedFrequencyDomain(bands, ufd)
     print(len(mfd))
     print(bands)
+    hp_het = polarizations_het["h_plus"]
+    fig = plt.figure()
+    fig.set_size_inches((8, 8))
+    x = ufd()
+    # plt.plot(
+    #     x, np.min(get_periods(hp_het.real, upper_bound_for_monotonicity=False), axis=0)
+    # )
+    # plt.plot(
+    #     x, np.min(get_periods(hp_het.real, upper_bound_for_monotonicity=True), axis=0)
+    # )
+    periods = get_periods(hp_het.real, upper_bound_for_monotonicity=False)
+    for perc in [1, 3, 5, 10]:
+        plt.plot(np.percentile(periods, perc, axis=0))
+    plt.yscale("log")
+    plt.ylabel("f in Hz")
+    plt.xlim(ufd.f_min, ufd.f_max * 1.1)
+    plt.xscale("log")
+    plt.ylabel("Period [bins]")
+    plt.show()
 
     transforms = Compose([ApplyHeterodyning(ufd), ApplyDecimation(mfd)])
     waveform_generator_het_dec = WaveformGenerator(
@@ -110,19 +129,4 @@ if __name__ == "__main__":
         plt.legend()
         plt.show()
 
-    hp_het = polarizations_het["h_plus"]
-    fig = plt.figure()
-    fig.set_size_inches((8, 8))
-    x = ufd()
-    plt.plot(
-        x, np.min(get_periods(hp_het.real, upper_bound_for_monotonicity=False), axis=0)
-    )
-    plt.plot(
-        x, np.min(get_periods(hp_het.real, upper_bound_for_monotonicity=True), axis=0)
-    )
-    plt.yscale("log")
-    plt.ylabel("f in Hz")
-    plt.xlim(ufd.f_min, ufd.f_max * 1.1)
-    plt.xscale("log")
-    plt.ylabel("Period [bins]")
-    plt.show()
+

@@ -8,7 +8,7 @@ from dingo.gw.domains import build_domain, FrequencyDomain
 def get_decimation_bands_adaptive(
     original_domain: FrequencyDomain,
     waveforms: np.ndarray,
-    min_num_bins_per_period: int = 8,
+    min_num_bins_per_period: int = 16,
     delta_f_max: float = np.inf,
 ):
     """
@@ -44,9 +44,13 @@ def get_decimation_bands_adaptive(
             f"(N, {len(original_domain)}): "
             f"N waveforms, each of the same length {len(original_domain)} as domain."
         )
-
-    x = waveforms[:, original_domain.min_idx :].real
     max_dec_factor_global = delta_f_max / original_domain.delta_f
+
+    # For some reason, the last bin of a waveform is always zero, so we need to get rid
+    # of that for the step below.
+    x = waveforms[:, original_domain.min_idx : -1]
+    f = original_domain()[original_domain.min_idx : -1]
+
     # Ideally, we would just call
     #   periods = np.min(get_periods(x, upper_bound_for_monotonicity=True), axis=0)
     # here. However, get_periods does not work perfectly on phase-heterodyned BNS
@@ -62,10 +66,11 @@ def get_decimation_bands_adaptive(
     # capture the oscillation, as the rate of change of the signal is much smaller than
     # what the period suggests. So below, we remove these cases by using
     # np.percentile(_, 1) instead of np.min(_).
-    periods = np.percentile(
-        get_periods(x, upper_bound_for_monotonicity=False), 1, axis=0
-    )
+    periods = get_periods(x.real, upper_bound_for_monotonicity=False)
+    # periods = get_period_for_complex_oscillation(x, upper_bound_for_monotonicity=False)
+    periods = np.percentile(periods, 1, axis=0)
     periods = np.minimum.accumulate(periods[::-1])[::-1]
+
     max_dec_factor_array = periods / min_num_bins_per_period
     bands_inds = get_inds_for_adaptive_decimation(
         max_dec_factor_array, max_dec_factor_global
@@ -73,7 +78,6 @@ def get_decimation_bands_adaptive(
 
     # transform the indices and decimation factors into the frequency bounds and
     # delta_f for the bands.
-    f = original_domain()[original_domain.min_idx :]
     bands = []
     for lower, upper, dec_factor in bands_inds:
         delta_f_band = dec_factor * original_domain.delta_f
@@ -238,6 +242,54 @@ def number_of_zero_crossings(x):
     return np.sum((x[..., :-1] * x[..., 1:]) < 0, axis=-1) + np.sum(x == 0, axis=-1)
 
 
+def get_period_for_complex_oscillation(
+    x: np.ndarray, upper_bound_for_monotonicity: bool = False
+):
+    """
+    Takes complex 1D or 2D array x as input. Returns array of the same shape,
+    specifying the cycle length for each bin (axis=-1). This is done by looking at the
+    local rate of change of the normalized array x / np.abs(x). Assuming sine-like
+    osscillations, the period is related to the maximum rate of change via
+
+        period = 2 pi / max_local(rate_of_change_per_bin).
+
+    Note: this assumes a monotonically increasing period.
+
+    Parameters
+    ----------
+    x: np.ndarray
+        Complex array with oscillation signal. 1D or 2D, oscillation pattern on axis -1.
+    upper_bound_for_monotonicity: bool = False
+        If set, then the periods returned increase monotonically.
+
+    Returns
+    -------
+    periods_expanded: np.ndarray
+        Array with same shape as x, containing the period (as float) for each bin.
+    """
+    if not np.iscomplexobj(x):
+        raise ValueError("This is only implemented for complex oscillations.")
+    if not len(x.shape) in [1, 2]:
+        raise ValueError(
+            f"Expected shape (num_bins) or (num_waveforms, num_bins), got {x.shape}."
+        )
+    # Infer period from derivative
+    y = x * 1
+    if np.min(np.abs(x)) == 0:
+        raise ValueError("This function requires |x| > 0.")
+    # normalize x
+    x = x / np.abs(x)
+    # normalized derivative
+    dx = np.concatenate(
+        ((x[..., 1:] - x[..., :-1]).real, (x[..., 1:] - x[..., :-1]).imag)
+    )
+    # Infer period from the derivative, assuming sine-like oscillations.
+    periods = 2 * np.pi / np.abs(dx)
+    if upper_bound_for_monotonicity:
+        periods = np.minimum.accumulate((periods)[..., ::-1], axis=-1)[..., ::-1]
+    return periods
+
+
 def get_periods(x: np.ndarray, upper_bound_for_monotonicity: bool = False):
     """
     Takes 1D or 2D array x as input. Returns array of the same shape, specifying the
@@ -246,8 +298,6 @@ def get_periods(x: np.ndarray, upper_bound_for_monotonicity: bool = False):
     intervals.
 
     Note: This assumes an oscillatory behavior of x about 0.
-    Note: A period here describes the interval between two consecutive zero crossings,
-    so it differs by a factor of 2 from the usual convention.
 
     Parameters
     ----------
@@ -291,6 +341,8 @@ def get_periods(x: np.ndarray, upper_bound_for_monotonicity: bool = False):
         periods_expanded[zero_crossings[-1] :] = periods_expanded[
             zero_crossings[-1] - 1
         ]
+        # multiply with 2, as a period includes 2 zero crossings
+        periods_expanded *= 2
         # if monotonically increasing periods are requested, upper bound the periods
         # with periods_expanded[i] = min(periods_expanded[i:]).
         if upper_bound_for_monotonicity:
