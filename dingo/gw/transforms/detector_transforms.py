@@ -239,39 +239,42 @@ class TimeShiftStrain(object):
 
 
 class ApplyCalibrationUncertainty(object):
-    """
-    Based off:
+    r"""
+    Expand out a waveform using several detector calibration draws. These multiple
+    draws are intended to be used for marginalizing over calibration uncertainty.
 
+    Detector calibration uncertainty is modeled as described in
     https://dcc.ligo.org/LIGO-T1400682/public
 
-    Usually gravitational wave data is in the form
+    Gravitational wave data $d$ is assumed to be of the form
 
-    d(f) = h_obs(f) + n(f)                                          (1)
+    $$d(f) = h_{obs}(f) + n(f),$$
 
-    Where d is the data, h is the waveform and n is the noise. However, since
-    the detector is not perfectly calibrated, there are corrections to the
-    waveform in the form
+    where $h_{obs}$ is the observed waveform and $n$ is the noise. Since the detector
+    is not perfectly calibrated, the observed waveform is not identical to the true
+    waveform $h(f)$. Rather, it is assumed to have corrections of the form
 
-    h_obs(f) = h(f) * (1 + \delta A(f)) * exp(i \delta \phi(f))      (2)
+    $$h_{obs}(f) = h(f) * (1 + \delta A(f)) * \exp(i \delta \phi(f)),$$
 
-    We can parameterize A(f) and \phi(f) with a cubic spline i.e.
+    where $\delta A(f)$ and $\delta \phi(f)$ are frequency-dependent amplitude and
+    phase errors. Under the calibration model, these are parametrized with cubic
+    splines, defined in terms of calibration parameters $A_i$ and $\phi_i$, defined
+    at log-spaced frequency nodes,
 
-    \delta A(f) = spline(f; {f_i, \delta A_i})                       (3)
-    \delta \phi(f) = spline(f; {f_i, \delta \phi_i})                 (4)
+    $$
+    \delta A(f) &= \mathrm{spline}(f; {f_i, \delta A_i}), \\
+    \delta \phi(f) &= \mathrm{spline}(f; {f_i, \delta \phi_i}).
+    $$
 
-    The \A_i and \phi_i are drawn from gaussians centered at 0 with standard
-    deviations determined by the calibration envelope which varies event to
-    event. This method draws multiple splines and multiplies the waveform
-    by the splines. Later when computing the likelihoods, we can marginalize
-    over these waveforms thereby mitigating the effects of calibration
-    uncertainties in the detectors.
+    The calibration parameters are not known precisely, rather they are assumed to be
+    normally distributed, with mean 0 and standard deviation  determined by the
+    "calibration envelope", which varies from event to event.
 
-
-    calibration_marginalization_kwargs: dict
-        Calibration marginalization kwargs. If None no calibration marginalization is
-        used. This should contain a dict with
-        {"num_calibration_curves": 100, "calibration_lookup_table": {"H1": filepath, "L1"...}}.
-        Optionally, you can also set "calibration_lookup_table" to None
+    For each detector waveform, this transform draws a collection of $N$
+    calibration curves $\{(\delta A^n(f), \delta \phi^n(f))\}_{n=1}^N$ according to a
+    calibration envelope, and applies them to generate $N$ observed waveforms $\{h^n_{
+    obs}(f)\}$. This is intended to be used for marginalizing over the calibration
+    uncertainty when evaluating the likelihood for importance sampling.
     """
 
     def __init__(
@@ -282,22 +285,27 @@ class ApplyCalibrationUncertainty(object):
         num_calibration_curves,
         num_calibration_nodes,
     ):
-        """
-        Initialize calibration marginalization. This requires the user to give
-        an event specific calibration curve.
+        r"""
+        Parameters
+        ---------
 
-        Calibration marginalization takes a median and sigma (of amplitude and
-        phase) for each point in frequency space. Then it creates a spline on
-        the median and sigma. NOTE this is a DIFFERENT spline from the cubic
-        spline that will be generated later. This spline is just needed to
-        create priors on the the node points for the calibration cubic spline.
-        This spline will give you the node points, i.e. f_i (log spaced) and
-        Priors(\delta A_i, \delta \psi_i).
-
-        These node points are the calibration parameters. From these node points
-        and priors you can draw values for \delta A_i and \delta \psi_i which
-        will give you a calibration curve. This is the calibration curve which
-        you then multiply against the waveform.
+        ifo_list : InterferometerList
+            List of Interferometers present in the analysis.
+        data_domain : Domain
+            Domain on which data is defined.
+        calibration_envelope : dict
+            Dictionary of the form ``{"H1": filepath, "L1": filepath}``,
+            where the filepaths are strings pointing to ".txt" files containing
+            calibration envelopes. The calibration envelope depends on the event analyzed,
+            and therefore  remains fixed for all applications of the transform. The
+            calibration envelope is used to define the variances $(\sigma_{\delta A_i},
+            \sigma_{\delta \phi_i})$ of the calibration paramters.
+        num_calibration_curves : int
+            Number of calibration curves $N$ to produce and apply to the
+            waveform. Ultimately, this will translate to the number of samples in the
+            Monte Carlo estimate of the marginalized likelihood integral.
+        num_calibration_nodes : int
+            Number of log-spaced frequency nodes $f_i$ to use in defining the spline.
         """
 
         self.ifo_list = ifo_list

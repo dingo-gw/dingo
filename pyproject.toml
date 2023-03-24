@@ -75,6 +75,7 @@ dev = [
     "myst-nb",
     "sphinxcontrib-mermaid",
     "sphinxcontrib-bibtex",
+    "sphinx-math-dollar",
     "myst-parser",
     "linkify-it-py"
 ]
