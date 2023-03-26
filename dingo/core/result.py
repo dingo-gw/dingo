@@ -7,10 +7,11 @@ import numpy as np
 from typing import Optional
 
 import pandas as pd
-import matplotlib.pyplot as plt
-from chainconsumer import ChainConsumer
+import corner
+import matplotlib as mpl
+from matplotlib import pyplot as plt
 from scipy.constants import golden
-from scipy.special import logsumexp, erfinv
+from scipy.special import logsumexp
 from bilby.core.prior import Constraint, DeltaFunction
 
 from dingo.core.dataset import DingoDataset
@@ -604,32 +605,95 @@ class Result(DingoDataset):
         if parameters:
             theta = theta[parameters]
 
-        c = ChainConsumer()
+        # Define plot properties
+        cmap = "Dark2"
+        color_1 = mpl.colors.rgb2hex(plt.get_cmap(cmap)(0))
+        color_2 = mpl.colors.rgb2hex(plt.get_cmap(cmap)(1))
+        label_1 = "Dingo"
+        label_2 = "Dingo-IS"
+        corner_params = {
+            "smooth": 1.0,
+            "smooth1d": 1.0,
+            "plot_datapoints": False,
+            "plot_density": False,
+            "plot_contours": True,
+            "levels": [0.5, 0.9],
+            "bins": 30,
+        }
+
+        serif_old = mpl.rcParams["font.family"]
+        mpl.rcParams["font.family"] = "serif"
+        linewidth_old = mpl.rcParams["lines.linewidth"]
+        mpl.rcParams["lines.linewidth"] = 2.5
 
         # Plot pre-importance sampling samples. I.e., drop weights, if present.
-        c.add_chain(theta, weights=None, color="orange", name="Dingo")
+        fig = corner.corner(
+            theta.to_numpy(),
+            color=color_1,
+            no_fill_contours=True,
+            labels=theta.columns,
+            **corner_params,
+        )
         n = 1
 
         if "weights" in theta:
-            c.add_chain(
-                theta, weights=theta["weights"].to_numpy(), color="red", name="Dingo-IS"
+            corner.corner(
+                theta.to_numpy(),
+                color=color_2,
+                no_fill_contours=True,
+                labels=theta.columns,
+                weights=theta["weights"].to_numpy(),
+                fig=fig,
+                **corner_params,
             )
             n = 2
 
-        c.configure(
-            linestyles=["-"] * n,
-            linewidths=[1.5] * n,
-            sigmas=[np.sqrt(2) * erfinv(x) for x in [0.5, 0.9]],
-            shade=[False] + [True] * (n - 1),
-            shade_alpha=0.3,
-            bar_shade=False,
-            label_font_size=10,
-            tick_font_size=10,
-            usetex=False,
-            legend_kwargs={"fontsize": 30},
-            kde=0.7,
+        # Eliminate spacing between the 2D plots
+        fig.subplots_adjust(wspace=0, hspace=0)
+
+        # Add legend
+        handles = [
+            plt.Line2D([], [], color=color_1, label=label_1, linewidth=5, markersize=20)
+        ]
+        if n == 2:
+            handles.append(
+                plt.Line2D(
+                    [], [], color=color_2, label=label_2, linewidth=5, markersize=20
+                )
+            )
+        fig.legend(
+            handles=handles,
+            loc="upper right",
+            fontsize=50,
+            labelcolor="linecolor",
         )
-        c.plotter.plot(filename=filename)
+
+        # Customize tick and label properties for each axis
+        for i, ax in enumerate(fig.get_axes()):
+            if ax.get_xlabel():
+                ax.tick_params(
+                    axis="x", labelsize=14, length=6, width=1.5
+                )  # Adjust labelsize, length, and width
+                ax.xaxis.label.set_size(16)  # Adjust x-axis label font size
+            else:
+                ax.tick_params(axis="x", which="both", bottom=False)
+            if ax.get_ylabel():
+                ax.tick_params(
+                    axis="y", labelsize=14, length=6, width=1.5
+                )  # Adjust labelsize, length, and width
+                ax.yaxis.label.set_size(16)  # Adjust x-axis label font size
+            else:
+                ax.tick_params(axis="y", which="both", left=False)
+
+            # Turn off grid
+            ax.grid()
+
+        # Save the figure
+        plt.savefig(filename)
+
+        # Reset rcParams to original values
+        mpl.rcParams["font.family"] = serif_old
+        mpl.rcParams["lines.linewidth"] = linewidth_old
 
     def plot_log_probs(self, filename="log_probs.png"):
         """
