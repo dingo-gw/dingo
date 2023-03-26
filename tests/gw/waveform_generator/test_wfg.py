@@ -1,6 +1,7 @@
 from dingo.gw.domains import FrequencyDomain
 from dingo.gw.waveform_generator.waveform_generator import WaveformGenerator
 from dingo.gw.transforms.parameter_transforms import StandardizeParameters
+from dingo.gw.gwutils import get_mismatch
 import pytest
 import numpy as np
 import torch
@@ -9,26 +10,64 @@ import torch.distributions
 
 @pytest.fixture
 def uniform_fd_domain():
-    p = {'f_min': 20.0, 'f_max': 4096.0, 'delta_f': 1.0/4.0}
+    p = {"f_min": 20.0, "f_max": 4096.0, "delta_f": 1.0 / 4.0}
     return FrequencyDomain(**p)
+
 
 @pytest.fixture
 def aligned_spin_wf_parameters():
-    parameters = {'chirp_mass': 34.0, 'mass_ratio': 0.35, 'chi_1': 0.2, 'chi_2': 0.1,
-                  'theta_jn': 1.57, 'phase': 0.0, 'luminosity_distance': 1.0}
+    parameters = {
+        "chirp_mass": 34.0,
+        "mass_ratio": 0.35,
+        "chi_1": 0.2,
+        "chi_2": 0.1,
+        "theta_jn": 1.57,
+        "phase": 0.0,
+        "luminosity_distance": 100.0,
+    }
     f_ref = 20.0
-    approximant = 'IMRPhenomPv2'
+    approximant = "IMRPhenomPv2"
     return parameters, f_ref, approximant
+
 
 @pytest.fixture
 def precessing_spin_wf_parameters():
-    parameters = {'chirp_mass': 34.0, 'mass_ratio': 0.35,
-                  'a_1': 0.5, 'a_2': 0.2, 'tilt_1': 2*np.pi/3.0, 'tilt_2': np.pi/4.0,
-                  'phi_12': np.pi/4.0, 'phi_jl': np.pi/3.0,
-                  'theta_jn': 1.57, 'phase': 0.0, 'luminosity_distance': 1.0}
+    parameters = {
+        "chirp_mass": 34.0,
+        "mass_ratio": 0.35,
+        "a_1": 0.5,
+        "a_2": 0.2,
+        "tilt_1": 2 * np.pi / 3.0,
+        "tilt_2": np.pi / 4.0,
+        "phi_12": np.pi / 4.0,
+        "phi_jl": np.pi / 3.0,
+        "theta_jn": 1.57,
+        "phase": 0.0,
+        "luminosity_distance": 100.0,
+    }
     f_ref = 100.0
-    approximant = 'IMRPhenomPv2'
+    approximant = "IMRPhenomPv2"
     return parameters, f_ref, approximant
+
+
+@pytest.fixture
+def precessing_spin_BNS_wf_parameters():
+    parameters = {
+        "chirp_mass": 1.2,
+        "mass_ratio": 0.35,
+        "a_1": 0.5,
+        "a_2": 0.2,
+        "tilt_1": 2 * np.pi / 3.0,
+        "tilt_2": np.pi / 4.0,
+        "phi_12": np.pi / 4.0,
+        "phi_jl": np.pi / 3.0,
+        "theta_jn": 1.57,
+        "phase": 0.0,
+        "luminosity_distance": 100.0,
+    }
+    f_ref = 20.0
+    return parameters, f_ref
+
 
 @pytest.fixture(params=["aligned_spin_wf_parameters", "precessing_spin_wf_parameters"])
 def wf_parameters(request):
@@ -44,7 +83,7 @@ def test_waveform_generator_FD(uniform_fd_domain, wf_parameters):
     wf_gen = WaveformGenerator(approximant, domain, f_ref)
     wf_dict = wf_gen.generate_hplus_hcross(parameters)
 
-    assert len(wf_dict['h_plus']) == len(domain)
+    assert len(wf_dict["h_plus"]) == len(domain)
     assert domain()[domain.frequency_mask][0] == domain.f_min
 
 
@@ -61,8 +100,7 @@ def test_waveform_generator_FD_f_max_failure(precessing_spin_wf_parameters):
     """
     # Common parameters
     parameters, f_ref, approximant = precessing_spin_wf_parameters
-    approximant = 'SEOBNRv4PHM'
-
+    approximant = "SEOBNRv4PHM"
 
     # (1)
     # For lalsuite >= 7.11 when calling SimInspiralFD() f_max is rounded
@@ -71,7 +109,7 @@ def test_waveform_generator_FD_f_max_failure(precessing_spin_wf_parameters):
     # Check that generating a waveform with f_max not a power of two succeeds.
     # This includes a check in WaveformGenerator.generate_FD_waveform() which ensures
     # that the generated waveform agrees with the frequency grid defined in the domain.
-    p_OK1 = {'f_min': 20.0, 'f_max': 896.0, 'delta_f': 1.0/8.0}
+    p_OK1 = {"f_min": 20.0, "f_max": 896.0, "delta_f": 1.0 / 8.0}
     domain_OK1 = FrequencyDomain(**p_OK1)
 
     wf_gen = WaveformGenerator(approximant, domain_OK1, f_ref)
@@ -79,7 +117,7 @@ def test_waveform_generator_FD_f_max_failure(precessing_spin_wf_parameters):
 
     # (2)
     # Check that generating this waveform **succeeds** as expected.
-    p_OK = {'f_min': 20.0, 'f_max': 1024.0, 'delta_f': 1.0/8.0}
+    p_OK = {"f_min": 20.0, "f_max": 1024.0, "delta_f": 1.0 / 8.0}
     domain_OK = FrequencyDomain(**p_OK)
 
     wf_gen = WaveformGenerator(approximant, domain_OK, f_ref)
@@ -92,11 +130,58 @@ def test_standardize_parameters_on_distribution():
     std_ = torch.tensor([2.0, 4.0, 7.0])
     n_samples = 100000
     parameters = torch.distributions.Normal(mean_, std_).sample((n_samples,)).numpy()
-    samples = {'parameters': {'x': parameters}, 'waveform': None}
-    tr = StandardizeParameters({'x': mean_.numpy()}, {'x': std_.numpy()})
+    samples = {"parameters": {"x": parameters}, "waveform": None}
+    tr = StandardizeParameters({"x": mean_.numpy()}, {"x": std_.numpy()})
     samples_tr = tr(samples)
-    parameters_tr = samples_tr['parameters']['x']
+    parameters_tr = samples_tr["parameters"]["x"]
 
     tol = 0.01
     assert np.all(np.abs(np.mean(parameters_tr, axis=0)) < tol)
     assert np.all(np.abs(np.std(parameters_tr, axis=0)) - np.ones(3) < tol)
+
+
+def test_tidal_deformability(uniform_fd_domain, precessing_spin_BNS_wf_parameters):
+    """
+    Test that tidal_deformability parameters are inserted correctly by the
+    WaveformGenerator.
+    """
+    domain = uniform_fd_domain
+    parameters, f_ref = precessing_spin_BNS_wf_parameters
+    wfg_XPHM = WaveformGenerator("IMRPhenomXPHM", domain, f_ref)
+    wfg_Pv2 = WaveformGenerator("IMRPhenomPv2", domain, f_ref)
+    wfg_Pv2_NRTidal = WaveformGenerator("IMRPhenomPv2_NRTidal", domain, f_ref)
+
+    # Check that polarizations generate only for Pv2_NRTidal if lambda_1/2 are given.
+    for wfg in [wfg_XPHM, wfg_Pv2, wfg_Pv2_NRTidal]:
+        _ = wfg.generate_hplus_hcross(parameters)
+    for wfg in [wfg_XPHM, wfg_Pv2]:
+        with pytest.raises(Exception):
+            _ = wfg.generate_hplus_hcross({**parameters, "lambda_1": 500})
+            _ = wfg.generate_hplus_hcross({**parameters, "lambda_2": 500})
+            _ = wfg.generate_hplus_hcross(
+                {**parameters, "lambda_1": 500, "lambda_2": 500}
+            )
+    _ = wfg_Pv2_NRTidal.generate_hplus_hcross({**parameters, "lambda_1": 500})
+    _ = wfg_Pv2_NRTidal.generate_hplus_hcross({**parameters, "lambda_2": 500})
+    _ = wfg_Pv2_NRTidal.generate_hplus_hcross(
+        {**parameters, "lambda_1": 500, "lambda_2": 500}
+    )
+
+    # Check that lambda_1/2 = 0 produces identical results as omitting it, and that
+    # settings lambda_1/2 > 0 changes the waveform.
+    pols_Pv2 = wfg_Pv2.generate_hplus_hcross(parameters)
+    pols_Pv2_NRTidal_none = wfg_Pv2_NRTidal.generate_hplus_hcross(parameters)
+    pols_Pv2_NRTidal_0 = wfg_Pv2_NRTidal.generate_hplus_hcross(
+        {**parameters, "lambda_1": 0, "lambda_2": 0}
+    )
+    pols_Pv2_NRTidal_500 = wfg_Pv2_NRTidal.generate_hplus_hcross(
+        {**parameters, "lambda_1": 500, "lambda_2": 0}
+    )
+    for pol_name, pol0 in pols_Pv2.items():
+        pol1 = pols_Pv2_NRTidal_none[pol_name]
+        pol2 = pols_Pv2_NRTidal_0[pol_name]
+        pol3 = pols_Pv2_NRTidal_500[pol_name]
+        # assert get_mismatch(pol0, pol1, domain) == 0
+        # apparently, IMRPhenomPv2 != IMRPhenomPv2_NRTidal even at lambda_1/2 = 0
+        assert get_mismatch(pol1, pol2, domain) == 0
+        assert get_mismatch(pol1, pol3, domain) > 0
