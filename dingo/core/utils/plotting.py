@@ -53,13 +53,21 @@ def plot_corner_multi(
     if not isinstance(labels, list):
         labels = [labels]
 
+    # Only plot common parameters for all sample sets, keeping the same order as the
+    # first sample set.
+    common_parameters = [
+        p
+        for p in samples[0].columns
+        if p in set.intersection(*(set(s.columns) for s in samples))
+    ]
+
     fig = None
     handles = []
     for i, (s, w, l) in enumerate(zip_longest(samples, weights, labels)):
         color = mpl.colors.rgb2hex(plt.get_cmap(cmap)(i))
         fig = corner.corner(
-            s.to_numpy(),
-            labels=s.columns,
+            s[common_parameters].to_numpy(),
+            labels=common_parameters,
             weights=w,
             color=color,
             no_fill_contours=True,
