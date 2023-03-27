@@ -1,9 +1,6 @@
 import copy
-from typing import Optional
 
 import torch
-import yaml
-from os.path import dirname, join
 
 from dingo.core.utils import build_train_and_test_loaders
 from dingo.core.utils.trainutils import RuntimeLimits

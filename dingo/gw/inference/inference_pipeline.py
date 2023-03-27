@@ -14,7 +14,7 @@ from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
 from dingo.gw.data.data_preparation import get_event_data_and_domain, \
     parse_settings_for_raw_data
-from dingo.gw.inference.visualization import load_ref_samples, generate_cornerplot
+from dingo.gw.inference.visualization import load_ref_samples
 
 
 def parse_args():

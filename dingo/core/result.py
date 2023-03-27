@@ -7,8 +7,6 @@ import numpy as np
 from typing import Optional
 
 import pandas as pd
-import corner
-import matplotlib as mpl
 from matplotlib import pyplot as plt
 from scipy.constants import golden
 from scipy.special import logsumexp
