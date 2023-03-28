@@ -70,16 +70,20 @@ def plot_corner_multi(
             labels=common_parameters,
             weights=w,
             color=color,
-            no_fill_contours=True,
+            no_fill_contours=False,
             fig=fig,
-            **corner_params
+            **corner_params,
         )
         handles.append(
             plt.Line2D([], [], color=color, label=l, linewidth=5, markersize=20)
         )
 
     # Eliminate spacing between the 2D plots
-    fig.subplots_adjust(wspace=0, hspace=0)
+    if len(common_parameters) > 8:
+        fig.subplots_adjust(wspace=0, hspace=0)
+    else:
+        space = 1 / (4 * len(common_parameters))
+        fig.subplots_adjust(wspace=space, hspace=space)
 
     fig.legend(
         handles=handles,
@@ -114,3 +118,5 @@ def plot_corner_multi(
     # Reset rcParams to original values
     mpl.rcParams["font.family"] = serif_old
     mpl.rcParams["lines.linewidth"] = linewidth_old
+
+    return fig
