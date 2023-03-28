@@ -42,8 +42,9 @@ def main():
         for k, v in d['model_state_dict'].items():
             grp_model.create_dataset(k, data=v.numpy())
 
-        # FIXME: do we need to save optimizer_state_dict?
-        # If we don't we could omit it and save some space.
+        # Note we do not save optimizer_state_dict which is
+        # not needed at inference time and saves a significant
+        # amount of disk space.
 
 
 if __name__ == "__main__":
