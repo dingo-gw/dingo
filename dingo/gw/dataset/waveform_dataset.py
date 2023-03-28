@@ -215,7 +215,8 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         # Decompression transforms are assumed to apply only to the waveform,
         # and do not involve parameters.
         if self.decompression_transform is not None:
-            polarizations = self.decompression_transform(polarizations)
+            data_sample = {"waveform": polarizations}
+            polarizations = self.decompression_transform(data_sample)["waveform"]
 
         # Main transforms can depend also on parameters.
         data = {"parameters": parameters, "waveform": polarizations}
