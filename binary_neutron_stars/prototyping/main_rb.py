@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from torchvision.transforms import Compose
 
 from dingo.gw.domains import build_domain
+from dingo.gw.gwutils import get_mismatch
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.waveform_generator import WaveformGenerator
 from dingo.gw.dataset.generate_dataset import (
@@ -50,6 +51,40 @@ if __name__ == "__main__":
     print(bands)
 
     # Compute mismatches: multiband->heterodyne vs. heterodyne->decimate
+
+    params = dict(parameters_het.iloc[0])
+    waveform_generator_het_mfd = WaveformGenerator(
+        domain=mfd, transform=ApplyHeterodyning(mfd), **settings["waveform_generator"]
+    )
+    waveform_generator_het_dec = WaveformGenerator(
+        domain=ufd,
+        transform=Compose([ApplyHeterodyning(ufd), ApplyDecimation(mfd)]),
+        **settings["waveform_generator"],
+    )
+    polarizations_het_mfd = waveform_generator_het_mfd.generate_hplus_hcross(params)
+    polarizations_het_dec = waveform_generator_het_dec.generate_hplus_hcross(params)
+
+    plt.plot(ufd(), polarizations_het["h_plus"][0].real)
+    plt.plot(mfd(), polarizations_het_mfd["h_plus"].real)
+    plt.show()
+
+    for pol_name in polarizations_het_dec.keys():
+        a = polarizations_het_dec[pol_name]
+        b = polarizations_het_mfd[pol_name]
+        print(get_mismatch(a, b, mfd))
+        plt.title("pol_name")
+        plt.plot(mfd(), a.real)
+        plt.plot(mfd(), b.real)
+        plt.plot(mfd(), 100 * (a - b).real)
+        plt.show()
+
+    params_lal = waveform_generator._convert_parameters_to_lal_frame(
+        {"f_ref": waveform_generator.f_ref, **params},
+        lal_target_function="SimInspiralChooseFDWaveformSequence",
+    )
+    import lalsimulation as LS
+
+    hp, hc = LS.SimInspiralChooseFDWaveformSequence(*params_lal)
 
     hp_het = polarizations_het["h_plus"]
     fig = plt.figure()
@@ -127,5 +162,3 @@ if __name__ == "__main__":
         )
         plt.legend()
         plt.show()
-
-
