@@ -29,7 +29,7 @@ def main():
             'scheduler_kwargs', 'scheduler_state_dict']
 
 
-    with h5py.File('model_weights.h5', 'w') as f:
+    with h5py.File(args.out_file, 'w') as f:
         # Save small nested dicts as json
         grp = f.create_group('serialized_dicts')
         for k in dicts_to_serialize:
