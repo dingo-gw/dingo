@@ -70,9 +70,9 @@ def plot_corner_multi(
             labels=common_parameters,
             weights=w,
             color=color,
-            no_fill_contours=False,
+            no_fill_contours=True,
             fig=fig,
-            **corner_params,
+            **corner_params
         )
         handles.append(
             plt.Line2D([], [], color=color, label=l, linewidth=5, markersize=20)
