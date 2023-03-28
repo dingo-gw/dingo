@@ -9,11 +9,12 @@ from pathlib import Path
 import yaml
 
 from dingo.core.models import PosteriorModel
+from dingo.core.utils.plotting import plot_corner_multi
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
 from dingo.gw.data.data_preparation import get_event_data_and_domain, \
     parse_settings_for_raw_data
-from dingo.gw.inference.visualization import load_ref_samples, generate_cornerplot
+from dingo.gw.inference.visualization import load_ref_samples
 
 
 def parse_args():
@@ -342,10 +343,10 @@ def analyze_event():
             ref_method = ref[time_event]["reference_samples"]["method"]
             sampler.to_hdf5(label=label, outdir=args.out_directory)
             ref_samples = load_ref_samples(ref_samples_file)
-            generate_cornerplot(
-                {"name": ref_method, "samples": ref_samples, "color": "blue"},
-                {"name": "dingo", "samples": sampler.samples, "color": "orange"},
-                filename=join(args.out_directory, f"cornerplot_{label}.pdf"),
+            plot_corner_multi(
+                [ref_samples, sampler.samples],
+                labels=[ref_method, "Dingo"],
+                filename=join(args.out_directory, f"cornerplot_{label}.pdf")
             )
     if args.exit_command:
         os.system(" ".join(args.exit_command))

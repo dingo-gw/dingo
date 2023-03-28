@@ -7,15 +7,15 @@ import numpy as np
 from typing import Optional
 
 import pandas as pd
-import matplotlib.pyplot as plt
-from chainconsumer import ChainConsumer
+from matplotlib import pyplot as plt
 from scipy.constants import golden
-from scipy.special import logsumexp, erfinv
+from scipy.special import logsumexp
 from bilby.core.prior import Constraint, DeltaFunction
 
 from dingo.core.dataset import DingoDataset
 from dingo.core.density import train_unconditional_density_estimator
 from dingo.core.utils.misc import recursive_check_dicts_are_equal
+from dingo.core.utils.plotting import plot_corner_multi
 
 DATA_KEYS = [
     "samples",
@@ -604,32 +604,19 @@ class Result(DingoDataset):
         if parameters:
             theta = theta[parameters]
 
-        c = ChainConsumer()
-
-        # Plot pre-importance sampling samples. I.e., drop weights, if present.
-        c.add_chain(theta, weights=None, color="orange", name="Dingo")
-        n = 1
-
         if "weights" in theta:
-            c.add_chain(
-                theta, weights=theta["weights"].to_numpy(), color="red", name="Dingo-IS"
+            plot_corner_multi(
+                [theta, theta],
+                weights=[None, theta["weights"].to_numpy()],
+                labels=["Dingo", "Dingo-IS"],
+                filename=filename,
             )
-            n = 2
-
-        c.configure(
-            linestyles=["-"] * n,
-            linewidths=[1.5] * n,
-            sigmas=[np.sqrt(2) * erfinv(x) for x in [0.5, 0.9]],
-            shade=[False] + [True] * (n - 1),
-            shade_alpha=0.3,
-            bar_shade=False,
-            label_font_size=10,
-            tick_font_size=10,
-            usetex=False,
-            legend_kwargs={"fontsize": 30},
-            kde=0.7,
-        )
-        c.plotter.plot(filename=filename)
+        else:
+            plot_corner_multi(
+                theta,
+                labels="Dingo",
+                filename=filename,
+            )
 
     def plot_log_probs(self, filename="log_probs.png"):
         """
