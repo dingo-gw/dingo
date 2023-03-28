@@ -5,8 +5,8 @@ domain:
   delta_f: 0.00390625 # = 1/256
 
 waveform_generator:
-#  approximant: IMRPhenomPv2_NRTidal
-  approximant: IMRPhenomXPHM
+  approximant: IMRPhenomPv2_NRTidal
+#  approximant: IMRPhenomXPHM
   f_ref: 10.0
 
 intrinsic_prior:
@@ -23,7 +23,7 @@ intrinsic_prior:
   phi_12: default
   phi_jl: default
   theta_jn: default
-#  lambda_1: bilby.core.prior.Uniform(minimum=0.0, maximum=5000)
+  lambda_1: bilby.core.prior.Uniform(minimum=0.0, maximum=5000)
 #  lambda_2: bilby.core.prior.Uniform(minimum=0.0, maximum=5000)
   # Reference values for fixed (extrinsic) parameters. These are needed to generate a waveform.
   luminosity_distance: 100.0  # Mpc

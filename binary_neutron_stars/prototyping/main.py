@@ -7,7 +7,7 @@ from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.waveform_generator import WaveformGenerator
 from dingo.gw.dataset.generate_dataset import generate_parameters_and_polarizations
 
-from multibanded_frequency_domain import MultibandedFrequencyDomain
+from dingo.gw.domains.multibanded_frequency_domain import MultibandedFrequencyDomain
 from heterodyning import (
     heterodyne_LO,
     factor_fiducial_waveform,

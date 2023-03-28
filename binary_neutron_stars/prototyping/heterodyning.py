@@ -3,7 +3,7 @@ import numpy as np
 import torch
 
 from dingo.gw.domains import FrequencyDomain
-from multibanded_frequency_domain import MultibandedFrequencyDomain
+from dingo.gw.domains.multibanded_frequency_domain import MultibandedFrequencyDomain
 
 
 def heterodyne_LO(data, domain, chirp_mass):

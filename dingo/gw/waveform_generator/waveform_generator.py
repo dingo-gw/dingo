@@ -265,6 +265,8 @@ class WaveformGenerator:
             if isinstance(self.domain, FrequencyDomain):
                 lal_target_function = "SimInspiralFD"
             elif isinstance(self.domain, TimeDomain):
+                # elif isinstance(self.domain, MultibandedFrequencyDomain):
+                #     lal_target_function = "SimInspiralChooseFDWaveformSequence"
                 lal_target_function = "SimInspiralTD"
             else:
                 raise ValueError(f"Unsupported domain type {type(self.domain)}.")
@@ -273,6 +275,7 @@ class WaveformGenerator:
             "SimInspiralTD",
             "SimInspiralChooseTDModes",
             "SimInspiralChooseFDModes",
+            # "SimInspiralChooseFDWaveformSequence",
             "SimIMRPhenomXPCalculateModelParametersFromSourceFrame",
         ]:
             raise ValueError(
@@ -368,6 +371,19 @@ class WaveformGenerator:
                 + domain_pars
                 + (lal_params, self.approximant)
             )
+
+        elif lal_target_function == "SimInspiralChooseFDWaveformSequence":
+            # LS.SimInspiralChooseFDWaveformSequence takes parameters:
+            #   phiRef, m1, m2, S1x, S1y, S1z, S2x, S2y, S2z
+            #   f_ref, distance, iota, lal_params, approximant, frequency_array
+            lal_parameter_tuple = (
+                phase
+                + masses
+                + spins_cartesian
+                + (f_ref, r, iota, lal_params, self.approximant)
+            )
+            lal_parameter_tuple = tuple(float(p) for p in lal_parameter_tuple)
+            lal_parameter_tuple = (*lal_parameter_tuple, self.domain())
 
         elif lal_target_function == "SimInspiralTD":
             # LS.SimInspiralTD takes parameters:

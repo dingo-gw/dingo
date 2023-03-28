@@ -1,5 +1,5 @@
 from dingo.gw.domains import Domain
-from multibanded_frequency_domain import MultibandedFrequencyDomain
+from dingo.gw.domains.multibanded_frequency_domain import MultibandedFrequencyDomain
 from heterodyning import factor_fiducial_waveform
 
 

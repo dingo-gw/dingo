@@ -5,7 +5,7 @@ import yaml
 import matplotlib.pyplot as plt
 from torchvision.transforms import Compose
 
-from dingo.gw.domains import build_domain, FrequencyDomain
+from dingo.gw.domains import build_domain
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.waveform_generator import WaveformGenerator
 from dingo.gw.dataset.generate_dataset import (
@@ -15,15 +15,11 @@ from dingo.gw.dataset.generate_dataset import (
 )
 from dingo.gw.SVD import ApplySVD
 
-from multibanded_frequency_domain import MultibandedFrequencyDomain
-from multibanding_utils import (
+from dingo.gw.domains.multibanded_frequency_domain import (
+    MultibandedFrequencyDomain,
     get_periods,
-    number_of_zero_crossings,
     get_decimation_bands_adaptive,
-    get_decimation_bands_from_chirp_mass,
-    duration_LO,
 )
-from heterodyning import factor_fiducial_waveform, change_heterodyning
 from bns_transforms import ApplyHeterodyning, ApplyDecimation
 
 if __name__ == "__main__":
@@ -49,9 +45,12 @@ if __name__ == "__main__":
         min_num_bins_per_period=16,
         delta_f_max=3.0,
     )
-    mfd = MultibandedFrequencyDomain(bands, ufd)
+    mfd = MultibandedFrequencyDomain(bands, ufd.domain_dict)
     print(len(mfd))
     print(bands)
+
+    # Compute mismatches: multiband->heterodyne vs. heterodyne->decimate
+
     hp_het = polarizations_het["h_plus"]
     fig = plt.figure()
     fig.set_size_inches((8, 8))

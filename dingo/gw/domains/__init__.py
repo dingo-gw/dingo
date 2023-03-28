@@ -1,6 +1,7 @@
 from .base import Domain
 from .frequency_domain import FrequencyDomain
 from .time_domain import TimeDomain
+from .multibanded_frequency_domain import MultibandedFrequencyDomain
 
 
 def build_domain(settings: dict) -> Domain:
@@ -27,6 +28,8 @@ def build_domain(settings: dict) -> Domain:
     kwargs = {k: v for k, v in settings.items() if k != "type"}
     if settings["type"] in ["FrequencyDomain", "FD"]:
         return FrequencyDomain(**kwargs)
+    elif settings["type"] in ["MultibandedFrequencyDomain", "MFD"]:
+        return MultibandedFrequencyDomain(**kwargs)
     elif settings["type"] == ["TimeDomain", "TD"]:
         return TimeDomain(**kwargs)
     else:
