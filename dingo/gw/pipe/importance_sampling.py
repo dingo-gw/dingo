@@ -117,6 +117,12 @@ class ImportanceSamplingInput(Input):
                 "num_calibration_nodes": self.spline_calibration_nodes,
                 "num_calibration_curves": self.spline_calibration_curves,
             }
+        elif self.calibration_model == None:
+            return None
+        else:
+            raise ValueError(
+                "The only calibration model which is supported is 'CubicSpline'"
+            )
 
     @property
     def importance_sampling_settings(self):
@@ -124,7 +130,6 @@ class ImportanceSamplingInput(Input):
 
     @importance_sampling_settings.setter
     def importance_sampling_settings(self, settings):
-
         # Set up defaults.
         if "phase" not in self.result.samples.columns:
             self._importance_sampling_settings = IMPORTANCE_SAMPLING_SETTINGS[
