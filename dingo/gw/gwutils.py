@@ -67,12 +67,12 @@ def get_mismatch(a, b, domain, asd_file=None):
             psd.frequency_array, psd.asd_array, bounds_error=False, fill_value=np.inf
         )
         asd_array = asd_interp(domain.sample_frequencies)
-        a /= asd_array
-        b /= asd_array
+        a = a / asd_array
+        b = b / asd_array
     min_idx = domain.min_idx
-    inner_ab = np.sum((a.conj() * b)[min_idx:], axis=0).real
-    inner_aa = np.sum((a.conj() * a)[min_idx:], axis=0).real
-    inner_bb = np.sum((b.conj() * b)[min_idx:], axis=0).real
+    inner_ab = np.sum((a.conj() * b)[...,min_idx:], axis=-1).real
+    inner_aa = np.sum((a.conj() * a)[...,min_idx:], axis=-1).real
+    inner_bb = np.sum((b.conj() * b)[...,min_idx:], axis=-1).real
     overlap = inner_ab / np.sqrt(inner_aa * inner_bb)
     return 1 - overlap
 
