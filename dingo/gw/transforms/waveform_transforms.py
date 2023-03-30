@@ -158,7 +158,10 @@ def factor_fiducial_waveform(
 
         # Expand across possible batch dimension.
         if type(chirp_mass) == np.float64 or type(chirp_mass) == float:
-            mc_f = chirp_mass * f
+            # Use np.outer.squeeze instead of chirp_mass * f, as the latter has a
+            # different precision, and we don't want the behaviour of this function to
+            # depend on whether chirp_mass is an array or float.
+            mc_f = np.outer(chirp_mass, f).squeeze()
             if f[0] == 0.0:
                 mc_f[0] = 1.0
         elif type(chirp_mass) == np.ndarray:
@@ -177,7 +180,7 @@ def factor_fiducial_waveform(
 
         # Avoid taking a negative power of 0 in the first index. This will get
         # chopped off or multiplied by 0 later anyway.
-        if f[0] == 0.0:
+        if (f[..., 0] == 0.0).all():
             mc_f[..., 0] = 1.0
 
         # Leading (0PN) phase
