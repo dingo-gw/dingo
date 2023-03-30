@@ -67,7 +67,7 @@ class Decimate(object):
         ----------
         multibanded_frequency_domain: MultibandedFrequencyDomain
             New domain of the decimated waveform data. Original waveform data must be in
-            multibanded_frequency_domain.original_domain
+            multibanded_frequency_domain.base_domain
         """
         self.multibanded_frequency_domain = multibanded_frequency_domain
 

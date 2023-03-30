@@ -21,40 +21,54 @@ class MultibandedFrequencyDomain(Domain):
     def __init__(
         self,
         bands: Iterable[Iterable[float]],
-        original_domain: Union[FrequencyDomain, dict] = None,
+        base_domain: Union[FrequencyDomain, dict] = None,
     ):
         """
         Parameters
         ----------
         bands: Iterable[Iterable[float]]
             Frequency bands. Each band contains three elements, [f_min, f_max, delta_f].
-        original_domain: Union[FrequencyDomain, dict] = None
+        base_domain: Union[FrequencyDomain, dict] = None
             Original (uniform frequency) domain of data, which is the starting point
             for the decimation. This determines the decimation details and the noise_std.
             Either provided as dict for build_domain, or as domain_object.
         """
         self._bands = np.array(bands)
         self.initialize_bands()
-        if type(original_domain) == dict:
+        if type(base_domain) == dict:
             from dingo.gw.domains import build_domain
 
-            original_domain = build_domain(original_domain)
-            if not isinstance(original_domain, FrequencyDomain):
+            base_domain = build_domain(base_domain)
+            if not isinstance(base_domain, FrequencyDomain):
                 raise ValueError(
-                    f"Expected domain type FrequencyDomain, got {type(original_domain)}."
+                    f"Expected domain type FrequencyDomain, got {type(base_domain)}."
                 )
-        self.original_domain = original_domain
-        if self.original_domain is not None:
+        self.base_domain = base_domain
+        if self.base_domain is not None:
             self.initialize_decimation()
 
     @classmethod
-    def init_for_decimation(
-        cls, original_domain, chirp_mass_min, alpha_bands, delta_f_max
+    def init_from_polarizations(
+        cls,
+        base_domain,
+        polarizations,
+        num_bins_per_period,
+        delta_f_max,
+        multibanding_method="adaptive",
     ):
-        bands = get_bands_for_decimation(
-            original_domain, chirp_mass_min, alpha_bands, delta_f_max
-        )
-        return cls(bands, original_domain)
+        if multibanding_method == "adaptive":
+            bands = get_decimation_bands_adaptive(
+                base_domain,
+                np.concatenate(list(polarizations.values())),
+                min_num_bins_per_period=num_bins_per_period,
+                delta_f_max=delta_f_max,
+            )
+        else:
+            raise NotImplementedError(
+                f"Unknown multibanding method {multibanding_method}."
+            )
+
+        return cls(bands, base_domain)
 
     def initialize_bands(self):
         if len(self._bands.shape) != 2 or self._bands.shape[1] != 3:
@@ -84,40 +98,40 @@ class MultibandedFrequencyDomain(Domain):
         self._f_max = self._sample_frequencies[-1]
 
     def initialize_decimation(self):
-        if self.original_domain is None:
+        if self.base_domain is None:
             raise ValueError(
                 "Original domain needs to be specified to initialize decimation."
             )
-        if not np.all(self._delta_f_bands % self.original_domain.delta_f == 0):
+        if not np.all(self._delta_f_bands % self.base_domain.delta_f == 0):
             raise NotImplementedError(
                 "delta_f_bands need to be multiple of delta_f of the original domain."
             )
         self.decimation_inds_bands = []
         for f_min_band, f_max_band, delta_f_band in self._bands:
-            decimation_factor_band = int(delta_f_band / self.original_domain.delta_f)
+            decimation_factor_band = int(delta_f_band / self.base_domain.delta_f)
             idx_lower_band = int(
-                (f_min_band - delta_f_band / 2.0 + self.original_domain.delta_f / 2.0)
-                / self.original_domain.delta_f
+                (f_min_band - delta_f_band / 2.0 + self.base_domain.delta_f / 2.0)
+                / self.base_domain.delta_f
             )
             # idx_upper_band is *inclusive*, so one slices with
             # [...idx_lower_band:idx_upper_band + 1]
             idx_upper_band = int(
-                (f_max_band + delta_f_band / 2.0 - self.original_domain.delta_f / 2.0)
-                / self.original_domain.delta_f
+                (f_max_band + delta_f_band / 2.0 - self.base_domain.delta_f / 2.0)
+                / self.base_domain.delta_f
             )
             self.decimation_inds_bands.append(
                 [idx_lower_band, idx_upper_band, decimation_factor_band]
             )
 
     def decimate(self, data):
-        if data.shape[-1] == len(self.original_domain):
+        if data.shape[-1] == len(self.base_domain):
             offset_idx = 0
-        elif data.shape[-1] == len(self.original_domain) - self.original_domain.min_idx:
-            offset_idx = -self.original_domain.min_idx
+        elif data.shape[-1] == len(self.base_domain) - self.base_domain.min_idx:
+            offset_idx = -self.base_domain.min_idx
         else:
             raise ValueError(
                 f"Provided data has {data.shape[-1]} bins, which is incompatible with "
-                f"the expected domain of length {len(self.original_domain)}"
+                f"the expected domain of length {len(self.base_domain)}"
             )
         if isinstance(data, np.ndarray):
             data_decimated = np.empty((*data.shape[:-1], len(self)), dtype=data.dtype)
@@ -381,7 +395,7 @@ class MultibandedFrequencyDomain(Domain):
         return {
             "type": "MultibandedFrequencyDomain",
             "bands": self.bands,
-            "original_domain": self.original_domain.domain_dict(),
+            "base_domain": self.base_domain.domain_dict(),
         }
 
 
@@ -391,7 +405,7 @@ class MultibandedFrequencyDomain(Domain):
 
 
 def get_decimation_bands_adaptive(
-    original_domain: FrequencyDomain,
+    base_domain: FrequencyDomain,
     waveforms: np.ndarray,
     min_num_bins_per_period: int = 16,
     delta_f_max: float = np.inf,
@@ -405,7 +419,7 @@ def get_decimation_bands_adaptive(
 
     Parameters
     ----------
-    original_domain: FrequencyDomain
+    base_domain: FrequencyDomain
         Original uniform frequency domain of the data to be decimated.
     waveforms: np.ndarray
         2D array with complex waveforms in the original uniform frequency domain. Used
@@ -423,18 +437,18 @@ def get_decimation_bands_adaptive(
         List of frequency bands. Can be used to initialize MultibandedFrequencyDomain.
 
     """
-    if len(waveforms.shape) != 2 or waveforms.shape[-1] != len(original_domain):
+    if len(waveforms.shape) != 2 or waveforms.shape[-1] != len(base_domain):
         raise ValueError(
             f"Waveform array has shape {waveforms.shape}, expected, "
-            f"(N, {len(original_domain)}): "
-            f"N waveforms, each of the same length {len(original_domain)} as domain."
+            f"(N, {len(base_domain)}): "
+            f"N waveforms, each of the same length {len(base_domain)} as domain."
         )
-    max_dec_factor_global = delta_f_max / original_domain.delta_f
+    max_dec_factor_global = delta_f_max / base_domain.delta_f
 
     # For some reason, the last bin of a waveform is always zero, so we need to get rid
     # of that for the step below.
-    x = waveforms[:, original_domain.min_idx : -1]
-    f = original_domain()[original_domain.min_idx : -1]
+    x = waveforms[:, base_domain.min_idx : -1]
+    f = base_domain()[base_domain.min_idx : -1]
 
     # Ideally, we would just call
     #   periods = np.min(get_periods(x, upper_bound_for_monotonicity=True), axis=0)
@@ -465,22 +479,22 @@ def get_decimation_bands_adaptive(
     # delta_f for the bands.
     bands = []
     for lower, upper, dec_factor in bands_inds:
-        delta_f_band = dec_factor * original_domain.delta_f
-        f_min_band = f[lower] + (dec_factor - 1) / 2 * original_domain.delta_f
-        f_max_band = f[upper] - (dec_factor - 1) / 2 * original_domain.delta_f
+        delta_f_band = dec_factor * base_domain.delta_f
+        f_min_band = f[lower] + (dec_factor - 1) / 2 * base_domain.delta_f
+        f_max_band = f[upper] - (dec_factor - 1) / 2 * base_domain.delta_f
         bands.append([f_min_band, f_max_band, delta_f_band])
 
     # test consistency
-    # mfd = MultibandedFrequencyDomain(bands, original_domain)
+    # mfd = MultibandedFrequencyDomain(bands, base_domain)
     # bands_inds_old = np.array(bands_inds)
-    # bands_inds_old[..., :2] += original_domain.min_idx
+    # bands_inds_old[..., :2] += base_domain.min_idx
     # assert (bands_inds_old == np.array(mfd.decimation_inds_bands)).all()
 
     return bands
 
 
 def get_decimation_bands_from_chirp_mass(
-    original_domain: FrequencyDomain,
+    base_domain: FrequencyDomain,
     chirp_mass_min: float,
     alpha: int = 1,
     delta_f_max: float = np.inf,
@@ -493,7 +507,7 @@ def get_decimation_bands_from_chirp_mass(
 
     Parameters
     ----------
-    original_domain: FrequencyDomain
+    base_domain: FrequencyDomain
         Original uniform frequency domain of the data to be decimated.
     chirp_mass_min: float
         Minimum chirp mass. Smaller chirp masses require larger resolution.
@@ -508,31 +522,31 @@ def get_decimation_bands_from_chirp_mass(
     bands: list
         List of frequency bands. Can be used to initialize MultibandedFrequencyDomain.
     """
-    if not is_power_of_2(1 / original_domain.delta_f):
+    if not is_power_of_2(1 / base_domain.delta_f):
         raise NotImplementedError(
             f"Decimation only implemented for domains with delta_f = 1 / k**2, "
-            f"got {original_domain.delta_f}."
+            f"got {base_domain.delta_f}."
         )
     if not is_power_of_2(alpha):
         raise NotImplementedError(f"Alpha needs to be a power of 2, got {alpha}.")
 
-    # delta_f and f_min for first band, derived from original_domain and chirp_mass_min
+    # delta_f and f_min for first band, derived from base_domain and chirp_mass_min
     delta_f_band = alpha / ceil_to_power_of_2(
-        duration_LO(chirp_mass_min, original_domain.f_min)
+        duration_LO(chirp_mass_min, base_domain.f_min)
     )
-    # delta_f can't be smaller than original_domain.delta_f
-    delta_f_band = max(delta_f_band, original_domain.delta_f)
-    f = original_domain.f_min - original_domain.delta_f / 2.0 + delta_f_band / 2.0
+    # delta_f can't be smaller than base_domain.delta_f
+    delta_f_band = max(delta_f_band, base_domain.delta_f)
+    f = base_domain.f_min - base_domain.delta_f / 2.0 + delta_f_band / 2.0
     bands = []
 
-    while f + delta_f_band / 2 < original_domain.f_max:
+    while f + delta_f_band / 2 < base_domain.f_max:
 
         f_min_band = f
         while is_within_band(
             f + delta_f_band,
             chirp_mass_min,
             delta_f_band,
-            original_domain.f_max,
+            base_domain.f_max,
             alpha,
             delta_f_max,
         ):

@@ -66,7 +66,7 @@ if __name__ == "__main__":
     mass_ratio = np.array(parameters["mass_ratio"])
     chirp_mass_pert = chirp_mass + np.random.normal(0, 0e-3, size=chirp_mass.shape)
 
-    mfd = MultibandedFrequencyDomain.init_for_decimation(
+    mfd = MultibandedFrequencyDomain.init_from_polarizations(
         original_domain, chirp_mass_min=1.0, alpha_bands=4, delta_f_max=8.0
     )
     mfd.initialize_decimation()
@@ -114,8 +114,8 @@ if __name__ == "__main__":
 
     # for idx in (0,1,2):
     #     plt.title(f"{idx}, {chirp_mass[idx]}")
-    #     plt.plot(original_domain(), hp[idx])
-    #     plt.plot(original_domain(), hp_het[idx])
+    #     plt.plot(base_domain(), hp[idx])
+    #     plt.plot(base_domain(), hp_het[idx])
     #     plt.xlim((20, 30))
     #     plt.show()
 
