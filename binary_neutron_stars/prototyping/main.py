@@ -1,3 +1,4 @@
+import lal
 import numpy as np
 
 np.random.seed(1)
@@ -8,11 +9,18 @@ from dingo.gw.waveform_generator import WaveformGenerator
 from dingo.gw.dataset.generate_dataset import generate_parameters_and_polarizations
 
 from dingo.gw.domains.multibanded_frequency_domain import MultibandedFrequencyDomain
-from heterodyning import (
-    heterodyne_LO,
-    factor_fiducial_waveform,
-    change_heterodyning,
-)
+from dingo.gw.transforms.waveform_transforms import change_phase_heterodyning, \
+    factor_fiducial_waveform
+
+
+def heterodyne_LO(data, domain, chirp_mass):
+    mc_f = chirp_mass * domain()
+    if mc_f[0] == 0.0:
+        mc_f[0] = 1.0
+    pi_mc_f_SI = np.pi * (lal.GMSUN_SI / lal.C_SI ** 3) * mc_f
+    fiducial_phase = (3 / 128) * (pi_mc_f_SI) ** (-5 / 3)
+    return domain.add_phase(data, -fiducial_phase)
+
 
 if __name__ == "__main__":
     # build domain
@@ -71,7 +79,7 @@ if __name__ == "__main__":
     hp_hetp = factor_fiducial_waveform(hp, original_domain, chirp_mass_pert)
     hp_hetp_dec = mfd.decimate(hp_hetp)
 
-    hp_het_dec_hetp = change_heterodyning(
+    hp_het_dec_hetp = change_phase_heterodyning(
         hp_het_dec,
         mfd,
         new_kwargs={"chirp_mass": chirp_mass_pert},

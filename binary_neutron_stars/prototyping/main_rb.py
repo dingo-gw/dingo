@@ -21,7 +21,7 @@ from dingo.gw.domains.multibanded_frequency_domain import (
     get_periods,
     get_decimation_bands_adaptive,
 )
-from bns_transforms import ApplyHeterodyning, ApplyDecimation
+from dingo.gw.transforms.waveform_transforms import HeterodynePhase, Decimate
 
 if __name__ == "__main__":
     num_processes = 10
@@ -32,7 +32,7 @@ if __name__ == "__main__":
     prior = build_prior_with_defaults(settings["intrinsic_prior"])
     waveform_generator = WaveformGenerator(domain=ufd, **settings["waveform_generator"])
     waveform_generator_het = WaveformGenerator(
-        domain=ufd, transform=ApplyHeterodyning(ufd), **settings["waveform_generator"]
+        domain=ufd, transform=HeterodynePhase(ufd), **settings["waveform_generator"]
     )
 
     # generate polarizations
@@ -54,11 +54,11 @@ if __name__ == "__main__":
 
     params = dict(parameters_het.iloc[0])
     waveform_generator_het_mfd = WaveformGenerator(
-        domain=mfd, transform=ApplyHeterodyning(mfd), **settings["waveform_generator"]
+        domain=mfd, transform=HeterodynePhase(mfd), **settings["waveform_generator"]
     )
     waveform_generator_het_dec = WaveformGenerator(
         domain=ufd,
-        transform=Compose([ApplyHeterodyning(ufd), ApplyDecimation(mfd)]),
+        transform=Compose([HeterodynePhase(ufd), Decimate(mfd)]),
         **settings["waveform_generator"],
     )
     polarizations_het_mfd = waveform_generator_het_mfd.generate_hplus_hcross(params)
@@ -106,7 +106,7 @@ if __name__ == "__main__":
     plt.ylabel("Period [bins]")
     plt.show()
 
-    transforms = Compose([ApplyHeterodyning(ufd), ApplyDecimation(mfd)])
+    transforms = Compose([HeterodynePhase(ufd), Decimate(mfd)])
     waveform_generator_het_dec = WaveformGenerator(
         domain=ufd, transform=transforms, **settings["waveform_generator"]
     )
@@ -134,7 +134,7 @@ if __name__ == "__main__":
     )
 
     transforms = Compose(
-        [ApplyHeterodyning(ufd), ApplyDecimation(mfd), ApplySVD(basis)]
+        [HeterodynePhase(ufd), Decimate(mfd), ApplySVD(basis)]
     )
     waveform_generator_het_dec_svd = WaveformGenerator(
         domain=ufd, transform=transforms, **settings["waveform_generator"]

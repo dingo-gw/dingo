@@ -24,8 +24,8 @@ from dingo.gw.domains.multibanded_frequency_domain import (
     get_periods,
     get_decimation_bands_adaptive,
 )
-from bns_transforms import ApplyHeterodyning, ApplyDecimation
-from heterodyning import change_heterodyning
+from dingo.gw.transforms.waveform_transforms import HeterodynePhase, Decimate, \
+    change_phase_heterodyning
 
 
 def print_mismatches(mismatches):
@@ -51,7 +51,7 @@ if __name__ == "__main__":
     #   wfg_het:        in uniform frequency domain
     #   wfg_het_mfd:    in multibanded frequency domain
     wfg_het = WaveformGenerator(
-        domain=ufd, transform=ApplyHeterodyning(ufd), **settings["waveform_generator"]
+        domain=ufd, transform=HeterodynePhase(ufd), **settings["waveform_generator"]
     )
     _, pols_het = generate_parameters_and_polarizations(
         wfg_het, prior, 100, num_processes
@@ -65,7 +65,7 @@ if __name__ == "__main__":
     mfd = MultibandedFrequencyDomain(bands, ufd.domain_dict)
     print(len(mfd), bands)
     wfg_het_mfd = WaveformGenerator(
-        domain=mfd, transform=ApplyHeterodyning(mfd), **settings["waveform_generator"]
+        domain=mfd, transform=HeterodynePhase(mfd), **settings["waveform_generator"]
     )
 
     # generate polarizations
@@ -114,7 +114,7 @@ if __name__ == "__main__":
     # as not all ufd bins that are averaged to a single mfd bin will be transformed in
     # the same way; instead, the applied phases will be slightly different.
 
-    delta_chirp_mass_max = 0.002
+    delta_chirp_mass_max = 0.005
     delta_time_max = 0.003
 
     # change heterodyning chirp mass
@@ -124,17 +124,14 @@ if __name__ == "__main__":
         + np.random.choice([-1, 1], size=len(parameters)) * delta_chirp_mass_max
     }
     # reference
-    print("a")
     pols_hetp = {
-        pol_name: change_heterodyning(pol, ufd, kwargs_het_old, kwargs_het_new)
+        pol_name: change_phase_heterodyning(pol, ufd, kwargs_het_old, kwargs_het_new)
         for pol_name, pol in pols_het.items()
     }
-    print("b")
     pols_hetp_dec = {pol_name: mfd.decimate(pol) for pol_name, pol in pols_hetp.items()}
     # ours
-    print("c")
     pols_hetp_mfd = {
-        pol_name: change_heterodyning(pol, mfd, kwargs_het_old, kwargs_het_new)
+        pol_name: change_phase_heterodyning(pol, mfd, kwargs_het_old, kwargs_het_new)
         for pol_name, pol in pols_het_mfd.items()
     }
     # mismatches
