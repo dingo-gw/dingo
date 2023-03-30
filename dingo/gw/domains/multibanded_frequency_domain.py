@@ -624,7 +624,8 @@ def is_within_band(f, chirp_mass_min, delta_f_band, f_max, alpha=1, delta_f_max=
 def number_of_zero_crossings(x):
     if np.iscomplex(x).any():
         raise ValueError("Only works for real arrays.")
-    return np.sum((x[..., :-1] * x[..., 1:]) < 0, axis=-1) + np.sum(x == 0, axis=-1)
+    x = x / np.max(np.abs(x))
+    return np.sum((x[..., :-1] * x[..., 1:]) < 0, axis=-1)
 
 
 def get_period_for_complex_oscillation(
