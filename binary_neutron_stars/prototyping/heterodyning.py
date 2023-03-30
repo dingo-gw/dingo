@@ -25,8 +25,21 @@ def factor_fiducial_waveform(
     data, domain, chirp_mass, mass_ratio=None, order=0, inverse=False
 ):
     """
-    Divides the data by the fiducial waveform defined by the chirp mass and (
-    optionally) mass ratio. Allows for batching.
+    Relative binning / heterodyning. Divides the data by a fiducial waveform defined by
+    the chirp mass and (optionally) mass ratio. Allows for batching.
+
+    At leading order, this factors out the overall chirp by dividing the data by a
+    fiducial waveform of the form
+        exp( - 1j * (3/128) * (pi G chirp_mass f / c**3)**(-5/3) ) ;
+    see 2001.11412, eq. (7.2). This is the leading order chirp due to the emission of
+    quadrupole radiation.
+
+    At next-to-leading order, this implements 1PN corrections involving the mass ratio.
+
+    We do not include any amplitude in the fiducial waveform, since at inference time
+    this transformation will be applied to noisy data. Multiplying the frequency-domain
+    noise by a complex number of unit norm is allowed because it only changes the
+    phase, not the overall amplitude, which would change the noise PSD.
 
     Parameters
     ----------
@@ -34,12 +47,19 @@ def factor_fiducial_waveform(
         If a dict, the keys would correspond to different detectors or
         polarizations. For a Tensor, these would be within different components.
         This method uses the same fiducial waveform for each detector.
-    chirp_mass : Union[np.array, torch.Tensor]
-    mass_ratio : Union[np.array, torch.Tensor]
+    domain : Domain
+        Only works for a FrequencyDomain or MultibandedFrequencyDomain at present.
+    chirp_mass : Union[np.array, torch.Tensor, float]
+        Chirp mass parameter(s).
+    mass_ratio : Union[np.array, torch.Tensor, float]
+        Mass ratio parameter(s).
+    order : int
+        Twice the post-Newtonian order for the expansion. Valid orders are 0 and 2.
 
     Returns
     -------
-    dict or torch.Tensor of the same form as data.
+    data: Union[dict, torch.Tensor]
+        Transformed data, of the same form as data.
     """
     if order not in (0, 2):
         raise ValueError(f"Order {order} invalid. Acceptable values are 0 and 2.")
