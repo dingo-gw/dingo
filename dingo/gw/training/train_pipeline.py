@@ -101,13 +101,10 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
     if local_settings.get("wandb", False):
         try:
             import wandb
-            run_id = local_settings["wandb_run_id"]
             wandb.init(
-                project="dingo-devel",
-                id=run_id,
                 config=full_settings,
-                group="hyperparameter_tuning",
                 dir=train_dir,
+                **local_settings["wandb"],
             )
         except ImportError:
             print("WandB is enabled but not installed.")
@@ -137,20 +134,15 @@ def prepare_training_resume(checkpoint_name, local_settings, train_dir):
     wfd = build_dataset(pm.metadata["train_settings"]["data"])
 
     if local_settings.get("wandb", False):
-
         try:
             import wandb
             wandb.init(
-                project=local_settings["wandb"].get("project", "dingo-devel"),
-                id=local_settings["wandb"]["run_id"],
-                group=local_settings["wandb"].get("group", "hyperparameter_tuning"),
                 resume="must",
                 dir=train_dir,
+                **local_settings["wandb"],
             )
-        except (ImportError, KeyError):
-            print(
-                "WandB is enabled but not installed or no run_id has been provided for resuming the run."
-            )
+        except ImportError:
+            print("WandB is enabled but not installed.")
 
     return pm, wfd
 
@@ -354,10 +346,10 @@ def train_local():
 
         local_settings = train_settings.pop("local")
         with open(os.path.join(args.train_dir, "local_settings.yaml"), "w") as f:
-            if local_settings.get("wandb", False) and "wandb_run_id" not in local_settings.keys():
+            if local_settings.get("wandb", False) and "id" not in local_settings["wandb"].keys():
                 try:
                     import wandb
-                    local_settings["wandb_run_id"] = wandb.util.generate_id()
+                    local_settings["wandb"]["id"] = wandb.util.generate_id()
                 except ImportError:
                     print("wandb not installed, cannot generate run id.")
             yaml.dump(local_settings, f, default_flow_style=False, sort_keys=False)

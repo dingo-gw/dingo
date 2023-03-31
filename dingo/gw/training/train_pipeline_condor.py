@@ -84,14 +84,10 @@ def train_condor():
 
             local_settings = train_settings.pop("local")
             with open(os.path.join(args.train_dir, "local_settings.yaml"), "w") as f:
-                if (
-                    local_settings.get("wandb", False)
-                    and "wandb_run_id" not in local_settings.keys()
-                ):
+                if local_settings.get("wandb", False) and "id" not in local_settings["wandb"].keys():
                     try:
                         import wandb
-
-                        local_settings["wandb_run_id"] = wandb.util.generate_id()
+                        local_settings["wandb"]["id"] = wandb.util.generate_id()
                     except ImportError:
                         print("wandb not installed, cannot generate run id.")
                 yaml.dump(local_settings, f, default_flow_style=False, sort_keys=False)

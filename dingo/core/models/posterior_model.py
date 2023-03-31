@@ -312,6 +312,8 @@ class PosteriorModel:
                 if use_wandb:
                     try:
                         import wandb
+                        wandb.define_metric("epoch")
+                        wandb.define_metric("*", step_metric="epoch")
                         wandb.log(
                             {
                                 "epoch": self.epoch,
