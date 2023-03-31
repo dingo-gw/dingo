@@ -10,7 +10,6 @@ import time
 from threadpoolctl import threadpool_limits
 import dingo.core.utils.trainutils
 import math
-import wandb
 
 from dingo.core.nn.nsf import (
     create_nsf_with_rb_projection_embedding_net,
@@ -72,7 +71,7 @@ class PosteriorModel:
         metadata: dict = None
             dict with metadata, used to save dataset_settings and train_settings
         """
-        self.version = f"dingo={get_version()}" # dingo version
+        self.version = f"dingo={get_version()}"  # dingo version
 
         self.optimizer_kwargs = None
         self.model_kwargs = None
@@ -275,8 +274,6 @@ class PosteriorModel:
             print(f"test loss: {test_loss:.3f}")
 
         else:
-            # if use_wandb:
-            #     wandb.watch(self.model, log="all", log_freq=10)
             while not runtime_limits.limits_exceeded(self.epoch):
                 self.epoch += 1
 
@@ -313,16 +310,21 @@ class PosteriorModel:
                 utils.write_history(train_dir, self.epoch, train_loss, test_loss, lr)
                 utils.save_model(self, train_dir, checkpoint_epochs=checkpoint_epochs)
                 if use_wandb:
-                    wandb.log(
-                        {
-                            "epoch": self.epoch,
-                            "learning_rate": lr[0],
-                            "train_loss": train_loss,
-                            "test_loss": test_loss,
-                            "train_time": train_time,
-                            "test_time": test_time,
-                        }
-                    )
+                    try:
+                        import wandb
+                        wandb.log(
+                            {
+                                "epoch": self.epoch,
+                                "learning_rate": lr[0],
+                                "train_loss": train_loss,
+                                "test_loss": test_loss,
+                                "train_time": train_time,
+                                "test_time": test_time,
+                            }
+                        )
+                    except ImportError:
+                        print("wandb not installed. Skipping logging to wandb.")
+
                 print(f"Finished training epoch {self.epoch}.\n")
 
     def sample(
