@@ -1,0 +1,7 @@
+device: cpu
+num_workers: 6
+use_wandb: false
+runtime_limits:
+  max_time_per_run: 36000
+  max_epochs_per_run: 30
+checkpoint_epochs: 15
