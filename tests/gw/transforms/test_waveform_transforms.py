@@ -52,7 +52,7 @@ def bns_setup():
     )
     _, pols_het = generate_parameters_and_polarizations(wfg_het, prior, 10, 0)
     mfd = MultibandedFrequencyDomain.init_from_polarizations(
-        ufd, pols_het, num_bins_per_period=16, delta_f_max=2.0
+        ufd, pols_het, min_num_bins_per_period=16, delta_f_max=2.0
     )
     wfg_het_mfd = WaveformGenerator(
         domain=mfd, transform=HeterodynePhase(mfd), **wfg_settings

@@ -52,16 +52,14 @@ class MultibandedFrequencyDomain(Domain):
         cls,
         base_domain,
         polarizations,
-        num_bins_per_period,
-        delta_f_max,
         multibanding_method="adaptive",
+        **kwargs,
     ):
         if multibanding_method == "adaptive":
             bands = get_decimation_bands_adaptive(
                 base_domain,
                 np.concatenate(list(polarizations.values())),
-                min_num_bins_per_period=num_bins_per_period,
-                delta_f_max=delta_f_max,
+                **kwargs,
             )
         else:
             raise NotImplementedError(
