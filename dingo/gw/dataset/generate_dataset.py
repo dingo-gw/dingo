@@ -13,8 +13,8 @@ from bilby.gw.prior import BBHPriorDict
 
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.gw.prior import build_prior_with_defaults
-from dingo.gw.domains import build_domain
-from dingo.gw.transforms import WhitenFixedASD
+from dingo.gw.domains import build_domain, build_domain_from_wfd_settings
+from dingo.gw.transforms import WhitenFixedASD, HeterodynePhase
 from dingo.gw.waveform_generator import WaveformGenerator, generate_waveforms_parallel
 from dingo.gw.SVD import SVDBasis, ApplySVD
 
@@ -147,8 +147,9 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
     A WaveformDataset based on the settings.
     """
 
+    # domain = build_domain(settings["domain"])
+    domain = build_domain_from_wfd_settings(settings, num_processes)
     prior = build_prior_with_defaults(settings["intrinsic_prior"])
-    domain = build_domain(settings["domain"])
     waveform_generator = WaveformGenerator(
         domain=domain,
         **settings["waveform_generator"],
@@ -168,6 +169,17 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
                 )
             )
 
+        if "phase_heterodyning" in settings["compression"]:
+            compression_transforms.append(
+                HeterodynePhase(
+                    domain,
+                    inverse=False,
+                    **settings["compression"]["phase_heterodyning"],
+                )
+            )
+
+        # *NOTE*: svd will be built based on polarizations with all compression
+        # transforms up to this point (i.e., if set, whitening, heterodyning).
         if "svd" in settings["compression"]:
             svd_settings = settings["compression"]["svd"]
 
@@ -177,7 +189,8 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
 
             # Otherwise, generate the basis based on simulated waveforms.
             else:
-                # If using whitened waveforms, then the SVD should be based on these.
+                # If using whitened or heterodyned waveforms, then the SVD should be
+                # based on these.
                 waveform_generator.transform = Compose(compression_transforms)
 
                 n_train = svd_settings["num_training_samples"]

@@ -7,7 +7,7 @@ from torchvision.transforms import Compose
 from dingo.core.dataset import DingoDataset
 from dingo.gw.SVD import SVDBasis, ApplySVD
 from dingo.gw.domains import build_domain
-from dingo.gw.transforms import WhitenFixedASD
+from dingo.gw.transforms import WhitenFixedASD, HeterodynePhase
 
 
 class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
@@ -160,11 +160,12 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             If provided, reduces the SVD size when decompressing (for speed).
         """
         decompression_transform_list = []
+        omit = self.settings.get("omit_decompression_transforms", [])
 
         # These transforms must be in reverse order compared to when dataset was
         # constructed.
 
-        if "svd" in self.settings["compression"]:
+        if "svd" in self.settings["compression"] and not "svd" in omit:
             assert self.svd is not None
 
             # We allow the option to reduce the size of the SVD used for decompression,
@@ -185,7 +186,19 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             svd_basis = SVDBasis(dictionary=self.svd)
             decompression_transform_list.append(ApplySVD(svd_basis, inverse=True))
 
-        if "whitening" in self.settings["compression"]:
+        if (
+            "phase_heterodyning" in self.settings["compression"]
+            and not "phase_heterodyning" in omit
+        ):
+            decompression_transform_list.append(
+                HeterodynePhase(
+                    self.domain,
+                    inverse=True,
+                    **self.settings["compression"]["phase_heterodyning"],
+                )
+            )
+
+        if "whitening" in self.settings["compression"] and not "whitening" in omit:
             decompression_transform_list.append(
                 WhitenFixedASD(
                     self.domain,
@@ -211,15 +224,18 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         polarizations = {
             pol: waveforms[idx] for pol, waveforms in self.polarizations.items()
         }
-
-        # Decompression transforms are assumed to apply only to the waveform,
-        # and do not involve parameters.
-        if self.decompression_transform is not None:
-            data_sample = {"waveform": polarizations}
-            polarizations = self.decompression_transform(data_sample)["waveform"]
-
-        # Main transforms can depend also on parameters.
         data = {"parameters": parameters, "waveform": polarizations}
+
+        # Decompression transforms.
+        if self.decompression_transform is not None:
+            data = self.decompression_transform(data)
+            if data["parameters"] != parameters:
+                raise ValueError(
+                    "Decompression transforms should not change parameters."
+                )
+
+        # Main transforms.
+        # data = {"parameters": parameters, "waveform": polarizations}
         if self.transform is not None:
             data = self.transform(data)
         return data

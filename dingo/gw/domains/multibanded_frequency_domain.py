@@ -33,17 +33,18 @@ class MultibandedFrequencyDomain(Domain):
             for the decimation. This determines the decimation details and the noise_std.
             Either provided as dict for build_domain, or as domain_object.
         """
-        self._bands = np.array(bands)
+        self.bands = np.array(bands)
         self.initialize_bands()
         if type(base_domain) == dict:
             from dingo.gw.domains import build_domain
 
             base_domain = build_domain(base_domain)
-            if not isinstance(base_domain, FrequencyDomain):
-                raise ValueError(
-                    f"Expected domain type FrequencyDomain, got {type(base_domain)}."
-                )
+
         self.base_domain = base_domain
+        if not isinstance(self.base_domain, FrequencyDomain):
+            raise ValueError(
+                f"Expected domain type FrequencyDomain, got {type(base_domain)}."
+            )
         if self.base_domain is not None:
             self.initialize_decimation()
 
@@ -55,6 +56,11 @@ class MultibandedFrequencyDomain(Domain):
         multibanding_method="adaptive",
         **kwargs,
     ):
+        if type(base_domain) == dict:
+            from dingo.gw.domains import build_domain
+
+            base_domain = build_domain(base_domain)
+
         if multibanding_method == "adaptive":
             bands = get_decimation_bands_adaptive(
                 base_domain,
@@ -69,16 +75,16 @@ class MultibandedFrequencyDomain(Domain):
         return cls(bands, base_domain)
 
     def initialize_bands(self):
-        if len(self._bands.shape) != 2 or self._bands.shape[1] != 3:
+        if len(self.bands.shape) != 2 or self.bands.shape[1] != 3:
             raise ValueError(
-                f"Expected format [num_bands, 3] for bands, got {self._bands.shape}."
+                f"Expected format [num_bands, 3] for bands, got {self.bands.shape}."
             )
-        self.num_bands = len(self._bands)
-        self._f_min_bands = self._bands[:, 0]
-        self._f_max_bands = self._bands[:, 1]
-        self._delta_f_bands = self._bands[:, 2]
+        self.num_bands = len(self.bands)
+        self._f_min_bands = self.bands[:, 0]
+        self._f_max_bands = self.bands[:, 1]
+        self._delta_f_bands = self.bands[:, 2]
         self._num_bins_bands = np.array(
-            [int((band[1] - band[0]) / band[2] + 1) for band in self._bands]
+            [int((band[1] - band[0]) / band[2] + 1) for band in self.bands]
         )
         self._f_bands = [
             np.linspace(f_min, f_max, num_bins)
@@ -105,7 +111,7 @@ class MultibandedFrequencyDomain(Domain):
                 "delta_f_bands need to be multiple of delta_f of the original domain."
             )
         self.decimation_inds_bands = []
-        for f_min_band, f_max_band, delta_f_band in self._bands:
+        for f_min_band, f_max_band, delta_f_band in self.bands:
             decimation_factor_band = int(delta_f_band / self.base_domain.delta_f)
             idx_lower_band = int(
                 (f_min_band - delta_f_band / 2.0 + self.base_domain.delta_f / 2.0)
@@ -162,7 +168,17 @@ class MultibandedFrequencyDomain(Domain):
         raise NotImplementedError()
 
     def update_data(self, data: np.ndarray, axis: int = -1, low_value: float = 0.0):
-        raise NotImplementedError()
+        """
+        Adjusts the data to be compatible with the domain. Updating
+        MultibandedFrequencyDomains is not implemented, so at present this method
+        simply checks that the data is compatible with the domain.
+        """
+        if data.shape[axis] != len(self):
+            raise ValueError(
+                f"Data (shape {data.shape}) incompatible with the domain (length "
+                f"{len(self)}."
+            )
+        return data
 
     def time_translate_data(self, data, dt):
         """
@@ -393,7 +409,7 @@ class MultibandedFrequencyDomain(Domain):
         return {
             "type": "MultibandedFrequencyDomain",
             "bands": self.bands,
-            "base_domain": self.base_domain.domain_dict(),
+            "base_domain": self.base_domain.domain_dict,
         }
 
 

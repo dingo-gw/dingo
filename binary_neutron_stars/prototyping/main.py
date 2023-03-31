@@ -130,4 +130,4 @@ if __name__ == "__main__":
 
     assert np.all(mfd.decimate(original_domain()) == mfd.sample_frequencies)
 
-    print(mfd._bands)
+    print(mfd.bands)
