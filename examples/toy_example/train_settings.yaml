@@ -1,5 +1,5 @@
 data:
-  waveform_dataset_path: /home/n/Documents/Research/Dingo/dingo/examples/toy_example/waveform_dataset.hdf5  # Contains intrinsic waveforms
+  waveform_dataset_path: /home/n/Documents/Research/Dingo/dingo/toy_example_train_dir/waveform_dataset.hdf5 # Contains intrinsic waveforms
   train_fraction: 0.95
   window:  # Needed to calculate window factor for simulated data
     type: tukey
@@ -19,9 +19,6 @@ data:
     psi: default
     luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0)
   ref_time: 1126259462.391
-  gnpe_time_shifts:
-    kernel: bilby.core.prior.Uniform(minimum=-0.001, maximum=0.001)
-    exact_equiv: True
   inference_parameters: default # [chirp_mass, mass_ratio,  luminosity_distance, dec]
 
 # Model architecture
@@ -50,11 +47,11 @@ model:
       num_validation_samples: 10
       size: 5
 
-# Training is divided in stages. They each require all settings as indicated below.
+# The first stage (and only) stage of training. 
 training:
   stage_0:
     epochs: 30
-    asd_dataset_path: /home/n/Documents/Research/Dingo/dingo/examples/toy_example/asds_O3.hdf5  # this should just contain a single fiducial ASD per detector for pretraining
+    asd_dataset_path: /home/n/Documents/Research/Dingo/dingo/toy_example_train_dir/asd_dataset_folder/asds_O1.hdf5  # this should just contain a single fiducial ASD per detector for pretraining
     freeze_rb_layer: True
     optimizer:
       type: adam

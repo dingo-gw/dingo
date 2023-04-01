@@ -42,6 +42,7 @@ As training a network from scratch can be expensive, we intend to also distribut
    :caption: Examples
    :maxdepth: 1
    
+   example_toy
    example_injection
 
 .. toctree::
