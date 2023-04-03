@@ -76,7 +76,7 @@ class WhitenFixedASD(object):
         else:
             psd = PowerSpectralDensity.from_aligo()
 
-        if psd.frequency_array[-1] < domain.f_max:
+        if psd.frequency_array[-1] < domain.sample_frequencies[-1]:
             raise ValueError(
                 f"ASD in {asd_file} has f_max={psd.frequency_array[-1]}, "
                 f"which is lower than domain f_max={domain.f_max}."
