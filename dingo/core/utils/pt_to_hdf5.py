@@ -34,13 +34,17 @@ def main():
         grp = f.create_group('serialized_dicts')
         for k in dicts_to_serialize:
             dict_str = json.dumps(d[k])
-            grp.create_dataset(k, data=dict_str, fletcher32=True)
+            grp.create_dataset(k, data=dict_str)
 
         # Save the OrderedDict containing the model weights
         # The keys are ordered alphanumerically as well.
         grp_model = f.create_group('model_weights')
         for k, v in d['model_state_dict'].items():
-            grp_model.create_dataset(k, data=v.numpy(), fletcher32=True)
+            if len(v.size()) > 0:
+                grp_model.create_dataset(k, data=v.numpy(), fletcher32=True)
+            else:
+                # fletcher32 is not available for scalars
+                grp_model.create_dataset(k, data=v.numpy())
 
         # Note we do not save optimizer_state_dict which is
         # not needed at inference time and saves a significant
@@ -48,7 +52,7 @@ def main():
 
         # Metadata for CVMFS LVK distribution
         # This needs to be exactly the same as the "basename" of the hdf5 file
-        f.attrs['CANONICAL_FILE_BASENAME'] = args.out_file
+        f.attrs['CANONICAL_FILE_BASENAME'] = os.path.basename(args.out_file)
         # TODO: We should add further metadata which are not encoded in json. Perhaps, a subset of 'model_kwargs'
 
 
