@@ -406,9 +406,10 @@ class MultibandedFrequencyDomain(Domain):
     @property
     def domain_dict(self):
         """Enables to rebuild the domain via calling build_domain(domain_dict)."""
+        # Call tolist() on self.bands, such that it can be saved as str for metadata.
         return {
             "type": "MultibandedFrequencyDomain",
-            "bands": self.bands,
+            "bands": self.bands.tolist(),
             "base_domain": self.base_domain.domain_dict,
         }
 
