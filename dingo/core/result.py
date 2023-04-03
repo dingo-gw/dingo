@@ -276,12 +276,16 @@ class Result(DingoDataset):
         valid_samples = (log_prior + delta_log_prob_target) != -np.inf
         theta = theta.iloc[valid_samples]
 
-        print(f"Calculating {len(theta)} likelihoods.")
-        t0 = time.time()
-        log_likelihood = self.likelihood.log_likelihood_multi(
-            theta, num_processes=num_processes
-        )
-        print(f"Done. This took {time.time() - t0:.2f} seconds.")
+        if "log_likelihood" not in self.samples.columns:
+            print(f"Calculating {len(theta)} likelihoods.")
+            t0 = time.time()
+            log_likelihood = self.likelihood.log_likelihood_multi(
+                theta, num_processes=num_processes
+            )
+            print(f"Done. This took {time.time() - t0:.2f} seconds.")
+        else:
+            log_likelihood = self.samples["log_likelihood"]
+            log_likelihood = log_likelihood[valid_samples]
 
         self.log_noise_evidence = self.likelihood.log_Zn
         self.samples["log_prior"] = log_prior
@@ -385,7 +389,11 @@ class Result(DingoDataset):
             ignore_index=True,
             random_state=random_state,
         )
+<<<<<<< HEAD
         return unweighted_samples.drop(["weights"], axis=1)
+=======
+        return self.samples
+>>>>>>> updated to not recalculate likelihoods when rewieghting to different prior
 
     def parameter_subset(self, parameters):
         """

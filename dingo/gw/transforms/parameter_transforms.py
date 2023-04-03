@@ -100,10 +100,17 @@ class SelectStandardizeRepackageParameters(object):
                         )
                     else:
                         standardized = np.empty(len(v), dtype=np.float32)
-                    for idx, par in enumerate(v):
-                        standardized[..., idx] = (
-                            full_parameters[par] - self.mean[par]
-                        ) / self.std[par]
+
+                    # For if you trained with exact equiv but want to do inference with not exact
+                    if v[0] not in list(self.mean.keys()):
+                        standardized[..., 0] = (
+                            full_parameters[v[0]] - full_parameters[v[0]].mean()
+                        ) / full_parameters[v[0]].std()
+                    else:
+                        for idx, par in enumerate(v):
+                            standardized[..., idx] = (
+                                full_parameters[par] - self.mean[par]
+                            ) / self.std[par]
                     sample[k] = standardized
 
         else:
