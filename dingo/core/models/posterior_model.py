@@ -221,7 +221,7 @@ class PosteriorModel:
             # Load model weights
             model_state_dict = OrderedDict()
             for k, v in fp['model_weights'].items():
-                model_state_dict[k] = torch.tensor(np.array(v))
+                model_state_dict[k] = torch.from_numpy(np.array(v, dtype=np.float32))
             d['model_state_dict'] = model_state_dict
 
         return d
