@@ -42,15 +42,15 @@ intrinsic_prior:
   geocent_time: 0.0  # s
 
 # Dataset size
-num_samples: 200
+num_samples: 10000
 
 ## Save a compressed representation of the dataset
 compression:
-#  whitening: aLIGO_ZERO_DET_high_P_asd.txt
+  whitening: aLIGO_ZERO_DET_high_P_asd.txt
   phase_heterodyning:
     order: 0
-#  svd:
-#    # Truncate the SVD basis at this size. No truncation if zero.
-#    size: 200
-#    num_training_samples: 5000
-#    num_validation_samples: 1000
+  svd:
+    # Truncate the SVD basis at this size. No truncation if zero.
+    size: 250
+    num_training_samples: 50000
+    num_validation_samples: 10000
