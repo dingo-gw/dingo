@@ -20,6 +20,9 @@ data:
     psi: default
     luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0)
   ref_time: 1126259462.391
+  gnpe_time_shifts:
+    kernel: bilby.core.prior.Uniform(minimum=-0.001, maximum=0.001)
+    exact_equiv: True
   inference_parameters: default # [chirp_mass, mass_ratio,  luminosity_distance, dec]
 
 # Model architecture
@@ -93,4 +96,4 @@ local:
     num_cpus: 16
     memory_cpus: 128000
     num_gpus: 1
-    memory_gpus: 8000
+    memory_gpus: 8000 
