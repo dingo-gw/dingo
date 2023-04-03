@@ -389,11 +389,7 @@ class Result(DingoDataset):
             ignore_index=True,
             random_state=random_state,
         )
-<<<<<<< HEAD
         return unweighted_samples.drop(["weights"], axis=1)
-=======
-        return self.samples
->>>>>>> updated to not recalculate likelihoods when rewieghting to different prior
 
     def parameter_subset(self, parameters):
         """
