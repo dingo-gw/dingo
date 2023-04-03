@@ -34,13 +34,13 @@ def main():
         grp = f.create_group('serialized_dicts')
         for k in dicts_to_serialize:
             dict_str = json.dumps(d[k])
-            grp.create_dataset(k, data=dict_str)
+            grp.create_dataset(k, data=dict_str, fletcher32=True)
 
         # Save the OrderedDict containing the model weights
         # The keys are ordered alphanumerically as well.
         grp_model = f.create_group('model_weights')
         for k, v in d['model_state_dict'].items():
-            grp_model.create_dataset(k, data=v.numpy())
+            grp_model.create_dataset(k, data=v.numpy(), fletcher32=True)
 
         # Note we do not save optimizer_state_dict which is
         # not needed at inference time and saves a significant
