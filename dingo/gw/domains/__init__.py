@@ -3,6 +3,8 @@ from .frequency_domain import FrequencyDomain
 from .time_domain import TimeDomain
 from .multibanded_frequency_domain import MultibandedFrequencyDomain
 
+from copy import deepcopy
+
 
 def build_domain(settings: dict) -> Domain:
     """
@@ -67,7 +69,7 @@ def build_domain_from_wfd_settings(settings: dict, num_processes: int = 0) -> Do
     ):
         from dingo.gw.dataset import generate_dataset
 
-        settings_new = settings.copy()
+        settings_new = deepcopy(settings)
         settings_new["num_samples"] = settings["domain"]["num_samples_band_generation"]
         settings_new["domain"] = settings["domain"]["base_domain"]
         # We don't need compression to generate just a few waveforms for this step.
