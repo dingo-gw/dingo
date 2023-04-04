@@ -7,9 +7,17 @@ import argparse
 
 
 def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-i", "--in_file", type=str, required=True, help='Input model weights file .pt')
-    parser.add_argument("-o", "--out_file", type=str, required=True, help='Output model weights file .hdf5')
+    parser = argparse.ArgumentParser(
+        description="Convert the weights of a trained PyTorch model to HDF5 format"
+        " for distribution in the LVK's CVMFS.",
+        epilog="Training history (optimizer_state_dict) is discarded.")
+    parser.add_argument("-i", "--in_file", type=str, required=True,
+            help='Input model ".pt" weights file')
+    parser.add_argument("-o", "--out_file", type=str, required=True,
+            help='Output model ".hdf5" weights file')
+    parser.add_argument("-n", "--version_number", type=int, required=True,
+            help="Model version number (integer). "
+            "Will be included in the output filename and metadata.")
     return parser.parse_args()
 
 
@@ -20,6 +28,13 @@ def main():
     if os.path.splitext(args.out_file)[-1] != '.hdf5':
         raise ValueError('Expected a .hdf5 output file')
 
+    # Build output filename with version number
+    # This is required for use on CVMFS
+    version_number = args.version_number
+    root, ext = os.path.splitext(args.out_file)
+    out_file_name = f'{root}_v{version_number}{ext}'
+    print('Output will be written to', out_file_name)
+
     # Load data into CPU memory since we'll be saving it using CPU libraries
     d = torch.load(args.in_file, map_location=torch.device("cpu"))
 
@@ -29,7 +44,7 @@ def main():
             'scheduler_kwargs', 'scheduler_state_dict']
 
 
-    with h5py.File(args.out_file, 'w') as f:
+    with h5py.File(out_file_name, 'w') as f:
         # Save small nested dicts as json
         grp = f.create_group('serialized_dicts')
         for k in dicts_to_serialize:
@@ -52,8 +67,9 @@ def main():
 
         # Metadata for CVMFS LVK distribution
         # This needs to be exactly the same as the "basename" of the hdf5 file
-        f.attrs['CANONICAL_FILE_BASENAME'] = os.path.basename(args.out_file)
-        # TODO: We should add further metadata which are not encoded in json. Perhaps, a subset of 'model_kwargs'
+        f.attrs['CANONICAL_FILE_BASENAME'] = os.path.basename(out_file_name)
+        # Add a few metadata entries as attributes
+        f.attrs['approximant'] = d['metadata']['dataset_settings']['waveform_generator']['approximant']
 
 
 if __name__ == "__main__":

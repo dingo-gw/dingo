@@ -214,6 +214,11 @@ class PosteriorModel:
         """
         d = {}
         with h5py.File(model_filename, 'r') as fp:
+            model_basename = os.path.basename(model_filename)
+            if fp.attrs['CANONICAL_FILE_BASENAME'] != model_basename:
+                raise ValueError('HDF5 attribute CANONICAL_FILE_BASENAME differs from model name',
+                        model_basename)
+
             # Load small nested dicts from json
             for k, v in fp['serialized_dicts'].items():
                 d[k] = json.loads(v[()])
