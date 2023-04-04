@@ -25,29 +25,29 @@ classifiers = [
 ]
 
 dependencies = [
-    "numpy",
-    "torch",
-    "torchvision",
-    "glasflow",
-    "scipy",
-    "pyyaml",
-    "h5py",
+    "astropy",
     "bilby",
     "bilby_pipe",
     "configargparse",
     "corner",
-    "astropy",
-    "lalsuite>=7.11",
-    "pesummary",
-    "tensorboard",
-    "pyopenssl",
     "cryptography",
-    "pycondor",
+    "glasflow",
     "gwpy",
-    "pycbc",
+    "h5py",
+    "lalsuite>=7.11",
+    "numpy",
     "pandas",
-    "threadpoolctl",
+    "pesummary",
+    "pycbc",
+    "pycondor",
+    "pyopenssl",
+    "pyyaml",
     "scikit-learn",
+    "scipy",
+    "tensorboard",
+    "threadpoolctl",
+    "torch",
+    "torchvision",
 ]
 
 
@@ -66,16 +66,16 @@ homepage = "https://github.com/dingo-gw/dingo"
 
 [project.optional-dependencies]
 dev = [
-    "pytest",
-    "pylint",
     "black",
+    "linkify-it-py",
+    "myst-nb",
+    "myst-parser",
+    "pylint",
+    "pytest",
     "sphinx",
     "sphinx-rtd-theme",
-    "myst-nb",
     "sphinxcontrib-mermaid",
     "sphinxcontrib-bibtex",
-    "myst-parser",
-    "linkify-it-py",
     "wandb",
 ]
 
