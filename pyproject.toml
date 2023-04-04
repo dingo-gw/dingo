@@ -47,7 +47,6 @@ dependencies = [
     "pycbc",
     "pandas",
     "threadpoolctl",
-    "wandb",
     "scikit-learn",
 ]
 
@@ -76,7 +75,8 @@ dev = [
     "sphinxcontrib-mermaid",
     "sphinxcontrib-bibtex",
     "myst-parser",
-    "linkify-it-py"
+    "linkify-it-py",
+    "wandb",
 ]
 
 
