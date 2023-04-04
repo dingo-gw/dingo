@@ -81,8 +81,9 @@ training:
 local:
   device: cpu  # Change this to 'cuda' for training on a GPU.
   num_workers: 32  # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
-  use_wandb: False
-  wandb_api_key: # insert_here. Can be obtained from https://wandb.ai/settings
+  #  wandb:
+  #    project: dingo
+  #    group: O4
   runtime_limits:
     max_time_per_run: 36000
     max_epochs_per_run: 500

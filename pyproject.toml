@@ -35,6 +35,7 @@ dependencies = [
     "bilby",
     "bilby_pipe",
     "configargparse",
+    "corner",
     "astropy",
     "lalsuite>=7.11",
     "pesummary",
@@ -46,8 +47,6 @@ dependencies = [
     "pycbc",
     "pandas",
     "threadpoolctl",
-    "chainconsumer",
-    "wandb",
     "scikit-learn",
 ]
 
@@ -76,7 +75,8 @@ dev = [
     "sphinxcontrib-mermaid",
     "sphinxcontrib-bibtex",
     "myst-parser",
-    "linkify-it-py"
+    "linkify-it-py",
+    "wandb",
 ]
 
 
