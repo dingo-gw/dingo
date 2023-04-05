@@ -1,11 +1,9 @@
-import lal
 import pytest
 import numpy as np
 import torch
 from bilby.core.prior import PriorDict
 from bilby.gw.detector import InterferometerList
 
-from dingo.gw.domains import FrequencyDomain
 from dingo.gw.transforms import GNPECoalescenceTimes
 
 
