@@ -321,7 +321,7 @@ class FrequencyDomain(Domain):
 
     @window_factor.setter
     def window_factor(self, value):
-        """Set self._window_factor and clear cache of self.noise_std."""
+        """Set self._window_factor."""
         self._window_factor = float(value)
 
     @property

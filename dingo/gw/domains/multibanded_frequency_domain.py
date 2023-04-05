@@ -22,6 +22,7 @@ class MultibandedFrequencyDomain(Domain):
         self,
         bands: Iterable[Iterable[float]],
         base_domain: Union[FrequencyDomain, dict] = None,
+        window_factor: float = None,
     ):
         """
         Parameters
@@ -32,7 +33,10 @@ class MultibandedFrequencyDomain(Domain):
             Original (uniform frequency) domain of data, which is the starting point
             for the decimation. This determines the decimation details and the noise_std.
             Either provided as dict for build_domain, or as domain_object.
+        window_factor: float = None
+            Window factor for this domain. Required when using self.noise_std.
         """
+        self._window_factor = window_factor
         self.bands = np.array(bands)
         self.initialize_bands()
         if type(base_domain) == dict:
@@ -100,8 +104,23 @@ class MultibandedFrequencyDomain(Domain):
         self._sample_frequencies_torch_cuda = None
         self._f_min = self._sample_frequencies[0]
         self._f_max = self._sample_frequencies[-1]
+        # array with delta_f for each bin
+        self._delta_f = np.concatenate(
+            [
+                np.ones(n) * delta_f
+                for n, delta_f in zip(self._num_bins_bands, self._delta_f_bands)
+            ]
+        )
 
     def initialize_decimation(self):
+        """
+        This sets the attribute self.decimation_inds_bands. For each band i,
+        self.decimation_inds_bands[i] contains three integers,
+        [idx_lower_band_ufd, idx_upper_band_ufd, decimation_factor_band].
+        Here, [idx_lower_band_ufd, idx_upper_band_ufd] specify the *inclusive* bounds in
+        self.base_domain for decimation, and decimation_factor_band is the number of
+        bins in self.base_domain that are averaged for each bin in self.
+        """
         if self.base_domain is None:
             raise ValueError(
                 "Original domain needs to be specified to initialize decimation."
@@ -113,19 +132,20 @@ class MultibandedFrequencyDomain(Domain):
         self.decimation_inds_bands = []
         for f_min_band, f_max_band, delta_f_band in self.bands:
             decimation_factor_band = int(delta_f_band / self.base_domain.delta_f)
-            idx_lower_band = int(
+            idx_lower_band_ufd = int(
                 (f_min_band - delta_f_band / 2.0 + self.base_domain.delta_f / 2.0)
                 / self.base_domain.delta_f
             )
-            # idx_upper_band is *inclusive*, so one slices with
-            # [...idx_lower_band:idx_upper_band + 1]
-            idx_upper_band = int(
+            # idx_upper_band_ufd is *inclusive*, so one slices with
+            # [...idx_lower_band_ufd:idx_upper_band_ufd + 1]
+            idx_upper_band_ufd = int(
                 (f_max_band + delta_f_band / 2.0 - self.base_domain.delta_f / 2.0)
                 / self.base_domain.delta_f
             )
             self.decimation_inds_bands.append(
-                [idx_lower_band, idx_upper_band, decimation_factor_band]
+                [idx_lower_band_ufd, idx_upper_band_ufd, decimation_factor_band]
             )
+        self.decimation_inds_bands = np.array(self.decimation_inds_bands)
 
     def decimate(self, data):
         if data.shape[-1] == len(self.base_domain):
@@ -348,27 +368,32 @@ class MultibandedFrequencyDomain(Domain):
 
     @property
     def window_factor(self):
-        raise NotImplementedError()
+        return self._window_factor
 
     @window_factor.setter
     def window_factor(self, value):
-        """Set self._window_factor and clear cache of self.noise_std."""
-        raise NotImplementedError()
+        """Set self._window_factor."""
+        self._window_factor = float(value)
 
     @property
     def noise_std(self) -> float:
         """Standard deviation of the whitened noise distribution.
 
         To have noise that comes from a multivariate *unit* normal
-        distribution, you must divide by this factor. In practice, this means
+        distribution, you must divide by this array. In practice, this means
         dividing the whitened waveforms by this.
 
+        In contrast to the uniform FrequencyDomain, this is an array and not a number,
+        as self._delta_f is not constant.
+
         TODO: This description makes some assumptions that need to be clarified.
-        TODO: Adapt to multibanded domain
         Windowing of TD data; tapering window has a slope -> reduces power only for noise,
         but not for the signal which is in the main part unaffected by the taper
         """
-        raise NotImplementedError()
+        if self._window_factor is None:
+            raise ValueError("Window factor needs to be set for noise_std.")
+        return np.sqrt(self._window_factor) / np.sqrt(4.0 * self._delta_f)
+
 
     @property
     def f_max(self) -> float:
