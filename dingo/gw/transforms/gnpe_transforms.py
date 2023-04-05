@@ -1,10 +1,7 @@
 import numpy as np
 import torch
-import lal
 from bilby.core.prior import PriorDict
 from abc import ABC, abstractmethod
-
-from dingo.gw.domains import FrequencyDomain, Domain
 
 
 class GNPEBase(ABC):
