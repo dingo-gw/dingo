@@ -44,7 +44,6 @@ dependencies = [
     "pyyaml",
     "scikit-learn",
     "scipy",
-    "tensorboard",
     "threadpoolctl",
     "torch",
     "torchvision",
