@@ -72,6 +72,7 @@ dev = [
     "pylint",
     "pytest",
     "sphinx",
+    "sphinx-math-dollar",
     "sphinx-rtd-theme",
     "sphinxcontrib-mermaid",
     "sphinxcontrib-bibtex",
