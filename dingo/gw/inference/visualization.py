@@ -1,10 +1,14 @@
 import numpy as np
-from chainconsumer import ChainConsumer
 import scipy
 import pandas as pd
 
 
 def generate_cornerplot(*sample_sets, filename=None):
+    try:
+        from chainconsumer import ChainConsumer
+    except ImportError:
+        return
+
     parameters = [
         p
         for p in sample_sets[0]["samples"].keys()

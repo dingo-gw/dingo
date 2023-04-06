@@ -112,7 +112,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                 if "s" in self.svd:
                     self.svd["s"] = self.svd["s"].astype(real_type, copy=False)
 
-        if self.settings["compression"] is not None:
+        if self.settings.get("compression", None) is not None:
             self.initialize_decompression(svd_size_update)
 
     def update_domain(self, domain_update: dict = None):
@@ -141,7 +141,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         # compressed, then adjust the SVD matrices. Otherwise, adjust the dataset
         # itself.
         if (
-            self.settings["compression"] is not None
+            self.settings.get("compression", None) is not None
             and "svd" in self.settings["compression"]
         ):
             self.svd["V"] = self.domain.update_data(self.svd["V"], axis=0)
