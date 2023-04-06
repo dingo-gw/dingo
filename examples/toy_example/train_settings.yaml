@@ -65,7 +65,13 @@ training:
 local:
   device: cpu  # Change this to 'cuda' for training on a GPU.
   num_workers: 6  # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
+<<<<<<< HEAD:examples/toy_example/train_settings.yaml
   use_wandb: False
+=======
+#  wandb:
+#    project: dingo
+#    group: O4
+>>>>>>> c90d5307f1b31c1bbfceb21e4f44b2d4e97b26e1:examples/training/train_settings_no_gnpe_toy.yaml
   runtime_limits:
     max_time_per_run: 36000
     max_epochs_per_run: 30

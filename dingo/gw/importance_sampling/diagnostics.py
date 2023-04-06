@@ -3,9 +3,7 @@ import numpy as np
 import math
 import pandas as pd
 import matplotlib.pyplot as plt
-from chainconsumer import ChainConsumer
-import scipy
-from dingo.core.samplers import Sampler
+from dingo.core.utils.plotting import plot_corner_multi
 from dingo.gw.result import Result
 
 
@@ -20,7 +18,7 @@ def plot_posterior_slice2d(
 
     p0, p1 = theta[keys[0]], theta[keys[1]]
     theta_grid = pd.DataFrame(
-        np.repeat(np.array(theta)[np.newaxis], n_grid ** 2, axis=0),
+        np.repeat(np.array(theta)[np.newaxis], n_grid**2, axis=0),
         columns=theta.keys(),
     )
     theta_grid[keys[0]] = full_axis0.flatten()
@@ -225,21 +223,9 @@ def plot_diagnostics(
         f"Generating cornerplot with {len(theta_new)} out of {len(theta)} IS samples."
     )
 
-    c = ChainConsumer()
-    c.add_chain(theta[: len(theta_new)], weights=None, color="orange", name="dingo")
-    c.add_chain(theta_new, weights=weights_new, color="red", name="dingo-is")
-    N = 2
-    c.configure(
-        linestyles=["-"] * N,
-        linewidths=[1.5] * N,
-        sigmas=[np.sqrt(2) * scipy.special.erfinv(x) for x in [0.5, 0.9]],
-        shade=[False] + [True] * (N - 1),
-        shade_alpha=0.3,
-        bar_shade=False,
-        label_font_size=10,
-        tick_font_size=10,
-        usetex=False,
-        legend_kwargs={"fontsize": 30},
-        kde=0.7,
+    plot_corner_multi(
+        [theta[: len(theta_new)], theta_new],
+        weights=[None, weights_new],
+        labels=["Dingo", "Dingo-IS"],
+        filename=join(outdir, "cornerplot_dingo-is.pdf"),
     )
-    c.plotter.plot(filename=join(outdir, "cornerplot_dingo-is.pdf"))

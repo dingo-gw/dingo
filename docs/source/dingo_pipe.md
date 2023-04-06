@@ -50,6 +50,15 @@ sampling-frequency = 2048.0
 importance-sampling-updates = {'duration': 4.0}
 
 ################################################################################
+## Calibration marginalization arguments
+################################################################################
+
+calibration-model = CubicSpline
+spline-calibration-envelope-dict = {H1: GWTC1_GW150914_H_CalEnv.txt, L1: GWTC1_GW150914_L_CalEnv.txt}
+spline-calibration-nodes = 10
+spline-calibration-curves = 1000
+
+################################################################################
 ## Plotting arguments
 ################################################################################
 
@@ -96,6 +105,22 @@ If extending the prior support during importance sampling, be sure that the post
 By default, dingo_pipe assumes that it is necessary to sample the phase synthetically, so it will do so before importance sampling. This can be turned off by passing an empty dictionary to `importance-sampling-settings`.
 
 Importance sampling (including synthetic phase sampling) is an expensive step, so dingo_pipe allows for parallelization: this step is split over `n-parallel` jobs, each of which uses `request-cpus-importance-sampling` processes. In the backend, this makes use of the Result [split()](dingo.core.result.Result.split) and [merge()](dingo.core.result.Result.merge) methods.
+
+### Calibration marginalization
+
+Settings related to calibration are used to **marginalize** over calibration uncertainty during importance sampling.
+
+calibration-model
+: None or "CubicSpline". If "CubicSpline", perform calibration marginalization using a cubic spline calibration model. If None do not perform calibration marginalization. (Default: None)
+
+spline-calibration-envelope-dict
+: Dictionary pointing to the spline calibration envelope files. This is required if calibration-model is "CubicSpline".
+
+spline-calibration-nodes
+: Number of calibration nodes. (Default: 10)
+
+spline-calibration-curves
+: Number of calibration curves to use for marginalization. (Default: 1000)
 
 ## Plotting
 

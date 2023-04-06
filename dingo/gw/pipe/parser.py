@@ -62,31 +62,40 @@ def create_parser(top_level=True):
     #     version=f"%(prog)s={get_version_information()}\nbilby={bilby.__version__}",
     # )
 
-    # calibration_parser = parser.add_argument_group(
-    #     "Calibration arguments",
-    #     description="Which calibration model and settings to use.",
-    # )
-    # calibration_parser.add(
-    #     "--calibration-model",
-    #     type=nonestr,
-    #     default=None,
-    #     choices=["CubicSpline", None],
-    #     help="Choice of calibration model, if None, no calibration is used",
-    # )
-    #
-    # calibration_parser.add(
-    #     "--spline-calibration-envelope-dict",
-    #     type=nonestr,
-    #     default=None,
-    #     help=("Dictionary pointing to the spline calibration envelope files"),
-    # )
-    #
-    # calibration_parser.add(
-    #     "--spline-calibration-nodes",
-    #     type=int,
-    #     default=10,
-    #     help=("Number of calibration nodes"),
-    # )
+    calibration_parser = parser.add_argument_group(
+        "Calibration arguments",
+        description="Which calibration model and settings to use. Calibration "
+                    "uncertainty is marginalizaed over during importance sampling.",
+    )
+    calibration_parser.add(
+        "--calibration-model",
+        type=nonestr,
+        default=None,
+        choices=["CubicSpline", None],
+        help="Choice of calibration model, if None, no calibration is used",
+    )
+
+    calibration_parser.add(
+        "--spline-calibration-envelope-dict",
+        type=nonestr,
+        default=None,
+        help=("Dictionary pointing to the spline calibration envelope files"),
+    )
+
+    calibration_parser.add(
+        "--spline-calibration-nodes",
+        type=int,
+        default=10,
+        help=("Number of calibration nodes"),
+    )
+
+    calibration_parser.add(
+        "--spline-calibration-curves",
+        type=int,
+        default=1000,
+        help=("Number of calibration curves to use in marginalizing over calibration "
+              "uncertainty"),
+    )
     #
     # calibration_parser.add(
     #     "--spline-calibration-amplitude-uncertainty-dict",

@@ -38,6 +38,7 @@ extensions = [
     'myst_nb',
     'sphinxcontrib.mermaid',
     'sphinxcontrib.bibtex',
+    'sphinx_math_dollar',
 ]
 
 myst_enable_extensions = [
@@ -55,6 +56,20 @@ myst_enable_extensions = [
     "substitution",
     "tasklist",
 ]
+
+mathjax_config = {
+    'tex2jax': {
+        'inlineMath': [ ["\\(","\\)"] ],
+        'displayMath': [["\\[","\\]"] ],
+    },
+}
+
+mathjax3_config = {
+  "tex": {
+    "inlineMath": [['\\(', '\\)']],
+    "displayMath": [["\\[", "\\]"]],
+  }
+}
 
 myst_heading_anchors = 2
 

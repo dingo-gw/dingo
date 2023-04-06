@@ -29,9 +29,9 @@ model:
   type: nsf+embedding
   # kwargs for neural spline flow
   nsf_kwargs:
-    num_flow_steps: 15 
+    num_flow_steps: 3 
     base_transform_kwargs:
-      hidden_dim: 512 
+      hidden_dim: 64 
       num_transform_blocks: 5
       activation: elu
       dropout_probability: 0.0
@@ -41,16 +41,13 @@ model:
   # kwargs for embedding net
   embedding_net_kwargs:
     output_dim: 128
-    hidden_dims: [512, 512, 512, 512, 512, 512,
-    256, 256, 256, 256, 256, 256,
-    128, 128, 128, 128, 128, 128
-    ]
+    hidden_dims: [1024, 512, 256, 128]
     activation: elu
     dropout: 0.0
     batch_norm: True
     svd:
-      num_training_samples: 50000
-      num_validation_samples: 10000
+      num_training_samples: 10000
+      num_validation_samples: 5000
       size: 200
 
 # Training is divided in stages. They each require all settings as indicated below.

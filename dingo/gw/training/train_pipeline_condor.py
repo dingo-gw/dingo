@@ -1,9 +1,8 @@
 import os
 import sys
-from os.path import join, isfile, dirname
+from os.path import join, isfile
 import yaml
 import argparse
-import wandb
 
 from dingo.gw.training import (
     prepare_training_new,
@@ -70,7 +69,6 @@ def train_condor():
     # else:
 
     if not args.start_submission:
-
         #
         # TRAIN
         #
@@ -86,14 +84,12 @@ def train_condor():
 
             local_settings = train_settings.pop("local")
             with open(os.path.join(args.train_dir, "local_settings.yaml"), "w") as f:
-                if local_settings.get("use_wandb", False):
-                    if "WANDB_API_KEY" not in os.environ.keys():
-                        os.environ["WANDB_API_KEY"] = local_settings["wandb_api_key"]
-                if (
-                    local_settings.get("use_wandb", False)
-                    and "wandb_run_id" not in local_settings.keys()
-                ):
-                    local_settings["wandb_run_id"] = wandb.util.generate_id()
+                if local_settings.get("wandb", False) and "id" not in local_settings["wandb"].keys():
+                    try:
+                        import wandb
+                        local_settings["wandb"]["id"] = wandb.util.generate_id()
+                    except ImportError:
+                        print("wandb not installed, cannot generate run id.")
                 yaml.dump(local_settings, f, default_flow_style=False, sort_keys=False)
 
             pm, wfd = prepare_training_new(
@@ -127,7 +123,6 @@ def train_condor():
             condor_arguments = f"--train_dir {args.train_dir}"
 
     else:
-
         #
         # PREPARE FIRST SUBMISSION
         #

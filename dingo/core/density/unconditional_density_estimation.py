@@ -1,9 +1,6 @@
 import copy
-from typing import Optional
 
 import torch
-import yaml
-from os.path import dirname, join
 
 from dingo.core.utils import build_train_and_test_loaders
 from dingo.core.utils.trainutils import RuntimeLimits
@@ -124,36 +121,3 @@ def parse_args():
         help="Path to settings file.",
     )
     return parser.parse_args()
-
-
-def main():
-    # load settings
-    args = parse_args()
-    with open(args.settings, "r") as fp:
-        settings = yaml.safe_load(fp)
-
-    # load samples from dingo output
-    samples = pd.read_pickle(settings["data"]["sample_file"])
-
-    model = train_unconditional_density_estimator(
-        samples, settings, dirname(args.settings)
-    )
-
-    model.model.eval()
-    with torch.no_grad():
-        new_samples = model.model.sample(num_samples=10000)
-    new_samples = new_samples.cpu().numpy() * std + mean
-    new_samples = pd.DataFrame(new_samples, columns=parameters)
-    test_samples = pd.DataFrame(samples[num_train_samples:], columns=parameters)
-
-    from dingo.gw.inference.visualization import generate_cornerplot
-
-    generate_cornerplot(
-        {"samples": test_samples, "color": "blue", "name": "test samples"},
-        {"samples": new_samples, "color": "orange", "name": "new samples"},
-        filename=join(dirname(f), "out.pdf"),
-    )
-
-
-if __name__ == "__main__":
-    main()
