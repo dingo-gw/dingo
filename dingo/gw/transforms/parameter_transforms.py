@@ -118,6 +118,9 @@ class SelectStandardizeRepackageParameters(object):
             inference_parameters = self.parameters_dict["inference_parameters"]
 
             parameters = input_sample["parameters"][:]
+            
+            if parameters.ndim == 1:
+                parameters = parameters.reshape(-1, 1)
             assert parameters.shape[-1] == len(inference_parameters), (
                 f"Expected {len(inference_parameters)} parameters "
                 f"({inference_parameters}), but got {parameters.shape[-1]}."
