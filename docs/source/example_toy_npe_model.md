@@ -21,19 +21,21 @@ First make a directory for this example where we will store all of our files fro
 
 ```
 cd dingo
-mkdir $(pwd)/toy_example_train_dir
-export TRAIN_DIR=$(pwd)/toy_example_train_dir
+mkdir $(pwd)/toy_npe_model_train_dir
+export TRAIN_DIR=$(pwd)/toy_npe_model_train_dir
 ```
 
 To generate a waveform dataset run 
 
 ```
-dingo_generate_dataset --settings examples/toy_example/waveform_dataset_settings.yaml --out_file $TRAIN_DIR/waveform_dataset.hdf5
+dingo_generate_dataset --settings examples/toy_npe_model/waveform_dataset_settings.yaml --out_file $TRAIN_DIR/waveform_dataset.hdf5
 ```
 
-{py:class}`dingo.gw.waveform_generator.waveform_generator.WaveformGenerator` object.
+which will create
+{py:class}`dingo.gw.waveform_generator.waveform_generator.WaveformGenerator`
+object and store it at the location provided with `--out_file`.
 
-The file `examples/toy_example/waveform_dataset_settings.yaml` contains four
+The file `examples/toy_npe_model/waveform_dataset_settings.yaml` contains four
 sections: `domain`, `waveform_generator`, `intrinsic_prior`, and `compression`. The
 domain section defines the settings for storing the waveform. Note the type
 attribute; this does not refer to the native domain of the waveform model, but
@@ -50,7 +52,7 @@ advisable to increase `f_max` to 2048 Hz.
 The waveform_generator section specifies the approximant attribute. If you would
 like to implement your own waveform model, it should work in dingo if it works
 in LALSimulation. However, it is best to first generate the waveforms using the
-{py:class}dingo.gw.waveform_generator.waveform_generator.WaveformGenerator module (see
+{py:class}`dingo.gw.waveform_generator.waveform_generator.WaveformGenerator` module (see
 [generating_waveforms](generating_waveforms.md)).
 
 The `intrinsic_prior` section is based on Bilby's prior module, with many values
@@ -71,12 +73,12 @@ Step 2 Generating the Amplitude Spectral Density (ASD) dataset
 To generate an ASDdataset run 
 
 ```
-dingo_generate_asd_dataset --settings_file examples/toy_example/asd_dataset_settings.yaml --data_dir $TRAIN_DIR/asd_dataset_folder
+dingo_generate_asd_dataset --settings_file examples/toy_npe_model/asd_dataset_settings.yaml --data_dir $TRAIN_DIR/asd_dataset_folder
 ```
 
 Running this command will generate an {py:class}`dingo.gw.noise.asd_dataset.ASDDataset` object in the form of an .hdf5 file, which will be used later for training. The reason for specifying a folder instead of a file, as in the waveform dataset example, is because some temporary data is downloaded to create Welch estimates of the ASD. This data can be removed later, but it is sometimes useful for understanding how the ASDs were estimated.
 
-The `examples/toy_example/asd_dataset_settings.yaml` file includes several attributes. `f_s` is the sampling frequency in Hz, `time_psd` is the length of time used for an ASD estimate, and `T` is the duration of each ASD segment. Thus, the value of `time_psd/T` gives the number of segments analyzed to estimate one ASD. To avoid spectral leakage, a window is applied to each segment. We use the standard window used in LVK analyses, tukey with a roll off of $\alpha=0.4$. The next attribute, num_psds_max=1, defines the number of ASDs stored in the ASD dataset. For now, we will use only one. See the next [tutorial](example_no_gnpe_network.md) for a more advanced setup.
+The `examples/toy_npe_model/asd_dataset_settings.yaml` file includes several attributes. `f_s` is the sampling frequency in Hz, `time_psd` is the length of time used for an ASD estimate, and `T` is the duration of each ASD segment. Thus, the value of `time_psd/T` gives the number of segments analyzed to estimate one ASD. To avoid spectral leakage, a window is applied to each segment. We use the standard window used in LVK analyses, tukey with a roll off of $\alpha=0.4$. The next attribute, num_psds_max=1, defines the number of ASDs stored in the ASD dataset. For now, we will use only one. See the next [tutorial](example_npe_model.md) for a more advanced setup.
 
 
 Step 3 Training the network
@@ -85,9 +87,9 @@ Step 3 Training the network
 To train the network run
 
 ```
-sed -i 's+/path/to/waveform_dataset.hdf5+'"$TRAIN_DIR"'/waveform_dataset.hdf5+g' examples/toy_example/train_settings.yaml
-sed -i 's+/path/to/asd_dataset.hdf5+'"$TRAIN_DIR"'/asd_dataset_folder/asds_O1.hdf5+g' examples/toy_example/train_settings.yaml
-dingo_train --settings_file examples/toy_example/train_settings.yaml --train_dir $TRAIN_DIR
+sed -i 's+/path/to/waveform_dataset.hdf5+'"$TRAIN_DIR"'/waveform_dataset.hdf5+g' examples/toy_npe_model/train_settings.yaml
+sed -i 's+/path/to/asd_dataset.hdf5+'"$TRAIN_DIR"'/asd_dataset_folder/asds_O1.hdf5+g' examples/toy_npe_model/train_settings.yaml
+dingo_train --settings_file examples/toy_npe_model/train_settings.yaml --train_dir $TRAIN_DIR
 ```
 
 The first two "`sed`" commands just replace the parts in the `train_settings.yaml` file with the datasets generated in the previous steps. While this file contains numerous settings that can be found in [training](training.md), we will cover the most significant ones here. During training, several `extrinsic_priors` are set, which project the waveforms generated in step 1 according to the specified priors. This effectively increases the size of the training set without the need to generate additional waveforms.
@@ -109,9 +111,9 @@ The final step is to do inference, for example on GW150914. To do this we will u
 [dingo_pipe](dingo_pipe.md). To run dingo pipe locally run:
 
 ```
-sed -i "s|TRAIN_DIR/|$TRAIN_DIR/|g" examples/toy_example/GW150914_toy.ini
-sed -i "s|/path/to/model.pt|$TRAIN_DIR/model_latest.pt|g" examples/toy_example/GW150914_toy.ini
-dingo_pipe examples/toy_example/GW150914.ini
+sed -i "s|TRAIN_DIR/|$TRAIN_DIR/|g" examples/toy_npe_model/GW150914_toy.ini
+sed -i "s|/path/to/model.pt|$TRAIN_DIR/model_latest.pt|g" examples/toy_npe_model/GW150914_toy.ini
+dingo_pipe examples/toy_npe_model/GW150914.ini
 ```
 
 This will generate files which are described in [dingo pipe](dingo_pipe.md). To see the results, take a look in $TRAIN_DIR/outdir_GW150914.

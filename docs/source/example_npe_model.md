@@ -1,9 +1,9 @@
-# No GNPE Network
+# NPE Model (production)
 
 We will now do a tutorial with higher profile settings. Note these are not the
 full production settings used for runs since we are not using [GNPE](gnpe.md), but
-they should decent results. Go to [this](example_gnpe_network.md) tutorial for the full production network. The
-steps are the essentially same as [the toy example](example_toy_network.md) but with higher level settings. It is
+they should decent results. Go to [this](example_gnpe_model.md) tutorial for the full production network. The
+steps are the essentially same as [the toy example](example_toy_model.md) but with higher level settings. It is
 recommended to run this on a cluster or GPU machine. 
 
 We can repeat the same first few steps from the previous tutorial with a couple differences. 
@@ -14,8 +14,8 @@ Step 1 Generating a Waveform Dataset
 
 ```
 cd dingo
-mkdir $(pwd)/no_gnpe_network_train_dir
-export TRAIN_DIR=$(pwd)/no_gnpe_network_train_dir
+mkdir $(pwd)/npe_model_train_dir
+export TRAIN_DIR=$(pwd)/npe_model_train_dir
 dingo_generate_dataset --settings examples/waveform_dataset_settings.yaml --out_file $TRAIN_DIR/waveform_dataset.hdf5
 ```
 
@@ -32,7 +32,7 @@ mismatch of $10^{-3}-10^{-4}$ is recommended.
 We could also generate the waveform dataset using a dag on a cluster with condor. To do this run
 
 ```
-dingo_generate_dataset_dag --settings_file $(pwd)/examples/no_gnpe_network/waveform_dataset_settings.yaml --out_file $TRAIN_DIR/IMRPhenomXPHM.hdf5 --env_path $DINGO_VENV_PATH --num_jobs 4 --request_cpus 64 --request_memory 128000 --request_memory_high 256000
+dingo_generate_dataset_dag --settings_file $(pwd)/examples/npe_model/waveform_dataset_settings.yaml --out_file $TRAIN_DIR/IMRPhenomXPHM.hdf5 --env_path $DINGO_VENV_PATH --num_jobs 4 --request_cpus 64 --request_memory 128000 --request_memory_high 256000
 ```
 
 Then run 
@@ -49,7 +49,7 @@ Step 2 Generating an ASD dataset
 To generate an ASD dataset we can run the same command as last time. 
 
 ```
-dingo_generate_asd_dataset --settings_file examples/no_gnpe_network/asd_dataset_settings_fiducial.yaml --data_dir $TRAIN_DIR/asd_dataset_folder -out_name $TRAIN_DIR/asds_O1_fiducial.hdf5
+dingo_generate_asd_dataset --settings_file examples/npe_model/asd_dataset_settings_fiducial.yaml --data_dir $TRAIN_DIR/asd_dataset_folder -out_name $TRAIN_DIR/asds_O1_fiducial.hdf5
 ```
 
 However, this time, during training we will need two sets of ASDs one which will
@@ -59,10 +59,10 @@ ASDs which is used during the fine tuning stage. To generate this second dataset
 run
 
 ```
-dingo_generate_asd_dataset --settings_file $(pwd)/examples/no_gnpe_network/asd_dataset_settings.yaml --data_dir $TRAIN_DIR/asd_dataset_folder -out_name $TRAIN_DIR/asds_O1.hdf5
+dingo_generate_asd_dataset --settings_file $(pwd)/examples/npe_model/asd_dataset_settings.yaml --data_dir $TRAIN_DIR/asd_dataset_folder -out_name $TRAIN_DIR/asds_O1.hdf5
 ```
 
-We can see that in `examples/no_gnpe_network/asd_dataset_settings.yaml` the `num_psds_max`
+We can see that in `examples/npe_model/asd_dataset_settings.yaml` the `num_psds_max`
 attribute is set to 0 indicating all possible ASDs will be downloaded. If you want to 
 decrease this, make sure that there are enough ASDs in the training set to represent 
 any possible data the dingo network will see. Typically this should be at least 1000,
@@ -75,10 +75,10 @@ Now we are ready for training. The command is analogous to the previous tutorial
 but the settings are increased to production values. To run the training do
 
 ```
-sed -i 's+/path/to/waveform_dataset.hdf5+'"$TRAIN_DIR"'/waveform_dataset.hdf5+g' examples/no_gnpe_network/train_settings.yaml
-sed -i 's+/path/to/asds_fiducial.hdf5+'"$TRAIN_DIR"'/asd_dataset_folder/asds_O1_fiducial.hdf5+g' examples/no_gnpe_network/train_settings.yaml
-sed -i 's+/path/to/asds.hdf5+'"$TRAIN_DIR"'/asd_dataset_folder/asds_O1.hdf5+g' examples/no_gnpe_network/train_settings.yaml
-dingo_train --settings_file examples/no_gnpe_network/train_settings.yaml --train_dir $TRAIN_DIR
+sed -i 's+/path/to/waveform_dataset.hdf5+'"$TRAIN_DIR"'/waveform_dataset.hdf5+g' examples/npe_model/train_settings.yaml
+sed -i 's+/path/to/asds_fiducial.hdf5+'"$TRAIN_DIR"'/asd_dataset_folder/asds_O1_fiducial.hdf5+g' examples/npe_model/train_settings.yaml
+sed -i 's+/path/to/asds.hdf5+'"$TRAIN_DIR"'/asd_dataset_folder/asds_O1.hdf5+g' examples/npe_model/train_settings.yaml
+dingo_train --settings_file examples/npe_model/train_settings.yaml --train_dir $TRAIN_DIR
 ```
 
 ```{tip}
@@ -109,12 +109,12 @@ Step 4 Doing Inference
 We can run inference with the same command as before
 
 ```
-sed -i "s|TRAIN_DIR/|$TRAIN_DIR/|g" examples/no_gnpe_network/GW150914.ini
-sed -i "s|/path/to/model.pt|$TRAIN_DIR/model_latest.pt|g" examples/no_gnpe_network/GW150914.ini
-dingo_pipe examples/no_gnpe_network/GW150914_toy.ini
+sed -i "s|TRAIN_DIR/|$TRAIN_DIR/|g" examples/npe_model/GW150914.ini
+sed -i "s|/path/to/model.pt|$TRAIN_DIR/model_latest.pt|g" examples/npe_model/GW150914.ini
+dingo_pipe examples/npe_model/GW150914_toy.ini
 ```
 
 There is just one difference from the previous example. It is possible to reweight the posterior to a new prior 
 if the user wants. Note though, that the new prior must be a subset of the previous prior. Otherwise, the proposal distribution
 generated by dingo will never have seen samples from the new prior (a low effective sample size) leading to poor results. As an example see the `prior-dict` attribute in 
-`examples/no_gnpe_network/GW150914.ini`.
+`examples/npe_model/GW150914.ini`.

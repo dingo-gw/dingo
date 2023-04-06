@@ -42,9 +42,9 @@ As training a network from scratch can be expensive, we intend to also distribut
    :caption: Examples
    :maxdepth: 1
    
-   example_toy_network
-   example_no_gnpe_network
-   example_gnpe_network
+   example_toy_npe_model
+   example_npe_model
+   example_gnpe_model
    example_injection
 
 .. toctree::
