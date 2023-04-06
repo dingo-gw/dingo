@@ -1,14 +1,34 @@
+#domain:
+#  type: MultibandedFrequencyDomain
+#  num_samples_band_generation: 100
+#  base_domain:
+#    type: FrequencyDomain
+#    f_min: 20.0
+#    f_max: 1024.0
+#    delta_f: 0.00390625 # = 1/256
+#  multibanding_method: "adaptive"
+#  min_num_bins_per_period: 16
+#  delta_f_max: 2.0
+#
 domain:
   type: MultibandedFrequencyDomain
-  num_samples_band_generation: 100
+  bands:
+  - [20.001953125, 20.462890625, 0.0078125]
+  - [20.474609375, 28.240234375, 0.015625]
+  - [28.263671875, 37.107421875, 0.03125]
+  - [37.154296875, 50.591796875, 0.0625]
+  - [50.685546875, 62.185546875, 0.125]
+  - [62.373046875, 114.623046875, 0.25]
+  - [114.998046875, 234.498046875, 0.5]
+  - [235.248046875, 389.248046875, 1.0]
+  - [390.748046875, 1022.748046875, 2.0]
+  window_factor: null
   base_domain:
     type: FrequencyDomain
     f_min: 20.0
     f_max: 1024.0
-    delta_f: 0.00390625 # = 1/256
-  multibanding_method: "adaptive"
-  min_num_bins_per_period: 16
-  delta_f_max: 2.0
+    delta_f: 0.00390625
+    window_factor: null
 
 #domain:
 #  type: FrequencyDomain
