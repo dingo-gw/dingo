@@ -1,6 +1,6 @@
 from bilby_pipe.job_creation.nodes import PlotNode as BilbyPlotNode
 
-from dingo.gw.pipe.utils import _strip_unwanted_submission_keys
+from dingo.pipe.utils import _strip_unwanted_submission_keys
 
 
 class PlotNode(BilbyPlotNode):
