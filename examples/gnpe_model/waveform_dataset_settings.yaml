@@ -11,9 +11,9 @@ waveform_generator:
 
 # Dataset only samples over intrinsic parameters. Extrinsic parameters are chosen at train time.
 intrinsic_prior:
-  mass_1: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)
-  mass_2: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)
-  chirp_mass: bilby.gw.prior.UniformInComponentsChirpMass(minimum=15.0, maximum=100.0)
+  mass_1: bilby.core.prior.Constraint(minimum=10.0, maximum=120.0)
+  mass_2: bilby.core.prior.Constraint(minimum=10.0, maximum=120.0)
+  chirp_mass: bilby.gw.prior.UniformInComponentsChirpMass(minimum=15.0, maximum=150.0)
   mass_ratio: bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.125, maximum=1.0)
   phase: default
   a_1: bilby.core.prior.Uniform(minimum=0.0, maximum=0.99)
