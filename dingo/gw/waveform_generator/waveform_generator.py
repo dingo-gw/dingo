@@ -1029,14 +1029,20 @@ class GWSignalWaveformGenerator:
               'phi_ref' : p["phase"]*u.rad,
               'distance' : p["luminosity_distance"]*u.Mpc,
               'inclination' : iota*u.rad,
-              #'ModeArray': self.mode_list,
+              'ModeArray': self.mode_list,
               'condition':1}
         
-        #if ('postadiabatic' in p):
-        #     params_gwsignal['postadiabatic'] = p['postadiabatic']
+        #SEOBNRv5 specific parameters
+        if ('postadiabatic' in p):
+             params_gwsignal['postadiabatic'] = p['postadiabatic']
 
-        #     if ('postadiabatic_type' in p):
-        #         params_gwsignal['postadiabatic_type'] = p['postadiabatic_type']
+             if ('postadiabatic_type' in p):
+                 params_gwsignal['postadiabatic_type'] = p['postadiabatic_type']
+        
+        if ('lmax_nyquist' in p):
+            params_gwsignal['lmax_nyquist'] = p['lmax_nyquist']
+        else:
+            params_gwsignal['lmax_nyquist'] = 2
 
         return params_gwsignal
 
