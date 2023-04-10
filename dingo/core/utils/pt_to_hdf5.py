@@ -15,7 +15,7 @@ def parse_args():
             help='Input model ".pt" weights file')
     parser.add_argument("-o", "--out_file", type=str, required=True,
             help='Output model ".hdf5" weights file')
-    parser.add_argument("-n", "--version_number", type=int, required=True,
+    parser.add_argument("-n", "--model_version_number", type=int, required=True,
             help="Model version number (integer). "
             "Will be included in the output filename and metadata.")
     return parser.parse_args()
