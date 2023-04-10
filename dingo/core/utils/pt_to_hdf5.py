@@ -8,7 +8,7 @@ import argparse
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Convert the weights of a trained PyTorch model to HDF5 format"
+        description="Convert the weights of a trained Dingo model from a PyTorch pickle .pt file to HDF5,"
         " for distribution in the LVK's CVMFS.",
         epilog="Training history (optimizer_state_dict) is discarded.")
     parser.add_argument("-i", "--in_file", type=str, required=True,
