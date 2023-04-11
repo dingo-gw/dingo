@@ -197,7 +197,7 @@ class PosteriorModel:
     ):
         """
         Helper function to load a trained model that has been
-        saved in HDF5 format using `pt_to_hdf5.py`.
+        saved in HDF5 format using `dingo_pt_to_hdf5`.
 
         Parameters
         ----------
