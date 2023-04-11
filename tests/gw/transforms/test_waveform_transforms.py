@@ -10,6 +10,7 @@ from dingo.gw.gwutils import get_mismatch
 from dingo.gw.domains.multibanded_frequency_domain import (
     MultibandedFrequencyDomain,
     number_of_zero_crossings,
+    get_decimation_bands_adaptive,
 )
 from dingo.gw.dataset import generate_parameters_and_polarizations
 
@@ -51,9 +52,13 @@ def bns_setup():
         domain=ufd, transform=HeterodynePhase(ufd), **wfg_settings
     )
     _, pols_het = generate_parameters_and_polarizations(wfg_het, prior, 10, 0)
-    mfd = MultibandedFrequencyDomain.init_from_polarizations(
-        ufd, pols_het, min_num_bins_per_period=16, delta_f_max=2.0
+    bands = get_decimation_bands_adaptive(
+        ufd,
+        np.concatenate(list(pols_het.values())),
+        min_num_bins_per_period=16,
+        delta_f_max=2.0,
     )
+    mfd = MultibandedFrequencyDomain(bands, ufd)
     wfg_het_mfd = WaveformGenerator(
         domain=mfd, transform=HeterodynePhase(mfd), **wfg_settings
     )

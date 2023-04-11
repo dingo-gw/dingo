@@ -52,31 +52,31 @@ class MultibandedFrequencyDomain(Domain):
         if self.base_domain is not None:
             self.initialize_decimation()
 
-    @classmethod
-    def init_from_polarizations(
-        cls,
-        base_domain,
-        polarizations,
-        multibanding_method="adaptive",
-        **kwargs,
-    ):
-        if type(base_domain) == dict:
-            from dingo.gw.domains import build_domain
-
-            base_domain = build_domain(base_domain)
-
-        if multibanding_method == "adaptive":
-            bands = get_decimation_bands_adaptive(
-                base_domain,
-                np.concatenate(list(polarizations.values())),
-                **kwargs,
-            )
-        else:
-            raise NotImplementedError(
-                f"Unknown multibanding method {multibanding_method}."
-            )
-
-        return cls(bands, base_domain)
+    # @classmethod
+    # def init_from_polarizations(
+    #     cls,
+    #     base_domain,
+    #     polarizations,
+    #     multibanding_method="adaptive",
+    #     **kwargs,
+    # ):
+    #     if type(base_domain) == dict:
+    #         from dingo.gw.domains import build_domain
+    #
+    #         base_domain = build_domain(base_domain)
+    #
+    #     if multibanding_method == "adaptive":
+    #         bands = get_decimation_bands_adaptive(
+    #             base_domain,
+    #             np.concatenate(list(polarizations.values())),
+    #             **kwargs,
+    #         )
+    #     else:
+    #         raise NotImplementedError(
+    #             f"Unknown multibanding method {multibanding_method}."
+    #         )
+    #
+    #     return cls(bands, base_domain)
 
     def initialize_bands(self):
         if len(self.bands.shape) != 2 or self.bands.shape[1] != 3:
@@ -393,7 +393,6 @@ class MultibandedFrequencyDomain(Domain):
         if self._window_factor is None:
             raise ValueError("Window factor needs to be set for noise_std.")
         return np.sqrt(self._window_factor) / np.sqrt(4.0 * self._delta_f)
-
 
     @property
     def f_max(self) -> float:
