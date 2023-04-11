@@ -30,9 +30,8 @@ def main():
 
     # Build output filename with the version number for this network
     # This is required for use on CVMFS
-    version_number = args.version_number
     root, ext = os.path.splitext(args.out_file)
-    out_file_name = f'{root}_v{version_number}{ext}'
+    out_file_name = f'{root}_v{args.model_version_number}{ext}'
     print('Output will be written to', out_file_name)
 
     # Load data into CPU memory since we'll be saving it using CPU libraries
@@ -72,7 +71,7 @@ def main():
         f.attrs['approximant'] = d['metadata']['dataset_settings']['waveform_generator']['approximant']
         f.attrs['epoch'] = d['epoch']
         # Add the dingo version used for training
-        f.attrs['dingo_version'] = d.get('version')
+        f.attrs['dingo_version'] = str(d.get('version'))
 
 
 if __name__ == "__main__":
