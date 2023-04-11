@@ -40,8 +40,8 @@ def main():
 
     # Collect the names of the dicts that can be serialized to JSON; model_state_dict and
     # optimizer_state_dict contain torch.tensors and cannot be JSON serialized
-    dicts_to_serialize = ['model_kwargs', 'epoch', 'metadata', 'optimizer_kwargs',
-            'scheduler_kwargs', 'scheduler_state_dict']
+    # In addition, we drop dicts related to training information that is not needed at inference time
+    dicts_to_serialize = ['model_kwargs', 'epoch', 'metadata']
 
 
     with h5py.File(out_file_name, 'w') as f:
