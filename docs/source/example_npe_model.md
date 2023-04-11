@@ -2,7 +2,7 @@
 
 We will now do a tutorial with higher profile settings. Note these are not the
 full production settings used for runs since we are not using [GNPE](gnpe.md), but
-they should decent results. Go to [this](example_gnpe_model.md) tutorial for the full production network. The
+they should lead to decent results. Go to [this](example_gnpe_model.md) tutorial for the full production network. The
 steps are the essentially same as [the toy example](example_toy_model.md) but with higher level settings. It is
 recommended to run this on a cluster or GPU machine. 
 
@@ -12,6 +12,8 @@ We can repeat the same first few steps from the previous tutorial with a couple 
 Step 1 Generating a Waveform Dataset
 ------------------------------------ 
 
+As before we run `dingo_generate_dataset`:
+
 ```
 cd dingo
 mkdir $(pwd)/npe_model_train_dir
@@ -19,54 +21,58 @@ export TRAIN_DIR=$(pwd)/npe_model_train_dir
 dingo_generate_dataset --settings examples/waveform_dataset_settings.yaml --out_file $TRAIN_DIR/waveform_dataset.hdf5
 ```
 
-Note there is a new attribute `compression`. This creates a singular value decomposition
-(SVD) of the waveform polarizations which is stored in disk. The `size` attribute 
-describes the number of basis vectors to represent the waveform. This can later be 
-changed during training. When the compression phase is finished, there will be output
-displaying the mismatch between the decompressed waveform and generated waveform. You can
+The `examples/npe_model/waveform_dataset_settings.yaml` settings file now includes a new attribute `compression`.
+This creates a truncated singular value decomposition (SVD) of the waveform polarizations which 
+is stored on disk as a compressed representation of the dataset. The `size` attribute 
+refers to the number of basis vectors included in the expansion of the waveform. This can later be
+changed during training. When the compression phase is finished, the log will
+display the mismatch between the decompressed waveform and generated waveform. You can
 also access these mismatch settings by running `dingo_ls` on a generated `waveform_dataset.hdf5`
-file, there will be multiple mismatches shown corresponding to the number of basis vectors used
-to decompress the waveform. It is up to the user as to what type of mismatch is acceptable, typically a max 
-mismatch of $10^{-3}-10^{-4}$ is recommended. 
+file. It will show multiple mismatches corresponding to the number of basis vectors used
+to decompress the waveform. It is up to the user as to what type of mismatch is acceptable,
+typically a maximum mismatch of $10^{-3}-10^{-4}$ is recommended. 
 
-We could also generate the waveform dataset using a dag on a cluster with condor. To do this run
+We could also generate the waveform dataset using a
+[condor DAG](https://htcondor.readthedocs.io/en/latest/users-manual/dagman-workflows.html)
+on a cluster. To do this run
 
 ```
 dingo_generate_dataset_dag --settings_file $(pwd)/examples/npe_model/waveform_dataset_settings.yaml --out_file $TRAIN_DIR/IMRPhenomXPHM.hdf5 --env_path $DINGO_VENV_PATH --num_jobs 4 --request_cpus 64 --request_memory 128000 --request_memory_high 256000
 ```
 
-Then run 
+and then submit the generated DAG
 
 ```
 condor_submit_dag condor/submit/dingo_generate_dataset_dagman_DATE.submit
 ```
 
-Where DATE is specified in the filename of the .submit file that was generated. 
+where `DATE` is specified in the filename of the `.submit` file that was generated.
+
 
 Step 2 Generating an ASD dataset
 --------------------------------
 
-To generate an ASD dataset we can run the same command as last time. 
+To generate an ASD dataset we can run the same command as in the previous tutorial.
 
 ```
 dingo_generate_asd_dataset --settings_file examples/npe_model/asd_dataset_settings_fiducial.yaml --data_dir $TRAIN_DIR/asd_dataset_folder -out_name $TRAIN_DIR/asds_O1_fiducial.hdf5
 ```
 
-However, this time, during training we will need two sets of ASDs one which will
-fixed during the initial training, this is the fiducial dataset generated above.
-This dataset will contain only 1 ASD. Then one ASDDataset which contains many
-ASDs which is used during the fine tuning stage. To generate this second dataset
-run
+However, this time, during training we will need two sets of ASDs. The first one will be
+fixed during the initial training -- this is the fiducial dataset generated above.
+This dataset will contain only  a single ASD. The second ASDDataset will contain many
+ASDs and is used during the fine tuning stage. To generate this second dataset run
 
 ```
 dingo_generate_asd_dataset --settings_file $(pwd)/examples/npe_model/asd_dataset_settings.yaml --data_dir $TRAIN_DIR/asd_dataset_folder -out_name $TRAIN_DIR/asds_O1.hdf5
 ```
 
 We can see that in `examples/npe_model/asd_dataset_settings.yaml` the `num_psds_max`
-attribute is set to 0 indicating all possible ASDs will be downloaded. If you want to 
+attribute is set to `0` indicating that all possible ASDs will be downloaded. If you want to 
 decrease this, make sure that there are enough ASDs in the training set to represent 
 any possible data the dingo network will see. Typically this should be at least 1000,
 but of course more is better. 
+
 
 Step 3 Training the network
 ---------------------------
@@ -114,7 +120,8 @@ sed -i "s|/path/to/model.pt|$TRAIN_DIR/model_latest.pt|g" examples/npe_model/GW1
 dingo_pipe examples/npe_model/GW150914_toy.ini
 ```
 
-There is just one difference from the previous example. It is possible to reweight the posterior to a new prior 
-if the user wants. Note though, that the new prior must be a subset of the previous prior. Otherwise, the proposal distribution
-generated by dingo will never have seen samples from the new prior (a low effective sample size) leading to poor results. As an example see the `prior-dict` attribute in 
+There is just one difference from the previous example. It is possible to reweight the posterior to a new prior.
+Note though, that the new prior must be a subset of the previous prior. Otherwise, the proposal distribution
+generated by dingo will include regions from the new prior where the network has not been trained which will
+result in a low effective sample size and lead to poor results. As an example see the `prior-dict` attribute in 
 `examples/npe_model/GW150914.ini`.
