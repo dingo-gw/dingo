@@ -28,7 +28,7 @@ def main():
     if os.path.splitext(args.out_file)[-1] != '.hdf5':
         raise ValueError('Expected a .hdf5 output file')
 
-    # Build output filename with version number
+    # Build output filename with the version number for this network
     # This is required for use on CVMFS
     version_number = args.version_number
     root, ext = os.path.splitext(args.out_file)
@@ -70,6 +70,9 @@ def main():
         f.attrs['CANONICAL_FILE_BASENAME'] = os.path.basename(out_file_name)
         # Add a few metadata entries as attributes
         f.attrs['approximant'] = d['metadata']['dataset_settings']['waveform_generator']['approximant']
+        f.attrs['epoch'] = d['epoch']
+        # Add the dingo version used for training
+        f.attrs['dingo_version'] = d.get('version')
 
 
 if __name__ == "__main__":
