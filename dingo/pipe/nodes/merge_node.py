@@ -1,6 +1,6 @@
 from bilby_pipe.job_creation.nodes import MergeNode as BilbyMergeNode
 
-from dingo.gw.pipe.utils import _strip_unwanted_submission_keys
+from dingo.pipe.utils import _strip_unwanted_submission_keys
 
 
 class MergeNode(BilbyMergeNode):

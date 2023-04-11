@@ -2,22 +2,31 @@ import os
 
 from bilby_pipe.job_creation.nodes import AnalysisNode
 
-from dingo.gw.pipe.utils import _strip_unwanted_submission_keys
+from dingo.pipe.utils import _strip_unwanted_submission_keys
 
 
-class SamplingNode(AnalysisNode):
-
-    def __init__(self, inputs, generation_node, dag):
+class ImportanceSamplingNode(AnalysisNode):
+    def __init__(self, inputs, sampling_node, generation_node, parallel_idx, dag):
         super(AnalysisNode, self).__init__(inputs)
         self.dag = dag
+        self.sampling_node = sampling_node
         self.generation_node = generation_node
-        self.request_cpus = inputs.request_cpus
-        self.device = inputs.device
+        self.parallel_idx = parallel_idx
+        self.request_cpus = inputs.request_cpus_importance_sampling
 
-        data_label = generation_node.job_name
-        base_name = data_label.replace("generation", "sampling")
-        self.job_name = base_name
+        data_label = sampling_node.job_name
+        base_name = data_label.replace("sampling", "importance_sampling")
+        self.base_job_name = base_name
+        if parallel_idx != "":
+            self.job_name = f"{base_name}_{parallel_idx}"
+        else:
+            self.job_name = base_name
         self.label = self.job_name
+
+        proposal_samples_file = os.path.join(
+            self.inputs.result_directory,
+            self.label.replace("importance_sampling", "sampling") + ".hdf5",
+        )
 
         self.setup_arguments()
 
@@ -37,19 +46,19 @@ class SamplingNode(AnalysisNode):
 
         # Add extra arguments for dingo
         self.arguments.add("label", self.label)
+        self.arguments.add("proposal-samples-file", proposal_samples_file)
         self.arguments.add("event-data-file", generation_node.event_data_file)
 
         self.extra_lines.extend(self._checkpoint_submit_lines())
         # if self.request_cpus > 1:
         #     self.extra_lines.extend(['environment = "OMP_NUM_THREADS=1"'])
 
-        for req in inputs.sampling_requirements:
-            self.requirements.append(req)
-
-        if self.device == "cuda":
-            self.extra_lines.append("request_gpus = 1")
-
         self.process_node()
+
+        # We need both of these as parents because importance sampling can in principle
+        # use different data than sampling. In that case, the generation node will not
+        # be a parent of the sampling node.
+        self.job.add_parent(sampling_node.job)
         self.job.add_parent(generation_node.job)
 
         if self.inputs.simple_submission:
@@ -57,11 +66,8 @@ class SamplingNode(AnalysisNode):
 
     @property
     def executable(self):
-        return self._get_executable_path("dingo_pipe_sampling")
+        return self._get_executable_path("dingo_pipe_importance_sampling")
 
     @property
-    def samples_file(self):
-        # TODO: Maybe remove -- not needed.
-        return os.path.join(
-            self.inputs.result_directory, self.label + ".hdf5"
-        )
+    def result_file(self):
+        return f"{self.inputs.result_directory}/{self.job_name}.hdf5"
