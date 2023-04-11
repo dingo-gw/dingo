@@ -10,8 +10,8 @@ from dingo.core.models import PosteriorModel
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
 from dingo.gw.inference.inference_pipeline import prepare_log_prob
-from dingo.gw.pipe.default_settings import DENSITY_RECOVERY_SETTINGS
-from dingo.gw.pipe.parser import create_parser
+from dingo.pipe.default_settings import DENSITY_RECOVERY_SETTINGS
+from dingo.pipe.parser import create_parser
 
 
 class SamplingInput(Input):

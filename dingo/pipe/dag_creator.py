@@ -7,7 +7,7 @@ import copy
 from bilby_pipe.job_creation.dag import Dag
 from bilby_pipe.utils import BilbyPipeError, logger
 
-from dingo.gw.pipe.nodes.generation_node import GenerationNode
+from dingo.pipe.nodes.generation_node import GenerationNode
 from .nodes.importance_sampling_node import ImportanceSamplingNode
 from .nodes.merge_node import MergeNode
 from .nodes.plot_node import PlotNode

@@ -2,7 +2,7 @@ import os
 
 from bilby_pipe.job_creation.nodes import GenerationNode as BilbyGenerationNode
 
-from dingo.gw.pipe.utils import _strip_unwanted_submission_keys
+from dingo.pipe.utils import _strip_unwanted_submission_keys
 
 
 class GenerationNode(BilbyGenerationNode):
