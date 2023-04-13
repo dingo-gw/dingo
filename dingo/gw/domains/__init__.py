@@ -100,15 +100,15 @@ def build_domain_from_wfd_settings(settings: dict, num_processes: int = 0) -> Do
             # heterodyning).
             polarizations = np.concatenate(list(wfd.polarizations.values()))
 
-            bands = get_decimation_bands_adaptive(
+            nodes_f, initial_delta_f = get_decimation_bands_adaptive(
                 wfd.domain, polarizations, **settings_mfd
             )
         else:
             raise NotImplementedError(
                 f"Unknown multibanding method {multibanding_method}."
             )
-        mfd = MultibandedFrequencyDomain(bands, wfd.domain)
-        print(f"MultibandedFrequencyDomain bands:\n{mfd.bands}")
+        mfd = MultibandedFrequencyDomain(nodes_f, initial_delta_f, wfd.domain)
+        print(f"MultibandedFrequencyDomain:\n{mfd.domain_dict}")
         return mfd
 
     else:

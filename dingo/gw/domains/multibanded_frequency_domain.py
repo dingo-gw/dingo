@@ -20,90 +20,65 @@ class MultibandedFrequencyDomain(Domain):
 
     def __init__(
         self,
-        bands: Iterable[Iterable[float]],
-        base_domain: Union[FrequencyDomain, dict] = None,
+        nodes: Iterable[float],
+        delta_f_initial: float,
+        base_domain: Union[FrequencyDomain, dict],
         window_factor: float = None,
     ):
         """
         Parameters
         ----------
-        bands: Iterable[Iterable[float]]
-            Frequency bands. Each band contains three elements, [f_min, f_max, delta_f].
-        base_domain: Union[FrequencyDomain, dict] = None
+        nodes: Iterable[float]
+            Frequency nodes for bands.
+            In total, there are len(nodes) - 1 frequency bands.
+            Band j consists of decimated data from the base domain in the range
+            [nodes[j]:nodes[j+1].
+        delta_f_initial: float
+            delta_f of band 0. The decimation factor doubles between adjacent bands,
+            so delta_f is halved.
+        base_domain: Union[FrequencyDomain, dict]
             Original (uniform frequency) domain of data, which is the starting point
             for the decimation. This determines the decimation details and the noise_std.
             Either provided as dict for build_domain, or as domain_object.
         window_factor: float = None
             Window factor for this domain. Required when using self.noise_std.
         """
-        self._window_factor = window_factor
-        self.bands = np.array(bands)
-        self.initialize_bands()
         if type(base_domain) == dict:
             from dingo.gw.domains import build_domain
 
             base_domain = build_domain(base_domain)
 
+        self._window_factor = window_factor
+        self.nodes = np.array(nodes)
         self.base_domain = base_domain
+        self.initialize_bands(delta_f_initial)
         if not isinstance(self.base_domain, FrequencyDomain):
             raise ValueError(
                 f"Expected domain type FrequencyDomain, got {type(base_domain)}."
             )
-        if self.base_domain is not None:
-            self.initialize_decimation()
 
-    # @classmethod
-    # def init_from_polarizations(
-    #     cls,
-    #     base_domain,
-    #     polarizations,
-    #     multibanding_method="adaptive",
-    #     **kwargs,
-    # ):
-    #     if type(base_domain) == dict:
-    #         from dingo.gw.domains import build_domain
-    #
-    #         base_domain = build_domain(base_domain)
-    #
-    #     if multibanding_method == "adaptive":
-    #         bands = get_decimation_bands_adaptive(
-    #             base_domain,
-    #             np.concatenate(list(polarizations.values())),
-    #             **kwargs,
-    #         )
-    #     else:
-    #         raise NotImplementedError(
-    #             f"Unknown multibanding method {multibanding_method}."
-    #         )
-    #
-    #     return cls(bands, base_domain)
-
-    def initialize_bands(self):
-        if len(self.bands.shape) != 2 or self.bands.shape[1] != 3:
+    def initialize_bands(self, delta_f_initial):
+        if len(self.nodes.shape) != 1:
             raise ValueError(
-                f"Expected format [num_bands, 3] for bands, got {self.bands.shape}."
+                f"Expected format [num_bands + 1] for nodes, "
+                f"got {self.nodes.shape}."
             )
-        self.num_bands = len(self.bands)
-        self._f_min_bands = self.bands[:, 0]
-        self._f_max_bands = self.bands[:, 1]
-        self._delta_f_bands = self.bands[:, 2]
-        self._num_bins_bands = np.array(
-            [int((band[1] - band[0]) / band[2] + 1) for band in self.bands]
-        )
-        self._f_bands = [
-            np.linspace(f_min, f_max, num_bins)
-            for f_min, f_max, num_bins in zip(
-                self._f_min_bands, self._f_max_bands, self._num_bins_bands
-            )
-        ]
-        for f_band, delta_f_band in zip(self._f_bands, self._delta_f_bands):
-            if len(f_band) > 1:
-                assert f_band[1] - f_band[0] == delta_f_band
-        self._sample_frequencies = np.concatenate(self._f_bands)
+        self.num_bands = len(self.nodes) - 1
+        self.nodes_indices = (self.nodes / self.base_domain.delta_f).astype(int)
+        self._delta_f_bands = delta_f_initial * (2 ** np.arange(self.num_bands))
+
+        self._decimation_factors_bands = (
+            self._delta_f_bands / self.base_domain.delta_f
+        ).astype(int)
+        self._num_bins_bands = (
+            (self.nodes_indices[1:] - self.nodes_indices[:-1])
+            / self._decimation_factors_bands
+        ).astype(int)
+
+        self._sample_frequencies = np.zeros(np.sum(self._num_bins_bands))
+        self._sample_frequencies = self.decimate(self.base_domain())
         self._sample_frequencies_torch = None
         self._sample_frequencies_torch_cuda = None
-        self._f_min = self._sample_frequencies[0]
-        self._f_max = self._sample_frequencies[-1]
         # array with delta_f for each bin
         self._delta_f = np.concatenate(
             [
@@ -111,41 +86,6 @@ class MultibandedFrequencyDomain(Domain):
                 for n, delta_f in zip(self._num_bins_bands, self._delta_f_bands)
             ]
         )
-
-    def initialize_decimation(self):
-        """
-        This sets the attribute self.decimation_inds_bands. For each band i,
-        self.decimation_inds_bands[i] contains three integers,
-        [idx_lower_band_ufd, idx_upper_band_ufd, decimation_factor_band].
-        Here, [idx_lower_band_ufd, idx_upper_band_ufd] specify the *inclusive* bounds in
-        self.base_domain for decimation, and decimation_factor_band is the number of
-        bins in self.base_domain that are averaged for each bin in self.
-        """
-        if self.base_domain is None:
-            raise ValueError(
-                "Original domain needs to be specified to initialize decimation."
-            )
-        if not np.all(self._delta_f_bands % self.base_domain.delta_f == 0):
-            raise NotImplementedError(
-                "delta_f_bands need to be multiple of delta_f of the original domain."
-            )
-        self.decimation_inds_bands = []
-        for f_min_band, f_max_band, delta_f_band in self.bands:
-            decimation_factor_band = int(delta_f_band / self.base_domain.delta_f)
-            idx_lower_band_ufd = int(
-                (f_min_band - delta_f_band / 2.0 + self.base_domain.delta_f / 2.0)
-                / self.base_domain.delta_f
-            )
-            # idx_upper_band_ufd is *inclusive*, so one slices with
-            # [...idx_lower_band_ufd:idx_upper_band_ufd + 1]
-            idx_upper_band_ufd = int(
-                (f_max_band + delta_f_band / 2.0 - self.base_domain.delta_f / 2.0)
-                / self.base_domain.delta_f
-            )
-            self.decimation_inds_bands.append(
-                [idx_lower_band_ufd, idx_upper_band_ufd, decimation_factor_band]
-            )
-        self.decimation_inds_bands = np.array(self.decimation_inds_bands)
 
     def decimate(self, data):
         if data.shape[-1] == len(self.base_domain):
@@ -167,18 +107,21 @@ class MultibandedFrequencyDomain(Domain):
             raise NotImplementedError(
                 f"Decimation not implemented for data of type {data}."
             )
+
         lower_out = 0  # running index for decimated band data
-        for idx, (lower_in, upper_in, dec_factor) in enumerate(
-            self.decimation_inds_bands
-        ):
-            # boundaries in original data
-            lower_in += offset_idx
-            upper_in += offset_idx
-            num_bins = self._num_bins_bands[idx]
+        for idx_band in range(self.num_bands):
+            lower_in = self.nodes_indices[idx_band] + offset_idx
+            upper_in = self.nodes_indices[idx_band + 1] + offset_idx
+            decimation_factor = self._decimation_factors_bands[idx_band]
+            num_bins = self._num_bins_bands[idx_band]
+
             data_decimated[..., lower_out : lower_out + num_bins] = decimate_uniform(
-                data[..., lower_in : upper_in + 1], dec_factor
+                data[..., lower_in:upper_in], decimation_factor
             )
-            lower_out += num_bins
+            lower_out = lower_out + num_bins
+
+        assert lower_out == len(self)
+
         return data_decimated
 
     def update(self, new_settings: dict):
@@ -433,8 +376,10 @@ class MultibandedFrequencyDomain(Domain):
         # Call tolist() on self.bands, such that it can be saved as str for metadata.
         return {
             "type": "MultibandedFrequencyDomain",
-            "bands": self.bands.tolist(),
+            "nodes": self.nodes.tolist(),
+            "delta_f_initial": self._delta_f_bands[0].item(),
             "base_domain": self.base_domain.domain_dict,
+            "window_factor": self.window_factor,
         }
 
 
@@ -482,7 +427,6 @@ def get_decimation_bands_adaptive(
             f"(N, {len(base_domain)}): "
             f"N waveforms, each of the same length {len(base_domain)} as domain."
         )
-    max_dec_factor_global = delta_f_max / base_domain.delta_f
 
     # For some reason, the last bin of a waveform is always zero, so we need to get rid
     # of that for the step below.
@@ -510,18 +454,25 @@ def get_decimation_bands_adaptive(
     periods = np.minimum.accumulate(periods[::-1])[::-1]
 
     max_dec_factor_array = periods / min_num_bins_per_period
-    bands_inds = get_inds_for_adaptive_decimation(
-        max_dec_factor_array, max_dec_factor_global
+    initial_downsampling, band_nodes_indices = get_band_nodes_for_adaptive_decimation(
+        max_dec_factor_array,
+        max_dec_factor_global=int(delta_f_max / base_domain.delta_f),
     )
+
+    # transform downsampling factor and band nodes from indices to frequencies
+    initial_delta_f = base_domain.delta_f * initial_downsampling
+    band_nodes_f = base_domain()[np.array(band_nodes_indices) + base_domain.min_idx]
+
+    return band_nodes_f, initial_delta_f
 
     # transform the indices and decimation factors into the frequency bounds and
     # delta_f for the bands.
-    bands = []
-    for lower, upper, dec_factor in bands_inds:
-        delta_f_band = dec_factor * base_domain.delta_f
-        f_min_band = f[lower] + (dec_factor - 1) / 2 * base_domain.delta_f
-        f_max_band = f[upper] - (dec_factor - 1) / 2 * base_domain.delta_f
-        bands.append([f_min_band, f_max_band, delta_f_band])
+    # bands = []
+    # for lower, upper, dec_factor in bands_inds:
+    #     delta_f_band = dec_factor * base_domain.delta_f
+    #     f_min_band = f[lower] + (dec_factor - 1) / 2 * base_domain.delta_f
+    #     f_max_band = f[upper] - (dec_factor - 1) / 2 * base_domain.delta_f
+    #     bands.append([f_min_band, f_max_band, delta_f_band])
 
     # test consistency
     # mfd = MultibandedFrequencyDomain(bands, base_domain)
@@ -529,7 +480,7 @@ def get_decimation_bands_adaptive(
     # bands_inds_old[..., :2] += base_domain.min_idx
     # assert (bands_inds_old == np.array(mfd.decimation_inds_bands)).all()
 
-    return bands
+    # return bands
 
 
 def get_decimation_bands_from_chirp_mass(
@@ -803,7 +754,7 @@ def get_periods(x: np.ndarray, upper_bound_for_monotonicity: bool = False):
         )
 
 
-def get_inds_for_adaptive_decimation(
+def get_band_nodes_for_adaptive_decimation(
     max_dec_factor_array: np.ndarray, max_dec_factor_global: int = np.inf
 ):
     """
@@ -821,30 +772,32 @@ def get_inds_for_adaptive_decimation(
 
     Returns
     -------
-    bands: list
-        List with decimation indices, in format [lower, upper, dec_factor] for each band.
-        (lower, upper) are the *inclusive* boundaries for the band.
+    initial_downsampling: int
+        Downsampling factor of band 0.
+    band_nodes: list[int]
+        List with nodes for bands.
+        Band j consists of indices [nodes[j]:nodes[j+1].
     """
     if len(max_dec_factor_array.shape) != 1:
         raise ValueError("max_dec_factor_array needs to be 1D array.")
     if not (max_dec_factor_array[1:] >= max_dec_factor_array[:-1]).all():
         raise ValueError("max_dec_factor_array needs to increase monotonically.")
 
-    bands = []
     max_dec_factor_array = np.clip(max_dec_factor_array, None, max_dec_factor_global)
     N = len(max_dec_factor_array)
     dec_factor = int(max(1, floor_to_power_of_2(max_dec_factor_array[0])))
-    lower_band = 0
-    upper = lower_band + dec_factor - 1
-    while upper < N:
-        if upper + dec_factor >= N:
-            bands.append([lower_band, upper, dec_factor])
-        elif dec_factor * 2 <= max_dec_factor_array[upper + 1]:
+    band_nodes = [0]
+    upper = dec_factor
+    initial_downsampling = dec_factor
+    while upper - 1 < N:
+        if upper - 1 + dec_factor >= N:
+            # conclude while loop, append upper as last node
+            band_nodes.append(upper)
+        elif dec_factor * 2 <= max_dec_factor_array[upper]:
             # conclude previous band
-            bands.append([lower_band, upper, dec_factor])
+            band_nodes.append(upper)
             # enter new band
             dec_factor *= 2
-            lower_band = upper + 1
         upper += dec_factor
 
-    return bands
+    return initial_downsampling, band_nodes
