@@ -431,7 +431,6 @@ def get_decimation_bands_adaptive(
     # For some reason, the last bin of a waveform is always zero, so we need to get rid
     # of that for the step below.
     x = waveforms[:, base_domain.min_idx : -1]
-    f = base_domain()[base_domain.min_idx : -1]
 
     # Ideally, we would just call
     #   periods = np.min(get_periods(x, upper_bound_for_monotonicity=True), axis=0)
@@ -460,27 +459,10 @@ def get_decimation_bands_adaptive(
     )
 
     # transform downsampling factor and band nodes from indices to frequencies
-    initial_delta_f = base_domain.delta_f * initial_downsampling
-    band_nodes_f = base_domain()[np.array(band_nodes_indices) + base_domain.min_idx]
+    delta_f_initial = base_domain.delta_f * initial_downsampling
+    nodes = base_domain()[np.array(band_nodes_indices) + base_domain.min_idx]
 
-    return band_nodes_f, initial_delta_f
-
-    # transform the indices and decimation factors into the frequency bounds and
-    # delta_f for the bands.
-    # bands = []
-    # for lower, upper, dec_factor in bands_inds:
-    #     delta_f_band = dec_factor * base_domain.delta_f
-    #     f_min_band = f[lower] + (dec_factor - 1) / 2 * base_domain.delta_f
-    #     f_max_band = f[upper] - (dec_factor - 1) / 2 * base_domain.delta_f
-    #     bands.append([f_min_band, f_max_band, delta_f_band])
-
-    # test consistency
-    # mfd = MultibandedFrequencyDomain(bands, base_domain)
-    # bands_inds_old = np.array(bands_inds)
-    # bands_inds_old[..., :2] += base_domain.min_idx
-    # assert (bands_inds_old == np.array(mfd.decimation_inds_bands)).all()
-
-    # return bands
+    return nodes, delta_f_initial
 
 
 def get_decimation_bands_from_chirp_mass(
