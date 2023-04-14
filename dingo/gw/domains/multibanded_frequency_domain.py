@@ -125,7 +125,8 @@ class MultibandedFrequencyDomain(Domain):
         return data_decimated
 
     def update(self, new_settings: dict):
-        raise NotImplementedError()
+        if not new_settings == self.domain_dict:
+            raise NotImplementedError()
 
     def set_new_range(self, f_min: float = None, f_max: float = None):
         raise NotImplementedError()
@@ -145,6 +146,8 @@ class MultibandedFrequencyDomain(Domain):
 
     def time_translate_data(self, data, dt):
         """
+        TODO: like self.add_phase, this is just copied from FrequencyDomain and
+        TODO: could be inherited instead.
         Time translate frequency-domain data by dt. Time translation corresponds (in
         frequency domain) to multiplication by
 
@@ -171,7 +174,19 @@ class MultibandedFrequencyDomain(Domain):
         -------
         Array-like of the same form as data.
         """
-        raise NotImplementedError()
+        f = self.get_sample_frequencies_astype(data)
+        if isinstance(data, np.ndarray):
+            # Assume numpy arrays un-batched, since they are only used at train time.
+            phase_shift = 2 * np.pi * dt * f
+        elif isinstance(data, torch.Tensor):
+            # Allow for possible multiple "batch" dimensions (e.g., batch + detector,
+            # which might have independent time shifts).
+            phase_shift = 2 * np.pi * torch.einsum("...,i", dt, f)
+        else:
+            raise NotImplementedError(
+                f"Time translation not implemented for data of " "type {data}."
+            )
+        return self.add_phase(data, phase_shift)
 
     def get_sample_frequencies_astype(self, data):
         """

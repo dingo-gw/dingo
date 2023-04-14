@@ -2,6 +2,8 @@ import numpy as np
 import torch
 from bilby.core.prior import PriorDict
 from abc import ABC, abstractmethod
+
+from dingo.gw.domains import Domain
 from dingo.gw.transforms.waveform_transforms import HeterodynePhase
 
 
@@ -307,87 +309,28 @@ class GNPEChirp(GNPEBase):
         # would be when calculating parameter standardizations, since we just want to
         # draw samples of the parameters at that point, and not prepare any data.
         if "waveform" in sample:
-            heterodyning_parameters = {
-                "chirp_mass": proxies["chirp_mass_proxy"],
-                "mass_ratio": proxies.get("mass_ratio_proxy"),
-            }
             sample["waveform"] = self.phase_heterodyning_transform(
-                {"waveform": sample["waveform"], "parameters": heterodyning_parameters}
+                {
+                    "waveform": sample["waveform"],
+                    "parameters": {
+                        "chirp_mass": proxies["chirp_mass_proxy"],
+                        "mass_ratio": proxies.get("mass_ratio_proxy"),
+                    },
+                }
             )["waveform"]
-
-            # sample["waveform"] = self.factor_fiducial_waveform(
-            #     sample["waveform"],
-            #     proxies["chirp_mass_proxy"],
-            #     proxies.get("mass_ratio_proxy"),
+            # import matplotlib.pyplot as plt
+            # plt.plot(
+            #     self.phase_heterodyning_transform.domain(),
+            #     input_sample["waveform"]["h_cross"],
             # )
+            # plt.plot(
+            #     self.phase_heterodyning_transform.domain(),
+            #     sample["waveform"]["h_cross"],
+            # )
+            # plt.show()
+            # plt.xlim((0, 100))
+            # plt.plot(input_sample["waveform"]["h_cross"])
+            # plt.plot(sample["waveform"]["h_cross"])
+            # plt.show()
 
         return sample
-
-    #
-    # def factor_fiducial_waveform(self, data, chirp_mass, mass_ratio):
-    #     """
-    #     Divides the data by the fiducial waveform defined by the chirp mass and (
-    #     optionally) mass ratio. Allows for batching.
-    #     Parameters
-    #     ----------
-    #     data : Union[dict, torch.Tensor]
-    #         If a dict, the keys would correspond to different detectors or
-    #         polarizations. For a Tensor, these would be within different components.
-    #         This method uses the same fiducial waveform for each detector.
-    #     chirp_mass : Union[np.array, torch.Tensor]
-    #     mass_ratio : Union[np.array, torch.Tensor]
-    #     Returns
-    #     -------
-    #     dict or torch.Tensor of the same form as data.
-    #     """
-    #     if isinstance(self.domain, FrequencyDomain):
-    #         if type(data) == dict:
-    #             f = self.domain.get_sample_frequencies_astype(list(data.values())[0])
-    #         else:
-    #             f = self.domain.get_sample_frequencies_astype(data)
-    #
-    #         # Expand across possible batch dimension.
-    #         if type(chirp_mass) == np.float64 or type(chirp_mass) == float:
-    #             mc_f = chirp_mass * f
-    #             # Avoid taking a negative power of 0 in the first index. This will get
-    #             # chopped off or multiplied by 0 later anyway.
-    #             if f[0] == 0.0:
-    #                 mc_f[0] = 1.0
-    #         elif type(chirp_mass) == torch.Tensor:
-    #             mc_f = torch.outer(chirp_mass, f)
-    #             if f[0] == 0.0:
-    #                 mc_f[0] = 1.0
-    #             if mass_ratio is not None:
-    #                 mass_ratio = mass_ratio[:, None]
-    #         else:
-    #             raise TypeError(
-    #                 f"Invalid type {type(chirp_mass)}. "
-    #                 f"Only implemented for floats and tensors"
-    #             )
-    #
-    #         # Leading (0PN) phase
-    #         pi_mc_f_SI = np.pi * (lal.GMSUN_SI / lal.C_SI ** 3) * mc_f
-    #         fiducial_phase = (3 / 128) * (pi_mc_f_SI) ** (-5 / 3)
-    #
-    #         # 1PN correction
-    #         if self.order >= 2:
-    #             assert mass_ratio is not None
-    #             symmetric_mass_ratio = mass_ratio / (1 + mass_ratio) ** 2
-    #             pi_m_f_SI = pi_mc_f_SI / symmetric_mass_ratio ** (3 / 5)
-    #             correction = 1 + (55 * symmetric_mass_ratio / 9 + 3715 / 756) * (
-    #                 pi_m_f_SI
-    #             ) ** (2 / 3)
-    #
-    #             fiducial_phase *= correction
-    #
-    #         if type(data) == dict:
-    #             result = {}
-    #             for k, v in data.items():
-    #                 result[k] = self.domain.add_phase(v, -fiducial_phase)
-    #         else:
-    #             result = self.domain.add_phase(data, -fiducial_phase)
-    #
-    #         return result
-    #
-    #     else:
-    #         raise NotImplementedError("Can only use GNPEChirp in frequency domain.")

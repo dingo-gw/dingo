@@ -18,6 +18,7 @@ from dingo.gw.transforms import (
     ToTorch,
     SelectStandardizeRepackageParameters,
     GNPECoalescenceTimes,
+    GNPEChirp,
     TimeShiftStrain,
     GNPEBase,
     PostCorrectGeocentTime,
@@ -248,7 +249,6 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
 
         gnpe_time_settings = data_settings.get("gnpe_time_shifts")
         gnpe_chirp_settings = data_settings.get("gnpe_chirp")
-        gnpe_phase_settings = data_settings.get("gnpe_phase")
         if (
             not gnpe_time_settings
             and not gnpe_chirp_settings
@@ -276,6 +276,10 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 )
             )
             transform_pre.append(TimeShiftStrain(ifo_list, self.domain))
+        if "gnpe_chirp" in data_settings:
+            d = data_settings["gnpe_chirp"]
+            transforms.append(GNPEChirp(d["kernel"], domain, d.get("order", 0)))
+            extra_context_parameters += transforms[-1].context_parameters
         transform_pre.append(
             SelectStandardizeRepackageParameters(
                 {"context_parameters": data_settings["context_parameters"]},

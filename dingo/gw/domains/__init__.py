@@ -108,7 +108,7 @@ def build_domain_from_wfd_settings(settings: dict, num_processes: int = 0) -> Do
                 f"Unknown multibanding method {multibanding_method}."
             )
         mfd = MultibandedFrequencyDomain(nodes_f, initial_delta_f, wfd.domain)
-        print(f"MultibandedFrequencyDomain:\n{mfd.domain_dict}")
+        print(f"MultibandedFrequencyDomain:\n{mfd.domain_dict}\nlength: {len(mfd)}")
         return mfd
 
     else:
