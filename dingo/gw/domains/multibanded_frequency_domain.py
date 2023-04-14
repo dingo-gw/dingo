@@ -48,7 +48,6 @@ class MultibandedFrequencyDomain(Domain):
 
             base_domain = build_domain(base_domain)
 
-        self._window_factor = window_factor
         self.nodes = np.array(nodes)
         self.base_domain = base_domain
         self.initialize_bands(delta_f_initial)
@@ -326,12 +325,12 @@ class MultibandedFrequencyDomain(Domain):
 
     @property
     def window_factor(self):
-        return self._window_factor
+        return self.base_domain.window_factor
 
     @window_factor.setter
     def window_factor(self, value):
-        """Set self._window_factor."""
-        self._window_factor = float(value)
+        """Set window factor of base domain."""
+        self.base_domain.window_factor = float(value)
 
     @property
     def noise_std(self) -> float:
@@ -348,9 +347,9 @@ class MultibandedFrequencyDomain(Domain):
         Windowing of TD data; tapering window has a slope -> reduces power only for noise,
         but not for the signal which is in the main part unaffected by the taper
         """
-        if self._window_factor is None:
+        if self.window_factor is None:
             raise ValueError("Window factor needs to be set for noise_std.")
-        return np.sqrt(self._window_factor) / np.sqrt(4.0 * self._delta_f)
+        return np.sqrt(self.window_factor) / np.sqrt(4.0 * self._delta_f)
 
     @property
     def f_max(self) -> float:
@@ -394,7 +393,6 @@ class MultibandedFrequencyDomain(Domain):
             "nodes": self.nodes.tolist(),
             "delta_f_initial": self._delta_f_bands[0].item(),
             "base_domain": self.base_domain.domain_dict,
-            "window_factor": self.window_factor,
         }
 
 
