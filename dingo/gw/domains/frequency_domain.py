@@ -154,7 +154,7 @@ class FrequencyDomain(Domain):
             phase_shift = 2 * np.pi * torch.einsum("...,i", dt, f)
         else:
             raise NotImplementedError(
-                f"Time translation not implemented for data of " "type {data}."
+                f"Time translation not implemented for data of type {data}."
             )
         return self.add_phase(data, phase_shift)
 
