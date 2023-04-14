@@ -6,6 +6,7 @@ from .multibanded_frequency_domain import (
     get_decimation_bands_adaptive,
 )
 
+from ..gwutils import get_window_factor
 from copy import deepcopy
 import numpy as np
 
