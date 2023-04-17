@@ -71,7 +71,7 @@ def main():
         f.attrs['approximant'] = d['metadata']['dataset_settings']['waveform_generator']['approximant']
         f.attrs['epoch'] = d['epoch']
         # Add the dingo version used for training
-        f.attrs['dingo_version'] = str(d.get('version'))
+        f.attrs['version'] = str(d.get('version'))
 
 
 if __name__ == "__main__":
