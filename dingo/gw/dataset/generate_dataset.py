@@ -15,12 +15,12 @@ from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.domains import build_domain
 from dingo.gw.transforms import WhitenFixedASD
-from dingo.gw.waveform_generator import WaveformGenerator, GWSignalWaveformGenerator, generate_waveforms_parallel
+from dingo.gw.waveform_generator import WaveformGenerator, NewInterfaceWaveformGenerator, generate_waveforms_parallel
 from dingo.gw.SVD import SVDBasis, ApplySVD
 
 
 def generate_parameters_and_polarizations(
-    waveform_generator: WaveformGenerator or GWSignalWaveformGenerator,
+    waveform_generator: WaveformGenerator or NewInterfaceWaveformGenerator,
     prior: BBHPriorDict,
     num_samples: int,
     num_processes: int,
@@ -152,7 +152,7 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
 
     gwsignalflag = settings.get("gwsignal_generator",False)
     if gwsignalflag:
-        waveform_generator = GWSignalWaveformGenerator(
+        waveform_generator = NewInterfaceWaveformGenerator(
             domain=domain,
             **settings["waveform_generator"],
         )

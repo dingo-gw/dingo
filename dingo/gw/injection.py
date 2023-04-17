@@ -16,7 +16,7 @@ from dingo.gw.transforms import (
     WhitenAndScaleStrain,
     ApplyCalibrationUncertainty,
 )
-from dingo.gw.waveform_generator.waveform_generator import WaveformGenerator, GWSignalWaveformGenerator
+from dingo.gw.waveform_generator.waveform_generator import WaveformGenerator, NewInterfaceWaveformGenerator
 
 
 class GWSignal(object):
@@ -34,7 +34,7 @@ class GWSignal(object):
         data_domain: FrequencyDomain,
         ifo_list: list,
         t_ref: float,
-        waveform_generator: WaveformGenerator or GWSignalWaveformGenerator
+        waveform_generator: WaveformGenerator or NewInterfaceWaveformGenerator
     ):
         """
         Parameters

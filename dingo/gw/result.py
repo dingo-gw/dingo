@@ -17,7 +17,7 @@ from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_extrinsic_prior_dict, get_window_factor
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 from dingo.gw.prior import build_prior_with_defaults
-from dingo.gw.waveform_generator import GWSignalWaveformGenerator, WaveformGenerator
+from dingo.gw.waveform_generator import NewInterfaceWaveformGenerator, WaveformGenerator
 
 
 RANDOM_STATE = 150914
@@ -322,7 +322,7 @@ class Result(CoreResult):
         if self.base_metadata["dataset_settings"].get("gwsignal_generator") is None:
             waveform_generator = WaveformGenerator
         else:
-            waveform_generator = GWSignalWaveformGenerator
+            waveform_generator = NewInterfaceWaveformGenerator
 
         # FIXME: This is a quick hack because I didn't know how to choose the wfg
         #  domain in the case of a changing domain during importance sampling. It could

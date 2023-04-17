@@ -766,7 +766,7 @@ class WaveformGenerator:
         pol_dict = {"h_plus": h_plus, "h_cross": h_cross}
         return pol_dict
 
-class GWSignalWaveformGenerator:
+class NewInterfaceWaveformGenerator:
     """Generate polarizations using GWSignal routines in the specified domain for a
     single GW coalescence given a set of waveform parameters.
     """
@@ -1394,7 +1394,7 @@ def SEOBNRv4PHM_maximum_starting_frequency(
 
 
 def generate_waveforms_task_func(
-    args: Tuple, waveform_generator: WaveformGenerator or GWSignalWaveformGenerator
+    args: Tuple, waveform_generator: WaveformGenerator or NewInterfaceWaveformGenerator
 ) -> Dict[str, np.ndarray]:
     """
     Picklable wrapper function for parallel waveform generation.
@@ -1415,7 +1415,7 @@ def generate_waveforms_task_func(
 
 
 def generate_waveforms_parallel(
-    waveform_generator: WaveformGenerator or GWSignalWaveformGenerator,
+    waveform_generator: WaveformGenerator or NewInterfaceWaveformGenerator,
     parameter_samples: pd.DataFrame,
     pool: Pool = None,
 ) -> Dict[str, np.ndarray]:
