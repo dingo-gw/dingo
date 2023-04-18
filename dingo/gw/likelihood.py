@@ -547,7 +547,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
         likelihoods = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
         # Return the average over calibration envelopes
-        return np.mean(likelihoods)
+        return logsumexp(likelihoods) - np.log(len(likelihoods))
 
     def d_inner_h_complex_multi(
         self, theta: pd.DataFrame, num_processes: int = 1
