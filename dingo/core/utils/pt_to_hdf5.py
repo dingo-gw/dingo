@@ -67,11 +67,14 @@ def main():
         # Metadata for CVMFS LVK distribution
         # This needs to be exactly the same as the "basename" of the hdf5 file
         f.attrs['CANONICAL_FILE_BASENAME'] = os.path.basename(out_file_name)
+
         # Add a few metadata entries as attributes
         f.attrs['approximant'] = d['metadata']['dataset_settings']['waveform_generator']['approximant']
         f.attrs['epoch'] = d['epoch']
         # Add the dingo version used for training
         f.attrs['version'] = str(d.get('version'))
+        # Make it clear to dingo_ls that this is file contains model weights
+        f.attrs['dataset_type'] = 'trained_model' 
 
 
 if __name__ == "__main__":

@@ -4,6 +4,8 @@ from pathlib import Path
 import h5py
 import torch
 import yaml
+import json
+from pprint import pprint
 
 from dingo.core.dataset import DingoDataset
 from dingo.gw.SVD import SVDBasis
@@ -122,6 +124,20 @@ def ls():
                     sort_keys=False,
                 )
             )
+
+        elif dataset_type == "trained_model":
+            with h5py.File(args.file_name, "r") as f:
+                print(f"Dingo version: {f.attrs['version']}")
+                print("\nTrained model\n" + "================\n")
+
+                print(f"Approximant: {f.attrs['approximant']}")
+                print(f"Epoch: {f.attrs['epoch']}")
+
+                for d in ['model_kwargs', 'metadata']:
+                    json_data = json.loads(f['serialized_dicts'][d][()])
+                    print(f"\n{d}:\n" + "-"*(len(d)+1))
+                    pprint(json_data)
+
         else:
             # Legacy (before dataset_type identifier).
             try:
