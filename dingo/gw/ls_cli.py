@@ -127,11 +127,10 @@ def ls():
 
         elif dataset_type == "trained_model":
             with h5py.File(args.file_name, "r") as f:
-                print(f"Dingo version: {f.attrs['version']}")
-                print("\nTrained model\n" + "================\n")
-
-                print(f"Approximant: {f.attrs['approximant']}")
-                print(f"Epoch: {f.attrs['epoch']}")
+                print("Extracting information about torch model.\n")
+                print(f"Version: {f.attrs['version']}")
+                print(f"Model epoch: {f.attrs['epoch']}")
+                print("Model metadata:")
 
                 for d in ['model_kwargs', 'metadata']:
                     json_data = json.loads(f['serialized_dicts'][d][()])
