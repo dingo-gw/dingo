@@ -109,7 +109,9 @@ Note if you have multiple GPUs on the machine, you can select which GPU to use
 by running 
 
 ```{important}
-It is recommended to have at least 40 GB of GPU memory on the device. 
+It is recommended to have at least 40 GB of GPU memory on the device. If there is not enough memory on the machine,
+first try halving the `batch_size`. In this case one should also multiply the learning rate, `lr`, by $\frac{1}{\sqrt{2}}$. If 
+there is still not enough memory, consider reducing the number of hidden dimensions.
 ```
 
 Step 4 Doing Inference
