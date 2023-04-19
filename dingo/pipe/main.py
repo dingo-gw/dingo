@@ -11,6 +11,7 @@ from bilby_pipe.utils import (
     logger,
     convert_string_to_dict,
 )
+logger.name = "dingo_pipe"
 
 from .dag_creator import generate_dag
 from .parser import create_parser

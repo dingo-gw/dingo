@@ -13,6 +13,7 @@ from bilby_pipe.utils import (
     noneint,
     nonestr,
 )
+logger.name = "dingo_pipe"
 
 
 class StoreBoolean(argparse.Action):

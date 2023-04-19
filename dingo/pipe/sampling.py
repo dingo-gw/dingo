@@ -5,6 +5,7 @@ from pathlib import Path
 
 from bilby_pipe.input import Input
 from bilby_pipe.utils import parse_args, logger, convert_string_to_dict
+logger.name = "dingo_pipe"
 
 from dingo.core.models import PosteriorModel
 from dingo.gw.data.event_dataset import EventDataset

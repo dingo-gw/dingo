@@ -7,6 +7,7 @@ import sys
 import yaml
 from bilby_pipe.input import Input
 from bilby_pipe.utils import parse_args, logger, convert_string_to_dict
+logger.name = "dingo_pipe"
 
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.pipe.default_settings import IMPORTANCE_SAMPLING_SETTINGS
