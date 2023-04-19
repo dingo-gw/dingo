@@ -61,7 +61,12 @@ dingo_generate_asd_dataset --settings_file examples/npe_model/asd_dataset_settin
 However, this time, during training we will need two sets of ASDs. The first one will be
 fixed during the initial training -- this is the fiducial dataset generated above.
 This dataset will contain only  a single ASD. The second ASDDataset will contain many
-ASDs and is used during the fine tuning stage. To generate this second dataset run
+ASDs and is used during the fine tuning stage. The reason to use just one ASD during the first 
+stage is to allow the network to train in an easier inference setting. It should learn how
+to infer parameters in the presence of that one ASD. However, during inference
+the ASD will be variable. Thus, in the second stage many ASDs are used so that dingo learns the distribution
+of ASDs from the observing run. We find this split leads to an improvement in
+overall performance. To generate this second dataset run
 
 ```
 dingo_generate_asd_dataset --settings_file $(pwd)/examples/npe_model/asd_dataset_settings.yaml --data_dir $TRAIN_DIR/asd_dataset_folder -out_name $TRAIN_DIR/asds_O1.hdf5
