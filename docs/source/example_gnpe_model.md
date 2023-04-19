@@ -59,7 +59,7 @@ dingo_train --settings_file examples/gnpe_model/train_settings.yaml --train_dir 
 
 Notice that the inference parameters are only the `H1_time` and `L1_time`. We train the main network 
 for the `default_inference_parameters` (defined [here](https://github.com/dingo-gw/dingo/blob/main/dingo/gw/prior.py)) 
-using:
+except for the `phase` of coalescence. 
 
 ```
 sed -i 's+/path/to/waveform_dataset.hdf5+'"$TRAIN_DIR"'/waveform_dataset.hdf5+g' examples/gnpe_model/train_settings.yaml

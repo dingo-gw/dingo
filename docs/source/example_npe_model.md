@@ -98,6 +98,9 @@ number of neural spline flow transforms described in
 `model.nsf_kwargs.num_flow_steps`. These increase the depth of the network and the 
 number/size of the layers in the embedding network. 
 
+Notice, we are not inferring the phase parameter here as it is not listed below `inference_parameters`. However,
+we do recover the phase in post processing. To see why and how this is done see [synthetic phase](result.md)
+
 Also notice there are now two training stages `stage_0` and `stage_1`. In `stage_0` a fixed ASD is used and the reduced basis layer
 is frozen. Then in `stage_1` all ASDs are used and the reduced basis layer is unfrozen. 
 

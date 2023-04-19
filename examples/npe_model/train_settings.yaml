@@ -20,7 +20,21 @@ data:
     psi: default
     luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0)
   ref_time: 1126259462.391
-  inference_parameters: default # [chirp_mass, mass_ratio,  luminosity_distance, dec]
+  inference_parameters:
+    - chirp_mass
+    - mass_ratio
+    - a_1
+    - a_2
+    - tilt_1
+    - tilt_2
+    - phi_12
+    - phi_jl
+    - theta_jn
+    - luminosity_distance
+    - geocent_time
+    - ra
+    - dec
+    - psi
 
 # Model architecture
 model:
