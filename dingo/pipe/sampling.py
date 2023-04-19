@@ -5,7 +5,6 @@ from pathlib import Path
 
 from bilby_pipe.input import Input
 from bilby_pipe.utils import parse_args, logger, convert_string_to_dict
-logger.name = "dingo_pipe"
 
 from dingo.core.models import PosteriorModel
 from dingo.gw.data.event_dataset import EventDataset
@@ -13,6 +12,8 @@ from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
 from dingo.gw.inference.inference_pipeline import prepare_log_prob
 from dingo.pipe.default_settings import DENSITY_RECOVERY_SETTINGS
 from dingo.pipe.parser import create_parser
+
+logger.name = "dingo_pipe"
 
 
 class SamplingInput(Input):

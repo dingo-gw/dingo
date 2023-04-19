@@ -11,13 +11,14 @@ from bilby_pipe.utils import (
     logger,
     convert_string_to_dict,
 )
-logger.name = "dingo_pipe"
 
 from .dag_creator import generate_dag
 from .parser import create_parser
 
 from dingo.gw.domains import build_domain_from_model_metadata
 from dingo.core.models import PosteriorModel
+
+logger.name = "dingo_pipe"
 
 
 def fill_in_arguments_from_model(args):

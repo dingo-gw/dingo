@@ -4,12 +4,13 @@ import sys
 from bilby_pipe.input import Input
 from bilby_pipe.main import parse_args
 from bilby_pipe.utils import logger, convert_string_to_dict
-logger.name = "dingo_pipe"
 from bilby_pipe.data_generation import DataGenerationInput as BilbyDataGenerationInput
 
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import FrequencyDomain
 from dingo.pipe.parser import create_parser
+
+logger.name = "dingo_pipe"
 
 
 class DataGenerationInput(BilbyDataGenerationInput):
