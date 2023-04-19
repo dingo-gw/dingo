@@ -10,6 +10,8 @@ from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import FrequencyDomain
 from dingo.pipe.parser import create_parser
 
+logger.name = "dingo_pipe"
+
 
 class DataGenerationInput(BilbyDataGenerationInput):
     def __init__(self, args, unknown_args, create_data=True):

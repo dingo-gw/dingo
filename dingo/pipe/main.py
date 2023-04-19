@@ -18,6 +18,8 @@ from .parser import create_parser
 from dingo.gw.domains import build_domain_from_model_metadata
 from dingo.core.models import PosteriorModel
 
+logger.name = "dingo_pipe"
+
 
 def fill_in_arguments_from_model(args):
     # FIXME: It would be better if we did not have to load an entire model just to

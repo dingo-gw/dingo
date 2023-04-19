@@ -14,6 +14,8 @@ from bilby_pipe.utils import (
     nonestr,
 )
 
+logger.name = "dingo_pipe"
+
 
 class StoreBoolean(argparse.Action):
     """argparse class for robust handling of booleans with configargparse

@@ -13,6 +13,8 @@ from dingo.pipe.default_settings import IMPORTANCE_SAMPLING_SETTINGS
 from dingo.pipe.parser import create_parser
 from dingo.gw.result import Result
 
+logger.name = "dingo_pipe"
+
 
 class ImportanceSamplingInput(Input):
     def __init__(self, args, unknown_args):

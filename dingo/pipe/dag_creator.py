@@ -13,6 +13,8 @@ from .nodes.merge_node import MergeNode
 from .nodes.plot_node import PlotNode
 from .nodes.sampling_node import SamplingNode
 
+logger.name = "dingo_pipe"
+
 
 def get_trigger_time_list(inputs):
     """Returns a list of GPS trigger times for each data segment"""

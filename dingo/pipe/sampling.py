@@ -13,6 +13,8 @@ from dingo.gw.inference.inference_pipeline import prepare_log_prob
 from dingo.pipe.default_settings import DENSITY_RECOVERY_SETTINGS
 from dingo.pipe.parser import create_parser
 
+logger.name = "dingo_pipe"
+
 
 class SamplingInput(Input):
     def __init__(self, args, unknown_args):
