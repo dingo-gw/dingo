@@ -25,6 +25,7 @@ class Dingo(Pipeline):
         Defaults to "C01_offline".
     """
 
+config_template = importlib.resources.path(__name__, 'dingo.ini')
     name = "dingo"
     STATUS = {"wait", "stuck", "stopped", "running", "finished"}
 
