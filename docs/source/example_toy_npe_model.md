@@ -275,13 +275,55 @@ The final step is to do inference, for example on GW150914. To do this we will u
 dingo_pipe GW150914.ini
 ```
 
-This will generate files which are described in [dingo_pipe](dingo_pipe.md). To see the results, take a look in `outdir_GW150914`.
+This calls `dingo_pipe` on an INI file that specifies the event to run on,
+```ini
+################################################################################
+##  Job submission arguments
+################################################################################
+
+local = True
+accounting = dingo
+request-cpus-importance-sampling = 2
+
+################################################################################
+##  Sampler arguments
+################################################################################
+
+model = training/model_latest.pt
+device = 'cpu'
+num-samples = 5000
+batch-size = 5000
+recover-log-prob = false
+importance-sample = false
+
+################################################################################
+## Data generation arguments
+################################################################################
+
+trigger-time = GW150914
+label = GW150914
+outdir = outdir_GW150914
+channel-dict = {H1:GWOSC, L1:GWOSC}
+psd-length = 128
+# sampling-frequency = 2048.0
+# importance-sampling-updates = {'duration': 4.0}
+
+################################################################################
+## Plotting arguments
+################################################################################
+
+plot-corner = true
+plot-weights = true
+plot-log-probs = true
+```
+
+This will generate files which are described in [dingo_pipe](dingo_pipe.md). To see the results, take a look in `outdir_GW150914`. We set the flag `importance-sample = False` in the INI file, which disables importance sampling for this simple example. Generally one would omit this (it defaults to True).
 
 We can load and manipulate the data with the following code. For example, here we create a cornerplot
 
 ```
 from dingo.gw.result import Result
-result = Result(file_name="$TRAIN_DIR/outdir_GW150914/result/GW150914_data0_1126259462-4_importance_sampling.hdf5")
+result = Result(file_name="outdir_GW150914/result/GW150914_data0_1126259462-4_sampling.hdf5")
 result.plot_corner()
 ```
 
