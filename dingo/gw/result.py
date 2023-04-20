@@ -506,6 +506,25 @@ class Result(CoreResult):
 
         print(f"Done. This took {time.time() - t0:.2f} s.")
 
+    def get_samples_bilby_phase(self):
+        """
+        Convert the spin angles phi_jl and theta_jn to account for a difference in
+        phase definition compared to Bilby.
+
+        Returns
+        -------
+        pd.DataFrame
+            Samples
+        """
+        spin_conversion_phase_old = self.base_metadata["dataset_settings"][
+            "waveform_generator"
+        ].get("spin_conversion_phase")
+
+        # Redefine phase parameter to be consistent with Bilby.
+        return change_spin_conversion_phase(
+            self.samples, self.f_ref, spin_conversion_phase_old, None
+        )
+
     @property
     def pesummary_samples(self):
         """Samples in a form suitable for PESummary.
@@ -543,9 +562,9 @@ class Result(CoreResult):
         ].get("spin_conversion_phase")
 
         # Redefine phase parameter to be consistent with Bilby. COMMENTED BECAUSE SLOW
-        # samples = change_spin_conversion_phase(
-        #     samples, self.f_ref, spin_conversion_phase_old, None
-        # )
+        samples = change_spin_conversion_phase(
+            samples, self.f_ref, spin_conversion_phase_old, None
+        )
 
         return samples
 
