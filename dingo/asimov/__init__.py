@@ -1,6 +1,7 @@
 # adapted from the Asimov Bilby Pipeline interface
 import configparser
 import glob
+import importlib
 import os
 import re
 import subprocess
@@ -25,7 +26,7 @@ class Dingo(Pipeline):
         Defaults to "C01_offline".
     """
 
-config_template = importlib.resources.path(__name__, 'dingo.ini')
+    config_template = importlib.resources.path(__name__, 'dingo.ini')
     name = "dingo"
     STATUS = {"wait", "stuck", "stopped", "running", "finished"}
 
