@@ -317,9 +317,14 @@ class Result(CoreResult):
             t_ref = self.event_metadata["time_event"]
         else:
             t_ref = self.base_metadata["train_settings"]["data"]["ref_time"]
-        
-        #Select waveform generator, LAL or GWSignal
-        if self.base_metadata["dataset_settings"].get("gwsignal_generator") is None:
+
+        # Select waveform generator, LAL or GWSignal
+        if (
+            self.base_metadata["dataset_settings"]["waveform_generator"].get(
+                "new_interface", False
+            )
+            is False
+        ):
             waveform_generator = WaveformGenerator
         else:
             waveform_generator = NewInterfaceWaveformGenerator
