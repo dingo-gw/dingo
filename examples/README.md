@@ -20,7 +20,7 @@ One can use `dingo_generate_dataset_dag` to set up a condor DAG for generating w
 
 Training also requires a dataset of noise ASDs, which are sampled randomly for each training sample. To generate this dataset based on noise observed during a run, execute
 ```
-dingo_generate_ASD_dataset --data_dir data_dir --settings_file asd_dataset_settings.yaml
+dingo_generate_asd_dataset --data_dir data_dir --settings_file asd_dataset_settings.yaml
 ```
 This will download data from the GWOSC website and create a `/tmp` directory, in which the estimated PSDs are stored. Subsequently, these are collected together into a final `.hdf5` ASD dataset. 
 If no `settings_file` is passed, the script will attempt to use the default one `data_dir/asd_dataset_settings.yaml`. 
