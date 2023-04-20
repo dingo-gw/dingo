@@ -42,6 +42,7 @@ class WaveformGenerator:
         mode_list: List[Tuple] = None,
         transform=None,
         spin_conversion_phase=None,
+        **kwargs,
     ):
         """
         Parameters
@@ -777,29 +778,10 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
     single GW coalescence given a set of waveform parameters.
     """
 
-    def __init__(
-        self,
-        approximant: str,
-        domain: Domain,
-        f_ref: float,
-        f_start: float = None,
-        mode_list: List[Tuple] = None,
-        transform=None,
-        spin_conversion_phase=None,
-        new_interface: bool = True,
-    ):
-        WaveformGenerator.__init__(
-            self,
-            approximant,
-            domain,
-            f_ref,
-            f_start,
-            mode_list,
-            transform,
-            spin_conversion_phase,
-        )
+    def __init__(self, **kwargs):
+        WaveformGenerator.__init__(self, **kwargs)
 
-        self.mode_list = mode_list
+        self.mode_list = kwargs.get("mode_list", None)
 
     def _convert_parameters(
         self,
