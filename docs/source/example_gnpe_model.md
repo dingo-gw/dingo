@@ -56,6 +56,7 @@ mkdir training_data
 mkdir training
 mkdir training/main_train_dir
 mkdir training/init_train_dir
+```
 
 Generate the waveform dataset:
 
