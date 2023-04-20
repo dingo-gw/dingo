@@ -7,7 +7,7 @@ import tqdm
 import scipy.optimize
 from threadpoolctl import threadpool_limits
 
-from dingo.gw.noise.synthetic_noise.utils import get_index_for_elem, lorentzian_eval
+from dingo.gw.noise.synthetic.utils import get_index_for_elem, lorentzian_eval
 
 P0_A, P0_Q = 5, 100
 MIN_A, MIN_Q = 0, 10
