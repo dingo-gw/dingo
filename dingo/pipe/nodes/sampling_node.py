@@ -65,3 +65,7 @@ class SamplingNode(AnalysisNode):
         return os.path.join(
             self.inputs.result_directory, self.label + ".hdf5"
         )
+
+    @property
+    def result_file(self):
+        return self.samples_file
