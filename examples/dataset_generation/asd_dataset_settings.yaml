@@ -1,4 +1,6 @@
 dataset_settings:
+#  f_min: 0         # defaults to 0
+#  f_max: 2048      # defaults to f_s/2
   f_s: 4096
   time_psd: 1024
   T: 8
@@ -14,8 +16,7 @@ dataset_settings:
     - H1
   observing_run: O2
 # condor:
-#   env_path: /Users/jonaswildberger/Desktop/dingo-devel/venv
+#   env_path: /path/to/environment
 #   num_jobs: 2 # per detector
 #   num_cpus: 16
 #   memory_cpus: 16000
-#   bid: 200

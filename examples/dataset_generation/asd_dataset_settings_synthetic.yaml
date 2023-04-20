@@ -1,0 +1,16 @@
+parameterization_settings:
+  num_spline_positions: 30
+  num_spectral_segments: 400
+  sigma: 0.14       # std of the Normal distribution parameterizing p(S_n|z)
+  delta_f: -1     # optional truncation parameter for the spectral lines
+  smoothen: True
+sampling_settings:
+  bandwidth_spectral: 0.5
+  bandwidth_spline: 0.25
+  split_frequencies:
+    - 30
+    - 100
+  rescaling_asd_paths:
+    H1: /path/to/rescaling_asd_H1.hdf5  # we use the first element here, in case the datasets contains multiple
+    L1: /path/to/rescaling_asd_L1.hdf5 # we use the first element here, in case the datasets contains multiple
+    
