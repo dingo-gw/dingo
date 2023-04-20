@@ -6,9 +6,6 @@ data:
     f_s: 4096
     T: 8.0
     roll_off: 0.4
-  domain_update:
-    f_min: 20.0
-    f_max: 1024.0
   detectors:
     - H1
     - L1
@@ -37,7 +34,7 @@ model:
   type: nsf+embedding
   # kwargs for neural spline flow
   nsf_kwargs:
-    num_flow_steps: 10
+    num_flow_steps: 5
     base_transform_kwargs:
       hidden_dim: 64 
       num_transform_blocks: 5
@@ -54,9 +51,9 @@ model:
     dropout: 0.0
     batch_norm: True
     svd:
-      num_training_samples: 100
-      num_validation_samples: 10
-      size: 5
+      num_training_samples: 1000
+      num_validation_samples: 100
+      size: 50
 
 # The first stage (and only) stage of training. 
 training:
@@ -69,7 +66,7 @@ training:
       lr: 0.0001
     scheduler:
       type: cosine
-      T_max: 10
+      T_max: 30
     batch_size: 64
 
 # Local settings for training that have no impact on the final trained network.

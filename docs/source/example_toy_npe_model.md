@@ -140,7 +140,7 @@ sed -i "s|/path/to/model.pt|$TRAIN_DIR/model_latest.pt|g" examples/toy_npe_model
 dingo_pipe examples/toy_npe_model/GW150914.ini
 ```
 
-This will generate files which are described in [dingo_pipe](dingo_pipe.md). To see the results, take a look in `$TRAIN_DIR/outdir_GW150914`.
+This will generate files which are described in [dingo_pipe](dingo_pipe.md). To see the results, take a look in `outdir_GW150914`.
 
 We can load and manipulate the data with the following code. For example, here we create a cornerplot
 
