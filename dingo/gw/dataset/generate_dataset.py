@@ -24,7 +24,7 @@ from dingo.gw.SVD import SVDBasis, ApplySVD
 
 
 def generate_parameters_and_polarizations(
-    waveform_generator: WaveformGenerator or NewInterfaceWaveformGenerator,
+    waveform_generator: WaveformGenerator,
     prior: BBHPriorDict,
     num_samples: int,
     num_processes: int,
