@@ -33,6 +33,7 @@ num-gnpe-iterations = 30
 num-samples = 50000
 batch-size = 50000
 recover-log-prob = true
+importance-sample = true
 prior-dict = {
 luminosity_distance = bilby.gw.prior.UniformComovingVolume(minimum=100, maximum=2000, name='luminosity_distance'),
 }
@@ -102,7 +103,7 @@ If a `prior-dict` is specified in the `.ini` file, then this will be used for th
 If extending the prior support during importance sampling, be sure that the posterior does not rail up against the prior boundary being extended.
 ```
 
-By default, dingo_pipe assumes that it is necessary to sample the phase synthetically, so it will do so before importance sampling. This can be turned off by passing an empty dictionary to `importance-sampling-settings`.
+By default, dingo_pipe assumes that it is necessary to sample the phase synthetically, so it will do so before importance sampling. This can be turned off by passing an empty dictionary to `importance-sampling-settings`. Note that importance sampling itself can be switched off by setting the `importance-sample` flag to False (it defaults to True). 
 
 Importance sampling (including synthetic phase sampling) is an expensive step, so dingo_pipe allows for parallelization: this step is split over `n-parallel` jobs, each of which uses `request-cpus-importance-sampling` processes. In the backend, this makes use of the Result [split()](dingo.core.result.Result.split) and [merge()](dingo.core.result.Result.merge) methods.
 

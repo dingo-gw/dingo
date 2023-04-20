@@ -17,7 +17,7 @@ from dingo.gw.noise.asd_dataset import ASDDataset
 """
 Catalogue against which to check that no event is present in the estimated PSDs
 """
-CATALOGUEs = ["GWTC-1-confident", "GWTC-2.1-confident", "GWTC-3-confident"]
+CATALOGS = ["GWTC-1-confident", "GWTC-2.1-confident", "GWTC-3-confident"]
 
 """
 Contains links for PSD segment lists with quality label BURST_CAT2 from the Gravitational Wave Open Science Center.
@@ -74,7 +74,7 @@ def psd_data_path(data_dir, run, detector):
 
 def get_event_gps_times():
     event_list = []
-    for catalogue in CATALOGUEs:
+    for catalogue in CATALOGS:
         events = EventTable.fetch_open_data(catalogue)
         event_list += list(events["GPS"])
     return event_list
@@ -182,13 +182,13 @@ def merge_datasets_cli():
         "--data_dir",
         type=str,
         required=True,
-        help="Path where the PSD data is to be stored. Must contain a 'settings.yaml' file.",
+        help="Path where the PSD data is to be stored.",
     )
     parser.add_argument(
         "--settings_file",
         type=str,
         required=True,
-        help="Path to a settings file in case two different datasets are generated in the same directory",
+        help="Path to a settings file that contains the settings for the ASD dataset generation",
     )
     parser.add_argument(
         "--time_segments_file",

@@ -14,6 +14,8 @@ from bilby_pipe.utils import (
     nonestr,
 )
 
+logger.name = "dingo_pipe"
+
 
 class StoreBoolean(argparse.Action):
     """argparse class for robust handling of booleans with configargparse
@@ -1227,6 +1229,14 @@ def create_parser(top_level=True):
             "Dictionary of density-recovery-settings to pass in, e.g., {num_samples: "
             "400_000, nde_settings: (...)} OR pass pre-defined set of "
             "density-recovery-settings {ProxyRecoveryDefault}"
+        ),
+    )
+    sampler_parser.add(
+        "--importance-sample",
+        action=StoreBoolean,
+        default=True,
+        help=(
+            "Whether to perform importance sampling on result. (Default: True)"
         ),
     )
     sampler_parser.add(

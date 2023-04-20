@@ -9,10 +9,11 @@ from bilby_pipe.input import Input
 from bilby_pipe.utils import parse_args, logger, convert_string_to_dict
 
 from dingo.gw.data.event_dataset import EventDataset
-from dingo.gw.inference.inference_pipeline import prepare_log_prob
-from dingo.gw.pipe.default_settings import IMPORTANCE_SAMPLING_SETTINGS
-from dingo.gw.pipe.parser import create_parser
+from dingo.pipe.default_settings import IMPORTANCE_SAMPLING_SETTINGS
+from dingo.pipe.parser import create_parser
 from dingo.gw.result import Result
+
+logger.name = "dingo_pipe"
 
 
 class ImportanceSamplingInput(Input):

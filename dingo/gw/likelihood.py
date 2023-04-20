@@ -547,7 +547,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
         likelihoods = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
         # Return the average over calibration envelopes
-        return np.mean(likelihoods)
+        return logsumexp(likelihoods) - np.log(len(likelihoods))
 
     def d_inner_h_complex_multi(
         self, theta: pd.DataFrame, num_processes: int = 1
@@ -568,7 +568,6 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         complex : Inner product
         """
         with threadpool_limits(limits=1, user_api="blas"):
-
             # Generator object for theta rows. For idx this yields row idx of
             # theta dataframe, converted to dict, ready to be passed to
             # self.log_likelihood.
