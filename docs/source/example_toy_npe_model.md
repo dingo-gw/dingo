@@ -55,7 +55,6 @@ After downloading the files for the tutorial first run
 cd toy_npe_model/
 mkdir training_data
 mkdir training
-mkdir outdir_GW150914
 ```
 
 to set up the file structure. Then run

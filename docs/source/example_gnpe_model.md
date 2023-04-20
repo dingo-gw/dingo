@@ -13,6 +13,7 @@ gnpe_model/
 
     #  config files
     waveform_dataset_settings.yaml
+    asd_dataset_settings_fiducial.yaml
     asd_dataset_settings.yaml
     train_settings_main.yaml
     train_settings_init.yaml
@@ -20,6 +21,8 @@ gnpe_model/
 
     training_data/
         waveform_dataset.hdf5
+        asd_dataset.hdf5
+        asd_dataset_fiducial.hdf5
         asd_dataset_folder_fiducial/ # Contains the asd_dataset.hdf5 and also temp files for asd generation
         asd_dataset_folder/ # Contains the asd_dataset.hdf5 and also temp files for asd generation
 
@@ -44,12 +47,19 @@ gnpe_model/
 Step 1 Generating a Waveform Dataset
 ------------------------------------ 
 
-We generate the waveform dataset locally:
+
+First generate the directory structure:
 
 ```
-cd dingo
-mkdir $(pwd)/gnpe_model_train_dir
-export TRAIN_DIR=$(pwd)/gnpe_model_train_dir
+cd gnpe_model
+mkdir training_data
+mkdir training
+mkdir training/main_train_dir
+mkdir training/init_train_dir
+
+Generate the waveform dataset:
+
+```
 dingo_generate_dataset --settings waveform_dataset_settings.yaml --out_file training_data/waveform_dataset.hdf5
 ```
 
@@ -95,9 +105,8 @@ network which estimates the time of arrival in the detectors:
 dingo_train --settings_file train_settings_init.yaml --train_dir training/init_network
 ```
 
-Notice that the inference parameters are only the `H1_time` and `L1_time`. We train the main network 
-for the `default_inference_parameters` (defined [here](https://github.com/dingo-gw/dingo/blob/main/dingo/gw/prior.py)) 
-except for the `phase` of coalescence. 
+Notice that the inference parameters are only the `H1_time` and `L1_time`. Also notice that the embedding_net 
+is significantly smaller and the number of flow steps, `num_flow_steps` is reduced.
 
 ```
 dingo_train --settings_file train_settings_main.yaml --train_dir training/main_network
