@@ -108,11 +108,11 @@ rather to the internal {py:class}`dingo.gw.domains.Domain` class. This allows th
 of time domain waveform models, which are transformed into Fourier domain before
 being passed to the network. Currently, only
 the {py:class}`dingo.gw.domains.FrequencyDomain` class is supported for training the
-network. It is common to generate waveforms with `f_max`=2048 Hz and then later truncate them at
-`f_max`=1024 Hz during training. This is recommended, as some combinations of priors
-and waveform models may generate errors due to the ringdown frequency being too large
-and unsupported by LALSimulation when `f_max=1024`. If this occurs, it is
-advisable to increase `f_max` to 2048 Hz.
+network. It is sometimes advisable to generate waveforms with a higher `f_max` and then
+truncate them at a lower `f_max` for training due to issues with generating short waveforms
+for some of the waveform models implemented in LALSuite's LALSimulation package
+(https://lscsoft.docs.ligo.org/lalsuite/lalsimulation/).
+
 
 The `waveform_generator` section specifies the `approximant` attribute.
 At present any waveform model, aka `approximant`, that is callable through LALSimulation's
@@ -124,8 +124,8 @@ The `intrinsic_prior` section is based on Bilby's prior module.
 Default values can be found in `dingo.gw.prior`.
 Two priors to note are the `chirp_mass` and `mass_ratio`, whose minimum values are set
 to 15.0 and 0.125, respectively. Extending these priors towards lower chirp masses
-or more extreme mass-ratios may lead to poor performance of the embedding network
-during training and would require changes to the network setup.
+or more extreme mass-ratios may lead to poor performance of the embedding network and normalizing 
+flow during training and would require changes to the network setup.
 Note that the `luminosity_distance` and `geocent_time` are defined as constants
 to generate the waveform at a fixed reference point.
 
