@@ -17,7 +17,6 @@ from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_extrinsic_prior_dict, get_window_factor
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 from dingo.gw.prior import build_prior_with_defaults
-from dingo.gw.waveform_generator import NewInterfaceWaveformGenerator, WaveformGenerator
 
 
 RANDOM_STATE = 150914
