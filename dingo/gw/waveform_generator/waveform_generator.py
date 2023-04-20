@@ -16,10 +16,8 @@ try:
     from lalsimulation.gwsignal.models import (
         gwsignal_get_waveform_generator as new_interface_get_waveform_generator,
     )
-except:
-    print(
-        "LALsimulation does not contain gwsignal module, you will not be able to employ new interface."
-    )
+except ImportError:
+    pass
 
 from bilby.gw.conversion import (
     convert_to_lal_binary_black_hole_parameters,
@@ -44,7 +42,6 @@ class WaveformGenerator:
         mode_list: List[Tuple] = None,
         transform=None,
         spin_conversion_phase=None,
-        new_interface: bool = False,
     ):
         """
         Parameters
@@ -79,23 +76,18 @@ class WaveformGenerator:
             which is expensive).
             By setting spin_conversion_phase != None, we impose the convention to always
             use phase = spin_conversion_phase when computing the cartesian spins.
-        new_interface: bool = False,
-            Interface employed for calling the approximant. Default value (False) sets the
-            C99 LALSimulation interface, while True will set the new python waveform interface.
-            Most models can be called through both interfaces, but SEOBNRv5 models will only be
-            accessible through the new interface.
         """
         if not isinstance(approximant, str):
             raise ValueError("approximant should be a string, but got", approximant)
         else:
             self.approximant_str = approximant
-            if not new_interface:
+            self.lal_params = None
+            try:
                 self.approximant = LS.GetApproximantFromString(approximant)
-                self.lal_params = None
                 if mode_list is not None:
                     self.lal_params = self.setup_mode_array(mode_list)
-            else:
-                self.mode_list = mode_list
+            except:
+                pass
 
         if not issubclass(type(domain), Domain):
             raise ValueError(
@@ -111,8 +103,6 @@ class WaveformGenerator:
         self.transform = transform
         self._spin_conversion_phase = None
         self.spin_conversion_phase = spin_conversion_phase
-
-        self.new_interface = new_interface
 
     @property
     def spin_conversion_phase(self):
@@ -189,14 +179,7 @@ class WaveformGenerator:
         parameters = parameters.copy()
         parameters["f_ref"] = self.f_ref
 
-        if self.new_interface:
-            # Convert to new interface parameters
-            parameters_generator = self._convert_parameters_new_interface(parameters)
-        else:
-            # Convert to lalsimulation parameters according to the specified domain
-            parameters_generator = self._convert_parameters_to_lal_frame(
-                parameters, self.lal_params
-            )
+        parameters_generator = self._convert_parameters(parameters, self.lal_params)
 
         # Generate GW polarizations
         if isinstance(self.domain, FrequencyDomain):
@@ -251,7 +234,7 @@ class WaveformGenerator:
         else:
             return x
 
-    def _convert_parameters_to_lal_frame(
+    def _convert_parameters(
         self,
         parameter_dict: Dict,
         lal_params=None,
@@ -685,7 +668,7 @@ class WaveformGenerator:
         # TD approximants that are implemented in J frame. Currently tested for:
         #   101: IMRPhenomXPHM
         if self.approximant in [101]:
-            parameters_lal_fd_modes = self._convert_parameters_to_lal_frame(
+            parameters_lal_fd_modes = self._convert_parameters(
                 {**parameters, "f_ref": self.f_ref},
                 lal_target_function="SimInspiralChooseFDModes",
             )
@@ -738,7 +721,7 @@ class WaveformGenerator:
         # TD approximants that are implemented in L0 frame. Currently tested for:
         #   52: SEOBNRv4PHM
         if self.approximant in [52]:
-            parameters_lal_td_modes, iota = self._convert_parameters_to_lal_frame(
+            parameters_lal_td_modes, iota = self._convert_parameters(
                 {**parameters, "f_ref": self.f_ref},
                 lal_target_function="SimInspiralChooseTDModes",
             )
@@ -803,7 +786,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         mode_list: List[Tuple] = None,
         transform=None,
         spin_conversion_phase=None,
-        new_interface: bool = False,
+        new_interface: bool = True,
     ):
         WaveformGenerator.__init__(
             self,
@@ -814,12 +797,14 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             mode_list,
             transform,
             spin_conversion_phase,
-            new_interface=True,
         )
 
-    def _convert_parameters_new_interface(
+        self.mode_list = mode_list
+
+    def _convert_parameters(
         self,
         parameter_dict: Dict,
+        lal_params=None,
     ):
         # Transform mass, spin, and distance parameters
         p, _ = convert_to_lal_binary_black_hole_parameters(parameter_dict)
@@ -1095,7 +1080,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         # TD approximants that are implemented in J frame. Currently tested for:
         #   101: IMRPhenomXPHM
         if self.approximant_str in ["IMRPhenomXPHM"]:
-            parameters_gwsignal = self._convert_parameters_new_interface(
+            parameters_gwsignal = self._convert_parameters(
                 {**parameters, "f_ref": self.f_ref}
             )
             iota = parameters_gwsignal["inclination"]
@@ -1163,7 +1148,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         # TD approximants that are implemented in L0 frame. Currently tested for:
         #   52: SEOBNRv4PHM
 
-        parameters_gwsignal = self._convert_parameters_new_interface(
+        parameters_gwsignal = self._convert_parameters(
             {**parameters, "f_ref": self.f_ref}
         )
 
@@ -1251,7 +1236,7 @@ def SEOBNRv4PHM_maximum_starting_frequency(
 
 
 def generate_waveforms_task_func(
-    args: Tuple, waveform_generator: WaveformGenerator or NewInterfaceWaveformGenerator
+    args: Tuple, waveform_generator: WaveformGenerator
 ) -> Dict[str, np.ndarray]:
     """
     Picklable wrapper function for parallel waveform generation.
@@ -1272,7 +1257,7 @@ def generate_waveforms_task_func(
 
 
 def generate_waveforms_parallel(
-    waveform_generator: WaveformGenerator or NewInterfaceWaveformGenerator,
+    waveform_generator: WaveformGenerator,
     parameter_samples: pd.DataFrame,
     pool: Pool = None,
 ) -> Dict[str, np.ndarray]:
