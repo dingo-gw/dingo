@@ -8,10 +8,8 @@ import time
 
 
 from asimov import config, logger
-from asimov.utils import set_directory
 
-from asimov.pipeline import Pipeline, PipelineException, PipelineLogger
-from asimov.storage import Store
+from asimov.pipeline import Pipeline, PipelineException, PipelineLogger, PESummaryPipeline
 
 
 class Dingo(Pipeline):
@@ -274,14 +272,13 @@ class Dingo(Pipeline):
                 f"""I wanted to run {" ".join(command)}."""
             ) from error
 
-    # TODO: start pesummary here
     def after_completion(self):
-        # this is the default implementation
-        self.production.status = "finished"
-        try:
-            self.production.meta.pop("job id")
-        except KeyError:
-            pass
+        post_pipeline = PESummaryPipeline(production=self.production)
+        self.logger.info("Job has completed. Running PE Summary.")
+        cluster = post_pipeline.submit_dag()
+        self.production.meta["job id"] = int(cluster)
+        self.production.status = "processing"
+        self.production.event.update_data()
 
     def detect_completion_processing(self):
         # no post processing currently performed
