@@ -18,7 +18,10 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=textwrap.dedent(
             """\
-        Generate a synthetic noise ASD dataset from an existing dataset of real ASDs.
+        Generate a synthetic noise ASD dataset from an existing dataset of real ASDs. ASDs can be parameterized to generate
+        smooth PSDs, e.g. to obtain a distribution over ASDs similar to BayesWave ASDs, or we can create a dataset over
+        synthetic PSDs to augment the training distribution and enhance robustness. In particular, this allows us to 
+        shift a distribution over ASDs from a source to a target observing run, where insufficient data is available.
         """
         ),
     )
@@ -33,6 +36,12 @@ def parse_args():
         type=str,
         required=True,
         help="YAML file containing database settings",
+    )
+    parser.add_argument(
+        "--num_samples",
+        type=int,
+        default=500,
+        help="Number of samples to draw from the parameterized ASDs",
     )
     parser.add_argument(
         "--num_processes",
@@ -51,7 +60,22 @@ def parse_args():
     return parser.parse_args()
 
 
-def generate_dataset(real_dataset, settings: Dict, num_processes: int, verbose: bool):
+def generate_dataset(real_dataset, settings: Dict, num_samples, num_processes: int, verbose: bool):
+    """
+    Generate a synthetic ASD dataset from an existing dataset of real ASDs.
+
+    Parameters
+    ----------
+    real_dataset : ASDDataset
+        Existing dataset of real ASDs.
+    settings : dict
+        Dictionary containing the settings for the parameterization and sampling.
+    num_processes : int
+        Number of processes to use in pool for parallel parameterization.
+    verbose : bool
+        Whether to print progress information.
+
+    """
     parameters_dict = parameterize_asd_dataset(
         real_dataset,
         settings["parameterization_settings"],
@@ -64,17 +88,17 @@ def generate_dataset(real_dataset, settings: Dict, num_processes: int, verbose: 
         "parameterization_settings"
     ]
 
-    sampling_settings = settings.get("sampling_settings", None)
+    sampling_settings = settings.get("sampling_settings")
     if sampling_settings:
         kde = KDE(parameters_dict, sampling_settings)
         kde.fit()
         rescaling_params = None
-        if "rescaling_psd_paths" in sampling_settings:
+        if "rescaling_asd_paths" in sampling_settings:
             rescaling_params = get_rescaling_params(
-                sampling_settings["rescaling_psd_paths"],
+                sampling_settings["rescaling_asd_paths"],
                 settings["parameterization_settings"],
             )
-        parameters_dict = kde.sample(rescaling_params)
+        parameters_dict = kde.sample(num_samples, rescaling_params)
         synthetic_dataset_dict["settings"]["sampling_settings"] = settings["sampling_settings"]
 
     asds_dict = {}
@@ -91,8 +115,7 @@ def generate_dataset(real_dataset, settings: Dict, num_processes: int, verbose: 
 
     synthetic_dataset_dict["parameters"] = parameters_dict
     synthetic_dataset_dict["asds"] = asds_dict
-    # TODO: should I make the "data_keys" an optional argument to the ASDDataset class? Such that the parameters
-    # can also be stored in this way
+
     return DingoDataset(
         dictionary=synthetic_dataset_dict, data_keys=["asds", "gps_times", "parameters"]
     )
@@ -107,7 +130,7 @@ def main():
 
     real_dataset = ASDDataset(file_name=args.asd_dataset)
     synthetic_dataset = generate_dataset(
-        real_dataset, settings, args.num_processes, args.verbose
+        real_dataset, settings, args.num_samples, args.num_processes, args.verbose
     )
 
     synthetic_dataset.to_file(args.out_file)

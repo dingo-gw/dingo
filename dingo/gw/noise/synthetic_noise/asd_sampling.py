@@ -10,7 +10,19 @@ from dingo.gw.noise.synthetic_noise.utils import (
 
 
 class KDE:
+    """
+    Kernel Density Estimation (KDE) class for sampling ASDs.
+    """
     def __init__(self, parameter_dict, sampling_settings):
+        """
+        Parameters
+        ----------
+        parameter_dict : dict
+            Dictionary containing the parameters of the ASDs used for fitting the synthetic distribution.
+        sampling_settings : dict
+            Dictionary containing the settings for the sampling.
+
+        """
 
         self.parameter_dicts = parameter_dict
         self.settings = sampling_settings
@@ -20,6 +32,13 @@ class KDE:
         self.broadband_kde = {det: [] for det in detectors}
 
     def fit(self, weights=None):
+        """
+        Fit the KDEs to the parameters saved in 'self.parameter_dict'.
+        Parameters
+        ----------
+        weights : array_like, optional
+            Weights for the KDEs. If None, all weights are set to 1.
+        """
 
         for det, param_dict in self.parameter_dicts.items():
             y_values = param_dict["y_values"]
@@ -61,9 +80,14 @@ class KDE:
                 )
                 self.broadband_kde[det].append(kde_vals)
 
-    def sample(self, rescaling_ys):
-
-        num_samples = self.settings["num_samples"]
+    def sample(self, num_samples, rescaling_ys=None):
+        """
+        Sample a synthetic ASD dataset from the fitted KDEs
+        ----------
+        Parameters:
+        num_samples (int): Number of samples to draw.
+        rescaling_ys (dict): Optional dictionary of spline y-values used for rescaling the base noise.
+        """
 
         parameters_dicts = copy.deepcopy(self.parameter_dicts)
         asds_dict = {}
@@ -95,6 +119,15 @@ class KDE:
 
 
 def get_rescaling_params(filenames, parameterization_settings):
+    """
+    Get the parameters of the ASDs that are used for rescaling.
+    Parameters
+    ----------
+    filenames : dict
+        Dictionary containing the paths to the ASD files.
+    parameterization_settings : dict
+        Dictionary containing the settings for the parameterization.
+    """
     parameters = {}
     for det, asd_path in filenames.items():
         asd_dataset = ASDDataset(asd_path)

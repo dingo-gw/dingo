@@ -9,8 +9,6 @@ from threadpoolctl import threadpool_limits
 
 from dingo.gw.noise.synthetic_noise.utils import get_index_for_elem, lorentzian_eval
 
-F_MIN = 20
-
 P0_A, P0_Q = 5, 100
 MIN_A, MIN_Q = 0, 10
 MAX_A, MAX_Q = 12, 1000
@@ -18,7 +16,20 @@ MAXFEV = 5000000
 
 
 def parameterize_asd_dataset(real_dataset, parameterization_settings, num_processes, verbose):
+    """
+    Parameterize a dataset of ASDs using a spline fit to the broadband noise and Lorentzians for the spectral features.
 
+    Parameters
+    ----------
+    real_dataset : ASDDataset
+        Dataset containing the ASDs to be parameterized.
+    parameterization_settings : dict
+        Dictionary containing the settings for the parameterization.
+    num_processes : int
+        Number of processes to use for parallelization.
+    verbose : bool
+        If True, print progress bars.
+    """
     real_asd_dict = real_dataset.asds
     domain = real_dataset.domain
 
@@ -37,6 +48,23 @@ def parameterize_asd_dataset(real_dataset, parameterization_settings, num_proces
 
 
 def parameterize_asds_parallel(asds, domain, parameterization_settings, pool=None, verbose=False):
+    """
+    Helper function to be called for parallel ASD parameterization.
+
+    Parameters
+    ----------
+    asds : array_like
+        Array containing the ASDs to be parameterized.
+    domain : Domain
+        Domain object containing the frequency grid.
+    parameterization_settings : dict
+        Dictionary containing the settings for the parameterization.
+    pool : Pool, optional
+        Pool object for parallelization. If None, the function is not parallelized.
+    verbose : bool
+        If True, print progress bars.
+
+    """
 
     task_func = partial(parameterize_single_psd, domain=domain, parameterization_settings=parameterization_settings)
     psds = asds ** 2
@@ -56,6 +84,19 @@ def parameterize_asds_parallel(asds, domain, parameterization_settings, pool=Non
 
 
 def parameterize_single_psd(real_psd, domain, parameterization_settings):
+    """
+    Parameterize a single ASD using a spline fit to the broadband noise and Lorentzians for the spectral features.
+
+    Parameters
+    ----------
+    real_psd : array_like
+        PSD to be parameterized.
+    domain : Domain
+        Domain object containing the frequency grid.
+    parameterization_settings : dict
+        Dictionary containing the settings for the parameterization.
+
+    """
     sigma = float(parameterization_settings["sigma"])
     if not len(real_psd) == len(domain.sample_frequencies):
         real_psd = domain.update_data(real_psd)
@@ -91,7 +132,24 @@ def parameterize_single_psd(real_psd, domain, parameterization_settings):
     return parameter_dict
 
 
-def fit_broadband_noise(domain, psd, num_spline_positions, sigma):
+def fit_broadband_noise(domain, psd, num_spline_positions, sigma, f_min=20):
+    """
+    Fit a spline to the broadband noise of a PSD.
+
+    Parameters
+    ----------
+    domain : Domain
+        Domain object containing the frequency grid.
+    psd : array_like
+        PSD to be parameterized.
+    num_spline_positions : int
+        Number of spline positions.
+    sigma : float
+        Standard deviation of the Gaussian noise used for the spline fit.
+    f_min : float, optional
+        position of the first node for the spline fi
+
+    """
     frequencies = domain.sample_frequencies
 
     # standardize frequencies to the interval [0,1]
@@ -100,7 +158,7 @@ def fit_broadband_noise(domain, psd, num_spline_positions, sigma):
     )
 
     # log-distributed x-positions in [20/f_max, 1] for the interpolating base noise spline
-    log_xs = np.logspace(np.log10(F_MIN / domain.f_max), 0, num_spline_positions)
+    log_xs = np.logspace(np.log10(f_min / domain.f_max), 0, num_spline_positions)
 
     # get indices corresponding to log_xs
 
@@ -145,17 +203,23 @@ def fit_spectral(
     frequencies, psd, broadband_noise, num_spectral_segments, sigma, delta_f
 ):
     """
+    Fit Lorentzians to the spectral features of a PSD.
+
     Parameters
     ----------
-    delta_f
-    num_spectral_segments
-    frequencies
-    psd: PSD of which to fit the spectral features
-    broadband_noise: Base noise of the PSD, i.e. non-spectral features
-     num_spectral_segments
-    sigma
-    Returns
-    -------
+    frequencies : array_like
+        Frequency grid.
+    psd : array_like
+        PSD to be parameterized.
+    broadband_noise : array_like
+        Broadband noise of the PSD.
+    num_spectral_segments : int
+        Number of spectral segments.
+    sigma : float
+        Standard deviation of the Gaussian noise used for the spline fit.
+    delta_f : float
+        Truncation parameter for Lorentzians. Set to None if non-positive value is passed.
+
     """
 
     # divide frequency spectrum into equi-length sub-intervals, in each of which a single spectral line is fitted
@@ -205,6 +269,19 @@ def fit_spectral(
 
 
 def curve_fit(data, std, delta_f=None):
+    """
+    Fit a Lorentzian to the PSD.
+
+    Parameters
+    ----------
+    data : dict
+        Dictionary containing the PSD, broadband noise, and frequency grid.
+    std : float
+        Standard deviation of the Gaussian noise.
+    delta_f : float
+        Truncation parameter for Lorentzians. Set to None if non-positive value is passed.
+
+    """
     func = partial(lorentzian_eval, delta_f=delta_f)
 
     popt, pcov = scipy.optimize.curve_fit(

@@ -7,7 +7,24 @@ def get_index_for_elem(arr, elem):
 
 
 def lorentzian_eval(x, f0, A, Q, delta_f=None):
-
+    """
+    Evaluates a Lorentzian function at the given frequencies.
+    Parameters
+    ----------
+    x: array_like
+        Frequencies at which the Lorentzian is evaluated.
+    f0: float
+        Center frequency of the Lorentzian.
+    A: float
+        Amplitude of the Lorentzian.
+    Q: float
+        Parameter determining the width of the Lorentzian
+    delta_f: float, optional
+        If given, the Lorentzian is truncated
+    Returns
+    -------
+    array_like
+    """
     if f0 == 0 or A < 0:
         return np.zeros_like(x)
 
@@ -24,6 +41,21 @@ def lorentzian_eval(x, f0, A, Q, delta_f=None):
 def reconstruct_psds_from_parameters(
     parameters_dict, domain, parameterization_settings
 ):
+    """
+    Reconstructs the PSDs from the parameters.
+    Parameters
+    ----------
+    parameters_dict : dict
+        Dictionary containing the parameters of the PSDs.
+    domain : dingo.gw.noise.domain.Domain
+        Domain object containing the frequencies at which the PSDs are evaluated.
+    parameterization_settings : dict
+        Dictionary containing the settings for the parameterization.
+    Returns
+    -------
+    array_like
+
+    """
     smoothen = parameterization_settings.get("smoothen", False)
 
     xs = parameters_dict["x_positions"]
