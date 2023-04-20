@@ -182,7 +182,7 @@ def merge_datasets_cli():
         "--data_dir",
         type=str,
         required=True,
-        help="Path where the PSD data is to be stored. Must contain a 'settings.yaml' file.",
+        help="Path where the PSD data is to be stored.",
     )
     parser.add_argument(
         "--settings_file",
