@@ -1232,6 +1232,14 @@ def create_parser(top_level=True):
         ),
     )
     sampler_parser.add(
+        "--importance-sample",
+        action=StoreBoolean,
+        default=True,
+        help=(
+            "Whether to perform importance sampling on result. (Default: True)"
+        ),
+    )
+    sampler_parser.add(
         "--importance-sampling-settings",
         type=str,
         default="Default",

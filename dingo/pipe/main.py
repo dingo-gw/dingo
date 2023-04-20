@@ -177,6 +177,8 @@ class MainInput(BilbyMainInput):
         # if self.injection:
         #     self.check_injection()
 
+        self.importance_sample = args.importance_sample
+
         self.request_disk = args.request_disk
         self.request_memory = args.request_memory
         self.request_memory_generation = args.request_memory_generation
