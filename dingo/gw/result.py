@@ -309,15 +309,6 @@ class Result(CoreResult):
         self.phase_marginalization_kwargs = phase_marginalization_kwargs
         self.calibration_marginalization_kwargs = calibration_marginalization_kwargs
 
-        # The detector reference positions during likelihood evaluation should be based
-        # on the event time, since any post-correction to account for the training
-        # reference time has already been applied to the samples.
-
-        if self.event_metadata is not None and "time_event" in self.event_metadata:
-            t_ref = self.event_metadata["time_event"]
-        else:
-            t_ref = self.base_metadata["train_settings"]["data"]["ref_time"]
-
         # Select waveform generator, LAL or GWSignal
         if (
             self.base_metadata["dataset_settings"]["waveform_generator"].get(
