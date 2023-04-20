@@ -309,17 +309,6 @@ class Result(CoreResult):
         self.phase_marginalization_kwargs = phase_marginalization_kwargs
         self.calibration_marginalization_kwargs = calibration_marginalization_kwargs
 
-        # Select waveform generator, LAL or GWSignal
-        if (
-            self.base_metadata["dataset_settings"]["waveform_generator"].get(
-                "new_interface", False
-            )
-            is False
-        ):
-            waveform_generator = WaveformGenerator
-        else:
-            waveform_generator = NewInterfaceWaveformGenerator
-
         # FIXME: This is a quick hack because I didn't know how to choose the wfg
         #  domain in the case of a changing domain during importance sampling. It could
         #  only pose problems for EOB, where sometimes one wants to start integrating
@@ -339,7 +328,6 @@ class Result(CoreResult):
             phase_marginalization_kwargs=phase_marginalization_kwargs,
             calibration_marginalization_kwargs=calibration_marginalization_kwargs,
             phase_grid=phase_grid,
-            waveform_generator=waveform_generator,
         )
 
     def sample_synthetic_phase(
