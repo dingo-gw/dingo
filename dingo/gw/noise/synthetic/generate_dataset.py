@@ -113,11 +113,11 @@ def generate_dataset(real_dataset, settings: Dict, num_samples, num_processes: i
             psds[:, real_dataset.domain.min_idx : real_dataset.domain.max_idx + 1]
         )
 
-    synthetic_dataset_dict["parameters"] = parameters_dict
+    synthetic_dataset_dict["asd_parameterizations"] = parameters_dict
     synthetic_dataset_dict["asds"] = asds_dict
 
-    return DingoDataset(
-        dictionary=synthetic_dataset_dict, data_keys=["asds", "gps_times", "parameters"]
+    return ASDDataset(
+        dictionary=synthetic_dataset_dict
     )
 
 

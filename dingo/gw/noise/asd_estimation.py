@@ -74,7 +74,6 @@ def download_and_estimate_psds(
         psd_path = psd_data_path(data_dir, run, det)
         os.makedirs(psd_path, exist_ok=True)
         estimation_kwargs = {
-            "det": det,
             "time_segment": T,
             "window": w,
             "f_s": f_s,
@@ -82,6 +81,9 @@ def download_and_estimate_psds(
         }
         if channels:
             estimation_kwargs["channel"] = channels[det]
+        else:
+            estimation_kwargs["det"] = det
+
         for index, (start, end) in enumerate(
             tqdm(time_segments[det], disable=not verbose)
         ):
