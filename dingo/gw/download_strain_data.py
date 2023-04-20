@@ -10,7 +10,13 @@ from dingo.gw.gwutils import (
 
 
 def estimate_single_psd(
-    det, time_start, time_segment, window, f_s=4096, num_segments: int = 128, channel=None
+    det,
+    time_start,
+    time_segment,
+    window,
+    f_s=4096,
+    num_segments: int = 128,
+    channel=None,
 ):
     """
     Download strain data and generate a PSD based on these. Use num_segments of length
@@ -41,9 +47,7 @@ def estimate_single_psd(
     # download strain data for psd
     time_end = time_start + time_segment * num_segments
     if channel:
-        psd_strain = TimeSeries.get(
-            channel, time_start, time_end
-        )
+        psd_strain = TimeSeries.get(channel, time_start, time_end)
         # TODO: We currently assume that sample rate of channel matches that provided in the settings?
     else:
         psd_strain = TimeSeries.fetch_open_data(
@@ -163,14 +167,14 @@ def download_event_data_in_FD(
             det, time_event, time_segment, time_buffer, window
         )
         data["asds"][det] = (
-                estimate_single_psd(
+            estimate_single_psd(
                 det,
                 time_event + time_buffer - time_segment * (num_segments_psd + 1),
                 time_segment,
                 window,
                 num_segments_psd,
             )
-                ** 0.5
+            ** 0.5
         )
 
     # build domain object

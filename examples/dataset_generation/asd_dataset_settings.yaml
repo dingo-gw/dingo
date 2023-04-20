@@ -18,4 +18,3 @@ dataset_settings:
 #   num_jobs: 2 # per detector
 #   num_cpus: 16
 #   memory_cpus: 16000
-#   bid: 200

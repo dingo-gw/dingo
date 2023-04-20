@@ -17,6 +17,7 @@ def split_time_segments(time_segments, condor_dir, num_jobs):
     """
     Split up all time segments used for estimating PSDs into num_jobs-many
     segments and save them into a condor directory
+
     Parameters
     ----------
     time_segments : dict
@@ -52,6 +53,7 @@ def create_dag(data_dir, settings_file, time_segments, out_name):
     """
     Create a Condor DAG to (a) download, estimate,
     individual PSDs and (b) merge them into one dataset
+
     Parameters
     ----------
     data_dir : str

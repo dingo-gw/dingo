@@ -22,6 +22,7 @@ def download_and_estimate_psds(
 ):
     """
     Downloads strain data for the specified time segments and estimates PSDs based on these
+
     Parameters
     ----------
     data_dir : str
@@ -122,7 +123,7 @@ def download_and_estimate_cli():
         "--settings_file",
         type=str,
         required=True,
-        help="Path to a settings file in case two different datasets are generated in the sam directory",
+        help="Path to a settings file containing the settings for the dataset generation",
     )
     parser.add_argument(
         "--time_segments_file",
