@@ -28,7 +28,7 @@ toy_npe_model/
 
     training_data/
         waveform_dataset.hdf5
-        asd_dataset_folder/ # Contains the asd_dataset.hdf5 and also temp files for asd generation
+        asd_dataset/ # Contains the asd_dataset.hdf5 and also temp files for asd generation
 
     training/
         model_050.pt
@@ -138,7 +138,7 @@ Step 2 Generating the Amplitude Spectral Density (ASD) dataset
 To generate an ASD dataset run
 
 ```
-dingo_generate_asd_dataset --settings_file asd_dataset_settings.yaml --data_dir training_data/asd_dataset_folder
+dingo_generate_asd_dataset --settings_file asd_dataset_settings.yaml --data_dir training_data/asd_dataset
 ```
 
 This command will generate an {py:class}`dingo.gw.noise.asd_dataset.ASDDataset` object in the form of an .hdf5 file, which will be used later for training. The reason for specifying a folder instead of a file, as in the waveform dataset example, is because some temporary data is downloaded to create Welch estimates of the ASD. This data can be removed later, but it is sometimes useful for understanding how the ASDs were estimated. For convenience here is a copy of the `asd_dataset_settings.yaml` file.
@@ -235,7 +235,7 @@ model:
 training:
   stage_0:
     epochs: 20
-    asd_dataset_path: training_data/asd_dataset_folder/asds_O1.hdf5  # this should just contain a single fiducial ASD per detector for pretraining
+    asd_dataset_path: training_data/asd_dataset/asds_O1.hdf5  # this should just contain a single fiducial ASD per detector for pretraining
     freeze_rb_layer: True
     optimizer:
       type: adam
