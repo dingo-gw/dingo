@@ -47,6 +47,7 @@ dependencies = [
     "threadpoolctl",
     "torch",
     "torchvision",
+    "tqdm",
 ]
 
 
