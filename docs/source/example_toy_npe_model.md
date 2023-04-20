@@ -14,24 +14,51 @@ There are 4 main steps:
 3. Train the network
 4. Do inference
 
+In this tutorial as well as the [npe model](example_npe_model) and [gnpe model](example_gnpe_model) the following file structure will
+be employed
+
+```
+toy_npe_model/
+
+    #  config files
+    waveform_dataset_settings.yaml
+    asd_dataset_settings.yaml
+    train_settings.yaml
+    GW150914.ini
+
+    training_data/
+        waveform_dataset.hdf5
+        asd_dataset.hdf5
+        tmp/    #  Contains temporary files from ASD dataset generation
+
+    training/
+        model_050.pt
+        model_stage_0.pt
+        model_latest.pt
+        history.txt
+        #  etc...
+
+    outdir_GW150914/
+        #  dingo_pipe output
+```
+
+The config files which are the only ones which need to be edited are contained in the top level directory. In the next
+few sections these config files will be explained. To download sample config files, please visit 
+https://github.com/dingo-gw/dingo/tree/main/examples. In this tutorial the toy_npe_model folder will be used.
+
+
 Step 1 Generating a waveform dataset
 ------------------------------------
 
-First make a directory for this example where we will store all of our files from this tutorial
+After downloading the files for the tutorial run 
 
 ```
-cd dingo
-mkdir $(pwd)/toy_npe_model_train_dir
-export TRAIN_DIR=$(pwd)/toy_npe_model_train_dir
+cd toy_npe_model/
+export BASE_DIR=$(pwd)
+dingo_generate_dataset --settings waveform_dataset_settings.yaml --out_file training_data/waveform_dataset.hdf5
 ```
 
-To generate a waveform dataset run
-
-```
-dingo_generate_dataset --settings examples/toy_npe_model/waveform_dataset_settings.yaml --out_file $TRAIN_DIR/waveform_dataset.hdf5
-```
-
-which will create a
+This will first change directories into the tutorial directory and then create a
 {py:class}`dingo.gw.waveform_generator.waveform_generator.WaveformGenerator`
 object and store it at the location provided with `--out_file`.
 
