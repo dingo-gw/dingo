@@ -5,7 +5,7 @@ domain:
   delta_f: 0.25  # Expressions like 1.0/8.0 would require eval and are not supported
 
 waveform_generator:
-  approximant: SEOBNRv4
+  approximant: IMRPhenomD
   f_ref: 20.0
   # f_start: 15.0  # Optional setting useful for EOB waveforms. Overrides f_min when generating waveforms.
 

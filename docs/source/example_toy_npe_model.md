@@ -50,11 +50,18 @@ https://github.com/dingo-gw/dingo/tree/main/examples. In this tutorial the toy_n
 Step 1 Generating a waveform dataset
 ------------------------------------
 
-After downloading the files for the tutorial run 
+After downloading the files for the tutorial first run
 
 ```
 cd toy_npe_model/
-export BASE_DIR=$(pwd)
+mkdir training_data
+mkdir training
+mkdir outdir_GW150914
+```
+
+to set up the file structure.
+
+```
 dingo_generate_dataset --settings waveform_dataset_settings.yaml --out_file training_data/waveform_dataset.hdf5
 ```
 
@@ -100,7 +107,7 @@ Step 2 Generating the Amplitude Spectral Density (ASD) dataset
 To generate an ASD dataset run
 
 ```
-dingo_generate_asd_dataset --settings_file examples/toy_npe_model/asd_dataset_settings.yaml --data_dir $TRAIN_DIR/asd_dataset_folder
+dingo_generate_asd_dataset --settings_file asd_dataset_settings.yaml --data_dir training_data/asd_dataset_folder
 ```
 
 This command will generate an {py:class}`dingo.gw.noise.asd_dataset.ASDDataset` object in the form of an .hdf5 file, which will be used later for training. The reason for specifying a folder instead of a file, as in the waveform dataset example, is because some temporary data is downloaded to create Welch estimates of the ASD. This data can be removed later, but it is sometimes useful for understanding how the ASDs were estimated.
@@ -110,12 +117,10 @@ The `examples/toy_npe_model/asd_dataset_settings.yaml` file includes several att
 Step 3 Training the network
 ---------------------------
 
-To train the network run
+To train the network, first the paths to the correct datasets must be specfied
 
 ```
-sed -i 's+/path/to/waveform_dataset.hdf5+'"$TRAIN_DIR"'/waveform_dataset.hdf5+g' examples/toy_npe_model/train_settings.yaml
-sed -i 's+/path/to/asd_dataset.hdf5+'"$TRAIN_DIR"'/asd_dataset_folder/asds_O1.hdf5+g' examples/toy_npe_model/train_settings.yaml
-dingo_train --settings_file examples/toy_npe_model/train_settings.yaml --train_dir $TRAIN_DIR
+dingo_train --settings_file train_settings.yaml --train_dir training
 ```
 
 The two `sed` commands just replace the parts in the `train_settings.yaml` file with the datasets generated in the previous steps. While this file contains numerous settings that are discussed in [training](training.md), we will cover the most significant ones here. For training, several `extrinsic_priors` are set, which project the waveforms generated in step 1 onto the detector network according to the specified priors. This is considerably cheaper than generating waveforms sampled from the full intrinsic plus extrinsic prior in step 1.
@@ -135,9 +140,7 @@ The final step is to do inference, for example on GW150914. To do this we will u
 [dingo_pipe](dingo_pipe.md). For a local run execute:
 
 ```
-sed -i "s|TRAIN_DIR/|$TRAIN_DIR/|g" examples/toy_npe_model/GW150914_toy.ini
-sed -i "s|/path/to/model.pt|$TRAIN_DIR/model_latest.pt|g" examples/toy_npe_model/GW150914_toy.ini
-dingo_pipe examples/toy_npe_model/GW150914.ini
+dingo_pipe GW150914.ini
 ```
 
 This will generate files which are described in [dingo_pipe](dingo_pipe.md). To see the results, take a look in `outdir_GW150914`.
@@ -151,4 +154,5 @@ result.plot_corner()
 ```
 
 Notice the results don't look very promising, but this is expected as the settings used in this
-example are not enough to warrant convergence.
+example are not enough to warrant convergence. Dingo should also automatically generate a cornerplot which will
+be displayed under outdir_GW150914.

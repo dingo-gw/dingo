@@ -1,5 +1,5 @@
 data:
-  waveform_dataset_path: /home/n/Documents/Research/Dingo/dingo/toy_example_train_dir/waveform_dataset.hdf5  # Contains intrinsic waveforms
+  waveform_dataset_path: training_data/waveform_dataset.hdf5  # Contains intrinsic waveforms
   train_fraction: 0.95
   window:  # Needed to calculate window factor for simulated data
     type: tukey
@@ -58,15 +58,15 @@ model:
 # The first stage (and only) stage of training. 
 training:
   stage_0:
-    epochs: 30
-    asd_dataset_path: /home/n/Documents/Research/Dingo/dingo/toy_example_train_dir/asd_dataset_folder/asds_O1.hdf5  # this should just contain a single fiducial ASD per detector for pretraining
+    epochs: 20
+    asd_dataset_path: training_data/asd_dataset_folder/asds_O1.hdf5  # this should just contain a single fiducial ASD per detector for pretraining
     freeze_rb_layer: True
     optimizer:
       type: adam
       lr: 0.0001
     scheduler:
       type: cosine
-      T_max: 30
+      T_max: 20
     batch_size: 64
 
 # Local settings for training that have no impact on the final trained network.
