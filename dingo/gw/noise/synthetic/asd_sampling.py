@@ -2,9 +2,9 @@ import copy
 
 import numpy as np
 from scipy import stats
-from dingo.gw.noise.synthetic_noise.asd_parameterization import fit_broadband_noise
+from dingo.gw.noise.synthetic.asd_parameterization import fit_broadband_noise
 from dingo.gw.noise.asd_dataset import ASDDataset
-from dingo.gw.noise.synthetic_noise.utils import (
+from dingo.gw.noise.synthetic.utils import (
     get_index_for_elem,
 )
 

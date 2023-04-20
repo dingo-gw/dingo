@@ -6,11 +6,10 @@ from typing import Dict
 
 import yaml
 
-from dingo.gw.dataset import DingoDataset
 from dingo.gw.noise.asd_dataset import ASDDataset
-from dingo.gw.noise.synthetic_noise.asd_parameterization import parameterize_asd_dataset
-from dingo.gw.noise.synthetic_noise.asd_sampling import KDE, get_rescaling_params
-from dingo.gw.noise.synthetic_noise.utils import reconstruct_psds_from_parameters
+from dingo.gw.noise.synthetic.asd_parameterization import parameterize_asd_dataset
+from dingo.gw.noise.synthetic.asd_sampling import KDE, get_rescaling_params
+from dingo.gw.noise.synthetic.utils import reconstruct_psds_from_parameters
 
 
 def parse_args():
