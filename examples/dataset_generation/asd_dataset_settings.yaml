@@ -16,7 +16,7 @@ dataset_settings:
     - H1
   observing_run: O2
 # condor:
-#   env_path: /Users/jonaswildberger/Desktop/dingo-devel/venv
+#   env_path: /path/to/environment
 #   num_jobs: 2 # per detector
 #   num_cpus: 16
 #   memory_cpus: 16000
