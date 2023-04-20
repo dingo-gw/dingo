@@ -1,6 +1,6 @@
 from bilby_pipe.job_creation.nodes import MergeNode as BilbyMergeNode
 
-from dingo.gw.pipe.utils import _strip_unwanted_submission_keys
+from dingo.pipe.utils import _strip_unwanted_submission_keys
 
 
 class MergeNode(BilbyMergeNode):
@@ -15,5 +15,5 @@ class MergeNode(BilbyMergeNode):
 
     @property
     def result_file(self):
-        label = self.label.removesuffix("_merge")
+        label = self.label.replace("_merge", "")
         return f"{self.inputs.result_directory}/{label}.hdf5"

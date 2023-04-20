@@ -38,4 +38,3 @@ compression:
     num_training_samples: 50000
     num_validation_samples: 10000
   whitening: aLIGO_ZERO_DET_high_P_asd.txt
-    # single_precision: True  # (not yet implemented) be careful if using without whitening.

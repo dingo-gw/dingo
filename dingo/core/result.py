@@ -7,15 +7,15 @@ import numpy as np
 from typing import Optional
 
 import pandas as pd
-import matplotlib.pyplot as plt
-from chainconsumer import ChainConsumer
+from matplotlib import pyplot as plt
 from scipy.constants import golden
-from scipy.special import logsumexp, erfinv
-from bilby.core.prior import Constraint
+from scipy.special import logsumexp
+from bilby.core.prior import Constraint, DeltaFunction
 
 from dingo.core.dataset import DingoDataset
 from dingo.core.density import train_unconditional_density_estimator
-from dingo.core.utils import recursive_check_dicts_are_equal
+from dingo.core.utils.misc import recursive_check_dicts_are_equal
+from dingo.core.utils.plotting import plot_corner_multi
 
 DATA_KEYS = [
     "samples",
@@ -23,6 +23,7 @@ DATA_KEYS = [
     "event_metadata",
     "importance_sampling_metadata",
     "log_evidence",
+    "log_noise_evidence",
 ]
 
 
@@ -57,6 +58,7 @@ class Result(DingoDataset):
         self.event_metadata = None
         self.context = None
         self.samples = None
+        self.log_noise_evidence = None
         super().__init__(
             file_name=file_name,
             dictionary=dictionary,
@@ -67,11 +69,10 @@ class Result(DingoDataset):
         if self.importance_sampling_metadata is None:
             self.importance_sampling_metadata = {}
 
-        data_settings = self.metadata["train_settings"]["data"]
-        self.inference_parameters = data_settings["inference_parameters"]
-
         self._build_prior()
         self._build_domain()
+        if self.importance_sampling_metadata.get("updates"):
+            self._rebuild_domain()
 
     @property
     def metadata(self):
@@ -83,6 +84,29 @@ class Result(DingoDataset):
             return self.metadata["base"]
         else:
             return self.metadata
+
+    @property
+    def injection_parameters(self):
+        if self.context:
+            return self.context.get("parameters")
+        else:
+            return None
+
+    @property
+    def constraint_parameter_keys(self):
+        return [k for k, v in self.prior.items() if isinstance(v, Constraint)]
+
+    @property
+    def search_parameter_keys(self):
+        return [
+            k
+            for k, v in self.prior.items()
+            if (not isinstance(v, Constraint) and not isinstance(v, DeltaFunction))
+        ]
+
+    @property
+    def fixed_parameter_keys(self):
+        return [k for k, v in self.prior.items() if isinstance(v, DeltaFunction)]
 
     def _build_domain(self):
         self.domain = None
@@ -134,10 +158,10 @@ class Result(DingoDataset):
                 print(f"  {k}:  {event_metadata[k]}")
                 self.importance_sampling_metadata["updates"][k] = event_metadata[k]
 
-            self._rebuild_domain()
+            self._rebuild_domain(verbose=True)
         self.event_metadata = event_metadata
 
-    def _rebuild_domain(self):
+    def _rebuild_domain(self, verbose=False):
         pass
 
     @property
@@ -168,10 +192,17 @@ class Result(DingoDataset):
 
     @property
     def log_evidence_std(self):
-        if "weights" in self.samples and self.log_evidence is not None:
+        if "weights" in self.samples and self.log_evidence:
             return np.sqrt(
                 (self.num_samples - self.n_eff) / (self.num_samples * self.n_eff)
             )
+        else:
+            return None
+
+    @property
+    def log_bayes_factor(self):
+        if self.log_evidence and self.log_noise_evidence:
+            return self.log_evidence - self.log_noise_evidence
         else:
             return None
 
@@ -252,6 +283,7 @@ class Result(DingoDataset):
         )
         print(f"Done. This took {time.time() - t0:.2f} seconds.")
 
+        self.log_noise_evidence = self.likelihood.log_Zn
         self.samples["log_prior"] = log_prior
         self.samples.loc[valid_samples, "log_likelihood"] = log_likelihood
         self._calculate_evidence()
@@ -321,21 +353,24 @@ class Result(DingoDataset):
             weights /= np.mean(weights)
             self.samples["weights"] = weights
 
-    def sampling_importance_resampling(self, num_samples=None):
+    def sampling_importance_resampling(self, num_samples=None, random_state=None):
         """
         Generate unweighted posterior samples from weighted ones. New
         samples are sampled with probability proportional to the sample weight.
         Resampling is done with replacement, until the desired number of
         unweighted samples is obtained.
 
-         Unweighted samples are saved in a new class attribute called
-         unweighted_samples, which is a pd.DataFrame.
-
         Parameters
         ----------
         num_samples : int
-            Number of samples to resample
+            Number of samples to resample.
+        random_state : int or None
+            Sampling seed.
 
+        Returns
+        -------
+        pd.Dataframe
+            Unweighted samples
         """
         if num_samples is None:
             num_samples = len(self.samples)
@@ -343,15 +378,19 @@ class Result(DingoDataset):
         if num_samples > len(self.samples):
             raise ValueError("Cannot sample more points than in the weighted posterior")
 
-        self.unweighted_samples = self.samples.sample(
-            n=num_samples, weights=self.samples["weights"], replace=True
+        unweighted_samples = self.samples.sample(
+            n=num_samples,
+            weights=self.samples["weights"],
+            replace=True,
+            ignore_index=True,
+            random_state=random_state,
         )
-        self.unweighted_samples = self.unweighted_samples.drop(["weights"], axis=1)
+        return unweighted_samples.drop(["weights"], axis=1)
 
     def parameter_subset(self, parameters):
         """
         Return a new object of the same type, with only a subset of parameters. Drops
-        all other columns in self.samples as well (e.g., log_prob, weights).
+        all other columns in samples DataFrame as well (e.g., log_prob, weights).
 
         Parameters
         ----------
@@ -517,7 +556,9 @@ class Result(DingoDataset):
             samples_parts.append(part_dict.pop("samples"))
 
             # Make sure we are not merging incompatible results. We deleted the
-            # log_evidence since this can differ among the sub-results.
+            # log_evidence since this can differ among the sub-results. Note that this
+            # will also raise an error if files were created with different versions of
+            # dingo.
             if not recursive_check_dicts_are_equal(part_dict, dataset_dict):
                 raise ValueError("Results to be merged must have same metadata.")
 
@@ -563,32 +604,19 @@ class Result(DingoDataset):
         if parameters:
             theta = theta[parameters]
 
-        c = ChainConsumer()
-
-        # Plot pre-importance sampling samples. I.e., drop weights, if present.
-        c.add_chain(theta, weights=None, color="orange", name="Dingo")
-        n = 1
-
         if "weights" in theta:
-            c.add_chain(
-                theta, weights=theta["weights"].to_numpy(), color="red", name="Dingo-IS"
+            plot_corner_multi(
+                [theta, theta],
+                weights=[None, theta["weights"].to_numpy()],
+                labels=["Dingo", "Dingo-IS"],
+                filename=filename,
             )
-            n = 2
-
-        c.configure(
-            linestyles=["-"] * n,
-            linewidths=[1.5] * n,
-            sigmas=[np.sqrt(2) * erfinv(x) for x in [0.5, 0.9]],
-            shade=[False] + [True] * (n - 1),
-            shade_alpha=0.3,
-            bar_shade=False,
-            label_font_size=10,
-            tick_font_size=10,
-            usetex=False,
-            legend_kwargs={"fontsize": 30},
-            kde=0.7,
-        )
-        c.plotter.plot(filename=filename)
+        else:
+            plot_corner_multi(
+                theta,
+                labels="Dingo",
+                filename=filename,
+            )
 
     def plot_log_probs(self, filename="log_probs.png"):
         """

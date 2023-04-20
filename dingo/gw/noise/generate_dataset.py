@@ -98,6 +98,7 @@ def generate_dataset():
 
     else:
 
+        print("Downloading strain data and estimating PSDs...")
         asd_filename_list = download_and_estimate_psds(
             args.data_dir, settings, time_segments, verbose=args.verbose
         )
@@ -105,6 +106,7 @@ def generate_dataset():
             det: [ASDDataset(asd_file) for asd_file in asd_file_list]
             for det, asd_file_list in asd_filename_list.items()
         }
+        print("Merging single dataset files into one...")
         dataset = merge_datasets(asd_dataset_list)
         filename = args.out_name
         if filename is None:

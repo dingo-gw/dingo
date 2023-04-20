@@ -21,6 +21,8 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
     that implement a __call__() method.
     """
 
+    dataset_type = "waveform_dataset"
+
     def __init__(
         self,
         file_name=None,
@@ -110,7 +112,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                 if "s" in self.svd:
                     self.svd["s"] = self.svd["s"].astype(real_type, copy=False)
 
-        if self.settings["compression"] is not None:
+        if self.settings.get("compression", None) is not None:
             self.initialize_decompression(svd_size_update)
 
     def update_domain(self, domain_update: dict = None):
@@ -139,7 +141,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         # compressed, then adjust the SVD matrices. Otherwise, adjust the dataset
         # itself.
         if (
-            self.settings["compression"] is not None
+            self.settings.get("compression", None) is not None
             and "svd" in self.settings["compression"]
         ):
             self.svd["V"] = self.domain.update_data(self.svd["V"], axis=0)
@@ -202,7 +204,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
     def __getitem__(self, idx) -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
         """
         Return a nested dictionary containing parameters and waveform polarizations
-        for sample with index `idx`. If defined, a chain of transformations are applied to
+        for sample with index `idx`. If defined, a chain of transformations is applied to
         the waveform data.
         """
         parameters = self.parameters.iloc[idx].to_dict()

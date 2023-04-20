@@ -46,13 +46,13 @@ The `GWSampler.metadata` attribute contains all settings that went into producin
 Injections (i.e., simulated data) are produced using the `Injection` class. It includes options for fixed or random parameters (drawn from a prior), and it returns injections in a format that can be directly set as `GWSampler.context`.
 
 ```{eval-rst}
-.. autoclass:: dingo.gw.inference.injection.Injection
+.. autoclass:: dingo.gw.injection.Injection
     :members:
     :show-inheritance:
 ```
 
 ```{hint}
-The convenience class method `from_posterior_model()` instantiates an `Injection` with all of the settings that went into the posterior model. Thus it should produce injections that perfectly match the characteristics of the training data (waveform approximant, data conditioning, noise characteristics, etc.). This can be very useful for testing a trained model.
+The convenience class method `from_posterior_model_metadata()` instantiates an `Injection` with all of the settings that went into the posterior model. To this class pass the PosteriorModel.metadata dictionary. It should produce injections that perfectly match the characteristics of the training data (waveform approximant, data conditioning, noise characteristics, etc.). This can be very useful for testing a trained model.
 ```
 
 ```{important}

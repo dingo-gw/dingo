@@ -40,7 +40,7 @@ def test_change_of_spin_conversion_phase(param_setup):
     params_pd = pd.DataFrame({k: np.array([v, v / 1.2]) for k, v in params.items()})
 
     # 1) check that only theta_jn and phi_jl are impacted
-    params_pd_new = change_spin_conversion_phase(params_pd, f_ref, "real_phase", 0)
+    params_pd_new = change_spin_conversion_phase(params_pd, f_ref, None, 0)
     diff = {
         k: np.sum(np.abs(params_pd_new[k] - params_pd[k])) for k in params_pd.keys()
     }
@@ -51,9 +51,9 @@ def test_change_of_spin_conversion_phase(param_setup):
 
     # 2) check that changing phases back and forth is consistent
     params_pd_new = params_pd.copy()
-    params_pd_new = change_spin_conversion_phase(params_pd_new, f_ref, "real_phase", 0)
+    params_pd_new = change_spin_conversion_phase(params_pd_new, f_ref, None, 0)
     params_pd_new = change_spin_conversion_phase(params_pd_new, f_ref, 0, 1)
-    params_pd_new = change_spin_conversion_phase(params_pd_new, f_ref, 1, "real_phase")
+    params_pd_new = change_spin_conversion_phase(params_pd_new, f_ref, 1, None)
     diff = {
         k: np.sum(np.abs(params_pd_new[k] - params_pd[k])) for k in params_pd.keys()
     }

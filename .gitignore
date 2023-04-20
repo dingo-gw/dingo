@@ -26,6 +26,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+dingo/_version.py
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -50,6 +51,8 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+tmp_test/
+tmp_files/
 
 # Translations
 *.mo
@@ -70,6 +73,9 @@ instance/
 
 # Sphinx documentation
 docs/_build/
+modules.rst
+dingo.*rst
+jupyter_execute/
 
 # PyBuilder
 target/

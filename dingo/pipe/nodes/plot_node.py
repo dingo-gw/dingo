@@ -1,14 +1,14 @@
 from bilby_pipe.job_creation.nodes import PlotNode as BilbyPlotNode
 
-from dingo.gw.pipe.utils import _strip_unwanted_submission_keys
+from dingo.pipe.utils import _strip_unwanted_submission_keys
 
 
 class PlotNode(BilbyPlotNode):
     def __init__(self, inputs, merged_node, dag):
         super(BilbyPlotNode, self).__init__(inputs)
         self.dag = dag
-        self.job_name = merged_node.job_name.removesuffix("_merge") + "_plot"
-        self.label = merged_node.job_name.removesuffix("_merge") + "_plot"
+        self.job_name = merged_node.job_name.replace("_merge", "") + "_plot"
+        self.label = merged_node.job_name.replace("_merge", "") + "_plot"
         self.request_cpus = 1
         self.setup_arguments(
             add_ini=False, add_unknown_args=False, add_command_line_args=False

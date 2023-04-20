@@ -1,0 +1,103 @@
+[build-system]
+requires = ["setuptools>=62.0", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "dingo-gw"
+authors = [ 
+    {name = "Maximilian Dax", email = "maximilian.dax@tuebingen.mpg.de"},
+    {name = "Stephen Green", email = "Stephen.Green2@nottingham.ac.uk"},
+]
+description = "Deep inference for gravitational-wave observations"
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.8"
+dynamic = ["version"]
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent"
+]
+
+dependencies = [
+    "astropy",
+    "bilby",
+    "bilby_pipe",
+    "configargparse",
+    "corner",
+    "cryptography",
+    "glasflow",
+    "gwpy",
+    "h5py",
+    "lalsuite>=7.11",
+    "numpy",
+    "pandas",
+    "pesummary",
+    "pycbc",
+    "pycondor",
+    "pyopenssl",
+    "pyyaml",
+    "scikit-learn",
+    "scipy",
+    "threadpoolctl",
+    "torch",
+    "torchvision",
+]
+
+
+[tool.setuptools.packages.find]
+include = ["dingo*"]
+namespaces = false
+
+
+[tool.setuptools_scm]
+write_to = "dingo/_version.py"
+
+
+[project.urls]
+homepage = "https://github.com/dingo-gw/dingo"
+
+
+[project.optional-dependencies]
+dev = [
+    "black",
+    "linkify-it-py",
+    "myst-nb",
+    "myst-parser",
+    "pylint",
+    "pytest",
+    "sphinx",
+    "sphinx-math-dollar",
+    "sphinx-rtd-theme",
+    "sphinxcontrib-mermaid",
+    "sphinxcontrib-bibtex",
+    "wandb",
+]
+
+
+[project.scripts]
+dingo_append_training_stage = "dingo.gw.training:append_stage"
+dingo_analyze_event = "dingo.gw.inference:analyze_event"
+dingo_build_svd = "dingo.gw.dataset.utils:build_svd_cli"
+dingo_estimate_psds = "dingo.gw.noise.asd_estimation:download_and_estimate_cli"
+dingo_generate_asd_dataset = "dingo.gw.noise.generate_dataset:generate_dataset"
+dingo_generate_dataset = "dingo.gw.dataset.generate_dataset:main"
+dingo_generate_dataset_dag = "dingo.gw.dataset.generate_dataset_dag:main"
+dingo_generate_synthetic_asd_dataset = "dingo.gw.noise.synthetic_noise.generate_dataset:main"
+dingo_ls = "dingo.gw.ls_cli:ls"
+dingo_merge_datasets = "dingo.gw.dataset.utils:merge_datasets_cli"
+dingo_merge_asd_datasets = "dingo.gw.noise.utils:merge_datasets_cli"
+dingo_pipe = "dingo.pipe.main:main"
+dingo_pipe_importance_sampling = "dingo.pipe.importance_sampling:main"
+dingo_pipe_generation = "dingo.pipe.data_generation:main"
+dingo_pipe_sampling = "dingo.pipe.sampling:main"
+dingo_pipe_plot = "dingo.pipe.plot:main"
+dingo_pt_to_hdf5 = "dingo.core.utils.pt_to_hdf5:main"
+dingo_result = "dingo.pipe.dingo_result:main"
+dingo_train = "dingo.gw.training:train_local"
+dingo_train_condor = "dingo.gw.training.train_pipeline_condor:train_condor"

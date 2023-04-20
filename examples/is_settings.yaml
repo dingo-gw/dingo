@@ -40,3 +40,10 @@ nde:
     scheduler:
       type: cosine
       T_max: 20
+
+calibration_marginalization:
+  num_calibration_curves: 100
+  num_calibration_nodes: 10
+  calibration_envelope:
+    H1: <path/to/H1-calibration-envelope>
+    L1: <path/to/L1-calibration-envelope> 

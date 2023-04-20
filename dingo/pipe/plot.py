@@ -5,6 +5,8 @@ from bilby_pipe.utils import get_command_line_arguments, logger, parse_args
 
 from dingo.gw.result import Result
 
+logger.name = "dingo_pipe"
+
 
 def create_parser():
     """Generate a parser for the plot script

@@ -6,16 +6,21 @@ from typing import Callable
 import torch
 import dingo.core.utils as utils
 from torch.utils.data import Dataset
+import os
 import time
+import numpy as np
 from threadpoolctl import threadpool_limits
 import dingo.core.utils.trainutils
 import math
-import wandb
+import h5py
+import json
+from collections import OrderedDict
 
 from dingo.core.nn.nsf import (
     create_nsf_with_rb_projection_embedding_net,
     create_nsf_wrapped,
 )
+from dingo.core.utils.misc import get_version
 
 
 class PosteriorModel:
@@ -71,6 +76,8 @@ class PosteriorModel:
         metadata: dict = None
             dict with metadata, used to save dataset_settings and train_settings
         """
+        self.version = f"dingo={get_version()}"  # dingo version
+
         self.optimizer_kwargs = None
         self.model_kwargs = None
         self.scheduler_kwargs = None
@@ -160,6 +167,7 @@ class PosteriorModel:
             "model_kwargs": self.model_kwargs,
             "model_state_dict": self.model.state_dict(),
             "epoch": self.epoch,
+            "version": self.version,
         }
 
         if self.metadata is not None:
@@ -182,6 +190,47 @@ class PosteriorModel:
 
         torch.save(model_dict, model_filename)
 
+
+    def _load_model_from_hdf5(
+        self,
+        model_filename: str
+    ):
+        """
+        Helper function to load a trained model that has been
+        saved in HDF5 format using `dingo_pt_to_hdf5`.
+
+        Parameters
+        ----------
+        model_filename: str
+            path to saved model; must have extension '.hdf5'
+
+        Returns
+        -------
+        d: dict
+            A stripped down version of the dict saved by torch.save()
+            Specifically, it does not include 'optimizer_state_dict'
+            to save space at inference time.
+        """
+        d = {}
+        with h5py.File(model_filename, 'r') as fp:
+            model_basename = os.path.basename(model_filename)
+            if fp.attrs['CANONICAL_FILE_BASENAME'] != model_basename:
+                raise ValueError('HDF5 attribute CANONICAL_FILE_BASENAME differs from model name',
+                        model_basename)
+
+            # Load small nested dicts from json
+            for k, v in fp['serialized_dicts'].items():
+                d[k] = json.loads(v[()])
+
+            # Load model weights
+            model_state_dict = OrderedDict()
+            for k, v in fp['model_weights'].items():
+                model_state_dict[k] = torch.from_numpy(np.array(v, dtype=np.float32))
+            d['model_state_dict'] = model_state_dict
+
+        return d
+
+
     def load_model(
         self,
         model_filename: str,
@@ -199,11 +248,18 @@ class PosteriorModel:
             specifies whether information required to proceed with training is
             loaded, e.g. optimizer state dict
         """
-
         # Make sure that when the model is loaded, the torch tensors are put on the
         # device indicated in the saved metadata. External routines run on a cpu
         # machine may have moved the model from 'cuda' to 'cpu'.
-        d = torch.load(model_filename, map_location=device)
+        ext = os.path.splitext(model_filename)[-1]
+        if ext == '.pt':
+            d = torch.load(model_filename, map_location=device)
+        elif ext == '.hdf5':
+            d = self._load_model_from_hdf5(model_filename)
+        else:
+            raise ValueError('Models should be ether in .pt or .hdf5 format.')
+
+        self.version = d.get("version")
 
         self.model_kwargs = d["model_kwargs"]
         self.initialize_model()
@@ -269,8 +325,6 @@ class PosteriorModel:
             print(f"test loss: {test_loss:.3f}")
 
         else:
-            # if use_wandb:
-            #     wandb.watch(self.model, log="all", log_freq=10)
             while not runtime_limits.limits_exceeded(self.epoch):
                 self.epoch += 1
 
@@ -307,16 +361,23 @@ class PosteriorModel:
                 utils.write_history(train_dir, self.epoch, train_loss, test_loss, lr)
                 utils.save_model(self, train_dir, checkpoint_epochs=checkpoint_epochs)
                 if use_wandb:
-                    wandb.log(
-                        {
-                            "epoch": self.epoch,
-                            "learning_rate": lr[0],
-                            "train_loss": train_loss,
-                            "test_loss": test_loss,
-                            "train_time": train_time,
-                            "test_time": test_time,
-                        }
-                    )
+                    try:
+                        import wandb
+                        wandb.define_metric("epoch")
+                        wandb.define_metric("*", step_metric="epoch")
+                        wandb.log(
+                            {
+                                "epoch": self.epoch,
+                                "learning_rate": lr[0],
+                                "train_loss": train_loss,
+                                "test_loss": test_loss,
+                                "train_time": train_time,
+                                "test_time": test_time,
+                            }
+                        )
+                    except ImportError:
+                        print("wandb not installed. Skipping logging to wandb.")
+
                 print(f"Finished training epoch {self.epoch}.\n")
 
     def sample(

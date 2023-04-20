@@ -15,8 +15,10 @@ from bilby_pipe.utils import (
 from .dag_creator import generate_dag
 from .parser import create_parser
 
-from ..domains import build_domain_from_model_metadata
-from ...core.models import PosteriorModel
+from dingo.gw.domains import build_domain_from_model_metadata
+from dingo.core.models import PosteriorModel
+
+logger.name = "dingo_pipe"
 
 
 def fill_in_arguments_from_model(args):

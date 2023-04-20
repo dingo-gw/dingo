@@ -1,10 +1,10 @@
 # Quickstart tutorial
 
-To learn to use Dingo, we recommend starting with the examples provided in the `/examples`
+To learn to use Dingo, we recommend starting with the examples provided in the [examples/](https://github.com/dingo-gw/dingo/tree/main/examples)
 folder. The YAML files contained in this directory (and subdirectories) contain
 configuration settings for the various Dingo tasks (constructing training data, training networks, and performing inference). These files should be provided as input to the
 command-line scripts, which then run Dingo and save output files. These output files
-contain as metadata the settings in the `.yaml` files, and they may usually be inspected
+contain as metadata the settings in the YAML files, and they may usually be inspected
 by running `dingo_ls`.
 
 ```{mermaid}
@@ -34,14 +34,10 @@ flowchart TB
     train_settings_main[train_settings_main.yaml]
     generate_asd--->train_main
     train_settings_main-->train_main
-    train_init-->inference(["dingo_analyze_event
-    #nbsp; #nbsp; --model model_main/model_stage_1.pt
-    #nbsp; #nbsp; --model_init model_init/model_stage_1.pt
-    #nbsp; #nbsp; --num_samples 50000
-    #nbsp; #nbsp; --gps_time_event 1126259462.4"])
+    train_init-->inference(["dingo_pipe GW150914.ini"])
     style inference text-align:left
     train_main-->inference
-    inference-->samples[dingo_samples-1126259462.4.hdf5]
+    inference-->samples[GW150914_data0_1126259462-4_sampling.hdf5]
 ```
 
 
@@ -76,7 +72,7 @@ training sample. To generate this dataset based on noise observed during a run, 
 dingo_generate_ASD_dataset --data_dir data_dir --settings_file asd_dataset_settings.yaml
 ```
 
-This will download data from the GWOSC website and create a `/tmp` directory, in which the
+This will download data from [GWOSC](https://www.gw-openscience.org) and create a `/tmp` directory, in which the
 estimated PSDs are stored. Subsequently, these are collected together into a final `.hdf5`
 ASD dataset.
 If no `settings_file` is passed, the script will attempt to use the default
@@ -103,30 +99,41 @@ If using CUDA on a machine with several GPUs, be sure to first select the desire
 number using the `CUDA_VISIBLE_DEVICES` environment variable. If using a cluster, Dingo
 can be trained using `dingo_train_condor`.
 
+Example training files can be found under `examples/training`. 
+`train_settings_toy.yaml` and `train_settings_production.yaml` train a flow to
+estimate the full posterior of the event conditioned on the time of coalescence
+in the detectors. The "toy" label is to indicate this should NOT be used for production but 
+rather to get a feel for the Dingo pipeline. The production settings contain tested 
+settings. Note that depending on the waveform model and event, these may need to occasionally
+be tuned. `train_settings_init_toy.yaml` and `train_settings_init_production.yaml` train
+flows to estimate the time of coalescence in the individual detectors. These two
+networks are needed to use [GNPE](gnpe.md). This is the preferred and
+most tested way of using Dingo. 
+
+Alternatively, the `train_settings_no_gnpe_toy.yaml` and
+`train_settings_no_gnpe_production.yaml` contain settings to train a network
+without the GNPE step. Note the lack of a `data/gnpe_time_shifts` option. While this is not
+recommended for production, it is still pedagogically useful and is good for prototyping 
+new ideas or doing a less expensive training.   
+
 ## Inference
 
-Once a Dingo model is trained, inference for real events can be performed with
+Once a Dingo model is trained, inference for real events can be performed using
+[dingo_pipe](dingo_pipe.md). There are 3 main inference steps, downloading the data, 
+running Dingo on this data and finally running importance sampling. The basic
+idea is to create a .ini file which contains the filepaths of the Dingo networks
+trained above and the segment of data to analyze. An example .ini file can be
+found under `examples/pipe/GW150914.ini`. 
+
+To do inference, cd into the directory with the .ini file and run 
 
 ```
-dingo_analyze_event
-  --model model.pt
-  --gps_time_event gps_time_event
-  --num_samples num_samples
-  --batch_size batch_size
+dingo_pipe GW150914.ini
 ```
 
-where `model.pt` is the path of the trained Dingo mode, `gps_time_event` is the GPS time
-of the event to be analyzed (e.g., 1126259462.4 for GW150914), `num_samples` is the number
-of desired samples and `batch_size` is the batch size (the larger the faster the
-computation, but limited by GPU memory). Dingo downloads the event data from GWOSC. It
-also estimates the noise ASD from data prior to the event.
 
-If Dingo was trained using GNPE (with the `data/gnpe_time_shifts` option in the settings
-file) then one must train an additional Dingo model to initialize the Gibbs sampler. This
-model infers initial estimates for the coalescence times in the individual detectors and
-is trained just like any other dingo model. See `training/train_settings_init.yaml` for an
-example settings file. To perform inference using GNPE, the script must be pointed to this
-model:
+<!-- One can also just run the network without doing importance sampling with the following
+command line argument. 
 
 ```
 dingo_analyze_event
@@ -138,76 +145,9 @@ dingo_analyze_event
   --batch_size batch_size
 ```
 
-where `model_init` is the path of the aforementioned initialization model,
-and `num_gnpe_iterations` specifies the number of GNPE iterations (
-typically, `num_gnpe_iterations=30`).
-
-Finally, the option `--event_dataset </path/to/event_dataset.hdf5>` can be set to cache
-downloaded event data for future use.
-
-## Importance sampling
-
-To perform importance sampling, run
-
-`python dingo/gw/importance_sampling/importance_weights.py --settings is_settings.yaml`
-
-where `is_settings.yaml` contains the settings, and in particular points to the output
-file that was previously generated by Dingo.
-
-[//]: # (The quickest way to get started with Dingo is to follow the examples in the repository.)
-
-[//]: # ()
-
-[//]: # (Running Your First Injection)
-
-[//]: # (----------------------------)
-
-[//]: # ()
-
-[//]: # (A general pipeline to using dingo for inference on injections is to )
-
-[//]: # ()
-
-[//]: # (1. Generate a :class:`~dingo.gw.dataset.waveform_dataset.WaveformDataset` )
-
-[//]: # (2. Generate a :class:`~dingo.gw.ASD_dataset.noise_dataset.ASDDataset`)
-
-[//]: # (3. Generate and train a :class:`~dingo.core.models.posterior_model.PosteriorModel` using the :class:`~dingo.gw.dataset.waveform_dataset.WaveformDataset`  and :class:`~dingo.gw.ASD_dataset.noise_dataset.ASDDataset` )
-
-[//]: # (4. Generate a :class:`~dingo.gw.inference.gw_samplers.GWSampler` using the trained :class:`~dingo.core.models.posterior_model.PosteriorModel` to do inference on a :class:`~dingo.gw.inference.injection.Injection`)
-
-[//]: # ()
-
-[//]: # ()
-
-[//]: # (This tutorial will take you through how to start with various settings files and go through steps 1-4. At the end you will be able to generate a corner plot of an injection using dingo!)
-
-[//]: # ()
-
-[//]: # ()
-
-[//]: # (Step 1, Generating a :class:`~dingo.gw.dataset.waveform_dataset.WaveformDataset` )
-
-[//]: # (------------------------------------)
-
-[//]: # ()
-
-[//]: # (Generating a :class:`~dingo.gw.dataset.waveform_dataset.WaveformDataset` is largely done with the use of a a `settings.yaml` file. You can edit this file to change the )
-
-[//]: # (priors, waveform approximant, f_max etc. Here is a sample settings.yaml file. )
-
-[//]: # ()
-
-[//]: # ()
-
-[//]: # (.. literalinclude:: ../../tutorials/02_gwpe/datasets/waveforms/settings.yaml)
-
-[//]: # (   :language: yaml)
-
-[//]: # ()
-
-[//]: # ()
-
-[//]: # ()
-
-[//]: # (Dingo's functionality is largely wrapped around the :class:`~dingo.core.models.posterior_model.PosteriorModel` class. This is the class which )
+where model.pt is the path of the trained Dingo mode, gps_time_event is the GPS
+time of the event to be analyzed (e.g., 1126259462.4 for GW150914), num_samples
+is the number of desired samples and batch_size is the batch size (the larger
+the faster the computation, but limited by GPU memory). Dingo downloads the
+event data from GWOSC. It also estimates the noise ASD from data prior to the
+event. -->

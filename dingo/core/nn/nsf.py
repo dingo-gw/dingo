@@ -372,7 +372,7 @@ def autocomplete_model_kwargs_nsf(model_kwargs, data_sample):
         updated, autocompleted model_kwargs
     """
     # set input dims from ifo_list and domain information
-    model_kwargs["embedding_net_kwargs"]["input_dims"] = data_sample[1].shape
+    model_kwargs["embedding_net_kwargs"]["input_dims"] = list(data_sample[1].shape)
     # set dimension of parameter space of nsf
     model_kwargs["nsf_kwargs"]["input_dim"] = len(data_sample[0])
     # set added_context flag of embedding net if gnpe proxies are required
