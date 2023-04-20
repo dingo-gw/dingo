@@ -10,15 +10,21 @@ import warnings
 import lal
 import lalsimulation as LS
 import pandas as pd
-from lalsimulation.gwsignal.core import waveform as gws_wfm
-from lalsimulation.gwsignal.models import (
-    gwsignal_get_waveform_generator as new_interface_get_waveform_generator,
-)
+
+try:
+    from lalsimulation.gwsignal.core import waveform as gws_wfm
+    from lalsimulation.gwsignal.models import (
+        gwsignal_get_waveform_generator as new_interface_get_waveform_generator,
+    )
+except:
+    print(
+        "LALsimulation does not contain gwsignal module, you will not be able to employ new interface."
+    )
+
 from bilby.gw.conversion import (
     convert_to_lal_binary_black_hole_parameters,
     bilby_to_lalsimulation_spins,
 )
-
 import dingo.gw.waveform_generator.wfg_utils as wfg_utils
 import dingo.gw.waveform_generator.frame_utils as frame_utils
 from dingo.gw.domains import Domain, FrequencyDomain, TimeDomain
