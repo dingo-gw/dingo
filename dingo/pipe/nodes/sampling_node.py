@@ -6,7 +6,6 @@ from dingo.pipe.utils import _strip_unwanted_submission_keys
 
 
 class SamplingNode(AnalysisNode):
-
     def __init__(self, inputs, generation_node, dag):
         super(AnalysisNode, self).__init__(inputs)
         self.dag = dag

@@ -101,3 +101,6 @@ dingo_pt_to_hdf5 = "dingo.core.utils.pt_to_hdf5:main"
 dingo_result = "dingo.pipe.dingo_result:main"
 dingo_train = "dingo.gw.training:train_local"
 dingo_train_condor = "dingo.gw.training.train_pipeline_condor:train_condor"
+
+[project.entry-points."asimov.pipelines"]
+dingo = "dingo.asimov.asimov:Dingo"
