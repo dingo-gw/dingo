@@ -102,4 +102,4 @@ dingo_train = "dingo.gw.training:train_local"
 dingo_train_condor = "dingo.gw.training.train_pipeline_condor:train_condor"
 
 [project.entry-points."asimov.pipelines"]
-dingo = "dingo.pipe.asimov:Dingo"
+dingo = "dingo.asimov.asimov:Dingo"
