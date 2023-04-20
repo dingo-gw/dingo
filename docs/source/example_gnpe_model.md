@@ -23,8 +23,8 @@ gnpe_model/
         waveform_dataset.hdf5
         asd_dataset.hdf5
         asd_dataset_fiducial.hdf5
-        asd_dataset_folder_fiducial/ # Contains the asd_dataset.hdf5 and also temp files for asd generation
-        asd_dataset_folder/ # Contains the asd_dataset.hdf5 and also temp files for asd generation
+        asd_dataset_fiducial/ # Contains the asd_dataset.hdf5 and also temp files for asd generation
+        asd_dataset/ # Contains the asd_dataset.hdf5 and also temp files for asd generation
 
     training/
         main_train_dir/
@@ -80,14 +80,14 @@ As before we generate a fiducial ASD dataset containing a single ASD:
 
 ```
 dingo_generate_asd_dataset --settings_file asd_dataset_settings_fiducial.yaml --data_dir
-training_data/asd_dataset_folder_fiducial -out_name training_data/asd_dataset_folder_fiducial/asds_O1_fiducial.hdf5
+training_data/asd_dataset_fiducial -out_name training_data/asd_dataset_fiducial/asds_O1_fiducial.hdf5
 ```
 
 and a large ASD dataset:
 
 ```
 dingo_generate_asd_dataset --settings_file asd_dataset_settings.yaml --data_dir
-training_data/asd_dataset_folder -out_name training_data/asd_dataset_folder/asds_O1.hdf5
+training_data/asd_dataset -out_name training_data/asd_dataset/asds_O1.hdf5
 ```
 
 

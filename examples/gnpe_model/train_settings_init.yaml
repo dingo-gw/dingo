@@ -57,7 +57,7 @@ model:
 training:
   stage_0:  # Pre-training stage (fixed ASD, typically)
     epochs: 150
-    asd_dataset_path: training_data/asd_dataset_folder_fiducial/asds_O1_fiducial.hdf5 # This should just contain a single 'fiducial' ASD for each detector.
+    asd_dataset_path: training_data/asd_dataset_fiducial/asds_O1_fiducial.hdf5 # This should just contain a single 'fiducial' ASD for each detector.
     freeze_rb_layer: True
     optimizer:
       type: adam
@@ -69,7 +69,7 @@ training:
 
   stage_1:  # Fine-tuning stage
     epochs: 75
-    asd_dataset_path: training_data/asd_dataset_folder/asds_O1.hdf5 # This should contain a large collection of ASDs for each detector.
+    asd_dataset_path: training_data/asd_dataset/asds_O1.hdf5 # This should contain a large collection of ASDs for each detector.
     freeze_rb_layer: False
     optimizer:
       type: adam
