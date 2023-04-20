@@ -1,8 +1,10 @@
+from os.path import isfile
+
 import numpy as np
 from gwpy.timeseries import TimeSeries
 
 from dingo.core.dataset import DingoDataset
-from dingo.core.utils import load_data_from_file
+from dingo.core.utils.misc import recursive_check_dicts_are_equal
 from dingo.gw.data.data_download import download_raw_data
 from dingo.gw.gwutils import get_window
 from dingo.gw.domains import build_domain_from_model_metadata, FrequencyDomain
@@ -33,8 +35,16 @@ def load_raw_data(time_event, settings, event_dataset=None):
 
     # first try to load the event data from the saved dataset
     if event_dataset is not None:
-        data = load_data_from_file(event_dataset, event, settings=settings)
-        if data is not None:
+
+        if isfile(event_dataset):
+            dataset = DingoDataset(file_name=event_dataset, data_keys=[event])
+            if settings is not None:
+                if not recursive_check_dicts_are_equal(settings, dataset.settings):
+                    raise ValueError(
+                        f"Settings {settings} don't match saved settings "
+                        f"{dataset.settings}"
+                    )
+            data = vars(dataset)[event]
             print(f"Data for event at {event} found in {event_dataset}.")
             return data
 
@@ -104,7 +114,7 @@ def data_to_domain(raw_data, settings_raw_data, domain, **kwargs):
 
         # convert psds to asds
         for det, psd in raw_data["psd"].items():
-            asd = psd ** 0.5
+            asd = psd**0.5
             asd = domain.update_data(asd, low_value=1.0)
             data["asds"][det] = asd
 

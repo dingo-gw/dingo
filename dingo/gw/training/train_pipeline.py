@@ -3,7 +3,6 @@ import numpy as np
 import yaml
 import argparse
 import textwrap
-import wandb
 
 
 from threadpoolctl import threadpool_limits
@@ -99,15 +98,16 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
         device=local_settings["device"],
     )
 
-    if local_settings.get("use_wandb", False):
-        run_id = local_settings["wandb_run_id"]
-        wandb.init(
-            project="dingo-devel",
-            id=run_id,
-            config=full_settings,
-            group="hyperparameter_tuning",
-            dir=train_dir,
-        )
+    if local_settings.get("wandb", False):
+        try:
+            import wandb
+            wandb.init(
+                config=full_settings,
+                dir=train_dir,
+                **local_settings["wandb"],
+            )
+        except ImportError:
+            print("WandB is enabled but not installed.")
 
     return pm, wfd
 
@@ -133,20 +133,16 @@ def prepare_training_resume(checkpoint_name, local_settings, train_dir):
     pm = PosteriorModel(model_filename=checkpoint_name, device=local_settings["device"])
     wfd = build_dataset(pm.metadata["train_settings"]["data"])
 
-    if local_settings.get("use_wandb", False):
-
+    if local_settings.get("wandb", False):
         try:
+            import wandb
             wandb.init(
-                project="dingo-devel",
-                id=local_settings["wandb_run_id"],
-                group="hyperparameter_tuning",
                 resume="must",
                 dir=train_dir,
+                **local_settings["wandb"],
             )
-        except KeyError:
-            print(
-                "WandB is enabled but no run_id has been provided for resuming the run."
-            )
+        except ImportError:
+            print("WandB is enabled but not installed.")
 
     return pm, wfd
 
@@ -274,7 +270,7 @@ def train_stages(pm, wfd, train_dir, local_settings):
             train_dir=train_dir,
             runtime_limits=runtime_limits,
             checkpoint_epochs=local_settings["checkpoint_epochs"],
-            use_wandb=local_settings.get("use_wandb", False),
+            use_wandb=local_settings.get("wandb", False),
             test_only=local_settings.get("test_only", False),
         )
         # if test_only, model should not be saved, and run is complete
@@ -350,11 +346,12 @@ def train_local():
 
         local_settings = train_settings.pop("local")
         with open(os.path.join(args.train_dir, "local_settings.yaml"), "w") as f:
-            if local_settings.get("use_wandb", False):
-                if "WANDB_API_KEY" not in os.environ.keys():
-                    os.environ["WANDB_API_KEY"] = local_settings["wandb_api_key"]
-                if "wandb_run_id" not in local_settings.keys():
-                    local_settings["wandb_run_id"] = wandb.util.generate_id()
+            if local_settings.get("wandb", False) and "id" not in local_settings["wandb"].keys():
+                try:
+                    import wandb
+                    local_settings["wandb"]["id"] = wandb.util.generate_id()
+                except ImportError:
+                    print("wandb not installed, cannot generate run id.")
             yaml.dump(local_settings, f, default_flow_style=False, sort_keys=False)
 
         pm, wfd = prepare_training_new(train_settings, args.train_dir, local_settings)

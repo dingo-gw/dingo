@@ -127,81 +127,75 @@ def pe_spins(p, f_ref):
     return result
 
 
-def change_spin_conversion_phase(p, f_ref, sc_phase_old, sc_phase_new):
+def change_spin_conversion_phase(samples, f_ref, sc_phase_old, sc_phase_new):
     """
     Change the phase used to convert cartesian spins to PE spins. The cartesian spins
     are independent of the spin conversion phase. When converting from cartesian spins
     to PE spins, the phase value has an impact on theta_jn and phi_jl.
 
-    The usual convention for the PE spins is to use the real phase for the conversion
+    The usual convention for the PE spins is to use the phase parameter for the conversion
     (cart. spins <--> PE spins), but for dingo-IS with the synthetic phase extension we
     need to use another convention, where the PE spins are defined with spin conversion
     phase 0. This function transforms between the different conventions.
 
     Parameters
     ----------
-    p: pd.Dataframe
-        parameters
+    samples: pd.Dataframe
+        Parameters.
     f_ref: float
-        reference frequency for definition of spins
-    sc_phase_old: float or str
-        spin conversion phase used for input parameters
-    sc_phase_new: float or str
-        spin conversion phase used for output parameters
+        Reference frequency for definition of spins.
+    sc_phase_old: float or None
+        Spin conversion phase used for input parameters. If None, use the phase parameter.
+    sc_phase_new: float or None
+        Spin conversion phase used for output parameters. If None, use the phase
+        parameter.
 
     Returns
     -------
     p_new:
         parameters with changed spin conversion phase
     """
-    p = p.astype(float)
+    samples = samples.astype(float)
     if sc_phase_old == sc_phase_new:
-        return p
+        return samples
 
     # check validity of phases
     for sc_phase in [sc_phase_old, sc_phase_new]:
-        if isinstance(sc_phase, str):
-            if not sc_phase == "real_phase":
+        if sc_phase is None:
+            if "phase" not in samples:
                 raise ValueError(
-                    f"Phase for spin conversion needs to be either a number, "
-                    f'or the string "real_phase", got {sc_phase}.'
+                    "Using phase parameter for spin conversion, but phase not in "
+                    "parameters."
                 )
-            if not "phase" in p:
-                raise ValueError(
-                    "Using real phase for spin conversion, but phase not in parameters."
-                )
-        elif not type(sc_phase) in (int, float):
+        elif type(sc_phase) not in (int, float):
             raise ValueError(
-                f"Phase for spin conversion needs to be either a number, "
-                f'or the string "real_phase", got {sc_phase}.'
+                f"Phase for spin conversion needs to be either a number or None; got"
+                f"{sc_phase}."
             )
 
     phase_old = sc_phase_old
     phase_new = sc_phase_new
-    p_new = {k: [] for k in p.keys()}
-    for idx in range(len(p)):
-        if sc_phase_old == "real_phase":
-            phase_old = p["phase"][idx]
-        if sc_phase_new == "real_phase":
-            phase_new = p["phase"][idx]
-
-        params_idx = {k: v[idx] for k, v in p.items()}
+    samples_new = {}
+    for idx, sample in samples.to_dict(orient="index").items():
+        if sc_phase_old is None:
+            phase_old = sample["phase"]
+        if sc_phase_new is None:
+            phase_new = sample["phase"]
 
         # transform to cartesian spins (which is the fundamental basis, independent of
         # the phase) with the old spin conversion phase, and back to PE spins with the
         # new spin conversion phase
-        params_idx_cart = cartesian_spins({**params_idx, "phase": phase_old}, f_ref)
-        params_idx_pe_new = pe_spins({**params_idx_cart, "phase": phase_new}, f_ref)
+        sample_cartesian = cartesian_spins({**sample, "phase": phase_old}, f_ref)
+        sample_pe_new = pe_spins({**sample_cartesian, "phase": phase_new}, f_ref)
 
         # The conversions above will set the phase parameter to sc_phase_new, however,
         # this is only the phase used for spin conversion, *not* the actual phase for
         # the parameters. Below, we set the phase to its correct (i.e., input) value.
-        if "phase" in p:
-            params_idx_pe_new["phase"] = p["phase"][idx]
+        if "phase" in sample:
+            sample_pe_new["phase"] = sample["phase"]
         else:
-            params_idx_pe_new.pop("phase")
+            sample_pe_new.pop("phase")
 
-        for k, v in p_new.items():
-            v.append(params_idx_pe_new[k])
+        samples_new[idx] = sample_pe_new
 
-    return pd.DataFrame(p_new)
+    return pd.DataFrame.from_dict(samples_new, orient="index")

@@ -18,6 +18,9 @@ local = True
 accounting = dingo
 request-cpus-importance-sampling = 16
 n-parallel = 4
+sampling-requirements = [TARGET.CUDAGlobalMemoryMb>40000]
+extra-lines = [+WantsGPUNode = True]
+simple-submission = false
 
 ################################################################################
 ##  Sampler arguments
@@ -45,6 +48,15 @@ channel-dict = {H1:GWOSC, L1:GWOSC}
 psd-length = 128
 sampling-frequency = 2048.0
 importance-sampling-updates = {'duration': 4.0}
+
+################################################################################
+## Calibration marginalization arguments
+################################################################################
+
+calibration-model = CubicSpline
+spline-calibration-envelope-dict = {H1: GWTC1_GW150914_H_CalEnv.txt, L1: GWTC1_GW150914_L_CalEnv.txt}
+spline-calibration-nodes = 10
+spline-calibration-curves = 1000
 
 ################################################################################
 ## Plotting arguments
@@ -78,6 +90,8 @@ The next step is sampling from the Dingo model. The model is loaded into a [GWSa
 
 If using GNPE, one can optionally specify `num-gnpe-iterations` (it defaults to 30). Importantly, obtaining the log probability when using GNPE requires an [extra step of training an unconditional flow](result.md#density-recovery). This is done using the `recover-log-prob` flag, which defaults to `True`. The default density recovery settings can be overwritten by providing a `density-recovery-settings` dictionary in the `.ini` file.
 
+Since sampling uses GPU hardware, there is an additional key `sampling-requirements` for HTCondor requirements during the sampling stage. This is intended for specifying GPU requirements such as memory or CUDA version.
+
 ## Importance sampling
 
 For importance sampling, the Result saved in the previous step is loaded. Since this contains the strain data and ASDs, as well as all settings used for training the network, the likelihood and prior can be evaluated for each sample point. If it is necessary to change data conditioning or PSD for importance sampling (i.e., if the `importance-sampling-updates` dictionary is non-empty), then a second [data generation](#data-generation) step is first carried using the new settings, and used as importance sampling context. The importance sampled result is finally saved as HDF5, including the estimated Bayesian evidence.
@@ -92,6 +106,30 @@ By default, dingo_pipe assumes that it is necessary to sample the phase syntheti
 
 Importance sampling (including synthetic phase sampling) is an expensive step, so dingo_pipe allows for parallelization: this step is split over `n-parallel` jobs, each of which uses `request-cpus-importance-sampling` processes. In the backend, this makes use of the Result [split()](dingo.core.result.Result.split) and [merge()](dingo.core.result.Result.merge) methods.
 
+### Calibration marginalization
+
+Settings related to calibration are used to **marginalize** over calibration uncertainty during importance sampling.
+
+calibration-model
+: None or "CubicSpline". If "CubicSpline", perform calibration marginalization using a cubic spline calibration model. If None do not perform calibration marginalization. (Default: None)
+
+spline-calibration-envelope-dict
+: Dictionary pointing to the spline calibration envelope files. This is required if calibration-model is "CubicSpline".
+
+spline-calibration-nodes
+: Number of calibration nodes. (Default: 10)
+
+spline-calibration-curves
+: Number of calibration curves to use for marginalization. (Default: 1000)
+
 ## Plotting
 
 The standard Result [plots](result.md#plotting) are turned on using the `plot-corner`, `plot-weights`, and `plot-log-probs` flags.
+
+## Additional options
+
+extra-lines
+: Additional lines for all submission scripts. This could be useful for particular cluster configurations.
+
+simple-submission
+: Strip the keys `accounting_tag`, `getenv`, `priority`, and `universe` from submission scripts. Again useful for particular cluster configurations.

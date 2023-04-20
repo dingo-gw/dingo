@@ -1,4 +1,4 @@
-# The `Result` class
+# The Result class
 
 The `Result` class stores the output of a `Sampler` run, namely a collection of samples. It contains several methods for operating on the samples, including for **importance sampling**, **plotting**, and **density recovery**: 
 

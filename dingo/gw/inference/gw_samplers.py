@@ -19,12 +19,10 @@ from dingo.gw.transforms import (
     SelectStandardizeRepackageParameters,
     GNPECoalescenceTimes,
     TimeShiftStrain,
-    GNPEChirp,
     GNPEBase,
     PostCorrectGeocentTime,
     CopyToExtrinsicParameters,
     GetDetectorTimes,
-    GNPEPhase,
 )
 
 
@@ -146,11 +144,11 @@ class GWSampler(GWSamplerMixin, Sampler):
     transform_pre :
         * Whitens strain.
         * Repackages strain data and the inverse ASDs (suitably scaled) into a torch
-        tensor.
+          tensor.
 
     transform_post :
         * Extract the desired inference parameters from the network output (
-        array-like), de-standardize them, and repackage as a dict.
+          array-like), de-standardize them, and repackage as a dict.
 
     Also mixes in GW functionality for building the domain and correcting the reference
     time.
@@ -278,21 +276,6 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 )
             )
             transform_pre.append(TimeShiftStrain(ifo_list, self.domain))
-        if gnpe_chirp_settings:
-            transform_pre.append(
-                GNPEChirp(
-                    gnpe_chirp_settings["kernel"],
-                    self.domain,
-                    gnpe_chirp_settings.get("order", 0),
-                )
-            )
-        if gnpe_phase_settings:
-            transform_pre.append(
-                GNPEPhase(
-                    gnpe_phase_settings["kernel"],
-                    gnpe_phase_settings.get("random_pi_jump", False),
-                )
-            )
         transform_pre.append(
             SelectStandardizeRepackageParameters(
                 {"context_parameters": data_settings["context_parameters"]},

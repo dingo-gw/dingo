@@ -41,7 +41,7 @@ class Dingo(Pipeline):
         Check for the production of the posterior file to signal that the job has completed.
         """
         self.logger.info("Checking if the dingo job has completed")
-        # TODO: correct results directory
+
         results_dir = glob.glob(f"{self.production.rundir}/result")
         if len(results_dir) > 0:
             if (
@@ -99,8 +99,6 @@ class Dingo(Pipeline):
         else:
             ini = f"{self.production.name}.ini"
 
-        gps_file = self.production.get_timefile()
-
         if self.production.rundir:
             rundir = self.production.rundir
         else:
@@ -123,8 +121,8 @@ class Dingo(Pipeline):
             job_label,
             "--outdir",
             f"{cwd}/{self.production.rundir}",
-            # "--accounting",
-            # f"{self.production.meta['scheduler']['accounting group']}",
+            "--accounting",
+            f"{self.production.meta['scheduler']['accounting group']}",
         ]
 
         if dryrun:
