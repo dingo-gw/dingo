@@ -31,7 +31,6 @@ data:
   - geocent_time
   - luminosity_distance
   - psi
-  - phase
 
 # Model architecture
 model:
