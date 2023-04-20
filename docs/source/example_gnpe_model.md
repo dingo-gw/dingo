@@ -5,6 +5,41 @@ The main difference from the [NPE](example_npe_model.md) tutorial is that here w
 (group neural posterior estimation). The data generation is exactly the same as the [previous](example_npe_model.md)
 tutorial, but we repeat it here, for completeness.
 
+The file structure is similar to the NPE example, except now there are two
+training sub-directories and two `train_settings.yaml` files. 
+
+```
+gnpe_model/
+
+    #  config files
+    waveform_dataset_settings.yaml
+    asd_dataset_settings.yaml
+    train_settings_main.yaml
+    train_settings_init.yaml
+    GW150914.ini
+
+    training_data/
+        waveform_dataset.hdf5
+        asd_dataset_folder_fiducial/ # Contains the asd_dataset.hdf5 and also temp files for asd generation
+        asd_dataset_folder/ # Contains the asd_dataset.hdf5 and also temp files for asd generation
+
+    training/
+        main_train_dir/
+            model_050.pt
+            model_stage_0.pt
+            model_latest.pt
+            history.txt
+            #  etc...
+        init_train_dir/
+            model_050.pt
+            model_stage_0.pt
+            model_latest.pt
+            history.txt
+            #  etc...
+
+    outdir_GW150914/
+        #  dingo_pipe output
+```
 
 Step 1 Generating a Waveform Dataset
 ------------------------------------ 
@@ -15,15 +50,15 @@ We generate the waveform dataset locally:
 cd dingo
 mkdir $(pwd)/gnpe_model_train_dir
 export TRAIN_DIR=$(pwd)/gnpe_model_train_dir
-dingo_generate_dataset --settings examples/gnpe_model/waveform_dataset_settings.yaml --out_file $TRAIN_DIR/waveform_dataset.hdf5
+dingo_generate_dataset --settings waveform_dataset_settings.yaml --out_file training_data/waveform_dataset.hdf5
 ```
 
 or using condor:
 
 ```
 dingo_generate_dataset_dag --settings_file
-$(pwd)/examples/gnpe_model/waveform_dataset_settings.yaml --out_file
-$TRAIN_DIR/IMRPhenomXPHM.hdf5 --env_path $DINGO_VENV_PATH --num_jobs 4
+waveform_dataset_settings.yaml --out_file
+training_data/waveform_dataset.hdf5 --env_path $DINGO_VENV_PATH --num_jobs 4
 --request_cpus 16 --request_memory 1280000 --request_memory_high 256000
 ```
 
@@ -34,13 +69,15 @@ Step 2 Generating an ASD dataset
 As before we generate a fiducial ASD dataset containing a single ASD:
 
 ```
-dingo_generate_asd_dataset --settings_file examples/gnpe_model/asd_dataset_settings_fiducial.yaml --data_dir
-$TRAIN_DIR/asd_dataset_folder -out_name $TRAIN_DIR/asds_O1_fiducial.hdf5
+dingo_generate_asd_dataset --settings_file asd_dataset_settings_fiducial.yaml --data_dir
+training_data/asd_dataset_folder_fiducial -out_name training_data/asd_dataset_folder_fiducial/asds_O1_fiducial.hdf5
+```
 
 and a large ASD dataset:
 
-dingo_generate_asd_dataset --settings_file $(pwd)/examples/gnpe_model/asd_dataset_settings.yaml --data_dir
-$TRAIN_DIR/asd_dataset_folder -out_name $TRAIN_DIR/asds_O1.hdf5
+```
+dingo_generate_asd_dataset --settings_file asd_dataset_settings.yaml --data_dir
+training_data/asd_dataset_folder -out_name training_data/asd_dataset_folder/asds_O1.hdf5
 ```
 
 
@@ -48,13 +85,14 @@ Step 3 Training the network
 ---------------------------
 
 Now we are ready for training using GNPE. Here we need to train two networks, one which estimates the time of arrival 
-in the detectors and one which does the full inference task. First we train the initialization network for the detector times with:
+in the detectors and one which does the full inference task. A natural question
+is why train two networks. The main idea is if one is able to align (and thus
+standardize) the times of arrival in the detectors, the inference task will
+become significantly easier. To do this we first need to train an initialization
+network which estimates the time of arrival in the detectors:
 
 ```
-sed -i 's+/path/to/waveform_dataset.hdf5+'"$TRAIN_DIR"'/waveform_dataset.hdf5+g' examples/gnpe_model/train_settings_init.yaml
-sed -i 's+/path/to/asds_fiducial.hdf5+'"$TRAIN_DIR"'/asd_dataset_folder/asds_O1_fiducial.hdf5+g' examples/gnpe_model/train_settings_init.yaml
-sed -i 's+/path/to/asds.hdf5+'"$TRAIN_DIR"'/asd_dataset_folder/asds_O1.hdf5+g' examples/gnpe_model/train_settings_init.yaml
-dingo_train --settings_file examples/gnpe_model/train_settings.yaml --train_dir $TRAIN_DIR/init_network
+dingo_train --settings_file train_settings_init.yaml --train_dir training/init_network
 ```
 
 Notice that the inference parameters are only the `H1_time` and `L1_time`. We train the main network 
@@ -62,10 +100,7 @@ for the `default_inference_parameters` (defined [here](https://github.com/dingo-
 except for the `phase` of coalescence. 
 
 ```
-sed -i 's+/path/to/waveform_dataset.hdf5+'"$TRAIN_DIR"'/waveform_dataset.hdf5+g' examples/gnpe_model/train_settings.yaml
-sed -i 's+/path/to/asds_fiducial.hdf5+'"$TRAIN_DIR"'/asd_dataset_folder/asds_O1_fiducial.hdf5+g' examples/gnpe_model/train_settings.yaml
-sed -i 's+/path/to/asds.hdf5+'"$TRAIN_DIR"'/asd_dataset_folder/asds_O1.hdf5+g' examples/gnpe_model/train_settings.yaml
-dingo_train --settings_file examples/gnpe_model/train_settings.yaml --train_dir $TRAIN_DIR/main_network
+dingo_train --settings_file train_settings_main.yaml --train_dir training/main_network
 ```
 
 Notice the `data.gnpe_time_shifts` section. The `kernel` describes how much to blur the GNPE proxies and is specified in 
@@ -82,9 +117,6 @@ number of GNPE steps to take. If the initialization network is not fully converg
 the length of the segment being analyzed is very long, it is recommended to increase this number.
 
 ```
-sed -i "s|TRAIN_DIR/|$TRAIN_DIR/|g" examples/gnpe_model/GW150914.ini
-sed -i "s|/path/to/init_model.pt|$TRAIN_DIR/init_network/model_latest.pt|g" examples/gnpe_model/GW150914.ini
-sed -i "s|/path/to/model.pt|$TRAIN_DIR/main_network/model_latest.pt|g" examples/gnpe_model/GW150914.ini
-dingo_pipe examples/gnpe_model/GW150914_toy.ini
+dingo_pipe GW150914.ini
 ```
 

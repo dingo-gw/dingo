@@ -28,8 +28,7 @@ toy_npe_model/
 
     training_data/
         waveform_dataset.hdf5
-        asd_dataset.hdf5
-        tmp/    #  Contains temporary files from ASD dataset generation
+        asd_dataset_folder/ # Contains the asd_dataset.hdf5 and also temp files for asd generation
 
     training/
         model_050.pt
@@ -44,7 +43,7 @@ toy_npe_model/
 
 The config files which are the only ones which need to be edited are contained in the top level directory. In the next
 few sections these config files will be explained. To download sample config files, please visit 
-https://github.com/dingo-gw/dingo/tree/main/examples. In this tutorial the toy_npe_model folder will be used.
+https://github.com/dingo-gw/dingo/tree/main/examples. In this tutorial the `toy_npe_model` folder will be used.
 
 
 Step 1 Generating a waveform dataset
@@ -59,17 +58,50 @@ mkdir training
 mkdir outdir_GW150914
 ```
 
-to set up the file structure.
+to set up the file structure. Then run
 
 ```
 dingo_generate_dataset --settings waveform_dataset_settings.yaml --out_file training_data/waveform_dataset.hdf5
 ```
 
-This will first change directories into the tutorial directory and then create a
+which will create a 
 {py:class}`dingo.gw.waveform_generator.waveform_generator.WaveformGenerator`
-object and store it at the location provided with `--out_file`.
+object and store it at the location provided with `--out_file`. For convenience, 
+here is the waveform dataset file
 
-The file `examples/toy_npe_model/waveform_dataset_settings.yaml` contains four
+```yaml
+domain:
+type: FrequencyDomain
+f_min: 20.0
+f_max: 1024.0
+delta_f: 0.25  # Expressions like 1.0/8.0 would require eval and are not supported
+
+waveform_generator:
+approximant: IMRPhenomD
+f_ref: 20.0
+# f_start: 15.0  # Optional setting useful for EOB waveforms. Overrides f_min when generating waveforms.
+
+# Dataset only samples over intrinsic parameters. Extrinsic parameters are chosen at train time.
+intrinsic_prior:
+mass_1: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)
+mass_2: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)
+chirp_mass: bilby.gw.prior.UniformInComponentsChirpMass(minimum=15.0, maximum=100.0)
+mass_ratio: bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.125, maximum=1.0)
+phase: default
+chi_1: bilby.gw.prior.AlignedSpin(name='chi_1', a_prior=Uniform(minimum=0, maximum=0.9))
+chi_2: bilby.gw.prior.AlignedSpin(name='chi_2', a_prior=Uniform(minimum=0, maximum=0.9))
+theta_jn: default
+# Reference values for fixed (extrinsic) parameters. These are needed to generate a waveform.
+luminosity_distance: 100.0  # Mpc
+geocent_time: 0.0  # s
+
+# Dataset size
+num_samples: 10000
+
+compression: None
+```
+
+The file `waveform_dataset_settings.yaml` contains four
 sections: `domain`, `waveform_generator`, `intrinsic_prior`, and `compression`. The
 domain section defines the settings for storing the waveform. Note the `type`
 attribute; this does not refer to the native domain of the waveform model, but
@@ -110,9 +142,25 @@ To generate an ASD dataset run
 dingo_generate_asd_dataset --settings_file asd_dataset_settings.yaml --data_dir training_data/asd_dataset_folder
 ```
 
-This command will generate an {py:class}`dingo.gw.noise.asd_dataset.ASDDataset` object in the form of an .hdf5 file, which will be used later for training. The reason for specifying a folder instead of a file, as in the waveform dataset example, is because some temporary data is downloaded to create Welch estimates of the ASD. This data can be removed later, but it is sometimes useful for understanding how the ASDs were estimated.
+This command will generate an {py:class}`dingo.gw.noise.asd_dataset.ASDDataset` object in the form of an .hdf5 file, which will be used later for training. The reason for specifying a folder instead of a file, as in the waveform dataset example, is because some temporary data is downloaded to create Welch estimates of the ASD. This data can be removed later, but it is sometimes useful for understanding how the ASDs were estimated. For convenience here is a copy of the `asd_dataset_settings.yaml` file.
 
-The `examples/toy_npe_model/asd_dataset_settings.yaml` file includes several attributes. `f_s` is the sampling frequency in Hz, `time_psd` is the length of time used for an ASD estimate, and `T` is the duration of each ASD segment. Thus, the value of `time_psd`/`T` gives the number of segments analyzed to estimate one ASD. To avoid spectral leakage, a window is applied to each segment. We use the standard window used in LVK analyses, a Tukey window with a roll off of $\alpha=0.4$. The next attribute, `num_psds_max=1`, defines the number of ASDs stored in the ASD dataset. For now, we will use only one. See the next [tutorial](example_npe_model.md) for a more advanced setup.
+```yaml
+dataset_settings:
+f_s: 4096
+time_psd: 1024
+T: 4
+window:
+    roll_off: 0.4
+    type: tukey
+time_gap: 0          # specifies the time skipped between to consecutive PSD estimates. If set < 0, the time segments overlap
+num_psds_max: 1  # if set > 0, only a subset of all available PSDs will be used
+detectors:
+    - H1
+    - L1
+observing_run: O1
+```
+
+The `asd_dataset_settings.yaml` file includes several attributes. `f_s` is the sampling frequency in Hz, `time_psd` is the length of time used for an ASD estimate, and `T` is the duration of each ASD segment. Thus, the value of `time_psd`/`T` gives the number of segments analyzed to estimate one ASD. To avoid spectral leakage, a window is applied to each segment. We use the standard window used in LVK analyses, a Tukey window with a roll off of $\alpha=0.4$. The next attribute, `num_psds_max=1`, defines the number of ASDs stored in the ASD dataset. For now, we will use only one. See the next [tutorial](example_npe_model.md) for a more advanced setup.
 
 Step 3 Training the network
 ---------------------------
@@ -123,7 +171,92 @@ To train the network, first the paths to the correct datasets must be specfied
 dingo_train --settings_file train_settings.yaml --train_dir training
 ```
 
-The two `sed` commands just replace the parts in the `train_settings.yaml` file with the datasets generated in the previous steps. While this file contains numerous settings that are discussed in [training](training.md), we will cover the most significant ones here. For training, several `extrinsic_priors` are set, which project the waveforms generated in step 1 onto the detector network according to the specified priors. This is considerably cheaper than generating waveforms sampled from the full intrinsic plus extrinsic prior in step 1.
+While this file contains numerous settings that are discussed in [training](training.md), we will cover the most significant ones here. Again here is the file.
+
+
+```yaml
+data:
+  waveform_dataset_path: training_data/waveform_dataset.hdf5  # Contains intrinsic waveforms
+  train_fraction: 0.95
+  window:  # Needed to calculate window factor for simulated data
+    type: tukey
+    f_s: 4096
+    T: 8.0
+    roll_off: 0.4
+  detectors:
+    - H1
+    - L1
+  extrinsic_prior:  # Sampled at train time
+    dec: default
+    ra: default
+    geocent_time: bilby.core.prior.Uniform(minimum=-0.10, maximum=0.10)
+    psi: default
+    luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0)
+  ref_time: 1126259462.391
+  inference_parameters: 
+  - chirp_mass
+  - mass_ratio
+  - chi_1
+  - chi_2
+  - theta_jn
+  - dec
+  - ra
+  - geocent_time
+  - luminosity_distance
+  - psi
+  - phase
+
+# Model architecture
+model:
+  type: nsf+embedding
+  # kwargs for neural spline flow
+  nsf_kwargs:
+    num_flow_steps: 5
+    base_transform_kwargs:
+      hidden_dim: 64 
+      num_transform_blocks: 5
+      activation: elu
+      dropout_probability: 0.0
+      batch_norm: True
+      num_bins: 8
+      base_transform_type: rq-coupling
+  # kwargs for embedding net
+  embedding_net_kwargs:
+    output_dim: 128
+    hidden_dims: [1024, 512, 256, 128]
+    activation: elu
+    dropout: 0.0
+    batch_norm: True
+    svd:
+      num_training_samples: 1000
+      num_validation_samples: 100
+      size: 50
+
+# The first stage (and only) stage of training. 
+training:
+  stage_0:
+    epochs: 20
+    asd_dataset_path: training_data/asd_dataset_folder/asds_O1.hdf5  # this should just contain a single fiducial ASD per detector for pretraining
+    freeze_rb_layer: True
+    optimizer:
+      type: adam
+      lr: 0.0001
+    scheduler:
+      type: cosine
+      T_max: 20
+    batch_size: 64
+
+# Local settings for training that have no impact on the final trained network.
+local:
+  device: cpu  # Change this to 'cuda' for training on a GPU.
+  num_workers: 6  # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
+  runtime_limits:
+    max_time_per_run: 36000
+    max_epochs_per_run: 30
+  checkpoint_epochs: 15
+```
+
+For training, several `extrinsic_priors` are set, which project the waveforms generated in step 1 onto the detector network according to the specified priors. This is considerably cheaper than generating waveforms sampled from the full intrinsic plus extrinsic prior in step 1.
 
 Another crucial setting is `inference_parameters`. By default all the parameters described in `dingo.gw.prior` are inferred. If a parameter needs to be marginalized over this parameter can be omitted from `inference_parameters`.
 
