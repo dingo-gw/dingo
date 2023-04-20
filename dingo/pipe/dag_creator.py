@@ -10,6 +10,7 @@ from bilby_pipe.utils import BilbyPipeError, logger
 from dingo.pipe.nodes.generation_node import GenerationNode
 from .nodes.importance_sampling_node import ImportanceSamplingNode
 from .nodes.merge_node import MergeNode
+from .nodes.pe_summary_node import PESummaryNode
 from .nodes.plot_node import PlotNode
 from .nodes.sampling_node import SamplingNode
 
@@ -42,7 +43,7 @@ def get_parallel_list(inputs):
         return [f"part{idx}" for idx in range(inputs.n_parallel)]
 
 
-def generate_dag(inputs):
+def generate_dag(inputs, model_args):
     inputs = copy.deepcopy(inputs)
     dag = Dag(inputs)
     trigger_times = get_trigger_time_list(inputs)
@@ -152,6 +153,11 @@ def generate_dag(inputs):
     #
     # 6. PESummary
     #
+
+    if inputs.create_summary:
+        # Add the waveform approximant to inputs, so that it can be fed to PESummary.
+        inputs.waveform_approximant = model_args["waveform_approximant"]
+        PESummaryNode(inputs, merged_importance_sampling_node_list, generation_node_list, dag=dag)
 
     dag.build()
     # create_overview(

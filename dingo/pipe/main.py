@@ -83,7 +83,7 @@ def fill_in_arguments_from_model(args):
         importance_sampling_updates = {
             k.replace("-", "_"): v for k, v in importance_sampling_updates.items()
         }
-    return {**changed_args, **importance_sampling_updates}
+    return {**changed_args, **importance_sampling_updates}, model_args
 
 
 class MainInput(BilbyMainInput):
@@ -125,11 +125,11 @@ class MainInput(BilbyMainInput):
         self.final_result = args.final_result
         self.final_result_nsamples = args.final_result_nsamples
 
-        # self.webdir = args.webdir
+        self.webdir = args.webdir
         self.email = args.email
         self.notification = args.notification
         self.queue = args.queue
-        # self.existing_dir = args.existing_dir
+        self.existing_dir = args.existing_dir
 
         self.scheduler = args.scheduler
         self.scheduler_args = args.scheduler_args
@@ -216,7 +216,7 @@ class MainInput(BilbyMainInput):
         # self.single_postprocessing_executable = args.single_postprocessing_executable
         # self.single_postprocessing_arguments = args.single_postprocessing_arguments
         #
-        # self.summarypages_arguments = args.summarypages_arguments
+        self.summarypages_arguments = args.summarypages_arguments
         #
         self.psd_dict = args.psd_dict
 
@@ -316,14 +316,14 @@ def main():
     parser = create_parser(top_level=True)
     args, unknown_args = parse_args(get_command_line_arguments(), parser)
 
-    importance_sampling_updates = fill_in_arguments_from_model(args)
+    importance_sampling_updates, model_args = fill_in_arguments_from_model(args)
     inputs = MainInput(args, unknown_args, importance_sampling_updates)
     write_complete_config_file(parser, args, inputs)
 
     # TODO: Use two sets of inputs! The first must match the network; the second is
     #  used in importance sampling.
 
-    generate_dag(inputs)
+    generate_dag(inputs, model_args)
 
     if len(unknown_args) > 0:
         print(f"Unrecognized arguments {unknown_args}")
