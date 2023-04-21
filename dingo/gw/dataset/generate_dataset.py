@@ -15,7 +15,11 @@ from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.gw.prior import build_prior_with_defaults, default_intrinsic_dict
 from dingo.gw.domains import build_domain, build_domain_from_wfd_settings
 from dingo.gw.transforms import WhitenFixedASD, HeterodynePhase
-from dingo.gw.waveform_generator import WaveformGenerator, generate_waveforms_parallel
+from dingo.gw.waveform_generator import (
+    WaveformGenerator,
+    NewInterfaceWaveformGenerator,
+    generate_waveforms_parallel,
+)
 from dingo.gw.SVD import SVDBasis, ApplySVD
 
 
@@ -150,10 +154,18 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
     domain = build_domain(settings["domain"])
     # domain = build_domain_from_wfd_settings(settings, num_processes)
     prior = build_prior_with_defaults(settings["intrinsic_prior"])
-    waveform_generator = WaveformGenerator(
-        domain=domain,
-        **settings["waveform_generator"],
-    )
+
+    new_interface_flag = settings["waveform_generator"].get("new_interface", False)
+    if new_interface_flag:
+        waveform_generator = NewInterfaceWaveformGenerator(
+            domain=domain,
+            **settings["waveform_generator"],
+        )
+    else:
+        waveform_generator = WaveformGenerator(
+            domain=domain,
+            **settings["waveform_generator"],
+        )
 
     dataset_dict = {"settings": settings}
 

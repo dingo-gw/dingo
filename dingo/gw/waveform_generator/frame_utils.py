@@ -21,7 +21,7 @@ def get_JL0_euler_angles(p, wfg, spin_conversion_phase=None):
 
     if spin_conversion_phase is not None:
         p["phase"] = 0.0
-    p_lal = wfg._convert_parameters_to_lal_frame(p)
+    p_lal = wfg._convert_parameters(p)
     p_lal = list(p_lal)
 
     m1, m2 = p_lal[0:2]

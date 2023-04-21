@@ -16,7 +16,10 @@ from dingo.gw.transforms import (
     WhitenAndScaleStrain,
     ApplyCalibrationUncertainty,
 )
-from dingo.gw.waveform_generator.waveform_generator import WaveformGenerator
+from dingo.gw.waveform_generator.waveform_generator import (
+    WaveformGenerator,
+    NewInterfaceWaveformGenerator,
+)
 
 
 class GWSignal(object):
@@ -58,13 +61,21 @@ class GWSignal(object):
         # domain of the trained network / requested injection / etc. This is typically
         # the case for EOB waveforms, which require the larger range to generate
         # robustly. For this reason we have two domains.
-        self.waveform_generator = WaveformGenerator(domain=wfg_domain, **wfg_kwargs)
+
+        new_interface_flag = wfg_kwargs.get("new_interface", False)
+        if new_interface_flag:
+            self.waveform_generator = NewInterfaceWaveformGenerator(
+                domain=wfg_domain, **wfg_kwargs
+            )
+        else:
+            self.waveform_generator = WaveformGenerator(domain=wfg_domain, **wfg_kwargs)
 
         self.t_ref = t_ref
         self.ifo_list = InterferometerList(ifo_list)
 
         # When we set self.whiten, the projection transforms are automatically prepared.
         self._calibration_envelope = None
+        self._calibration_marginalization_kwargs = None
         self.whiten = False
 
         self.asd = None
@@ -91,17 +102,25 @@ class GWSignal(object):
         self._initialize_transform()
 
     @property
-    def calibration_envelope(self):
+    def calibration_marginalization_kwargs(self):
         """
-        Either None, str 'generate' or a dict with
-        {"H1": filepath, "L1":filepath, ...} with locations of
-        lookup tables for the calibration uncertainty curves
-        """
-        return self._calibration_envelope
+        Dictionary with the following keys:
 
-    @calibration_envelope.setter
-    def calibration_envelope(self, value):
-        self._calibration_envelope = value
+        calibration_envelope
+            Dictionary of the form {"H1": filepath, "L1": filepath, ...} with locations of
+            lookup tables for the calibration uncertainty curves.
+
+        num_calibration_nodes
+            Number of nodes for the calibration model.
+
+        num_calibration_curves
+            Number of calibration curves to use in marginalization.
+        """
+        return self._calibration_marginalization_kwargs
+
+    @calibration_marginalization_kwargs.setter
+    def calibration_marginalization_kwargs(self, value):
+        self._calibration_marginalization_kwargs = value
         self._initialize_transform()
 
     def _initialize_transform(self):
@@ -109,13 +128,12 @@ class GWSignal(object):
             GetDetectorTimes(self.ifo_list, self.t_ref),
             ProjectOntoDetectors(self.ifo_list, self.data_domain, self.t_ref),
         ]
-        if self.calibration_envelope is not None:
+        if self.calibration_marginalization_kwargs:
             transforms.append(
                 ApplyCalibrationUncertainty(
                     self.ifo_list,
                     self.data_domain,
-                    self.calibration_envelope,
-                    self.num_calibration_curves,
+                    **self.calibration_marginalization_kwargs,
                 )
             )
         if self.whiten:

@@ -48,6 +48,7 @@ Finally, there are several utility commands that are useful for working with Din
 |---|---|
 |`dingo_ls`| Inspect a file produced by Dingo and print a summary.|
 |`dingo_append_training_stage`| Modify the training plan of a model checkpoint.|
+|`dingo_pt_to_hdf5`| Convert a trained Dingo model from a PyTorch pickle .pt file to HDF5.|
 ```
 
 ```{hint}
@@ -57,7 +58,7 @@ The `dingo_ls` command is very useful for inspecting Dingo files. It will print 
 
 ### File types
 
-As noted above, most Dingo commands take a YAML file to specify configuration options (except for `dingo_pipe`, which uses an INI file, as is standard for LVK parameter estimation). When run, these commands generate data, which is usually stored in HDF5 files. One exception is when training a neural network. This saves the network weights using the PyTorch `.pt` format.
+As noted above, most Dingo commands take a YAML file to specify configuration options (except for `dingo_pipe`, which uses an INI file, as is standard for LVK parameter estimation). When run, these commands generate data, which is usually stored in HDF5 files. One exception is when training a neural network. This saves the network weights using the PyTorch `.pt` format. However, primarily for LVK use, `dingo_pt_to_hdf5` can convert the weights of a trained model to a HDF5 file.
 
 ```{important}
 
