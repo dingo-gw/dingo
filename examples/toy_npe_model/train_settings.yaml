@@ -4,7 +4,7 @@ data:
   window:  # Needed to calculate window factor for simulated data
     type: tukey
     f_s: 4096
-    T: 8.0
+    T: 4.0
     roll_off: 0.4
   detectors:
     - H1

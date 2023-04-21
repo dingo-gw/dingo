@@ -15,7 +15,7 @@ dataset_settings:
   detectors:
     - H1
     - L1
-  observing_run: O2
+  observing_run: O1
 # condor:
 #   env_path: /path/to/environment
 #   num_jobs: 2 # per detector
