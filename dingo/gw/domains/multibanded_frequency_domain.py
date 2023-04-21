@@ -2,6 +2,8 @@ from typing import Iterable, Union
 import numpy as np
 import torch
 import lal
+from copy import copy
+import math
 
 from .base import Domain
 from .frequency_domain import FrequencyDomain
@@ -23,7 +25,6 @@ class MultibandedFrequencyDomain(Domain):
         nodes: Iterable[float],
         delta_f_initial: float,
         base_domain: Union[FrequencyDomain, dict],
-        window_factor: float = None,
     ):
         """
         Parameters
@@ -55,6 +56,10 @@ class MultibandedFrequencyDomain(Domain):
             raise ValueError(
                 f"Expected domain type FrequencyDomain, got {type(base_domain)}."
             )
+        # truncation indices for domain update
+        self.domain_update_idx_lower = None
+        self.domain_update_idx_upper = None
+        self.domain_update_initial_length = None
 
     def initialize_bands(self, delta_f_initial):
         if len(self.nodes.shape) != 1:
@@ -124,24 +129,89 @@ class MultibandedFrequencyDomain(Domain):
         return data_decimated
 
     def update(self, new_settings: dict):
-        if not new_settings == self.domain_dict:
-            raise NotImplementedError()
+        """
+        Update the domain by truncating the frequency range to
+        [new_settings["f_max"], new_settings["f_min"]].
+
+        After calling this function, data from the initial (unupdated) domain can be
+        updated to this domain with self.update(data), which truncates the data
+        accordingly. We don't allow for multiple updates of the domain to avoid bugs
+        due to an unclear initial domain.
+        """
+        if (
+            self.domain_update_idx_lower is not None
+            or self.domain_update_idx_upper is not None
+        ):
+            raise ValueError(f"Can't update domain of type {type(self)} a second time.")
+
+        f_min = new_settings.pop("f_min", None)
+        f_max = new_settings.pop("f_max", None)
+
+        nodes_new = copy(self.nodes)
+        delta_f_bands = copy(self._delta_f_bands)
+
+        if f_min is not None:
+            if f_min < nodes_new[0]:
+                raise ValueError(f"Can't update domain, as f_min={f_min} is too small.")
+            elif f_min > nodes_new[-1] - delta_f_bands[-1]:
+                raise ValueError(f"Can't update domain, as f_min={f_min} is too big.")
+            starting_band = np.argmax(nodes_new[1:] - delta_f_bands > f_min)
+            # We need to truncate all bands below starting_band.
+            nodes_new = nodes_new[starting_band:]
+            delta_f_bands = delta_f_bands[starting_band:]
+            # Further, the node of the starting band needs to be set to be >= f_min.
+            removed_bins_band = math.ceil((f_min - nodes_new[0]) / delta_f_bands[0])
+            nodes_new[0] += removed_bins_band * delta_f_bands[0]
+            # count total number of removed bins
+            self.domain_update_idx_lower = (
+                np.sum(self._num_bins_bands[:starting_band]) + removed_bins_band
+            )
+
+        if f_max is not None:
+            if f_max > nodes_new[-1]:
+                raise ValueError(f"Can't update domain, as f_max={f_max} is too big.")
+            elif f_max < nodes_new[0] + delta_f_bands[0]:
+                raise ValueError(f"Can't update domain, as f_max={f_max} is too small.")
+            final_band = np.argmax(nodes_new[1:] - delta_f_bands > f_max)
+            # We need to truncate all bands above the final band.
+            nodes_new = nodes_new[: final_band + 2]
+            delta_f_bands = delta_f_bands[: final_band + 1]
+            # Further, the node after the final band needs to be set to be <= f_max.
+            removed_bins_band = math.ceil((nodes_new[-1] - f_max) / delta_f_bands[-1])
+            nodes_new[-1] -= removed_bins_band * delta_f_bands[-1]
+            self.domain_update_idx_upper = len(self) - (
+                np.sum(self._num_bins_bands[final_band + 1:]) + removed_bins_band
+            )
+
+        self.domain_update_initial_length = len(self)
+        self.nodes = nodes_new
+        self.initialize_bands(delta_f_bands[0])
 
     def set_new_range(self, f_min: float = None, f_max: float = None):
         raise NotImplementedError()
 
     def update_data(self, data: np.ndarray, axis: int = -1, low_value: float = 0.0):
         """
-        Adjusts the data to be compatible with the domain. Updating
-        MultibandedFrequencyDomains is not implemented, so at present this method
-        simply checks that the data is compatible with the domain.
+        Adjusts the data to be compatible with the domain.
         """
-        if data.shape[axis] != len(self):
+        if data.shape[axis] == len(self):
+            return data
+        elif (
+            self.domain_update_initial_length is not None
+            and data.shape[axis] == self.domain_update_initial_length
+        ):
+            sl = [slice(None)] * data.ndim
+            # First truncate beyond f_max.
+            sl[axis] = slice(
+                self.domain_update_idx_lower, self.domain_update_idx_upper
+            )
+            data = data[tuple(sl)]
+            return data
+        else:
             raise ValueError(
                 f"Data (shape {data.shape}) incompatible with the domain (length "
                 f"{len(self)}."
             )
-        return data
 
     def time_translate_data(self, data, dt):
         """
