@@ -79,6 +79,8 @@ class MultibandedFrequencyDomain(Domain):
             / self._decimation_factors_bands
         ).astype(int)
 
+        # temporarily set self._sample_frequencies to zeros as self.decimate needs it
+        # for len(self) call
         self._sample_frequencies = np.zeros(np.sum(self._num_bins_bands))
         self._sample_frequencies = self.decimate(self.base_domain())
         self._sample_frequencies_torch = None
@@ -138,18 +140,20 @@ class MultibandedFrequencyDomain(Domain):
         accordingly. We don't allow for multiple updates of the domain to avoid bugs
         due to an unclear initial domain.
         """
-        if (
-            self.domain_update_idx_lower is not None
-            or self.domain_update_idx_upper is not None
-        ):
-            raise ValueError(f"Can't update domain of type {type(self)} a second time.")
+        if not set(new_settings.keys()).issubset(["f_min", "f_max"]):
+            raise ValueError(f"Invalid argument for domain update {new_settings}")
+        f_min = new_settings.get("f_min", None)
+        f_max = new_settings.get("f_max", None)
+        if f_min is None and f_max is None:
+            return
 
-        f_min = new_settings.pop("f_min", None)
-        f_max = new_settings.pop("f_max", None)
+        if self.domain_update_initial_length is not None:
+            raise ValueError(f"Can't update domain of type {type(self)} a second time.")
 
         nodes_new = copy(self.nodes)
         delta_f_bands = copy(self._delta_f_bands)
 
+        starting_band = 0
         if f_min is not None:
             if f_min < nodes_new[0]:
                 raise ValueError(f"Can't update domain, as f_min={f_min} is too small.")
@@ -162,30 +166,51 @@ class MultibandedFrequencyDomain(Domain):
             # Further, the node of the starting band needs to be set to be >= f_min.
             removed_bins_band = math.ceil((f_min - nodes_new[0]) / delta_f_bands[0])
             nodes_new[0] += removed_bins_band * delta_f_bands[0]
+            assert abs(nodes_new[0] - f_min) < delta_f_bands[0]
             # count total number of removed bins
             self.domain_update_idx_lower = (
                 np.sum(self._num_bins_bands[:starting_band]) + removed_bins_band
             )
+            assert (
+                nodes_new[0]
+                <= self()[self.domain_update_idx_lower]
+                < nodes_new[0] + delta_f_bands[0]
+            )
+        else:
+            self.domain_update_idx_lower = 0
 
         if f_max is not None:
             if f_max > nodes_new[-1]:
                 raise ValueError(f"Can't update domain, as f_max={f_max} is too big.")
             elif f_max < nodes_new[0] + delta_f_bands[0]:
                 raise ValueError(f"Can't update domain, as f_max={f_max} is too small.")
-            final_band = np.argmax(nodes_new[1:] - delta_f_bands > f_max)
-            # We need to truncate all bands above the final band.
-            nodes_new = nodes_new[: final_band + 2]
-            delta_f_bands = delta_f_bands[: final_band + 1]
+            # Number of bands after truncation to f_max.
+            num_bands = np.argmax(nodes_new[1:] - delta_f_bands > f_max) + 1
+            # We need to truncate all bands above the final band. Below, we use
+            # [: num_bands + 1], as the final element of nodes is the upper bound, so
+            # len(nodes) = num_bands + 1.
+            nodes_new = nodes_new[: num_bands + 1]
+            delta_f_bands = delta_f_bands[:num_bands]
             # Further, the node after the final band needs to be set to be <= f_max.
             removed_bins_band = math.ceil((nodes_new[-1] - f_max) / delta_f_bands[-1])
             nodes_new[-1] -= removed_bins_band * delta_f_bands[-1]
+            assert abs(nodes_new[-1] - f_max) < delta_f_bands[-1]
             self.domain_update_idx_upper = len(self) - (
-                np.sum(self._num_bins_bands[final_band + 1:]) + removed_bins_band
+                np.sum(self._num_bins_bands[starting_band + num_bands :])
+                + removed_bins_band
             )
+            assert (
+                nodes_new[-1] - delta_f_bands[-1]
+                <= self()[self.domain_update_idx_upper - 1]
+                <= nodes_new[-1]
+            )
+        else:
+            self.domain_update_idx_upper = len(self)
 
         self.domain_update_initial_length = len(self)
         self.nodes = nodes_new
         self.initialize_bands(delta_f_bands[0])
+        assert self.domain_update_idx_upper - self.domain_update_idx_lower == len(self)
 
     def set_new_range(self, f_min: float = None, f_max: float = None):
         raise NotImplementedError()
@@ -202,9 +227,7 @@ class MultibandedFrequencyDomain(Domain):
         ):
             sl = [slice(None)] * data.ndim
             # First truncate beyond f_max.
-            sl[axis] = slice(
-                self.domain_update_idx_lower, self.domain_update_idx_upper
-            )
+            sl[axis] = slice(self.domain_update_idx_lower, self.domain_update_idx_upper)
             data = data[tuple(sl)]
             return data
         else:

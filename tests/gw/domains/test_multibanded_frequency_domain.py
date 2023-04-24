@@ -27,35 +27,43 @@ def MFD_setup():
     ]
     return MultibandedFrequencyDomain(nodes, delta_f_initial, base_domain)
 
+
 def test_MFD_domain_update(MFD_setup):
     mfd = MFD_setup
 
-    mfd_updated = build_domain(mfd.domain_dict)
-    mfd_updated.update({"f_min": 23, "f_max": 350})
-    mfd_updated.update_data(mfd())
-    assert (mfd_updated.update_data(mfd()) == mfd_updated()).all()
-    assert ((mfd_updated.update_data(mfd_updated())) == mfd_updated()).all()
-    with pytest.raises(ValueError):
-        mfd_updated.update(np.ones(len(mfd_updated) + 1))
+    # check successful updates for valid settings
+    for new_settings in [
+        {"f_min": 21, "f_max": 1500},  # same number of bands
+        {"f_min": 35, "f_max": 1500},  # truncate two bands from lower end
+        {"f_min": 21, "f_max": 200},  # truncate two bands from upper end
+        {"f_min": 21},  # no f_max, same number of bands
+        {"f_min": 50},  # no f_min, truncate three bands from lower end
+        {"f_max": 1500},  # no f_min, same number of bands
+        {"f_max": 200},  # no f_min, truncate two bands from upper end
+        {"f_max": 20 + mfd._delta_f_bands[0] + 1e-5},  # domain with only 1 bin
+    ]:
+        mfd_updated = build_domain(mfd.domain_dict)
+        mfd_updated.update(new_settings)
+        mfd_updated.update_data(mfd())
+        assert (mfd_updated.update_data(mfd()) == mfd_updated()).all()
+        assert ((mfd_updated.update_data(mfd_updated())) == mfd_updated()).all()
+        assert len(mfd_updated.update_data(mfd())) == len(mfd_updated)
+        with pytest.raises(ValueError):
+            mfd_updated.update_data(np.ones(len(mfd_updated) + 1))
 
-    mfd_updated = build_domain(mfd.domain_dict)
-    mfd_updated.update({"f_min": 50})
-    mfd_updated.update_data(mfd())
-    assert (mfd_updated.update_data(mfd()) == mfd_updated()).all()
+    # check that ValueErrors for invalid settings
+    for new_settings in [
+        {"f_min": 2049},  # f_min larger than maximum frequency
+        {"f_max": 19},  # f_max smaller than minimum frequency
+        {"f_max": 20 + mfd._delta_f_bands[0] - 1e-5},  # f_max too small
+        {"f_min": 30, "f_max": 29},  # f_min > f_max
+        {"f_min": 29, "f_max": 29},  # f_min == f_max
+    ]:
+        mfd_updated = build_domain(mfd.domain_dict)
+        with pytest.raises(ValueError):
+            mfd_updated.update(new_settings)
 
-    mfd_updated = build_domain(mfd.domain_dict)
-    mfd_updated.update({"f_max": 100})
-    mfd_updated.update_data(mfd())
-    assert (mfd_updated.update_data(mfd()) == mfd_updated()).all()
-
-    mfd_updated = build_domain(mfd.domain_dict)
-    with pytest.raises(ValueError):
-        mfd_updated.update({"f_max": 19})
-
-    mfd_updated = build_domain(mfd.domain_dict)
-    with pytest.raises(ValueError):
-        mfd_updated.update({"f_min": 30, "f_max": 29})
-
+    # check that we can't update twice
     mfd_updated = build_domain(mfd.domain_dict)
     mfd_updated.update({"f_min": 30, "f_max": 40})
     with pytest.raises(ValueError):
