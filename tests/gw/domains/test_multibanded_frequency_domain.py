@@ -68,3 +68,13 @@ def test_MFD_domain_update(MFD_setup):
     mfd_updated.update({"f_min": 30, "f_max": 40})
     with pytest.raises(ValueError):
         mfd_updated.update({"f_min": 32, "f_max": 34})
+
+    # check SVD update
+    V = mfd()[:, np.newaxis].repeat(10, axis=1)
+    mfd_updated = build_domain(mfd.domain_dict)
+    f_min, f_max = 30, 40
+    mfd_updated.update({"f_min": f_min, "f_max": f_max})
+    V_updated = mfd_updated.update_data(V, axis=0)
+    assert (np.std(V_updated, axis=1) == 0).all()
+    assert abs(V_updated[0, 0] - f_min) < 2 * mfd_updated._delta_f_bands[0]
+    assert abs(V_updated[-1, 0] - f_max) < 2 * mfd_updated._delta_f_bands[-1]

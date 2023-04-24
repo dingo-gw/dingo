@@ -232,8 +232,8 @@ class MultibandedFrequencyDomain(Domain):
             return data
         else:
             raise ValueError(
-                f"Data (shape {data.shape}) incompatible with the domain (length "
-                f"{len(self)}."
+                f"Data (shape {data.shape}) incompatible with the domain "
+                f"(length {len(self)})."
             )
 
     def time_translate_data(self, data, dt):
