@@ -444,6 +444,7 @@ class GNPESampler(Sampler):
             thr = torch.quantile(init_samples["log_prob"], self.remove_init_outliers)
             inds = torch.where(init_samples["log_prob"] >= thr)[0][:num_samples]
             init_samples = {k: v[inds] for k, v in init_samples.items()}
+            # TODO: Update num_samples?
 
         # We could be starting with either the GNPE parameters *or* their proxies,
         # depending on the nature of the initialization network.
@@ -484,6 +485,24 @@ class GNPESampler(Sampler):
             self.iteration_tracker.update(
                 {k: v.cpu().numpy() for k, v in x["extrinsic_parameters"].items()}
             )
+
+            # In early iterations, we apply a boost to the movement of the GNPE
+            # parameters to accelerate convergence.
+            if 1 < i < self.num_iterations // 2:
+                max_boost_factor = 10 * (1 - 2 * i / self.num_iterations)
+                mean = self.iteration_tracker.mean(i)
+                prev_mean = self.iteration_tracker.mean(i-1)
+                prev_prev_mean = self.iteration_tracker.mean(i-2)
+                std = self.iteration_tracker.std(i)
+                for k in self.gnpe_parameters:
+                    boost = max_boost_factor * (mean[k] - prev_mean[k])
+                    if abs(boost) > std[k] / 2:
+                        boost = np.sign(boost) * std[k] / 2
+                    x["extrinsic_parameters"][k] += boost
+                    self.iteration_tracker.data[k][i] += boost
+                    print(f"{k}: means "
+                          f"{prev_mean[k]}, {mean[k]}; shift by"
+                          f" {boost}.")
 
             d = data_.clone()
             x["data"] = d.expand(num_samples, *d.shape)
