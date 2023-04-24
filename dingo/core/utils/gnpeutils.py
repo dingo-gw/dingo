@@ -1,7 +1,5 @@
-from scipy.stats import kstest, gaussian_kde
+from scipy.stats import kstest
 import numpy as np
-
-from dingo.core.dataset import DingoDataset
 
 
 class IterationTracker:
@@ -59,10 +57,10 @@ class IterationTracker:
     def std(self, idx):
         return {k: self.data[k][idx].std() for k in self.data}
 
-    def save(self, filename):
-        dataset = DingoDataset(dictionary={"parameters": self.data}, data_keys=[
-            "parameters"])
-        dataset.to_file(filename)
+    # def save(self, filename):
+    #     dataset = DingoDataset(dictionary={"parameters": self.data}, data_keys=[
+    #         "parameters"])
+    #     dataset.to_file(filename)
 
     # def remove_outliers(self, x):
     #     xc = np.concatenate([v[None, :] for v in self.x.values()], axis=0)
