@@ -491,20 +491,27 @@ class GNPESampler(Sampler):
             # In early iterations, we apply a boost to the movement of the GNPE
             # parameters to accelerate convergence.
             if 1 < i < self.num_iterations // 2:
-                max_boost_factor = 10 * (1 - 2 * i / self.num_iterations)
                 mean = self.iteration_tracker.mean(i)
                 prev_mean = self.iteration_tracker.mean(i-1)
-                prev_prev_mean = self.iteration_tracker.mean(i-2)
                 std = self.iteration_tracker.std(i)
+
+                diff = {k: mean[k] - prev_mean[k] for k in mean}
+                mag_diff = np.sqrt(np.sum([v**2 for v in diff.values()]))
+                unit_diff = {k: diff[k] / mag_diff for k in diff}
+                mag_std = np.sqrt(np.sum([v**2 for v in std.values()]))
+
+                amp = min(5 * mag_diff, 2 * mag_std) * (1 - 2 * i / self.num_iterations)
+                amp = max(amp, mag_diff)
+
+                print(f"Boost time shift magnitude {mag_diff} -> {amp}")
+
                 for k in self.gnpe_parameters:
-                    boost = max_boost_factor * (mean[k] - prev_mean[k])
-                    if abs(boost) > std[k] / 2:
-                        boost = np.sign(boost) * std[k] / 2
+                    boost = (amp - mag_diff) * unit_diff[k]
                     x["extrinsic_parameters"][k] += boost
                     self.iteration_tracker.data[k][i] += boost
-                    print(f"{k}: means "
-                          f"{prev_mean[k]}, {mean[k]}; shift by"
-                          f" {boost}.")
+                    # print(f"{k}: means "
+                    #       f"{prev_mean[k]}, {mean[k]}; shift by"
+                    #       f" {boost}.")
 
             d = data_.clone()
             x["data"] = d.expand(num_samples, *d.shape)
