@@ -69,6 +69,9 @@ def test_MFD_domain_update(MFD_setup):
     with pytest.raises(ValueError):
         mfd_updated.update({"f_min": 32, "f_max": 34})
 
+    mfd_updated = build_domain(mfd.domain_dict)
+    mfd_updated.update({"f_min": 30, "f_max": 2046})
+
     # check SVD update
     V = mfd()[:, np.newaxis].repeat(10, axis=1)
     mfd_updated = build_domain(mfd.domain_dict)
@@ -78,3 +81,23 @@ def test_MFD_domain_update(MFD_setup):
     assert (np.std(V_updated, axis=1) == 0).all()
     assert abs(V_updated[0, 0] - f_min) < 2 * mfd_updated._delta_f_bands[0]
     assert abs(V_updated[-1, 0] - f_max) < 2 * mfd_updated._delta_f_bands[-1]
+
+    # check domain_update with domain_dict
+    mfd_updated = build_domain(mfd.domain_dict)
+    mfd_updated.update({"f_min": 30, "f_max": 40})
+    mfd_updated_new = build_domain(mfd.domain_dict)
+    mfd_updated_new.update(mfd_updated.domain_dict)
+    assert mfd_updated_new.domain_dict == mfd_updated.domain_dict
+    assert mfd_updated_new.domain_dict != mfd.domain_dict
+    # we should be able to update again, provided that we don't change any settings
+    mfd_updated_new.update(mfd_updated.domain_dict)
+
+    # check that error is raised when updating with invalid domain_dict
+    mfd_updated = build_domain(mfd.domain_dict)
+    mfd_updated.update({"f_min": 30, "f_max": 40})
+    with pytest.raises(ValueError):
+        mfd_updated.update(mfd.domain_dict)
+
+    mfd_updated = build_domain(mfd.domain_dict)
+    mfd_updated.update({"f_min": 30, "f_max": 40})
+    mfd_updated.update(mfd_updated.domain_dict)
