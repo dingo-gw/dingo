@@ -122,6 +122,7 @@ class MainInput(BilbyMainInput):
         # self.analysis_executable = args.analysis_executable
         # self.analysis_executable_parser = args.analysis_executable_parser
         self.result_format = "hdf5"
+        self.disable_hdf5_locking = None
         self.final_result = args.final_result
         self.final_result_nsamples = args.final_result_nsamples
 
