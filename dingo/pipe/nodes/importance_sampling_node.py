@@ -50,8 +50,13 @@ class ImportanceSamplingNode(AnalysisNode):
         self.arguments.add("event-data-file", generation_node.event_data_file)
 
         self.extra_lines.extend(self._checkpoint_submit_lines())
+        env_vars = []
         # if self.request_cpus > 1:
-        #     self.extra_lines.extend(['environment = "OMP_NUM_THREADS=1"'])
+        #     env_vars.append("OMP_NUM_THREADS=1")
+        if self.disable_hdf5_locking:
+            env_vars.append("USE_HDF5_FILE_LOCKING=FALSE")
+        if env_vars:
+            self.extra_lines.append(f"environment = \"{' '.join(env_vars)}\"")
 
         self.process_node()
 

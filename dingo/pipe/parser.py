@@ -651,6 +651,16 @@ def create_parser(top_level=True):
         ),
     )
     submission_parser.add(
+        "--disable-hdf5-locking",
+        action=StoreBoolean,
+        default=True,
+        help=(
+            "If true (default), disable HDF5 locking. This can improve "
+            "stability on some clusters, but may cause issues if multiple "
+            "processes are reading/writing to the same file."
+        ),
+    )
+    submission_parser.add(
         "--log-directory",
         type=nonestr,
         default=None,

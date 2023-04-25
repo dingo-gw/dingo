@@ -20,6 +20,10 @@ class PlotNode(BilbyPlotNode):
             if getattr(inputs, f"plot_{plot_type}", False):
                 self.arguments.add_flag(plot_type)
         # self.arguments.add("format", inputs.plot_format)
+
+        if self.disable_hdf5_locking:
+            self.extra_lines.append('environment = "HDF5_USE_FILE_LOCKING=FALSE"')
+
         self.process_node()
         self.job.add_parent(merged_node.job)
 
