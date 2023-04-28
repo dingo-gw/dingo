@@ -93,6 +93,9 @@ training:
 local:
   device: cpu  # Change this to 'cuda' for training on a GPU.
   num_workers: 6
+#  wandb:
+#    project: dingo
+#    group: O4
   runtime_limits:
     max_time_per_run: 36000
     max_epochs_per_run: 500
@@ -150,6 +153,9 @@ device
 
 num_workers
 : Number of CPU worker processes to use for pre-processing training data before copying to the GPU. Data pre-processing (inluding decompression, projection to detectors, and noise generation) is quite expensive, so using 16 or 32 processes is recommended, otherwise this can become a bottleneck. We recommend monitoring the GPU utilization percentage as well as time spent on pre-processing (output during training) to fine-tune this number.
+
+wandb
+: Settings for [Weights & Biases](https://wandb.ai/site). If you have an account, you can use this to track your training progress and compare different runs.
 
 runtime_limits
 : Maximum time (in seconds) or maximum number of epochs per run. Using this could make sense in a cluster environment.

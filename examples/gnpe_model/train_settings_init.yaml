@@ -1,0 +1,97 @@
+data:
+  waveform_dataset_path: training_data/waveform_dataset.hdf5  # Contains intrinsic waveforms
+  train_fraction: 0.95
+  window:  # Needed to calculate window factor for simulated data
+    type: tukey
+    f_s: 4096
+    T: 8.0
+    roll_off: 0.4
+  domain_update:
+    f_min: 20.0
+    f_max: 1024.0
+  svd_size_update: 200  # Optionally, reduce the SVD size when decompressing (for performance)
+  detectors:
+    - H1
+    - L1
+  extrinsic_prior:  # Sampled at train time
+    dec: default
+    ra: default
+    geocent_time: bilby.core.prior.Uniform(minimum=-0.10, maximum=0.10)
+    psi: default
+    luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0)
+  ref_time: 1126259462.391
+  inference_parameters:
+  - H1_time
+  - L1_time
+
+# Model architecture
+model:
+  type: nsf+embedding
+  # kwargs for neural spline flow
+  nsf_kwargs:
+    num_flow_steps: 15 
+    base_transform_kwargs:
+      hidden_dim: 512 
+      num_transform_blocks: 5
+      activation: elu
+      dropout_probability: 0.0
+      batch_norm: True
+      num_bins: 8
+      base_transform_type: rq-coupling
+  # kwargs for embedding net
+  embedding_net_kwargs:
+    output_dim: 128
+    hidden_dims: [512, 512, 512, 512, 512, 512,
+    256, 256, 256, 256, 256, 256,
+    128, 128, 128, 128, 128, 128
+    ]
+    activation: elu
+    dropout: 0.0
+    batch_norm: True
+    svd:
+      num_training_samples: 50000
+      num_validation_samples: 10000
+      size: 200
+
+# Training is divided in stages. They each require all settings as indicated below.
+training:
+  stage_0:  # Pre-training stage (fixed ASD, typically)
+    epochs: 150
+    asd_dataset_path: training_data/asd_dataset_fiducial/asds_O1_fiducial.hdf5 # This should just contain a single 'fiducial' ASD for each detector.
+    freeze_rb_layer: True
+    optimizer:
+      type: adam
+      lr: 5.0e-5
+    scheduler:
+      type: cosine
+      T_max: 150
+    batch_size: 4096
+
+  stage_1:  # Fine-tuning stage
+    epochs: 75
+    asd_dataset_path: training_data/asd_dataset/asds_O1.hdf5 # This should contain a large collection of ASDs for each detector.
+    freeze_rb_layer: False
+    optimizer:
+      type: adam
+      lr: 1.0e-5
+    scheduler:
+      type: cosine
+      T_max: 75
+    batch_size: 4096
+
+# Local settings for training that have no impact on the final trained network.
+local:
+  device: cpu  # Change this to 'cuda' for training on a GPU.
+  num_workers: 6  # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
+  use_wandb: True
+  wandb_api_key:  # insert_here for monitoring many runs. Can be obtained from https://wandb.ai/settings
+  runtime_limits:
+    max_time_per_run: 36000
+    max_epochs_per_run: 500
+  checkpoint_epochs: 10
+  condor:
+    bid: 100
+    num_cpus: 16
+    memory_cpus: 128000
+    num_gpus: 1
+    memory_gpus: 8000

@@ -22,6 +22,7 @@ def download_and_estimate_psds(
 ):
     """
     Downloads strain data for the specified time segments and estimates PSDs based on these
+
     Parameters
     ----------
     data_dir : str
@@ -73,7 +74,6 @@ def download_and_estimate_psds(
         psd_path = psd_data_path(data_dir, run, det)
         os.makedirs(psd_path, exist_ok=True)
         estimation_kwargs = {
-            "det": det,
             "time_segment": T,
             "window": w,
             "f_s": f_s,
@@ -81,6 +81,9 @@ def download_and_estimate_psds(
         }
         if channels:
             estimation_kwargs["channel"] = channels[det]
+        else:
+            estimation_kwargs["det"] = det
+
         for index, (start, end) in enumerate(
             tqdm(time_segments[det], disable=not verbose)
         ):
@@ -116,13 +119,13 @@ def download_and_estimate_cli():
         "--data_dir",
         type=str,
         required=True,
-        help="Path where the PSD data is to be stored. Must contain a 'settings.yaml' file.",
+        help="Path where the PSD data is to be stored.",
     )
     parser.add_argument(
         "--settings_file",
         type=str,
         required=True,
-        help="Path to a settings file in case two different datasets are generated in the sam directory",
+        help="Path to a settings file containing the settings for the dataset generation",
     )
     parser.add_argument(
         "--time_segments_file",

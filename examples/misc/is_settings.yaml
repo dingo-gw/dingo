@@ -1,0 +1,49 @@
+num_samples: 1000
+event_dataset: <path/to/event_dataset>
+
+# to turn off time marginalization, simply
+time_marginalization: 
+  n_fft: 5
+
+slice_plots:
+  num_slice_plots: 10
+  params_slice2d: [[phase, geocent_time], [phase, tilt_1]]
+
+# settings for unconditional neural density estimator (nde)
+nde:
+  # training data: output dingo samples for nde
+  data:
+    parameter_samples: <path/to/dingo-samples>
+    parameters: null # need all parameters for likelihood
+  # nde architecture
+  model:
+    type: nsf
+    num_flow_steps: 10
+    base_transform_kwargs:
+      hidden_dim: 128
+      num_transform_blocks: 2
+      activation: elu
+      dropout_probability: 0.1
+      batch_norm: true
+      num_bins: 8
+      base_transform_type: rq-coupling
+  # nde training
+  training:
+    device: cpu
+    num_workers: 0
+    train_fraction: 0.9
+    batch_size: 512
+    epochs: 20
+    optimizer:
+      type: adam
+      lr: 0.003
+    scheduler:
+      type: cosine
+      T_max: 20
+
+calibration_marginalization:
+  num_calibration_curves: 100
+  num_calibration_nodes: 10
+  calibration_envelope:
+    H1: <path/to/H1-calibration-envelope>
+    L1: <path/to/L1-calibration-envelope> 

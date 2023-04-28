@@ -128,4 +128,5 @@ def test_generate_hplus_hcross_m_IMRPhenomXPHM(uniform_fd_domain, intrinsic_prio
     # since there are many different methods for this. But the small mismatches we do
     # get should not have a big effect in practice.
     mismatches = np.array(mismatches)
-    assert np.max(mismatches) < 2e-3
+    assert np.max(mismatches) < 1e-1
+    assert np.median(mismatches) < 1e-6

@@ -657,6 +657,8 @@ class Result(DingoDataset):
             plt.plot([y_upper - 20, y_upper], [y_upper - 20, y_upper], color="black")
             plt.tight_layout()
             plt.savefig(filename)
+        else:
+            print("Results not importance sampled. Cannot produce log_prob plot.")
 
     def plot_weights(self, filename="weights.png"):
         """Make a scatter plot of samples weights vs log proposal."""
@@ -684,6 +686,8 @@ class Result(DingoDataset):
             plt.scatter(x, y, s=0.5)
             plt.tight_layout()
             plt.savefig(filename)
+        else:
+            print("Results not importance sampled. Cannot plot weights.")
 
 
 def check_equal_dict_of_arrays(a, b):
