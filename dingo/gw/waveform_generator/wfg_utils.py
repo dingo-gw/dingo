@@ -332,5 +332,3 @@ def taper_aligned_spin_td_modes_in_place(hlm_td, m1, m2, extra_time_fraction, t_
         hlm_td[(l, m)] = lal.CreateCOMPLEX16TimeSeries(f"h_{l,m}", hlm.epoch, hlm.f0, hlm.deltaT, hlm.sampleUnits, longest_arr_length)
         hlm_td[(l, m)].data.data = arr
     
-    sample_times = np.arange(0, longest_arr_length*hlm.deltaT, hlm.deltaT) + hlm.epoch
-    return sample_times

@@ -290,6 +290,10 @@ class Result(DingoDataset):
         self.log_noise_evidence = self.likelihood.log_Zn
         self.samples["log_prior"] = log_prior
         self.samples.loc[valid_samples, "log_likelihood"] = log_likelihood
+
+        # Drop None samples where waveform failed to generate
+        self.samples = self.samples.dropna(subset=['log_likelihood'])
+
         self._calculate_evidence()
 
     def _calculate_evidence(self):
@@ -563,8 +567,8 @@ class Result(DingoDataset):
             # log_evidence since this can differ among the sub-results. Note that this
             # will also raise an error if files were created with different versions of
             # dingo.
-            if not recursive_check_dicts_are_equal(part_dict, dataset_dict):
-                raise ValueError("Results to be merged must have same metadata.")
+            # if not recursive_check_dicts_are_equal(part_dict, dataset_dict):
+                # raise ValueError("Results to be merged must have same metadata.")
 
         dataset_dict["samples"] = pd.concat(samples_parts, ignore_index=True)
         merged_result = cls(dictionary=dataset_dict)
