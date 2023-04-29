@@ -241,7 +241,7 @@ class WaveformGenerator:
         else:
             return x
 
-    def _convert_parameters(
+    def _convert_parameters_to_lal_frame(
         self,
         parameter_dict: Dict,
         lal_params=None,
