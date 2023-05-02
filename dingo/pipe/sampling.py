@@ -49,6 +49,7 @@ class SamplingInput(Input):
         self.num_samples = args.num_samples
         self.batch_size = args.batch_size
         self.density_recovery_settings = args.density_recovery_settings
+        self.trigger_chirp_mass = args.trigger_chirp_mass
 
         # self.sampler = args.sampler
         # self.sampler_kwargs = args.sampler_kwargs
@@ -102,6 +103,8 @@ class SamplingInput(Input):
     def _load_event(self):
         event_dataset = EventDataset(file_name=self.event_data_file)
         self.context = event_dataset.data
+        if self.trigger_chirp_mass is not None:
+            self.context["trigger_chirp_mass"] = self.trigger_chirp_mass
         self.event_metadata = event_dataset.settings
 
     def _load_sampler(self):

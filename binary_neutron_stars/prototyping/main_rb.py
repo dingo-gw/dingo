@@ -58,7 +58,7 @@ if __name__ == "__main__":
     )
     waveform_generator_het_dec = WaveformGenerator(
         domain=ufd,
-        transform=Compose([HeterodynePhase(ufd), Decimate(mfd)]),
+        transform=Compose([HeterodynePhase(ufd), Decimate(mfd, ["waveform"])]),
         **settings["waveform_generator"],
     )
     polarizations_het_mfd = waveform_generator_het_mfd.generate_hplus_hcross(params)
@@ -106,7 +106,7 @@ if __name__ == "__main__":
     plt.ylabel("Period [bins]")
     plt.show()
 
-    transforms = Compose([HeterodynePhase(ufd), Decimate(mfd)])
+    transforms = Compose([HeterodynePhase(ufd), Decimate(mfd, ["waveform"])])
     waveform_generator_het_dec = WaveformGenerator(
         domain=ufd, transform=transforms, **settings["waveform_generator"]
     )
@@ -134,7 +134,7 @@ if __name__ == "__main__":
     )
 
     transforms = Compose(
-        [HeterodynePhase(ufd), Decimate(mfd), ApplySVD(basis)]
+        [HeterodynePhase(ufd), Decimate(mfd, ["waveform"]), ApplySVD(basis)]
     )
     waveform_generator_het_dec_svd = WaveformGenerator(
         domain=ufd, transform=transforms, **settings["waveform_generator"]

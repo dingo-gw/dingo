@@ -221,6 +221,15 @@ def create_parser(top_level=True):
             "trigger time"
         ),
     )
+    data_gen_pars.add(
+        "--trigger-chirp-mass",
+        default=None,
+        type=nonestr,
+        help=(
+            "Trigger chirp mass for the event. Used e.g. for initialization of BNS "
+            "networks."
+        ),
+    )
     # data_gen_pars.add(
     #     "--n-simulation",
     #     type=int,

@@ -255,7 +255,7 @@ class GNPEChirp(GNPEBase):
     only changes the phase, not the overall amplitude, which would change the noise PSD.
     """
 
-    def __init__(self, kernel, domain: Domain, order: int = 0):
+    def __init__(self, kernel, domain: Domain, order: int = 0, inference: bool = False):
         """
         Parameters
         ----------
@@ -266,6 +266,8 @@ class GNPEChirp(GNPEBase):
             Only works for a FrequencyDomain at present.
         order : int
             Twice the post-Newtonian order for the expansion. Valid orders are 0 and 2.
+        inference : bool = False
+            Whether to use inference or training mode.
         """
         # We copy the kernel because the PriorDict constructor modifies the argument.
         kernel = kernel.copy()
@@ -288,6 +290,7 @@ class GNPEChirp(GNPEBase):
         operators = {"chirp_mass": "x", "mass_ratio": "x"}
         super().__init__(kernel, operators)
 
+        self.inference = inference
         self.phase_heterodyning_transform = HeterodynePhase(
             domain, order, inverse=False
         )
@@ -304,6 +307,9 @@ class GNPEChirp(GNPEBase):
         )
         extrinsic_parameters.update(proxies)
         sample["extrinsic_parameters"] = extrinsic_parameters
+        if self.inference:
+            # if "chirp_mass_trigger" in sample:
+            raise NotImplementedError()
 
         # The only situation where we would expect to not have a waveform to transform
         # would be when calculating parameter standardizations, since we just want to

@@ -2,6 +2,9 @@ import pytest
 import numpy as np
 import pandas as pd
 from torchvision.transforms import Compose
+from bilby.gw.detector import PowerSpectralDensity
+from scipy.interpolate import interp1d
+from scipy.stats import norm
 
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.domains import build_domain
@@ -14,7 +17,7 @@ from dingo.gw.domains.multibanded_frequency_domain import (
 )
 from dingo.gw.dataset import generate_parameters_and_polarizations
 
-from dingo.gw.transforms import HeterodynePhase, Decimate
+from dingo.gw.transforms import HeterodynePhase, Decimate, DecimateWaveformsAndASDS
 
 
 @pytest.fixture
@@ -64,7 +67,7 @@ def bns_setup():
     )
     wfg_het_dec = WaveformGenerator(
         domain=ufd,
-        transform=Compose([HeterodynePhase(ufd), Decimate(mfd)]),
+        transform=Compose([HeterodynePhase(ufd), Decimate(mfd, ["waveform"])]),
         **wfg_settings
     )
 
@@ -111,3 +114,60 @@ def test_mfd_decimation(bns_setup):
 
     assert max_mismatch(pols_het_dec1, pols_het_dec2, mfd) == 0
     assert max_mismatch(pols_het_dec1, pols_het_mfd, mfd) < 1e-5
+
+
+def test_mfd_decimation_noise_level(bns_setup):
+    """Test that decimation of waveform and ASDs leads to the correct noise levels."""
+    _, mfd, *_ = bns_setup
+    mfd.update({"f_max": 256})
+    ufd = mfd.base_domain
+    mfd.window_factor = 1
+
+    psd = PowerSpectralDensity(asd_file="aLIGO_ZERO_DET_high_P_asd.txt")
+    psd_interp = interp1d(
+        psd.frequency_array, psd.psd_array, bounds_error=False, fill_value=np.inf
+    )
+    psd = psd_interp(ufd.sample_frequencies)[ufd.min_idx :] * 1e40
+    # add a few spectral lines
+    for mu, std in zip([50, 60, 70, 80, 90], [0.5, 0.2, 0.1, 0.05, 0.005]):
+        psd += 1000 * norm(mu, std).pdf(ufd()[ufd.min_idx :])
+    psd_expanded = psd[None, :].repeat(100, axis=0)
+    noise = np.random.normal(loc=0, scale=(psd_expanded ** 0.5 * ufd.noise_std))
+
+    sample = {
+        "waveform": {"H1": noise},
+        "asds": {"H1": psd_expanded ** 0.5},
+    }
+
+    dec_w = DecimateWaveformsAndASDS(mfd, "whitened")
+    dec_u = DecimateWaveformsAndASDS(mfd, "unwhitened")
+
+    sample_dec_w = dec_w(sample)
+    sample_dec_u = dec_u(sample)
+
+    wf_w = sample_dec_w["waveform"]["H1"]
+    asd_w = sample_dec_w["asds"]["H1"]
+    wf_u = sample_dec_u["waveform"]["H1"]
+    asd_u = sample_dec_u["asds"]["H1"]
+
+    # locally check that we whiten the data correctly
+    assert np.max(np.std(wf_w / asd_w / mfd.noise_std, axis=0)) < 1.5
+    assert np.min(np.std(wf_w / asd_w / mfd.noise_std, axis=0)) > 0.5
+    assert np.max(np.std(wf_u / asd_u / mfd.noise_std, axis=0)) < 1.5
+    assert np.min(np.std(wf_u / asd_u / mfd.noise_std, axis=0)) > 0.5
+
+    # locally check that incorrect whitening leads to incorrect results
+    assert np.max(np.std(wf_u / asd_w / mfd.noise_std, axis=0)) > 1.5
+    assert np.min(np.std(wf_w / asd_u / mfd.noise_std, axis=0)) < 0.5
+
+    # global checks
+    assert abs(np.std(wf_w / asd_w / mfd.noise_std) - 1) < 1e-2
+    assert abs(np.std(wf_u / asd_u / mfd.noise_std) - 1) < 1e-2
+    assert np.std(wf_u / asd_w / mfd.noise_std) > 10
+    assert (
+        max(
+            abs(np.std(wf_w / asd_w / mfd.noise_std) - 1),
+            abs(np.std(wf_u / asd_u / mfd.noise_std) - 1),
+        )
+        < abs(np.std(wf_w / asd_u / mfd.noise_std) - 1)
+    )

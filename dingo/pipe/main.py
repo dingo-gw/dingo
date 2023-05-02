@@ -28,7 +28,7 @@ def fill_in_arguments_from_model(args):
     model = PosteriorModel(args.model, device="cpu", load_training_info=False)
     model_metadata = model.metadata
 
-    domain = build_domain_from_model_metadata(model_metadata)
+    domain = build_domain_from_model_metadata(model_metadata, base=True)
 
     data_settings = model_metadata["train_settings"]["data"]
 
@@ -159,6 +159,7 @@ class MainInput(BilbyMainInput):
 
         # self.ignore_gwpy_data_quality_check = args.ignore_gwpy_data_quality_check
         self.trigger_time = args.trigger_time
+        self.trigger_chirp_mass = args.trigger_chirp_mass
         # self.deltaT = args.deltaT
         # self.gps_tuple = args.gps_tuple
         # self.gps_file = args.gps_file

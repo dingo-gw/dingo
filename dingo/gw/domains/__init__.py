@@ -116,7 +116,7 @@ def build_domain_from_wfd_settings(settings: dict, num_processes: int = 0) -> Do
         return build_domain(settings["domain"])
 
 
-def build_domain_from_model_metadata(model_metadata) -> Domain:
+def build_domain_from_model_metadata(model_metadata, base=False) -> Domain:
     """
     Instantiate a domain class from settings of model.
 
@@ -125,6 +125,11 @@ def build_domain_from_model_metadata(model_metadata) -> Domain:
     model_metadata: dict
         model metadata containing information to build the domain
         typically obtained from the model.metadata attribute
+    base: bool = False
+        If base=True, return domain.base_domain if this is an attribute of domain,
+        else return domain. Example: MultibandedFrequencyDomain has a FrequencyDomain
+        object as a base_domain. In dingo_pipe, we want to load data in the
+        base_domain, and later decimate from base_domain to domain.
 
     Returns
     -------
@@ -136,4 +141,6 @@ def build_domain_from_model_metadata(model_metadata) -> Domain:
     domain.window_factor = get_window_factor(
         model_metadata["train_settings"]["data"]["window"]
     )
+    if base and hasattr(domain, "base_domain"):
+        domain = domain.base_domain
     return domain
