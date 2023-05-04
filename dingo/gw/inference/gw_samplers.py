@@ -136,6 +136,46 @@ class GWSamplerMixin(object):
         #     #     self._sample_synthetic_phase(samples, inverse)
         #     self._correct_reference_time(samples, inverse)
 
+    def initialize_transforms_pre(self):
+        """
+        Initialize self.transform_pre. This is used to transform the GW data into a
+        torch Tensor via:
+            * in case of MultibandedFrequencyDomain: decimate data from base domain
+            * whiten and scale strain (the inference network expects standardized data)
+            * repackage strains and asds from dicts to an array
+            * convert array to torch tensor on the correct device
+            * extract only strain/waveform from the sample
+
+        self.transform_pre is used once in the beginning of self._run_sampler. For
+        GWSampler, this is the only preprocessing transform, for GWSamplerGNPE there is
+        an additional transform self.transform_gnpe_loop_pre, which is applied once in
+        every GNPE iteration, prior to sampling from the neural network.
+        """
+        # preprocessing transforms:
+        transform_pre = []
+        #   * in case of MultibandedFrequencyDomain: decimate data from base domain
+        if isinstance(self.domain, MultibandedFrequencyDomain):
+            transform_pre.append(
+                DecimateWaveformsAndASDS(self.domain, decimation_mode="whitened")
+            )
+        #   * whiten and scale strain (the inference network expects standardized data)
+        #   * repackage strains and asds from dicts to an array
+        #   * convert array to torch tensor on the correct device
+        #   * extract only strain/waveform from the sample
+        transform_pre += [
+            WhitenAndScaleStrain(self.domain.noise_std),
+            # Use base metadata so that unconditional samplers still know how to
+            # transform data, since this transform is used by the GNPE sampler as
+            # well.
+            RepackageStrainsAndASDS(
+                self.base_model_metadata["train_settings"]["data"]["detectors"],
+                first_index=self.domain.min_idx,
+            ),
+            ToTorch(device=self.model.device),
+            GetItem("waveform"),
+        ]
+        self.transform_pre = Compose(transform_pre)
+
 
 class GWSampler(GWSamplerMixin, Sampler):
     """
@@ -163,34 +203,10 @@ class GWSampler(GWSamplerMixin, Sampler):
     """
 
     def _initialize_transforms(self):
+        # preprocessing transforms
+        self.initialize_transforms_pre()
 
-        # preprocessing transforms:
-        transform_pre = []
-        #   * in case of MultibandedFrequencyDomain: decimate data from base domain
-        if isinstance(self.domain, MultibandedFrequencyDomain):
-            transform_pre.append(
-                DecimateWaveformsAndASDS(self.domain, decimation_mode="whitened")
-            )
-        #   * whiten and scale strain (the inference network expects standardized data)
-        #   * repackage strains and asds from dicts to an array
-        #   * convert array to torch tensor on the correct device
-        #   * extract only strain/waveform from the sample
-        transform_pre += [
-            WhitenAndScaleStrain(self.domain.noise_std),
-            # Use base metadata so that unconditional samplers still know how to
-            # transform data, since this transform is used by the GNPE sampler as
-            # well.
-            RepackageStrainsAndASDS(
-                self.base_model_metadata["train_settings"]["data"]["detectors"],
-                first_index=self.domain.min_idx,
-            ),
-            ToTorch(device=self.model.device),
-            GetItem("waveform"),
-        ]
-
-        self.transform_pre = Compose(transform_pre)
-
-        # postprocessing transforms:
+        # postprocessing transforms
         #   * de-standardize data and extract inference parameters
         self.transform_post = SelectStandardizeRepackageParameters(
             {"inference_parameters": self.inference_parameters},
@@ -246,7 +262,7 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
         **not set up**
     """
 
-    def _initialize_transforms(self):
+    def _initialize_transforms_gnpe_loop(self):
         """
         Builds the transforms that are used in the GNPE loop.
         """
@@ -265,15 +281,16 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 "coalescence time, or phase GNPE."
             )
 
-        # transforms for gnpe loop, to be applied prior to sampling step:
+        # Set transform_gnpe_loop_pre. These transform are applied prior to each
+        # sampling step in the gnpe loop.
         #   * reset the sample (e.g., clone non-gnpe transformed waveform)
         #   * blurring detector times to obtain gnpe proxies
         #   * shifting the strain by - gnpe proxies
         #   * repackaging & standardizing proxies to sample['context_parameters']
         #     for conditioning of the inference network
-        transform_pre = [RenameKey("data", "waveform")]
+        transform_gnpe_loop_pre = [RenameKey("data", "waveform")]
         if gnpe_time_settings:
-            transform_pre.append(
+            transform_gnpe_loop_pre.append(
                 GNPECoalescenceTimes(
                     ifo_list,
                     gnpe_time_settings["kernel"],
@@ -281,31 +298,31 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                     inference=True,
                 )
             )
-            transform_pre.append(TimeShiftStrain(ifo_list, self.domain))
+            transform_gnpe_loop_pre.append(TimeShiftStrain(ifo_list, self.domain))
         if gnpe_chirp_settings:
-            transform_pre.append(
+            transform_gnpe_loop_pre.append(
                 GNPEChirp(
                     gnpe_chirp_settings["kernel"],
                     self.domain,
                     gnpe_chirp_settings.get("order", 0),
-                    # inference=True,
+                    inference=True,
                 )
             )
 
-        transform_pre.append(
+        transform_gnpe_loop_pre.append(
             SelectStandardizeRepackageParameters(
                 {"context_parameters": data_settings["context_parameters"]},
                 data_settings["standardization"],
                 device=self.model.device,
             )
         )
-        transform_pre.append(RenameKey("waveform", "data"))
+        transform_gnpe_loop_pre.append(RenameKey("waveform", "data"))
 
         # Extract GNPE information (list of parameters, dict of kernels) from the
         # transforms.
         self.gnpe_parameters = []
         self.gnpe_kernel = PriorDict()
-        for transform in transform_pre:
+        for transform in transform_gnpe_loop_pre:
             if isinstance(transform, GNPEBase):
                 self.gnpe_parameters += transform.input_parameter_names
                 for k, v in transform.kernel.items():
@@ -313,14 +330,14 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
         print("GNPE parameters: ", self.gnpe_parameters)
         print("GNPE kernel: ", self.gnpe_kernel)
 
-        self.transform_pre = Compose(transform_pre)
+        self.transform_gnpe_loop_pre = Compose(transform_gnpe_loop_pre)
 
         # transforms for gnpe loop, to be applied after sampling step:
         #   * de-standardization of parameters
         #   * post correction for geocent time (required for gnpe with exact equivariance)
         #   * computation of detectortimes from parameters (required for next gnpe
         #       iteration)
-        self.transform_post = Compose(
+        self.transform_gnpe_loop_post = Compose(
             [
                 SelectStandardizeRepackageParameters(
                     {"inference_parameters": self.inference_parameters},
@@ -335,6 +352,19 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 GetDetectorTimes(ifo_list, data_settings["ref_time"]),
             ]
         )
+
+    def _initialize_transforms(self):
+        """
+        Initialize the transform
+            * self.transfrom_pre
+            * self.transform_gnpe_loop_pre
+            * self.transform_gnpe_loop_post
+        """
+        # preprocessing transforms (self.transfrom_pre)
+        self.initialize_transforms_pre()
+        # transforms for gnpe loop
+        # (self.transform_gnpe_loop_pre/self.transform_gnpe_loop_post)
+        self._initialize_transforms_gnpe_loop()
 
     def _kernel_log_prob(self, samples):
         # TODO: Reimplement as a method of GNPEBase.

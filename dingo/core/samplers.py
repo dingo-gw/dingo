@@ -426,7 +426,7 @@ class GNPESampler(Sampler):
         if context is None:
             raise ValueError("self.context must be set to run sampler.")
 
-        data_ = self.init_sampler.transform_pre(context)
+        data_ = self.transform_pre(context)
 
         # TODO: Reimplement outlier removal in IterationTracker? Save setting somewhere.
         if self.remove_init_outliers == 0.0:
@@ -488,7 +488,7 @@ class GNPESampler(Sampler):
             d = data_.clone()
             x["data"] = d.expand(num_samples, *d.shape)
 
-            x = self.transform_pre(x)
+            x = self.transform_gnpe_loop_pre(x)
 
             time_sample_start = time.time()
             self.model.model.eval()
@@ -500,7 +500,7 @@ class GNPESampler(Sampler):
 
             x["parameters"] = y
             x["log_prob"] = log_prob
-            x = self.transform_post(x)
+            x = self.transform_gnpe_loop_post(x)
 
             # Extract the proxy parameters from x["extrinsic_parameters"]. These have
             # not been standardized. They are persistent from before sampling took place,
@@ -566,3 +566,17 @@ class GNPESampler(Sampler):
                 assert torch.equal(proxies[k], init_proxies[k])
 
         return samples
+
+    def _initialize_transforms(self):
+        # preprocessing transforms
+        self.transform_pre = Compose([])
+
+        # transforms for gnpe loop. At least self.transform_gnpe_loop_pre needs to be
+        # set in subclass.
+        self.transform_gnpe_loop_pre = None
+        self.transform_gnpe_loop_post = SelectStandardizeRepackageParameters(
+            {"inference_parameters": self.inference_parameters},
+            self.metadata["train_settings"]["data"]["standardization"],
+            inverse=True,
+            as_type="dict",
+        )
