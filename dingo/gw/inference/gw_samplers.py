@@ -165,19 +165,18 @@ class GWSampler(GWSamplerMixin, Sampler):
     def _initialize_transforms(self):
 
         # preprocessing transforms:
-        #   * whiten and scale strain (since the inference network expects standardized
-        #   data)
         transform_pre = []
         #   * in case of MultibandedFrequencyDomain: decimate data from base domain
         if isinstance(self.domain, MultibandedFrequencyDomain):
             transform_pre.append(
                 DecimateWaveformsAndASDS(self.domain, decimation_mode="whitened")
             )
-        transform_pre.append(WhitenAndScaleStrain(self.domain.noise_std))
+        #   * whiten and scale strain (the inference network expects standardized data)
         #   * repackage strains and asds from dicts to an array
         #   * convert array to torch tensor on the correct device
         #   * extract only strain/waveform from the sample
         transform_pre += [
+            WhitenAndScaleStrain(self.domain.noise_std),
             # Use base metadata so that unconditional samplers still know how to
             # transform data, since this transform is used by the GNPE sampler as
             # well.
@@ -188,33 +187,6 @@ class GWSampler(GWSamplerMixin, Sampler):
             ToTorch(device=self.model.device),
             GetItem("waveform"),
         ]
-
-        # This sampler class does *not* allow for GNPE. However, one can use the GNPE
-        # implementation to perform prior conditioning, in which case there are no GNPE
-        # iterations. We do this for BNS systems, where the chirp mass can be
-        # determined *a priori* with great precision. In that case, we can use an
-        # inference network conditioned on a chirp_mass_proxy, which enables us to use
-        # phase heterodyned data.
-        gnpe_chirp_settings = self.base_model_metadata["train_settings"]["data"].get(
-            "gnpe_chirp"
-        )
-        if gnpe_chirp_settings:
-            transform_pre.append(
-                GNPEChirp(
-                    gnpe_chirp_settings["kernel"],
-                    self.domain,
-                    gnpe_chirp_settings.get("order", 0),
-                    # inference=True,
-                )
-            )
-            data_settings = self.base_model_metadata["train_settings"]["data"]
-            transform_pre.append(
-                SelectStandardizeRepackageParameters(
-                    {"context_parameters": data_settings["context_parameters"]},
-                    data_settings["standardization"],
-                    device=self.model.device,
-                )
-            )
 
         self.transform_pre = Compose(transform_pre)
 
