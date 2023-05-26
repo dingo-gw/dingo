@@ -106,8 +106,6 @@ class SamplingInput(Input):
 
     def _load_sampler(self):
         """Load the sampler and set its context based on event data."""
-        import torch
-        print(self.device, torch.cuda.is_available(), torch.cuda.current_device())
         model = PosteriorModel(self.model, device=self.device, load_training_info=False)
 
         if self.model_init is not None:
