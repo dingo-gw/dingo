@@ -1,0 +1,51 @@
+domain:
+  type: MultibandedFrequencyDomain
+  num_samples_band_generation: 2000
+  base_domain:
+    type: FrequencyDomain
+    f_min: 20 # 30 Hz in initial analysis, decreased to 23 Hz in the reanalysis
+    f_max: 2048
+    delta_f: 0.0078125 # = 1/128
+  multibanding_method: "adaptive"
+  min_num_bins_per_period: 32
+  delta_f_max: 2.0
+
+waveform_generator:
+  approximant: IMRPhenomPv2_NRTidal
+  f_ref: 100.0
+  spin_conversion_phase: 0.0
+
+intrinsic_prior:
+  # component mass prior was [0.5, 7.7] in official analysis
+  mass_1: bilby.core.prior.Constraint(minimum=1.0, maximum=2.0)
+  mass_2: bilby.core.prior.Constraint(minimum=1.0, maximum=2.0)
+  chirp_mass: bilby.gw.prior.UniformInComponentsChirpMass(minimum=1.184, maximum=2.168)
+  mass_ratio: bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.05, maximum=1.0)
+  # lowSpin: < 0.05; highSpin: < 0.89
+  a_1: bilby.core.prior.Uniform(minimum=0.0, maximum=0.89)
+  a_2: bilby.core.prior.Uniform(minimum=0.0, maximum=0.89)
+  phase: default
+  tilt_1: default
+  tilt_2: default
+  phi_12: default
+  phi_jl: default
+  theta_jn: default
+  lambda_1: bilby.core.prior.Uniform(minimum=0.0, maximum=5000)
+  lambda_2: bilby.core.prior.Uniform(minimum=0.0, maximum=5000)
+  # Reference values for fixed (extrinsic) parameters. These are needed to generate a waveform.
+  luminosity_distance: 100.0  # Mpc
+  geocent_time: 0.0  # s
+
+# Dataset size
+num_samples: 5_000_000
+
+## Save a compressed representation of the dataset
+compression:
+  whitening: aLIGO_ZERO_DET_high_P_asd.txt
+  phase_heterodyning:
+    order: 0
+  svd:
+    # Truncate the SVD basis at this size. No truncation if zero.
+    size: 300
+    num_training_samples: 50000
+    num_validation_samples: 10000
