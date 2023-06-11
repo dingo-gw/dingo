@@ -86,8 +86,14 @@ class GWSignal(object):
             raise ValueError(
                 "Output domain is not contained within WaveformGenerator domain."
             )
-        if domain_in.delta_f != domain_out.delta_f:
-            raise ValueError("Domains must have same delta_f.")
+        domain_in_copy = build_domain(domain_in.domain_dict)
+        domain_in_copy.update({"f_min": domain_out.f_min, "f_max": domain_out.f_max})
+        domain_in_copy.window_factor = domain_out.window_factor
+        if not domain_in_copy.domain_dict == domain_out.domain_dict:
+            raise ValueError(
+                f"Domains are incompatible. \ndomain_in: {domain_in.domain_dict} "
+                f"\ndomain_out: {domain_out.domain_dict} "
+            )
 
     @property
     def whiten(self):
