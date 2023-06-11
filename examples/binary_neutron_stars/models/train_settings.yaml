@@ -1,0 +1,137 @@
+data:
+  waveform_dataset_path: /fast/groups/dingo/03_binary_neutron_stars/01_wfd/01_GW170817_lowSpin/waveform_dataset.hdf5
+  svd_size_update: 200
+  train_fraction: 0.98
+  window:
+    type: tukey
+    f_s: 4096
+    T: 128.0
+    roll_off: 0.4
+  domain_update:
+    f_min: 30
+    f_max: 1536
+  detectors:
+  - H1
+  - L1
+  extrinsic_prior:
+    dec: default
+    ra: default
+    geocent_time: bilby.core.prior.Uniform(minimum=-0.10, maximum=0.10)
+    psi: default
+    luminosity_distance: bilby.core.prior.Uniform(minimum=10.0, maximum=100.0)
+  ref_time: 1126259462.391
+  gnpe_time_shifts:
+    kernel: bilby.core.prior.Uniform(minimum=-0.001, maximum=0.001)
+    exact_equiv: true
+  gnpe_chirp:
+    kernel:
+      chirp_mass: bilby.core.prior.Uniform(minimum=0.998, maximum=1.002)
+    order: 0
+  inference_parameters:
+  - chirp_mass
+  - mass_ratio
+  - a_1
+  - a_2
+  - tilt_1
+  - tilt_2
+  - phi_12
+  - phi_jl
+  - theta_jn
+  - luminosity_distance
+  - geocent_time
+  - ra
+  - dec
+  - psi
+model:
+  type: nsf+embedding
+  nsf_kwargs:
+    num_flow_steps: 30
+    base_transform_kwargs:
+      hidden_dim: 512
+      num_transform_blocks: 5
+      activation: elu
+      dropout_probability: 0.0
+      batch_norm: true
+      num_bins: 8
+      base_transform_type: rq-coupling
+  embedding_net_kwargs:
+    output_dim: 128
+    hidden_dims:
+    - 1024
+    - 1024
+    - 1024
+    - 1024
+    - 1024
+    - 1024
+    - 512
+    - 512
+    - 512
+    - 512
+    - 512
+    - 512
+    - 256
+    - 256
+    - 256
+    - 256
+    - 256
+    - 256
+    - 128
+    - 128
+    - 128
+    - 128
+    - 128
+    - 128
+    activation: elu
+    dropout: 0.0
+    batch_norm: true
+    svd:
+      num_training_samples: 50000
+      num_validation_samples: 10000
+      size: 200
+training:
+  stage_0:
+    epochs: 200
+    asd_dataset_path: /fast/groups/dingo/03_binary_neutron_stars/01_wfd/01_GW170817_lowSpin/asds/asd_dataset_bw_inverse-asd-decimation.hdf5
+    freeze_rb_layer: true
+    optimizer:
+      type: adam
+      lr: 0.0002
+    scheduler:
+      type: cosine
+      T_max: 200
+    batch_size: 4096
+  stage_1:
+    epochs: 100
+    asd_dataset_path: /fast/groups/dingo/03_binary_neutron_stars/01_wfd/01_GW170817_lowSpin/asds/asd_dataset_bw_inverse-asd-decimation.hdf5
+    freeze_rb_layer: false
+    optimizer:
+      type: adam
+      lr: 2.0e-05
+    scheduler:
+      type: cosine
+      T_max: 100
+    batch_size: 4096
+  stage_2:
+    epochs: 100
+    asd_dataset_path: /fast/groups/dingo/03_binary_neutron_stars/01_wfd/01_GW170817_lowSpin/asds/asd_dataset_bw_inverse-asd-decimation.hdf5
+    freeze_rb_layer: false
+    optimizer:
+      type: adam
+      lr: 2.0e-05
+    scheduler:
+      type: cosine
+      T_max: 100
+    batch_size: 4096
+local:
+  device: cuda
+  num_workers: 31
+  runtime_limits:
+    max_time_per_run: 36000
+    max_epochs_per_run: 300
+  checkpoint_epochs: 100
+  condor:
+    bid: 200
+    num_cpus: 32
+    memory_cpus: 256000
+    num_gpus: 1
+    memory_gpus: 60000
