@@ -3,6 +3,7 @@ import math
 import time
 from pathlib import Path
 from typing import Optional, Union
+from types import SimpleNamespace
 import sys
 
 import numpy as np
@@ -546,8 +547,11 @@ class GNPESampler(Sampler):
             # Proxies should be sitting in extrinsic_parameters.
             all_params = {**x["extrinsic_parameters"], **samples}
             all_params = {k: torch_detach_to_cpu(v) for k, v in all_params.items()}
-            kernel_log_prob = self._kernel_log_prob(all_params)
-            samples["delta_log_prob_target"] = torch.Tensor(kernel_log_prob)
+            try:
+                kernel_log_prob = self._kernel_log_prob(all_params)
+                samples["delta_log_prob_target"] = torch.Tensor(kernel_log_prob)
+            except NotImplementedError:
+                pass
 
         else:
             # Otherwise we only save the inference parameters, and no log_prob.
@@ -580,3 +584,24 @@ class GNPESampler(Sampler):
             inverse=True,
             as_type="dict",
         )
+
+
+class FixedInitSampler(object):
+    def __init__(self, init_parameters):
+        self.init_parameters = init_parameters
+        # Set unconditional_model=False to avoid that context and event data is
+        # copied to GNPE sampler.
+        self.unconditional_model = (
+            False  # avoids copying of context/data to GNPE sampler
+        )
+
+    @property
+    def model(self):
+        return SimpleNamespace(metadata={"fixed_init_parameters": self.init_parameters})
+
+    def _run_sampler(self, num_samples, *_):
+        sample = {
+            k: v * torch.ones(num_samples) for k, v in self.init_parameters.items()
+        }
+        sample["log_prob"] = torch.ones(num_samples).fill_(torch.nan)
+        return sample

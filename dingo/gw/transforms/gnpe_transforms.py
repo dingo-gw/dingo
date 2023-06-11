@@ -297,19 +297,25 @@ class GNPEChirp(GNPEBase):
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
+
         extrinsic_parameters = sample["extrinsic_parameters"].copy()
 
-        # The relevant parameters could be in either the intrinsic or extrinsic
-        # parameters list. At inference time, we put all GNPE parameters into the
-        # extrinsic parameters list.
-        proxies = self.sample_proxies(
-            {**sample["parameters"], **sample["extrinsic_parameters"]}
-        )
-        extrinsic_parameters.update(proxies)
-        sample["extrinsic_parameters"] = extrinsic_parameters
-        if self.inference:
-            # if "chirp_mass_trigger" in sample:
-            raise NotImplementedError()
+        # If proxies already exist, use them. Otherwise, sample them. Proxies may
+        # already exist if provided by an unconditional initialization network when
+        # attempting to recover the density from GNPE samples, or when using fixed
+        # initialization parameters.
+        # TODO: Reimplement in GNPEBase.sample_proxies().
+        if set(self.proxy_list).issubset(extrinsic_parameters.keys()):
+            proxies = {p: extrinsic_parameters[p] for p in self.proxy_list}
+        else:
+            # The relevant parameters could be in either the intrinsic or extrinsic
+            # parameters list. At inference time, we put all GNPE parameters into the
+            # extrinsic parameters list.
+            proxies = self.sample_proxies(
+                {**sample["parameters"], **sample["extrinsic_parameters"]}
+            )
+            extrinsic_parameters.update(proxies)
+            sample["extrinsic_parameters"] = extrinsic_parameters
 
         # The only situation where we would expect to not have a waveform to transform
         # would be when calculating parameter standardizations, since we just want to

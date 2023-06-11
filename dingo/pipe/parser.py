@@ -224,7 +224,7 @@ def create_parser(top_level=True):
     data_gen_pars.add(
         "--trigger-chirp-mass",
         default=None,
-        type=nonestr,
+        type=nonefloat,
         help=(
             "Trigger chirp mass for the event. Used e.g. for initialization of BNS "
             "networks."

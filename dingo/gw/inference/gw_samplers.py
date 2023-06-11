@@ -334,24 +334,33 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
 
         # transforms for gnpe loop, to be applied after sampling step:
         #   * de-standardization of parameters
-        #   * post correction for geocent time (required for gnpe with exact equivariance)
+        #   * post correction for geocent time (required for gnpe_time with exact
+        #     equivariance)
         #   * computation of detectortimes from parameters (required for next gnpe
-        #       iteration)
-        self.transform_gnpe_loop_post = Compose(
-            [
-                SelectStandardizeRepackageParameters(
-                    {"inference_parameters": self.inference_parameters},
-                    data_settings["standardization"],
-                    inverse=True,
-                    as_type="dict",
-                ),
-                PostCorrectGeocentTime(),
-                CopyToExtrinsicParameters(
-                    "ra", "dec", "geocent_time", "chirp_mass", "mass_ratio", "phase"
-                ),
-                GetDetectorTimes(ifo_list, data_settings["ref_time"]),
-            ]
+        #     iteration)
+        transform_gnpe_loop_post = [
+            SelectStandardizeRepackageParameters(
+                {"inference_parameters": self.inference_parameters},
+                data_settings["standardization"],
+                inverse=True,
+                as_type="dict",
+            )
+        ]
+        if gnpe_time_settings:
+            transform_gnpe_loop_post.append(PostCorrectGeocentTime())
+
+        transform_gnpe_loop_post.append(
+            CopyToExtrinsicParameters(
+                "ra", "dec", "geocent_time", "chirp_mass", "mass_ratio", "phase"
+            )
         )
+
+        if gnpe_time_settings:
+            transform_gnpe_loop_post.append(
+                GetDetectorTimes(ifo_list, data_settings["ref_time"])
+            )
+
+        self.transform_gnpe_loop_post = Compose(transform_gnpe_loop_post)
 
     def _initialize_transforms(self):
         """

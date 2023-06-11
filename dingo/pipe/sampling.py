@@ -6,7 +6,9 @@ from pathlib import Path
 from bilby_pipe.input import Input
 from bilby_pipe.utils import parse_args, logger, convert_string_to_dict
 
+from dingo.core.samplers import FixedInitSampler
 from dingo.core.models import PosteriorModel
+from dingo.core.transforms import Copy
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
 from dingo.gw.inference.inference_pipeline import prepare_log_prob
@@ -116,7 +118,7 @@ class SamplingInput(Input):
             init_model = PosteriorModel(
                 self.model_init, device=self.device, load_training_info=False
             )
-            init_sampler = GWSampler(model=init_model)
+            init_sampler = self._get_init_sampler(init_model)
             self.dingo_sampler = GWSamplerGNPE(
                 model=model,
                 init_sampler=init_sampler,
@@ -129,6 +131,62 @@ class SamplingInput(Input):
 
         self.dingo_sampler.context = self.context
         self.dingo_sampler.event_metadata = self.event_metadata
+
+    def _get_init_sampler(self, init_model: PosteriorModel):
+        """
+        Get a sampler for GNPE initialization based on init_model. In the simplest
+        case, this just returns GWSampler(model=init_model).
+
+        In some cases, init_model is a GNPE model itself, e.g., when GNPE is used for
+        prior-conditioning on a fixed chirp mass. In this case, the init_sampler is a
+        GNPE sampler itself, run with one iteration, and conditioned on proxies.
+
+        Parameters
+        ----------
+        init_model: PosteriorModel
+            Model for GNPE initialization
+
+        Returns
+        -------
+        sampler: Union[GWSampler, GWSamplerGNPE]
+            Sampler for GNPE initialization
+        """
+        # check if init_model has gnpe settings
+        data_settings = init_model.metadata["train_settings"]["data"]
+        gnpe_keys = [k for k in data_settings.keys() if k.startswith("gnpe_")]
+
+        if len(gnpe_keys) == 0:
+            return GWSampler(model=init_model)
+
+        fixed_init_parameters = {}
+        additional_post_transforms = []
+        if "gnpe_chirp" in gnpe_keys:
+            fixed_init_parameters["chirp_mass_proxy"] = self.trigger_chirp_mass
+            gnpe_keys.remove("gnpe_chirp")
+            if "chirp_mass" not in data_settings["inference_parameters"]:
+                additional_post_transforms.append(
+                    Copy(
+                        "extrinsic_parameters/chirp_mass_proxy", "parameters/chirp_mass"
+                    )
+                )
+
+        if len(gnpe_keys) > 0:
+            raise ValueError(
+                f"Unsupported gnpe keys {gnpe_keys} for fixed initialization."
+            )
+
+        fixed_init_sampler = FixedInitSampler(fixed_init_parameters)
+        print(
+            f"Using a GNPE initialization network with fixed conditioning proxies "
+            f"{fixed_init_parameters}."
+        )
+
+        init_sampler = GWSamplerGNPE(
+            model=init_model, init_sampler=fixed_init_sampler, num_iterations=1
+        )
+        init_sampler.transform_gnpe_loop_post.transforms += additional_post_transforms
+
+        return init_sampler
 
     @property
     def density_recovery_settings(self):

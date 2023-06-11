@@ -31,8 +31,8 @@ class HeterodynePhase(object):
         Parameters
         ----------
         input_sample : dict
-            Values of sample["waveform"] should be arrays containing waveforms to be
-            transformed.
+            sample["waveform"]: Dict with values being arrays containing waveforms,
+            or torch Tensor with the waveform.
             sample["parameters"] contains parameters of the binary system. Required for
             chirp mass (and mass ratio if self.order == 2).
 
@@ -43,18 +43,14 @@ class HeterodynePhase(object):
         sample = input_sample.copy()
         waveform = sample["waveform"]
         parameters = sample["parameters"]
-        sample["waveform"] = {
-            k: factor_fiducial_waveform(
-                v,
-                self.domain,
-                parameters["chirp_mass"],
-                mass_ratio=parameters.get("mass_ratio"),
-                order=self.order,
-                inverse=self.inverse,
-            )
-            for k, v in waveform.items()
-        }
-
+        sample["waveform"] = factor_fiducial_waveform(
+            waveform,
+            self.domain,
+            parameters["chirp_mass"],
+            mass_ratio=parameters.get("mass_ratio"),
+            order=self.order,
+            inverse=self.inverse,
+        )
         return sample
 
 
