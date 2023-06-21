@@ -750,15 +750,8 @@ class WaveformGenerator:
                 assert LS.SimInspiralImplementedTDApproximants(self.approximant)
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: TD)
-                if self.approximant_str == "SEOBNRv4EHM_opt" or self.approximant_str == "SEOBNRv4HM" or self.approximant_str == "NRsur7dq4":
-                    if self.approximant_str == "SEOBNRv4EHM_opt":
-                        parameters_lal, iota = self._convert_parameters_to_lal_frame(
-                            {**parameters, "f_ref": self.f_ref},
-                            lal_target_function="SimIMRSpinAlignedEOBModesEcc_opt",
-                        )
-                        m1, m2, s1z, s2z = parameters_lal[1], parameters_lal[2], parameters_lal[5], parameters_lal[6]
-
-                    elif self.approximant_str == "SEOBNRv4HM":
+                if self.approximant_str == "SEOBNRv4HM" or self.approximant_str == "NRsur7dq4":
+                    if self.approximant_str == "SEOBNRv4HM":
                         parameters_lal, iota = self._convert_parameters_to_lal_frame(
                             {**parameters, "f_ref": self.f_ref},
                             lal_target_function="SimIMRSpinAlignedEOBModes",
@@ -778,7 +771,7 @@ class WaveformGenerator:
                         extra_time_fraction,
                         t_chirp,
                         t_extra,
-                    ) = wfg_utils.get_aligned_spin_f_start(
+                    ) = wfg_utils.get_stepped_back_f_start(
                         self.domain.f_min,
                         m1,
                         m2,
@@ -786,16 +779,15 @@ class WaveformGenerator:
                         s2z
                     )
                     self.f_start = f_start
-
+                
                 hlm_td, iota = self.generate_TD_modes_L0(parameters)
 
                 # Step 2: Transform modes to target domain.
                 # This requires tapering of TD modes, and FFT to transform to FD.
                 
                 # Tapering is different depending on if you use aligned spin or precessing waveforms
-                if self.approximant_str == "SEOBNRv4EHM_opt" or self.approximant_str == "SEOBNRv4HM" or self.approximant_str == "NRsur7dq4":
-                    self.f_start = None
-                    wfg_utils.taper_aligned_spin_td_modes_in_place(
+                if self.approximant_str == "SEOBNRv4HM" or self.approximant_str == "NRsur7dq4":
+                    wfg_utils.taper_stepped_back_waveform_modes(
                         hlm_td,
                         m1,
                         m2,

@@ -286,7 +286,7 @@ def taper_aligned_spin(h, m1, m2, extra_time_fraction, t_chirp, t_extra, f_min):
 
     return h_real, h_imag
 
-def get_aligned_spin_f_start(f_min, m1, m2, S1z, S2z):
+def get_stepped_back_f_start(f_min, m1, m2, S1z, S2z):
     extra_time_fraction = 0.1 # fraction of waveform duration to add as extra time for tapering
     extra_cycles = 3.0 # more extra time measured in cycles at the starting frequency
 
@@ -318,7 +318,7 @@ def get_aligned_spin_f_start(f_min, m1, m2, S1z, S2z):
     
     return f_start, extra_time_fraction, t_chirp, t_extra
 
-def taper_aligned_spin_td_modes_in_place(hlm_td, m1, m2, extra_time_fraction, t_chirp, t_extra, f_min):
+def taper_stepped_back_waveform_modes(hlm_td, m1, m2, extra_time_fraction, t_chirp, t_extra, f_min):
     for (l, m), hlm in hlm_td.copy().items():
         h_real, h_imag = taper_aligned_spin(hlm, m1, m2, extra_time_fraction, t_chirp, t_extra, f_min)
         strain = lal.CreateCOMPLEX16TimeSeries(f"h_{l,m}", hlm.epoch, hlm.f0, hlm.deltaT, hlm.sampleUnits, h_real.data.length)
