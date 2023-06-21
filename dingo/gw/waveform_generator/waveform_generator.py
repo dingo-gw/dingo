@@ -202,7 +202,7 @@ class WaveformGenerator:
                         f"Evaluating the waveform failed with error: {e}\n"
                         f"The parameters were {parameters_generator}\n"
                     )
-                    pol_nan = np.ones(len(self.domain)) * np.nan
+                    pol_nan = np.ones(len(self.domain), dtype=complex) * np.nan
                     wf_dict = {"h_plus": pol_nan, "h_cross": pol_nan}
                 else:
                     raise
