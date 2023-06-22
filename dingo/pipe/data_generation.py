@@ -192,7 +192,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.tukey_roll_off = pm.metadata["train_settings"]["data"]["window"]["roll_off"]
 
         self.asd = injection_generator.asd
-        self.strain_data = injection_generator.injection(self.injection_parameters)
+        self.strain_data = injection_generator.injection(self.injection_parameters, seed=args.injection_random_seed)
 
     def save_hdf5(self):
         """Save frequency-domain strain and ASDs as DingoDataset HDF5 format."""

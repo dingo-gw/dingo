@@ -447,6 +447,12 @@ def create_parser(top_level=True):
             "if there are multiple asds stored will select a random one"
         ),
     )
+    injection_parser.add(
+        "--injection-random-seed",
+        type=noneint,
+        default=None,
+        help="random seed to use when generating noise realization(s) from PSD",
+    )
     # injection_parser.add(
     #     "--injection-numbers",
     #     action="append",
