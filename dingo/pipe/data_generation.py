@@ -172,15 +172,34 @@ class DataGenerationInput(BilbyDataGenerationInput):
 
     def generate_injection(self, args): 
         """ Generate injection consistent with trained dingo model """
+        from dingo.gw.data.data_preparation import load_raw_data, data_to_domain, build_domain_from_model_metadata, parse_settings_for_raw_data
 
+        # loading posterior model for which we want to generate injections
         pm = PosteriorModel(model_filename=args.model, device="cpu")
         injection_generator = Injection.from_posterior_model_metadata(pm.metadata)
         
-        asd_dataset = ASDDataset(args.asd_dataset)
-        randint = np.random.randint(0, [v for v in asd_dataset.length_info.values()][0])
-        injection_generator.asd = {k: v[randint] for k, v in asd_dataset.asds.items() \
-                                   if k in [ifo.name for ifo in injection_generator.ifo_list]}
-        injection_generator.t_ref = args.trigger_time
+        # selecting PSD 
+        if args.use_psd_of_trigger:
+            trigger_time = float(args.trigger_time)
+            domain = build_domain_from_model_metadata(pm.metadata)
+            settings_raw_data = parse_settings_for_raw_data(pm.metadata, args.psd_length, args.psd_fractional_overlap)
+            raw_data = load_raw_data(trigger_time, settings=settings_raw_data)
+
+            # Converting data to frequency series
+            event_data = data_to_domain(
+                raw_data,
+                settings_raw_data,
+                domain,
+                window=pm.metadata["train_settings"]["data"]["window"],
+            )
+            injection_generator.asd = event_data["asds"]
+        else:
+            asd_dataset = ASDDataset(args.asd_dataset)
+            randint = np.random.randint(0, [v for v in asd_dataset.length_info.values()][0])
+            injection_generator.asd = {k: v[randint] for k, v in asd_dataset.asds.items() \
+                                    if k in [ifo.name for ifo in injection_generator.ifo_list]}
+
+        injection_generator.t_ref = trigger_time
 
         #NOTE is this right? it gives 2*f_max=2048, but should it be 4096??
         self.detectors = [ifo.name for ifo in injection_generator.ifo_list]
@@ -222,7 +241,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
             # PSD and strain data.
             data = {"waveform": {}, "asds": {}}  # TODO: Rename these keys.
             for ifo in self.interferometers:
-
                 strain = ifo.strain_data.frequency_domain_strain
                 frequency_array = ifo.strain_data.frequency_array
                 asd = ifo.power_spectral_density.get_amplitude_spectral_density_array(
