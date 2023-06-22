@@ -421,10 +421,13 @@ def create_parser(top_level=True):
     # )
     injection_parser_input = injection_parser.add_mutually_exclusive_group()
     injection_parser_input.add(
-        "--injection-dict",
+        "--injection-parameters",
         type=nonestr,
         default=None,
-        help="A single injection dictionary given in the ini file",
+        help=(
+            "A single injection dictionary given in the ini file. Will use dingo.gw.injection to generate"
+            "waveform data" 
+        ),
     )
     injection_parser_input.add(
         "--injection-file",
@@ -433,6 +436,15 @@ def create_parser(top_level=True):
         help=(
             "Injection file to use. See `bilby_pipe_create_injection_file --help`"
             " for supported formats"
+        ),
+    )
+    injection_parser.add(
+        "--asd-dataset",
+        type=nonestr,
+        default=None,
+        help=(
+            "path to the ASDDataset file which will be used for the injection"
+            "if there are multiple asds stored will select a random one"
         ),
     )
     # injection_parser.add(

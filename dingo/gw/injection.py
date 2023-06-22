@@ -328,7 +328,7 @@ class Injection(GWSignal):
             t_ref=metadata["train_settings"]["data"]["ref_time"],
         )
 
-    def injection(self, theta):
+    def injection(self, theta, seed=0):
         """
         Generate an injection based on specified parameters.
 
@@ -365,6 +365,7 @@ class Injection(GWSignal):
             self.whiten = False
 
         data = {}
+        np.random.seed(seed)
         for ifo, s in signal["waveform"].items():
             noise = (
                 (np.random.randn(len(s)) + 1j * np.random.randn(len(s)))
