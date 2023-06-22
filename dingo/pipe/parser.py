@@ -472,14 +472,15 @@ def create_parser(top_level=True):
     #         "Repeated entries will be ignored."
     #     ),
     # )
-    # injection_parser.add(
-    #     "--injection-waveform-approximant",
-    #     type=nonestr,
-    #     default=None,
-    #     help="The name of the waveform approximant to use to create injections. "
-    #     "If none is specified, then the `waveform-approximant` will be used"
-    #     "as the `injection-waveform-approximant`.",
-    # )
+    injection_parser.add(
+        "--injection-waveform-approximant",
+        type=nonestr,
+        default=None,
+        help="The name of the waveform approximant to use to create injections. "
+        "If none is specified, then the waveform consistent with the network"
+        "training will be used. Allowed waveform approximants are those implemented"
+        "in lalsimulation"
+    )
     # injection_parser.add(
     #     "--injection-waveform-arguments",
     #     type=nonestr,

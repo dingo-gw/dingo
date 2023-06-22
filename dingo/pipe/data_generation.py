@@ -7,6 +7,7 @@ from bilby_pipe.main import parse_args
 from bilby_pipe.utils import logger, convert_string_to_dict
 from bilby_pipe.data_generation import DataGenerationInput as BilbyDataGenerationInput
 import numpy as np
+import lalsimulation as LS
 
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import FrequencyDomain
@@ -108,7 +109,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # self.mode_array = args.mode_array
         # self.waveform_arguments_dict = args.waveform_arguments_dict
         # self.numerical_relativity_file = args.numerical_relativity_file
-        # self.injection_waveform_approximant = args.injection_waveform_approximant
         # self.frequency_domain_source_model = args.frequency_domain_source_model
         # self.conversion_function = args.conversion_function
         # self.generation_function = args.generation_function
@@ -199,6 +199,15 @@ class DataGenerationInput(BilbyDataGenerationInput):
             injection_generator.asd = {k: v[randint] for k, v in asd_dataset.asds.items() \
                                     if k in [ifo.name for ifo in injection_generator.ifo_list]}
 
+        # allowing for changing waveform approximant injection 
+        if args.injection_waveform_approximant is not None:
+            injection_generator.waveform_generator.approximant = LS.GetApproximantFromString(args.injection_waveform_approximant)
+            injection_generator.waveform_generator.approximant_str = args.injection_waveform_approximant
+            self.injection_waveform_approximant = args.injection_waveform_approximant
+        else:
+            self.injection_waveform_approximant = injection_generator.waveform_generator.approximant_str
+
+        # the trigger time determines how the waveform is injected based on the rotation of earth
         injection_generator.t_ref = trigger_time
 
         #NOTE is this right? it gives 2*f_max=2048, but should it be 4096??
@@ -232,6 +241,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
             dataset = EventDataset(
                 dictionary={
                     "data": self.strain_data,
+                    "injection_waveform_approximant": self.injection_waveform_approximant,
                     "injection_parameters": self.injection_parameters,
                     "settings": settings,
                 }
