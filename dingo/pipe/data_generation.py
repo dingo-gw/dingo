@@ -15,6 +15,13 @@ from dingo.pipe.parser import create_parser
 from dingo.gw.injection import Injection
 from dingo.core.models import PosteriorModel
 from dingo.gw.noise.asd_dataset import ASDDataset
+from dingo.gw.data.data_preparation import (
+    load_raw_data,
+    data_to_domain,
+    build_domain_from_model_metadata,
+    parse_settings_for_raw_data,
+)
+
 
 logger.name = "dingo_pipe"
 
@@ -173,13 +180,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
 
     def generate_injection(self, args):
         """Generate injection consistent with trained dingo model"""
-        from dingo.gw.data.data_preparation import (
-            load_raw_data,
-            data_to_domain,
-            build_domain_from_model_metadata,
-            parse_settings_for_raw_data,
-        )
-
         # loading posterior model for which we want to generate injections
         pm = PosteriorModel(model_filename=args.model, device="cpu")
         injection_generator = Injection.from_posterior_model_metadata(pm.metadata)
@@ -229,9 +229,8 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # the trigger time determines how the waveform is injected based on the rotation of earth
         injection_generator.t_ref = trigger_time
 
-        # NOTE is this right? it gives 2*f_max=2048, but should it be 4096??
         self.detectors = [ifo.name for ifo in injection_generator.ifo_list]
-        self.sampling_frequency = injection_generator.data_domain.sampling_rate
+        self.sampling_frequency = injection_generator.waveform_generator.domain.sampling_rate
         self.duration = injection_generator.data_domain.duration
         self.minimum_frequency = injection_generator.data_domain.f_min
         self.maximum_frequency = injection_generator.data_domain.f_max
