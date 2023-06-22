@@ -67,7 +67,7 @@ def create_parser(top_level=True):
     calibration_parser = parser.add_argument_group(
         "Calibration arguments",
         description="Which calibration model and settings to use. Calibration "
-                    "uncertainty is marginalizaed over during importance sampling.",
+        "uncertainty is marginalizaed over during importance sampling.",
     )
     calibration_parser.add(
         "--calibration-model",
@@ -95,8 +95,10 @@ def create_parser(top_level=True):
         "--spline-calibration-curves",
         type=int,
         default=1000,
-        help=("Number of calibration curves to use in marginalizing over calibration "
-              "uncertainty"),
+        help=(
+            "Number of calibration curves to use in marginalizing over calibration "
+            "uncertainty"
+        ),
     )
     #
     # calibration_parser.add(
@@ -151,9 +153,9 @@ def create_parser(top_level=True):
             "--importance-sampling-generation",
             action="store_true",
             help="Whether to prepare data based on the updated importance sampling "
-                 "settings rather than network settings. This is used internally for "
-                 "data generation, when preparing different data for the importance "
-                 "sampling stage.",
+            "settings rather than network settings. This is used internally for "
+            "data generation, when preparing different data for the importance "
+            "sampling stage.",
         )
 
     data_gen_pars = parser.add_argument_group(
@@ -426,7 +428,7 @@ def create_parser(top_level=True):
         default=None,
         help=(
             "A single injection dictionary given in the ini file. Will use dingo.gw.injection to generate"
-            "waveform data" 
+            "waveform data"
         ),
     )
     injection_parser_input.add(
@@ -479,7 +481,7 @@ def create_parser(top_level=True):
         help="The name of the waveform approximant to use to create injections. "
         "If none is specified, then the waveform consistent with the network"
         "training will be used. Allowed waveform approximants are those implemented"
-        "in lalsimulation"
+        "in lalsimulation",
     )
     # injection_parser.add(
     #     "--injection-waveform-arguments",
@@ -598,9 +600,7 @@ def create_parser(top_level=True):
     submission_parser.add(
         "--extra-lines",
         action="append",
-        help=(
-            "List of additional lines to include for all HTCondor submissions."
-        ),
+        help=("List of additional lines to include for all HTCondor submissions."),
     )
     submission_parser.add(
         "--simple-submission",
@@ -1271,9 +1271,7 @@ def create_parser(top_level=True):
         "--importance-sample",
         action=StoreBoolean,
         default=True,
-        help=(
-            "Whether to perform importance sampling on result. (Default: True)"
-        ),
+        help=("Whether to perform importance sampling on result. (Default: True)"),
     )
     sampler_parser.add(
         "--importance-sampling-settings",
