@@ -1,6 +1,6 @@
 import os
 import sys
-import ast 
+import ast
 
 from bilby_pipe.input import Input
 from bilby_pipe.main import parse_args
@@ -32,7 +32,9 @@ class DataGenerationInput(BilbyDataGenerationInput):
             # bilby_pipe_version=get_version_information(),
         )
         self.injection_parameters = ast.literal_eval(args.injection_parameters)
-        self.injection_parameters = {k.replace("-", "_"):v for k,v in self.injection_parameters.items()}
+        self.injection_parameters = {
+            k.replace("-", "_"): v for k, v in self.injection_parameters.items()
+        }
 
         # Admin arguments
         self.ini = args.ini
@@ -169,20 +171,26 @@ class DataGenerationInput(BilbyDataGenerationInput):
             args.injection_waveform_arguments = None
             self.create_data(args)
 
-
-    def generate_injection(self, args): 
-        """ Generate injection consistent with trained dingo model """
-        from dingo.gw.data.data_preparation import load_raw_data, data_to_domain, build_domain_from_model_metadata, parse_settings_for_raw_data
+    def generate_injection(self, args):
+        """Generate injection consistent with trained dingo model"""
+        from dingo.gw.data.data_preparation import (
+            load_raw_data,
+            data_to_domain,
+            build_domain_from_model_metadata,
+            parse_settings_for_raw_data,
+        )
 
         # loading posterior model for which we want to generate injections
         pm = PosteriorModel(model_filename=args.model, device="cpu")
         injection_generator = Injection.from_posterior_model_metadata(pm.metadata)
-        
-        # selecting PSD 
+
+        # selecting PSD
         if args.use_psd_of_trigger:
             trigger_time = float(args.trigger_time)
             domain = build_domain_from_model_metadata(pm.metadata)
-            settings_raw_data = parse_settings_for_raw_data(pm.metadata, args.psd_length, args.psd_fractional_overlap)
+            settings_raw_data = parse_settings_for_raw_data(
+                pm.metadata, args.psd_length, args.psd_fractional_overlap
+            )
             raw_data = load_raw_data(trigger_time, settings=settings_raw_data)
 
             # Converting data to frequency series
@@ -195,32 +203,47 @@ class DataGenerationInput(BilbyDataGenerationInput):
             injection_generator.asd = event_data["asds"]
         else:
             asd_dataset = ASDDataset(args.asd_dataset)
-            randint = np.random.randint(0, [v for v in asd_dataset.length_info.values()][0])
-            injection_generator.asd = {k: v[randint] for k, v in asd_dataset.asds.items() \
-                                    if k in [ifo.name for ifo in injection_generator.ifo_list]}
+            randint = np.random.randint(
+                0, [v for v in asd_dataset.length_info.values()][0]
+            )
+            injection_generator.asd = {
+                k: v[randint]
+                for k, v in asd_dataset.asds.items()
+                if k in [ifo.name for ifo in injection_generator.ifo_list]
+            }
 
-        # allowing for changing waveform approximant injection 
+        # allowing for changing waveform approximant injection
         if args.injection_waveform_approximant is not None:
-            injection_generator.waveform_generator.approximant = LS.GetApproximantFromString(args.injection_waveform_approximant)
-            injection_generator.waveform_generator.approximant_str = args.injection_waveform_approximant
+            injection_generator.waveform_generator.approximant = (
+                LS.GetApproximantFromString(args.injection_waveform_approximant)
+            )
+            injection_generator.waveform_generator.approximant_str = (
+                args.injection_waveform_approximant
+            )
             self.injection_waveform_approximant = args.injection_waveform_approximant
         else:
-            self.injection_waveform_approximant = injection_generator.waveform_generator.approximant_str
+            self.injection_waveform_approximant = (
+                injection_generator.waveform_generator.approximant_str
+            )
 
         # the trigger time determines how the waveform is injected based on the rotation of earth
         injection_generator.t_ref = trigger_time
 
-        #NOTE is this right? it gives 2*f_max=2048, but should it be 4096??
+        # NOTE is this right? it gives 2*f_max=2048, but should it be 4096??
         self.detectors = [ifo.name for ifo in injection_generator.ifo_list]
-        self.sampling_frequency = injection_generator.data_domain.sampling_rate 
+        self.sampling_frequency = injection_generator.data_domain.sampling_rate
         self.duration = injection_generator.data_domain.duration
         self.minimum_frequency = injection_generator.data_domain.f_min
         self.maximum_frequency = injection_generator.data_domain.f_max
         self.window_type = pm.metadata["train_settings"]["data"]["window"]["type"]
-        self.tukey_roll_off = pm.metadata["train_settings"]["data"]["window"]["roll_off"]
+        self.tukey_roll_off = pm.metadata["train_settings"]["data"]["window"][
+            "roll_off"
+        ]
 
         self.asd = injection_generator.asd
-        self.strain_data = injection_generator.injection(self.injection_parameters, seed=args.injection_random_seed)
+        self.strain_data = injection_generator.injection(
+            self.injection_parameters, seed=args.injection_random_seed
+        )
 
     def save_hdf5(self):
         """Save frequency-domain strain and ASDs as DingoDataset HDF5 format."""
