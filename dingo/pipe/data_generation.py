@@ -59,9 +59,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
             }
             self.generate_injection(args)
             return
-        else:
-            self.injection_dict = None
-            self.injection_dict = None
 
         # Prior arguments
         # self.reference_frame = args.reference_frame
