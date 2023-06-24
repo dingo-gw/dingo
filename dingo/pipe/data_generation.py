@@ -34,15 +34,10 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.meta_data = dict(
             command_line_args=args.__dict__,
             unknown_command_line_args=unknown_args,
-            injection_parameters=args.injection_parameters,
+            injection_dict=args.injection_dict,
             # bilby_version=bilby.__version__,
             # bilby_pipe_version=get_version_information(),
         )
-        if args.injection_parameters is not None:
-            self.injection_parameters = ast.literal_eval(args.injection_parameters)
-            self.injection_parameters = {
-                k.replace("-", "_"): v for k, v in self.injection_parameters.items()
-            }
 
         # Admin arguments
         self.ini = args.ini
@@ -57,9 +52,16 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.label = args.label
 
         # If creating an injection no need for real data generation
-        if self.injection_parameters is not None:
+        if args.injection_dict is not None:
+            self.injection_dict = ast.literal_eval(args.injection_dict)
+            self.injection_dict = {
+                k.replace("-", "_"): v for k, v in self.injection_dict.items()
+            }
             self.generate_injection(args)
             return
+        else:
+            self.injection_dict = None
+            self.injection_dict = None
 
         # Prior arguments
         # self.reference_frame = args.reference_frame
@@ -174,7 +176,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
             args.injection = False
             args.injection_numbers = None
             args.injection_file = None
-            args.injection_parameters = None
+            args.injection_dict = None
             args.gaussian_noise = False
             args.injection_waveform_arguments = None
             self.create_data(args)
@@ -242,7 +244,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
 
         self.asd = injection_generator.asd
         self.strain_data = injection_generator.injection(
-            self.injection_parameters, seed=args.injection_random_seed
+            self.injection_dict, seed=args.injection_random_seed
         )
 
     def save_hdf5(self):
@@ -265,7 +267,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
                 dictionary={
                     "data": self.strain_data,
                     "injection_waveform_approximant": self.injection_waveform_approximant,
-                    "injection_parameters": self.injection_parameters,
+                    "injection_dict": self.injection_dict,
                     "settings": settings,
                 }
             )
