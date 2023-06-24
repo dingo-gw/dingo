@@ -41,10 +41,11 @@ class DataGenerationInput(BilbyDataGenerationInput):
             # bilby_version=bilby.__version__,
             # bilby_pipe_version=get_version_information(),
         )
-        self.injection_parameters = ast.literal_eval(args.injection_parameters)
-        self.injection_parameters = {
-            k.replace("-", "_"): v for k, v in self.injection_parameters.items()
-        }
+        if self.injection_parameters is not None:
+            self.injection_parameters = ast.literal_eval(args.injection_parameters)
+            self.injection_parameters = {
+                k.replace("-", "_"): v for k, v in self.injection_parameters.items()
+            }
 
         # Admin arguments
         self.ini = args.ini
