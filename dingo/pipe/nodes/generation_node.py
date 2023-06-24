@@ -22,7 +22,7 @@ class GenerationNode(BilbyGenerationNode):
         super().setup_arguments(**kwargs)
         if self.importance_sampling:
             self.arguments.add_flag("importance-sampling-generation")
-
+        
     @property
     def job_name(self):
         flag = "_IS" if self.importance_sampling else ""

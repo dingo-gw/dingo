@@ -1,14 +1,27 @@
 import os
 import sys
+import ast
 
 from bilby_pipe.input import Input
 from bilby_pipe.main import parse_args
 from bilby_pipe.utils import logger, convert_string_to_dict
 from bilby_pipe.data_generation import DataGenerationInput as BilbyDataGenerationInput
+import numpy as np
+import lalsimulation as LS
 
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import FrequencyDomain
 from dingo.pipe.parser import create_parser
+from dingo.gw.injection import Injection
+from dingo.core.models import PosteriorModel
+from dingo.gw.noise.asd_dataset import ASDDataset
+from dingo.gw.data.data_preparation import (
+    load_raw_data,
+    data_to_domain,
+    build_domain_from_model_metadata,
+    parse_settings_for_raw_data,
+)
+
 
 logger.name = "dingo_pipe"
 
@@ -21,11 +34,14 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.meta_data = dict(
             command_line_args=args.__dict__,
             unknown_command_line_args=unknown_args,
-            injection_parameters=None,
+            injection_parameters=args.injection_parameters,
             # bilby_version=bilby.__version__,
             # bilby_pipe_version=get_version_information(),
         )
-        self.injection_parameters = None
+        self.injection_parameters = ast.literal_eval(args.injection_parameters)
+        self.injection_parameters = {
+            k.replace("-", "_"): v for k, v in self.injection_parameters.items()
+        }
 
         # Admin arguments
         self.ini = args.ini
@@ -38,6 +54,11 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # Naming arguments
         self.outdir = args.outdir
         self.label = args.label
+
+        # If creating an injection no need for real data generation
+        if self.injection_parameters is not None:
+            self.generate_injection(args)
+            return
 
         # Prior arguments
         # self.reference_frame = args.reference_frame
@@ -97,7 +118,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # self.mode_array = args.mode_array
         # self.waveform_arguments_dict = args.waveform_arguments_dict
         # self.numerical_relativity_file = args.numerical_relativity_file
-        # self.injection_waveform_approximant = args.injection_waveform_approximant
         # self.frequency_domain_source_model = args.frequency_domain_source_model
         # self.conversion_function = args.conversion_function
         # self.generation_function = args.generation_function
@@ -149,88 +169,176 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # self.plot_injection = args.plot_injection
 
         if create_data:
-            # Added for dingo so that create_data runs. TODO: enable injections
+            # TODO what happens if we remove this??
             args.injection = False
             args.injection_numbers = None
             args.injection_file = None
-            args.injection_dict = None
+            args.injection_parameters = None
             args.gaussian_noise = False
             args.injection_waveform_arguments = None
-
             self.create_data(args)
+
+    def generate_injection(self, args):
+        """Generate injection consistent with trained dingo model"""
+        # loading posterior model for which we want to generate injections
+        pm = PosteriorModel(model_filename=args.model, device="cpu")
+        injection_generator = Injection.from_posterior_model_metadata(pm.metadata)
+
+        # selecting PSD
+        if args.use_psd_of_trigger:
+            trigger_time = float(args.trigger_time)
+            domain = build_domain_from_model_metadata(pm.metadata)
+            settings_raw_data = parse_settings_for_raw_data(
+                pm.metadata, args.psd_length, args.psd_fractional_overlap
+            )
+            raw_data = load_raw_data(trigger_time, settings=settings_raw_data)
+
+            # Converting data to frequency series
+            event_data = data_to_domain(
+                raw_data,
+                settings_raw_data,
+                domain,
+                window=pm.metadata["train_settings"]["data"]["window"],
+            )
+            injection_generator.asd = event_data["asds"]
+        else:
+            asd_dataset = ASDDataset(args.asd_dataset)
+            randint = np.random.randint(
+                0, [v for v in asd_dataset.length_info.values()][0]
+            )
+            injection_generator.asd = {
+                k: v[randint]
+                for k, v in asd_dataset.asds.items()
+                if k in [ifo.name for ifo in injection_generator.ifo_list]
+            }
+
+        # allowing for changing waveform approximant injection
+        if args.injection_waveform_approximant is not None:
+            injection_generator.waveform_generator.approximant = (
+                LS.GetApproximantFromString(args.injection_waveform_approximant)
+            )
+            injection_generator.waveform_generator.approximant_str = (
+                args.injection_waveform_approximant
+            )
+            self.injection_waveform_approximant = args.injection_waveform_approximant
+        else:
+            self.injection_waveform_approximant = (
+                injection_generator.waveform_generator.approximant_str
+            )
+
+        # the trigger time determines how the waveform is injected based on the rotation of earth
+        injection_generator.t_ref = trigger_time
+
+        self.detectors = [ifo.name for ifo in injection_generator.ifo_list]
+        self.sampling_frequency = injection_generator.waveform_generator.domain.sampling_rate
+        self.duration = injection_generator.data_domain.duration
+        self.minimum_frequency = injection_generator.data_domain.f_min
+        self.maximum_frequency = injection_generator.data_domain.f_max
+        self.window_type = pm.metadata["train_settings"]["data"]["window"]["type"]
+        self.tukey_roll_off = pm.metadata["train_settings"]["data"]["window"][
+            "roll_off"
+        ]
+
+        self.asd = injection_generator.asd
+        self.strain_data = injection_generator.injection(
+            self.injection_parameters, seed=args.injection_random_seed
+        )
 
     def save_hdf5(self):
         """Save frequency-domain strain and ASDs as DingoDataset HDF5 format."""
 
-        # PSD and strain data.
-        data = {"waveform": {}, "asds": {}}  # TODO: Rename these keys.
-        for ifo in self.interferometers:
-
-            strain = ifo.strain_data.frequency_domain_strain
-            frequency_array = ifo.strain_data.frequency_array
-            asd = ifo.power_spectral_density.get_amplitude_spectral_density_array(
-                frequency_array
-            )
-
-            # These arrays extend up to self.sampling_frequency. Truncate them to
-            # self.maximum_frequency, and also set the asd to 1.0 below
-            # self.minimum_frequency.
-            domain = FrequencyDomain(
-                f_min=self.minimum_frequency,
-                f_max=self.maximum_frequency,
-                delta_f=1 / self.duration,
-            )
-            strain = domain.update_data(strain)
-            asd = domain.update_data(asd, low_value=1.0)
-
-            # Dingo expects data to have trigger time 0, so we apply a cyclic time shift
-            # by the post-trigger duration.
-            strain = domain.time_translate_data(strain, self.post_trigger_duration)
-
-            # Note that the ASD estimated by the Bilby Interferometer differs ever so
-            # slightly from the ASDs we computed before using pycbc. In addition,
-            # there is no handling of NaNs in the strain data from which the ASD is
-            # estimated.
-
-            data["waveform"][ifo.name] = strain
-            data["asds"][ifo.name] = asd
-
-        # Data conditioning settings.
-        settings = {
-            "time_event": self.trigger_time,
-            "time_buffer": self.post_trigger_duration,
-            "detectors": self.detectors,
-            "f_s": self.sampling_frequency,
-            "T": self.duration,
-            "f_min": self.minimum_frequency,
-            "f_max": self.maximum_frequency,
-            "window_type": "tukey",
-            "roll_off": self.tukey_roll_off,
-        }
-
-        for k in [
-            "psd_duration",
-            "psd_dict",
-            "psd_fractional_overlap",
-            "psd_start_time",
-            "psd_method",
-            "channel_dict",
-            "data_dict",
-        ]:
-            try:
-                v = getattr(self, k)
-            except AttributeError:
-                continue
-            if v is not None:
-                settings[k] = v
-
-        dataset = EventDataset(
-            dictionary={
-                "data": data,
-                # "event_metadata": event_metadata,
-                "settings": settings,
+        # if the data is created via an injection, we don't need to convert anything
+        # from the Bilby format
+        if hasattr(self, "strain_data"):
+            settings = {
+                "detectors": self.detectors,
+                "f_s": self.sampling_frequency,
+                "detectors": self.detectors,
+                "T": self.duration,
+                "f_min": self.minimum_frequency,
+                "f_max": self.maximum_frequency,
+                "window_type": self.window_type,
+                "roll_off": self.tukey_roll_off,
             }
-        )
+            dataset = EventDataset(
+                dictionary={
+                    "data": self.strain_data,
+                    "injection_waveform_approximant": self.injection_waveform_approximant,
+                    "injection_parameters": self.injection_parameters,
+                    "settings": settings,
+                }
+            )
+
+        else:
+            # PSD and strain data.
+            data = {"waveform": {}, "asds": {}}  # TODO: Rename these keys.
+            for ifo in self.interferometers:
+                strain = ifo.strain_data.frequency_domain_strain
+                frequency_array = ifo.strain_data.frequency_array
+                asd = ifo.power_spectral_density.get_amplitude_spectral_density_array(
+                    frequency_array
+                )
+
+                # These arrays extend up to self.sampling_frequency. Truncate them to
+                # self.maximum_frequency, and also set the asd to 1.0 below
+                # self.minimum_frequency.
+                domain = FrequencyDomain(
+                    f_min=self.minimum_frequency,
+                    f_max=self.maximum_frequency,
+                    delta_f=1 / self.duration,
+                )
+                strain = domain.update_data(strain)
+                asd = domain.update_data(asd, low_value=1.0)
+
+                # Dingo expects data to have trigger time 0, so we apply a cyclic time shift
+                # by the post-trigger duration.
+                strain = domain.time_translate_data(strain, self.post_trigger_duration)
+
+                # Note that the ASD estimated by the Bilby Interferometer differs ever so
+                # slightly from the ASDs we computed before using pycbc. In addition,
+                # there is no handling of NaNs in the strain data from which the ASD is
+                # estimated.
+
+                data["waveform"][ifo.name] = strain
+                data["asds"][ifo.name] = asd
+
+            # Data conditioning settings.
+            settings = {
+                "time_event": self.trigger_time,
+                "time_buffer": self.post_trigger_duration,
+                "detectors": self.detectors,
+                "f_s": self.sampling_frequency,
+                "T": self.duration,
+                "f_min": self.minimum_frequency,
+                "f_max": self.maximum_frequency,
+                "window_type": "tukey",
+                "roll_off": self.tukey_roll_off,
+            }
+
+            for k in [
+                "psd_duration",
+                "psd_dict",
+                "psd_fractional_overlap",
+                "psd_start_time",
+                "psd_method",
+                "channel_dict",
+                "data_dict",
+            ]:
+                try:
+                    v = getattr(self, k)
+                except AttributeError:
+                    continue
+                if v is not None:
+                    settings[k] = v
+
+            dataset = EventDataset(
+                dictionary={
+                    "data": data,
+                    # "event_metadata": event_metadata,
+                    "settings": settings,
+                }
+            )
+
         dataset.to_file(self.event_data_file)
 
     @property

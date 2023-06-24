@@ -42,7 +42,7 @@ class SamplingNode(AnalysisNode):
         env_vars = []
         # if self.request_cpus > 1:
         #     env_vars.append("OMP_NUM_THREADS=1")
-        if self.disable_hdf5_locking:
+        if getattr(self, "disable_hdf5_locking", None):
             env_vars.append("USE_HDF5_FILE_LOCKING=FALSE")
         if env_vars:
             self.extra_lines.append(f"environment = \"{' '.join(env_vars)}\"")

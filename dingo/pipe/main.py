@@ -2,6 +2,7 @@
 #  Adapted from bilby_pipe. In particular, uses the bilby_pipe data generation code.
 #
 import os
+import ast
 
 from bilby_pipe.input import Input
 from bilby_pipe.main import MainInput as BilbyMainInput
@@ -167,16 +168,8 @@ class MainInput(BilbyMainInput):
         # self.gaussian_noise = args.gaussian_noise
         # self.zero_noise = args.zero_noise
         # self.n_simulation = args.n_simulation
-        #
-        # self.injection = args.injection
-        # self.injection_numbers = args.injection_numbers
         self.injection_file = args.injection_file
-        # self.injection_dict = args.injection_dict
-        # self.injection_waveform_arguments = args.injection_waveform_arguments
-        # self.injection_waveform_approximant = args.injection_waveform_approximant
-        # self.generation_seed = args.generation_seed
-        # if self.injection:
-        #     self.check_injection()
+        self.injection_parameters = ast.literal_eval(args.injection_parameters)
 
         self.importance_sample = args.importance_sample
 
