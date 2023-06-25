@@ -53,6 +53,8 @@ class DataGenerationInput(BilbyDataGenerationInput):
 
         # If creating an injection no need for real data generation
         if args.injection_dict is not None:
+            self.injection_numbers = None
+            self.injection_dict = None
             self.injection_dict = ast.literal_eval(args.injection_dict)
             self.injection_dict = {
                 k.replace("-", "_"): v for k, v in self.injection_dict.items()
