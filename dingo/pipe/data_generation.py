@@ -53,6 +53,9 @@ class DataGenerationInput(BilbyDataGenerationInput):
 
         # If creating an injection no need for real data generation
         if args.injection_dict is not None:
+            if args.asd_dataset is not None:
+                args.use_psd_of_trigger = False
+                logger.info("asd-dataset is set, not using psd of trigger")
             self.injection_numbers = None
             self.injection_dict = None
             self.injection_dict = ast.literal_eval(args.injection_dict)
