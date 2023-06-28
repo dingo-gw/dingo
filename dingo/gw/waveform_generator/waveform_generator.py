@@ -202,16 +202,12 @@ class WaveformGenerator:
             if not catch_waveform_errors:
                 raise
             else:
-                EDOM = e.args[0] == "Internal function call failed: Input domain error"
-                if EDOM:
-                    warnings.warn(
-                        f"Evaluating the waveform failed with error: {e}\n"
-                        f"The parameters were {parameters_lal}\n"
-                    )
-                    pol_nan = np.ones(len(self.domain)) * np.nan
-                    wf_dict = {"h_plus": pol_nan, "h_cross": pol_nan}
-                else:
-                    raise
+                warnings.warn(
+                    f"Evaluating the waveform failed with error: {e}\n"
+                    f"The parameters were {parameters_lal}\n"
+                )
+                pol_nan = np.ones(len(self.domain), dtype=complex) * np.nan
+                wf_dict = {"h_plus": pol_nan, "h_cross": pol_nan}
 
         if self.transform is not None:
             return self.transform(wf_dict)
@@ -1227,7 +1223,10 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 # assert LS.SimInspiralImplementedTDApproximants(self.approximant)
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: TD)
-                hlm_td, iota = self.generate_TD_modes_L0(parameters)
+                try:
+                    hlm_td, iota = self.generate_TD_modes_L0(parameters)
+                except:
+                    return {(2,2): np.ones(generator.domain.sample_frequencies.shape[0], dtype=complex) * np.nan}
 
                 # Step 2: Transform modes to target domain.
                 # This requires tapering of TD modes, and FFT to transform to FD.

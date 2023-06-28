@@ -169,7 +169,9 @@ class MainInput(BilbyMainInput):
         # self.zero_noise = args.zero_noise
         # self.n_simulation = args.n_simulation
         self.injection_file = args.injection_file
-        self.injection_parameters = ast.literal_eval(args.injection_parameters)
+        if args.injection_dict is not None:
+            self.injection_numbers = None
+            self.injection_dict = ast.literal_eval(args.injection_dict)
 
         self.importance_sample = args.importance_sample
 

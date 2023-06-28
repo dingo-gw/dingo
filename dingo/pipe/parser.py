@@ -434,7 +434,7 @@ def create_parser(top_level=True):
     # )
     injection_parser_input = injection_parser.add_mutually_exclusive_group()
     injection_parser_input.add(
-        "--injection-parameters",
+        "--injection-dict",
         type=nonestr,
         default=None,
         help=(
@@ -474,16 +474,16 @@ def create_parser(top_level=True):
         help="random seed to use when generating noise realization(s) from PSD",
     )
     # injection_parser.add(
-    #     "--injection-numbers",
-    #     action="append",
-    #     type=nonestr,
-    #     default=None,
-    #     help=(
-    #         "Specific injections rows to use from the injection_file, e.g. "
-    #         "`injection_numbers=[0,3] selects the zeroth and third row. Can be "
-    #         "a list of slice-syntax values, e.g, [0, 2:4] will produce [0, 2, 3]. "
-    #         "Repeated entries will be ignored."
-    #     ),
+        # "--injection-numbers",
+        # action="append",
+        # type=nonestr,
+        # default=None,
+        # help=(
+            # "Specific injections rows to use from the injection_file, e.g. "
+            # "`injection_numbers=[0,3] selects the zeroth and third row. Can be "
+            # "a list of slice-syntax values, e.g, [0, 2:4] will produce [0, 2, 3]. "
+            # "Repeated entries will be ignored."
+        # ),
     # )
     injection_parser.add(
         "--injection-waveform-approximant",

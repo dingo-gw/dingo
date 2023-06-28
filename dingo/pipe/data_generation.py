@@ -37,15 +37,10 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.meta_data = dict(
             command_line_args=args.__dict__,
             unknown_command_line_args=unknown_args,
-            injection_parameters=args.injection_parameters,
+            injection_dict=args.injection_dict,
             # bilby_version=bilby.__version__,
             # bilby_pipe_version=get_version_information(),
         )
-        if self.injection_parameters is not None:
-            self.injection_parameters = ast.literal_eval(args.injection_parameters)
-            self.injection_parameters = {
-                k.replace("-", "_"): v for k, v in self.injection_parameters.items()
-            }
 
         # Admin arguments
         self.ini = args.ini
@@ -60,7 +55,15 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.label = args.label
 
         # If creating an injection no need for real data generation
-        if self.injection_parameters is not None:
+        if args.injection_dict is not None:
+            if args.asd_dataset is not None:
+                args.use_psd_of_trigger = False
+                logger.info("asd-dataset is set, not using psd of trigger")
+            self.injection_numbers = None
+            self.injection_dict = ast.literal_eval(args.injection_dict)
+            self.injection_dict = {
+                k.replace("-", "_"): v for k, v in self.injection_dict.items()
+            }
             self.generate_injection(args)
             return
 
@@ -177,7 +180,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
             args.injection = False
             args.injection_numbers = None
             args.injection_file = None
-            args.injection_parameters = None
+            args.injection_dict = None
             args.gaussian_noise = False
             args.injection_waveform_arguments = None
             self.create_data(args)
@@ -190,12 +193,11 @@ class DataGenerationInput(BilbyDataGenerationInput):
 
         # selecting PSD
         if args.use_psd_of_trigger:
-            trigger_time = float(args.trigger_time)
             domain = build_domain_from_model_metadata(pm.metadata)
             settings_raw_data = parse_settings_for_raw_data(
                 pm.metadata, args.psd_length, args.psd_fractional_overlap
             )
-            raw_data = load_raw_data(trigger_time, settings=settings_raw_data)
+            raw_data = load_raw_data(args.trigger_time, settings=settings_raw_data)
 
             # Converting data to frequency series
             event_data = data_to_domain(
@@ -231,7 +233,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
             )
 
         # the trigger time determines how the waveform is injected based on the rotation of earth
-        injection_generator.t_ref = trigger_time
+        injection_generator.t_ref = args.trigger_time
 
         self.detectors = [ifo.name for ifo in injection_generator.ifo_list]
         self.sampling_frequency = injection_generator.waveform_generator.domain.sampling_rate
@@ -243,9 +245,8 @@ class DataGenerationInput(BilbyDataGenerationInput):
             "roll_off"
         ]
 
-        self.asd = injection_generator.asd
         self.strain_data = injection_generator.injection(
-            self.injection_parameters, seed=args.injection_random_seed
+            self.injection_dict, seed=args.injection_random_seed
         )
         
     def create_data(self, args):
@@ -295,7 +296,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
                 dictionary={
                     "data": self.strain_data,
                     "injection_waveform_approximant": self.injection_waveform_approximant,
-                    "injection_parameters": self.injection_parameters,
+                    "injection_dict": self.injection_dict,
                     "settings": settings,
                 }
             )
