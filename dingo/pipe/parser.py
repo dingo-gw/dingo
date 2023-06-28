@@ -423,7 +423,7 @@ def create_parser(top_level=True):
     # )
     injection_parser_input = injection_parser.add_mutually_exclusive_group()
     injection_parser_input.add(
-        "--injection-parameters",
+        "--injection-dict",
         type=nonestr,
         default=None,
         help=(
