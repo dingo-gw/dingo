@@ -106,7 +106,7 @@ def td_modes_to_fd_modes(hlm_td, domain):
 
     lal_fft_plan = lal.CreateForwardCOMPLEX16FFTPlan(chirplen, 0)
     for lm, h_td in hlm_td.items():
-        assert h_td.deltaT == delta_t
+        assert np.abs(h_td.deltaT - delta_t) < 1e-12
 
         # resize data to chirplen by zero-padding or truncating
         # if chirplen < h_td.data.length:
@@ -127,8 +127,8 @@ def td_modes_to_fd_modes(hlm_td, domain):
         )
         # apply FFT
         lal.COMPLEX16TimeFreqFFT(h_fd, h_td, lal_fft_plan)
-        assert h_fd.deltaF == delta_f
-        assert h_fd.f0 == -domain.f_max
+        assert np.abs(h_fd.deltaF - delta_f) < 1e-10
+        assert np.abs(h_fd.f0 + domain.f_max) < 1e-6
 
         # time shift
         dt = (
