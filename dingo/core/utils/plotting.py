@@ -8,7 +8,7 @@ import pandas as pd
 
 
 def plot_corner_multi(
-    samples, weights=None, labels=None, filename="corner.pdf", **kwargs
+    samples, weights=None, labels=None, filename="corner.pdf", truth=None, **kwargs
 ):
     """
     Generate a corner plot for multiple posteriors.
@@ -24,6 +24,8 @@ def plot_corner_multi(
         Labels for the posteriors.
     filename : str
         Where to save samples.
+    truth : dict
+        Optional truth values. Usually used when doing an injection recovery
     **kwargs :
         Forwarded to corner.corner.
     """
@@ -74,6 +76,10 @@ def plot_corner_multi(
             fig=fig,
             **corner_params
         )
+        if truth is not None:
+            truth_list = np.array([truth[c] if c in truth else None for c in common_parameters])
+            corner.overplot_lines(fig, truth_list, c='k')
+
         handles.append(
             plt.Line2D([], [], color=color, label=l, linewidth=5, markersize=20)
         )

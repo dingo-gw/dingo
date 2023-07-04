@@ -584,7 +584,7 @@ class Result(DingoDataset):
 
         return self.samples.replace(-np.inf, np.nan).dropna(axis=0)
 
-    def plot_corner(self, parameters=None, filename="corner.pdf"):
+    def plot_corner(self, parameters=None, truth=None, filename="corner.pdf"):
         """
         Generate a corner plot of the samples.
 
@@ -595,7 +595,13 @@ class Result(DingoDataset):
             (Default: None)
         filename : str
             Where to save samples.
+        truth : dict
+            Optional truth values of the injection. If None will search
+            for injection parameters in the context of the result.
         """
+        if truth is None and "parameters" in self.context:
+            truth = self.context["parameters"]
+            
         theta = self._cleaned_samples()
         # delta_log_prob_target is not interesting so never plot it.
         theta = theta.drop(columns="delta_log_prob_target", errors="ignore")
@@ -610,12 +616,14 @@ class Result(DingoDataset):
                 weights=[None, theta["weights"].to_numpy()],
                 labels=["Dingo", "Dingo-IS"],
                 filename=filename,
+                truth=truth,
             )
         else:
             plot_corner_multi(
                 theta,
                 labels="Dingo",
                 filename=filename,
+                truth=truth,
             )
 
     def plot_log_probs(self, filename="log_probs.png"):
