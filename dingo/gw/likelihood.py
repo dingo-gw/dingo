@@ -289,7 +289,12 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
         # Step 1: Compute signal for phase = 0, separated into the m-contributions from
         # the individual modes.
-        pol_m = self.signal_m({**theta, "phase": 0})
+        try:
+            pol_m = self.signal_m({**theta, "phase": 0})
+        except:
+            # if unable to generate a waveform, return 0 for log_likelihood
+            return np.zeros(len(phases))
+
         pol_m = {k: pol["waveform"] for k, pol in pol_m.items()}
 
         # Step 2: Precompute complex inner products (mu, mu) and (d, mu) for the

@@ -229,10 +229,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
             self.injection_waveform_approximant = (
                 injection_generator.waveform_generator.approximant_str
             )
-
-        # the trigger time determines how the waveform is injected based on the rotation of earth
-        injection_generator.t_ref = trigger_time
-
+            
         self.detectors = [ifo.name for ifo in injection_generator.ifo_list]
         self.sampling_frequency = injection_generator.waveform_generator.domain.sampling_rate
         self.duration = injection_generator.data_domain.duration
