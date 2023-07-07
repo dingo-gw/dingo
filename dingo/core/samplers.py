@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 from typing import Optional, Union
 import sys
+from tqdm import tqdm
 
 import numpy as np
 import pandas as pd
@@ -214,7 +215,8 @@ class Sampler(object):
         if batch_size is None:
             batch_size = num_samples
         full_batches, remainder = divmod(num_samples, batch_size)
-        samples = [self._run_sampler(batch_size, context) for _ in range(full_batches)]
+        samples = [self._run_sampler(batch_size, context) for _ in tqdm(range(full_batches))]
+
         if remainder > 0:
             samples.append(self._run_sampler(remainder, context))
         samples = {p: torch.cat([s[p] for s in samples]) for p in samples[0].keys()}
