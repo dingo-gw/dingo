@@ -278,7 +278,7 @@ class Result(DingoDataset):
 
         print(f"Calculating {len(theta)} likelihoods.")
         t0 = time.time()
-        log_likelihood = self.likelihood.log_likelihood_multi(
+        log_likelihood, rho_opt, rho_coh = self.likelihood.log_likelihood_multi(
             theta, num_processes=num_processes
         )
         print(f"Done. This took {time.time() - t0:.2f} seconds.")
@@ -286,6 +286,8 @@ class Result(DingoDataset):
         self.log_noise_evidence = self.likelihood.log_Zn
         self.samples["log_prior"] = log_prior
         self.samples.loc[valid_samples, "log_likelihood"] = log_likelihood
+        self.samples.loc[valid_samples, "rho_opt"] = rho_opt
+        self.samples.loc[valid_samples, "rho_coh"] = rho_coh
         self._calculate_evidence()
 
     def _calculate_evidence(self):

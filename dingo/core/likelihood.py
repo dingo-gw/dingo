@@ -42,4 +42,7 @@ class Likelihood(object):
             else:
                 log_likelihood = list(map(self.log_likelihood, theta_generator))
 
-        return np.array(log_likelihood)
+        log_L, rho_opt, rho_coh = np.array(log_likelihood).T
+
+        return log_L, rho_opt, rho_coh
+

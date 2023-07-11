@@ -247,6 +247,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         Returns
         -------
         log_likelihood: float
+        rho_opt: float
+        rho_coh: float
         """
 
         # Step 1: Compute whitened GW strain mu(theta) for parameters theta.
@@ -256,13 +258,17 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to
         # compute the remaining terms rho2opt and kappa2
         rho2opt = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
-        kappa2 = sum(
-            [
-                inner_product(d_ifo, mu_ifo)
-                for d_ifo, mu_ifo in zip(d.values(), mu.values())
-            ],
-        )
-        return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+        kappa2C_list = [
+            inner_product_complex(d_ifo, mu_ifo)
+            for d_ifo, mu_ifo in zip(d.values(), mu.values())
+        ]
+        kappa2C = sum(kappa2C_list)
+        kappa2 = sum([np.real(k) for k in kappa2C_list])
+        rho_opt = np.sqrt(rho2opt)
+        rho_coh = np.abs(kappa2C) / rho_opt
+        logL = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+
+        return logL, rho_opt, rho_coh
 
     def log_likelihood_phase_grid(self, theta, phases=None):
         # TODO: Implement for time marginalization
