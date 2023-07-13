@@ -163,6 +163,16 @@ def build_prior_with_defaults(prior_settings: Dict[str, str]):
     Depending on the particular prior choices the dimensionality of a
     parameter sample obtained from the returned GWPriorDict will vary.
     """
+    import bilby.core.prior
+    class ZeroPrior(bilby.core.prior.Prior):
+        def __init__(self):
+            pass 
+
+        def prob(self, val):
+            return (val == 0).astype(int)        
+
+        def sample(self, size=1):
+            return np.zeros(size)
 
     full_prior_settings = deepcopy(prior_settings)
     for k, v in prior_settings.items():

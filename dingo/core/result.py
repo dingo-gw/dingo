@@ -295,6 +295,7 @@ class Result(DingoDataset):
         self.samples = self.samples.dropna(subset=['log_likelihood'])
 
         self._calculate_evidence()
+        return self.samples
 
     def _calculate_evidence(self):
         """Calculate the Bayesian log evidence and sample weights.
