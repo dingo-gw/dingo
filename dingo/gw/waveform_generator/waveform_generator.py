@@ -280,7 +280,7 @@ class WaveformGenerator:
             "SimInspiralChooseTDModes",
             "SimInspiralChooseFDModes",
             "SimIMRPhenomXPCalculateModelParametersFromSourceFrame",
-            "SimIMRSpinAlignedEOBModesEcc_opt",
+            "SimIMRSpinAlignedEOBModesEcc_opt1",
             "SimIMRSpinAlignedEOBModes",
             "SimIMRSpinAlignedEOBWaveformEcc_opt",
         ]:
@@ -452,7 +452,7 @@ class WaveformGenerator:
                 None
             )
 
-        elif lal_target_function == "SimIMRSpinAlignedEOBModesEcc_opt":
+        elif lal_target_function == "SimIMRSpinAlignedEOBModesEcc_opt1":
             if self.approximant == 109:
                 approx = 41
             domain_pars = (delta_t, f_min, f_ref)
@@ -498,6 +498,7 @@ class WaveformGenerator:
                 p.get("HypPphi0", 4.22), # 0 or 4.22?
                 p.get("HypR0", 10000.0), # 0 or 10000.0
                 p.get("HypE0", 1.012), # 0 or 1.012
+                p.get("ellMaxForNyquistCheck", 2)
             )
 
             lal_parameter_tuple = (lal_parameter_tuple, iota)
@@ -900,13 +901,13 @@ class WaveformGenerator:
                 if self.approximant in [109]:
                     parameters_lal_td_modes, iota = self._convert_parameters_to_lal_frame(
                         {**parameters, "f_ref": self.f_ref},
-                        lal_target_function="SimIMRSpinAlignedEOBModesEcc_opt",
+                        lal_target_function="SimIMRSpinAlignedEOBModesEcc_opt1",
                     )
                     (
                         hlm_td,
                         low_samp_dynamics,
                         high_samp_dynamics,
-                    ) = LS.SimIMRSpinAlignedEOBModesEcc_opt(*parameters_lal_td_modes)
+                    ) = LS.SimIMRSpinAlignedEOBModesEcc_opt1(*parameters_lal_td_modes)
 
                 elif self.approximant in [94]:
                     parameters_lal_td_modes, iota = self._convert_parameters_to_lal_frame(
