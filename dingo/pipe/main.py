@@ -166,12 +166,12 @@ class MainInput(BilbyMainInput):
         # self.gps_file = args.gps_file
         self.timeslide_file = args.timeslide_file
         # self.gaussian_noise = args.gaussian_noise
-        # self.zero_noise = args.zero_noise
-        # self.n_simulation = args.n_simulation
+        self.zero_noise = args.zero_noise
+        self.num_noise_realizations = args.num_noise_realizations
         self.injection_file = args.injection_file
         if args.injection_dict is not None:
             self.injection_numbers = None
-            self.injection_dict = ast.literal_eval(str(args.injection_dict))
+            self.injection_dict = ast.literal_eval(args.injection_dict)
 
         self.importance_sample = args.importance_sample
 

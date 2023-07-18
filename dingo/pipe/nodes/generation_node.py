@@ -9,6 +9,7 @@ class GenerationNode(BilbyGenerationNode):
 
     def __init__(self, inputs, importance_sampling=False, **kwargs):
         self.importance_sampling = importance_sampling
+        self.num_noise_realizations = inputs.num_noise_realizations
         super().__init__(inputs, **kwargs)
 
         if self.inputs.simple_submission:
@@ -29,7 +30,7 @@ class GenerationNode(BilbyGenerationNode):
         return super().job_name + flag
 
     @property
-    def event_data_file(self):
-        return os.path.join(
-            self.inputs.data_directory, "_".join([self.label, "event_data.hdf5"])
-        )
+    def event_data_files(self):
+        return [os.path.join(
+            self.inputs.data_directory, "_".join([self.label, f"event_data_{i}.hdf5"])
+        ) for i in range(self.num_noise_realizations)]

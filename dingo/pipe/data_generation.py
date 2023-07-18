@@ -2,12 +2,14 @@ import os
 import sys
 import ast
 
+import numpy as np
 from bilby_pipe.input import Input
 from bilby_pipe.main import parse_args
 from bilby_pipe.utils import logger, convert_string_to_dict
 from bilby_pipe.data_generation import DataGenerationInput as BilbyDataGenerationInput
 import numpy as np
 import lalsimulation as LS
+from bilby.gw.detector.psd import PowerSpectralDensity
 
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import FrequencyDomain
@@ -21,10 +23,9 @@ from dingo.gw.data.data_preparation import (
     build_domain_from_model_metadata,
     parse_settings_for_raw_data,
 )
-
+from dingo.gw.data.data_download import download_psd
 
 logger.name = "dingo_pipe"
-
 
 class DataGenerationInput(BilbyDataGenerationInput):
     def __init__(self, args, unknown_args, create_data=True):
@@ -51,20 +52,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.outdir = args.outdir
         self.label = args.label
 
-        # If creating an injection no need for real data generation
-        if args.injection_dict is not None:
-            if args.asd_dataset is not None:
-                args.use_psd_of_trigger = False
-                logger.info("asd-dataset is set, not using psd of trigger")
-            self.injection_numbers = None
-            self.injection_dict = None
-            self.injection_dict = ast.literal_eval(args.injection_dict)
-            self.injection_dict = {
-                k.replace("-", "_"): v for k, v in self.injection_dict.items()
-            }
-            self.generate_injection(args)
-            return
-
         # Prior arguments
         # self.reference_frame = args.reference_frame
         # self.time_reference = args.time_reference
@@ -74,14 +61,32 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # self.deltaT = args.deltaT
         # self.default_prior = args.default_prior
 
+        self.zero_noise = args.zero_noise
+        if self.zero_noise:
+            self.num_noise_realizations = args.num_noise_realizations
+        else:
+            self.num_noise_realizations = 1
+
         # Whether to generate data for importance sampling. This must be done when
         # desired data settings differ from those used for network training. If this is
         # the case, save the new data to a different file name.
-
         self.importance_sampling = args.importance_sampling_generation
         self.importance_sampling_updates = args.importance_sampling_updates
         if self.importance_sampling:
             vars(args).update(self.importance_sampling_updates)
+
+        # If creating an injection no need for real data generation
+        if args.injection_dict is not None:
+            if args.asd_dataset is not None:
+                args.use_psd_of_trigger = False
+                logger.info("asd-dataset is set, not using psd of trigger")
+            self.injection_numbers = None
+            self.injection_dict = ast.literal_eval(args.injection_dict)
+            self.injection_dict = {
+                k.replace("-", "_"): v for k, v in self.injection_dict.items()
+            }
+            self.generate_injection(args)
+            return
 
         # Data arguments
         self.ignore_gwpy_data_quality_check = args.ignore_gwpy_data_quality_check
@@ -91,7 +96,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.data_format = args.data_format
         self.allow_tape = args.allow_tape
         self.tukey_roll_off = args.tukey_roll_off
-        self.zero_noise = False  # dingo mod
         self.resampling_method = args.resampling_method
 
         # if args.timeslide_dict is not None:
@@ -188,15 +192,16 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # loading posterior model for which we want to generate injections
         pm = PosteriorModel(model_filename=args.model, device="cpu")
         injection_generator = Injection.from_posterior_model_metadata(pm.metadata)
+        injection_generator.t_ref = float(args.trigger_time)
+        injection_generator._initialize_transform()
 
         # selecting PSD
         if args.use_psd_of_trigger:
-            trigger_time = float(args.trigger_time)
             domain = build_domain_from_model_metadata(pm.metadata)
             settings_raw_data = parse_settings_for_raw_data(
                 pm.metadata, args.psd_length, args.psd_fractional_overlap
             )
-            raw_data = load_raw_data(trigger_time, settings=settings_raw_data)
+            raw_data = load_raw_data(args.trigger_time, settings=settings_raw_data)
 
             # Converting data to frequency series
             event_data = data_to_domain(
@@ -231,7 +236,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
                 injection_generator.waveform_generator.approximant_str
             )
 
-
         self.detectors = [ifo.name for ifo in injection_generator.ifo_list]
         self.sampling_frequency = injection_generator.waveform_generator.domain.sampling_rate
         self.duration = injection_generator.data_domain.duration
@@ -241,36 +245,85 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.tukey_roll_off = pm.metadata["train_settings"]["data"]["window"][
             "roll_off"
         ]
+        self.post_trigger_duration = args.post_trigger_duration
 
-        self.asd = injection_generator.asd
-        self.strain_data = injection_generator.injection(
-            self.injection_dict, seed=args.injection_random_seed
-        )
+        self.strain_data_list = []
+        # if importance sampling with zero-noise, don't add noise to injection
+        # the idea here is to reweight to the zero-noise likelihood
+        if self.zero_noise and self.importance_sampling:
+            self.strain_data_list.append(
+                injection_generator.signal(
+                    self.injection_dict
+                )
+            )
+        else:
+            for i in range(self.num_noise_realizations):
+                # add i to the seed to get different noise realizations
+                # but keep consistent across zero noise seed
+                seed = args.injection_random_seed + i if args.injection_random_seed is not None else None
+                self.strain_data_list.append(
+                    injection_generator.injection(
+                        self.injection_dict,
+                        seed=seed,
+                    )
+                )
+
+        
+    def create_data(self, args):
+        super().create_data(args)
+
+        # check if there are nan's in the asd, if there are shift the detector segment used to generate the psd to an earlier time 
+        for ifo in self.interferometers:
+            frequency_array = ifo.strain_data.frequency_array
+            asd = ifo.power_spectral_density.get_amplitude_spectral_density_array(
+                frequency_array
+            )
+
+            if np.max(np.isnan(asd)):
+                if args.shift_segment_for_psd_generation_if_nan:
+                    window = {
+                        "type": "tukey",
+                        "roll_off":self.tukey_roll_off, 
+                        "T": self.duration,
+                        "f_s": self.sampling_frequency
+                    }
+                    psd_array = download_psd(ifo.name, self.start_time + self.psd_start_time, self.psd_duration, window, self.sampling_frequency)
+                    psd = PowerSpectralDensity(frequency_array=frequency_array, psd_array=psd_array)
+                    ifo.power_spectral_density = psd
+                else:
+                    logger.critical(f"""Nan encountered in strain data for PSD estimation for detector {ifo.name}. 
+                    Specify --shift-segment-for-psd-generation-if-nan to shift PSD segement to an earlier time without Nans. """)
+                    raise
+
 
     def save_hdf5(self):
         """Save frequency-domain strain and ASDs as DingoDataset HDF5 format."""
 
         # if the data is created via an injection, we don't need to convert anything
         # from the Bilby format
-        if hasattr(self, "strain_data"):
-            settings = {
-                "detectors": self.detectors,
-                "f_s": self.sampling_frequency,
-                "detectors": self.detectors,
-                "T": self.duration,
-                "f_min": self.minimum_frequency,
-                "f_max": self.maximum_frequency,
-                "window_type": self.window_type,
-                "roll_off": self.tukey_roll_off,
-            }
-            dataset = EventDataset(
-                dictionary={
-                    "data": self.strain_data,
-                    "injection_waveform_approximant": self.injection_waveform_approximant,
-                    "injection_dict": self.injection_dict,
-                    "settings": settings,
-                }
-            )
+        # Data conditioning settings.
+        settings = {
+            "time_event": self.trigger_time,
+            "time_buffer": self.post_trigger_duration,
+            "detectors": self.detectors,
+            "f_s": self.sampling_frequency,
+            "T": self.duration,
+            "f_min": self.minimum_frequency,
+            "f_max": self.maximum_frequency,
+            "window_type": "tukey",
+            "roll_off": self.tukey_roll_off,
+        }
+        if hasattr(self, "strain_data_list"):
+            for strain_data, event_data_file in zip(self.strain_data_list, self.event_data_files):
+                dataset = EventDataset(
+                    dictionary={
+                        "data": strain_data,
+                        "injection_waveform_approximant": self.injection_waveform_approximant,
+                        "injection_dict": self.injection_dict,
+                        "settings": settings,
+                    }
+                )
+                dataset.to_file(event_data_file)
 
         else:
             # PSD and strain data.
@@ -305,18 +358,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
                 data["waveform"][ifo.name] = strain
                 data["asds"][ifo.name] = asd
 
-            # Data conditioning settings.
-            settings = {
-                "time_event": self.trigger_time,
-                "time_buffer": self.post_trigger_duration,
-                "detectors": self.detectors,
-                "f_s": self.sampling_frequency,
-                "T": self.duration,
-                "f_min": self.minimum_frequency,
-                "f_max": self.maximum_frequency,
-                "window_type": "tukey",
-                "roll_off": self.tukey_roll_off,
-            }
 
             for k in [
                 "psd_duration",
@@ -342,13 +383,13 @@ class DataGenerationInput(BilbyDataGenerationInput):
                 }
             )
 
-        dataset.to_file(self.event_data_file)
+            dataset.to_file(self.event_data_file)
 
     @property
-    def event_data_file(self):
-        return os.path.join(
-            self.data_directory, "_".join([self.label, "event_data.hdf5"])
-        )
+    def event_data_files(self):
+        return [os.path.join(
+            self.data_directory, "_".join([self.label, f"event_data_{i}.hdf5"])
+        ) for i in range(self.num_noise_realizations)]
 
     @property
     def importance_sampling_updates(self):
