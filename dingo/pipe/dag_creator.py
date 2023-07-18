@@ -33,6 +33,7 @@ def get_trigger_time_list(inputs):
     else:
         raise BilbyPipeError("Unable to determine input trigger times from ini file")
     logger.info(f"Setting segment trigger-times {trigger_times}")
+
     return trigger_times
 
 
@@ -85,7 +86,7 @@ def generate_dag(inputs, model_args):
         #
         # If injecting into simulated noise, be sure to use consistent noise realization.
 
-        if len(inputs.importance_sampling_updates) > 0:
+        if len(inputs.importance_sampling_updates) > 0 or inputs.zero_noise:
             # Iterate over all generation nodes and store them in a list
             importance_sampling_generation_node_list = []
             for idx, trigger_time in enumerate(trigger_times):
