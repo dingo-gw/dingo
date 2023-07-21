@@ -38,7 +38,7 @@ class SamplingInput(Input):
         self.result_format = args.result_format
 
         # Event files to run on
-        self.event_data_files = args.event_data_files
+        self.event_data_files = args.event_data_files[0].split()
 
         # Choices for running
         self.detectors = args.detectors
