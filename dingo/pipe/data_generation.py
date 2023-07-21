@@ -24,6 +24,7 @@ from dingo.gw.data.data_preparation import (
     parse_settings_for_raw_data,
 )
 from dingo.gw.data.data_download import download_psd
+from dingo.gw.likelihood import inner_product
 
 logger.name = "dingo_pipe"
 
@@ -268,7 +269,31 @@ class DataGenerationInput(BilbyDataGenerationInput):
                     )
                 )
 
-        
+        # Compute optimal SNR
+        rho_opt_ifos, rho_opt = self.compute_optimal_snr(self.strain_data_list[0], injection_generator.data_domain)
+        logger.info(f"Network optimal SNR of injection: {rho_opt}")
+        logger.info(f"Detector optimal SNRs of injection: {rho_opt_ifos}")
+
+
+    def compute_optimal_snr(self, strain_data, data_domain):
+        """Compute network optimal signal-to-noise ratio for the first injected strain"""
+        mu = strain_data['waveform']
+        asds = strain_data['asds']
+        delta_f = data_domain.delta_f
+        noise_std = data_domain.noise_std
+
+        # In the inner products below explicitly divide by the window factor
+        window_factor = 4*delta_f * noise_std**2
+
+        # optimal network SNR
+        kappa2_list = [inner_product(mu_ifo, mu_ifo, delta_f=delta_f, psd=window_factor * asd_ifo**2)
+                     for mu_ifo, asd_ifo in zip(mu.values(), asds.values())]
+        rho_opt = np.sqrt(sum(kappa2_list))
+        rho_opt_ifos = np.sqrt(kappa2_list)
+
+        return rho_opt_ifos, rho_opt
+
+
     def create_data(self, args):
         super().create_data(args)
 
