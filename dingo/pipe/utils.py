@@ -1,3 +1,5 @@
+from pathlib import Path
+
 def _strip_unwanted_submission_keys(job):
     job.getenv = None
     job.universe = None
@@ -6,3 +8,4 @@ def _strip_unwanted_submission_keys(job):
         if not line.startswith("priority") and not line.startswith("accounting_group"):
             extra_lines.append(line)
     job.extra_lines = extra_lines
+

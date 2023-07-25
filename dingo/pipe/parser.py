@@ -136,9 +136,10 @@ def create_parser(top_level=True):
             help="Filename for the data dump: only used internally by data_analysis",
         )
         parser.add(
-            "--event-data-file",
+            "--event-data-files",
             type=nonestr,
             default=None,
+            nargs="+",
             help="Filename for the event: only used internally by sampling and "
             "importance_sampling",
         )
@@ -285,10 +286,10 @@ def create_parser(top_level=True):
     #     action="store_true",
     #     help="If true, use simulated Gaussian noise",
     # )
-    # data_type_pars.add(
-    #     "--zero-noise",
-    #     action="store_true",
-    #     help="Use a zero noise realisation",
+    # data_gen_pars.add(
+        # "--zero-noise",
+        # action="store_true",
+        # help="Use a zero noise realisation",
     # )
 
     det_parser = parser.add_argument_group(
@@ -494,6 +495,19 @@ def create_parser(top_level=True):
         "training will be used. Allowed waveform approximants are those implemented"
         "in lalsimulation",
     )
+    injection_parser.add(
+        "--zero-noise",
+        action="store_true",
+        help="Use a zero noise realisation",
+    )
+    injection_parser.add(
+        "--num-noise-realizations",
+        type=int,
+        default=100,
+        help="When using zero noise, the number of noise realisations to average over."
+        "This is the number of dingo proposals to average over before importance sampling."
+    )
+
     # injection_parser.add(
     #     "--injection-waveform-arguments",
     #     type=nonestr,

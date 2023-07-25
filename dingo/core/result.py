@@ -556,12 +556,14 @@ class Result(DingoDataset):
         Combined Result.
         """
         dataset_dict = parts[0].to_dictionary()
-        del dataset_dict["log_evidence"]
+        if "log_evidence" in dataset_dict:
+            del dataset_dict["log_evidence"]
         samples_parts = [dataset_dict.pop("samples")]
 
         for part in parts[1:]:
             part_dict = part.to_dictionary()
-            del part_dict["log_evidence"]
+            if "log_evidence" in dataset_dict:
+                del part_dict["log_evidence"]
             samples_parts.append(part_dict.pop("samples"))
 
             # Make sure we are not merging incompatible results. We deleted the

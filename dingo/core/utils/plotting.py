@@ -8,7 +8,7 @@ import pandas as pd
 
 
 def plot_corner_multi(
-    samples, weights=None, labels=None, filename="corner.pdf", **kwargs
+    samples, weights=None, labels=None, filename="corner.pdf", colors=None, **kwargs
 ):
     """
     Generate a corner plot for multiple posteriors.
@@ -37,6 +37,7 @@ def plot_corner_multi(
         "plot_contours": True,
         "levels": [0.5, 0.9],
         "bins": 30,
+        "hist_kwargs": {},
     }
     corner_params.update(kwargs)
 
@@ -64,14 +65,14 @@ def plot_corner_multi(
     fig = None
     handles = []
     for i, (s, w, l) in enumerate(zip_longest(samples, weights, labels)):
-        color = mpl.colors.rgb2hex(plt.get_cmap(cmap)(i))
+        color = mpl.colors.rgb2hex(plt.get_cmap(cmap)(i)) if colors is None else colors[i]
+        corner_params["hist_kwargs"]["color"] = color
         fig = corner.corner(
             s[common_parameters].to_numpy(),
             labels=common_parameters,
             weights=w,
-            color=color,
             no_fill_contours=True,
-            fig=fig,
+            color=color,
             **corner_params
         )
         handles.append(

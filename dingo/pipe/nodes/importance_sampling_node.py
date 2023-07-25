@@ -47,7 +47,7 @@ class ImportanceSamplingNode(AnalysisNode):
         # Add extra arguments for dingo
         self.arguments.add("label", self.label)
         self.arguments.add("proposal-samples-file", proposal_samples_file)
-        self.arguments.add("event-data-file", generation_node.event_data_file)
+        self.arguments.add("event-data-files", " ".join(generation_node.event_data_files))
 
         self.extra_lines.extend(self._checkpoint_submit_lines())
         env_vars = []
