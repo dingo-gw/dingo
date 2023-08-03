@@ -16,7 +16,7 @@ try:
     from lalsimulation.gwsignal.models import (
         gwsignal_get_waveform_generator as new_interface_get_waveform_generator,
     )
-except ImportError:
+except:
     pass
 
 from bilby.gw.conversion import (
@@ -790,6 +790,12 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
     ):
         # Transform mass, spin, and distance parameters
         p, _ = convert_to_lal_binary_black_hole_parameters(parameter_dict)
+
+        # Convert to SI units
+        p["mass_1"] *= lal.MSUN_SI
+        p["mass_2"] *= lal.MSUN_SI
+        print(p["mass_1"])
+    
         # Transform to lal source frame: iota and Cartesian spin components
         param_keys_in = (
             "theta_jn",
@@ -825,8 +831,8 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         delta_t = 0.5 / self.domain.f_max
 
         params_gwsignal = {
-            "mass1": p["mass_1"] * u.solMass,
-            "mass2": p["mass_2"] * u.solMass,
+            "mass1": p["mass_1"] * u.kg,
+            "mass2": p["mass_2"] * u.kg,
             "spin1x": s1x * u.dimensionless_unscaled,
             "spin1y": s1y * u.dimensionless_unscaled,
             "spin1z": s1z * u.dimensionless_unscaled,
