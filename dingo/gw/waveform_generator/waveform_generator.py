@@ -794,7 +794,6 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         # Convert to SI units
         p["mass_1"] *= lal.MSUN_SI
         p["mass_2"] *= lal.MSUN_SI
-        print(p["mass_1"])
     
         # Transform to lal source frame: iota and Cartesian spin components
         param_keys_in = (
