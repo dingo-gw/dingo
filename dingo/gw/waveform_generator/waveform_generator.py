@@ -16,7 +16,7 @@ try:
     from lalsimulation.gwsignal.models import (
         gwsignal_get_waveform_generator as new_interface_get_waveform_generator,
     )
-except:
+except ImportError:
     pass
 
 from bilby.gw.conversion import (
