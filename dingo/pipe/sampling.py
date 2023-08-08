@@ -172,7 +172,7 @@ class SamplingInput(Input):
         for context in self.contexts:
             self.dingo_sampler.context = context
 
-            if self.gnpe and self.recover_log_prob:
+            if self.gnpe and self.recover_log_prob and not self.zero_noise:
                 logger.info(
                     "GNPE network does not provide log probability. Generating "
                     "samples and training a new network to recover it."
@@ -185,29 +185,32 @@ class SamplingInput(Input):
                     **self.density_recovery_settings,
                 )
 
-            n_training_samples = 1_000_000
-            self.dingo_sampler.run_sampler(int(n_training_samples / self.num_noise_realizations), batch_size=self.batch_size)
-            samples_list.append(self.dingo_sampler.samples)
+            # Training unconditional density estimator if zero noise
+            elif self.zero_noise:
+                n_training_samples = 1_000_000
+                self.dingo_sampler.run_sampler(int(n_training_samples / self.num_noise_realizations), batch_size=self.batch_size)
+                samples_list.append(self.dingo_sampler.samples)
 
-        self.dingo_sampler.samples = pd.concat(samples_list)
+                logger.info("Training unconditional density estimator on pool of noise realizations")
+                training_result = self.dingo_sampler.to_result()
+                outdir = Path(self.result_directory)
+                training_result.to_file(outdir / "training_samples.hdf5")
+                inference_parameters = list(self.dingo_sampler.samples.columns)
+                # removing proxies since this makes training the unconditional flow easier 
+                inference_parameters = [x for x in inference_parameters if "proxy" not in x]
+                unconditional_flow = training_result.train_unconditional_flow(
+                    inference_parameters, 
+                    nde_settings=self.density_recovery_settings["nde_settings"]
+                    )
 
-        # Training unconditional density estimator if zero noise
-        if self.zero_noise:
-            logger.info("Training unconditional density estimator")
-            training_result = self.dingo_sampler.to_result()
-            outdir = Path(self.result_directory)
-            training_result.to_file(outdir / "training_samples.hdf5")
-            inference_parameters = list(self.dingo_sampler.samples.columns)
-            # removing proxies since this makes training the unconditional flow easier 
-            inference_parameters = [x for x in inference_parameters if "proxy" not in x]
-            unconditional_flow = training_result.train_unconditional_flow(
-                inference_parameters, 
-                nde_settings=self.density_recovery_settings["nde_settings"]
-                )
+                nde_sampler = GWSampler(model=unconditional_flow)
+                nde_sampler.run_sampler(num_samples=self.num_samples, batch_size=self.batch_size)
+                self.dingo_sampler = nde_sampler
 
-            nde_sampler = GWSampler(model=unconditional_flow)
-            nde_sampler.run_sampler(num_samples=self.num_samples, batch_size=self.batch_size)
-            self.dingo_sampler.samples = nde_sampler.samples
+
+        # run the sampler 
+        self.dingo_sampler.run_sampler(num_samples=self.num_samples, batch_size=self.batch_size)
+
 
         self.dingo_sampler.to_hdf5(label=self.label, outdir=self.result_directory)
         if self.n_parallel > 1:
