@@ -1,4 +1,6 @@
 import bilby
+import numpy as np
+import pandas as pd
 import pytest
 from bilby.gw import GravitationalWaveTransient
 from bilby.gw import WaveformGenerator as BilbyWaveformGenerator
@@ -15,9 +17,35 @@ from dingo.gw.prior import (
 from dingo.gw.waveform_generator import NewInterfaceWaveformGenerator
 
 
-@pytest.fixture(params=["IMRPhenomXPHM, SEOBNRv4PHM"])
-def injection_setup(request):
-    approximant = request.param
+@pytest.fixture(params=["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM"])
+def approximant(request):
+    return request.param
+
+
+@pytest.fixture
+def bbh_parameters():
+    return {
+        "mass_1": 60.29442201204798,
+        "mass_2": 25.460299253933126,
+        "phase": 2.346269257440926,
+        "a_1": 0.07104636316747037,
+        "a_2": 0.7853578509086726,
+        "tilt_1": 1.8173336549500292,
+        "tilt_2": 0.4380213394743055,
+        "phi_12": 5.892609139936818,
+        "phi_jl": 1.6975651971466297,
+        "theta_jn": 1.0724395559873239,
+        "luminosity_distance": 1000.0,
+        "geocent_time": 0.0,
+        "ra": 1.0,
+        "dec": 2.0,
+        "psi": 2.5,
+    }
+
+
+@pytest.fixture  # (params=["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM"])
+def injection(approximant):
+    # approximant = request.param
     wfg_kwargs = {
         "approximant": approximant,
         "f_ref": 20.0,
@@ -75,24 +103,8 @@ def injection_setup(request):
 
 
 @pytest.fixture
-def bbh_parameters():
-    return {
-        "mass_1": 60.29442201204798,
-        "mass_2": 25.460299253933126,
-        "phase": 2.346269257440926,
-        "a_1": 0.07104636316747037,
-        "a_2": 0.7853578509086726,
-        "tilt_1": 1.8173336549500292,
-        "tilt_2": 0.4380213394743055,
-        "phi_12": 5.892609139936818,
-        "phi_jl": 1.6975651971466297,
-        "theta_jn": 1.0724395559873239,
-        "luminosity_distance": 1000.0,
-        "geocent_time": 0.0,
-        "ra": 1.0,
-        "dec": 2.0,
-        "psi": 2.5,
-    }
+def data(injection, bbh_parameters):
+    return injection.injection(bbh_parameters)
 
 
 @pytest.fixture
@@ -101,7 +113,8 @@ def prior():
     return build_prior_with_defaults(prior_dict)
 
 
-def setup_bilby_likelihood(injection, data):
+@pytest.fixture
+def bilby_likelihood(injection, data):
     post_trigger_duration = 2.0
 
     domain = injection.waveform_generator.domain
@@ -155,7 +168,8 @@ def setup_bilby_likelihood(injection, data):
     return bilby_likelihood
 
 
-def setup_dingo_likelihood(injection, data):
+@pytest.fixture
+def dingo_likelihood(injection, data):
     if isinstance(injection.waveform_generator, NewInterfaceWaveformGenerator):
         new_interface = True
     else:
@@ -169,7 +183,7 @@ def setup_dingo_likelihood(injection, data):
         new_interface=new_interface,
     )
 
-    likelihood = StationaryGaussianGWLikelihood(
+    dingo_likelihood = StationaryGaussianGWLikelihood(
         wfg_kwargs=wfg_kwargs,
         wfg_domain=injection.waveform_generator.domain,
         data_domain=injection.data_domain,
@@ -177,42 +191,43 @@ def setup_dingo_likelihood(injection, data):
         t_ref=injection.t_ref,
     )
 
-    return likelihood
+    return dingo_likelihood
 
 
-def test_gw_likelihood(injection_setup, bbh_parameters, prior):
-    # Generate data
-    injection = injection_setup
-    p = bbh_parameters
-
-    data = injection.injection(p)
-
-    likelihood = setup_dingo_likelihood(injection, data)
-    bilby_likelihood = setup_bilby_likelihood(injection, data)
-
-    # Sample new parameters from the prior
+def test_gw_likelihood(prior, bilby_likelihood, dingo_likelihood):
+    # Evaluate the likelihood at a new parameter value.
     p = prior.sample()
-    # p = bbh_parameters
     p = {
         k: float(v) for k, v in p.items()
     }  # FIXME: Initially a mix of float and np.float64
+
+    # Evaluate Dingo and Bilby log likelihoods and check that they match.
+    log_likelihood_dingo = dingo_likelihood.log_likelihood(p)
+
+    # Bilby treats the time of coalescence differently.
     p_bilby = p.copy()
-    p_bilby["geocent_time"] += injection.t_ref
-
-    # Check that the likelihood evaluation matches that of Bilby.
-    log_likelihood_dingo = likelihood.log_likelihood(p)
-
+    p_bilby["geocent_time"] += dingo_likelihood.t_ref
     bilby_likelihood.parameters = p_bilby
     log_likelihood_bilby = bilby_likelihood.log_likelihood()
-    print(log_likelihood_dingo)
-    print(log_likelihood_bilby)
+
+    assert np.abs(log_likelihood_bilby - log_likelihood_dingo) < 1e-1
 
 
-def test_gw_likelihood_multi():
-    # Generate data
-    injection = injection_setup_xphm
-    p = bbh_parameters
+@pytest.mark.parametrize("approximant", ["IMRPhenomXPHM"])
+def test_gw_likelihood_multi(prior, dingo_likelihood):
+    p = pd.DataFrame(prior.sample(5))
 
-    data = injection.injection(p)
+    # Check that multiprocessing log likelihoods gives the same result as single processing.
+    log_likelihoods_multi, supplement_multi = dingo_likelihood.log_likelihood_multi(
+        p,
+        include_supplemental=True,
+        num_processes=2,
+    )
+    supplement_multi = pd.DataFrame(supplement_multi)
 
-    # Use a few random evaluation points, comparing the multiprocessing and non-multiprocessing.
+    for i, row in p.iterrows():
+        log_likelihood_single, supplement_single = dingo_likelihood.log_likelihood(
+            row.to_dict(), include_supplemental=True
+        )
+        assert log_likelihood_single == log_likelihoods_multi[i]
+        assert supplement_single == supplement_multi.iloc[i].to_dict()
