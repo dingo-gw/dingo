@@ -506,10 +506,15 @@ class Result(CoreResult):
 
         print(f"Done. This took {time.time() - t0:.2f} s.")
 
-    def get_samples_bilby_phase(self):
+    def get_samples_bilby_phase(self, num_processes=1):
         """
         Convert the spin angles phi_jl and theta_jn to account for a difference in
         phase definition compared to Bilby.
+
+        Parameters
+        ----------
+        num_processes: int
+            Number of parallel processes.
 
         Returns
         -------
@@ -522,7 +527,11 @@ class Result(CoreResult):
 
         # Redefine phase parameter to be consistent with Bilby.
         return change_spin_conversion_phase(
-            self.samples, self.f_ref, spin_conversion_phase_old, None
+            self.samples,
+            self.f_ref,
+            spin_conversion_phase_old,
+            None,
+            num_processes=num_processes,
         )
 
     @property
