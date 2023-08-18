@@ -278,14 +278,16 @@ class Result(DingoDataset):
 
         print(f"Calculating {len(theta)} likelihoods.")
         t0 = time.time()
-        log_likelihood = self.likelihood.log_likelihood_multi(
-            theta, num_processes=num_processes
+        log_likelihood, supplemental = self.likelihood.log_likelihood_multi(
+            theta, include_supplemental=True, num_processes=num_processes
         )
         print(f"Done. This took {time.time() - t0:.2f} seconds.")
 
         self.log_noise_evidence = self.likelihood.log_Zn
         self.samples["log_prior"] = log_prior
         self.samples.loc[valid_samples, "log_likelihood"] = log_likelihood
+        for k, v in supplemental.items():
+            self.samples.loc[valid_samples, k] = v
         self._calculate_evidence()
 
     def _calculate_evidence(self):
@@ -683,7 +685,6 @@ class Result(DingoDataset):
 
 
 def check_equal_dict_of_arrays(a, b):
-
     if type(a) != type(b):
         return False
 

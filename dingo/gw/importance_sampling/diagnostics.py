@@ -26,7 +26,7 @@ def plot_posterior_slice2d(
 
     # compute log_prob
     log_probs_target = (
-        sampler.likelihood.log_likelihood_multi(theta_grid, num_processes)
+        sampler.likelihood.log_likelihood_multi(theta_grid, num_processes=num_processes)
         # + sampler.prior.ln_prob(theta_grid, axis=0)
         - sampler.log_evidence
     )
@@ -81,7 +81,9 @@ def plot_posterior_slice(
         theta_param[param] = param_axis
         # evaluate the posterior at theta_grid
         log_probs_target = (
-            sampler.likelihood.log_likelihood_multi(theta_param, num_processes)
+            sampler.likelihood.log_likelihood_multi(
+                theta_param, num_processes=num_processes
+            )
             + sampler.prior.ln_prob(theta_param, axis=0)
             - sampler.log_evidence
         )

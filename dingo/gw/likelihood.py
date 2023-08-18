@@ -175,7 +175,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         with np.errstate(divide="ignore"):  # ignore warnings for log(0) = -inf
             self.time_prior_log = np.log(time_prior / np.sum(time_prior))
 
-    def log_likelihood(self, theta):
+    def log_likelihood(self, theta, include_supplemental=False):
         if (
             sum(
                 [
@@ -192,13 +192,29 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             )
 
         if self.time_marginalization:
-            return self._log_likelihood_time_marginalized(theta)
+            result = self._log_likelihood_time_marginalized(theta)
         elif self.phase_marginalization:
-            return self._log_likelihood_phase_marginalized(theta)
+            result = self._log_likelihood_phase_marginalized(theta)
         elif self.calibration_marginalization_kwargs:
-            return self._log_likelihood_calibration_marginalized(theta)
+            result = self._log_likelihood(theta)
         else:
-            return self._log_likelihood(theta)
+            result = self._log_likelihood(theta)
+
+        # We assume that the _log_likelihood* methods return either a 2-tuple (log_likelihood, supplement), or just a
+        # log_likelihood scalar. If just a scalar, but supplemental information was requested, return an empty dict.
+
+        if include_supplemental:
+            if isinstance(result, tuple):
+                assert len(result) == 2
+                return result
+            else:
+                return result, {}
+        else:
+            if isinstance(result, tuple):
+                assert len(result) == 2
+                return result[0]
+            else:
+                return result
 
     def _log_likelihood(self, theta):
         """
@@ -210,7 +226,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         we denote the strain data by d and the GW signal by mu(theta).
         [see e.g. arxiv.org/pdf/1809.02293, equation (44) for details]
         We expand this expression below to compute the log likelihood, and omit psi.
-        The expaneded expression reads
+        The expanded expression reads
 
                 log L(d|theta) = log_Zn + kappa2(theta) - 1/2 rho2opt(theta),
 
@@ -238,6 +254,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         The above expansion of the likelihood is particularly useful for time
         marginalization, as only kappa2 depends on the time parameter.
 
+        This method works also when the signal generator produces multiple draws, e.g., for marginalizing over
+        calibration draws.
 
         Parameters
         ----------
@@ -247,22 +265,53 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         Returns
         -------
         log_likelihood: float
+        dict containing detector matched filter and optimal SNR
         """
 
         # Step 1: Compute whitened GW strain mu(theta) for parameters theta.
+
+        # In the calibration-marginalization case, the values of mu for each detector have an additional leading
+        # dimension, which corresponds to the calibration draws. These are averaged over in computing the likelihood.
+
         mu = self.signal(theta)["waveform"]
         d = self.whitened_strains
 
-        # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to
-        # compute the remaining terms rho2opt and kappa2
-        rho2opt = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
-        kappa2 = sum(
-            [
-                inner_product(d_ifo, mu_ifo)
-                for d_ifo, mu_ifo in zip(d.values(), mu.values())
-            ],
-        )
-        return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+        # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to compute the remaining terms rho2opt
+        # and kappa2. This calculation batches multiple waveform draws.
+
+        rho2opt_detector = {
+            ifo: inner_product(mu_ifo, mu_ifo) for ifo, mu_ifo in mu.items()
+        }
+        kappa2_detector = {
+            ifo: inner_product(d[ifo], mu_ifo) for ifo, mu_ifo in mu.items()
+        }
+
+        # Calculate likelihood.
+
+        # First sum over detectors for each draw.
+        rho2opt = np.sum(list(rho2opt_detector.values()), axis=0)
+        kappa2 = np.sum(list(kappa2_detector.values()), axis=0)
+
+        if isinstance(rho2opt, np.ndarray):
+            # We marginalize the *likelihood*, not the *log likelihood*.
+            log_likelihoods = self.log_Zn + kappa2 - (1 / 2) * rho2opt
+            log_likelihood = logsumexp(log_likelihoods) - np.log(len(log_likelihoods))
+        else:
+            log_likelihood = self.log_Zn + kappa2 - (1 / 2) * rho2opt
+
+        # Calculate supplementary outputs, rho_mf and rho_opt, for each detector. By taking the mean, we marginalize
+        # over multiple draws, if present.
+
+        rho_opt_detector = {
+            f"{ifo}_optimal_snr": np.mean(v ** (1 / 2))
+            for ifo, v in rho2opt_detector.items()
+        }
+        rho_mf_detector = {
+            f"{ifo}_matched_filter_snr": np.mean(v / rho2opt_detector[ifo] ** (1 / 2))
+            for ifo, v in kappa2_detector.items()
+        }
+
+        return log_likelihood, rho_opt_detector | rho_mf_detector
 
     def log_likelihood_phase_grid(self, theta, phases=None):
         # TODO: Implement for time marginalization
@@ -508,47 +557,6 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
-    def _log_likelihood_calibration_marginalized(self, theta):
-        """
-        Computes log likelihood with calibration_marginalization
-
-        Parameters
-        ----------
-        theta: dict
-            BBH parameters.
-
-        Returns
-        -------
-        log_likelihood: float
-        """
-
-        # Step 1: Compute whitened GW strain mu(theta) for parameters theta.
-        mu = self.signal(theta)["waveform"]
-        d = self.whitened_strains
-
-        # In the calibration-marginalization case, the values of mu for each detector
-        # have an additional leading dimension, which corresponds to the calibration
-        # draws. These are averaged over in computing the likelihood.
-        # TODO: Combine with _log_likelihood() into a single method.
-
-        # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to
-        # compute the remaining terms rho2opt and kappa2
-
-        rho2opt = np.sum(
-            [inner_product(mu_ifo.T, mu_ifo.T) for mu_ifo in mu.values()], axis=0
-        )
-        kappa2 = np.sum(
-            [
-                inner_product(d_ifo[:, None], mu_ifo.T)
-                for d_ifo, mu_ifo in zip(d.values(), mu.values())
-            ],
-            axis=0,
-        )
-
-        likelihoods = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
-        # Return the average over calibration envelopes
-        return logsumexp(likelihoods) - np.log(len(likelihoods))
-
     def d_inner_h_complex_multi(
         self, theta: pd.DataFrame, num_processes: int = 1
     ) -> np.ndarray:
@@ -618,9 +626,8 @@ def inner_product(a, b, min_idx=0, delta_f=None, psd=None):
     provided. Alternatively, if delta_f and psd are not provided, the data a and b are
     assumed to be whitened already (i.e., whitened as d -> d * sqrt(4 delta_f / psd)).
 
-    Note: sum is only taken along axis 0 (which is assumed to be the frequency axis),
-    while other axes are preserved. This is e.g. useful when evaluating kappa2 on a
-    phase grid.
+    Note: sum is only taken along axis -1 (which is assumed to be the frequency axis), while
+    other axes are preserved. This is, e.g., useful when using calibration marginalization.
 
     Parameters
     ----------
@@ -647,9 +654,9 @@ def inner_product(a, b, min_idx=0, delta_f=None, psd=None):
             raise ValueError(
                 "If unwhitened data is provided, both delta_f and psd must be provided."
             )
-        return 4 * delta_f * np.sum((a.conj() * b / psd)[min_idx:], axis=0).real
+        return 4 * delta_f * np.sum((a.conj() * b / psd)[..., min_idx:], axis=-1).real
     else:
-        return np.sum((a.conj() * b)[min_idx:], axis=0).real
+        return np.sum((a.conj() * b)[..., min_idx:], axis=-1).real
 
 
 def inner_product_complex(a, b, min_idx=0, delta_f=None, psd=None):
@@ -664,9 +671,9 @@ def inner_product_complex(a, b, min_idx=0, delta_f=None, psd=None):
             raise ValueError(
                 "If unwhitened data is provided, both delta_f and psd must be provided."
             )
-        return 4 * delta_f * np.sum((a.conj() * b / psd)[min_idx:], axis=0)
+        return 4 * delta_f * np.sum((a.conj() * b / psd)[..., min_idx:], axis=-1)
     else:
-        return np.sum((a.conj() * b)[min_idx:], axis=0)
+        return np.sum((a.conj() * b)[..., min_idx:], axis=-1)
 
 
 def build_stationary_gaussian_likelihood(
