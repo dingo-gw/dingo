@@ -568,19 +568,20 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         # compute the remaining terms rho2opt and kappa2
 
         rho2opt = np.sum(
-            [inner_product(mu_ifo.T, mu_ifo.T) for mu_ifo in mu.values()], axis=0
+            [inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()], axis=0
         )
         kappa2 = np.sum(
             [
-                inner_product(d_ifo[:, None], mu_ifo.T)
+                inner_product(d_ifo, mu_ifo)
                 for d_ifo, mu_ifo in zip(d.values(), mu.values())
             ],
             axis=0,
         )
 
-        likelihoods = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
-        # Return the average over calibration envelopes
-        return logsumexp(likelihoods) - np.log(len(likelihoods))
+        log_likelihoods = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+
+        # We marginalize the *likelihood*, not the *log likelihood*.
+        return logsumexp(log_likelihoods) - np.log(len(log_likelihoods))
 
     def d_inner_h_complex_multi(
         self, theta: pd.DataFrame, num_processes: int = 1
@@ -651,9 +652,8 @@ def inner_product(a, b, min_idx=0, delta_f=None, psd=None):
     provided. Alternatively, if delta_f and psd are not provided, the data a and b are
     assumed to be whitened already (i.e., whitened as d -> d * sqrt(4 delta_f / psd)).
 
-    Note: sum is only taken along axis 0 (which is assumed to be the frequency axis),
-    while other axes are preserved. This is e.g. useful when evaluating kappa2 on a
-    phase grid.
+    Note: sum is only taken along axis -1 (which is assumed to be the frequency axis), while
+    other axes are preserved. This is, e.g., useful when using calibration marginalization.
 
     Parameters
     ----------
@@ -680,9 +680,9 @@ def inner_product(a, b, min_idx=0, delta_f=None, psd=None):
             raise ValueError(
                 "If unwhitened data is provided, both delta_f and psd must be provided."
             )
-        return 4 * delta_f * np.sum((a.conj() * b / psd)[min_idx:], axis=0).real
+        return 4 * delta_f * np.sum((a.conj() * b / psd)[..., min_idx:], axis=-1).real
     else:
-        return np.sum((a.conj() * b)[min_idx:], axis=0).real
+        return np.sum((a.conj() * b)[..., min_idx:], axis=-1).real
 
 
 def inner_product_complex(a, b, min_idx=0, delta_f=None, psd=None):
@@ -697,9 +697,9 @@ def inner_product_complex(a, b, min_idx=0, delta_f=None, psd=None):
             raise ValueError(
                 "If unwhitened data is provided, both delta_f and psd must be provided."
             )
-        return 4 * delta_f * np.sum((a.conj() * b / psd)[min_idx:], axis=0)
+        return 4 * delta_f * np.sum((a.conj() * b / psd)[..., min_idx:], axis=-1)
     else:
-        return np.sum((a.conj() * b)[min_idx:], axis=0)
+        return np.sum((a.conj() * b)[..., min_idx:], axis=-1)
 
 
 def build_stationary_gaussian_likelihood(
