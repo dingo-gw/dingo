@@ -196,7 +196,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         elif self.phase_marginalization:
             result = self._log_likelihood_phase_marginalized(theta)
         elif self.calibration_marginalization_kwargs:
-            result = self._log_likelihood_calibration_marginalized(theta)
+            result = self._log_likelihood(theta)
         else:
             result = self._log_likelihood(theta)
 
@@ -254,6 +254,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         The above expansion of the likelihood is particularly useful for time
         marginalization, as only kappa2 depends on the time parameter.
 
+        This method works also when the signal generator produces multiple draws, e.g., for marginalizing over
+        calibration draws.
 
         Parameters
         ----------
@@ -267,12 +269,15 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         """
 
         # Step 1: Compute whitened GW strain mu(theta) for parameters theta.
+
+        # In the calibration-marginalization case, the values of mu for each detector have an additional leading
+        # dimension, which corresponds to the calibration draws. These are averaged over in computing the likelihood.
+
         mu = self.signal(theta)["waveform"]
         d = self.whitened_strains
 
-        # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to
-        # compute the remaining terms rho2opt and kappa2. We also return the
-        # per-detector optimal and matched filter SNRs.
+        # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to compute the remaining terms rho2opt
+        # and kappa2. This calculation batches multiple waveform draws.
 
         rho2opt_detector = {
             ifo: inner_product(mu_ifo, mu_ifo) for ifo, mu_ifo in mu.items()
@@ -281,19 +286,30 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             ifo: inner_product(d[ifo], mu_ifo) for ifo, mu_ifo in mu.items()
         }
 
+        # Calculate likelihood.
+
+        # First sum over detectors for each draw.
+        rho2opt = np.sum(list(rho2opt_detector.values()), axis=0)
+        kappa2 = np.sum(list(kappa2_detector.values()), axis=0)
+
+        if isinstance(rho2opt, np.ndarray):
+            # We marginalize the *likelihood*, not the *log likelihood*.
+            log_likelihoods = self.log_Zn + kappa2 - (1 / 2) * rho2opt
+            log_likelihood = logsumexp(log_likelihoods) - np.log(len(log_likelihoods))
+        else:
+            log_likelihood = self.log_Zn + kappa2 - (1 / 2) * rho2opt
+
+        # Calculate supplementary outputs, rho_mf and rho_opt, for each detector. By taking the mean, we marginalize
+        # over multiple draws, if present.
+
         rho_opt_detector = {
-            f"{ifo}_optimal_snr": v ** (1 / 2) for ifo, v in rho2opt_detector.items()
+            f"{ifo}_optimal_snr": np.mean(v ** (1 / 2))
+            for ifo, v in rho2opt_detector.items()
         }
         rho_mf_detector = {
-            f"{ifo}_matched_filter_snr": v / rho2opt_detector[ifo] ** (1 / 2)
+            f"{ifo}_matched_filter_snr": np.mean(v / rho2opt_detector[ifo] ** (1 / 2))
             for ifo, v in kappa2_detector.items()
         }
-
-        log_likelihood = (
-            self.log_Zn
-            + sum(kappa2_detector.values())
-            - (1 / 2) * sum(rho2opt_detector.values())
-        )
 
         return log_likelihood, rho_opt_detector | rho_mf_detector
 
@@ -540,48 +556,6 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         kappa2 = alpha + np.log(np.sum(np.exp(exponent - alpha)))
 
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
-
-    def _log_likelihood_calibration_marginalized(self, theta):
-        """
-        Computes log likelihood with calibration_marginalization
-
-        Parameters
-        ----------
-        theta: dict
-            BBH parameters.
-
-        Returns
-        -------
-        log_likelihood: float
-        """
-
-        # Step 1: Compute whitened GW strain mu(theta) for parameters theta.
-        mu = self.signal(theta)["waveform"]
-        d = self.whitened_strains
-
-        # In the calibration-marginalization case, the values of mu for each detector
-        # have an additional leading dimension, which corresponds to the calibration
-        # draws. These are averaged over in computing the likelihood.
-        # TODO: Combine with _log_likelihood() into a single method.
-
-        # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to
-        # compute the remaining terms rho2opt and kappa2
-
-        rho2opt = np.sum(
-            [inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()], axis=0
-        )
-        kappa2 = np.sum(
-            [
-                inner_product(d_ifo, mu_ifo)
-                for d_ifo, mu_ifo in zip(d.values(), mu.values())
-            ],
-            axis=0,
-        )
-
-        log_likelihoods = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
-
-        # We marginalize the *likelihood*, not the *log likelihood*.
-        return logsumexp(log_likelihoods) - np.log(len(log_likelihoods))
 
     def d_inner_h_complex_multi(
         self, theta: pd.DataFrame, num_processes: int = 1
