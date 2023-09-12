@@ -829,7 +829,6 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         # parameters needed for TD waveforms
         delta_t = 0.5 / self.domain.f_max
 
-        conditioning = parameter_dict.get("conditioning",2)
         params_gwsignal = {
             "mass1": p["mass_1"] * u.kg,
             "mass2": p["mass_2"] * u.kg,
@@ -849,7 +848,6 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             "inclination": iota * u.rad,
             "ModeArray": self.mode_list,
             "condition": 1,
-            #"conditioning": conditioning
         }
 
         # SEOBNRv5 specific parameters
