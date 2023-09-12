@@ -829,6 +829,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         # parameters needed for TD waveforms
         delta_t = 0.5 / self.domain.f_max
 
+        conditioning = parameter_dict.get("conditioning",2)
         params_gwsignal = {
             "mass1": p["mass_1"] * u.kg,
             "mass2": p["mass_2"] * u.kg,
@@ -848,6 +849,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             "inclination": iota * u.rad,
             "ModeArray": self.mode_list,
             "condition": 1,
+            #"conditioning": conditioning
         }
 
         # SEOBNRv5 specific parameters
@@ -1026,11 +1028,11 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 # assert LS.SimInspiralImplementedTDApproximants(self.approximant)
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: TD)
-                hlm_td, iota = self.generate_TD_modes_L0(parameters)
+                hlm_td, iota, new_fstart, textra, original_f_min, fisco  = self.generate_TD_modes_L0(parameters)
 
                 # Step 2: Transform modes to target domain.
                 # This requires tapering of TD modes, and FFT to transform to FD.
-                wfg_utils.taper_td_modes_in_place(hlm_td)
+                wfg_utils.taper_td_modes_in_place(hlm_td, f_min=new_fstart, standard_tapering=1, extra_time=textra, original_fmin=original_f_min, f_isco=fisco)
                 hlm_fd = wfg_utils.td_modes_to_fd_modes(hlm_td, self.domain)
 
             # Step 3: Separate negative and positive frequency parts of the modes,
@@ -1139,8 +1141,12 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             {**parameters, "f_ref": self.f_ref}
         )
 
+        new_fstart, textra, original_f_min, fisco = get_starting_frequency_for_conditioning(parameters_gwsignal)
+        params = parameters_gwsignal.copy()
+        params["f22_start"] = new_fstart*u.Hz
+
         generator = new_interface_get_waveform_generator(self.approximant_str)
-        hlm_td = gws_wfm.GenerateTDModes(parameters_gwsignal, generator)
+        hlm_td = gws_wfm.GenerateTDModes(params, generator)
         hlms_lal = {}
 
         for key, value in hlm_td.items():
@@ -1156,7 +1162,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 hlm_lal.data.data = value.value
                 hlms_lal[key] = hlm_lal
 
-        return hlms_lal, parameters_gwsignal["inclination"].value
+        return hlms_lal, parameters_gwsignal["inclination"].value, new_fstart, textra, original_f_min, fisco
 
     def generate_TD_waveform(self, parameters_gwsignal: Dict) -> Dict[str, np.ndarray]:
         """
@@ -1292,6 +1298,49 @@ def sum_contributions_m(x_m, phase_shift=0.0):
         for m, x in x_m.items():
             result[key] += x[key] * np.exp(-1j * m * phase_shift)
     return result
+
+def get_starting_frequency_for_conditioning(parameters):
+    extra_time_fraction = (
+        0.1  # fraction of waveform duration to add as extra time for tapering
+    )
+    extra_cycles = (
+        3.0  # more extra time measured in cycles at the starting frequency
+    )
+
+    f_min = parameters["f22_start"].value
+    m1 = parameters["mass1"].value
+    m2 = parameters["mass2"].value
+    S1z = parameters["spin1z"].value
+    S2z = parameters["spin2z"].value
+    original_f_min = f_min
+
+    fisco = 1.0 / (pow(9.0, 1.5) * np.pi * (m1 + m2) * lal.MTSUN_SI/lal.MSUN_SI)
+    if f_min > fisco:
+        f_min = fisco
+
+    # upper bound on the chirp time starting at f_min
+    tchirp = LS.SimInspiralChirpTimeBound(
+        f_min, m1, m2, S1z, S2z
+    )
+    # upper bound on the final black hole spin */
+    spinkerr = LS.SimInspiralFinalBlackHoleSpinBound(S1z, S2z)
+    # upper bound on the final plunge, merger, and ringdown time */
+    tmerge = LS.SimInspiralMergeTimeBound(
+        m1 , m2 
+    ) + LS.SimInspiralRingdownTimeBound((m1 + m2) , spinkerr)
+
+    # extra time to include for all waveforms to take care of situations where the frequency is close to merger (and is sweeping rapidly): this is a few cycles at the low frequency
+    textra = extra_cycles / f_min
+    # compute a new lower frequency
+    fstart = LS.SimInspiralChirpStartFrequencyBound(
+        (1.0 + extra_time_fraction) * tchirp + tmerge + textra,
+        m1 ,
+        m2 ,
+    )
+
+    fisco = 1.0 / (pow(6.0, 1.5) * np.pi * (m1 + m2) * lal.MTSUN_SI/lal.MSUN_SI)
+
+    return fstart, extra_time_fraction * tchirp + textra, original_f_min, fisco
 
 
 if __name__ == "__main__":

@@ -15,8 +15,7 @@ def linked_list_modes_to_dict_modes(hlm_ll):
 
     return hlm_dict
 
-
-def get_tapering_window_for_complex_time_series(h, tapering_flag: int = 1):
+def get_tapering_window_for_complex_time_series(h, tapering_flag: int = 1, standard_tapering: int = 0, extra_time: float = 0.0, f_min: float = 0.0, original_fmin: float = 0.0, f_isco: float = 0.0):
     """
     Get window for tapering of a complex time series from the lal backend. This is done
     by  tapering the time series with lal, and dividing tapered output by untapered
@@ -39,18 +38,37 @@ def get_tapering_window_for_complex_time_series(h, tapering_flag: int = 1):
     window: np.ndarray
         Array of length h.data.length, with the window used for tapering.
     """
+    
     h_tapered = lal.CreateREAL8TimeSeries(
         "h_tapered", h.epoch, 0, h.deltaT, None, h.data.length
     )
     h_tapered.data.data = h.data.data.copy().real
-    LS.SimInspiralREAL8WaveTaper(h_tapered.data, tapering_flag)
+
+    if standard_tapering:
+        h_tapered_im = lal.CreateREAL8TimeSeries(
+            "h_tapered", h.epoch, 0, h.deltaT, None, h.data.length
+        )
+        h_tapered_im.data.data = h.data.data.copy().imag
+        # condition the time domain waveform by tapering in the extra time at the beginning and high-pass filtering above original f_min
+
+        LS.SimInspiralTDConditionStage1(
+            h_tapered, h_tapered_im, extra_time, original_fmin
+        )
+
+        # final tapering at the beginning and at the end to remove filter transients
+        # waveform should terminate at a frequency >= Schwarzschild ISCO
+        # so taper one cycle at this frequency at the end; should not make
+        # any difference to IMR waveforms */
+        LS.SimInspiralTDConditionStage2(h_tapered, h_tapered_im, f_min, f_isco)
+    else:
+        LS.SimInspiralREAL8WaveTaper(h_tapered.data, tapering_flag)
     eps = 1e-20 * np.max(np.abs(h.data.data))
     window = (np.abs(h_tapered.data.data) + eps) / (np.abs(h.data.data.real) + eps)
     # FIXME: using eps for numerical stability is not really robust here
     return window
 
 
-def taper_td_modes_in_place(hlm_td, tapering_flag: int = 1):
+def taper_td_modes_in_place(hlm_td, tapering_flag: int = 1, standard_tapering: int = 0, extra_time: float = 0.0, f_min: float = 0.0, original_fmin: float = 0.0, f_isco: float = 0.0):
     """
     Taper the time domain modes in place.
 
