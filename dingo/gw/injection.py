@@ -72,6 +72,7 @@ class GWSignal(object):
 
         self.t_ref = t_ref
         self.ifo_list = InterferometerList(ifo_list)
+        self.trigger_offset = None
 
         # When we set self.whiten, the projection transforms are automatically prepared.
         self._calibration_envelope = None
@@ -125,7 +126,7 @@ class GWSignal(object):
 
     def _initialize_transform(self):
         transforms = [
-            GetDetectorTimes(self.ifo_list, self.t_ref),
+            GetDetectorTimes(self.ifo_list, self.t_ref, self.trigger_offset),
             ProjectOntoDetectors(self.ifo_list, self.data_domain, self.t_ref),
         ]
         if self.calibration_marginalization_kwargs:
@@ -328,7 +329,7 @@ class Injection(GWSignal):
             t_ref=metadata["train_settings"]["data"]["ref_time"],
         )
 
-    def injection(self, theta):
+    def injection(self, theta, seed=None):
         """
         Generate an injection based on specified parameters.
 
@@ -364,6 +365,8 @@ class Injection(GWSignal):
             print("self.whiten was set to True. Resetting to False.")
             self.whiten = False
 
+        if seed is not None:
+            np.random.seed(seed)
         data = {}
         for ifo, s in signal["waveform"].items():
             noise = (
