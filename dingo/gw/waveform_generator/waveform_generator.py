@@ -1022,6 +1022,13 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 # Step 2: Transform modes to target domain.
                 # Not required here, as approximant domain and target domain are both FD.
 
+            elif self.approximant_str == "SEOBNRv5PHM" or self.approximant_str == "SEOBNRv5HM":
+                # Step 1: generate waveform modes in L0 frame in native domain of
+                # approximant (here: TD), applying standard conditioning
+                hlm_td, iota = self.generate_TD_modes_L0_conditioned_extra_time(parameters)
+
+                # Step 2: Transform modes to target domain.
+                hlm_fd = wfg_utils.td_modes_to_fd_modes(hlm_td, self.domain)
             else:
                 # assert LS.SimInspiralImplementedTDApproximants(self.approximant)
                 # Step 1: generate waveform modes in L0 frame in native domain of
@@ -1154,6 +1161,45 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                     len(value),
                 )
                 hlm_lal.data.data = value.value
+                hlms_lal[key] = hlm_lal
+
+        return hlms_lal, parameters_gwsignal["inclination"].value
+
+    def generate_TD_modes_L0_conditioned_extra_time(self, parameters):
+        """
+        Generate TD modes in the L0 frame.
+
+        Parameters
+        ----------
+        parameters: dict
+            Dictionary of parameters for the waveform.
+            For details see see self.generate_hplus_hcross.
+
+        Returns
+        -------
+        hlm_td: dict
+            Dictionary with (l,m) as keys and the corresponding TD modes in lal format as
+            values.
+        iota: float
+        """
+        # TD approximants that are implemented in L0 frame. Currently tested for:
+        #   52: SEOBNRv4PHM
+
+        parameters_gwsignal = self._convert_parameters(
+            {**parameters, "f_ref": self.f_ref}
+        )
+
+        f_min, new_fstart, textra, original_f_min, fisco = wfg_utils.get_starting_frequency_for_conditioning(parameters_gwsignal)
+        params = parameters_gwsignal.copy()
+        params["f22_start"] = new_fstart*u.Hz
+
+        generator = new_interface_get_waveform_generator(self.approximant_str)
+        hlm_td = gws_wfm.GenerateTDModes(params, generator)
+        hlms_lal = {}
+
+        for key, value in hlm_td.items():
+            if type(key) != str:
+                hlm_lal = wfg_utils.taper_td_modes_extra_time(value, textra, f_min, original_f_min, fisco)
                 hlms_lal[key] = hlm_lal
 
         return hlms_lal, parameters_gwsignal["inclination"].value
