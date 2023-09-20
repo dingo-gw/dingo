@@ -244,17 +244,6 @@ def prepare_log_prob(
         sampler.to_hdf5(label=low_latency_label, outdir=outdir)
     result = sampler.to_result()
     nde_settings["training"]["device"] = str(sampler.model.device)
-
-    # If there is only one parameter, and no context, we cannot use a
-    # coupling transform. In this case, we use an autoregressive transform
-    # for the density estimator
-    if len(sampler.gnpe_proxy_parameters) == 1:
-        print(
-            "Using autoregressive transform for density estimator since there is only 1 GNPE proxy."
-        )
-        nde_settings["model"]["base_transform_kwargs"][
-            "base_transform_type"
-        ] = "rq-autoregressive"
     unconditional_model = result.train_unconditional_flow(
         sampler.gnpe_proxy_parameters,
         nde_settings,
