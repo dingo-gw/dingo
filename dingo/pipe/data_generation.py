@@ -359,6 +359,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
             "f_max": self.maximum_frequency,
             "window_type": "tukey",
             "roll_off": self.tukey_roll_off,
+            "trigger_offset": {ifo.name: ifo.strain_data.start_time - (self.trigger_time - self.duration + self.post_trigger_duration) for ifo in self.interferometers}
         }
         if hasattr(self, "strain_data_list"):
             for strain_data, event_data_file in zip(

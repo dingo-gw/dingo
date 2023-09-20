@@ -10,6 +10,7 @@ import warnings
 import lal
 import lalsimulation as LS
 import pandas as pd
+import bilby.core.utils as bilby_utils 
 
 try:
     from lalsimulation.gwsignal.core import waveform as gws_wfm
@@ -292,8 +293,8 @@ class WaveformGenerator:
         p, _ = convert_to_lal_binary_black_hole_parameters(parameter_dict)
 
         # Convert to SI units
-        p["mass_1"] *= lal.MSUN_SI
-        p["mass_2"] *= lal.MSUN_SI
+        p["mass_1"] *= bilby_utils.solar_mass
+        p["mass_2"] *= bilby_utils.solar_mass
         p["luminosity_distance"] *= 1e6 * lal.PC_SI
 
         # Transform to lal source frame: iota and Cartesian spin components

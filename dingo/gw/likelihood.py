@@ -31,6 +31,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         phase_marginalization_kwargs=None,
         calibration_marginalization_kwargs=None,
         phase_grid=None,
+        event_metadata=None,
     ):
         # TODO: Does the phase_grid argument ever get used?
         """
@@ -54,6 +55,9 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             Calibration marginalization parameters. If None, no calibration marginalization is used.
         phase_marginalization_kwargs: dict
             Phase marginalization parameters. If None, no phase marginalization is used.
+        event_metadata : dict
+            Metadata about the event. This is used to set the start times in the detectors
+            which may be different from the trigger time.
         """
         super().__init__(
             wfg_kwargs=wfg_kwargs,
@@ -62,6 +66,17 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             ifo_list=list(event_data["waveform"].keys()),
             t_ref=t_ref,
         )
+
+        # Updates interferometer start times depending on the start time of the detectors
+        # This is useful for simulating signals that are not
+        # co-located. Or if there are signals which don't start at the same time
+        # in each detector due to discretization of the signal.
+        # only does this if the start times are not all zero
+        if "trigger_offset" in event_metadata and not all(
+            np.abs(v) < 1e-12 for v in event_metadata["trigger_offset"].values()
+        ):
+            self.trigger_offset = event_metadata["trigger_offset"]
+            self._initialize_transform()
 
         self.asd = event_data["asds"]
 
@@ -262,6 +277,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 for d_ifo, mu_ifo in zip(d.values(), mu.values())
             ],
         )
+
+        print(self.log_Zn, kappa2, -1 / 2 * rho2opt)
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
     def log_likelihood_phase_grid(self, theta, phases=None):
@@ -289,7 +306,10 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
         # Step 1: Compute signal for phase = 0, separated into the m-contributions from
         # the individual modes.
-        pol_m = self.signal_m({**theta, "phase": 0})
+        try:
+            pol_m = self.signal_m({**theta, "phase": 0})
+        except:
+            return np.zeros(len(phases))
         pol_m = {k: pol["waveform"] for k, pol in pol_m.items()}
 
         # Step 2: Precompute complex inner products (mu, mu) and (d, mu) for the
@@ -367,16 +387,16 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             log_likelihoods[idx] = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
             # comment out for cross check:
-            mu = sum_contributions_m(pol_m, phase_shift=phase)
-            rho2opt_ref = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
-            kappa2_ref = sum(
-                [
-                    inner_product(d_ifo, mu_ifo)
-                    for d_ifo, mu_ifo in zip(d.values(), mu.values())
-                ]
-            )
-            assert rho2opt - rho2opt_ref < 1e-10
-            assert kappa2 - kappa2_ref < 1e-10
+            # mu = sum_contributions_m(pol_m, phase_shift=phase)
+            # rho2opt_ref = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
+            # kappa2_ref = sum(
+            # [
+            # inner_product(d_ifo, mu_ifo)
+            # for d_ifo, mu_ifo in zip(d.values(), mu.values())
+            # ]
+            # )
+            # assert rho2opt - rho2opt_ref < 1e-10
+            # assert kappa2 - kappa2_ref < 1e-10
 
         # # Test that this works:
         # idx = len(phases) // 3
