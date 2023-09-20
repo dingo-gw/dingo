@@ -12,8 +12,10 @@ from dingo.core.models import PosteriorModel
 from dingo.core.utils.plotting import plot_corner_multi
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
-from dingo.gw.data.data_preparation import get_event_data_and_domain, \
-    parse_settings_for_raw_data
+from dingo.gw.data.data_preparation import (
+    get_event_data_and_domain,
+    parse_settings_for_raw_data,
+)
 from dingo.gw.inference.visualization import load_ref_samples
 
 
@@ -160,8 +162,9 @@ def get_event_data(event, args, model, ref=None):
             args.event_dataset,
         )
 
-        event_metadata = parse_settings_for_raw_data(model.metadata, args.time_psd,
-                                                     args.time_buffer)
+        event_metadata = parse_settings_for_raw_data(
+            model.metadata, args.time_psd, args.time_buffer
+        )
 
         # Put the metadata in the same format as provided by dingo_pipe data_generation.
         # (This is a bit ad hoc, should be improved.)
@@ -241,6 +244,17 @@ def prepare_log_prob(
         sampler.to_hdf5(label=low_latency_label, outdir=outdir)
     result = sampler.to_result()
     nde_settings["training"]["device"] = str(sampler.model.device)
+
+    # If there is only one parameter, and no context, we cannot use a
+    # coupling transform. In this case, we use an autoregressive transform
+    # for the density estimator
+    if len(sampler.gnpe_proxy_parameters) == 1:
+        print(
+            "Using autoregressive transform for density estimator since there is only 1 GNPE proxy."
+        )
+        nde_settings["model"]["base_transform_kwargs"][
+            "base_transform_type"
+        ] = "rq-autoregressive"
     unconditional_model = result.train_unconditional_flow(
         sampler.gnpe_proxy_parameters,
         nde_settings,
@@ -346,7 +360,7 @@ def analyze_event():
             plot_corner_multi(
                 [ref_samples, sampler.samples],
                 labels=[ref_method, "Dingo"],
-                filename=join(args.out_directory, f"cornerplot_{label}.pdf")
+                filename=join(args.out_directory, f"cornerplot_{label}.pdf"),
             )
     if args.exit_command:
         os.system(" ".join(args.exit_command))
