@@ -83,12 +83,11 @@ class WaveformGenerator:
         else:
             self.approximant_str = approximant
             self.lal_params = None
-            try:
+            if "SEOBNRv5" not in approximant:
+                # This LAL function does not work with waveforms using the new interface. TODO: Improve the check.
                 self.approximant = LS.GetApproximantFromString(approximant)
                 if mode_list is not None:
                     self.lal_params = self.setup_mode_array(mode_list)
-            except:
-                pass
 
         if not issubclass(type(domain), Domain):
             raise ValueError(
