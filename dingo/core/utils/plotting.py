@@ -25,7 +25,7 @@ def plot_corner_multi(
     filename : str
         Where to save samples.
     plot_density : bool
-        Whether to normalize the posteriors.
+        Whether to normalize the posteriors. Defaults to False.
     **kwargs :
         Forwarded to corner.corner.
     """
