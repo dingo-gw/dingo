@@ -791,8 +791,8 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         p, _ = convert_to_lal_binary_black_hole_parameters(parameter_dict)
 
         # Convert to SI units
-        p["mass_1"] *= lal.MSUN_SI
-        p["mass_2"] *= lal.MSUN_SI
+        #p["mass_1"] *= lal.MSUN_SI
+        #p["mass_2"] *= lal.MSUN_SI
     
         # Transform to lal source frame: iota and Cartesian spin components
         param_keys_in = (
@@ -809,6 +809,8 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             "phase",
         )
         param_values_in = [p[k] for k in param_keys_in]
+        param_values_in[7] *= lal.MSUN_SI
+        param_values_in[8] *= lal.MSUN_SI
         # if spin_conversion_phase is set, use this as fixed phiRef when computing the
         # cartesian spins instead of using the phase parameter
         if self.spin_conversion_phase is not None:
@@ -829,8 +831,8 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         delta_t = 0.5 / self.domain.f_max
 
         params_gwsignal = {
-            "mass1": p["mass_1"] * u.kg,
-            "mass2": p["mass_2"] * u.kg,
+            "mass1": p["mass_1"] * u.solMass,
+            "mass2": p["mass_2"] * u.solMass,
             "spin1x": s1x * u.dimensionless_unscaled,
             "spin1y": s1y * u.dimensionless_unscaled,
             "spin1z": s1z * u.dimensionless_unscaled,

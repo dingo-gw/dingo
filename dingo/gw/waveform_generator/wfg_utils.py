@@ -193,31 +193,31 @@ def get_starting_frequency_for_conditioning(parameters):
     S2z = parameters["spin2z"].value
     original_f_min = f_min
 
-    fisco = 1.0 / (pow(9.0, 1.5) * np.pi * (m1 + m2) * lal.MTSUN_SI/lal.MSUN_SI)
+    fisco = 1.0 / (pow(9.0, 1.5) * np.pi * (m1 + m2) * lal.MTSUN_SI)
     if f_min > fisco:
         f_min = fisco
 
     # upper bound on the chirp time starting at f_min
     tchirp = LS.SimInspiralChirpTimeBound(
-        f_min, m1, m2, S1z, S2z
+        f_min, m1*lal.MSUN_SI, m2*lal.MSUN_SI, S1z, S2z
     )
     # upper bound on the final black hole spin */
     spinkerr = LS.SimInspiralFinalBlackHoleSpinBound(S1z, S2z)
     # upper bound on the final plunge, merger, and ringdown time */
     tmerge = LS.SimInspiralMergeTimeBound(
-        m1 , m2 
-    ) + LS.SimInspiralRingdownTimeBound((m1 + m2) , spinkerr)
+        m1*lal.MSUN_SI , m2 *lal.MSUN_SI
+    ) + LS.SimInspiralRingdownTimeBound((m1 + m2)*lal.MSUN_SI , spinkerr)
 
     # extra time to include for all waveforms to take care of situations where the frequency is close to merger (and is sweeping rapidly): this is a few cycles at the low frequency
     textra = extra_cycles / f_min
     # compute a new lower frequency
     fstart = LS.SimInspiralChirpStartFrequencyBound(
         (1.0 + extra_time_fraction) * tchirp + tmerge + textra,
-        m1 ,
-        m2 ,
+        m1*lal.MSUN_SI ,
+        m2*lal.MSUN_SI ,
     )
 
-    fisco = 1.0 / (pow(6.0, 1.5) * np.pi * (m1 + m2) * lal.MTSUN_SI/lal.MSUN_SI)
+    fisco = 1.0 / (pow(6.0, 1.5) * np.pi * (m1 + m2) * lal.MTSUN_SI)
 
     return f_min, fstart, extra_time_fraction * tchirp + textra, original_f_min, fisco
 
