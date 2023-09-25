@@ -791,9 +791,9 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         p, _ = convert_to_lal_binary_black_hole_parameters(parameter_dict)
 
         # Convert to SI units
-        #p["mass_1"] *= lal.MSUN_SI
-        #p["mass_2"] *= lal.MSUN_SI
-    
+        # p["mass_1"] *= lal.MSUN_SI
+        # p["mass_2"] *= lal.MSUN_SI
+
         # Transform to lal source frame: iota and Cartesian spin components
         param_keys_in = (
             "theta_jn",
@@ -1023,10 +1023,15 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 # Step 2: Transform modes to target domain.
                 # Not required here, as approximant domain and target domain are both FD.
 
-            elif self.approximant_str == "SEOBNRv5PHM" or self.approximant_str == "SEOBNRv5HM":
+            elif (
+                self.approximant_str == "SEOBNRv5PHM"
+                or self.approximant_str == "SEOBNRv5HM"
+            ):
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: TD), applying standard conditioning
-                hlm_td, iota = self.generate_TD_modes_L0_conditioned_extra_time(parameters)
+                hlm_td, iota = self.generate_TD_modes_L0_conditioned_extra_time(
+                    parameters
+                )
 
                 # Step 2: Transform modes to target domain.
                 hlm_fd = wfg_utils.td_modes_to_fd_modes(hlm_td, self.domain)
@@ -1168,7 +1173,10 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
 
     def generate_TD_modes_L0_conditioned_extra_time(self, parameters):
         """
-        Generate TD modes in the L0 frame.
+        Generate TD modes in the L0 frame applying a conditioning routine which mimicks the behaviour of the standard LALSimulation conditioning (https://lscsoft.docs.ligo.org/lalsuite/lalsimulation/_l_a_l_sim_inspiral_generator_conditioning_8c.html#ac78b5fcdabf8922a3ac479da20185c85)
+
+        Essentially, a new starting frequency is computed to have some extra cycles that will be tapered.
+        Some extra buffer time is also added to ensure that the waveform at the requested starting frequency is not modified, while still having a tapered timeseries suited for clean FFT.
 
         Parameters
         ----------
@@ -1184,15 +1192,23 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         iota: float
         """
         # TD approximants that are implemented in L0 frame. Currently tested for:
-        #   52: SEOBNRv4PHM
+        # SEOBNRv5HM and SEOBNRv5PHM
 
         parameters_gwsignal = self._convert_parameters(
             {**parameters, "f_ref": self.f_ref}
         )
 
-        f_min, new_fstart, textra, original_f_min, fisco = wfg_utils.get_starting_frequency_for_conditioning(parameters_gwsignal)
+        (
+            f_min,
+            new_f_start,
+            t_extra,
+            original_f_min,
+            f_isco,
+        ) = wfg_utils.get_starting_frequency_for_SEOBRNRv5_conditioning(
+            parameters_gwsignal
+        )
         params = parameters_gwsignal.copy()
-        params["f22_start"] = new_fstart*u.Hz
+        params["f22_start"] = new_f_start * u.Hz
 
         generator = new_interface_get_waveform_generator(self.approximant_str)
         hlm_td = gws_wfm.GenerateTDModes(params, generator)
@@ -1200,7 +1216,9 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
 
         for key, value in hlm_td.items():
             if type(key) != str:
-                hlm_lal = wfg_utils.taper_td_modes_extra_time(value, textra, f_min, original_f_min, fisco)
+                hlm_lal = wfg_utils.taper_td_modes_for_SEOBRNRv5_extra_time(
+                    value, t_extra, f_min, original_f_min, f_isco
+                )
                 hlms_lal[key] = hlm_lal
 
         return hlms_lal, parameters_gwsignal["inclination"].value
