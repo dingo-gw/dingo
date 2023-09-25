@@ -8,7 +8,7 @@ import pandas as pd
 
 
 def plot_corner_multi(
-    samples, weights=None, labels=None, filename="corner.pdf", **kwargs
+    samples, weights=None, labels=None, filename="corner.pdf", plot_density=False, **kwargs
 ):
     """
     Generate a corner plot for multiple posteriors.
@@ -24,6 +24,8 @@ def plot_corner_multi(
         Labels for the posteriors.
     filename : str
         Where to save samples.
+    plot_density : bool
+        Whether to normalize the posteriors.
     **kwargs :
         Forwarded to corner.corner.
     """
@@ -60,6 +62,15 @@ def plot_corner_multi(
         for p in samples[0].columns
         if p in set.intersection(*(set(s.columns) for s in samples))
     ]
+
+    if plot_density:
+        # Redefine all sets of weights to have unit sum.
+        for i, w in enumerate(weights):
+            if w is not None:
+                weights[i] = w / np.sum(w)
+            else:
+                n = len(samples[i])
+                weights[i] = np.ones(n) / n
 
     fig = None
     handles = []
