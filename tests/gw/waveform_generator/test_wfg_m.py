@@ -124,16 +124,16 @@ def tolerances(approximant):
         # was 7e-4, while almost all mismatches were of order 1e-5.
         return 5e-4, 5e-4
 
-    elif approximant == "SEOBNRv5PHM":
-        # Tested on 1000 mismatches, max mismatch was 3e-8.
-        return 1e-7, 1e-10
+    elif approximant in ["SEOBNRv5PHM", "SEOBNRv5HM"]:
+        # Tested on 1000 mismatches.
+        return 1e-9, 1e-12
 
     else:
-        return 1e-1, 1e-7
+        return 1e-5, 1e-5
 
 
 # Uncomment to test only one approximant.
-@pytest.mark.parametrize("approximant", ["IMRPhenomXPHM"])
+# @pytest.mark.parametrize("approximant", ["IMRPhenomXPHM"])
 def test_generate_hplus_hcross_m(intrinsic_prior, wfg, num_evaluations, tolerances):
     mismatches = []
     for idx in range(num_evaluations):

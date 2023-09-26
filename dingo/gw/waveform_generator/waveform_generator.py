@@ -1173,16 +1173,19 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
 
     def generate_TD_modes_L0_conditioned_extra_time(self, parameters):
         """
-        Generate TD modes in the L0 frame applying a conditioning routine which mimicks the behaviour of the standard LALSimulation conditioning (https://lscsoft.docs.ligo.org/lalsuite/lalsimulation/_l_a_l_sim_inspiral_generator_conditioning_8c.html#ac78b5fcdabf8922a3ac479da20185c85)
+        Generate TD modes in the L0 frame applying a conditioning routine which mimics the behaviour of the standard
+        LALSimulation conditioning
+        (https://lscsoft.docs.ligo.org/lalsuite/lalsimulation/_l_a_l_sim_inspiral_generator_conditioning_8c.html#ac78b5fcdabf8922a3ac479da20185c85)
 
-        Essentially, a new starting frequency is computed to have some extra cycles that will be tapered.
-        Some extra buffer time is also added to ensure that the waveform at the requested starting frequency is not modified, while still having a tapered timeseries suited for clean FFT.
+        Essentially, a new starting frequency is computed to have some extra cycles that will be tapered. Some extra
+        buffer time is also added to ensure that the waveform at the requested starting frequency is not modified,
+        while still having a tapered timeseries suited for clean FFT.
 
         Parameters
         ----------
         parameters: dict
             Dictionary of parameters for the waveform.
-            For details see see self.generate_hplus_hcross.
+            For details see self.generate_hplus_hcross.
 
         Returns
         -------
