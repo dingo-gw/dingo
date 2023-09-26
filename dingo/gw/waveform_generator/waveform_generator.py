@@ -790,10 +790,6 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         # Transform mass, spin, and distance parameters
         p, _ = convert_to_lal_binary_black_hole_parameters(parameter_dict)
 
-        # Convert to SI units
-        # p["mass_1"] *= lal.MSUN_SI
-        # p["mass_2"] *= lal.MSUN_SI
-
         # Transform to lal source frame: iota and Cartesian spin components
         param_keys_in = (
             "theta_jn",
@@ -809,8 +805,13 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             "phase",
         )
         param_values_in = [p[k] for k in param_keys_in]
+
+        # Masses for spin conversion must be in SI units. However, for waveform generation, they must remain in solar
+        # masses due to sensitive dependence of SEOBNRv5 waveforms to small changes in the mass. Hence, we only convert
+        # units here.
         param_values_in[7] *= lal.MSUN_SI
         param_values_in[8] *= lal.MSUN_SI
+
         # if spin_conversion_phase is set, use this as fixed phiRef when computing the
         # cartesian spins instead of using the phase parameter
         if self.spin_conversion_phase is not None:
