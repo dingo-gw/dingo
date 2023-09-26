@@ -322,6 +322,86 @@ class DataGenerationInput(BilbyDataGenerationInput):
             asd = ifo.power_spectral_density.get_amplitude_spectral_density_array(
                 frequency_array
             )
+            self.injection_waveform_approximant = args.injection_waveform_approximant
+        else:
+            self.injection_waveform_approximant = (
+                injection_generator.waveform_generator.approximant_str
+            )
+
+        self.detectors = [ifo.name for ifo in injection_generator.ifo_list]
+        self.sampling_frequency = (
+            injection_generator.waveform_generator.domain.sampling_rate
+        )
+        self.duration = injection_generator.data_domain.duration
+        self.minimum_frequency = injection_generator.data_domain.f_min
+        self.maximum_frequency = injection_generator.data_domain.f_max
+        self.window_type = pm.metadata["train_settings"]["data"]["window"]["type"]
+        self.tukey_roll_off = pm.metadata["train_settings"]["data"]["window"][
+            "roll_off"
+        ]
+        self.post_trigger_duration = args.post_trigger_duration
+
+        self.strain_data_list = []
+        # if importance sampling with zero-noise, don't add noise to injection
+        # the idea here is to reweight to the zero-noise likelihood
+        if self.zero_noise and self.importance_sampling:
+            self.strain_data_list.append(
+                injection_generator.signal(self.injection_dict)
+            )
+        else:
+            for i in range(self.num_noise_realizations):
+                # add i to the seed to get different noise realizations
+                # but keep consistent across zero noise seed
+                seed = (
+                    args.injection_random_seed + i
+                    if args.injection_random_seed is not None
+                    else None
+                )
+                self.strain_data_list.append(
+                    injection_generator.injection(
+                        self.injection_dict,
+                        seed=seed,
+                    )
+                )
+
+        # Compute optimal SNR
+        rho_opt_ifos, rho_opt = self.compute_optimal_snr(
+            self.strain_data_list[0], injection_generator.data_domain
+        )
+        logger.info(f"Network optimal SNR of injection: {rho_opt}")
+        logger.info(f"Detector optimal SNRs of injection: {rho_opt_ifos}")
+
+    def compute_optimal_snr(self, strain_data, data_domain):
+        """Compute network optimal signal-to-noise ratio for the first injected strain"""
+        mu = strain_data["waveform"]
+        asds = strain_data["asds"]
+        delta_f = data_domain.delta_f
+        noise_std = data_domain.noise_std
+
+        # In the inner products below explicitly divide by the window factor
+        window_factor = 4 * delta_f * noise_std**2
+
+        # optimal network SNR
+        kappa2_list = [
+            inner_product(
+                mu_ifo, mu_ifo, delta_f=delta_f, psd=window_factor * asd_ifo**2
+            )
+            for mu_ifo, asd_ifo in zip(mu.values(), asds.values())
+        ]
+        rho_opt = np.sqrt(sum(kappa2_list))
+        rho_opt_ifos = np.sqrt(kappa2_list)
+
+        return rho_opt_ifos, rho_opt
+
+    def create_data(self, args):
+        super().create_data(args)
+
+        # check if there are nan's in the asd, if there are shift the detector segment used to generate the psd to an earlier time
+        for ifo in self.interferometers:
+            frequency_array = ifo.strain_data.frequency_array
+            asd = ifo.power_spectral_density.get_amplitude_spectral_density_array(
+                frequency_array
+            )
 
             if np.max(np.isnan(asd)):
                 if args.shift_segment_for_psd_generation_if_nan:
