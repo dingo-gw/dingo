@@ -67,7 +67,7 @@ def create_parser(top_level=True):
     calibration_parser = parser.add_argument_group(
         "Calibration arguments",
         description="Which calibration model and settings to use. Calibration "
-                    "uncertainty is marginalizaed over during importance sampling.",
+        "uncertainty is marginalizaed over during importance sampling.",
     )
     calibration_parser.add(
         "--calibration-model",
@@ -95,8 +95,10 @@ def create_parser(top_level=True):
         "--spline-calibration-curves",
         type=int,
         default=1000,
-        help=("Number of calibration curves to use in marginalizing over calibration "
-              "uncertainty"),
+        help=(
+            "Number of calibration curves to use in marginalizing over calibration "
+            "uncertainty"
+        ),
     )
     #
     # calibration_parser.add(
@@ -134,9 +136,10 @@ def create_parser(top_level=True):
             help="Filename for the data dump: only used internally by data_analysis",
         )
         parser.add(
-            "--event-data-file",
+            "--event-data-files",
             type=nonestr,
             default=None,
+            nargs="+",
             help="Filename for the event: only used internally by sampling and "
             "importance_sampling",
         )
@@ -151,9 +154,9 @@ def create_parser(top_level=True):
             "--importance-sampling-generation",
             action="store_true",
             help="Whether to prepare data based on the updated importance sampling "
-                 "settings rather than network settings. This is used internally for "
-                 "data generation, when preparing different data for the importance "
-                 "sampling stage.",
+            "settings rather than network settings. This is used internally for "
+            "data generation, when preparing different data for the importance "
+            "sampling stage.",
         )
 
     data_gen_pars = parser.add_argument_group(
@@ -168,6 +171,17 @@ def create_parser(top_level=True):
         help=(
             "Ignores the check to see if data queried from GWpy (ie not gaussian "
             "noise) is obtained from time when the IFOs are in science mode."
+        ),
+    )
+
+    data_gen_pars.add(
+        "--shift-segment-for-psd-generation-if-nan",
+        action=StoreBoolean,
+        default=False,
+        help=(
+            "Occasionally there are Nans stored in the strain data from which the PSD is generated. "
+            "If this method is activated, it will roll back the strain data which is being analyzed to "
+            "a segement which contains no Nans."
         ),
     )
     #
@@ -272,10 +286,10 @@ def create_parser(top_level=True):
     #     action="store_true",
     #     help="If true, use simulated Gaussian noise",
     # )
-    # data_type_pars.add(
-    #     "--zero-noise",
-    #     action="store_true",
-    #     help="Use a zero noise realisation",
+    # data_gen_pars.add(
+        # "--zero-noise",
+        # action="store_true",
+        # help="Use a zero noise realisation",
     # )
 
     det_parser = parser.add_argument_group(
@@ -424,7 +438,10 @@ def create_parser(top_level=True):
         "--injection-dict",
         type=nonestr,
         default=None,
-        help="A single injection dictionary given in the ini file",
+        help=(
+            "A single injection dictionary given in the ini file. Will use dingo.gw.injection to generate"
+            "waveform data"
+        ),
     )
     injection_parser_input.add(
         "--injection-file",
@@ -435,26 +452,62 @@ def create_parser(top_level=True):
             " for supported formats"
         ),
     )
+    injection_parser.add(
+        "--injection-random-seed",
+        type=noneint,
+        default=None,
+        help="random seed to use when generating noise realization(s) from PSD",
+    )
+    injection_parser_psd_input = injection_parser.add_mutually_exclusive_group()
+    injection_parser_psd_input.add(
+        "--asd-dataset",
+        type=nonestr,
+        default=None,
+        help=(
+            "path to the ASDDataset file which will be used for the injection"
+            "if there are multiple asds stored will select a random one"
+        ),
+    )
+    injection_parser_psd_input.add(
+        "--use-psd-of-trigger",
+        type=bool,
+        default=True,
+        help="random seed to use when generating noise realization(s) from PSD",
+    )
     # injection_parser.add(
-    #     "--injection-numbers",
-    #     action="append",
-    #     type=nonestr,
-    #     default=None,
-    #     help=(
-    #         "Specific injections rows to use from the injection_file, e.g. "
-    #         "`injection_numbers=[0,3] selects the zeroth and third row. Can be "
-    #         "a list of slice-syntax values, e.g, [0, 2:4] will produce [0, 2, 3]. "
-    #         "Repeated entries will be ignored."
-    #     ),
+        # "--injection-numbers",
+        # action="append",
+        # type=nonestr,
+        # default=None,
+        # help=(
+            # "Specific injections rows to use from the injection_file, e.g. "
+            # "`injection_numbers=[0,3] selects the zeroth and third row. Can be "
+            # "a list of slice-syntax values, e.g, [0, 2:4] will produce [0, 2, 3]. "
+            # "Repeated entries will be ignored."
+        # ),
     # )
-    # injection_parser.add(
-    #     "--injection-waveform-approximant",
-    #     type=nonestr,
-    #     default=None,
-    #     help="The name of the waveform approximant to use to create injections. "
-    #     "If none is specified, then the `waveform-approximant` will be used"
-    #     "as the `injection-waveform-approximant`.",
-    # )
+    injection_parser.add(
+        "--injection-waveform-approximant",
+        type=nonestr,
+        default=None,
+        help="The name of the waveform approximant to use to create injections. "
+        "If none is specified, then the waveform consistent with the network"
+        "training will be used. Allowed waveform approximants are those implemented"
+        "in lalsimulation",
+    )
+    injection_parser.add(
+        "--zero-noise",
+        action="store_true",
+        help="Use a zero noise realisation",
+    )
+    injection_parser.add(
+        "--num-noise-realizations",
+        type=int,
+        default=100,
+        help="When using zero noise, the number of noise realisations to average over."
+        "This is the number of dingo proposals to average over before importance sampling."
+    )
+
     # injection_parser.add(
     #     "--injection-waveform-arguments",
     #     type=nonestr,
@@ -572,9 +625,7 @@ def create_parser(top_level=True):
     submission_parser.add(
         "--extra-lines",
         action="append",
-        help=(
-            "List of additional lines to include for all HTCondor submissions."
-        ),
+        help=("List of additional lines to include for all HTCondor submissions."),
     )
     submission_parser.add(
         "--simple-submission",
@@ -1245,9 +1296,7 @@ def create_parser(top_level=True):
         "--importance-sample",
         action=StoreBoolean,
         default=True,
-        help=(
-            "Whether to perform importance sampling on result. (Default: True)"
-        ),
+        help=("Whether to perform importance sampling on result. (Default: True)"),
     )
     sampler_parser.add(
         "--importance-sampling-settings",
