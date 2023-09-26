@@ -168,7 +168,6 @@ class SamplingInput(Input):
         # Iterating through all event data files, you will 
         # only have more than one if you are noise averaging
         self.dingo_sampler.event_metadata = self.event_metadata
-        n_training_samples = 1_000_000
         samples_list = []
         for context in self.contexts:
             self.dingo_sampler.context = context
@@ -188,27 +187,25 @@ class SamplingInput(Input):
 
             # Training unconditional density estimator if zero noise
             elif self.zero_noise:
+                n_training_samples = 1_000_000
                 self.dingo_sampler.run_sampler(int(n_training_samples / self.num_noise_realizations), batch_size=self.batch_size)
                 samples_list.append(self.dingo_sampler.samples)
 
-        
-        if self.zero_noise:
-            self.dingo_sampler.samples = pd.concat(samples_list)
-            logger.info("Training unconditional density estimator on pool of noise realizations")
-            training_result = self.dingo_sampler.to_result()
-            outdir = Path(self.result_directory)
-            training_result.to_file(outdir / "training_samples.hdf5")
-            inference_parameters = list(self.dingo_sampler.samples.columns)
-            # removing proxies since this makes training the unconditional flow easier 
-            inference_parameters = [x for x in inference_parameters if "proxy" not in x]
-            unconditional_flow = training_result.train_unconditional_flow(
-                inference_parameters, 
-                nde_settings=self.density_recovery_settings["nde_settings"]
-                )
+                logger.info("Training unconditional density estimator on pool of noise realizations")
+                training_result = self.dingo_sampler.to_result()
+                outdir = Path(self.result_directory)
+                training_result.to_file(outdir / "training_samples.hdf5")
+                inference_parameters = list(self.dingo_sampler.samples.columns)
+                # removing proxies since this makes training the unconditional flow easier 
+                inference_parameters = [x for x in inference_parameters if "proxy" not in x]
+                unconditional_flow = training_result.train_unconditional_flow(
+                    inference_parameters, 
+                    nde_settings=self.density_recovery_settings["nde_settings"]
+                    )
 
-            nde_sampler = GWSampler(model=unconditional_flow)
-            nde_sampler.run_sampler(num_samples=self.num_samples, batch_size=self.batch_size)
-            self.dingo_sampler = nde_sampler
+                nde_sampler = GWSampler(model=unconditional_flow)
+                nde_sampler.run_sampler(num_samples=self.num_samples, batch_size=self.batch_size)
+                self.dingo_sampler = nde_sampler
 
 
         # run the sampler 
