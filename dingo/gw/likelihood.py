@@ -72,9 +72,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         # co-located. Or if there are signals which don't start at the same time
         # in each detector due to discretization of the signal.
         # only does this if the start times are not all zero
-        if "trigger_offset" in event_metadata and not all(
-            np.abs(v) < 1e-12 for v in event_metadata["trigger_offset"].values()
-        ):
+        if "trigger_offset" in event_metadata:
             self.trigger_offset = event_metadata["trigger_offset"]
             self._initialize_transform()
 
