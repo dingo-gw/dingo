@@ -115,8 +115,13 @@ class MainInput(BilbyMainInput):
         self.coherence_test = (
             False  # dingo mod: Cannot use different sets of detectors.
         )
+        self.data_dict = args.data_dict
+        self.frame_type_dict = args.frame_type_dict
+        self.data_find_url = args.data_find_url
+        self.data_find_urltype = args.data_find_urltype
         self.n_parallel = args.n_parallel
-        # self.transfer_files = args.transfer_files
+        self.transfer_files = args.transfer_files
+        self.additional_transfer_paths = args.additional_transfer_paths
         self.osg = args.osg
         self.desired_sites = args.desired_sites
         # self.analysis_executable = args.analysis_executable
@@ -218,8 +223,13 @@ class MainInput(BilbyMainInput):
         # self.single_postprocessing_arguments = args.single_postprocessing_arguments
         #
         self.summarypages_arguments = args.summarypages_arguments
-        #
+
         self.psd_dict = args.psd_dict
+        self.psd_maximum_duration = args.psd_maximum_duration
+        self.psd_length = args.psd_length
+        self.psd_fractional_overlap = args.psd_fractional_overlap
+        self.psd_start_time = args.psd_start_time
+        self.spline_calibration_envelope_dict = args.spline_calibration_envelope_dict
 
         # self.check_source_model(args)
 
