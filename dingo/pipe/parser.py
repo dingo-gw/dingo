@@ -704,11 +704,12 @@ def create_parser(top_level=True):
     submission_parser.add(
         "--disable-hdf5-locking",
         action=StoreBoolean,
-        default=True,
+        default=False,
         help=(
             "If true (default), disable HDF5 locking. This can improve "
             "stability on some clusters, but may cause issues if multiple "
             "processes are reading/writing to the same file."
+            "This argument is deprecated and should be passed through --environment-variables"
         ),
     )
     submission_parser.add(
