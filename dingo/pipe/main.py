@@ -142,6 +142,8 @@ class MainInput(BilbyMainInput):
         self.scheduler_env = args.scheduler_env
         self.scheduler_analysis_time = args.scheduler_analysis_time
         self.disable_hdf5_locking = args.disable_hdf5_locking
+        self.environment_variables = args.environment_variables
+        self.getenv = args.getenv
 
         # self.waveform_approximant = args.waveform_approximant
         #

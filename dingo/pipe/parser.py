@@ -671,6 +671,23 @@ def create_parser(top_level=True):
         ),
     )
     submission_parser.add(
+        "--environment-variables",
+        default=None,
+        type=nonestr,
+        help=(
+            "Key value pairs for environment variables formatted as a json string, "
+            "e.g., '{'OMP_NUM_THREADS': 1, 'LAL_DATA_PATH'='/home/data'}'. These values "
+            f"take precedence over --getenv. The default values are {ENVIRONMENT_DEFAULTS}."
+        ),
+    )
+    submission_parser.add(
+        "--getenv",
+        default=None,
+        action="append",
+        type=nonestr,
+        help="List of environment variables to copy from the current session.",
+    )
+    submission_parser.add(
         "--additional-transfer-paths",
         action="append",
         default=None,
