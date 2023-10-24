@@ -308,14 +308,21 @@ class Result(CoreResult):
         self.phase_marginalization_kwargs = phase_marginalization_kwargs
         self.calibration_marginalization_kwargs = calibration_marginalization_kwargs
 
-        # FIXME: This is a quick hack because I didn't know how to choose the wfg
-        #  domain in the case of a changing domain during importance sampling. It could
-        #  only pose problems for EOB, where sometimes one wants to start integrating
-        #  from lower f_min. But even in that case, f_start should override it.
-        if self.importance_sampling_metadata.get("updates") is None:
-            wfg_domain = build_domain(self.base_metadata["dataset_settings"]["domain"])
-        else:
-            wfg_domain = self.domain
+        # Choose the WaveformGenerator domain. This is ultimately projected to the data domain, but generally we
+        # allow it to be different, e.g., to start integrating from lower frequencies than
+        # the lower bound of the likelihood integral. Usually we use the same domain as that
+        # used for the WaveformDataset. However, if we make a change to certain settings during
+        # importance sampling, we need to ensure the projection is still compatible. In particular,
+        # delta_f (=1/T) cannot be changed in a domain projection, so update that at the level
+        # of the WaveformGenerator.
+
+        wfg_domain_dict = self.base_metadata["dataset_settings"]["domain"].copy()
+        if "updates" in self.importance_sampling_metadata:
+            if "T" in self.importance_sampling_metadata["updates"]:
+                wfg_domain_dict["delta_f"] = (
+                    1 / self.importance_sampling_metadata["updates"]["T"]
+                )
+        wfg_domain = build_domain(wfg_domain_dict)
 
         self.likelihood = StationaryGaussianGWLikelihood(
             wfg_kwargs=self.base_metadata["dataset_settings"]["waveform_generator"],
