@@ -151,7 +151,7 @@ class MainInput(BilbyMainInput):
         # self.likelihood_type = args.likelihood_type
         self.duration = args.duration
         # self.phase_marginalization = args.phase_marginalization
-        # self.prior_file = args.prior_file
+        self.prior_file = None  # Dingo update. To change prior use the priod_dict.
         self.prior_dict = args.prior_dict
         self.default_prior = "PriorDict"
         self.minimum_frequency = args.minimum_frequency
