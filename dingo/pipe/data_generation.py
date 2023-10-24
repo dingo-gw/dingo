@@ -68,13 +68,13 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.zero_noise = False  # dingo mod
         self.resampling_method = args.resampling_method
 
-        # if args.timeslide_dict is not None:
-        #     self.timeslide_dict = convert_string_to_dict(args.timeslide_dict)
-        #     logger.info(f"Read-in timeslide dict directly: {self.timeslide_dict}")
-        # elif args.timeslide_file is not None:
-        #     self.gps_file = args.gps_file
-        #     self.timeslide_file = args.timeslide_file
-        #     self.timeslide_dict = self.get_timeslide_dict(self.idx)
+        if args.timeslide_dict is not None:
+            self.timeslide_dict = convert_string_to_dict(args.timeslide_dict)
+            logger.info(f"Read-in timeslide dict directly: {self.timeslide_dict}")
+        elif args.timeslide_file is not None:
+            self.gps_file = args.gps_file
+            self.timeslide_file = args.timeslide_file
+            self.timeslide_dict = self.get_timeslide_dict(self.idx)
 
         # Data duration arguments
         self.duration = args.duration

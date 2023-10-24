@@ -170,27 +170,27 @@ def create_parser(top_level=True):
             "noise) is obtained from time when the IFOs are in science mode."
         ),
     )
-    #
-    # data_gen_pars.add(
-    #     "--gps-tuple",
-    #     type=nonestr,
-    #     help=(
-    #         "Tuple of the (start, step, number) of GPS start times. For"
-    #         " example, (10, 1, 3) produces the gps start times [10, 11, 12]."
-    #         " If given, gps-file is ignored."
-    #     ),
-    #     default=None,
-    # )
-    # data_gen_pars.add(
-    #     "--gps-file",
-    #     type=nonestr,
-    #     help=(
-    #         "File containing segment GPS start times. This can be a multi-"
-    #         "column file if (a) it is comma-separated and (b) the zeroth "
-    #         "column contains the gps-times to use"
-    #     ),
-    #     default=None,
-    # )
+
+    data_gen_pars.add(
+        "--gps-tuple",
+        type=nonestr,
+        help=(
+            "Tuple of the (start, step, number) of GPS start times. For"
+            " example, (10, 1, 3) produces the gps start times [10, 11, 12]."
+            " If given, gps-file is ignored."
+        ),
+        default=None,
+    )
+    data_gen_pars.add(
+        "--gps-file",
+        type=nonestr,
+        help=(
+            "File containing segment GPS start times. This can be a multi-"
+            "column file if (a) it is comma-separated and (b) the zeroth "
+            "column contains the gps-times to use"
+        ),
+        default=None,
+    )
     data_gen_pars.add(
         "--timeslide-file",
         type=nonestr,
@@ -202,15 +202,15 @@ def create_parser(top_level=True):
         ),
         default=None,
     )
-    # data_gen_pars.add(
-    #     "--timeslide-dict",
-    #     type=nonestr,
-    #     help=(
-    #         "Dictionary containing detector timeslides: applies a fixed offset"
-    #         " per detector. E.g. to apply +1s in H1, {H1: 1}"
-    #     ),
-    #     default=None,
-    # )
+    data_gen_pars.add(
+        "--timeslide-dict",
+        type=nonestr,
+        help=(
+            "Dictionary containing detector timeslides: applies a fixed offset"
+            " per detector. E.g. to apply +1s in H1, {H1: 1}"
+        ),
+        default=None,
+    )
     data_gen_pars.add(
         "--trigger-time",
         default=None,
