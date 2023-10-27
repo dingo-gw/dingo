@@ -38,8 +38,9 @@ def get_extrinsic_prior_dict(extrinsic_prior):
     TODO: Move to dingo.gw.prior.py?"""
     extrinsic_prior_dict = default_extrinsic_dict.copy()
     for k, v in extrinsic_prior.items():
-        if v.lower() != "default":
-            extrinsic_prior_dict[k] = v
+        if isinstance(v, str) and v.lower() == "default":
+            continue
+        extrinsic_prior_dict[k] = v
     return extrinsic_prior_dict
 
 
@@ -67,12 +68,12 @@ def get_mismatch(a, b, domain, asd_file=None):
             psd.frequency_array, psd.asd_array, bounds_error=False, fill_value=np.inf
         )
         asd_array = asd_interp(domain.sample_frequencies)
-        a = a / asd_array
-        b = b / asd_array
+        a /= asd_array
+        b /= asd_array
     min_idx = domain.min_idx
-    inner_ab = np.sum((a.conj() * b)[...,min_idx:], axis=-1).real
-    inner_aa = np.sum((a.conj() * a)[...,min_idx:], axis=-1).real
-    inner_bb = np.sum((b.conj() * b)[...,min_idx:], axis=-1).real
+    inner_ab = np.sum((a.conj() * b)[min_idx:], axis=0).real
+    inner_aa = np.sum((a.conj() * a)[min_idx:], axis=0).real
+    inner_bb = np.sum((b.conj() * b)[min_idx:], axis=0).real
     overlap = inner_ab / np.sqrt(inner_aa * inner_bb)
     return 1 - overlap
 

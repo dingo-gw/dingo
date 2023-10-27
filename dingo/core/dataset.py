@@ -109,7 +109,7 @@ class DingoDataset:
 
     def from_file(self, file_name):
         print("Loading dataset from " + str(file_name) + ".")
-        with h5py.File(file_name, "r") as f:
+        with h5py.File(file_name, "r", locking=False) as f:
             # Load only the keys that the class expects
             loaded_dict = recursive_hdf5_load(f, keys=self._data_keys)
             for k, v in loaded_dict.items():

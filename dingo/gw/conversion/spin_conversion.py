@@ -177,29 +177,25 @@ def change_spin_conversion_phase(samples, f_ref, sc_phase_old, sc_phase_new):
     phase_new = sc_phase_new
     samples_new = {}
     for idx, sample in samples.to_dict(orient="index").items():
-        try:
-            if sc_phase_old is None:
-                phase_old = sample["phase"]
-            if sc_phase_new is None:
-                phase_new = sample["phase"]
+        if sc_phase_old is None:
+            phase_old = sample["phase"]
+        if sc_phase_new is None:
+            phase_new = sample["phase"]
 
-            # transform to cartesian spins (which is the fundamental basis, independent of
-            # the phase) with the old spin conversion phase, and back to PE spins with the
-            # new spin conversion phase
-            sample_cartesian = cartesian_spins({**sample, "phase": phase_old}, f_ref)
-            sample_pe_new = pe_spins({**sample_cartesian, "phase": phase_new}, f_ref)
+        # transform to cartesian spins (which is the fundamental basis, independent of
+        # the phase) with the old spin conversion phase, and back to PE spins with the
+        # new spin conversion phase
+        sample_cartesian = cartesian_spins({**sample, "phase": phase_old}, f_ref)
+        sample_pe_new = pe_spins({**sample_cartesian, "phase": phase_new}, f_ref)
 
-            # The conversions above will set the phase parameter to sc_phase_new, however,
-            # this is only the phase used for spin conversion, *not* the actual phase for
-            # the parameters. Below, we set the phase to its correct (i.e., input) value.
-            if "phase" in sample:
-                sample_pe_new["phase"] = sample["phase"]
-            else:
-                sample_pe_new.pop("phase")
+        # The conversions above will set the phase parameter to sc_phase_new, however,
+        # this is only the phase used for spin conversion, *not* the actual phase for
+        # the parameters. Below, we set the phase to its correct (i.e., input) value.
+        if "phase" in sample:
+            sample_pe_new["phase"] = sample["phase"]
+        else:
+            sample_pe_new.pop("phase")
 
-            samples_new[idx] = sample_pe_new
-        except RuntimeError:
-            print("Failed to convert spins. Saving sample unchanged.")
-            samples_new[idx] = sample
+        samples_new[idx] = sample_pe_new
 
     return pd.DataFrame.from_dict(samples_new, orient="index")

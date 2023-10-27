@@ -21,20 +21,13 @@ handled by Dingo include
 
 ### Pip
 
-To install using pip, run the following within a suitable virtual environment:
+The easiest way to install Dingo is using pip. Within a suitable virtual environment, run
+the command
 ```sh
 pip install dingo-gw
 ```
-This will install Dingo as well as all of its requirements, which are listed in
+This will install Dingo as well as all of its requirements, listed in
 [pyproject.toml](https://github.com/dingo-gw/dingo/blob/main/pyproject.toml).
-
-### Conda
-
-Dingo is also available from the [conda-forge](https://conda-forge.org) repository.
-To install using conda, first activate a conda environment, and then run
-```sh
-conda install -c conda-forge dingo-gw
-```
 
 ### Development install
 

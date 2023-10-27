@@ -21,6 +21,8 @@ def get_activation_function_from_string(activation_name: str):
         return F.relu
     elif activation_name.lower() == "leaky_relu":
         return F.leaky_relu
+    elif activation_name.lower() == "gelu":
+        return F.gelu
     else:
         raise ValueError("Invalid activation function.")
 

@@ -97,7 +97,6 @@ def generate_dataset():
         print(f"DAG submission file written.")
 
     else:
-
         print("Downloading strain data and estimating PSDs...")
         asd_filename_list = download_and_estimate_psds(
             args.data_dir, settings, time_segments, verbose=args.verbose

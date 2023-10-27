@@ -7,15 +7,15 @@ import numpy as np
 from typing import Optional
 
 import pandas as pd
-from matplotlib import pyplot as plt
+import matplotlib.pyplot as plt
+from chainconsumer import ChainConsumer
 from scipy.constants import golden
-from scipy.special import logsumexp
+from scipy.special import logsumexp, erfinv
 from bilby.core.prior import Constraint, DeltaFunction
 
 from dingo.core.dataset import DingoDataset
 from dingo.core.density import train_unconditional_density_estimator
 from dingo.core.utils.misc import recursive_check_dicts_are_equal
-from dingo.core.utils.plotting import plot_corner_multi
 
 DATA_KEYS = [
     "samples",
@@ -263,7 +263,10 @@ class Result(DingoDataset):
         # proxies are also stored in self.samples, but are not needed for the likelihood.
         # TODO: replace by self.metadata["train_settings"]["data"]["inference_parameters"]
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
-        theta = self.samples[param_keys]
+        param_keys_inference = [k for k in param_keys if k in self.samples.keys()]
+        theta = self.samples[param_keys_inference]
+        # TODO: Theta might not contain all parameters. Does ln_prob still do the right thing? Looks like it but pls
+        #  check!
 
         # Calculate the (un-normalized) target density as prior times likelihood,
         # evaluated at the same sample points.
@@ -275,7 +278,10 @@ class Result(DingoDataset):
         # for BH spins > 1).
         valid_samples = (log_prior + delta_log_prob_target) != -np.inf
         theta = theta.iloc[valid_samples]
-
+        # TODO We now add fixed parameters to the likelihood by checking which parameters received a delta prior.
+        # TODO this should be replaced by a less hacky solution. Adding fixed_parameter_keys is not sufficient
+        # TODO because, e.g., the phase is then still missing.
+        # theta = self.add_fixed_parameters(theta)
         print(f"Calculating {len(theta)} likelihoods.")
         t0 = time.time()
         log_likelihood = self.likelihood.log_likelihood_multi(
@@ -604,19 +610,31 @@ class Result(DingoDataset):
         if parameters:
             theta = theta[parameters]
 
+        c = ChainConsumer()
+        # Plot pre-importance sampling samples. I.e., drop weights, if present.
+        c.add_chain(theta, weights=None, color="orange", name="Dingo")
+        n = 1
+
         if "weights" in theta:
-            plot_corner_multi(
-                [theta, theta],
-                weights=[None, theta["weights"].to_numpy()],
-                labels=["Dingo", "Dingo-IS"],
-                filename=filename,
+            c.add_chain(
+                theta, weights=theta["weights"].to_numpy(), color="red", name="Dingo-IS"
             )
-        else:
-            plot_corner_multi(
-                theta,
-                labels="Dingo",
-                filename=filename,
-            )
+            n = 2
+
+        c.configure(
+            linestyles=["-"] * n,
+            linewidths=[1.5] * n,
+            sigmas=[np.sqrt(2) * erfinv(x) for x in [0.5, 0.9]],
+            shade=[False] + [True] * (n - 1),
+            shade_alpha=0.3,
+            bar_shade=False,
+            label_font_size=10,
+            tick_font_size=10,
+            usetex=False,
+            legend_kwargs={"fontsize": 30},
+            kde=0.7,
+        )
+        c.plotter.plot(filename=filename)
 
     def plot_log_probs(self, filename="log_probs.png"):
         """
@@ -649,8 +667,6 @@ class Result(DingoDataset):
             plt.plot([y_upper - 20, y_upper], [y_upper - 20, y_upper], color="black")
             plt.tight_layout()
             plt.savefig(filename)
-        else:
-            print("Results not importance sampled. Cannot produce log_prob plot.")
 
     def plot_weights(self, filename="weights.png"):
         """Make a scatter plot of samples weights vs log proposal."""
@@ -678,8 +694,23 @@ class Result(DingoDataset):
             plt.scatter(x, y, s=0.5)
             plt.tight_layout()
             plt.savefig(filename)
-        else:
-            print("Results not importance sampled. Cannot plot weights.")
+
+    def add_fixed_parameters(self, theta):
+        """
+        Adds the fixed parameters to the samples. This is required for the log-likelihood evaluation of the data.
+
+        """
+        # TODO Added the following lines. To evaluate the log-likelihood we need to add the missing parameters with
+        #  delta prior (remaining parameters should be marginalized over?! (pls CHECK))
+        for k, v in self.settings["dataset_settings"]["intrinsic_prior"].items():
+            if isinstance(v, float) or isinstance(v, int):
+                theta[k] = v
+
+        for k, v in self.settings["train_settings"]["data"]["extrinsic_prior"].items():
+            if isinstance(v, float) or isinstance(v, int):
+                theta[k] = v
+        return theta
+
 
 
 def check_equal_dict_of_arrays(a, b):

@@ -4,7 +4,7 @@ import os
 from os.path import join
 import numpy as np
 import torch
-from dingo.core.models.posterior_model import PosteriorModel
+from dingo.core.posterior_models.normalizing_flow import NormalizingFlow
 from dingo.core.utils import torchutils
 
 
@@ -112,14 +112,14 @@ def test_pm_saving_and_loading_basic(data_setup_pm_1):
     d = data_setup_pm_1
 
     # initialize model and save it
-    pm_0 = PosteriorModel(metadata=d.metadata, device='cpu')
+    pm_0 = NormalizingFlow(metadata=d.metadata, device='cpu')
     pm_0.save_model(d.model_filename)
 
     # load saved model
-    pm_1 = PosteriorModel(model_filename=d.model_filename, device='cpu')
+    pm_1 = NormalizingFlow(model_filename=d.model_filename, device='cpu')
 
     # build a model with identical kwargs
-    pm_2 = PosteriorModel(metadata=d.metadata, device='cpu')
+    pm_2 = NormalizingFlow(metadata=d.metadata, device='cpu')
 
     # check that module names are identical in saved and loaded model
     module_names_0 = [name for name, param in pm_0.model.named_parameters()]
@@ -168,7 +168,7 @@ def test_pm_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler):
     # Test step scheduler
     optimizer_kwargs = e.adam_kwargs
     scheduler_kwargs = e.step_kwargs
-    pm = PosteriorModel(metadata=d.metadata, device='cpu')
+    pm = NormalizingFlow(metadata=d.metadata, device='cpu')
     pm.optimizer_kwargs = optimizer_kwargs
     pm.scheduler_kwargs = scheduler_kwargs
     pm.initialize_optimizer_and_scheduler()
@@ -177,7 +177,7 @@ def test_pm_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler):
     for epoch, loss in zip(e.epochs, e.losses):
         if epoch == 5:
             pm.save_model(d.model_filename, save_training_info=True)
-            pm = PosteriorModel(model_filename=d.model_filename, device='cpu')
+            pm = NormalizingFlow(model_filename=d.model_filename, device='cpu')
         lr = pm.optimizer.state_dict()["param_groups"][0]["lr"]
         factors.append(lr / pm.optimizer.defaults["lr"])
         torchutils.perform_scheduler_step(pm.scheduler, loss)
@@ -186,7 +186,7 @@ def test_pm_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler):
     # Test reduce_on_plateau scheduler
     optimizer_kwargs = e.sgd_kwargs
     scheduler_kwargs = e.rop_kwargs
-    pm = PosteriorModel(metadata=d.metadata, device='cpu')
+    pm = NormalizingFlow(metadata=d.metadata, device='cpu')
     pm.optimizer_kwargs = optimizer_kwargs
     pm.scheduler_kwargs = scheduler_kwargs
     pm.initialize_optimizer_and_scheduler()
@@ -195,7 +195,7 @@ def test_pm_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler):
     for epoch, loss in zip(e.epochs, e.losses):
         if epoch == 5:
             pm.save_model(d.model_filename, save_training_info=True)
-            pm = PosteriorModel(model_filename=d.model_filename, device='cpu')
+            pm = NormalizingFlow(model_filename=d.model_filename, device='cpu')
         lr = pm.optimizer.state_dict()["param_groups"][0]["lr"]
         factors.append(lr / pm.optimizer.defaults["lr"])
         torchutils.perform_scheduler_step(pm.scheduler, loss)
@@ -204,7 +204,7 @@ def test_pm_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler):
     # Test cosine scheduler
     optimizer_kwargs = e.sgd_kwargs
     scheduler_kwargs = e.cosine_kwargs
-    pm = PosteriorModel(metadata=d.metadata, device='cpu')
+    pm = NormalizingFlow(metadata=d.metadata, device='cpu')
     pm.optimizer_kwargs = optimizer_kwargs
     pm.scheduler_kwargs = scheduler_kwargs
     pm.initialize_optimizer_and_scheduler()
@@ -213,7 +213,7 @@ def test_pm_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler):
     for epoch, loss in zip(e.epochs, e.losses):
         if epoch == 5:
             pm.save_model(d.model_filename, save_training_info=True)
-            pm = PosteriorModel(model_filename=d.model_filename, device='cpu')
+            pm = NormalizingFlow(model_filename=d.model_filename, device='cpu')
         lr = pm.optimizer.state_dict()["param_groups"][0]["lr"]
         factors.append(lr / pm.optimizer.defaults["lr"])
         torchutils.perform_scheduler_step(pm.scheduler, loss)

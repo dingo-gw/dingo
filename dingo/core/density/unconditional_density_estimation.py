@@ -1,6 +1,9 @@
 import copy
+from typing import Optional
 
 import torch
+import yaml
+from os.path import dirname, join
 
 from dingo.core.utils import build_train_and_test_loaders
 from dingo.core.utils.trainutils import RuntimeLimits
@@ -8,13 +11,13 @@ import numpy as np
 import pandas as pd
 import argparse
 
-from dingo.core.models import PosteriorModel
+from dingo.core.posterior_models import NormalizingFlow
 
 
 class SampleDataset(torch.utils.data.Dataset):
     """
     Dataset class for unconditional density estimation.
-    This is required, since the training method of dingo.core.models.PosteriorModel
+    This is required, since the training method of dingo.core.posterior_models.Base
     expects a tuple of (theta, *context) as output of the DataLoader, but here we have
     no context, so len(context) = 0. This SampleDataset therefore returns a tuple
     (theta, ) instead of just theta.
@@ -51,7 +54,7 @@ def train_unconditional_density_estimator(
 
     Returns
     -------
-    model: PosteriorModel
+    model: Base
         trained density estimator
     """
     samples = result.samples
@@ -74,7 +77,8 @@ def train_unconditional_density_estimator(
     # set up density estimation network
     settings["model"]["input_dim"] = num_params
     settings["model"]["context_dim"] = None
-    model = PosteriorModel(
+    # TODO: ultimately, we want to replace this by FlowMatching, I guess
+    model = NormalizingFlow(
         metadata={"train_settings": settings, "base": copy.deepcopy(result.metadata)},
         device=settings["training"]["device"],
     )
@@ -121,3 +125,36 @@ def parse_args():
         help="Path to settings file.",
     )
     return parser.parse_args()
+
+
+def main():
+    # load settings
+    args = parse_args()
+    with open(args.settings, "r") as fp:
+        settings = yaml.safe_load(fp)
+
+    # load samples from dingo output
+    samples = pd.read_pickle(settings["data"]["sample_file"])
+
+    model = train_unconditional_density_estimator(
+        samples, settings, dirname(args.settings)
+    )
+
+    model.model.eval()
+    with torch.no_grad():
+        new_samples = model.model.sample(num_samples=10000)
+    new_samples = new_samples.cpu().numpy() * std + mean
+    new_samples = pd.DataFrame(new_samples, columns=parameters)
+    test_samples = pd.DataFrame(samples[num_train_samples:], columns=parameters)
+
+    from dingo.gw.inference.visualization import generate_cornerplot
+
+    generate_cornerplot(
+        {"samples": test_samples, "color": "blue", "name": "test samples"},
+        {"samples": new_samples, "color": "orange", "name": "new samples"},
+        filename=join(dirname(f), "out.pdf"),
+    )
+
+
+if __name__ == "__main__":
+    main()

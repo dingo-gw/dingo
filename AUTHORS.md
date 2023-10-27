@@ -15,5 +15,4 @@ not listed.
 
 ### Contributors
 
-* Hector Estelles
 * Jonathan Gair

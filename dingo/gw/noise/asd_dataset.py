@@ -45,7 +45,7 @@ class ASDDataset(DingoDataset):
         super().__init__(
             file_name=file_name,
             dictionary=dictionary,
-            data_keys=["asds", "gps_times", "asd_parameterizations"],
+            data_keys=["asds", "gps_times"],
         )
 
         if ifos is not None:

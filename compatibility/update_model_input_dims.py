@@ -23,9 +23,9 @@ a list:
 
     model_kwargs["embedding_net_kwargs"]["input_dims"] = list(data_sample[1].shape)
     
-Old models and result files (pre commit 53929ae0ce5eee0607510119194167cf9db003a4) need 
+Old posterior_models and result files (pre commit 53929ae0ce5eee0607510119194167cf9db003a4) need 
 to be updated with the present script to account for this change (note: training will 
-still work, updates to old models are only required when running inference and 
+still work, updates to old posterior_models are only required when running inference and 
 interfacing with pesummary). 
 """
 

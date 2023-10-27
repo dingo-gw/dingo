@@ -1,4 +1,3 @@
-import sys
 from multiprocessing import Pool
 
 import numpy as np
@@ -121,8 +120,33 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             else:
                 print("Using phase marginalization with (2,2) mode approximation.")
 
-        # Initialize calibration marginalization using the setter from GWSignal.
-        self.calibration_marginalization_kwargs = calibration_marginalization_kwargs
+        # optionally initialize calibration marginalization
+        self.calibration_marginalization = False
+        if calibration_marginalization_kwargs is not None:
+            self.calibration_marginalization = True
+            self.initialize_calibration_marginalization(
+                **calibration_marginalization_kwargs
+            )
+
+    def initialize_calibration_marginalization(
+        self, calibration_envelope, num_calibration_curves=1
+    ):
+        """
+        Initialize calibration marginalization table which will use the files provided to
+        multiply the signal by a calibration envelope.
+
+        Parameters
+        ----------
+        num_calibration_curves : int
+            The number of calibration curves to average over. Will default to 1. Increasing this will
+            decrease the sample efficiency due to the calibration errors.
+
+        calibration_lookup_table : dict
+            Dict with locations of .h5 files of calibration envelopes {"H1":, filepath,...}
+            optionally can be set to 'generate'
+        """
+        self.num_calibration_curves = num_calibration_curves
+        self.calibration_envelope = calibration_envelope
 
     def initialize_time_marginalization(self, t_lower, t_upper, n_fft=1):
         """
@@ -181,7 +205,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 [
                     self.time_marginalization,
                     self.phase_marginalization,
-                    bool(self.calibration_marginalization_kwargs),
+                    self.calibration_marginalization,
                 ]
             )
             > 1
@@ -195,7 +219,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             return self._log_likelihood_time_marginalized(theta)
         elif self.phase_marginalization:
             return self._log_likelihood_phase_marginalized(theta)
-        elif self.calibration_marginalization_kwargs:
+        elif self.calibration_marginalization:
             return self._log_likelihood_calibration_marginalized(theta)
         else:
             return self._log_likelihood(theta)
@@ -525,11 +549,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         # Step 1: Compute whitened GW strain mu(theta) for parameters theta.
         mu = self.signal(theta)["waveform"]
         d = self.whitened_strains
-
-        # In the calibration-marginalization case, the values of mu for each detector
-        # have an additional leading dimension, which corresponds to the calibration
-        # draws. These are averaged over in computing the likelihood.
-        # TODO: Combine with _log_likelihood() into a single method.
+        d = {ifo: np.tile(v, (self.num_calibration_curves, 1)) for ifo, v in d.items()}
 
         # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to
         # compute the remaining terms rho2opt and kappa2
@@ -539,7 +559,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         )
         kappa2 = np.sum(
             [
-                inner_product(d_ifo[:, None], mu_ifo.T)
+                inner_product(d_ifo.T, mu_ifo.T)
                 for d_ifo, mu_ifo in zip(d.values(), mu.values())
             ],
             axis=0,
@@ -547,7 +567,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
         likelihoods = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
         # Return the average over calibration envelopes
-        return logsumexp(likelihoods) - np.log(len(likelihoods))
+        return np.mean(likelihoods)
 
     def d_inner_h_complex_multi(
         self, theta: pd.DataFrame, num_processes: int = 1
@@ -568,6 +588,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         complex : Inner product
         """
         with threadpool_limits(limits=1, user_api="blas"):
+
             # Generator object for theta rows. For idx this yields row idx of
             # theta dataframe, converted to dict, ready to be passed to
             # self.log_likelihood.
