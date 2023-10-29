@@ -309,19 +309,25 @@ class Result(CoreResult):
         self.calibration_marginalization_kwargs = calibration_marginalization_kwargs
 
         # Choose the WaveformGenerator domain. This is ultimately projected to the data domain, but generally we
-        # allow it to be different, e.g., to start integrating from lower frequencies than
-        # the lower bound of the likelihood integral. Usually we use the same domain as that
-        # used for the WaveformDataset. However, if we make a change to certain settings during
-        # importance sampling, we need to ensure the projection is still compatible. In particular,
-        # delta_f (=1/T) cannot be changed in a domain projection, so update that at the level
-        # of the WaveformGenerator.
+        # allow it to be different, e.g., to start integrating from lower frequencies than the lower bound of the
+        # likelihood integral. Usually we use the same domain as that used for the WaveformDataset. However,
+        # if we make a change to certain settings during importance sampling, we need to ensure the projection is
+        # still compatible:
+        #
+        # * delta_f (=1/T): cannot be changed in a domain projection, so update at the level of the
+        #   WaveformGenerator.
+        #
+        # TODO: Add functionality to update other waveform settings, i.e., approximant, generation minimum and
+        #  maximumum frequencies, reference frequency, and starting frequency.
 
         wfg_domain_dict = self.base_metadata["dataset_settings"]["domain"].copy()
         if "updates" in self.importance_sampling_metadata:
             if "T" in self.importance_sampling_metadata["updates"]:
-                wfg_domain_dict["delta_f"] = (
-                    1 / self.importance_sampling_metadata["updates"]["T"]
+                delta_f_new = 1 / self.importance_sampling_metadata["updates"]["T"]
+                print(
+                    f'Updating waveform generation delta_f from {wfg_domain_dict["delta_f"]} to {delta_f_new}.'
                 )
+                wfg_domain_dict["delta_f"] = delta_f_new
         wfg_domain = build_domain(wfg_domain_dict)
 
         self.likelihood = StationaryGaussianGWLikelihood(
