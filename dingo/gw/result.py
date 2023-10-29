@@ -318,7 +318,7 @@ class Result(CoreResult):
         #   WaveformGenerator.
         #
         # TODO: Add functionality to update other waveform settings, i.e., approximant, generation minimum and
-        #  maximumum frequencies, reference frequency, and starting frequency.
+        #  maximum frequencies, reference frequency, and starting frequency.
 
         wfg_domain_dict = self.base_metadata["dataset_settings"]["domain"].copy()
         if "updates" in self.importance_sampling_metadata:
