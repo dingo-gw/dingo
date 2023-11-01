@@ -11,10 +11,11 @@ build:
   tools:
     python: "3.10"
     # You can also specify other tool versions:
-    gsl: "2.7"
     # nodejs: "19"
     # rust: "1.64"
     # golang: "1.19"
+  apt-packages:
+    - gsl
   jobs:
     post_install:
       - pip install --force-reinstall "docutils<0.17"
