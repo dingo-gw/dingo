@@ -41,7 +41,7 @@ dependencies = [
     "pycbc",
     "pycondor",
     "pyopenssl",
-    "pyseobnr",
+    "pygsl",
     "pyyaml",
     "scikit-learn",
     "scipy",
