@@ -14,7 +14,7 @@ build:
     # nodejs: "19"
     # rust: "1.64"
     # golang: "1.19"
-  apt-packages:
+  apt_packages:
     - gsl
   jobs:
     post_install:
