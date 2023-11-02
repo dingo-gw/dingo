@@ -14,6 +14,8 @@ build:
     # nodejs: "19"
     # rust: "1.64"
     # golang: "1.19"
+  apt_packages:
+    - libgsl-dev
   jobs:
     post_install:
       - pip install --force-reinstall "docutils<0.17"
