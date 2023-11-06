@@ -41,16 +41,13 @@ def fill_in_arguments_from_model(args):
         "tukey_roll_off": data_settings["window"]["roll_off"],
         "waveform_approximant": model_metadata["dataset_settings"][
             "waveform_generator"
-        ][
-            "approximant"
-        ],  # TODO: Update approximant in IS
+        ]["approximant"],
     }
 
     changed_args = {}
     for k, v in model_args.items():
         args_v = getattr(args, k)
         if args_v is not None:
-
             # Convert type from str to enable comparison.
             try:
                 if isinstance(v, float):
@@ -61,6 +58,10 @@ def fill_in_arguments_from_model(args):
                 pass
 
             if args_v != v:
+                if k in ["waveform_approximant"]:
+                    raise NotImplementedError(
+                        "Cannot change waveform approximant during importance sampling."
+                    )  # TODO: Implement this. Also no error if passed explicitly as an update.
                 logger.warning(
                     f"Argument {k} provided to dingo_pipe as {args_v} "
                     f"does not match value {v} in model file. Using model value for "
@@ -88,7 +89,6 @@ def fill_in_arguments_from_model(args):
 
 class MainInput(BilbyMainInput):
     def __init__(self, args, unknown_args, importance_sampling_updates):
-
         # Settings added for dingo.
 
         self.model = args.model
