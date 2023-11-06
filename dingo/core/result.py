@@ -600,14 +600,16 @@ class Result(DingoDataset):
         # delta_log_prob_target is not interesting so never plot it.
         theta = theta.drop(columns="delta_log_prob_target", errors="ignore")
 
+        weights = theta.get("weights")
+
         # User option to plot specific parameters.
         if parameters:
             theta = theta[parameters]
 
-        if "weights" in theta:
+        if weights:
             plot_corner_multi(
                 [theta, theta],
-                weights=[None, theta["weights"].to_numpy()],
+                weights=[None, weights.to_numpy()],
                 labels=["Dingo", "Dingo-IS"],
                 filename=filename,
             )

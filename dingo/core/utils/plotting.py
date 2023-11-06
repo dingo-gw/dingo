@@ -25,7 +25,7 @@ def plot_corner_multi(
     weights : list[np.ndarray or None] or None
         List of weights sets. The length of each array should be the same as the length of
         the corresponding samples.
-    labels : list[str or None] or None
+    labels : list[str or None] or None or str
         Labels for the posteriors.
     filename : str
         Where to save samples.
