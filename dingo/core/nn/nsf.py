@@ -218,7 +218,9 @@ class FlowWrapper(nn.Module):
         if self.embedding_net is not None:
             x = torchutils.forward_pass_with_unpacked_tuple(self.embedding_net, x)
         if len(x) > 0:
-            return torch.squeeze(sample, dim=list(range(sample.ndim - 1)))
+            sample = self.flow.sample(num_samples)
+            sl = list(range(sample.ndim - 1))
+            return torch.squeeze(sample, dim=sl)
         else:
             # if there is no context, omit the context argument
             sample = self.flow.sample(num_samples)
