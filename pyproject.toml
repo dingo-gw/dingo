@@ -49,6 +49,7 @@ dependencies = [
     "chainconsumer",
     "wandb",
     "scikit-learn",
+    "torchdiffeq",
 ]
 
 
