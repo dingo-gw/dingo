@@ -218,21 +218,27 @@ class FlowWrapper(nn.Module):
         if self.embedding_net is not None:
             x = torchutils.forward_pass_with_unpacked_tuple(self.embedding_net, x)
         if len(x) > 0:
-            return torch.squeeze(self.flow.sample(num_samples, x))
+            sample = self.flow.sample(num_samples)
+            sl = list(range(sample.ndim - 1))
+            return torch.squeeze(sample, dim=sl)
         else:
             # if there is no context, omit the context argument
-            return torch.squeeze(self.flow.sample(num_samples))
+            sample = self.flow.sample(num_samples)
+            sl = list(range(sample.ndim - 1))
+            return torch.squeeze(sample, dim=sl)
 
     def sample_and_log_prob(self, *x, num_samples=1):
         if self.embedding_net is not None:
             x = torchutils.forward_pass_with_unpacked_tuple(self.embedding_net, x)
         if len(x) > 0:
             sample, log_prob = self.flow.sample_and_log_prob(num_samples, x)
-            return torch.squeeze(sample), torch.squeeze(log_prob)
+            sl = list(range(sample.ndim - 1))
+            return torch.squeeze(sample, dim=sl), torch.squeeze(log_prob, dim=sl)
         else:
             # if there is no context, omit the context argument
             sample, log_prob = self.flow.sample_and_log_prob(num_samples)
-            return torch.squeeze(sample), torch.squeeze(log_prob)
+            sl = list(range(sample.ndim - 1))
+            return torch.squeeze(sample, dim=sl), torch.squeeze(log_prob, dim=sl)
 
     def forward(self, y, *x):
         if len(x) > 0:

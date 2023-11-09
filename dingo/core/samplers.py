@@ -492,10 +492,14 @@ class GNPESampler(Sampler):
 
             time_sample_start = time.time()
             self.model.model.eval()
+
             with torch.no_grad():
-                y, log_prob = self.model.model.sample_and_log_prob(
-                    x["data"], x["context_parameters"]
-                )
+                if "context_parameters" not in x.keys():
+                    y, log_prob = self.model.model.sample_and_log_prob(x["data"])
+                else:
+                    y, log_prob = self.model.model.sample_and_log_prob(
+                        x["data"], x["context_parameters"]
+                    )
             time_sample_end = time.time()
 
             x["parameters"] = y
