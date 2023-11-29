@@ -99,11 +99,13 @@ class DataGenerationInput(BilbyDataGenerationInput):
 
         # If creating an injection no need for real data generation
         if args.injection_dict is not None:
-            if args.asd_dataset is not None:
+            if args.asd_dataset is not None or args.psd_dict is not None:
                 args.use_psd_of_trigger = False
-                logger.info("asd-dataset is set, not using psd of trigger")
+                logger.info("psd is specified, not using psd of trigger")
+            if args.psd_dict is not None:
+                self.psd_dict = args.psd_dict
             self.injection_numbers = None
-            self.injection_dict = ast.literal_eval(args.injection_dict)
+            self.injection_dict = convert_string_to_dict(args.injection_dict)
             self.injection_dict = {
                 k.replace("-", "_"): v for k, v in self.injection_dict.items()
             }
@@ -223,6 +225,12 @@ class DataGenerationInput(BilbyDataGenerationInput):
                 window=pm.metadata["train_settings"]["data"]["window"],
             )
             injection_generator.asd = event_data["asds"]
+        elif args.psd_dict is not None:
+            injection_generator.asd = {
+                k: np.sqrt(np.loadtxt(v)[:, 1])
+                for k, v in self.psd_dict.items()
+                if k in [ifo.name for ifo in injection_generator.ifo_list]
+            }
         else:
             asd_dataset = ASDDataset(args.asd_dataset)
             randint = np.random.randint(
@@ -264,7 +272,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.strain_data_list = []
         # if importance sampling with zero-noise, don't add noise to injection
         # the idea here is to reweight to the zero-noise likelihood
-        if self.zero_noise and self.importance_sampling:
+        if self.zero_noise:
             self.strain_data_list.append(
                 injection_generator.signal(self.injection_dict)
             )
