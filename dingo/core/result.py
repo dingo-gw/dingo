@@ -276,26 +276,17 @@ class Result(DingoDataset):
         valid_samples = (log_prior + delta_log_prob_target) != -np.inf
         theta = theta.iloc[valid_samples]
 
-        if "log_likelihood" not in self.samples.columns:
-            print(f"Calculating {len(theta)} likelihoods.")
-            t0 = time.time()
-            log_likelihood = self.likelihood.log_likelihood_multi(
-                theta, num_processes=num_processes
-            )
-            print(f"Done. This took {time.time() - t0:.2f} seconds.")
-        else:
-            log_likelihood = self.samples["log_likelihood"]
-            log_likelihood = log_likelihood[valid_samples]
+        print(f"Calculating {len(theta)} likelihoods.")
+        t0 = time.time()
+        log_likelihood = self.likelihood.log_likelihood_multi(
+            theta, num_processes=num_processes
+        )
+        print(f"Done. This took {time.time() - t0:.2f} seconds.")
 
         self.log_noise_evidence = self.likelihood.log_Zn
         self.samples["log_prior"] = log_prior
         self.samples.loc[valid_samples, "log_likelihood"] = log_likelihood
-
-        # Drop None samples where waveform failed to generate
-        self.samples = self.samples.dropna(subset=['log_likelihood'])
-
         self._calculate_evidence()
-        return self.samples
 
     def _calculate_evidence(self):
         """Calculate the Bayesian log evidence and sample weights.
@@ -556,22 +547,20 @@ class Result(DingoDataset):
         Combined Result.
         """
         dataset_dict = parts[0].to_dictionary()
-        if "log_evidence" in dataset_dict:
-            del dataset_dict["log_evidence"]
+        del dataset_dict["log_evidence"]
         samples_parts = [dataset_dict.pop("samples")]
 
         for part in parts[1:]:
             part_dict = part.to_dictionary()
-            if "log_evidence" in dataset_dict:
-                del part_dict["log_evidence"]
+            del part_dict["log_evidence"]
             samples_parts.append(part_dict.pop("samples"))
 
             # Make sure we are not merging incompatible results. We deleted the
             # log_evidence since this can differ among the sub-results. Note that this
             # will also raise an error if files were created with different versions of
             # dingo.
-            # if not recursive_check_dicts_are_equal(part_dict, dataset_dict):
-                # raise ValueError("Results to be merged must have same metadata.")
+            if not recursive_check_dicts_are_equal(part_dict, dataset_dict):
+                raise ValueError("Results to be merged must have same metadata.")
 
         dataset_dict["samples"] = pd.concat(samples_parts, ignore_index=True)
         merged_result = cls(dictionary=dataset_dict)
