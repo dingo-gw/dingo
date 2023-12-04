@@ -284,10 +284,13 @@ class GNPEChirp(GNPEBase):
         elif order == 2:
             if "chirp_mass" not in kernel or "mass_ratio" not in kernel:
                 raise KeyError(f"Kernel must include chirp_mass and mass_ratio keys.")
+            raise NotImplementedError(
+                "Mass ratio conditioning for 2nd order not set up."
+            )
         else:
             raise ValueError(f"Order {order} invalid. Acceptable values are 0 and 2.")
 
-        operators = {"chirp_mass": "x", "mass_ratio": "x"}
+        operators = {"chirp_mass": "+", "mass_ratio": "+"}
         super().__init__(kernel, operators)
 
         self.inference = inference
@@ -311,10 +314,16 @@ class GNPEChirp(GNPEBase):
             # The relevant parameters could be in either the intrinsic or extrinsic
             # parameters list. At inference time, we put all GNPE parameters into the
             # extrinsic parameters list.
-            proxies = self.sample_proxies(
-                {**sample["parameters"], **sample["extrinsic_parameters"]}
-            )
+            parameters = {**sample["parameters"], **sample["extrinsic_parameters"]}
+            proxies = self.sample_proxies(parameters)
             extrinsic_parameters.update(proxies)
+            delta_parameters = {
+                "delta_"
+                + p[: -len("_proxy")]: parameters[p[: -len("_proxy")]]
+                - proxies[p]
+                for p in self.proxy_list
+            }
+            extrinsic_parameters.update(delta_parameters)
             sample["extrinsic_parameters"] = extrinsic_parameters
 
         # The only situation where we would expect to not have a waveform to transform
