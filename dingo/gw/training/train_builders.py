@@ -276,9 +276,7 @@ def build_svd_for_embedding_network(
         wfd,
         batch_size=batch_size,
         num_workers=num_workers,
-        worker_init_fn=lambda _: np.random.seed(
-            int(torch.initial_seed()) % (2 ** 32 - 1)
-        ),
+        worker_init_fn=fix_random_seeds,
     )
     with threadpool_limits(limits=1, user_api="blas"):
         for idx, data in enumerate(loader):
