@@ -74,14 +74,14 @@ class BBHExtrinsicPriorDict(BBHPriorDict):
                     std[key] = np.sqrt((p.maximum - p.minimum) ** 2.0 / 12.0).item()
                 elif isinstance(p, Sine) and p.minimum == 0.0 and p.maximum == np.pi:
                     mean[key] = np.pi / 2.0
-                    std[key] = np.sqrt(0.25 * (np.pi ** 2) - 2).item()
+                    std[key] = np.sqrt(0.25 * (np.pi**2) - 2).item()
                 elif (
                     isinstance(p, Cosine)
                     and p.minimum == -np.pi / 2
                     and p.maximum == np.pi / 2
                 ):
                     mean[key] = 0.0
-                    std[key] = np.sqrt(0.25 * (np.pi ** 2) - 2).item()
+                    std[key] = np.sqrt(0.25 * (np.pi**2) - 2).item()
                 else:
                     estimation_keys.append(key)
         else:
@@ -170,6 +170,28 @@ def build_prior_with_defaults(prior_settings: Dict[str, str]):
             full_prior_settings[k] = default_intrinsic_dict[k]
 
     return BBHPriorDict(full_prior_settings)
+
+
+def autocomplete_full_prior_dict(prior_dict):
+    """
+    Fill in default priors, for both intrinsic and extrinsic parameters together.
+
+    Parameters
+    ----------
+    prior_dict : dict
+        Dictionary strings describing the prior, allowing for "default" as a value. In
+        this case, use the value in the default dictionary.
+
+    Returns
+    -------
+    dict
+    """
+    default_prior_dict = {**default_intrinsic_dict, **default_extrinsic_dict}
+    completed_prior_dict = deepcopy(prior_dict)
+    for k, v in completed_prior_dict.items():
+        if v == "default" and k in default_prior_dict:
+            completed_prior_dict[k] = default_prior_dict[k]
+    return completed_prior_dict
 
 
 def split_off_extrinsic_parameters(theta):
