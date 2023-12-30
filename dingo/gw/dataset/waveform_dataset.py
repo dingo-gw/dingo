@@ -1,4 +1,3 @@
-import copy
 from typing import Dict, Union
 import numpy as np
 import torch.utils.data
@@ -62,11 +61,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             data_keys=["parameters", "polarizations", "svd"],
         )
 
-        if (
-            self.parameters is not None
-            and self.polarizations is not None
-            and self.settings is not None
-        ):
+        if self.parameters is not None and self.settings is not None:
             self.load_supplemental(domain_update, svd_size_update)
 
     def load_supplemental(self, domain_update=None, svd_size_update=None):
@@ -102,8 +97,9 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                     'precision can only be changed to "single" or "double".'
                 )
             self.parameters = self.parameters.astype(real_type, copy=False)
-            for k, v in self.polarizations.items():
-                self.polarizations[k] = v.astype(complex_type, copy=False)
+            if self.polarizations:
+                for k, v in self.polarizations.items():
+                    self.polarizations[k] = v.astype(complex_type, copy=False)
 
             # This should probably be moved to the SVDBasis class.
             if self.svd is not None:
@@ -145,7 +141,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             and "svd" in self.settings["compression"]
         ):
             self.svd["V"] = self.domain.update_data(self.svd["V"], axis=0)
-        else:
+        elif self.polarizations:
             for k, v in self.polarizations.items():
                 self.polarizations[k] = self.domain.update_data(v)
 
@@ -208,14 +204,24 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         the waveform data.
         """
         parameters = self.parameters.iloc[idx].to_dict()
-        polarizations = {
-            pol: waveforms[idx] for pol, waveforms in self.polarizations.items()
-        }
-
-        # Decompression transforms are assumed to apply only to the waveform,
-        # and do not involve parameters.
-        if self.decompression_transform is not None:
-            polarizations = self.decompression_transform(polarizations)
+        if self.polarizations:
+            polarizations = {
+                pol: waveforms[idx] for pol, waveforms in self.polarizations.items()
+            }
+            # Decompression transforms are assumed to apply only to the waveform,
+            # and do not involve parameters.
+            if self.decompression_transform is not None:
+                polarizations = self.decompression_transform(polarizations)
+        else:
+            # Generate the waveform. Requires a waveform_generator to be configured.
+            polarizations = self.waveform_generator.generate_hplus_hcross(parameters)
+            polarizations = {
+                k: self.domain.update_data(v) for k, v in polarizations.items()
+            }
+            if self.precision == "single":
+                polarizations = {
+                    k: v.astype(np.complex64) for k, v in polarizations.items()
+                }
 
         # Main transforms can depend also on parameters.
         data = {"parameters": parameters, "waveform": polarizations}
