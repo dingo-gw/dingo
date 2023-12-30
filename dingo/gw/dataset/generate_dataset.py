@@ -21,6 +21,7 @@ from dingo.gw.waveform_generator import (
     generate_waveforms_parallel,
 )
 from dingo.gw.SVD import SVDBasis, ApplySVD
+from dingo.gw.waveform_generator.waveform_generator import build_waveform_generator
 
 
 def generate_parameters_and_polarizations(
@@ -153,18 +154,9 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
 
     prior = build_prior_with_defaults(settings["intrinsic_prior"])
     domain = build_domain(settings["domain"])
-
-    new_interface_flag = settings["waveform_generator"].get("new_interface", False)
-    if new_interface_flag:
-        waveform_generator = NewInterfaceWaveformGenerator(
-            domain=domain,
-            **settings["waveform_generator"],
-        )
-    else:
-        waveform_generator = WaveformGenerator(
-            domain=domain,
-            **settings["waveform_generator"],
-        )
+    waveform_generator = build_waveform_generator(
+        settings["waveform_generator"], domain
+    )
 
     dataset_dict = {"settings": settings}
 

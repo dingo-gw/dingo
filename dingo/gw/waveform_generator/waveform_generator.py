@@ -1363,6 +1363,20 @@ def sum_contributions_m(x_m, phase_shift=0.0):
     return result
 
 
+def build_waveform_generator(settings, wfg_domain):
+    new_interface_flag = settings.get("new_interface", False)
+    if new_interface_flag:
+        return NewInterfaceWaveformGenerator(
+            domain=wfg_domain,
+            **settings,
+        )
+    else:
+        return WaveformGenerator(
+            domain=wfg_domain,
+            **settings,
+        )
+
+
 if __name__ == "__main__":
     import pandas as pd
     import numpy as np
