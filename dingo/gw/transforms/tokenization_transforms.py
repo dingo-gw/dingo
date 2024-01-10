@@ -22,13 +22,13 @@ class StrainTokenization(object):
 
         """
         num_f = torch.tensor((f_max - f_min)/df)
-        self.n_per_token = torch.ceil(num_f / num_tokens).to(int)
-        f_token_width = self.n_per_token * df
-        self.token_indices = torch.arange(0, num_tokens*self.n_per_token, self.n_per_token, dtype=torch.int)
+        self.num_bins_per_token = torch.ceil(num_f / num_tokens).to(int)
+        f_token_width = self.num_bins_per_token * df
+        self.token_indices = torch.arange(0, num_tokens*self.num_bins_per_token, self.num_bins_per_token, dtype=torch.int)
         assert num_tokens == len(self.token_indices)
         self.f_min_per_token = torch.arange(f_min, f_max, f_token_width)
         self.f_max_per_token = self.f_min_per_token + f_token_width - df
-        self.num_padded_f_bins = int(num_tokens * self.n_per_token - num_f - 1)
+        self.num_padded_f_bins = int(num_tokens * self.num_bins_per_token - num_f)
         self.num_tokens = num_tokens
 
     def __call__(self, input_sample):
@@ -44,7 +44,7 @@ class StrainTokenization(object):
 
         # pad last dimension
         strain = np.pad(sample["waveform"], ((0, 0), (0, 0), (0, self.num_padded_f_bins)), "constant")
-        strain = strain.reshape(strain.shape[0], strain.shape[1], self.num_tokens, self.n_per_token)
+        strain = strain.reshape(strain.shape[0], strain.shape[1], self.num_tokens, self.num_bins_per_token)
 
         sample["waveform"] = strain
         sample["tokenization_parameters"] = {
