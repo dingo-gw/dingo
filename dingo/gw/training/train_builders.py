@@ -22,6 +22,7 @@ from dingo.gw.transforms import (
     GNPECoalescenceTimes,
     SampleExtrinsicParameters,
     GetDetectorTimes,
+    StrainTokenization
 )
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.prior import default_inference_parameters
@@ -170,10 +171,22 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     transforms.append(
         RepackageStrainsAndASDS(data_settings["detectors"], first_index=domain.min_idx)
     )
+
     if data_settings["context_parameters"]:
         selected_keys = ["inference_parameters", "waveform", "context_parameters"]
     else:
         selected_keys = ["inference_parameters", "waveform"]
+
+    if data_settings["tokenization"]:
+        transforms.append(
+            StrainTokenization(
+                data_settings["tokenization"]["num_tokens"],
+                data_settings["domain_update"]["f_min"],
+                data_settings["domain_update"]["f_max"],
+                df=1/data_settings["window"]["T"]
+            )
+        )
+        selected_keys.append("tokenization_parameters")
 
     transforms.append(UnpackDict(selected_keys=selected_keys))
 
