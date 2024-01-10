@@ -85,6 +85,28 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
             "train_settings": train_settings,
         }
 
+    elif train_settings["model"]["type"] == "nsf+transformer":
+
+        # Set the transforms for training. We need to do this here so that we can (a)
+        # get the data dimensions to configure the network, and (b) save the
+        # parameter standardization dict in the PosteriorModel. In principle, (a) could
+        # be done without generating data (by careful calculation) and (b) could also
+        # be done outside the transform setup. But for now, this is convenient. The
+        # transforms will be reset later by initialize_stage().
+
+        set_train_transforms(
+            wfd,
+            train_settings["data"],
+            train_settings["training"]["stage_0"]["asd_dataset_path"],
+        )
+
+        # This modifies the model settings in-place.
+        autocomplete_model_kwargs_nsf(train_settings["model"], wfd[0])
+        full_settings = {
+            "dataset_settings": wfd.settings,
+            "train_settings": train_settings,
+        }
+
     else:
         raise ValueError('Model type must be "nsf+embedding".')
 
