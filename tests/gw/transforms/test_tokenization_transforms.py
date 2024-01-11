@@ -8,7 +8,7 @@ def test_StrainTokenization():
     f_min = 20.
     f_max = 1024.
     T = 8.
-    num_f = int((f_max - f_min)*T)
+    num_f = int((f_max - f_min)*T) + 1
 
     token_transformation = StrainTokenization(num_tokens, f_min, f_max, df=1/T)
     waveform = np.random.random_sample([2, 3, num_f])
@@ -26,7 +26,3 @@ def test_StrainTokenization():
     # Check that token parameters match with initial f_min & f_max
     assert tok_params["f_min_per_token"].min() == f_min
     assert tok_params["f_max_per_token"].max() >= f_max
-
-
-if __name__ == "__main__":
-    test_StrainTokenization()

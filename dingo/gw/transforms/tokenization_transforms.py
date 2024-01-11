@@ -11,17 +11,17 @@ class StrainTokenization(object):
         """
         Parameters
         ----------
-        num_tokens : int
+        num_tokens: int
             Number of tokens into which the frequency bins should be divided.
-        f_min : float
+        f_min: float
             Minimal frequency value.
-        f_max : float
+        f_max: float
             Maximal frequency value.
-        df : float
+        df: float
             Frequency interval between bins.
 
         """
-        num_f = torch.tensor((f_max - f_min)/df)
+        num_f = torch.tensor((f_max - f_min)/df) + 1
         self.num_bins_per_token = torch.ceil(num_f / num_tokens).to(int)
         f_token_width = self.num_bins_per_token * df
         self.token_indices = torch.arange(0, num_tokens*self.num_bins_per_token, self.num_bins_per_token, dtype=torch.int)
@@ -35,10 +35,20 @@ class StrainTokenization(object):
         """
         Parameters
         ----------
-        input_sample : Dict
-            Value for key "waveform":
+        input_sample: Dict
+            Value for key 'waveform':
             Sample of shape [num_blocks, num_channels, num_bins] where num_blocks=num_ifos (number of interferometers),
             num_channels>=3 (real, imag, auxiliary channels, e.g. asd), and num_bins=number of frequency bins.
+
+        Returns
+        ----------
+        sample: Dict
+            input_sample with modified value for key
+            - 'waveform', shape [num_blocks, num_channels, num_tokens, num_bins_per_token]
+            and additional keys
+            - 'f_min_per_token', shape [num_tokens]
+            - 'f_max_per_token', shape [num_tokens]
+            - 'num_bins_per_token', shape [num_tokens + 1]
         """
         sample = input_sample.copy()
 
