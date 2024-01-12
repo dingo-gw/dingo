@@ -7,6 +7,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 from glasflow.nflows.nn.nets.resnet import ResidualBlock
 from dingo.core.utils import torchutils
+from dingo.core.nn.transformer import TransformerModel
 
 
 class LinearProjectionRB(nn.Module):
@@ -358,6 +359,69 @@ def create_enet_with_projection_layer_and_dense_resnet(
         return enet
     else:
         return ModuleMerger((enet, nn.Identity()))
+
+
+def create_transformer_enet(
+    input_dims: List[int],
+    output_dim: int,
+    emb_size: int,
+    num_head: int,
+    num_encoder_layers: int,
+    hidden_dim_encoder: int,
+    individual_token_embedding: bool,
+    freq_encoding_type: str,
+    dropout: float,
+):
+    """
+    Builder function for a transformer embedding network for complex 1D data
+    with multiple blocks and channels.
+    The complex signal has to be represented via the real part in channel 0 and
+    the imaginary part in channel 1. Auxiliary signals may be contained in
+    channels with indices => 2. In the GW use case, a block corresponds to a
+    detector and channel 2 is used for ASD information.
+
+    Parameters
+    --------
+    input_dims: List[int]
+        containing [num_blocks, num_channels, num_tokens, num_bins_per_token]
+        where num_blocks = number of interferometers in GW use case, and num_channels = [real, imag, asd]
+    output_dim: int
+        size of output dimension, has to match context_dim of normalizing flow
+    emb_size: int
+        size of transformer embedding dimension
+    num_head: int
+        number of transformer heads
+    num_encoder_layers: int
+        number of transformer encoder layers
+    hidden_dim_encoder: int
+        number of hidden dimensions in the feedforward neural networks of the transformer encoder
+    individual_token_embedding: bool
+        whether to embed each raw token with an individual embedding network or not
+    freq_encoding_type: str
+        type of frequency encoding, either 'discrete' for discrete positional encoding (from paper
+        'Attention is all you need') or 'continuous' for continuous positional encoding (from paper
+        'NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis'
+    dropout: float
+        dropout
+
+    Returns
+    --------
+        model: TransformerModel
+
+    """
+    model = TransformerModel(
+        input_dims=input_dims,
+        emb_size=emb_size,
+        num_head=num_head,
+        d_hid=hidden_dim_encoder,
+        num_layers=num_encoder_layers,
+        d_out=output_dim,
+        individual_token_embedding=individual_token_embedding,
+        frequency_encoding_type=freq_encoding_type,
+        dropout=dropout,
+    )
+
+    return model
 
 
 if __name__ == "__main__":

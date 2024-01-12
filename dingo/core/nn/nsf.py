@@ -11,7 +11,10 @@ import glasflow.nflows as nflows  # nflows not maintained, so use this maintaine
 from glasflow.nflows import distributions, flows, transforms
 import glasflow.nflows.nn.nets as nflows_nets
 from dingo.core.utils import torchutils
-from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
+from dingo.core.nn.enets import (
+    create_enet_with_projection_layer_and_dense_resnet,
+    create_transformer_enet,
+)
 from typing import Union, Callable, Tuple
 
 
@@ -191,7 +194,7 @@ class FlowWrapper(nn.Module):
     """
     This class wraps the neural spline flow. It is required for multiple
     reasons. (i) some embedding networks take tuples as input, which is not
-    supported by the nflows package. (ii) paralellization across multiple
+    supported by the nflows package. (ii) parallelization across multiple
     GPUs requires a forward method, but the relevant flow method for training
     is log_prob.
     """
@@ -322,7 +325,7 @@ def create_nsf_with_rb_projection_embedding_net(
     nsf_kwargs : dict
         kwargs for neural spline flow
     embedding_net_kwargs : dict
-        kwargs for emebedding network
+        kwargs for embedding network
     initial_weights : dict
         Dictionary containing the initial weights for the SVD projection. This should
         have one key 'V_rb_list', with value a list of SVD V matrices (one for each
@@ -352,6 +355,41 @@ def create_nsf_with_rb_projection_embedding_net(
     return model
 
 
+def create_nsf_with_transformer_embedding(
+    nsf_kwargs: dict,
+    embedding_net_kwargs: dict,
+    initial_weights: dict = None,
+):
+    """
+    Builds a neural spline flow with an embedding network that consists of a
+    transformer encoder.
+
+    Parameters
+    ----------
+    nsf_kwargs : dict
+        kwargs for neural spline flow
+    embedding_net_kwargs : dict
+        kwargs for embedding network
+    initial_weights: dict
+        Dictionary containing the initial weights for the SVD projection. This should
+        have one key 'V_rb_list', with value a list of SVD V matrices (one for each
+        detector).
+        -> Not needed here, but included for consistency
+
+    Returns
+    -------
+    nn.Module
+        Neural spline flow model
+    """
+
+    embedding_net_kwargs = copy.deepcopy(embedding_net_kwargs)
+
+    embedding_net = create_transformer_enet(**embedding_net_kwargs)
+    flow = create_nsf_model(**nsf_kwargs)
+    model = FlowWrapper(flow, embedding_net)
+    return model
+
+
 def autocomplete_model_kwargs_nsf(model_kwargs, data_sample):
     """
     Autocomplete the model kwargs from train_settings and data_sample from
@@ -374,19 +412,25 @@ def autocomplete_model_kwargs_nsf(model_kwargs, data_sample):
     model_kwargs["embedding_net_kwargs"]["input_dims"] = list(data_sample[1].shape)
     # set dimension of parameter space of nsf
     model_kwargs["nsf_kwargs"]["input_dim"] = len(data_sample[0])
-    # set added_context flag of embedding net if gnpe proxies are required
-    # set context dim of nsf to output dim of embedding net + gnpe proxy dim
-    try:
-        gnpe_proxy_dim = len(data_sample[2])
-        model_kwargs["embedding_net_kwargs"]["added_context"] = True
-        model_kwargs["nsf_kwargs"]["context_dim"] = (
-            model_kwargs["embedding_net_kwargs"]["output_dim"] + gnpe_proxy_dim
-        )
-    except IndexError:
-        model_kwargs["embedding_net_kwargs"]["added_context"] = False
+    if "hidden_dim_encoder" in model_kwargs["embedding_net_kwargs"].keys():
+        # gnpe not required for transformer embedding
         model_kwargs["nsf_kwargs"]["context_dim"] = model_kwargs[
             "embedding_net_kwargs"
         ]["output_dim"]
+    else:
+        # set added_context flag of embedding net if gnpe proxies are required
+        # set context dim of nsf to output dim of embedding net + gnpe proxy dim
+        try:
+            gnpe_proxy_dim = len(data_sample[2])
+            model_kwargs["embedding_net_kwargs"]["added_context"] = True
+            model_kwargs["nsf_kwargs"]["context_dim"] = (
+                model_kwargs["embedding_net_kwargs"]["output_dim"] + gnpe_proxy_dim
+            )
+        except IndexError:
+            model_kwargs["embedding_net_kwargs"]["added_context"] = False
+            model_kwargs["nsf_kwargs"]["context_dim"] = model_kwargs[
+                "embedding_net_kwargs"
+            ]["output_dim"]
     # return model_kwargs
 
 
