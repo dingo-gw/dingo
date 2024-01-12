@@ -17,11 +17,13 @@ class TokenEmbedding(nn.Module):
         [batch_size, num_blocks, num_channels, num_tokens, num_bins_per_token]
         where num_blocks = number of interferometers in GW use case, and num_channels = [real, imag, asd]
     """
-    def __init__(self,
-                 input_dims: List[int],
-                 emb_size: int,
-                 individual_token_embedding: bool = False
-                 ):
+
+    def __init__(
+        self,
+        input_dims: List[int],
+        emb_size: int,
+        individual_token_embedding: bool = False,
+    ):
         """
         Parameters
         --------
@@ -35,12 +37,23 @@ class TokenEmbedding(nn.Module):
         """
         super(TokenEmbedding, self).__init__()
 
-        self.num_blocks, self.num_channels, self.num_tokens, self.num_bins_per_token = input_dims
+        (
+            self.num_blocks,
+            self.num_channels,
+            self.num_tokens,
+            self.num_bins_per_token,
+        ) = input_dims
         if individual_token_embedding:
-            self.stack_linear = [nn.Linear(self.num_channels * self.num_bins_per_token, emb_size, bias=False)
-                                 for _ in range(self.num_tokens)]
+            self.stack_linear = [
+                nn.Linear(
+                    self.num_channels * self.num_bins_per_token, emb_size, bias=False
+                )
+                for _ in range(self.num_tokens)
+            ]
         else:
-            self.linear = nn.Linear(self.num_channels * self.num_bins_per_token, emb_size, bias=False)
+            self.linear = nn.Linear(
+                self.num_channels * self.num_bins_per_token, emb_size, bias=False
+            )
 
         self.individual_token_embedding = individual_token_embedding
         self.emb_size = emb_size
@@ -58,7 +71,12 @@ class TokenEmbedding(nn.Module):
         x: Tensor
             shape [batch_size, num_blocks, num_tokens, emb_size]
         """
-        if x.shape[1:] != (self.num_blocks, self.num_channels, self.num_tokens, self.num_bins_per_token):
+        if x.shape[1:] != (
+            self.num_blocks,
+            self.num_channels,
+            self.num_tokens,
+            self.num_bins_per_token,
+        ):
             raise ValueError(
                 f"Invalid shape for token embedding layer. "
                 f"Expected {(self.num_blocks, self.num_channels, self.num_tokens, self.num_bins_per_token)}, "
@@ -76,8 +94,12 @@ class TokenEmbedding(nn.Module):
                 # extract tensor of shape [batch_size, num_channels, num_bins_per_token]
                 x_b = x[:, b, :, i, :]
                 out_b.append(lin_layer(x_b.flatten(start_dim=1)))
-            out.append(torch.stack(out_b, dim=2).reshape([-1, self.num_tokens, self.emb_size]))
-        x = torch.stack(out, dim=3).reshape([-1, self.num_blocks, self.num_tokens, self.emb_size])
+            out.append(
+                torch.stack(out_b, dim=2).reshape([-1, self.num_tokens, self.emb_size])
+            )
+        x = torch.stack(out, dim=3).reshape(
+            [-1, self.num_blocks, self.num_tokens, self.emb_size]
+        )
 
         return x * math.sqrt(self.emb_size)
 
@@ -98,6 +120,7 @@ class FrequencyEncoding(nn.Module):
     forward:
         add the frequency encoding to the embedding matrix, dependent on f_min and f_max of each token
     """
+
     def __init__(self, emb_size: int, encoding_type: str, dropout: float):
         """
         Parameters:
@@ -137,32 +160,36 @@ class FrequencyEncoding(nn.Module):
         emb_size_f_max = self.emb_size - emb_size_f_min
 
         if self.encoding_type == "discrete":
-            d_f_min = torch.exp(-torch.arange(0, emb_size_f_min, 2) * math.log(10000.0) / emb_size_f_min)
-            d_f_max = torch.exp(-torch.arange(0, emb_size_f_max, 2) * math.log(10000.0) / emb_size_f_max)
+            d_f_min = torch.exp(
+                -torch.arange(0, emb_size_f_min, 2) * math.log(10000.0) / emb_size_f_min
+            )
+            d_f_max = torch.exp(
+                -torch.arange(0, emb_size_f_max, 2) * math.log(10000.0) / emb_size_f_max
+            )
         elif self.encoding_type == "continuous":
             d_f_min = torch.pow(2, torch.arange(0, emb_size_f_min, 2)) * math.pi
             d_f_max = torch.pow(2, torch.arange(0, emb_size_f_max, 2)) * math.pi
         else:
             raise ValueError(
                 f"Invalid value for encoding_type.",
-                f"Expected one of ['discrete', 'continuous'], got {self.encoding_type}."
+                f"Expected one of ['discrete', 'continuous'], got {self.encoding_type}.",
             )
 
         if d_f_min.shape[0] + d_f_max.shape[0] != self.emb_size:
-            d_f_max = d_f_max[:int(emb_size_f_max / 2)]
+            d_f_max = d_f_max[: int(emb_size_f_max / 2)]
 
         # Assuming that f_min and f_max are the same for all blocks
         pos_embedding = torch.zeros((batch_size, 1, num_tokens, self.emb_size))
         pos_embedding[:, :, :, 0:emb_size_f_min:2] = torch.sin(
             f_min.reshape(batch_size, 1, num_tokens, 1) * d_f_min
         )
-        pos_embedding[:, :, :, 1:emb_size_f_min + 1:2] = torch.cos(
+        pos_embedding[:, :, :, 1 : emb_size_f_min + 1 : 2] = torch.cos(
             f_min.reshape(batch_size, 1, num_tokens, 1) * d_f_min
         )
-        pos_embedding[:, :, :, emb_size_f_min + 1:self.emb_size:2] = torch.sin(
+        pos_embedding[:, :, :, emb_size_f_min + 1 : self.emb_size : 2] = torch.sin(
             f_max.reshape(batch_size, 1, num_tokens, 1) * d_f_max
         )
-        pos_embedding[:, :, :, emb_size_f_min + 2:self.emb_size:2] = torch.cos(
+        pos_embedding[:, :, :, emb_size_f_min + 2 : self.emb_size : 2] = torch.cos(
             f_max.reshape(batch_size, 1, num_tokens, 1) * d_f_max
         )
 
@@ -181,6 +208,7 @@ class BlockEmbedding(nn.Module):
     forward:
         obtains embedding of employed blocks and adds it to x.
     """
+
     def __init__(self, num_blocks: int, emb_size: int):
         """
         Parameters
@@ -222,7 +250,9 @@ class BlockEmbedding(nn.Module):
         block_encoding = self.encoding(blocks.long()) * math.sqrt(self.emb_size)
         out = []
         for i in range(self.num_blocks):
-            block_out = x[:, i, :, :] + block_encoding[:, i, :].reshape(block_encoding.shape[0], 1, -1)
+            block_out = x[:, i, :, :] + block_encoding[:, i, :].reshape(
+                block_encoding.shape[0], 1, -1
+            )
             out.append(block_out)
         x = torch.cat(out, dim=1)
 
@@ -244,33 +274,35 @@ class TransformerModel(nn.Module):
     forward:
         evaluates the transformer encoder model
     """
-    def __init__(self,
-                 input_dims: List[int],
-                 emb_size: int,
-                 num_head: int,
-                 d_hid: int,
-                 num_layers: int,
-                 d_out: int,
-                 individual_token_embedding: bool,
-                 frequency_encoding_type: str,
-                 dropout: float = 0.5
-                 ):
+
+    def __init__(
+        self,
+        input_dims: List[int],
+        d_out: int,
+        emb_size: int,
+        num_head: int,
+        num_layers: int,
+        d_hid: int,
+        individual_token_embedding: bool,
+        frequency_encoding_type: str,
+        dropout: float = 0.5,
+    ):
         """
         Parameters
         --------
         input_dims: List[int]
             containing [num_blocks, num_channels, num_tokens, num_bins_per_token]
             where num_blocks = number of interferometers in GW use case, and num_channels = [real, imag, asd]
+        d_out: int
+            dimension of output
         emb_size: int
             size of embedding dimension
         num_head: int
             number of transformer heads
-        d_hid: int
-            number of hidden dimensions in the feedforward neural networks of the transformer encoder
         num_layers: int
             number of transformer layers
-        d_out: int
-            dimension of output
+        d_hid: int
+            number of hidden dimensions in the feedforward neural networks of the transformer encoder
         individual_token_embedding: bool
             whether to embed each raw token with an individual embedding network or not
         frequency_encoding_type: str
@@ -281,27 +313,32 @@ class TransformerModel(nn.Module):
             dropout
         """
         super().__init__()
-        self.model_type = 'Transformer'
+        self.model_type = "Transformer"
         self.individual_token_embedding = individual_token_embedding
 
-        self.num_blocks, self.num_channels, self.num_tokens, self.num_bins_per_token = input_dims
+        (
+            self.num_blocks,
+            self.num_channels,
+            self.num_tokens,
+            self.num_bins_per_token,
+        ) = input_dims
         self.embedding = TokenEmbedding(
             input_dims=input_dims,
             emb_size=emb_size,
-            individual_token_embedding=self.individual_token_embedding
+            individual_token_embedding=self.individual_token_embedding,
         )
         self.freq_encoder = FrequencyEncoding(
-            emb_size=emb_size,
-            encoding_type=frequency_encoding_type,
-            dropout=dropout
+            emb_size=emb_size, encoding_type=frequency_encoding_type, dropout=dropout
         )
-        self.block_encoder = BlockEmbedding(num_blocks=self.num_blocks, emb_size=emb_size)
+        self.block_encoder = BlockEmbedding(
+            num_blocks=self.num_blocks, emb_size=emb_size
+        )
         encoder_layers = TransformerEncoderLayer(
             d_model=emb_size,
             nhead=num_head,
             dim_feedforward=d_hid,
             dropout=dropout,
-            batch_first=True
+            batch_first=True,
         )
         self.transformer_encoder = TransformerEncoder(encoder_layers, num_layers)
         self.flatten = nn.Flatten(start_dim=1, end_dim=-1)
@@ -316,13 +353,22 @@ class TransformerModel(nn.Module):
         init_range = 0.1
         if self.individual_token_embedding:
             for i in range(self.num_tokens):
-                self.embedding.stack_linear[i].weight.data.uniform_(-init_range, init_range)
+                self.embedding.stack_linear[i].weight.data.uniform_(
+                    -init_range, init_range
+                )
         else:
             self.embedding.linear.weight.data.uniform(-init_range, init_range)
         self.linear.bias.data.zero_()
         self.linear.weight.data.uniform_(-init_range, init_range)
 
-    def forward(self, src: Tensor, blocks: Tensor, f_min: Tensor, f_max: Tensor, src_mask: Tensor = None) -> Tensor:
+    def forward(
+        self,
+        src: Tensor,
+        blocks: Tensor,
+        f_min: Tensor,
+        f_max: Tensor,
+        src_mask: Tensor = None,
+    ) -> Tensor:
         """
         Parameters
         --------
