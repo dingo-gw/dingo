@@ -186,7 +186,10 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
                 df=1/data_settings["window"]["T"]
             )
         )
-        selected_keys.append("tokenization_parameters")
+        selected_keys.append("blocks")
+        selected_keys.append("f_min_per_token")
+        selected_keys.append("f_max_per_token")
+        # selected_keys.append("num_bins_per_token")
 
     transforms.append(UnpackDict(selected_keys=selected_keys))
 
