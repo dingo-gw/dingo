@@ -4,8 +4,10 @@ import numpy as np
 
 class StrainTokenization(object):
     """
-        Divide frequency bins into frequency segments of equal length and add frequency information to
-        sample['tokenization_parameters'].
+        Divide frequency bins into frequency segments of equal length and add frequency information and
+        encoding of blocks (i.e. interferometers in GW use case) to sample. It is assumed that f_min
+        and f_max are the same for all blocks, that all waveforms contain the same number of blocks
+        and that the ordering of the blocks within 'waveform' is fixed.
     """
     def __init__(self, num_tokens: int, f_min: float, f_max: float, df: float):
         """
@@ -46,9 +48,9 @@ class StrainTokenization(object):
             input_sample with modified value for key
             - 'waveform', shape [num_blocks, num_channels, num_tokens, num_bins_per_token]
             and additional keys
+            - 'blocks', shape [num_blocks]
             - 'f_min_per_token', shape [num_tokens]
             - 'f_max_per_token', shape [num_tokens]
-            - 'num_bins_per_token', shape [num_tokens + 1]
         """
         sample = input_sample.copy()
 
@@ -57,10 +59,10 @@ class StrainTokenization(object):
         strain = strain.reshape(strain.shape[0], strain.shape[1], self.num_tokens, self.num_bins_per_token)
 
         sample["waveform"] = strain
-        sample["tokenization_parameters"] = {
-            "f_min_per_token": self.f_min_per_token,
-            "f_max_per_token": self.f_max_per_token,
-            "num_bins_per_token": torch.diff(self.token_indices)
-        }
+        detector_dict = {'H1': 0, 'L1': 1, 'V1': 2}
+        detectors = [detector_dict[key] for key in input_sample["asds"]]
+        sample["blocks"] = torch.Tensor(detectors)
+        sample["f_min_per_token"] = self.f_min_per_token
+        sample["f_max_per_token"] = self.f_max_per_token
 
         return sample
