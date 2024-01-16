@@ -87,13 +87,13 @@ class TokenEmbedding(nn.Module):
         for b in range(self.num_blocks):
             out_b = []
             for i in range(self.num_tokens):
+                # apply linear layer for tensor of shape [batch_size, num_channels, num_bins_per_token]
                 if self.individual_token_embedding:
-                    lin_layer = self.stack_linear[i]
+                    out_b.append(
+                        self.stack_linear[i](x[:, b, :, i, :].flatten(start_dim=1))
+                    )
                 else:
-                    lin_layer = self.linear
-                # extract tensor of shape [batch_size, num_channels, num_bins_per_token]
-                x_b = x[:, b, :, i, :]
-                out_b.append(lin_layer(x_b.flatten(start_dim=1)))
+                    out_b.append(self.linear(x[:, b, :, i, :].flatten(start_dim=1)))
             out.append(
                 torch.stack(out_b, dim=2).reshape([-1, self.num_tokens, self.emb_size])
             )
@@ -134,9 +134,38 @@ class FrequencyEncoding(nn.Module):
         """
         super(FrequencyEncoding, self).__init__()
 
+        self.emb_size_f_min = int(emb_size / 2)
+        self.emb_size_f_max = emb_size - self.emb_size_f_min
+
+        if encoding_type == "discrete":
+            self.d_f_min = torch.exp(
+                -torch.arange(0, self.emb_size_f_min, 2)
+                * math.log(10000.0)
+                / self.emb_size_f_min
+            )
+            self.d_f_max = torch.exp(
+                -torch.arange(0, self.emb_size_f_max, 2)
+                * math.log(10000.0)
+                / self.emb_size_f_max
+            )
+        elif encoding_type == "continuous":
+            self.d_f_min = (
+                torch.pow(2, torch.arange(0, self.emb_size_f_min, 2)) * math.pi
+            )
+            self.d_f_max = (
+                torch.pow(2, torch.arange(0, self.emb_size_f_max, 2)) * math.pi
+            )
+        else:
+            raise ValueError(
+                f"Invalid value for encoding_type.",
+                f"Expected one of ['discrete', 'continuous'], got {self.encoding_type}.",
+            )
+
+        if self.d_f_min.shape[0] + self.d_f_max.shape[0] != emb_size:
+            self.d_f_max = self.d_f_max[: int(self.emb_size_f_max / 2)]
+
         self.emb_size = torch.tensor(emb_size)
         self.dropout = nn.Dropout(p=dropout)
-        self.encoding_type = encoding_type
 
     def forward(self, x: Tensor, f_min: Tensor, f_max: Tensor) -> Tensor:
         """
@@ -148,6 +177,8 @@ class FrequencyEncoding(nn.Module):
             shape [batch_size, num_tokens]
         f_max: Tensor
             shape [batch_size, num_tokens]
+        device: str
+            current device
 
         Returns
         --------
@@ -156,41 +187,23 @@ class FrequencyEncoding(nn.Module):
         """
         batch_size, num_tokens = x.shape[0], x.shape[2]
         assert self.emb_size == x.shape[3]
-        emb_size_f_min = int(self.emb_size / 2)
-        emb_size_f_max = self.emb_size - emb_size_f_min
-
-        if self.encoding_type == "discrete":
-            d_f_min = torch.exp(
-                -torch.arange(0, emb_size_f_min, 2) * math.log(10000.0) / emb_size_f_min
-            )
-            d_f_max = torch.exp(
-                -torch.arange(0, emb_size_f_max, 2) * math.log(10000.0) / emb_size_f_max
-            )
-        elif self.encoding_type == "continuous":
-            d_f_min = torch.pow(2, torch.arange(0, emb_size_f_min, 2)) * math.pi
-            d_f_max = torch.pow(2, torch.arange(0, emb_size_f_max, 2)) * math.pi
-        else:
-            raise ValueError(
-                f"Invalid value for encoding_type.",
-                f"Expected one of ['discrete', 'continuous'], got {self.encoding_type}.",
-            )
-
-        if d_f_min.shape[0] + d_f_max.shape[0] != self.emb_size:
-            d_f_max = d_f_max[: int(emb_size_f_max / 2)]
+        device = x.device
 
         # Assuming that f_min and f_max are the same for all blocks
-        pos_embedding = torch.zeros((batch_size, 1, num_tokens, self.emb_size))
-        pos_embedding[:, :, :, 0:emb_size_f_min:2] = torch.sin(
-            f_min.reshape(batch_size, 1, num_tokens, 1) * d_f_min
+        pos_embedding = torch.zeros(
+            (batch_size, 1, num_tokens, self.emb_size), device=device
         )
-        pos_embedding[:, :, :, 1 : emb_size_f_min + 1 : 2] = torch.cos(
-            f_min.reshape(batch_size, 1, num_tokens, 1) * d_f_min
+        pos_embedding[:, :, :, 0 : self.emb_size_f_min : 2] = torch.sin(
+            f_min.reshape(batch_size, 1, num_tokens, 1) * self.d_f_min
         )
-        pos_embedding[:, :, :, emb_size_f_min + 1 : self.emb_size : 2] = torch.sin(
-            f_max.reshape(batch_size, 1, num_tokens, 1) * d_f_max
+        pos_embedding[:, :, :, 1 : self.emb_size_f_min + 1 : 2] = torch.cos(
+            f_min.reshape(batch_size, 1, num_tokens, 1) * self.d_f_min
         )
-        pos_embedding[:, :, :, emb_size_f_min + 2 : self.emb_size : 2] = torch.cos(
-            f_max.reshape(batch_size, 1, num_tokens, 1) * d_f_max
+        pos_embedding[:, :, :, self.emb_size_f_min + 1 : self.emb_size : 2] = torch.sin(
+            f_max.reshape(batch_size, 1, num_tokens, 1) * self.d_f_max
+        )
+        pos_embedding[:, :, :, self.emb_size_f_min + 2 : self.emb_size : 2] = torch.cos(
+            f_max.reshape(batch_size, 1, num_tokens, 1) * self.d_f_max
         )
 
         x = x + pos_embedding
@@ -250,10 +263,10 @@ class BlockEmbedding(nn.Module):
         block_encoding = self.encoding(blocks.long()) * math.sqrt(self.emb_size)
         out = []
         for i in range(self.num_blocks):
-            block_out = x[:, i, :, :] + block_encoding[:, i, :].reshape(
-                block_encoding.shape[0], 1, -1
+            out.append(
+                x[:, i, :, :]
+                + block_encoding[:, i, :].reshape(block_encoding.shape[0], 1, -1)
             )
-            out.append(block_out)
         x = torch.cat(out, dim=1)
 
         return x
