@@ -177,7 +177,7 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     else:
         selected_keys = ["inference_parameters", "waveform"]
 
-    if data_settings["tokenization"]:
+    try:
         transforms.append(
             StrainTokenization(
                 data_settings["tokenization"]["num_tokens"],
@@ -190,6 +190,8 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         selected_keys.append("f_min_per_token")
         selected_keys.append("f_max_per_token")
         # selected_keys.append("num_bins_per_token")
+    except KeyError:
+        print("No tokenization information found, omitting StrainTokenization transform.")
 
     transforms.append(UnpackDict(selected_keys=selected_keys))
 
