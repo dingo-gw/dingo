@@ -65,7 +65,6 @@ class ScoreDiffusion(ContinuousFlowsBase):
         t, theta_t, score = self.get_t_theta_t_score(theta_1=theta)
         pred_score = self.network(t, theta_t, *context_data)
 
-        # TODO: write as MSE loss
         weighting = self.likelihood_weighting(t)
         losses = torch.square(pred_score - score)
         losses = 1 / 2 * torch.sum(losses, dim=1) * weighting
@@ -87,7 +86,6 @@ class ScoreDiffusion(ContinuousFlowsBase):
         beta = self.beta(1 - t)
         return -1 / 2 * beta[:, None] * (score - theta_t)
 
-    # TODO: move likelihood_weighting, alpha, beta, mu, sigma into a NoiseScheduler
     def get_likelihood_weighting(self, weighting):
         if weighting == "score-matching":
 
@@ -124,53 +122,3 @@ class ScoreDiffusion(ContinuousFlowsBase):
         theta_t = mu + theta_0 * sigma[:, None]
         score = theta_0 / sigma[:, None]
         return t, theta_t, score
-
-
-# class ScoreBasedNoiseTransform:
-#     def __init__(
-#         self,
-#         beta_min,
-#         beta_max,
-#         epsilon,
-#     ):
-#         self.beta_min = beta_min
-#         self.beta_max = beta_max
-#         self.epsilon = epsilon
-#
-#     def __call__(self, theta):
-#         # sample time in [0, 1 - epsilon]
-#         t = (1 - self.epsilon) * torch.rand(theta.shape[0], device=theta.device)
-#         mu, sigma = self.mu(t, theta), self.sigma(t, theta).to(theta.device)
-#         z = torch.randn_like(theta, device=theta.device)
-#         x = mu + z * sigma[:, None]
-#         score = z / sigma[:, None]
-#         return x, score, t
-#
-#     def alpha(self, t):
-#         T = t * self.beta_min + 1 / 2 * (self.beta_max - self.beta_min) * (t ** 2)
-#         return torch.exp(-1 / 2 * T)
-#
-#     def beta(self, t):
-#         return self.beta_min + t * (self.beta_max - self.beta_min)
-#
-#     def mu(self, t, x_1):
-#         return self.alpha(1 - t)[:, None].to(x_1.device) * x_1
-#
-#     def sigma(self, t, x_1=None):
-#         return torch.sqrt(1 - self.alpha(1 - t) ** 2)
-
-# def get_mu_sigma(self, t, theta_1):
-#     alpha_tau = self.alpha(1 - t)
-#     mu = alpha_tau[:, None] * theta_1
-#     sigma = torch.sqrt(1 - alpha_tau ** 2)[:, None]
-#     return mu, sigma
-
-# t = self.sample_t(len(theta))
-# theta_0 = self.sample_theta_0(len(theta))
-# theta_1 = theta
-# mu, sigma = self.get_mu_sigma(t, theta_1)
-# theta_t = mu + theta_0 * sigma
-# score = theta_0 / sigma
-# weighting = self.likelihood_weighting(t, theta)
-#
-# pred_score = self.network(t, theta_t, *context)

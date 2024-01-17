@@ -5,7 +5,6 @@ from dingo.core.posterior_models.flow_matching import FlowMatching
 from dingo.core.posterior_models.score_matching import ScoreDiffusion
 
 
-# TODO: where to put this to avoid cyclic imports?
 def build_model_from_kwargs(filename=None, settings=None, **kwargs):
     """
     Returns the built model (from settings file or rebuild from file). Extracts the relevant arguments (normalizing flow
@@ -40,10 +39,6 @@ def build_model_from_kwargs(filename=None, settings=None, **kwargs):
         raise ValueError("No valid posterior model specified.")
 
     model = models_dict[type.lower()]
-    # TODO copy the relevant posterior model arguments to posterior model and delete
-    # TODO non-necessary arguments currently keeps all arguments for flow_matching and
-    # TODO score_matching, e.g., sigma_min for score_matching
-    # delete and or modify parameter file.
     if settings is not None:
         if type.lower() == "normalizing_flow":
             settings["train_settings"]["model"]["posterior_kwargs"].update(
