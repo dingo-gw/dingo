@@ -8,13 +8,12 @@ from os.path import dirname, join
 from pathlib import Path
 import yaml
 
-from dingo.core.models import PosteriorModel
-from dingo.core.utils.plotting import plot_corner_multi
+from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
 from dingo.gw.data.data_preparation import get_event_data_and_domain, \
     parse_settings_for_raw_data
-from dingo.gw.inference.visualization import load_ref_samples
+from dingo.gw.inference.visualization import load_ref_samples, generate_cornerplot
 
 
 def parse_args():
@@ -262,7 +261,7 @@ def analyze_event():
     else:
         device = "cpu"
 
-    model = PosteriorModel(args.model, device=device, load_training_info=False)
+    model = build_model_from_kwargs(filename=args.model, device=device)
     epoch = model.epoch
     wf_model = model.metadata["dataset_settings"]["waveform_generator"]["approximant"]
 
@@ -280,9 +279,7 @@ def analyze_event():
 
     if args.model_init is not None:
         gnpe = True
-        init_model = PosteriorModel(
-            args.model_init, device=device, load_training_info=False
-        )
+        init_model = build_model_from_kwargs(filename=args.model_init, device=device, load_training_info=False)
         init_sampler = GWSampler(model=init_model)
         sampler = GWSamplerGNPE(
             model=model,
