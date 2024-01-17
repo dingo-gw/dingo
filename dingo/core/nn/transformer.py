@@ -44,12 +44,12 @@ class TokenEmbedding(nn.Module):
             self.num_bins_per_token,
         ) = input_dims
         if individual_token_embedding:
-            self.stack_linear = [
+            self.stack_linear = nn.ModuleList([
                 nn.Linear(
                     self.num_channels * self.num_bins_per_token, emb_size, bias=False
                 )
                 for _ in range(self.num_tokens)
-            ]
+            ])
         else:
             self.linear = nn.Linear(
                 self.num_channels * self.num_bins_per_token, emb_size, bias=False
