@@ -138,21 +138,21 @@ class FrequencyEncoding(nn.Module):
         self.emb_size_f_max = emb_size - self.emb_size_f_min
 
         if encoding_type == "discrete":
-            self.d_f_min = torch.exp(
+            d_f_min = torch.exp(
                 -torch.arange(0, self.emb_size_f_min, 2)
                 * math.log(10000.0)
                 / self.emb_size_f_min
             )
-            self.d_f_max = torch.exp(
+            d_f_max = torch.exp(
                 -torch.arange(0, self.emb_size_f_max, 2)
                 * math.log(10000.0)
                 / self.emb_size_f_max
             )
         elif encoding_type == "continuous":
-            self.d_f_min = (
+            d_f_min = (
                 torch.pow(2, torch.arange(0, self.emb_size_f_min, 2)) * math.pi
             )
-            self.d_f_max = (
+            d_f_max = (
                 torch.pow(2, torch.arange(0, self.emb_size_f_max, 2)) * math.pi
             )
         else:
@@ -161,11 +161,14 @@ class FrequencyEncoding(nn.Module):
                 f"Expected one of ['discrete', 'continuous'], got {self.encoding_type}.",
             )
 
-        if self.d_f_min.shape[0] + self.d_f_max.shape[0] != emb_size:
-            self.d_f_max = self.d_f_max[: int(self.emb_size_f_max / 2)]
+        if d_f_min.shape[0] + d_f_max.shape[0] != emb_size:
+            d_f_max = d_f_max[: int(self.emb_size_f_max / 2)]
 
         self.emb_size = torch.tensor(emb_size)
         self.dropout = nn.Dropout(p=dropout)
+
+        self.register_buffer('d_f_min', d_f_min)
+        self.register_buffer('d_f_max', d_f_max)
 
     def forward(self, x: Tensor, f_min: Tensor, f_max: Tensor) -> Tensor:
         """
