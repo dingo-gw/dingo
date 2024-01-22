@@ -11,7 +11,13 @@ class HeterodynePhase(object):
     factor_fiducial_waveform for details.
     """
 
-    def __init__(self, domain: Domain, order: int = 0, inverse: bool = False):
+    def __init__(
+        self,
+        domain: Domain,
+        order: int = 0,
+        inverse: bool = False,
+        fixed_parameters: dict = None,
+    ):
         """
         Parameters
         ----------
@@ -21,10 +27,14 @@ class HeterodynePhase(object):
             Order for phase heterodyning. Either 0 or 2.
         inverse : bool
             Whether to apply for the forward or inverse transform. Default: False.
+        fixed_parameters: dict = None
+            If set, extract chirp_mass and mass_ratio parameters from this dict instead
+            from the input sample.
         """
         self.domain = domain
         self.order = order
         self.inverse = inverse
+        self.fixed_parameters = fixed_parameters
 
     def __call__(self, input_sample: dict):
         """
@@ -42,7 +52,10 @@ class HeterodynePhase(object):
         """
         sample = input_sample.copy()
         waveform = sample["waveform"]
-        parameters = sample["parameters"]
+        if self.fixed_parameters:
+            parameters = self.fixed_parameters
+        else:
+            parameters = sample["parameters"]
         sample["waveform"] = factor_fiducial_waveform(
             waveform,
             self.domain,

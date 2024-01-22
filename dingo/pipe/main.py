@@ -94,6 +94,7 @@ class MainInput(BilbyMainInput):
         self.model = args.model
         self.model_init = args.model_init
         self.num_gnpe_iterations = args.num_gnpe_iterations
+        self.fixed_gnpe_proxies = args.fixed_gnpe_proxies
         self.importance_sampling_updates = importance_sampling_updates
 
         Input.__init__(self, args, unknown_args, print_msg=False)
@@ -159,7 +160,6 @@ class MainInput(BilbyMainInput):
 
         # self.ignore_gwpy_data_quality_check = args.ignore_gwpy_data_quality_check
         self.trigger_time = args.trigger_time
-        self.trigger_chirp_mass = args.trigger_chirp_mass
         # self.deltaT = args.deltaT
         # self.gps_tuple = args.gps_tuple
         # self.gps_file = args.gps_file

@@ -67,7 +67,7 @@ def create_parser(top_level=True):
     calibration_parser = parser.add_argument_group(
         "Calibration arguments",
         description="Which calibration model and settings to use. Calibration "
-                    "uncertainty is marginalizaed over during importance sampling.",
+        "uncertainty is marginalizaed over during importance sampling.",
     )
     calibration_parser.add(
         "--calibration-model",
@@ -95,8 +95,10 @@ def create_parser(top_level=True):
         "--spline-calibration-curves",
         type=int,
         default=1000,
-        help=("Number of calibration curves to use in marginalizing over calibration "
-              "uncertainty"),
+        help=(
+            "Number of calibration curves to use in marginalizing over calibration "
+            "uncertainty"
+        ),
     )
     #
     # calibration_parser.add(
@@ -151,9 +153,9 @@ def create_parser(top_level=True):
             "--importance-sampling-generation",
             action="store_true",
             help="Whether to prepare data based on the updated importance sampling "
-                 "settings rather than network settings. This is used internally for "
-                 "data generation, when preparing different data for the importance "
-                 "sampling stage.",
+            "settings rather than network settings. This is used internally for "
+            "data generation, when preparing different data for the importance "
+            "sampling stage.",
         )
 
     data_gen_pars = parser.add_argument_group(
@@ -219,15 +221,6 @@ def create_parser(top_level=True):
             "Either a GPS trigger time, or the event name (e.g. GW150914). "
             "For event names, the gwosc package is used to identify the "
             "trigger time"
-        ),
-    )
-    data_gen_pars.add(
-        "--trigger-chirp-mass",
-        default=None,
-        type=nonefloat,
-        help=(
-            "Trigger chirp mass for the event. Used e.g. for initialization of BNS "
-            "networks."
         ),
     )
     # data_gen_pars.add(
@@ -581,9 +574,7 @@ def create_parser(top_level=True):
     submission_parser.add(
         "--extra-lines",
         action="append",
-        help=(
-            "List of additional lines to include for all HTCondor submissions."
-        ),
+        help=("List of additional lines to include for all HTCondor submissions."),
     )
     submission_parser.add(
         "--simple-submission",
@@ -1218,6 +1209,12 @@ def create_parser(top_level=True):
         help="Number of GNPE iterations to perform when using a GNPE model. Default 30.",
     )
     sampler_parser.add(
+        "--fixed-gnpe-proxies",
+        type=nonestr,
+        default=None,
+        help="Dictionary with fixed gnpe proxies.",
+    )
+    sampler_parser.add(
         "--num-samples",
         type=int,
         default=50000,
@@ -1244,9 +1241,7 @@ def create_parser(top_level=True):
         "--importance-sample",
         action=StoreBoolean,
         default=True,
-        help=(
-            "Whether to perform importance sampling on result. (Default: True)"
-        ),
+        help=("Whether to perform importance sampling on result. (Default: True)"),
     )
     sampler_parser.add(
         "--importance-sampling-settings",

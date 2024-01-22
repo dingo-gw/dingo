@@ -25,6 +25,7 @@ from dingo.gw.transforms import (
     PostCorrectGeocentTime,
     CopyToExtrinsicParameters,
     GetDetectorTimes,
+    HeterodynePhase,
 )
 
 
@@ -266,6 +267,12 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
         """
         Builds the transforms that are used in the GNPE loop.
         """
+        # When working with MultibandedFrequencyDomain, the data initially needs to be
+        # in self.domain.base_domain, as heterodyning with gnpe-chirp (in
+        # self.transform_pre, if applied) needs to be applied before decimation
+        # to self.domain.
+        base_domain = getattr(self.domain, "base_domain", self.domain)
+
         data_settings = self.metadata["train_settings"]["data"]
         ifo_list = InterferometerList(data_settings["detectors"])
 
@@ -289,6 +296,59 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
         #   * repackaging & standardizing proxies to sample['context_parameters']
         #     for conditioning of the inference network
         transform_gnpe_loop_pre = [RenameKey("data", "waveform")]
+
+        if gnpe_chirp_settings:
+            if base_domain == self.domain:
+                # If the initial data domain (base_domain) is the domain of the model
+                # (self.domain) [i.e., we don't apply decimation], we can simply apply
+                # the gnpe chirp transformation.
+                transform_gnpe_loop_pre.append(
+                    GNPEChirp(
+                        gnpe_chirp_settings["kernel"],
+                        base_domain,
+                        gnpe_chirp_settings.get("order", 0),
+                        inference=True,
+                    )
+                )
+            else:
+                # If we apply decimation (i.e., base_domain != self.domain), we need to
+                # make sure to apply the gnpe chirp transformation *before* the
+                # decimation, as decimation and the gnpe chirp phase transformation do
+                # not commute.
+                if "chirp_mass" in self.fixed_gnpe_proxies:
+                    # If we use a fixed chirp mass proxy, we can heterodyne the data in
+                    # self.transform_pre (as opposed to transform_gnpe_loop_pre in the
+                    # gnpe loop), which is much more efficient, as we only need to
+                    # carry around the decimated strain. Fixed chirp mass proxies can
+                    # e.g. be used when running single-iteration gnpe for the chirp
+                    # mass as a form of prior conditioning. This is possible when the
+                    # chirp mass posterior is tighter than the corresponding gnpe kernel.
+                    #
+                    # Specifically:
+                    # (1) add the heterodyning transformation to self.transform_pre
+                    # (2) omit the gnpe_chirp_transformation (i.e., no heterodyning in
+                    #     the loop, but nevertheless condition the network on the proxy)
+                    self.transform_pre.transforms.insert(
+                        0,
+                        HeterodynePhase(
+                            domain=base_domain,
+                            order=gnpe_chirp_settings.get("order", 0),
+                            inverse=False,
+                            fixed_parameters=self.fixed_gnpe_proxies,
+                        ),
+                    )
+
+                else:
+                    # If we don't use fixed chirp mass proxies (i.e., we gnpe-iterate
+                    # the chirp mass), then we need to remove the
+                    # DecimateWaveformsAndASDS and WhitenAndScaleStrain transformations
+                    # from self.transform_pre, and move them *after* the gnpe chirp
+                    # transform in transform_gnpe_loop_pre instead. This is currently
+                    # not implemented, as this becomes extremely expensive: We need to
+                    # store num_samples batches of the undecimated strain (with
+                    # potentially >1e5 bins) on the GPU, which could be >20 Gb.
+                    raise NotImplementedError()
+
         if gnpe_time_settings:
             transform_gnpe_loop_pre.append(
                 GNPECoalescenceTimes(
@@ -299,15 +359,6 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 )
             )
             transform_gnpe_loop_pre.append(TimeShiftStrain(ifo_list, self.domain))
-        if gnpe_chirp_settings:
-            transform_gnpe_loop_pre.append(
-                GNPEChirp(
-                    gnpe_chirp_settings["kernel"],
-                    self.domain,
-                    gnpe_chirp_settings.get("order", 0),
-                    inference=True,
-                )
-            )
 
         transform_gnpe_loop_pre.append(
             SelectStandardizeRepackageParameters(
@@ -327,7 +378,9 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 self.gnpe_parameters += transform.input_parameter_names
                 for k, v in transform.kernel.items():
                     self.gnpe_kernel[k] = v
+        self.gnpe_parameters += list(self.fixed_gnpe_proxies.keys())
         print("GNPE parameters: ", self.gnpe_parameters)
+        print("GNPE parameters fixed (not iterated): ", self.fixed_gnpe_proxies)
         print("GNPE kernel: ", self.gnpe_kernel)
 
         self.transform_gnpe_loop_pre = Compose(transform_gnpe_loop_pre)
@@ -383,4 +436,7 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
             k: np.array(samples[k] - samples[f"{k}_proxy"])
             for k in self.gnpe_kernel.keys()
         }
+        # When using only fixed proxies (i.e., no GNPE iterations), return log probs = 0.
+        if not gnpe_proxies_diff:
+            return np.zeros(len(list(samples.values())[0]))
         return self.gnpe_kernel.ln_prob(gnpe_proxies_diff, axis=0)

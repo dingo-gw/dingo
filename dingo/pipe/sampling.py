@@ -51,7 +51,10 @@ class SamplingInput(Input):
         self.num_samples = args.num_samples
         self.batch_size = args.batch_size
         self.density_recovery_settings = args.density_recovery_settings
-        self.trigger_chirp_mass = args.trigger_chirp_mass
+        if args.fixed_gnpe_proxies is not None:
+            self.fixed_gnpe_proxies = convert_string_to_dict(args.fixed_gnpe_proxies)
+        else:
+            self.fixed_gnpe_proxies = None
 
         # self.sampler = args.sampler
         # self.sampler_kwargs = args.sampler_kwargs
@@ -105,8 +108,6 @@ class SamplingInput(Input):
     def _load_event(self):
         event_dataset = EventDataset(file_name=self.event_data_file)
         self.context = event_dataset.data
-        if self.trigger_chirp_mass is not None:
-            self.context["trigger_chirp_mass"] = self.trigger_chirp_mass
         self.event_metadata = event_dataset.settings
 
     def _load_sampler(self):
@@ -123,6 +124,7 @@ class SamplingInput(Input):
                 model=model,
                 init_sampler=init_sampler,
                 num_iterations=self.num_gnpe_iterations,
+                fixed_gnpe_proxies=self.fixed_gnpe_proxies,
             )
 
         else:
@@ -158,16 +160,24 @@ class SamplingInput(Input):
         if len(gnpe_keys) == 0:
             return GWSampler(model=init_model)
 
+        # fixed gnpe parameters
+
         fixed_init_parameters = {}
-        additional_post_transforms = []
         if "gnpe_chirp" in gnpe_keys:
-            fixed_init_parameters["chirp_mass_proxy"] = self.trigger_chirp_mass
+            try:
+                fixed_init_parameters["chirp_mass_proxy"] = self.fixed_gnpe_proxies[
+                    "chirp_mass"
+                ]
+            except TypeError or KeyError as e:
+                raise ValueError(
+                    f"Using GNPE initialization network with gnpe-chirp, "
+                    f"but no fixed chirp mass proxy provided: {e}."
+                )
             gnpe_keys.remove("gnpe_chirp")
-            if "chirp_mass" not in data_settings["inference_parameters"]:
-                additional_post_transforms.append(
-                    Copy(
-                        "extrinsic_parameters/chirp_mass_proxy", "parameters/chirp_mass"
-                    )
+            if "chirp_mass" in data_settings["inference_parameters"]:
+                raise ValueError(
+                    "Chirp mass should not be an inference parameter of the "
+                    "initialization model when using a fixed chirp mass proxy."
                 )
 
         if len(gnpe_keys) > 0:
@@ -182,9 +192,11 @@ class SamplingInput(Input):
         )
 
         init_sampler = GWSamplerGNPE(
-            model=init_model, init_sampler=fixed_init_sampler, num_iterations=1
+            model=init_model,
+            init_sampler=fixed_init_sampler,
+            num_iterations=1,
+            fixed_gnpe_proxies=self.fixed_gnpe_proxies,
         )
-        init_sampler.transform_gnpe_loop_post.transforms += additional_post_transforms
 
         return init_sampler
 

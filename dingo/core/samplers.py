@@ -370,6 +370,7 @@ class GNPESampler(Sampler):
         model: PosteriorModel,
         init_sampler: Sampler,
         num_iterations: int = 1,
+        fixed_gnpe_proxies: dict = None,
     ):
         """
         Parameters
@@ -379,8 +380,17 @@ class GNPESampler(Sampler):
             Used for generating initial samples
         num_iterations : int
             Number of GNPE iterations to be performed by sampler.
+        fixed_gnpe_proxies: dict
+            Dict with fixed gnpe proxies. For each parameter listed here, we do not
+            iterate in the GNPE loop, but instead use the fixed value provided.
+            Useful e.g. for prior-conditioning.
         """
         self.gnpe_parameters = []  # Should be set in subclass _initialize_transform()
+        if fixed_gnpe_proxies is not None:
+            self.fixed_gnpe_proxies = fixed_gnpe_proxies
+            print(f"Using fixed gnpe proxies for {fixed_gnpe_proxies.keys()}.")
+        else:
+            self.fixed_gnpe_proxies = {}
 
         super().__init__(model)
         self.init_sampler = init_sampler
@@ -475,10 +485,20 @@ class GNPESampler(Sampler):
 
             if start_with_proxies and i == 0:
                 x["extrinsic_parameters"] = proxies.copy()
+                # TODO: check that this works when using fixed_gnpe_proxies
             else:
                 x["extrinsic_parameters"] = {
-                    k: x["extrinsic_parameters"][k] for k in self.gnpe_parameters
+                    k: x["extrinsic_parameters"][k]
+                    for k in self.gnpe_parameters
+                    if k not in self.fixed_gnpe_proxies
                 }
+                # add fixed proxies
+                x["extrinsic_parameters"].update(
+                    {
+                        k + "_proxy": torch.ones(num_samples, dtype=torch.float32) * v
+                        for k, v in self.fixed_gnpe_proxies.items()
+                    }
+                )
 
             # TODO: Depending on whether start_with_proxies is True, this might end up
             #  comparing proxies vs gnpe_parameters for the first iteration.
