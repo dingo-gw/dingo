@@ -52,18 +52,22 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
     # This is the only case that exists so far, but we leave it open to develop new
     # model types.
     if train_settings["model"]["type"] == "nsf+embedding":
+        if "no_init" in train_settings["model"]["embedding_net_kwargs"]["svd"]:
+            initial_weights = None
+            print("Building model='nsf+embedding' without seeding embedding network with SVD")
+        else:
+            # First, build the SVD for seeding the embedding network.
+            print("\nBuilding SVD for initialization of embedding network.")
+            initial_weights["V_rb_list"] = build_svd_for_embedding_network(
+                wfd,
+                train_settings["data"],
+                train_settings["training"]["stage_0"]["asd_dataset_path"],
+                num_workers=local_settings["num_workers"],
+                batch_size=train_settings["training"]["stage_0"]["batch_size"],
+                out_dir=train_dir,
+                **train_settings["model"]["embedding_net_kwargs"]["svd"],
+            )
 
-        # First, build the SVD for seeding the embedding network.
-        print("\nBuilding SVD for initialization of embedding network.")
-        initial_weights["V_rb_list"] = build_svd_for_embedding_network(
-            wfd,
-            train_settings["data"],
-            train_settings["training"]["stage_0"]["asd_dataset_path"],
-            num_workers=local_settings["num_workers"],
-            batch_size=train_settings["training"]["stage_0"]["batch_size"],
-            out_dir=train_dir,
-            **train_settings["model"]["embedding_net_kwargs"]["svd"],
-        )
 
         # Now set the transforms for training. We need to do this here so that we can (a)
         # get the data dimensions to configure the network, and (b) save the
@@ -108,7 +112,7 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
         }
 
     else:
-        raise ValueError('Model type must be "nsf+embedding".')
+        raise ValueError('Model type must be "nsf+embedding" or "nsf+transformer".')
 
     print("\nInitializing new posterior model.")
     print("Complete settings:")
