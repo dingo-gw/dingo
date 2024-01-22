@@ -439,6 +439,7 @@ class GNPESampler(Sampler):
 
         data_ = self.transform_pre(context)
 
+        # Get GNPE initialization samples.
         # TODO: Reimplement outlier removal in IterationTracker? Save setting somewhere.
         if self.remove_init_outliers == 0.0:
             init_samples = self.init_sampler._run_sampler(num_samples, context)
@@ -455,6 +456,10 @@ class GNPESampler(Sampler):
             thr = torch.quantile(init_samples["log_prob"], self.remove_init_outliers)
             inds = torch.where(init_samples["log_prob"] >= thr)[0][:num_samples]
             init_samples = {k: v[inds] for k, v in init_samples.items()}
+        # Insert fixed proxies into initialization samples.
+        init_samples.update(
+            {k: torch.ones(num_samples) * v for k, v in self.fixed_gnpe_proxies.items()}
+        )
 
         # We could be starting with either the GNPE parameters *or* their proxies,
         # depending on the nature of the initialization network.
@@ -490,12 +495,12 @@ class GNPESampler(Sampler):
                 x["extrinsic_parameters"] = {
                     k: x["extrinsic_parameters"][k]
                     for k in self.gnpe_parameters
-                    if k not in self.fixed_gnpe_proxies
+                    if k + "_proxy" not in self.fixed_gnpe_proxies
                 }
                 # add fixed proxies
                 x["extrinsic_parameters"].update(
                     {
-                        k + "_proxy": torch.ones(num_samples, dtype=torch.float32) * v
+                        k: torch.ones(num_samples, dtype=torch.float32) * v
                         for k, v in self.fixed_gnpe_proxies.items()
                     }
                 )
@@ -551,7 +556,7 @@ class GNPESampler(Sampler):
             # In this case it makes sense to save the log_prob and the proxy parameters.
 
             samples = x["parameters"]
-            samples["log_prob"] = x["log_prob"] + proxy_log_prob
+            samples["log_prob"] = x["log_prob"] + proxy_log_prob.to(x["log_prob"].device)
 
             # The log_prob returned by gnpe is not just the log_prob over parameters
             # theta, but instead the log_prob in the *joint* space q(theta,theta^|x),
@@ -567,11 +572,8 @@ class GNPESampler(Sampler):
             # Proxies should be sitting in extrinsic_parameters.
             all_params = {**x["extrinsic_parameters"], **samples}
             all_params = {k: torch_detach_to_cpu(v) for k, v in all_params.items()}
-            try:
-                kernel_log_prob = self._kernel_log_prob(all_params)
-                samples["delta_log_prob_target"] = torch.Tensor(kernel_log_prob)
-            except NotImplementedError:
-                pass
+            kernel_log_prob = self._kernel_log_prob(all_params)
+            samples["delta_log_prob_target"] = torch.Tensor(kernel_log_prob)
 
         else:
             # Otherwise we only save the inference parameters, and no log_prob.

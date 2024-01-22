@@ -166,7 +166,7 @@ class SamplingInput(Input):
         if "gnpe_chirp" in gnpe_keys:
             try:
                 fixed_init_parameters["chirp_mass_proxy"] = self.fixed_gnpe_proxies[
-                    "chirp_mass"
+                    "chirp_mass_proxy"
                 ]
             except TypeError or KeyError as e:
                 raise ValueError(

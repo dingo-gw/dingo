@@ -315,7 +315,7 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 # make sure to apply the gnpe chirp transformation *before* the
                 # decimation, as decimation and the gnpe chirp phase transformation do
                 # not commute.
-                if "chirp_mass" in self.fixed_gnpe_proxies:
+                if "chirp_mass_proxy" in self.fixed_gnpe_proxies:
                     # If we use a fixed chirp mass proxy, we can heterodyne the data in
                     # self.transform_pre (as opposed to transform_gnpe_loop_pre in the
                     # gnpe loop), which is much more efficient, as we only need to
@@ -328,13 +328,17 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                     # (1) add the heterodyning transformation to self.transform_pre
                     # (2) omit the gnpe_chirp_transformation (i.e., no heterodyning in
                     #     the loop, but nevertheless condition the network on the proxy)
+                    fixed_parameters = {
+                        k[: -len("_proxy")]: v
+                        for k, v in self.fixed_gnpe_proxies.items()
+                    }
                     self.transform_pre.transforms.insert(
                         0,
                         HeterodynePhase(
                             domain=base_domain,
                             order=gnpe_chirp_settings.get("order", 0),
                             inverse=False,
-                            fixed_parameters=self.fixed_gnpe_proxies,
+                            fixed_parameters=fixed_parameters,
                         ),
                     )
 
@@ -378,9 +382,12 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 self.gnpe_parameters += transform.input_parameter_names
                 for k, v in transform.kernel.items():
                     self.gnpe_kernel[k] = v
-        self.gnpe_parameters += list(self.fixed_gnpe_proxies.keys())
+        fixed_gnpe_parameters = [
+            k[: -len("_proxy")] for k in self.fixed_gnpe_proxies.keys()
+        ]
+        self.gnpe_parameters += fixed_gnpe_parameters
         print("GNPE parameters: ", self.gnpe_parameters)
-        print("GNPE parameters fixed (not iterated): ", self.fixed_gnpe_proxies)
+        print("GNPE parameters fixed (not iterated): ", fixed_gnpe_parameters)
         print("GNPE kernel: ", self.gnpe_kernel)
 
         self.transform_gnpe_loop_pre = Compose(transform_gnpe_loop_pre)
