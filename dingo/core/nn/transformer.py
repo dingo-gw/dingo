@@ -134,7 +134,7 @@ class FrequencyEncoding(nn.Module):
         """
         super(FrequencyEncoding, self).__init__()
 
-        self.emb_size_f_min = int(emb_size / 2)
+        self.emb_size_f_min = int(torch.ceil(torch.tensor(emb_size) / 2))
         self.emb_size_f_max = emb_size - self.emb_size_f_min
 
         if encoding_type == "discrete":
@@ -160,9 +160,6 @@ class FrequencyEncoding(nn.Module):
                 f"Invalid value for encoding_type.",
                 f"Expected one of ['discrete', 'continuous'], got {self.encoding_type}.",
             )
-
-        if d_f_min.shape[0] + d_f_max.shape[0] != emb_size:
-            d_f_max = d_f_max[: int(self.emb_size_f_max / 2)]
 
         self.emb_size = torch.tensor(emb_size)
         self.dropout = nn.Dropout(p=dropout)
@@ -202,11 +199,12 @@ class FrequencyEncoding(nn.Module):
         pos_embedding[:, :, :, 1 : self.emb_size_f_min + 1 : 2] = torch.cos(
             f_min.reshape(batch_size, 1, num_tokens, 1) * self.d_f_min
         )
-        pos_embedding[:, :, :, self.emb_size_f_min + 1 : self.emb_size : 2] = torch.sin(
+        pos_embedding[:, :, :, self.emb_size_f_min : self.emb_size : 2] = torch.sin(
             f_max.reshape(batch_size, 1, num_tokens, 1) * self.d_f_max
         )
-        pos_embedding[:, :, :, self.emb_size_f_min + 2 : self.emb_size : 2] = torch.cos(
-            f_max.reshape(batch_size, 1, num_tokens, 1) * self.d_f_max
+        f_max_cos_dim = pos_embedding[:, :, :, self.emb_size_f_min + 1 : self.emb_size : 2].shape[3]
+        pos_embedding[:, :, :, self.emb_size_f_min + 1 : self.emb_size : 2] = torch.cos(
+            f_max.reshape(batch_size, 1, num_tokens, 1) * self.d_f_max[:f_max_cos_dim]
         )
 
         x = x + pos_embedding
@@ -295,7 +293,6 @@ class TransformerModel(nn.Module):
         self,
         input_dims: List[int],
         d_out: int,
-        emb_size: int,
         num_head: int,
         num_layers: int,
         d_hid: int,
@@ -310,9 +307,7 @@ class TransformerModel(nn.Module):
             containing [num_blocks, num_channels, num_tokens, num_bins_per_token]
             where num_blocks = number of interferometers in GW use case, and num_channels = [real, imag, asd]
         d_out: int
-            dimension of output
-        emb_size: int
-            size of embedding dimension
+            dimension of output, corresponds to embedding size of transformer
         num_head: int
             number of transformer heads
         num_layers: int
@@ -340,25 +335,25 @@ class TransformerModel(nn.Module):
         ) = input_dims
         self.embedding = TokenEmbedding(
             input_dims=input_dims,
-            emb_size=emb_size,
+            emb_size=d_out,
             individual_token_embedding=self.individual_token_embedding,
         )
         self.freq_encoder = FrequencyEncoding(
-            emb_size=emb_size, encoding_type=frequency_encoding_type, dropout=dropout
+            emb_size=d_out, encoding_type=frequency_encoding_type, dropout=dropout
         )
         self.block_encoder = BlockEmbedding(
-            num_blocks=self.num_blocks, emb_size=emb_size
+            num_blocks=self.num_blocks, emb_size=d_out
         )
         encoder_layers = TransformerEncoderLayer(
-            d_model=emb_size,
+            d_model=d_out,
             nhead=num_head,
             dim_feedforward=d_hid,
             dropout=dropout,
             batch_first=True,
         )
         self.transformer_encoder = TransformerEncoder(encoder_layers, num_layers)
-        self.flatten = nn.Flatten(start_dim=1, end_dim=-1)
-        self.linear = nn.Linear(emb_size * self.num_tokens * self.num_blocks, d_out)
+        self.adapt_avg_pool = nn.AdaptiveAvgPool1d(1)
+        self.d_out = d_out
 
         self.init_weights()
 
@@ -374,8 +369,6 @@ class TransformerModel(nn.Module):
                 )
         else:
             self.embedding.linear.weight.data.uniform(-init_range, init_range)
-        self.linear.bias.data.zero_()
-        self.linear.weight.data.uniform_(-init_range, init_range)
 
     def forward(
         self,
@@ -412,7 +405,6 @@ class TransformerModel(nn.Module):
             output = self.transformer_encoder(src)
         else:
             output = self.transformer_encoder(src, src_mask)
-        output = self.flatten(output)
-        output = self.linear(output)
+        output = self.adapt_avg_pool(output.reshape(output.shape[0], self.d_out, -1)).squeeze()
 
         return output
