@@ -368,7 +368,7 @@ class TransformerModel(nn.Module):
                     -init_range, init_range
                 )
         else:
-            self.embedding.linear.weight.data.uniform(-init_range, init_range)
+            self.embedding.linear.weight.data.uniform_(-init_range, init_range)
 
     def forward(
         self,
