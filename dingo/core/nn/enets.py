@@ -364,7 +364,6 @@ def create_enet_with_projection_layer_and_dense_resnet(
 def create_transformer_enet(
     input_dims: List[int],
     output_dim: int,
-    emb_size: int,
     num_head: int,
     num_encoder_layers: int,
     hidden_dim_encoder: int,
@@ -386,9 +385,8 @@ def create_transformer_enet(
         containing [num_blocks, num_channels, num_tokens, num_bins_per_token]
         where num_blocks = number of interferometers in GW use case, and num_channels = [real, imag, asd]
     output_dim: int
-        size of output dimension, has to match context_dim of normalizing flow
-    emb_size: int
-        size of transformer embedding dimension
+        size of output dimension, has to match context_dim of normalizing flow,
+        corresponds to size of transformer embedding dimension
     num_head: int
         number of transformer heads
     num_encoder_layers: int
@@ -411,7 +409,6 @@ def create_transformer_enet(
     """
     model = TransformerModel(
         input_dims=input_dims,
-        emb_size=emb_size,
         num_head=num_head,
         d_hid=hidden_dim_encoder,
         num_layers=num_encoder_layers,
