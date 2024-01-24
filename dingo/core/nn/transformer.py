@@ -128,7 +128,7 @@ class FrequencyEncoding(nn.Module):
         emb_size: int
             size of embedding dimension
         encoding_type: str
-            type of encoding, possibilities ["discrete", "continuous"]
+            type of encoding, possibilities ["discrete", "continuous". "discrete+nn", "continuous+nn"]
         dropout: float
             dropout value
         """
@@ -137,7 +137,7 @@ class FrequencyEncoding(nn.Module):
         self.emb_size_f_min = int(torch.ceil(torch.tensor(emb_size) / 2))
         self.emb_size_f_max = emb_size - self.emb_size_f_min
 
-        if encoding_type == "discrete":
+        if "discrete" in encoding_type:
             d_f_min = torch.exp(
                 -torch.arange(0, self.emb_size_f_min, 2)
                 * math.log(10000.0)
@@ -148,7 +148,7 @@ class FrequencyEncoding(nn.Module):
                 * math.log(10000.0)
                 / self.emb_size_f_max
             )
-        elif encoding_type == "continuous":
+        elif "continuous" in encoding_type:
             d_f_min = (
                 torch.pow(2, torch.arange(0, self.emb_size_f_min, 2)) * math.pi
             )
@@ -158,8 +158,11 @@ class FrequencyEncoding(nn.Module):
         else:
             raise ValueError(
                 f"Invalid value for encoding_type.",
-                f"Expected one of ['discrete', 'continuous'], got {self.encoding_type}.",
+                f"Expected one of ['discrete', 'continuous'] to be in {self.encoding_type}.",
             )
+        self.linear = None
+        if "nn" in encoding_type:
+            self.linear = nn.Linear(emb_size, emb_size)
 
         self.emb_size = torch.tensor(emb_size)
         self.dropout = nn.Dropout(p=dropout)
@@ -206,6 +209,11 @@ class FrequencyEncoding(nn.Module):
         pos_embedding[:, :, :, self.emb_size_f_min + 1 : self.emb_size : 2] = torch.cos(
             f_max.reshape(batch_size, 1, num_tokens, 1) * self.d_f_max[:f_max_cos_dim]
         )
+        if self.linear:
+            tmp = []
+            for i in range(num_tokens):
+                tmp.append(self.linear(pos_embedding[:, :, i, :]))
+            pos_embedding = torch.stack(tmp, dim=2)
 
         x = x + pos_embedding
 
