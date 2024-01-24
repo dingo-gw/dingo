@@ -18,7 +18,7 @@ from dingo.gw.prior import build_prior_with_defaults, autocomplete_full_prior_di
 from dingo.gw.training import set_train_transforms
 from dingo.gw.transforms import AddWhiteNoiseComplex, UnpackDict
 from dingo.gw.waveform_generator.waveform_generator import build_waveform_generator
-from dingo.populations.population_dataset import PopulationDataset
+from dingo.populations.population_dataset import BasePopulationDataset
 
 
 def generate_base_population(
@@ -56,7 +56,7 @@ def generate_base_population(
 
     Returns
     -------
-    PopulationDataset
+    BasePopulationDataset
     """
     event_model = PosteriorModel(
         model_filename=event_model_path, device=device, load_training_info=False
@@ -171,7 +171,7 @@ def generate_base_population(
         "settings": settings,
     }
 
-    return PopulationDataset(dictionary=population_dataset_dict)
+    return BasePopulationDataset(dictionary=population_dataset_dict)
 
 
 def parse_args():

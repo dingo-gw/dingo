@@ -12,7 +12,7 @@ from dingo.core.dataset import DingoDataset
 DATA_KEYS = ["parameters", "embeddings"]
 
 
-class PopulationDataset(DingoDataset):
+class BasePopulationDataset(DingoDataset):
     """
     Stores a population of GW events. This consists of a set of parameters and
     associated single-event embeddings. The population parameters are typically draws
@@ -78,34 +78,6 @@ class PopulationDataset(DingoDataset):
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
         theta = self.parameters[param_keys]
         self.parameters["log_prior"] = self.prior.ln_prob(theta, axis=0)
-
-    def sample_nearest_subpopulation(self, desired_parameters, snr_threshold=None):
-        """
-        Sample a subpopulation based on proximity to desired parameters.
-
-        Parameters
-        ----------
-        desired_parameters : dict[np.ndarray]
-            Desired subpopulation parameters
-        snr_threshold : float
-            Only return events with S/N exceeding this value.
-
-        Returns
-        -------
-        np.ndarray
-            Array of single-event embeddings for the sampled events.
-        """
-        desired_std = []
-        for k in self.search_parameters_std:
-            desired_std.append((desired_parameters[k] - self.mean[k]) / self.std[k])
-        _, nearest = self.tree.query(np.vstack(desired_std).T)
-        # Impose a check that the distances in parameter space aren't too far?
-        embeddings = self.embeddings[nearest]
-        if snr_threshold is not None:
-            embeddings = embeddings[
-                self.parameters.loc[nearest, "matched_filter_snr"] >= snr_threshold
-            ]
-        return embeddings
 
     def sample_nearest(self, desired_parameters):
         # The cKDTree is based on standardized parameters.

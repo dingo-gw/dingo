@@ -9,7 +9,7 @@ from bilby.gw.conversion import generate_mass_parameters
 from bilby.gw.prior import UniformComovingVolume, UniformSourceFrame
 from pycbc.cosmology import DistToZ
 
-from dingo.populations.population_dataset import PopulationDataset
+from dingo.populations.population_dataset import BasePopulationDataset
 
 
 class PowerLawPopulation(torch.utils.data.Dataset):
@@ -22,7 +22,7 @@ class PowerLawPopulation(torch.utils.data.Dataset):
         maximum_size,
     ):
         super().__init__()
-        self.base_population = PopulationDataset(file_name=base_population_path)
+        self.base_population = BasePopulationDataset(file_name=base_population_path)
         self.base_population.initialize_nearest_neighbors(
             search_parameters=["mass_1", "mass_2", "luminosity_distance"]
         )
