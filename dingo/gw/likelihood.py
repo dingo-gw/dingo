@@ -1,4 +1,3 @@
-import sys
 from multiprocessing import Pool
 
 import numpy as np
@@ -9,6 +8,7 @@ from bilby.gw.utils import ln_i0
 from threadpoolctl import threadpool_limits
 
 from dingo.core.likelihood import Likelihood
+from dingo.gw.gwutils import inner_product, inner_product_complex
 from dingo.gw.injection import GWSignal
 from dingo.gw.waveform_generator import WaveformGenerator
 from dingo.gw.domains import build_domain
@@ -609,64 +609,6 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 for d_ifo, mu_ifo in zip(d.values(), mu.values())
             ]
         )
-
-
-def inner_product(a, b, min_idx=0, delta_f=None, psd=None):
-    """
-    Compute the inner product between two complex arrays. There are two modes: either,
-    the data a and b are not whitened, in which case delta_f and the psd must be
-    provided. Alternatively, if delta_f and psd are not provided, the data a and b are
-    assumed to be whitened already (i.e., whitened as d -> d * sqrt(4 delta_f / psd)).
-
-    Note: sum is only taken along axis 0 (which is assumed to be the frequency axis),
-    while other axes are preserved. This is e.g. useful when evaluating kappa2 on a
-    phase grid.
-
-    Parameters
-    ----------
-    a: np.ndaarray
-        First array with frequency domain data.
-    b: np.ndaarray
-        Second array with frequency domain data.
-    min_idx: int = 0
-        Truncation of likelihood integral, index of lowest frequency bin to consider.
-    delta_f: float
-        Frequency resolution of the data. If None, a and b are assumed to be whitened
-        and the inner product is computed without further whitening.
-    psd: np.ndarray = None
-        PSD of the data. If None, a and b are assumed to be whitened and the inner
-        product is computed without further whitening.
-
-    Returns
-    -------
-    inner_product: float
-    """
-    #
-    if psd is not None:
-        if delta_f is None:
-            raise ValueError(
-                "If unwhitened data is provided, both delta_f and psd must be provided."
-            )
-        return 4 * delta_f * np.sum((a.conj() * b / psd)[min_idx:], axis=0).real
-    else:
-        return np.sum((a.conj() * b)[min_idx:], axis=0).real
-
-
-def inner_product_complex(a, b, min_idx=0, delta_f=None, psd=None):
-    """
-    Same as inner product, but without taking the real part. Retaining phase
-    information is useful for the phase-marginalized likelihood. For further
-    documentation see inner_product function.
-    """
-    #
-    if psd is not None:
-        if delta_f is None:
-            raise ValueError(
-                "If unwhitened data is provided, both delta_f and psd must be provided."
-            )
-        return 4 * delta_f * np.sum((a.conj() * b / psd)[min_idx:], axis=0)
-    else:
-        return np.sum((a.conj() * b)[min_idx:], axis=0)
 
 
 def build_stationary_gaussian_likelihood(

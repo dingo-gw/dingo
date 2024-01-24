@@ -1,18 +1,26 @@
 import copy
 
+import numpy as np
 import pandas as pd
 import torch.utils.data
 from astropy.cosmology import FlatLambdaCDM
 from bilby.core.prior import PriorDict, PowerLaw, Constraint
 from bilby.gw.conversion import generate_mass_parameters
-from bilby.gw.prior import UniformComovingVolume
+from bilby.gw.prior import UniformComovingVolume, UniformSourceFrame
 from pycbc.cosmology import DistToZ
 
 from dingo.populations.population_dataset import PopulationDataset
 
 
 class PowerLawPopulation(torch.utils.data.Dataset):
-    def __init__(self, base_population_path, population_prior, snr_threshold):
+    def __init__(
+        self,
+        base_population_path,
+        population_prior,
+        snr_threshold,
+        minimum_size,
+        maximum_size,
+    ):
         super().__init__()
         self.base_population = PopulationDataset(file_name=base_population_path)
         self.base_population.initialize_nearest_neighbors(
@@ -23,20 +31,36 @@ class PowerLawPopulation(torch.utils.data.Dataset):
         self.population_prior = PriorDict(copy.deepcopy(population_prior))
 
         self.snr_threshold = snr_threshold
-        self.size = None
+        self.minimum_size = minimum_size
+        self.maximum_size = maximum_size
         self.hyperparameters = None
         self.transform = None
 
     def __getitem__(self, idx):
-        size = 10  # How do we choose the size? It can be variable.
-        exact_population = self.generate_population(idx, size)
-        embeddings = self.base_population.sample_nearest_subpopulation(exact_population)
+        size = np.random.randint(low=self.minimum_size, high=self.maximum_size + 1)
+        generate_event_func = self.get_event_generator(idx)
+
+        # Keep generating events until the desired size is reached.
+        embeddings = np.empty((size, self.base_population.embedding_size))
+        n = 0
+        tries = 0
+        while n < size:
+            p = generate_event_func()
+            p_nearest, emb = self.base_population.sample_nearest(p)
+            if p_nearest["matched_filter_snr"] >= self.snr_threshold:
+                embeddings[n] = emb
+                n += 1
+            tries += 1
+            if tries / (n + 1) > 100:
+                raise ValueError("Sampling efficiency < 1%")
+
+        # Prepare output, consisting of hyperparameters and an array of embeddings.
         sample = {
             "hyperparameters": self.hyperparameters.iloc[idx].to_dict(),
             "embeddings": embeddings,
         }
         if self.transform is not None:
-            # Transform could perform SNR cuts, prepare for NN.
+            # Transform could prepare for NN.
             return self.transform(sample)
         else:
             return sample
@@ -47,7 +71,7 @@ class PowerLawPopulation(torch.utils.data.Dataset):
     def sample_hyperparameters(self, num_samples):
         self.hyperparameters = pd.DataFrame(self.population_prior.sample(num_samples))
 
-    def generate_population(self, population_idx, size):
+    def get_event_generator(self, population_idx):
         p = self.hyperparameters.iloc[population_idx]
         if self.base_population.prior is None:
             self.base_population.build_prior()
@@ -66,7 +90,7 @@ class PowerLawPopulation(torch.utils.data.Dataset):
                     minimum=p["minimum_mass"],
                     maximum=p["maximum_mass"],
                 ),
-                "luminosity_distance": UniformComovingVolume(
+                "luminosity_distance": UniformSourceFrame(
                     minimum=minimum_distance,
                     maximum=maximum_distance,
                     cosmology=cosmology,
@@ -76,18 +100,25 @@ class PowerLawPopulation(torch.utils.data.Dataset):
             },
             conversion_function=lambda x: generate_mass_parameters(x, source=True),
         )
-        samples = prior.sample(size)
 
         # We use the PyCBC class DistToZ, which is much faster than using the astropy
         # function for z(d_L) directly, since it interpolates.
         dist_to_z = DistToZ(cosmology=cosmology)
-        samples["redshift"] = dist_to_z.get_redshift(samples["luminosity_distance"])
-        # samples["redshift"] = luminosity_distance_to_redshift(
-        #     samples["luminosity_distance"], cosmology=cosmology
-        # )
-        for k in ["mass_1", "mass_2"]:
-            samples[k] = samples[k + "_source"] * (1 + samples["redshift"])
-        return samples
+
+        # We return the generating function for event parameters for two reasons:
+        # (1) Because of selection effects, we don't know a priori how many events we
+        # have to generate.
+        # (2) Some of the objects (construction of prior, cosmology, DistToZ) are a bit
+        # slow to construct, so we should avoid doing so repeatedly for each set of
+        # hyperparameters.
+        def generation_func():
+            s = prior.sample()
+            s["redshift"] = dist_to_z.get_redshift(s["luminosity_distance"])
+            for k in ["mass_1", "mass_2"]:
+                s[k] = s[k + "_source"] * (1 + s["redshift"])
+            return s
+
+        return generation_func
 
 
 def build_population_model(settings):

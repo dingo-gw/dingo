@@ -16,8 +16,9 @@ from dingo.gw.dataset import WaveformDataset
 from dingo.gw.domains import build_domain
 from dingo.gw.prior import build_prior_with_defaults, autocomplete_full_prior_dict
 from dingo.gw.training import set_train_transforms
+from dingo.gw.transforms import AddWhiteNoiseComplex, UnpackDict
 from dingo.gw.waveform_generator.waveform_generator import build_waveform_generator
-from population_dataset import PopulationDataset
+from dingo.populations.population_dataset import PopulationDataset
 
 
 def generate_base_population(
@@ -96,14 +97,19 @@ def generate_base_population(
     )
 
     # (2) Build the transforms to produce detector waveforms. We use the same
-    # transforms that are used to train the Dingo model. Add a transform to calculate
-    # the S/N ratio of the simulated data.
+    # transforms that are used to train the Dingo model, with minor changes as below.
     set_train_transforms(
         waveform_dataset,
         event_model.metadata["train_settings"]["data"],
         asd_dataset_path,
     )
-    waveform_dataset.transform.transforms[-1].selected_keys[0] = "parameters"
+    for t in waveform_dataset.transform.transforms:
+        if isinstance(t, AddWhiteNoiseComplex):
+            # We need the S/N ratio to apply selection effects.
+            t.store_snr = True
+        if isinstance(t, UnpackDict):
+            # Save all the parameters.
+            t.selected_keys[0] = "parameters"
 
     # (3) Data generation loop, similar to the training loop for a single-event
     # network, but with no backward pass. For each event, save the parameters,

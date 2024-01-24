@@ -12,7 +12,6 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
     population_model = build_population_model(train_settings["data"])
     # population_model.sample_hyperparameters(5)
     # p = population_model[1]
-    # p = population_likelihood.generate_population(1, 10000)
     # (2) Build dataloaders
 
     # (3) Build model

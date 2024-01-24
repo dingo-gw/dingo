@@ -4,6 +4,7 @@ from bilby.gw.detector import PowerSpectralDensity
 from scipy.interpolate import interp1d
 
 from dingo.gw.domains import FrequencyDomain
+from dingo.gw.gwutils import inner_product
 
 
 class SampleNoiseASD(object):
@@ -157,8 +158,8 @@ class AddWhiteNoiseComplex(object):
     complex strain data.
     """
 
-    def __init__(self):
-        pass
+    def __init__(self, store_snr=False):
+        self.store_snr = store_snr
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
@@ -176,7 +177,19 @@ class AddWhiteNoiseComplex(object):
             )
             noise = noise.numpy()
             noisy_strains[ifo] = pure_strain + noise
+
+        if self.store_snr:
+            kappa_squared = 0.0
+            rho_opt_squared = 0.0
+            for ifo, clean_waveform in sample["waveform"].items():
+                kappa_squared += inner_product(clean_waveform, noisy_strains[ifo])
+                rho_opt_squared += inner_product(clean_waveform, clean_waveform)
+            sample["parameters"]["matched_filter_snr"] = kappa_squared / np.sqrt(
+                rho_opt_squared
+            )
+
         sample["waveform"] = noisy_strains
+
         return sample
 
 
