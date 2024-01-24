@@ -1,0 +1,6 @@
+event_model_path: /Users/stephen/Documents/Research/dingo-gw/networks/npe_xphm_O3/model_225.pt
+asd_dataset_path: /Users/stephen/Documents/Research/dingo-gw/asd-datasets/asds_O3.hdf5
+size: 1000
+device: cpu
+batch_size: 100
+num_workers: 0

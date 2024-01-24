@@ -1,0 +1,33 @@
+data:
+  base_population_path: /Users/stephen/Documents/Research/dingo-gw/dingo-devel/experiments_stephen/populations/population_dataset.hdf5
+  population_model: power_law
+  population_prior:
+    minimum_mass: bilby.core.prior.Uniform(minimum=18.0, maximum=30.0)
+    maximum_mass: bilby.core.prior.Uniform(minimum=37.0, maximum=47.0)
+    hubble_constant: bilby.core.prior.Uniform(minimum=40.0, maximum=140.0)
+    alpha: bilby.core.prior.Uniform(minimum=-2.0, maximum=2.0)
+    beta: bilby.core.prior.Uniform(minimum=-2.0, maximum=2.0)
+  snr_threshold: 12
+  minimum_size: 10
+  maximum_size: 20
+
+model:
+  type: transformer+nsf
+  transformer_kwargs:
+  nsf_kwargs:
+    num_flow_steps: 30
+    base_transform_kwargs:
+      hidden_dim: 1024
+      num_transform_blocks: 5
+      activation: elu
+      dropout_probability: 0.0
+      batch_norm: true
+      num_bins: 8
+      base_transform_type: rq-coupling
+    context_dim: 128
+
+training:
+  epochs: 10
+
+local:
+  device: cpu
