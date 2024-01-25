@@ -47,7 +47,7 @@ class BasePopulationDataset(DingoDataset):
     @property
     def embedding_size(self):
         if self.embeddings is not None:
-            return self.embeddings[-1]
+            return self.embeddings.shape[-1]
 
     def initialize_nearest_neighbors(self, search_parameters):
         # Extend parameters as necessary, e.g., component masses from chirp mass and
