@@ -92,3 +92,17 @@ class BasePopulationDataset(DingoDataset):
         #  coverage of the base population is too sparse. Alternatively, generate new
         #  samples for the base population.
         return self.parameters.iloc[i].to_dict(), self.embeddings[i]
+
+    def restrict_to_subpopulation(self, s):
+        """
+        Restricts to a subpopulation of events, as defined by the slice s. This is
+        useful for defining training and eval sets.
+
+        Parameters
+        ----------
+        s : slice
+            Slicing object to define subpopulation
+        """
+        self.parameters = self.parameters.iloc[s]
+        self.embeddings = self.embeddings[s]
+        self.settings["size"] = len(self.parameters)

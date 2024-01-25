@@ -20,9 +20,19 @@ class PowerLawPopulation(torch.utils.data.Dataset):
         snr_threshold,
         minimum_size,
         maximum_size,
+        mode=None,
     ):
         super().__init__()
+
         self.base_population = BasePopulationDataset(file_name=base_population_path)
+
+        # Depending on whether we are in train or test mode, we take even or odd
+        # elements of the base population (half for each).
+        if mode == "train":
+            self.base_population.restrict_to_subpopulation(slice(0, None, 2))
+        elif mode == "test":
+            self.base_population.restrict_to_subpopulation(slice(1, None, 2))
+
         self.base_population.initialize_nearest_neighbors(
             search_parameters=["mass_1", "mass_2", "luminosity_distance"]
         )
@@ -121,8 +131,8 @@ class PowerLawPopulation(torch.utils.data.Dataset):
         return generation_func
 
 
-def build_population_model(settings):
+def build_population_model(settings, mode=None):
     population_model = settings["population_model"]
     kwargs = {k: v for k, v in settings.items() if k != "population_model"}
     if population_model == "power_law":
-        return PowerLawPopulation(**kwargs)
+        return PowerLawPopulation(**kwargs, mode=mode)

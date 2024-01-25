@@ -8,10 +8,14 @@ from dingo.populations.population_models import build_population_model
 
 
 def prepare_training_new(train_settings: dict, train_dir: str, local_settings: dict):
-    # (1) Build population likelihood
-    population_model = build_population_model(train_settings["data"])
-    # population_model.sample_hyperparameters(5)
-    # p = population_model[1]
+    # (1) Build population forward models (train and test). These use different halves
+    # of the base population events.
+
+    population_model_train = build_population_model(
+        train_settings["data"], mode="train"
+    )
+    population_model_test = build_population_model(train_settings["data"], mode="test")
+
     # (2) Build dataloaders
 
     # (3) Build model
