@@ -150,6 +150,8 @@ class ImportanceSamplingInput(Input):
                 self._importance_sampling_settings.update(
                     convert_string_to_dict(settings)
                 )
+            if "phase_marginalization" in self._importance_sampling_settings:
+                self._importance_sampling_settings.pop("synthetic_phase", None)
         else:
             self._importance_sampling_settings = dict()
 
