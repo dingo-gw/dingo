@@ -148,8 +148,13 @@ class Sampler(object):
             # requested sample. We therefore expand it across the batch *after*
             # pre-processing.
             x = self.transform_pre(context)
-            x = x.expand(num_samples, *x.shape)
-            x = [x]
+            if type(x) is list:
+                # If additional variables have to be passed to the embedding network,
+                # we need to expand all of them across the batch.
+                x = [x[i].expand(num_samples, *x[i].shape) for i in range(len(x))]
+            else:
+                x = x.expand(num_samples, *x.shape)
+                x = [x]
             # The number of samples is expressed via the first dimension of x,
             # so we must pass num_samples = 1 to sample_and_log_prob().
             num_samples = 1

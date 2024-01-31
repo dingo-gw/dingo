@@ -23,6 +23,8 @@ from dingo.gw.transforms import (
     PostCorrectGeocentTime,
     CopyToExtrinsicParameters,
     GetDetectorTimes,
+    StrainTokenization,
+    UnpackDict,
 )
 
 
@@ -145,6 +147,7 @@ class GWSampler(GWSamplerMixin, Sampler):
         * Whitens strain.
         * Repackages strain data and the inverse ASDs (suitably scaled) into a torch
           tensor.
+        * If model has transformer embedding network: segment strain into tokens.
 
     transform_post :
         * Extract the desired inference parameters from the network output (
@@ -161,27 +164,45 @@ class GWSampler(GWSamplerMixin, Sampler):
     """
 
     def _initialize_transforms(self):
-
         # preprocessing transforms:
         #   * whiten and scale strain (since the inference network expects standardized
         #   data)
         #   * repackage strains and asds from dicts to an array
         #   * convert array to torch tensor on the correct device
         #   * extract only strain/waveform from the sample
-        self.transform_pre = Compose(
-            [
-                WhitenAndScaleStrain(self.domain.noise_std),
-                # Use base metadata so that unconditional samplers still know how to
-                # transform data, since this transform is used by the GNPE sampler as
-                # well.
-                RepackageStrainsAndASDS(
-                    self.base_model_metadata["train_settings"]["data"]["detectors"],
-                    first_index=self.domain.min_idx,
-                ),
-                ToTorch(device=self.model.device),
-                GetItem("waveform"),
-            ]
-        )
+        transforms = [
+            WhitenAndScaleStrain(self.domain.noise_std),
+            # Use base metadata so that unconditional samplers still know how to
+            # transform data, since this transform is used by the GNPE sampler as
+            # well.
+            RepackageStrainsAndASDS(
+                self.base_model_metadata["train_settings"]["data"]["detectors"],
+                first_index=self.domain.min_idx,
+            ),
+        ]
+        selected_keys = ["waveform"]
+        try:
+            data_settings = self.model.metadata["train_settings"]["data"]
+            transforms.append(
+                StrainTokenization(
+                    data_settings["tokenization"]["num_tokens"],
+                    data_settings["domain_update"]["f_min"],
+                    data_settings["domain_update"]["f_max"],
+                    df=1 / data_settings["window"]["T"],
+                )
+            )
+            selected_keys.append("blocks")
+            selected_keys.append("f_min_per_token")
+            selected_keys.append("f_max_per_token")
+        except KeyError:
+            print(
+                "No tokenization information found, omitting StrainTokenization transform."
+            )
+
+        transforms.append(ToTorch(device=self.model.device))
+        transforms.append(UnpackDict(selected_keys=selected_keys))
+
+        self.transform_pre = Compose(transforms)
 
         # postprocessing transforms:
         #   * de-standardize data and extract inference parameters
