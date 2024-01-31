@@ -24,17 +24,17 @@ class StrainTokenization(object):
             Frequency interval between bins.
 
         """
-        num_f = torch.tensor((f_max - f_min) / df) + 1
-        self.num_bins_per_token = torch.ceil(num_f / num_tokens).to(int)
+        num_f = np.array((f_max - f_min) / df) + 1
+        self.num_bins_per_token = np.ceil(num_f / num_tokens).astype(int)
         f_token_width = self.num_bins_per_token * df
-        self.token_indices = torch.arange(
+        self.token_indices = np.arange(
             0,
             num_tokens * self.num_bins_per_token,
             self.num_bins_per_token,
-            dtype=torch.int,
+            dtype=int,
         )
         assert num_tokens == len(self.token_indices)
-        self.f_min_per_token = torch.arange(f_min, f_max, f_token_width)
+        self.f_min_per_token = np.arange(f_min, f_max, f_token_width)
         self.f_max_per_token = self.f_min_per_token + f_token_width - df
         self.num_padded_f_bins = int(num_tokens * self.num_bins_per_token - num_f)
         self.num_tokens = num_tokens
@@ -75,7 +75,7 @@ class StrainTokenization(object):
         sample["waveform"] = strain
         detector_dict = {"H1": 0, "L1": 1, "V1": 2}
         detectors = [detector_dict[key] for key in input_sample["asds"]]
-        sample["blocks"] = torch.Tensor(detectors)
+        sample["blocks"] = np.array(detectors)
         sample["f_min_per_token"] = self.f_min_per_token
         sample["f_max_per_token"] = self.f_max_per_token
 
