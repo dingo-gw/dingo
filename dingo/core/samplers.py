@@ -147,9 +147,14 @@ class Sampler(object):
             # transforms_pre are expected to transform the data in the same way for each
             # requested sample. We therefore apply pre-processing only once.
             x = self.transform_pre(context)
-            # Require a batch dimension for the embedding network.
-            x = x.unsqueeze(0)
-            x = [x]
+            if type(x) is list:
+                # If additional variables have to be passed to the embedding network,
+                # we need to expand all of them across the batch.
+                x = [x[i].expand(num_samples, *x[i].shape) for i in range(len(x))]
+            else:
+                # Require a batch dimension for the embedding network.
+                x = x.unsqueeze(0)
+                x = [x]
         else:
             if context is not None:
                 print("Unconditional model. Ignoring context.")
