@@ -1,12 +1,11 @@
 """Implementation of embedding networks."""
 
-from typing import Tuple, Callable, Union, List
+from typing import Tuple, Union, List
 import torch
 import numpy as np
 import torch.nn as nn
-from torch.nn import functional as F
-from glasflow.nflows.nn.nets.resnet import ResidualBlock
 from dingo.core.utils import torchutils
+from dingo.core.nn.resnet import DenseResidualNet
 from dingo.core.nn.transformer import TransformerModel
 
 
@@ -157,82 +156,6 @@ class LinearProjectionRB(nn.Module):
         return x
 
 
-class DenseResidualNet(nn.Module):
-    """
-    A nn.Module consisting of a sequence of dense residual blocks. This is
-    used to embed high dimensional input to a compressed output. Linear
-    resizing layers are used for resizing the input and output to match the
-    first and last hidden dimension, respectively.
-
-    Module specs
-    --------
-        input dimension:    (batch_size, input_dim)
-        output dimension:   (batch_size, output_dim)
-    """
-
-    def __init__(
-        self,
-        input_dim: int,
-        output_dim: int,
-        hidden_dims: Tuple,
-        activation: Callable = F.elu,
-        dropout: float = 0.0,
-        batch_norm: bool = True,
-    ):
-        """
-        Parameters
-        ----------
-        input_dim : int
-            dimension of the input to this module
-        output_dim : int
-            output dimension of this module
-        hidden_dims : tuple
-            tuple with dimensions of hidden layers of this module
-        activation: callable
-            activation function used in residual blocks
-        dropout: float
-            dropout probability for residual blocks used for reqularization
-        batch_norm: bool
-            flag that specifies whether to use batch normalization
-        """
-
-        super(DenseResidualNet, self).__init__()
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        self.hidden_dims = hidden_dims
-        self.num_res_blocks = len(self.hidden_dims)
-
-        self.initial_layer = nn.Linear(self.input_dim, hidden_dims[0])
-        self.blocks = nn.ModuleList(
-            [
-                ResidualBlock(
-                    features=self.hidden_dims[n],
-                    context_features=None,
-                    activation=activation,
-                    dropout_probability=dropout,
-                    use_batch_norm=batch_norm,
-                )
-                for n in range(self.num_res_blocks)
-            ]
-        )
-        self.resize_layers = nn.ModuleList(
-            [
-                nn.Linear(self.hidden_dims[n - 1], self.hidden_dims[n])
-                if self.hidden_dims[n - 1] != self.hidden_dims[n]
-                else nn.Identity()
-                for n in range(1, self.num_res_blocks)
-            ]
-            + [nn.Linear(self.hidden_dims[-1], self.output_dim)]
-        )
-
-    def forward(self, x):
-        x = self.initial_layer(x)
-        for block, resize_layer in zip(self.blocks, self.resize_layers):
-            x = block(x, context=None)
-            x = resize_layer(x)
-        return x
-
-
 class ModuleMerger(nn.Module):
     """
     This is a wrapper used to process multiple different kinds of context
@@ -367,9 +290,12 @@ def create_transformer_enet(
     num_head: int,
     num_encoder_layers: int,
     hidden_dim_encoder: int,
+    hidden_dims_token_embedding: Tuple,
     individual_token_embedding: bool,
     freq_encoding_type: str,
-    dropout: float,
+    dropout: float = 0.0,
+    activation: str = "elu",
+    batch_norm: bool = True,
 ):
     """
     Builder function for a transformer embedding network for complex 1D data
@@ -393,26 +319,36 @@ def create_transformer_enet(
         number of transformer encoder layers
     hidden_dim_encoder: int
         number of hidden dimensions in the feedforward neural networks of the transformer encoder
+    hidden_dims_token_embedding: Tuple
+        dimensions of hidden layers of DenseResNet used in TokenEmbedding
     individual_token_embedding: bool
         whether to embed each raw token with an individual embedding network or not
     freq_encoding_type: str
         type of frequency encoding, either 'discrete' for discrete positional encoding (from paper
         'Attention is all you need') or 'continuous' for continuous positional encoding (from paper
         'NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis'
+    activation: Callable
+        activation function used in TokenEmbedding
     dropout: float
         dropout
+    batch_norm: bool
+        whether to apply batch normalization
 
     Returns
     --------
         model: TransformerModel
 
     """
+    activation_fn = torchutils.get_activation_function_from_string(activation)
     model = TransformerModel(
         input_dims=input_dims,
         num_head=num_head,
         d_hid=hidden_dim_encoder,
         num_layers=num_encoder_layers,
         d_out=output_dim,
+        hidden_dims_token_embedding=hidden_dims_token_embedding,
+        activation=activation_fn,
+        batch_norm=batch_norm,
         individual_token_embedding=individual_token_embedding,
         frequency_encoding_type=freq_encoding_type,
         dropout=dropout,

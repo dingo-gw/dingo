@@ -1,8 +1,10 @@
-from typing import List
+from typing import Callable, List, Tuple
 import math
 import torch
 from torch import nn, Tensor
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
+
+from dingo.core.nn.resnet import DenseResidualNet
 
 
 class TokenEmbedding(nn.Module):
@@ -21,7 +23,11 @@ class TokenEmbedding(nn.Module):
     def __init__(
         self,
         input_dims: List[int],
+        hidden_dims: Tuple,
         emb_size: int,
+        activation: Callable,
+        dropout: float,
+        batch_norm: bool,
         individual_token_embedding: bool = False,
     ):
         """
@@ -30,8 +36,16 @@ class TokenEmbedding(nn.Module):
         input_dims: List[int]
             containing [num_blocks, num_channels, num_tokens, num_bins_per_token]
             where num_blocks = number of interferometers in GW use case, and num_channels = [real, imag, asd]
+        hidden_dims: Tuple
+            dimensions of hidden layers for DenseResidualNet
         emb_size: int
             size of embedding dimension
+        activation: str
+            activation function for DenseResidualNet
+        dropout: float
+            dropout rate for DenseResidualNet
+        batch_norm: Callable
+            batch normalization for DenseResidualNet
         individual_token_embedding: bool
             whether to use an individual linear layer for each token
         """
@@ -44,16 +58,32 @@ class TokenEmbedding(nn.Module):
             self.num_bins_per_token,
         ) = input_dims
         if individual_token_embedding:
-            self.stack_linear = nn.ModuleList([
-                nn.Linear(
-                    self.num_channels * self.num_bins_per_token, emb_size, bias=False
+            self.stack_embedding_networks = nn.ModuleList([
+                DenseResidualNet(
+                    input_dim=self.num_channels * self.num_bins_per_token,
+                    output_dim=emb_size,
+                    hidden_dims=hidden_dims,
+                    activation=activation,
+                    dropout=dropout,
+                    batch_norm=batch_norm
                 )
+                #nn.Linear(
+                #    self.num_channels * self.num_bins_per_token, emb_size, bias=False
+                #)
                 for _ in range(self.num_tokens)
             ])
         else:
-            self.linear = nn.Linear(
-                self.num_channels * self.num_bins_per_token, emb_size, bias=False
+            self.embedding_networks = DenseResidualNet(
+                input_dim=self.num_channels * self.num_bins_per_token,
+                output_dim=emb_size,
+                hidden_dims=hidden_dims,
+                activation=activation,
+                dropout=dropout,
+                batch_norm=batch_norm
             )
+            #self.embedding_networks = nn.Linear(
+            #    self.num_channels * self.num_bins_per_token, emb_size, bias=False
+            #)
 
         self.individual_token_embedding = individual_token_embedding
         self.emb_size = emb_size
@@ -90,10 +120,10 @@ class TokenEmbedding(nn.Module):
                 # apply linear layer for tensor of shape [batch_size, num_channels, num_bins_per_token]
                 if self.individual_token_embedding:
                     out_b.append(
-                        self.stack_linear[i](x[:, b, :, i, :].flatten(start_dim=1))
+                        self.stack_embedding_networks[i](x[:, b, :, i, :].flatten(start_dim=1))
                     )
                 else:
-                    out_b.append(self.linear(x[:, b, :, i, :].flatten(start_dim=1)))
+                    out_b.append(self.embedding_networks(x[:, b, :, i, :].flatten(start_dim=1)))
             out.append(
                 torch.stack(out_b, dim=2).reshape([-1, self.num_tokens, self.emb_size])
             )
@@ -304,6 +334,9 @@ class TransformerModel(nn.Module):
         num_head: int,
         num_layers: int,
         d_hid: int,
+        hidden_dims_token_embedding: Tuple,
+        activation: Callable,
+        batch_norm: bool,
         individual_token_embedding: bool,
         frequency_encoding_type: str,
         dropout: float = 0.5,
@@ -322,6 +355,12 @@ class TransformerModel(nn.Module):
             number of transformer layers
         d_hid: int
             number of hidden dimensions in the feedforward neural networks of the transformer encoder
+        hidden_dims_token_embedding: Tuple
+            dimensions of hidden layers of DenseResNet used in TokenEmbedding
+        activation: Callable
+            activation function used in TokenEmbedding
+        batch_norm: bool
+            whether to apply batch normalization
         individual_token_embedding: bool
             whether to embed each raw token with an individual embedding network or not
         frequency_encoding_type: str
@@ -344,6 +383,10 @@ class TransformerModel(nn.Module):
         self.embedding = TokenEmbedding(
             input_dims=input_dims,
             emb_size=d_out,
+            hidden_dims=hidden_dims_token_embedding,
+            activation=activation,
+            dropout=dropout,
+            batch_norm=batch_norm,
             individual_token_embedding=self.individual_token_embedding,
         )
         self.freq_encoder = FrequencyEncoding(
