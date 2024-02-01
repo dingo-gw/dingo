@@ -367,16 +367,14 @@ class TransformerModel(nn.Module):
 
     def init_weights(self) -> None:
         """
-        Initialize weights of transformer encoder to uniform values and set biases to zero.
+        Initialize parameters of transformer encoder explicitly due to Issue
+        https://github.com/pytorch/pytorch/issues/72253.
+        The parameters of the transformer encoder are initialized with xavier uniform.
         """
-        init_range = 0.1
-        if self.individual_token_embedding:
-            for i in range(self.num_tokens):
-                self.embedding.stack_linear[i].weight.data.uniform_(
-                    -init_range, init_range
-                )
-        else:
-            self.embedding.linear.weight.data.uniform_(-init_range, init_range)
+
+        for p in self.transformer_encoder.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
 
     def forward(
         self,
