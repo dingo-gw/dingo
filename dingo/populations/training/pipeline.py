@@ -5,6 +5,7 @@ import textwrap
 import yaml
 
 from dingo.populations.population_models import build_population_model
+from dingo.populations.training.transform_builders import set_train_transforms
 
 
 def prepare_training_new(train_settings: dict, train_dir: str, local_settings: dict):
@@ -17,8 +18,12 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
     population_model_test = build_population_model(train_settings["data"], mode="test")
 
     # (2) Build dataloaders
+    set_train_transforms(population_model_train, train_settings["data"])
 
     # (3) Build model
+    # autocomplete_model_kwargs(train_settings["model"], population_model_train[0])
+
+    full_settings = {}
 
     # Return dataloaders and model
     return

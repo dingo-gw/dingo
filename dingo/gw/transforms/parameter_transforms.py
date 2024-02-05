@@ -157,7 +157,7 @@ class StandardizeParameters:
     Standardize parameters according to the transform (x - mu) / std.
     """
 
-    def __init__(self, mu, std):
+    def __init__(self, mu, std, key="parameters"):
         """
         Initialize the standardization transform with means
         and standard deviations for each parameter
@@ -168,9 +168,12 @@ class StandardizeParameters:
             The (estimated) means
         std : Dict[str, float]
             The (estimated) standard deviations
+        key : str
+            Key associated to parameters in the sample dict. Default: 'parameters'
         """
         self.mu = mu
         self.std = std
+        self.key = key
         if not set(mu.keys()) == set(std.keys()):
             raise ValueError(
                 "The keys in mu and std disagree:" f"mu: {mu.keys()}, std: {std.keys()}"
@@ -182,16 +185,15 @@ class StandardizeParameters:
 
         Parameters
         ----------
-        samples: Dict[Dict, Dict]
-            A nested dictionary with keys 'parameters', 'waveform',
-            'noise_summary'.
+        samples: dict
+            A nested dictionary with a 'parameters' key.
 
         Only parameters included in mu, std get transformed.
         """
-        x = samples["parameters"]
+        x = samples[self.key]
         y = {k: (x[k] - self.mu[k]) / self.std[k] for k in self.mu.keys()}
         samples_out = samples.copy()
-        samples_out["parameters"] = y
+        samples_out[self.key] = y
         return samples_out
 
     def inverse(self, samples):
@@ -200,14 +202,13 @@ class StandardizeParameters:
 
         Parameters
         ----------
-        samples: Dict[Dict, Dict]
-            A nested dictionary with keys 'parameters', 'waveform',
-            'noise_summary'.
+        samples: dict
+            A nested dictionary with a 'parameters' key.
 
         Only parameters included in mu, std get transformed.
         """
-        y = samples["parameters"]
+        y = samples[self.key]
         x = {k: self.mu[k] + y[k] * self.std[k] for k in self.mu.keys()}
         samples_out = samples.copy()
-        samples_out["parameters"] = x
+        samples_out[self.key] = x
         return samples_out

@@ -18,8 +18,10 @@ class PowerLawPopulation(torch.utils.data.Dataset):
         base_population_path,
         population_prior,
         snr_threshold,
-        minimum_size,
-        maximum_size,
+        minimum_population_size,
+        maximum_population_size,
+        size,
+        train_fraction,
         mode=None,
     ):
         super().__init__()
@@ -30,8 +32,10 @@ class PowerLawPopulation(torch.utils.data.Dataset):
         # elements of the base population (half for each).
         if mode == "train":
             self.base_population.restrict_to_subpopulation(slice(0, None, 2))
+            self.size = int(size * train_fraction)
         elif mode == "test":
             self.base_population.restrict_to_subpopulation(slice(1, None, 2))
+            self.size = int(size * (1 - train_fraction))
 
         self.base_population.initialize_nearest_neighbors(
             search_parameters=["mass_1", "mass_2", "luminosity_distance"]
@@ -41,13 +45,18 @@ class PowerLawPopulation(torch.utils.data.Dataset):
         self.population_prior = PriorDict(copy.deepcopy(population_prior))
 
         self.snr_threshold = snr_threshold
-        self.minimum_size = minimum_size
-        self.maximum_size = maximum_size
+        self.minimum_population_size = minimum_population_size
+        self.maximum_population_size = maximum_population_size
+
         self.hyperparameters = None
+        self.sample_hyperparameters()
+
         self.transform = None
 
     def __getitem__(self, idx):
-        size = np.random.randint(low=self.minimum_size, high=self.maximum_size + 1)
+        size = np.random.randint(
+            low=self.minimum_population_size, high=self.maximum_population_size + 1
+        )
         generate_event_func = self.get_event_generator(idx)
 
         # Keep generating events until the desired size is reached.
@@ -78,8 +87,12 @@ class PowerLawPopulation(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.hyperparameters)
 
-    def sample_hyperparameters(self, num_samples):
-        self.hyperparameters = pd.DataFrame(self.population_prior.sample(num_samples))
+    @property
+    def embedding_size(self):
+        return self.base_population.embedding_size
+
+    def sample_hyperparameters(self):
+        self.hyperparameters = pd.DataFrame(self.population_prior.sample(self.size))
 
     def get_event_generator(self, population_idx):
         p = self.hyperparameters.iloc[population_idx]
@@ -129,6 +142,11 @@ class PowerLawPopulation(torch.utils.data.Dataset):
             return s
 
         return generation_func
+
+    def hyperparameter_mean_std(self):
+        mean = self.hyperparameters.mean().to_dict()
+        std = self.hyperparameters.std().to_dict()
+        return {"mean": mean, "std": std}
 
 
 def build_population_model(settings, mode=None):

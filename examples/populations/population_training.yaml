@@ -8,8 +8,10 @@ data:
     alpha: bilby.core.prior.Uniform(minimum=-2.0, maximum=2.0)
     beta: bilby.core.prior.Uniform(minimum=-2.0, maximum=2.0)
   snr_threshold: 12
-  minimum_size: 10
-  maximum_size: 20
+  minimum_population_size: 10
+  maximum_population_size: 20
+  size: 5000
+  train_fraction: 0.95
 
 model:
   type: transformer+nsf
