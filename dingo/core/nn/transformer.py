@@ -202,12 +202,18 @@ class FrequencyEncoding(nn.Module):
         self.linear = None
         if "nn" in encoding_type:
             self.linear = nn.Linear(emb_size, emb_size)
+            self.initialize_linear()
 
         self.emb_size = torch.tensor(emb_size)
         self.dropout = nn.Dropout(p=dropout)
 
         self.register_buffer('d_f_min', d_f_min)
         self.register_buffer('d_f_max', d_f_max)
+
+    def initialize_linear(self):
+        self.linear.bias.data = torch.zeros_like(self.linear.bias.data)
+        self.linear.weight.data = (torch.eye(self.linear.weight.data.shape[0])
+                                   + torch.normal(0, 0.01, size=self.linear.weight.data.shape))
 
     def forward(self, x: Tensor, f_min: Tensor, f_max: Tensor) -> Tensor:
         """
@@ -254,7 +260,7 @@ class FrequencyEncoding(nn.Module):
                 tmp.append(self.linear(pos_embedding[:, :, i, :]))
             pos_embedding = torch.stack(tmp, dim=2)
 
-        x = x + pos_embedding
+        x = (x + pos_embedding)/2
 
         return self.dropout(x)
 
@@ -282,6 +288,15 @@ class BlockEmbedding(nn.Module):
         super(BlockEmbedding, self).__init__()
         self.block_embedding = nn.Embedding(num_blocks, emb_size)
         self.num_blocks = num_blocks
+        self.emb_size = emb_size
+
+        self.initialize_embedding()
+
+    def initialize_embedding(self):
+        pi = torch.tensor(math.pi)
+        p_emb = torch.linspace(0, 2*pi, self.emb_size)
+        off_set = torch.tensor([i/self.num_blocks * 2*pi for i in range(self.num_blocks)])
+        self.block_embedding.weight.data = torch.sin(p_emb + off_set.unsqueeze(1))
 
     def forward(self, x: Tensor, blocks: Tensor) -> Tensor:
         """
@@ -309,7 +324,7 @@ class BlockEmbedding(nn.Module):
             )
 
         x = x + torch.unsqueeze(self.block_embedding(blocks.long()), 2)
-        x = x.reshape(x.shape[0], x.shape[1]*x.shape[2], x.shape[3])
+        x = x.reshape(x.shape[0], x.shape[1]*x.shape[2], x.shape[3])/2
 
         return x
 
@@ -395,7 +410,7 @@ class TransformerModel(nn.Module):
         self.freq_encoder = FrequencyEncoding(
             emb_size=d_out, encoding_type=frequency_encoding_type, dropout=dropout
         )
-        self.block_encoder = BlockEmbedding(
+        self.block_embedding = BlockEmbedding(
             num_blocks=self.num_blocks, emb_size=d_out
         )
         encoder_layers = TransformerEncoderLayer(
@@ -451,7 +466,7 @@ class TransformerModel(nn.Module):
         """
         src = self.embedding(src)
         src = self.freq_encoder(src, f_min, f_max)
-        src = self.block_encoder(src, blocks)
+        src = self.block_embedding(src, blocks)
 
         if src_mask is None:
             output = self.transformer_encoder(src)
