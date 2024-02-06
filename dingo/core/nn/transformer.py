@@ -352,7 +352,7 @@ class TransformerModel(nn.Module):
         num_head: int,
         num_layers: int,
         d_hid: int,
-        hidden_dims_token_embedding: Tuple,
+        hidden_dims_token_embedding: Union[int, Tuple],
         activation: Callable,
         batch_norm: bool,
         individual_token_embedding: bool,
@@ -373,8 +373,9 @@ class TransformerModel(nn.Module):
             number of transformer layers
         d_hid: int
             number of hidden dimensions in the feedforward neural networks of the transformer encoder
-        hidden_dims_token_embedding: Tuple
-            dimensions of hidden layers of DenseResNet used in TokenEmbedding
+        hidden_dims_token_embedding: Union[int, Tuple]
+            if int: dimension of linear layer
+            if Tuple: dimensions of hidden layers of DenseResNet used in TokenEmbedding
         activation: Callable
             activation function used in TokenEmbedding
         batch_norm: bool
