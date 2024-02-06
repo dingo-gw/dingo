@@ -139,7 +139,7 @@ class TokenEmbedding(nn.Module):
             )
         x = torch.stack(out, dim=1)
 
-        return x * math.sqrt(self.emb_size)
+        return x
 
 
 class FrequencyEncoding(nn.Module):
@@ -280,9 +280,8 @@ class BlockEmbedding(nn.Module):
             size of embedding dimension
         """
         super(BlockEmbedding, self).__init__()
-        self.encoding = nn.Embedding(num_blocks, emb_size)
+        self.block_embedding = nn.Embedding(num_blocks, emb_size)
         self.num_blocks = num_blocks
-        self.emb_size = emb_size
 
     def forward(self, x: Tensor, blocks: Tensor) -> Tensor:
         """
@@ -308,14 +307,9 @@ class BlockEmbedding(nn.Module):
                 f"Invalid input shape in block encoding layer. "
                 f"Expected {self.num_blocks}, got {x.shape[1]}."
             )
-        block_encoding = self.encoding(blocks.long()) * math.sqrt(self.emb_size)
-        out = []
-        for i in range(self.num_blocks):
-            out.append(
-                x[:, i, :, :]
-                + block_encoding[:, i, :].reshape(block_encoding.shape[0], 1, -1)
-            )
-        x = torch.cat(out, dim=1)
+
+        x = x + torch.unsqueeze(self.block_embedding(blocks.long()), 2)
+        x = x.reshape(x.shape[0], x.shape[1]*x.shape[2], x.shape[3])
 
         return x
 
