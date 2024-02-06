@@ -1,4 +1,4 @@
-from typing import Callable, List, Tuple
+from typing import Callable, List, Tuple, Union
 import math
 import torch
 from torch import nn, Tensor
@@ -23,7 +23,7 @@ class TokenEmbedding(nn.Module):
     def __init__(
         self,
         input_dims: List[int],
-        hidden_dims: Tuple,
+        hidden_dims: Union[List, int],
         emb_size: int,
         activation: Callable,
         dropout: float,
@@ -36,8 +36,9 @@ class TokenEmbedding(nn.Module):
         input_dims: List[int]
             containing [num_blocks, num_channels, num_tokens, num_bins_per_token]
             where num_blocks = number of interferometers in GW use case, and num_channels = [real, imag, asd]
-        hidden_dims: Tuple
-            dimensions of hidden layers for DenseResidualNet
+        hidden_dims: Optional[Tuple, int]
+            if type List: dimensions of hidden layers for DenseResidualNet
+            if type int: number of nodes in linear layer
         emb_size: int
             size of embedding dimension
         activation: str
@@ -58,32 +59,41 @@ class TokenEmbedding(nn.Module):
             self.num_bins_per_token,
         ) = input_dims
         if individual_token_embedding:
-            self.stack_embedding_networks = nn.ModuleList([
-                DenseResidualNet(
+            if type(hidden_dims) is list:
+                self.stack_embedding_networks = nn.ModuleList([
+                    DenseResidualNet(
+                        input_dim=self.num_channels * self.num_bins_per_token,
+                        output_dim=emb_size,
+                        hidden_dims=tuple(hidden_dims),
+                        activation=activation,
+                        dropout=dropout,
+                        batch_norm=batch_norm
+                    )
+                    for _ in range(self.num_tokens)
+                ])
+            else:
+                assert type(hidden_dims) is int
+                self.stack_embedding_networks = nn.ModuleList([
+                    nn.Linear(
+                        self.num_channels * self.num_bins_per_token, emb_size, bias=False
+                    )
+                    for _ in range(self.num_tokens)
+                ])
+        else:
+            if type(hidden_dims) is list:
+                self.embedding_networks = DenseResidualNet(
                     input_dim=self.num_channels * self.num_bins_per_token,
                     output_dim=emb_size,
-                    hidden_dims=hidden_dims,
+                    hidden_dims=tuple(hidden_dims),
                     activation=activation,
                     dropout=dropout,
                     batch_norm=batch_norm
                 )
-                #nn.Linear(
-                #    self.num_channels * self.num_bins_per_token, emb_size, bias=False
-                #)
-                for _ in range(self.num_tokens)
-            ])
-        else:
-            self.embedding_networks = DenseResidualNet(
-                input_dim=self.num_channels * self.num_bins_per_token,
-                output_dim=emb_size,
-                hidden_dims=hidden_dims,
-                activation=activation,
-                dropout=dropout,
-                batch_norm=batch_norm
-            )
-            #self.embedding_networks = nn.Linear(
-            #    self.num_channels * self.num_bins_per_token, emb_size, bias=False
-            #)
+            else:
+                assert type(hidden_dims) is int
+                self.embedding_networks = nn.Linear(
+                    self.num_channels * self.num_bins_per_token, emb_size, bias=False
+                )
 
         self.individual_token_embedding = individual_token_embedding
         self.emb_size = emb_size
@@ -167,6 +177,7 @@ class FrequencyEncoding(nn.Module):
         self.emb_size_f_min = int(torch.ceil(torch.tensor(emb_size) / 2))
         self.emb_size_f_max = emb_size - self.emb_size_f_min
 
+        self.encoding_type = encoding_type
         if "discrete" in encoding_type:
             d_f_min = torch.exp(
                 -torch.arange(0, self.emb_size_f_min, 2)
