@@ -135,11 +135,9 @@ class TokenEmbedding(nn.Module):
                 else:
                     out_b.append(self.embedding_networks(x[:, b, :, i, :].flatten(start_dim=1)))
             out.append(
-                torch.stack(out_b, dim=2).reshape([-1, self.num_tokens, self.emb_size])
+                torch.stack(out_b, dim=1)
             )
-        x = torch.stack(out, dim=3).reshape(
-            [-1, self.num_blocks, self.num_tokens, self.emb_size]
-        )
+        x = torch.stack(out, dim=1)
 
         return x * math.sqrt(self.emb_size)
 
