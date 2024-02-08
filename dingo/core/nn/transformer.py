@@ -7,6 +7,25 @@ from torch.nn import TransformerEncoder, TransformerEncoderLayer
 from dingo.core.nn.resnet import DenseResidualNet
 
 
+class MLP(nn.Module):
+    """Simple MLP with one hidden layer."""
+    def __init__(self,
+                 input_size: int,
+                 hidden_size: int,
+                 output_size: int,
+                 activation_fn: Callable
+                 ):
+        super(MLP, self).__init__()
+        self.linear0 = nn.Linear(input_size, hidden_size)
+        self.activation = activation_fn
+        self.linear1 = nn.Linear(hidden_size, output_size)
+
+    def forward(self, x: Tensor) -> Tensor:
+        x = self.activation(self.linear0(x))
+        x = self.activation(self.linear1(x))
+        return x
+
+
 class TokenEmbedding(nn.Module):
     """
     A nn.Module that maps each frequency fragment of length num_bins_per_token and width num_channels
@@ -74,9 +93,10 @@ class TokenEmbedding(nn.Module):
             else:
                 assert type(hidden_dims) is int
                 self.stack_embedding_networks = nn.ModuleList([
-                    nn.Linear(
-                        self.num_channels * self.num_bins_per_token, emb_size, bias=False
-                    )
+                    MLP(self.num_channels * self.num_bins_per_token,
+                        hidden_dims,
+                        emb_size,
+                        activation)
                     for _ in range(self.num_tokens)
                 ])
         else:
@@ -91,9 +111,10 @@ class TokenEmbedding(nn.Module):
                 )
             else:
                 assert type(hidden_dims) is int
-                self.embedding_networks = nn.Linear(
-                    self.num_channels * self.num_bins_per_token, emb_size, bias=False
-                )
+                self.embedding_networks = MLP(self.num_channels * self.num_bins_per_token,
+                                              hidden_dims,
+                                              emb_size,
+                                              activation)
 
         self.individual_token_embedding = individual_token_embedding
         self.emb_size = emb_size
