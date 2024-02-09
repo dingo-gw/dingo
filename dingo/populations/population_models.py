@@ -60,7 +60,7 @@ class PowerLawPopulation(torch.utils.data.Dataset):
         generate_event_func = self.get_event_generator(idx)
 
         # Keep generating events until the desired size is reached.
-        embeddings = np.empty((size, self.base_population.embedding_size))
+        embeddings = np.empty((size, self.embedding_size))
         n = 0
         tries = 0
         while n < size:
@@ -91,7 +91,19 @@ class PowerLawPopulation(torch.utils.data.Dataset):
     def embedding_size(self):
         return self.base_population.embedding_size
 
+    @property
+    def num_hyperparameters(self):
+        return self.hyperparameters.shape[-1]
+
+    @property
+    def base_settings(self):
+        return self.base_population.settings
+
+    def init_epoch(self):
+        self.sample_hyperparameters()
+
     def sample_hyperparameters(self):
+        print("Generating new set of population hyperparameters for dataset.")
         self.hyperparameters = pd.DataFrame(self.population_prior.sample(self.size))
 
     def get_event_generator(self, population_idx):

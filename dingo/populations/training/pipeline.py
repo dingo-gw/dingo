@@ -3,30 +3,105 @@ import os
 import textwrap
 
 import yaml
+from threadpoolctl import threadpool_limits
+from torch.utils.data import DataLoader
 
+from dingo.core.models import PosteriorModel
+from dingo.core.utils import (
+    fix_random_seeds,
+    get_number_of_model_parameters,
+    RuntimeLimits,
+)
 from dingo.populations.population_models import build_population_model
 from dingo.populations.training.transform_builders import set_train_transforms
 
 
-def prepare_training_new(train_settings: dict, train_dir: str, local_settings: dict):
-    # (1) Build population forward models (train and test). These use different halves
-    # of the base population events.
+def train(train_settings: dict, train_dir: str, local_settings: dict, resume=False):
+    # (1) Prepare training data
 
+    # Build population forward models (train and test). These use different halves of
+    # the base population events.
     population_model_train = build_population_model(
         train_settings["data"], mode="train"
     )
     population_model_test = build_population_model(train_settings["data"], mode="test")
 
-    # (2) Build dataloaders
     set_train_transforms(population_model_train, train_settings["data"])
+    set_train_transforms(population_model_test, train_settings["data"])
 
-    # (3) Build model
-    # autocomplete_model_kwargs(train_settings["model"], population_model_train[0])
+    train_loader = DataLoader(
+        population_model_train,
+        batch_size=train_settings["training"]["batch_size"],
+        shuffle=True,
+        pin_memory=True,
+        num_workers=local_settings["num_workers"],
+        worker_init_fn=fix_random_seeds,
+    )
+    test_loader = DataLoader(
+        population_model_test,
+        batch_size=train_settings["training"]["batch_size"],
+        shuffle=False,
+        pin_memory=True,
+        num_workers=local_settings["num_workers"],
+        worker_init_fn=fix_random_seeds,
+    )
 
-    full_settings = {}
+    # (2) Prepare neural model
 
-    # Return dataloaders and model
-    return
+    if not resume:
+        # Configure additional network settings based on the embedding size and number
+        # of hyperparameters.
+        model_settings = train_settings["model"]
+        model_settings["transformer_kwargs"][
+            "d_dingo_encoding"
+        ] = population_model_train.embedding_size
+        model_settings["nsf_kwargs"][
+            "input_dim"
+        ] = population_model_train.num_hyperparameters
+
+        # (3) Build model
+        full_settings = {
+            "base_settings": population_model_train.base_settings,
+            "train_settings": train_settings,
+        }
+        pm = PosteriorModel(metadata=full_settings, device=local_settings["device"])
+
+        pm.optimizer_kwargs = train_settings["training"]["optimizer"]
+        pm.scheduler_kwargs = train_settings["training"]["scheduler"]
+        pm.initialize_optimizer_and_scheduler()
+    else:
+        raise NotImplementedError("Resuming training not yet implemented.")
+
+    num_params_encoder = get_number_of_model_parameters(pm.model.embedding_net)
+    num_params_flow = get_number_of_model_parameters(pm.model.flow)
+    print(
+        f"Number of parameters:\n  Encoder: {num_params_encoder:.1e}\n  Flow: "
+        f"{num_params_flow:.1e}\n  Total:  {num_params_encoder+num_params_flow:.1e}"
+    )
+
+    # (3) Train
+
+    runtime_limits = RuntimeLimits(
+        epoch_start=pm.epoch, **local_settings["runtime_limits"]
+    )
+    runtime_limits.max_epochs_total = train_settings["training"]["epochs"]
+    pm.train(
+        train_loader,
+        test_loader,
+        train_dir=train_dir,
+        runtime_limits=runtime_limits,
+        checkpoint_epochs=local_settings["checkpoint_epochs"],
+        use_wandb=local_settings.get("wandb", False),
+        test_only=local_settings.get("test_only", False),
+    )
+    if pm.epoch == train_settings["training"]["epochs"]:
+        save_file = os.path.join(train_dir, f"model_complete.pt")
+        print(f"Training complete. Saving to {save_file}.")
+        pm.save_model(save_file, save_training_info=True)
+        return True
+    if runtime_limits.local_limits_exceeded(pm.epoch):
+        print("Local runtime limits reached. Ending program.")
+        return False
 
 
 def parse_args():
@@ -73,6 +148,7 @@ def train_local():
 
     if args.settings_file is not None:
         print("Beginning new training run.")
+        resume = False
         with open(args.settings_file, "r") as fp:
             train_settings = yaml.safe_load(fp)
 
@@ -84,23 +160,19 @@ def train_local():
         with open(os.path.join(args.train_dir, "local_settings.yaml"), "w") as f:
             yaml.dump(local_settings, f, default_flow_style=False, sort_keys=False)
 
-        prepare_training_new(train_settings, args.train_dir, local_settings)
+    else:
+        print("Resuming training run.")
+        resume = True
+        with open(os.path.join(args.train_dir, "local_settings.yaml"), "r") as f:
+            local_settings = yaml.safe_load(f)
 
-    # else:
-    #     print("Resuming training run.")
-    #     with open(os.path.join(args.train_dir, "local_settings.yaml"), "r") as f:
-    #         local_settings = yaml.safe_load(f)
-    #     pm, wfd = prepare_training_resume(
-    #         args.checkpoint, local_settings, args.train_dir
-    #     )
-    #
-    # with threadpool_limits(limits=1, user_api="blas"):
-    #     complete = train(pm, wfd, args.train_dir, local_settings)
-    #
-    # if complete:
-    #     print("All training stages complete.")
-    # else:
-    #     print("Program terminated due to runtime limit.")
+    with threadpool_limits(limits=1, user_api="blas"):
+        complete = train(train_settings, args.train_dir, local_settings, resume)
+
+    if complete:
+        print("Training complete.")
+    else:
+        print("Program terminated due to runtime limit.")
 
 
 if __name__ == "__main__":

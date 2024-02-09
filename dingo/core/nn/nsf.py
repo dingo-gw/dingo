@@ -9,6 +9,8 @@ import torch.nn as nn
 import glasflow.nflows as nflows  # nflows not maintained, so use this maintained fork
 from glasflow.nflows import distributions, flows, transforms
 import glasflow.nflows.nn.nets as nflows_nets
+
+from dingo.core.nn.population_transformer import create_population_transformer
 from dingo.core.utils import torchutils
 from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
 from typing import Union, Callable, Tuple
@@ -351,6 +353,22 @@ def create_nsf_with_rb_projection_embedding_net(
     flow = create_nsf_model(**nsf_kwargs)
     model = FlowWrapper(flow, embedding_net)
     return model
+
+
+def create_nsf_with_population_transformer(nsf_kwargs: dict, transformer_kwargs: dict):
+    transformer_kwargs = copy.deepcopy(transformer_kwargs)
+    transformer = create_population_transformer(transformer_kwargs)
+    flow = create_nsf_model(
+        context_dim=transformer_kwargs["final_net"]["output_dim"], **nsf_kwargs
+    )
+    model = FlowWrapper(flow, transformer)
+    return model
+    # return create_nsf_model(
+    #     embedding_net_builder=create_population_transformer,
+    #     embedding_net_kwargs=transformer_kwargs,
+    #     context_dim=transformer_kwargs["final_net"]["output_dim"],
+    #     **nsf_kwargs,
+    # )
 
 
 def autocomplete_model_kwargs_nsf(model_kwargs, data_sample):

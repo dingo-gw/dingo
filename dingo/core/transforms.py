@@ -29,7 +29,7 @@ class DictToArray:
         sample = input_sample.copy()
 
         d = input_sample[self.key]
-        arr = np.empty(len(d))
+        arr = np.empty(len(d), dtype=np.float32)
         for idx, v in enumerate(d.values()):
             arr[..., idx] = v
 

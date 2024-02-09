@@ -32,5 +32,9 @@ def set_train_transforms(population_model, data_settings):
     transforms.append(DictToArray("hyperparameters"))
     transforms.append(ToTorch(device="cpu"))
     transforms.append(UnpackDict(["hyperparameters", "embeddings"]))
+
+    # The transformer requires sequences to be padded up to the maximum length. This
+    # does so, and produces a corresponding mask (True = mask out token).
     transforms.append(PadMask(1, 0, population_model.maximum_population_size))
+
     population_model.transform = torchvision.transforms.Compose(transforms)

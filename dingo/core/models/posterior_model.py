@@ -19,6 +19,7 @@ from collections import OrderedDict
 from dingo.core.nn.nsf import (
     create_nsf_with_rb_projection_embedding_net,
     create_nsf_wrapped,
+    create_nsf_with_population_transformer,
 )
 from dingo.core.utils.misc import get_version
 
@@ -446,11 +447,18 @@ def get_model_callable(model_type: str):
         return create_nsf_with_rb_projection_embedding_net
     elif model_type == "nsf":
         return create_nsf_wrapped
+    elif model_type == "population_transformer+nsf":
+        return create_nsf_with_population_transformer
     else:
         raise KeyError("Invalid model type.")
 
 
 def train_epoch(pm, dataloader):
+    try:
+        dataloader.dataset.init_epoch()
+    except AttributeError:
+        pass
+
     pm.model.train()
     loss_info = dingo.core.utils.trainutils.LossInfo(
         pm.epoch,
@@ -478,6 +486,11 @@ def train_epoch(pm, dataloader):
 
 
 def test_epoch(pm, dataloader):
+    try:
+        dataloader.dataset.init_epoch()
+    except AttributeError:
+        pass
+
     with torch.no_grad():
         pm.model.eval()
         loss_info = dingo.core.utils.trainutils.LossInfo(
