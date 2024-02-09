@@ -126,21 +126,19 @@ def generate_base_population(
     embeddings = []
     print(f"Generating {size} embeddings.")
     time_start = time.time()
-    network_time = 0.0
     with threadpool_limits(limits=1, user_api="blas"):
         with torch.no_grad():
             event_model.model.eval()
-            for _, data in enumerate(data_loader):
+            for i, data in enumerate(data_loader):
                 parameters.append(data[0])
                 waveform = data[1].to(event_model.device, non_blocking=True)
                 network_start = time.time()
                 embeddings.append(event_model.model(waveform).to("cpu"))
-                network_time += time.time() - network_start
-    total_time = time.time() - time_start
-    print(
-        f"Done. This took {total_time} seconds, of which {network_time} s doing forward "
-        f"passes."
-    )
+                waveform_time = network_start - time_start
+                network_time = time.time() - network_start
+                time_start = time.time()
+                print(f"Batch {i} [{batch_size*i}/{size}]  Waveform generation time: "
+                      f"{waveform_time} s   Network time: {network_time} s")
     parameters = pd.DataFrame(
         {k: torch.cat([p[k] for p in parameters]) for k in parameters[0].keys()}
     )
