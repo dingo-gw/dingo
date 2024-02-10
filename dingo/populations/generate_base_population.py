@@ -117,9 +117,9 @@ def generate_base_population(
     data_loader = DataLoader(
         waveform_dataset,
         batch_size=batch_size,
-        shuffle=False,  # Critical to keep the ordering.
+        shuffle=False,
         pin_memory=True,
-        num_workers=num_workers,  # Update this after debugging
+        num_workers=num_workers,
         worker_init_fn=fix_random_seeds,
     )
     parameters = []
@@ -130,7 +130,7 @@ def generate_base_population(
         with torch.no_grad():
             event_model.model.eval()
             for i, data in enumerate(data_loader):
-                parameters.append(data[0])
+                parameters.append(copy.deepcopy(data[0]))
                 waveform = data[1].to(event_model.device, non_blocking=True)
                 network_start = time.time()
                 embeddings.append(event_model.model(waveform).detach().to("cpu"))
