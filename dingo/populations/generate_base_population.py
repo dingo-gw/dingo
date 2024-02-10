@@ -133,12 +133,14 @@ def generate_base_population(
                 parameters.append(data[0])
                 waveform = data[1].to(event_model.device, non_blocking=True)
                 network_start = time.time()
-                embeddings.append(event_model.model(waveform).to("cpu"))
+                embeddings.append(event_model.model(waveform).detach().to("cpu"))
                 waveform_time = network_start - time_start
                 network_time = time.time() - network_start
                 time_start = time.time()
-                print(f"Batch {i} [{batch_size*i}/{size}]  Waveform generation time: "
-                      f"{waveform_time} s   Network time: {network_time} s")
+                print(
+                    f"Batch {i} [{batch_size*i}/{size}]  Waveform generation time: "
+                    f"{waveform_time:.5f} s   Network time: {network_time:.5f} s"
+                )
     parameters = pd.DataFrame(
         {k: torch.cat([p[k] for p in parameters]) for k in parameters[0].keys()}
     )
