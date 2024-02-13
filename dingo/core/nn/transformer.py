@@ -208,10 +208,10 @@ class FrequencyEncoding(nn.Module):
             )
         elif "continuous" in encoding_type:
             d_f_min = (
-                torch.pow(2, torch.arange(0, self.emb_size_f_min, 2)) * math.pi
+                torch.pow(2, torch.arange(0, self.emb_size_f_min, 2) / self.emb_size_f_min) * math.pi
             )
             d_f_max = (
-                torch.pow(2, torch.arange(0, self.emb_size_f_max, 2)) * math.pi
+                torch.pow(2, torch.arange(0, self.emb_size_f_max, 2) / self.emb_size_f_max) * math.pi
             )
         else:
             raise ValueError(
