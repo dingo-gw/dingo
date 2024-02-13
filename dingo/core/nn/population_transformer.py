@@ -45,6 +45,7 @@ def create_population_transformer(config):
     transformer_layer = nn.TransformerEncoderLayer(
         d_model=config.transformer["d_model"],
         nhead=config.transformer["nhead"],
+        dropout=config.transformer.get("dropout", 0.1),
         batch_first=True,
     )
     transformer = nn.TransformerEncoder(
