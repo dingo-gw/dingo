@@ -44,6 +44,7 @@ def create_population_transformer(config):
     tokenizer = DenseResidualNet(**config.tokenizer)
     transformer_layer = nn.TransformerEncoderLayer(
         d_model=config.transformer["d_model"],
+        dim_feedforward=config.transformer.get("dim_feedforward", 2048),
         nhead=config.transformer["nhead"],
         dropout=config.transformer.get("dropout", 0.1),
         batch_first=True,
