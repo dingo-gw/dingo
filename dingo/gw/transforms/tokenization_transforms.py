@@ -9,7 +9,7 @@ class StrainTokenization(object):
     and that the ordering of the blocks within 'waveform' is fixed.
     """
 
-    def __init__(self, num_tokens: int, f_min: float, f_max: float, df: float):
+    def __init__(self, num_tokens: int, f_min: float, f_max: float, df: float, normalize_frequency: bool = False):
         """
         Parameters
         ----------
@@ -21,6 +21,8 @@ class StrainTokenization(object):
             Maximal frequency value.
         df: float
             Frequency interval between bins.
+        normalize_frequency: bool
+            Whether to normalize the frequency bins for the positional encoding
 
         """
         num_f = np.array((f_max - f_min) / df) + 1
@@ -36,6 +38,9 @@ class StrainTokenization(object):
         self.f_min_per_token = np.arange(f_min, f_max, f_token_width)
         self.f_max_per_token = self.f_min_per_token + f_token_width - df
         self.num_padded_f_bins = int(num_tokens * self.num_bins_per_token - num_f)
+        self.normalize_freq = normalize_frequency
+        self.f_min = f_min
+        self.f_max = self.f_max_per_token.max()
         self.num_tokens = num_tokens
 
     def __call__(self, input_sample):
@@ -75,7 +80,11 @@ class StrainTokenization(object):
         detector_dict = {"H1": 0, "L1": 1, "V1": 2}
         detectors = [detector_dict[key] for key in input_sample["asds"]]
         sample["blocks"] = np.array(detectors)
-        sample["f_min_per_token"] = self.f_min_per_token
-        sample["f_max_per_token"] = self.f_max_per_token
+        if self.normalize_freq:
+            sample["f_min_per_token"] = (self.f_min_per_token - self.f_min)/(self.f_max - self.f_min)
+            sample["f_max_per_token"] = (self.f_max_per_token - self.f_min)/(self.f_max - self.f_min)
+        else:
+            sample["f_min_per_token"] = self.f_min_per_token
+            sample["f_max_per_token"] = self.f_max_per_token
 
         return sample

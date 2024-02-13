@@ -183,7 +183,8 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
                 data_settings["tokenization"]["num_tokens"],
                 data_settings["domain_update"]["f_min"],
                 data_settings["domain_update"]["f_max"],
-                df=1/data_settings["window"]["T"]
+                df=1/data_settings["window"]["T"],
+                normalize_frequency=data_settings["tokenization"]["normalize_frequency_for_positional_encoding"]
             )
         )
         selected_keys.append("blocks")
