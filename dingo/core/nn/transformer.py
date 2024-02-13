@@ -180,7 +180,7 @@ class FrequencyEncoding(nn.Module):
         add the frequency encoding to the embedding matrix, dependent on f_min and f_max of each token
     """
 
-    def __init__(self, emb_size: int, encoding_type: str, dropout: float):
+    def __init__(self, emb_size: int, encoding_type: str):
         """
         Parameters:
         --------
@@ -188,8 +188,6 @@ class FrequencyEncoding(nn.Module):
             size of embedding dimension
         encoding_type: str
             type of encoding, possibilities ["discrete", "continuous". "discrete+nn", "continuous+nn"]
-        dropout: float
-            dropout value
         """
         super(FrequencyEncoding, self).__init__()
 
@@ -226,7 +224,6 @@ class FrequencyEncoding(nn.Module):
             self.initialize_linear()
 
         self.emb_size = torch.tensor(emb_size)
-        self.dropout = nn.Dropout(p=dropout)
 
         self.register_buffer('d_f_min', d_f_min)
         self.register_buffer('d_f_max', d_f_max)
@@ -283,7 +280,7 @@ class FrequencyEncoding(nn.Module):
 
         x = (x + pos_embedding)/2
 
-        return self.dropout(x)
+        return x
 
 
 class BlockEmbedding(nn.Module):
@@ -378,7 +375,7 @@ class TransformerModel(nn.Module):
         batch_norm: bool,
         individual_token_embedding: bool,
         frequency_encoding_type: str,
-        dropout: float = 0.5,
+        dropout: float = 0.1,
     ):
         """
         Parameters
@@ -430,11 +427,12 @@ class TransformerModel(nn.Module):
             individual_token_embedding=self.individual_token_embedding,
         )
         self.freq_encoder = FrequencyEncoding(
-            emb_size=d_out, encoding_type=frequency_encoding_type, dropout=dropout
+            emb_size=d_out, encoding_type=frequency_encoding_type
         )
         self.block_embedding = BlockEmbedding(
             num_blocks=self.num_blocks, emb_size=d_out
         )
+        self.dropout = nn.Dropout(p=dropout)
         encoder_layers = TransformerEncoderLayer(
             d_model=d_out,
             nhead=num_head,
@@ -489,6 +487,7 @@ class TransformerModel(nn.Module):
         src = self.embedding(src)
         src = self.freq_encoder(src, f_min, f_max)
         src = self.block_embedding(src, blocks)
+        src = self.dropout(src)
 
         if src_mask is None:
             output = self.transformer_encoder(src)
