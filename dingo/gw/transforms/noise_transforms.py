@@ -179,14 +179,13 @@ class AddWhiteNoiseComplex(object):
             noisy_strains[ifo] = pure_strain + noise
 
         if self.store_snr:
-            kappa_squared = 0.0
-            rho_opt_squared = 0.0
+            rho_mf_network_squared = 0.0
             for ifo, clean_waveform in sample["waveform"].items():
-                kappa_squared += inner_product(clean_waveform, noisy_strains[ifo])
-                rho_opt_squared += inner_product(clean_waveform, clean_waveform)
-            sample["parameters"]["matched_filter_snr"] = kappa_squared / np.sqrt(
-                rho_opt_squared
-            )
+                kappa_squared = inner_product(clean_waveform, noisy_strains[ifo])
+                rho_opt_squared = inner_product(clean_waveform, clean_waveform)
+                rho_mf = kappa_squared / np.sqrt(rho_opt_squared)
+                rho_mf_network_squared += rho_mf ** 2
+            sample["parameters"]["matched_filter_snr"] = np.sqrt(rho_mf_network_squared)
 
         sample["waveform"] = noisy_strains
 
