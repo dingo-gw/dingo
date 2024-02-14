@@ -290,7 +290,7 @@ def create_transformer_enet(
     num_head: int,
     num_encoder_layers: int,
     hidden_dim_encoder: int,
-    hidden_dims_token_embedding: Tuple,
+    hidden_dims_token_embedding: Union[int, Tuple],
     individual_token_embedding: bool,
     freq_encoding_type: str,
     dropout: float = 0.0,
@@ -319,8 +319,9 @@ def create_transformer_enet(
         number of transformer encoder layers
     hidden_dim_encoder: int
         number of hidden dimensions in the feedforward neural networks of the transformer encoder
-    hidden_dims_token_embedding: Tuple
-        dimensions of hidden layers of DenseResNet used in TokenEmbedding
+    hidden_dims_token_embedding: Union[int, Tuple]
+        if int: dimension of linear layer
+        if Tuple: dimensions of hidden layers of DenseResNet used in TokenEmbedding
     individual_token_embedding: bool
         whether to embed each raw token with an individual embedding network or not
     freq_encoding_type: str
