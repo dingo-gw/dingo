@@ -178,13 +178,17 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         selected_keys = ["inference_parameters", "waveform"]
 
     try:
+        if "normalize_frequency_for_positional_encoding" in data_settings["tokenization"]:
+            norm_freq = data_settings["tokenization"]["normalize_frequency_for_positional_encoding"]
+        else:
+            norm_freq = False
         transforms.append(
             StrainTokenization(
                 data_settings["tokenization"]["num_tokens"],
                 data_settings["domain_update"]["f_min"],
                 data_settings["domain_update"]["f_max"],
-                df=1/data_settings["window"]["T"],
-                normalize_frequency=data_settings["tokenization"]["normalize_frequency_for_positional_encoding"]
+                df=1 / data_settings["window"]["T"],
+                normalize_frequency=norm_freq
             )
         )
         selected_keys.append("blocks")
@@ -204,15 +208,15 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
 
 
 def build_svd_for_embedding_network(
-    wfd: WaveformDataset,
-    data_settings: dict,
-    asd_dataset_path: str,
-    size: int,
-    num_training_samples: int,
-    num_validation_samples: int,
-    num_workers: int = 0,
-    batch_size: int = 1000,
-    out_dir=None,
+        wfd: WaveformDataset,
+        data_settings: dict,
+        asd_dataset_path: str,
+        size: int,
+        num_training_samples: int,
+        num_validation_samples: int,
+        num_workers: int = 0,
+        batch_size: int = 1000,
+        out_dir=None,
 ):
     """
     Construct SVD matrices V based on clean waveforms in each interferometer. These
@@ -305,7 +309,7 @@ def build_svd_for_embedding_network(
             )
             strain_data = data["waveform"]
             for ifo, strains in strain_data.items():
-                waveforms[ifo][lower : lower + n] = strains[:n]
+                waveforms[ifo][lower: lower + n] = strains[:n]
             if lower + n == num_waveforms:
                 break
     print(f"...done. This took {time.time() - time_start:.0f} s.")
@@ -346,7 +350,7 @@ def build_svd_for_embedding_network(
     for ifo in data_settings["detectors"]:
         V = basis_dict[ifo].V
         assert np.allclose(V[: wfd.domain.min_idx], 0)
-        V = V[wfd.domain.min_idx :]
+        V = V[wfd.domain.min_idx:]
         print("      " + str(V.shape))
         V_rb_list.append(V)
     print("\n")
