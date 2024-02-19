@@ -317,6 +317,10 @@ class Result(CoreResult):
         else:
             wfg_domain = self.domain
 
+        # print("USING SEOBNRv4E_opt1")
+        # self.base_metadata["dataset_settings"]["waveform_generator"][
+        # "approximant"
+        # ] = "SEOBNRv4E_opt1"
         self.likelihood = StationaryGaussianGWLikelihood(
             wfg_kwargs=self.base_metadata["dataset_settings"]["waveform_generator"],
             wfg_domain=wfg_domain,

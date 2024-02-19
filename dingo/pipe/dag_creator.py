@@ -96,7 +96,9 @@ def generate_dag(inputs, model_args):
                     # Ensures any cached files (e.g. the distance-marginalization
                     # lookup table) are only built once.
                     kwargs["parent"] = generation_node_list[0]
-                generation_node = GenerationNode(inputs, importance_sampling=True, **kwargs)
+                generation_node = GenerationNode(
+                    inputs, importance_sampling=True, **kwargs
+                )
                 importance_sampling_generation_node_list.append(generation_node)
         else:
             importance_sampling_generation_node_list = generation_node_list
@@ -158,7 +160,9 @@ def generate_dag(inputs, model_args):
     if inputs.create_summary:
         # Add the waveform approximant to inputs, so that it can be fed to PESummary.
         inputs.waveform_approximant = model_args["waveform_approximant"]
-        PESummaryNode(inputs, merged_importance_sampling_node_list, generation_node_list, dag=dag)
+        PESummaryNode(
+            inputs, merged_importance_sampling_node_list, generation_node_list, dag=dag
+        )
 
     dag.build()
     # create_overview(

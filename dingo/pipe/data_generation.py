@@ -203,7 +203,9 @@ class DataGenerationInput(BilbyDataGenerationInput):
         )
         # NOTE FIXME this is a hack to get around the fact that the f_start is set to f_ref in the waveform generator
         # for most approximants
-        injection_generator.waveform_generator.f_start = injection_generator.waveform_generator.f_ref
+        injection_generator.waveform_generator.f_start = (
+            injection_generator.waveform_generator.f_ref
+        )
 
         # selecting PSD
         if args.use_psd_of_trigger:
@@ -283,29 +285,33 @@ class DataGenerationInput(BilbyDataGenerationInput):
                 )
 
         # Compute optimal SNR
-        rho_opt_ifos, rho_opt = self.compute_optimal_snr(self.strain_data_list[0], injection_generator.data_domain)
+        rho_opt_ifos, rho_opt = self.compute_optimal_snr(
+            self.strain_data_list[0], injection_generator.data_domain
+        )
         logger.info(f"Network optimal SNR of injection: {rho_opt}")
         logger.info(f"Detector optimal SNRs of injection: {rho_opt_ifos}")
 
-
     def compute_optimal_snr(self, strain_data, data_domain):
         """Compute network optimal signal-to-noise ratio for the first injected strain"""
-        mu = strain_data['waveform']
-        asds = strain_data['asds']
+        mu = strain_data["waveform"]
+        asds = strain_data["asds"]
         delta_f = data_domain.delta_f
         noise_std = data_domain.noise_std
 
         # In the inner products below explicitly divide by the window factor
-        window_factor = 4*delta_f * noise_std**2
+        window_factor = 4 * delta_f * noise_std**2
 
         # optimal network SNR
-        kappa2_list = [inner_product(mu_ifo, mu_ifo, delta_f=delta_f, psd=window_factor * asd_ifo**2)
-                     for mu_ifo, asd_ifo in zip(mu.values(), asds.values())]
+        kappa2_list = [
+            inner_product(
+                mu_ifo, mu_ifo, delta_f=delta_f, psd=window_factor * asd_ifo**2
+            )
+            for mu_ifo, asd_ifo in zip(mu.values(), asds.values())
+        ]
         rho_opt = np.sqrt(sum(kappa2_list))
         rho_opt_ifos = np.sqrt(kappa2_list)
 
         return rho_opt_ifos, rho_opt
-
 
     def create_data(self, args):
         super().create_data(args)
@@ -349,6 +355,16 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # if the data is created via an injection, we don't need to convert anything
         # from the Bilby format
         # Data conditioning settings.
+        # Slight correction to detector start times. But is not set in case of an injection
+        if hasattr(self, "_interferometers"):
+            trigger_offset = {
+                ifo.name: ifo.strain_data.start_time
+                - (self.trigger_time - self.duration + self.post_trigger_duration)
+                for ifo in self.interferometers
+            }
+        else:
+            trigger_offset = None
+
         settings = {
             "time_event": self.trigger_time,
             "time_buffer": self.post_trigger_duration,
@@ -359,7 +375,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
             "f_max": self.maximum_frequency,
             "window_type": "tukey",
             "roll_off": self.tukey_roll_off,
-            "trigger_offset": {ifo.name: ifo.strain_data.start_time - (self.trigger_time - self.duration + self.post_trigger_duration) for ifo in self.interferometers}
+            "trigger_offset": trigger_offset,
         }
         if hasattr(self, "strain_data_list"):
             for strain_data, event_data_file in zip(
@@ -436,7 +452,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
 
     @property
     def event_data_files(self):
-        if self.zero_noise:
+        if self.zero_noise and not self.importance_sampling:
             return [
                 os.path.join(
                     self.data_directory, "_".join([self.label, f"event_data_{i}.hdf5"])
@@ -444,7 +460,11 @@ class DataGenerationInput(BilbyDataGenerationInput):
                 for i in range(self.num_noise_realizations)
             ]
         else:
-            return [os.path.join(self.data_directory, "_".join([self.label, f"event_data.hdf5"]))]
+            return [
+                os.path.join(
+                    self.data_directory, "_".join([self.label, f"event_data.hdf5"])
+                )
+            ]
 
     @property
     def importance_sampling_updates(self):

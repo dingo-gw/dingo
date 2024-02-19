@@ -58,6 +58,10 @@ def interpolated_sample_and_log_prob(sample_points, values):
     -------
     (float, float) : sample and log_prob
     """
+    # This is a hack to deal with the fact that the bilby Interped class
+    # can't properly handle NAN values
+    if np.any(np.isnan(values)):
+        return np.nan, np.nan
     interp = Interped(sample_points, values)
     sample = interp.sample()
     log_prob = interp.ln_prob(sample)

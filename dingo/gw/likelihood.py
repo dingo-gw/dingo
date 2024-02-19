@@ -1,4 +1,5 @@
 import sys
+
 from multiprocessing import Pool
 
 import numpy as np
@@ -7,6 +8,7 @@ from scipy.fft import fft
 from scipy.special import logsumexp
 from bilby.gw.utils import ln_i0
 from threadpoolctl import threadpool_limits
+import warnings
 
 from dingo.core.likelihood import Likelihood
 from dingo.gw.injection import GWSignal
@@ -72,9 +74,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         # co-located. Or if there are signals which don't start at the same time
         # in each detector due to discretization of the signal.
         # only does this if the start times are not all zero
-        if "trigger_offset" in event_metadata and not all(
-            np.abs(v) < 1e-12 for v in event_metadata["trigger_offset"].values()
-        ):
+        if event_metadata is not None and "trigger_offset" in event_metadata:
             self.trigger_offset = event_metadata["trigger_offset"]
             self._initialize_transform()
 
@@ -278,7 +278,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             ],
         )
 
-        print(self.log_Zn, kappa2, -1 / 2 * rho2opt)
+        # print(self.log_Zn, kappa2, -1 / 2 * rho2opt)
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
     def log_likelihood_phase_grid(self, theta, phases=None):
@@ -308,8 +308,12 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         # the individual modes.
         try:
             pol_m = self.signal_m({**theta, "phase": 0})
-        except:
-            return np.zeros(len(phases))
+        except Exception as e:
+            warnings.warn(
+                f"Evaluating the waveform failed with error: {e}\n"
+                f"The parameters were {theta}\n"
+            )
+            return np.ones(len(phases)) * np.nan
         pol_m = {k: pol["waveform"] for k, pol in pol_m.items()}
 
         # Step 2: Precompute complex inner products (mu, mu) and (d, mu) for the

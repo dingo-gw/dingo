@@ -38,7 +38,10 @@ class SamplingInput(Input):
         self.result_format = args.result_format
 
         # Event files to run on
-        self.event_data_files = args.event_data_files[0].split()
+        if isinstance(args.event_data_files, list):
+            self.event_data_files = args.event_data_files
+        else:
+            self.event_data_files = args.event_data_files[0].split()
 
         # Choices for running
         self.detectors = args.detectors
@@ -191,6 +194,7 @@ class SamplingInput(Input):
                     batch_size=self.batch_size,
                 )
                 samples_list.append(self.dingo_sampler.samples)
+                print(len(samples_list))
 
         if self.zero_noise:
             self.dingo_sampler.samples = pd.concat(samples_list)
@@ -203,6 +207,7 @@ class SamplingInput(Input):
             inference_parameters = list(self.dingo_sampler.samples.columns)
             # removing proxies since this makes training the unconditional flow easier
             inference_parameters = [x for x in inference_parameters if "proxy" not in x]
+
             unconditional_flow = training_result.train_unconditional_flow(
                 inference_parameters,
                 nde_settings=self.density_recovery_settings["nde_settings"],

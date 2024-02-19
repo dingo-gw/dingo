@@ -28,7 +28,6 @@ def plot_corner_multi(
         Forwarded to corner.corner.
     """
     # Define plot properties
-    cmap = "Dark2"
     corner_params = {
         "smooth": 1.0,
         "smooth1d": 1.0,
@@ -62,21 +61,24 @@ def plot_corner_multi(
         if p in set.intersection(*(set(s.columns) for s in samples))
     ]
 
-    fig = None
     handles = []
     for i, (s, w, l) in enumerate(zip_longest(samples, weights, labels)):
-        color = mpl.colors.rgb2hex(plt.get_cmap(cmap)(i)) if colors is None else colors[i]
-        corner_params["hist_kwargs"]["color"] = color
+        corner_params["hist_kwargs"]["color"] = (
+            colors[i] if colors is not None else None
+        )
+        corner_params["hist_kwargs"]["linestyle"] = (
+            kwargs["linestyles"][i] if "linestyles" in list(kwargs.keys()) else "-"
+        )
         fig = corner.corner(
             s[common_parameters].to_numpy(),
             labels=common_parameters,
             weights=w,
             no_fill_contours=True,
-            color=color,
-            **corner_params
+            color=colors[i] if colors is not None else None,
+            **corner_params,
         )
         handles.append(
-            plt.Line2D([], [], color=color, label=l, linewidth=5, markersize=20)
+            plt.Line2D([], [], color=colors[i], label=l, linewidth=5, markersize=20)
         )
 
     # Eliminate spacing between the 2D plots
@@ -89,7 +91,7 @@ def plot_corner_multi(
     fig.legend(
         handles=handles,
         loc="upper right",
-        fontsize=50,
+        fontsize=70,
         labelcolor="linecolor",
     )
 

@@ -291,8 +291,9 @@ class Result(DingoDataset):
         self.samples["log_prior"] = log_prior
         self.samples.loc[valid_samples, "log_likelihood"] = log_likelihood
 
-        # Drop None samples where waveform failed to generate
-        self.samples = self.samples.dropna(subset=['log_likelihood'])
+        # Drop NaN samples where waveform failed to generate
+        self.samples["log_likelihood"] = self.samples["log_likelihood"].fillna(-np.inf)
+        # self.samples = self.samples.dropna(subset=["log_likelihood"])
 
         self._calculate_evidence()
         return self.samples
@@ -391,7 +392,6 @@ class Result(DingoDataset):
             n=num_samples,
             weights=self.samples["weights"],
             replace=True,
-            ignore_index=True,
             random_state=random_state,
         )
         return unweighted_samples.drop(["weights"], axis=1)
@@ -571,7 +571,7 @@ class Result(DingoDataset):
             # will also raise an error if files were created with different versions of
             # dingo.
             # if not recursive_check_dicts_are_equal(part_dict, dataset_dict):
-                # raise ValueError("Results to be merged must have same metadata.")
+            # raise ValueError("Results to be merged must have same metadata.")
 
         dataset_dict["samples"] = pd.concat(samples_parts, ignore_index=True)
         merged_result = cls(dictionary=dataset_dict)
@@ -694,7 +694,6 @@ class Result(DingoDataset):
 
 
 def check_equal_dict_of_arrays(a, b):
-
     if type(a) != type(b):
         return False
 

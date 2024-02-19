@@ -10,7 +10,7 @@ import warnings
 import lal
 import lalsimulation as LS
 import pandas as pd
-import bilby.core.utils as bilby_utils 
+import bilby.core.utils as bilby_utils
 
 try:
     from lalsimulation.gwsignal.core import waveform as gws_wfm
@@ -88,7 +88,8 @@ class WaveformGenerator:
                 self.approximant = LS.GetApproximantFromString(approximant)
                 if mode_list is not None:
                     self.lal_params = self.setup_mode_array(mode_list)
-            except:
+            except Exception as e:
+                print(e)
                 pass
 
         if not issubclass(type(domain), Domain):
@@ -439,18 +440,18 @@ class WaveformGenerator:
             elif self.approximant == 107:
                 approx = 4
             lal_parameter_tuple = (
-                phase, 
+                phase,
                 delta_t,
                 *masses,
                 f_min,
                 r,
                 iota,
-                s1z, 
+                s1z,
                 s2z,
                 ecc_params[1],
                 ecc_params[2],
                 approx,
-                None
+                None,
             )
 
         elif lal_target_function == "SimIMRSpinAlignedEOBModesEcc_opt1":
@@ -492,14 +493,14 @@ class WaveformGenerator:
                 p.get("EccPNRRForm", 1),
                 p.get("EccPNWfForm", 1),
                 p.get("EccAvNQCWaveform", 1),
-                p.get("EcctAppend", 30), # 40 or 30?
+                p.get("EcctAppend", 30),  # 40 or 30?
                 p.get(
                     "EccIC", -2
                 ),  # 0 periastron, 2 hyperbolic,  -1 instantaneous omega, -2 orbit-average omega
-                p.get("HypPphi0", 4.22), # 0 or 4.22?
-                p.get("HypR0", 10000.0), # 0 or 10000.0
-                p.get("HypE0", 1.012), # 0 or 1.012
-                p.get("ellMaxForNyquistCheck", 2)
+                p.get("HypPphi0", 4.22),  # 0 or 4.22?
+                p.get("HypR0", 10000.0),  # 0 or 10000.0
+                p.get("HypE0", 1.012),  # 0 or 1.012
+                p.get("ellMaxForNyquistCheck", 2),
             )
 
             lal_parameter_tuple = (lal_parameter_tuple, iota)
@@ -566,6 +567,20 @@ class WaveformGenerator:
         LS.SimInspiralWaveformParamsInsertModeArray(lal_params, ma)
         return lal_params
 
+    def setup_instantaneous_reference_frequency(self):
+        """
+        Set up the lal params to set EccIC
+        If using an instantaneous frequency, set EccIC = -1
+
+        Returns
+        -------
+        lal_params:
+            A lal parameter dictionary
+        """
+        lal_params = lal.CreateDict()
+        LS.SimInspiralWaveformParamsInsertEccIC(lal_params, -1)
+        return lal_params
+
     def generate_FD_waveform(self, parameters_lal: Tuple) -> Dict[str, np.ndarray]:
         """
         Generate Fourier domain GW polarizations (h_plus, h_cross).
@@ -612,6 +627,12 @@ class WaveformGenerator:
             )
 
         # Depending on whether the domain is uniform or non-uniform call the appropriate wf generator
+        if (
+            hasattr(self, "use_instantaneous_reference_frequency")
+            and self.use_instantaneous_reference_frequency
+        ):
+            parameters_lal = list(parameters_lal)
+            parameters_lal[-2] = self.setup_instantaneous_reference_frequency()
         hp, hc = LS.SimInspiralFD(*parameters_lal)
 
         # the check below filters for unphysical waveforms:
@@ -748,21 +769,33 @@ class WaveformGenerator:
                 assert LS.SimInspiralImplementedTDApproximants(self.approximant)
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: TD)
-                if self.approximant_str == "SEOBNRv4HM" or self.approximant_str == "NRsur7dq4":
+                if (
+                    self.approximant_str == "SEOBNRv4HM"
+                    or self.approximant_str == "NRsur7dq4"
+                ):
                     if self.approximant_str == "SEOBNRv4HM":
                         parameters_lal, iota = self._convert_parameters_to_lal_frame(
                             {**parameters, "f_ref": self.f_ref},
                             lal_target_function="SimIMRSpinAlignedEOBModes",
                         )
-                        m1, m2, s1z, s2z = parameters_lal[1], parameters_lal[2], parameters_lal[5], parameters_lal[6]
+                        m1, m2, s1z, s2z = (
+                            parameters_lal[1],
+                            parameters_lal[2],
+                            parameters_lal[5],
+                            parameters_lal[6],
+                        )
 
                     elif self.approximant_str == "NRsur7dq4":
                         parameters_lal, iota = self._convert_parameters_to_lal_frame(
                             {**parameters, "f_ref": self.f_ref},
-                            lal_target_function="SimInspiralChooseTDModes"
+                            lal_target_function="SimInspiralChooseTDModes",
                         )
-                        m1, m2, s1z, s2z = parameters_lal[2], parameters_lal[3], parameters_lal[6], parameters_lal[9]
-
+                        m1, m2, s1z, s2z = (
+                            parameters_lal[2],
+                            parameters_lal[3],
+                            parameters_lal[6],
+                            parameters_lal[9],
+                        )
 
                     (
                         f_start,
@@ -770,21 +803,20 @@ class WaveformGenerator:
                         t_chirp,
                         t_extra,
                     ) = wfg_utils.get_stepped_back_f_start(
-                        self.domain.f_min,
-                        m1,
-                        m2,
-                        s1z,
-                        s2z
+                        self.domain.f_min, m1, m2, s1z, s2z
                     )
                     self.f_start = f_start
-                
+
                 hlm_td, iota = self.generate_TD_modes_L0(parameters)
 
                 # Step 2: Transform modes to target domain.
                 # This requires tapering of TD modes, and FFT to transform to FD.
-                
+
                 # Tapering is different depending on if you use aligned spin or precessing waveforms
-                if self.approximant_str == "SEOBNRv4HM" or self.approximant_str == "NRsur7dq4":
+                if (
+                    self.approximant_str == "SEOBNRv4HM"
+                    or self.approximant_str == "NRsur7dq4"
+                ):
                     wfg_utils.taper_stepped_back_waveform_modes(
                         hlm_td,
                         m1,
@@ -887,10 +919,11 @@ class WaveformGenerator:
         # TD approximants that are implemented in L0 frame. Currently tested for:
         #   52: SEOBNRv4PHM
         #   109: SEOBNRv4EHM_opt
+        #   92: NRSur7dq2
         #   93: NRSur7dq4
-        if self.approximant in [52, 109, 93, 94]:
+        if self.approximant in [52, 109, 92, 93, 94]:
             # Precessing Spins
-            if self.approximant in [52, 93]:
+            if self.approximant in [52, 92, 93]:
                 parameters_lal_td_modes, iota = self._convert_parameters_to_lal_frame(
                     {**parameters, "f_ref": self.f_ref},
                     lal_target_function="SimInspiralChooseTDModes",
@@ -900,7 +933,10 @@ class WaveformGenerator:
             # Aligned Spins
             elif self.approximant in [109, 94]:
                 if self.approximant in [109]:
-                    parameters_lal_td_modes, iota = self._convert_parameters_to_lal_frame(
+                    (
+                        parameters_lal_td_modes,
+                        iota,
+                    ) = self._convert_parameters_to_lal_frame(
                         {**parameters, "f_ref": self.f_ref},
                         lal_target_function="SimIMRSpinAlignedEOBModesEcc_opt1",
                     )
@@ -911,7 +947,10 @@ class WaveformGenerator:
                     ) = LS.SimIMRSpinAlignedEOBModesEcc_opt1(*parameters_lal_td_modes)
 
                 elif self.approximant in [94]:
-                    parameters_lal_td_modes, iota = self._convert_parameters_to_lal_frame(
+                    (
+                        parameters_lal_td_modes,
+                        iota,
+                    ) = self._convert_parameters_to_lal_frame(
                         {**parameters, "f_ref": self.f_ref},
                         lal_target_function="SimIMRSpinAlignedEOBModes",
                     )
@@ -921,7 +960,7 @@ class WaveformGenerator:
                         high_samp_dynamics,
                     ) = LS.SimIMRSpinAlignedEOBModes(*parameters_lal_td_modes)
 
-                hlm_td = wfg_utils.linked_list_modes_to_dict_modes(hlm_td)  # NOTE check if eccentricity wf model actually does this
+                hlm_td = wfg_utils.linked_list_modes_to_dict_modes(hlm_td)
                 # The output of SimIMRSpinAlignedEOBModes is in the EOB frame, but we need in the LAL frame so we do a coordinate rotation
                 # https://git.ligo.org/waveforms/reviews/SEOBNRv4HM/-/blob/master/tests/conventions/conventions.pdf
                 for (ell, m), hlm in hlm_td.items():
@@ -1228,7 +1267,12 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 try:
                     hlm_td, iota = self.generate_TD_modes_L0(parameters)
                 except:
-                    return {(2,2): np.ones(generator.domain.sample_frequencies.shape[0], dtype=complex) * np.nan}
+                    return {
+                        (2, 2): np.ones(
+                            generator.domain.sample_frequencies.shape[0], dtype=complex
+                        )
+                        * np.nan
+                    }
 
                 # Step 2: Transform modes to target domain.
                 # This requires tapering of TD modes, and FFT to transform to FD.
@@ -1423,9 +1467,9 @@ def SEOBNRv4PHM_maximum_starting_frequency(
     f_max_Hz = fudge * 10.5 ** (-1.5) / (np.pi * total_mass_sec)
     return f_max_Hz
 
+
 def generate_waveforms_task_func(
-    args: Tuple, 
-    waveform_generator: WaveformGenerator = None
+    args: Tuple, waveform_generator: WaveformGenerator = None
 ) -> Dict[str, np.ndarray]:
     """
     Picklable wrapper function for parallel waveform generation.
@@ -1443,6 +1487,7 @@ def generate_waveforms_task_func(
     """
     parameters = args[1].to_dict()
     return waveform_generator.generate_hplus_hcross(parameters)
+
 
 def generate_waveforms_parallel(
     waveform_generator: WaveformGenerator,
@@ -1482,6 +1527,7 @@ def generate_waveforms_parallel(
     }
     return polarizations
 
+
 def sum_contributions_m(x_m, phase_shift=0.0):
     """
     Sum the contributions over m-components, optionally introducing a phase shift.
@@ -1492,6 +1538,7 @@ def sum_contributions_m(x_m, phase_shift=0.0):
         for m, x in x_m.items():
             result[key] += x[key] * np.exp(-1j * m * phase_shift)
     return result
+
 
 def sum_contributions_lm(x_m, phase_shift=0.0):
     """
@@ -1504,6 +1551,7 @@ def sum_contributions_lm(x_m, phase_shift=0.0):
             assert l >= m
             result[key] += np.nan_to_num(x[key]) * np.exp(-1j * m * phase_shift)
     return result
+
 
 if __name__ == "__main__":
     import pandas as pd

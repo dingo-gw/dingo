@@ -80,7 +80,6 @@ class GWSignal(object):
         self.whiten = False
 
         self.asd = None
-        
 
     @staticmethod
     def _check_domains(domain_in, domain_out):
