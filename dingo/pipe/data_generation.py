@@ -156,8 +156,8 @@ class DataGenerationInput(BilbyDataGenerationInput):
             args.injection_dict = None
             args.injection_waveform_arguments = None
             args.injection_frequency_domain_source_model = None
+            args.gaussian_noise = False
             self.frequency_domain_source_model = None
-            self.gaussian_noise = False
 
             self.create_data(args)
 
