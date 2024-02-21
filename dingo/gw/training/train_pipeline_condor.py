@@ -155,8 +155,6 @@ def train_condor():
             f"condor_submit_bid {bid} " f"{join(args.train_dir, submission_file)}"
         )
     else:
-        # There was no 'bid' in the sample settings file.
-        # This is a specific settings for the MPI-IS cluster
         os.system(f"condor_submit {join(args.train_dir, submission_file)}")
 
 
