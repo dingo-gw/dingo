@@ -149,6 +149,7 @@ def train_condor():
     #
 
     if "bid" in condor_settings:
+        # This is a specific setting for the MPI-IS cluster.
         bid = condor_settings["bid"]
         os.system(
             f"condor_submit_bid {bid} " f"{join(args.train_dir, submission_file)}"
