@@ -108,6 +108,7 @@ default_extrinsic_dict = {
     "geocent_time": "bilby.core.prior.Uniform(minimum=-0.1, maximum=0.1)",
     "psi": 'bilby.core.prior.Uniform(minimum=0.0, maximum=np.pi, boundary="periodic")',
     "luminosity_distance": "bilby.core.prior.Uniform(minimum=100.0, maximum=6000.0)",
+    "los_acceleration": "bilby.core.prior.Uniform(minimum=0,maximum=1)"
 }
 
 default_intrinsic_dict = {
