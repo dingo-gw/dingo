@@ -133,7 +133,7 @@ def get_scheduler_from_kwargs(
         optimizer for which the scheduler is used
     scheduler_kwargs:
         kwargs for scheduler; type needs to be one of [step, cosine,
-        reduce_on_plateau], the remaining kwargs are used for
+        reduce_on_plateau, sequential, linear], the remaining kwargs are used for
         specific scheduler kwargs, such as learning rate and momentum
 
     Returns
@@ -144,13 +144,37 @@ def get_scheduler_from_kwargs(
         "step": torch.optim.lr_scheduler.StepLR,
         "cosine": torch.optim.lr_scheduler.CosineAnnealingLR,
         "reduce_on_plateau": torch.optim.lr_scheduler.ReduceLROnPlateau,
+        "sequential": torch.optim.lr_scheduler.SequentialLR,
+        "linear": torch.optim.lr_scheduler.LinearLR
     }
     if not "type" in scheduler_kwargs:
         raise KeyError("Scheduler type needs to be specified.")
     if not scheduler_kwargs["type"].lower() in schedulers_dict:
         raise ValueError("No valid scheduler specified.")
-    scheduler = schedulers_dict[scheduler_kwargs.pop("type")]
-    return scheduler(optimizer, **scheduler_kwargs)
+
+    if scheduler_kwargs["type"] == "sequential":
+        # Load individual schedulers
+        scheduler_keys = [k for k in scheduler_kwargs.keys() if k.startswith("scheduler")]
+        if len(scheduler_keys) < 2:
+            raise KeyError("At least two schedulers need to be specified via "
+                           "'scheduler_1': {...}, 'scheduler_2: {...}' when using sequential.")
+        schedulers = []
+        for scheduler_key in scheduler_keys:
+            individual_scheduler_kwargs = scheduler_kwargs.pop(scheduler_key)
+            if "type" not in individual_scheduler_kwargs:
+                raise KeyError(f"Scheduler type of {scheduler_key} needs to be specified.")
+            individual_scheduler_type = individual_scheduler_kwargs.pop("type").lower()
+            if individual_scheduler_type not in schedulers_dict:
+                raise ValueError(f"No valid scheduler specified for {scheduler_key}.")
+            individual_scheduler = schedulers_dict[individual_scheduler_type](optimizer, **individual_scheduler_kwargs)
+            schedulers.append(individual_scheduler)
+
+        # Create SequentialScheduler
+        scheduler_kwargs.pop("type")
+        return schedulers_dict["sequential"](optimizer, schedulers, **scheduler_kwargs)
+    else:
+        scheduler = schedulers_dict[scheduler_kwargs.pop("type")]
+        return scheduler(optimizer, **scheduler_kwargs)
 
 
 def perform_scheduler_step(
