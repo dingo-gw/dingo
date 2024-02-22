@@ -61,6 +61,7 @@ def generate_base_population(
     event_model = PosteriorModel(
         model_filename=event_model_path, device=device, load_training_info=False
     )
+    event_model_metadata = copy.deepcopy(event_model.metadata)
     # Make sure this is not a GNPE network.
     event_model.set_embedding_only()
 
@@ -162,6 +163,7 @@ def generate_base_population(
         "asd_dataset_path": asd_dataset_path,
         "size": size,
         "prior": prior_dict,
+        "full_event_model_metadata": event_model_metadata,
     }
 
     # Append settings, calculate log_probs under the full prior, also S/N
