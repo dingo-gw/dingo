@@ -12,7 +12,7 @@ from dingo.core.utils import (
     get_number_of_model_parameters,
     RuntimeLimits,
 )
-from dingo.populations.population_models import build_population_model
+from dingo.populations.training.population_dataset import PopulationDataset
 from dingo.populations.training.transform_builders import set_train_transforms
 
 
@@ -21,10 +21,8 @@ def train(train_settings: dict, train_dir: str, local_settings: dict, resume=Fal
 
     # Build population forward models (train and test). These use different halves of
     # the base population events.
-    population_model_train = build_population_model(
-        train_settings["data"], mode="train"
-    )
-    population_model_test = build_population_model(train_settings["data"], mode="test")
+    population_model_train = PopulationDataset(**train_settings["data"], mode="train")
+    population_model_test = PopulationDataset(**train_settings["data"], mode="test")
 
     set_train_transforms(population_model_train, train_settings["data"])
     set_train_transforms(population_model_test, train_settings["data"])
