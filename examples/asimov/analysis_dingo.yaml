@@ -1,0 +1,6 @@
+kind: analysis
+name: Prod0
+pipeline: dingo
+networks:
+  model: /data/nihargupte/projects/dingo-devel/tutorials/010_aligned_spin/train_dirs/train_dir_SEOBNRv4HM_O2_0/model_latest.pt
+  model init: /data/nihargupte/projects/dingo-devel/tutorials/010_aligned_spin/train_dirs/train_dir_SEOBNRv4HM_O2_0_time/model_latest.pt

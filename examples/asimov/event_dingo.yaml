@@ -1,0 +1,36 @@
+kind: event
+name: GW150914_095045
+data:
+  channels:
+    H1: H1:DCS-CALIB_STRAIN_C02
+    L1: L1:DCS-CALIB_STRAIN_C02
+  frame types:
+    H1: H1_HOFT_C02
+    L1: L1_HOFT_C02
+  segment length: 4
+event time: 1126259462.391
+gid: G190047
+psd length: 128
+interferometers:
+- H1
+- L1
+calibration:
+  H1: /work/nihargupte/analysis/dingo/events/O1/GW150914/data/H1_calib_env.txt
+  L1: /work/nihargupte/analysis/dingo/events/O1/GW150914/data/L1_calib_env.txt
+priors:
+  chirp mass:
+    maximum: 41.97447913941358
+    minimum: 21.418182160215295
+  luminosity distance:
+    maximum: 10000
+    minimum: 10
+  mass 1:
+    maximum: 1000
+    minimum: 1
+  mass ratio:
+    maximum: 1.0
+    minimum: 0.05
+quality:
+  minimum frequency:
+    H1: 20
+    L1: 20
