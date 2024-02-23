@@ -1,3 +1,5 @@
+import copy
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -140,6 +142,8 @@ def get_scheduler_from_kwargs(
     -------
     scheduler
     """
+    scheduler_kwargs = copy.deepcopy(scheduler_kwargs)
+
     schedulers_dict = {
         "step": torch.optim.lr_scheduler.StepLR,
         "cosine": torch.optim.lr_scheduler.CosineAnnealingLR,
