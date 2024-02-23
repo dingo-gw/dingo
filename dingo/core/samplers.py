@@ -226,6 +226,17 @@ class Sampler(object):
         self._post_process(samples)
         self.samples = pd.DataFrame(samples)
         print(f"Done. This took {time.time() - t0:.1f} s.")
+
+        # Add derived parameters
+        keys = self.samples.keys()
+        keys_new = [
+            k[len("delta_"):] for k in keys if k.startswith("delta_")
+            if k[len("delta_"):] not in keys and k[len("delta_"):] + "_proxy" in keys
+        ]
+        print(f"Adding parameters for {keys_new}.")
+        for k in keys_new:
+            self.samples[k] = self.samples["delta_" + k] + self.samples[k + "_proxy"]
+
         sys.stdout.flush()
 
     def log_prob(self, samples: pd.DataFrame) -> np.ndarray:
@@ -556,7 +567,9 @@ class GNPESampler(Sampler):
             # In this case it makes sense to save the log_prob and the proxy parameters.
 
             samples = x["parameters"]
-            samples["log_prob"] = x["log_prob"] + proxy_log_prob.to(x["log_prob"].device)
+            samples["log_prob"] = x["log_prob"] + proxy_log_prob.to(
+                x["log_prob"].device
+            )
 
             # The log_prob returned by gnpe is not just the log_prob over parameters
             # theta, but instead the log_prob in the *joint* space q(theta,theta^|x),
@@ -609,13 +622,17 @@ class GNPESampler(Sampler):
 
 
 class FixedInitSampler(object):
-    def __init__(self, init_parameters):
+    def __init__(self, init_parameters, log_prob=None):
         self.init_parameters = init_parameters
         # Set unconditional_model=False to avoid that context and event data is
         # copied to GNPE sampler.
         self.unconditional_model = (
             False  # avoids copying of context/data to GNPE sampler
         )
+        if log_prob is not None:
+            self.log_prob = log_prob
+        else:
+            self.log_prob = torch.nan
 
     @property
     def model(self):
@@ -625,5 +642,5 @@ class FixedInitSampler(object):
         sample = {
             k: v * torch.ones(num_samples) for k, v in self.init_parameters.items()
         }
-        sample["log_prob"] = torch.ones(num_samples).fill_(torch.nan)
+        sample["log_prob"] = torch.ones(num_samples).fill_(self.log_prob)
         return sample

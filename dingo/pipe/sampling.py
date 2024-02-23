@@ -8,7 +8,6 @@ from bilby_pipe.utils import parse_args, logger, convert_string_to_dict
 
 from dingo.core.samplers import FixedInitSampler
 from dingo.core.models import PosteriorModel
-from dingo.core.transforms import Copy
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
 from dingo.gw.inference.inference_pipeline import prepare_log_prob
@@ -125,7 +124,12 @@ class SamplingInput(Input):
                 init_sampler=init_sampler,
                 num_iterations=self.num_gnpe_iterations,
                 fixed_gnpe_proxies=self.fixed_gnpe_proxies,
+                # fixed_conditioning_parameters=self.fixed_conditioning_parameters,
             )
+
+        elif self.fixed_gnpe_proxies is not None:
+            self.gnpe = False
+            self.dingo_sampler = self._get_init_sampler(model)
 
         else:
             self.gnpe = False
@@ -185,7 +189,7 @@ class SamplingInput(Input):
                 f"Unsupported gnpe keys {gnpe_keys} for fixed initialization."
             )
 
-        fixed_init_sampler = FixedInitSampler(fixed_init_parameters)
+        fixed_init_sampler = FixedInitSampler(fixed_init_parameters, log_prob=0)
         print(
             f"Using a GNPE initialization network with fixed conditioning proxies "
             f"{fixed_init_parameters}."
