@@ -262,6 +262,8 @@ class Result(CoreResult):
         phase_marginalization_kwargs: Optional[dict] = None,
         calibration_marginalization_kwargs: Optional[dict] = None,
         phase_grid: Optional[np.ndarray] = None,
+        decimate: Optional[bool] = False,
+        phase_heterodyning: Optional[bool] = False,
     ):
         """
         Build the likelihood function based on model metadata. This is called at the
@@ -307,6 +309,8 @@ class Result(CoreResult):
         self.time_marginalization_kwargs = time_marginalization_kwargs
         self.phase_marginalization_kwargs = phase_marginalization_kwargs
         self.calibration_marginalization_kwargs = calibration_marginalization_kwargs
+        self.decimate = decimate
+        self.phase_heterodyning = phase_heterodyning
 
         # FIXME: This is a quick hack because I didn't know how to choose the wfg
         #  domain in the case of a changing domain during importance sampling. It could
@@ -316,6 +320,20 @@ class Result(CoreResult):
             wfg_domain = build_domain(self.base_metadata["dataset_settings"]["domain"])
         else:
             wfg_domain = self.domain
+
+        if phase_heterodyning:
+            if (
+                "chirp_mass_proxy" not in self.samples
+                or np.std(self.samples["chirp_mass_proxy"]) > 1e-10
+            ):
+                raise ValueError("Heterodyning assumes constant chirp mass proxy.")
+            chirp_mass_proxy = np.mean(self.samples["chirp_mass_proxy"])
+            chirp_mass_proxy = float(chirp_mass_proxy)
+            phase_heterodyning_kwargs = dict(
+                fixed_parameters=dict(chirp_mass=chirp_mass_proxy)
+            )
+        else:
+            phase_heterodyning_kwargs = None
 
         self.likelihood = StationaryGaussianGWLikelihood(
             wfg_kwargs=self.base_metadata["dataset_settings"]["waveform_generator"],
@@ -327,11 +345,14 @@ class Result(CoreResult):
             phase_marginalization_kwargs=phase_marginalization_kwargs,
             calibration_marginalization_kwargs=calibration_marginalization_kwargs,
             phase_grid=phase_grid,
+            decimate=decimate,
+            phase_heterodyning_kwargs=phase_heterodyning_kwargs,
         )
 
     def sample_synthetic_phase(
         self,
         synthetic_phase_kwargs,
+        likelihood_kwargs: Optional[dict] = None,
         inverse: bool = False,
     ):
         """
@@ -419,7 +440,9 @@ class Result(CoreResult):
 
         if not inverse:
             # TODO: This can probably be removed.
-            self._build_likelihood()
+            if likelihood_kwargs is None:
+                likelihood_kwargs = {}
+            self._build_likelihood(**likelihood_kwargs)
 
         if inverse:
             # We estimate the log_prob for given phases, so first save the evaluation

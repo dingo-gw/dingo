@@ -3,7 +3,6 @@ import numpy as np
 import torch
 import lal
 from copy import copy
-import math
 
 from .base import Domain
 from .frequency_domain import FrequencyDomain
@@ -201,7 +200,7 @@ class MultibandedFrequencyDomain(Domain):
             else:
                 raise ValueError(
                     f"f_min = {f_min} is not in expected range "
-                    f"[{self._f_base_lower[-1], self._f_base_lower[-1]}]."
+                    f"[{self._f_base_lower[0], self._f_base_lower[-1]}]."
                 )
 
         if f_max is not None:
@@ -211,7 +210,7 @@ class MultibandedFrequencyDomain(Domain):
             else:
                 raise ValueError(
                     f"f_min = {f_min} is not in expected range "
-                    f"[{self._f_base_lower[-1], self._f_base_lower[-1]}]."
+                    f"[{self._f_base_lower[0], self._f_base_lower[-1]}]."
                 )
 
         lower_band = self._band_assignment[lower_bin]

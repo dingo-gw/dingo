@@ -13,6 +13,7 @@ from dingo.gw.injection import GWSignal
 from dingo.gw.waveform_generator import WaveformGenerator
 from dingo.gw.domains import build_domain
 from dingo.gw.data.data_preparation import get_event_data_and_domain
+from dingo.gw.transforms import HeterodynePhase
 
 
 class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
@@ -31,6 +32,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         phase_marginalization_kwargs=None,
         calibration_marginalization_kwargs=None,
         phase_grid=None,
+        phase_heterodyning_kwargs=None,
+        decimate=False,
     ):
         # TODO: Does the phase_grid argument ever get used?
         """
@@ -54,23 +57,66 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             Calibration marginalization parameters. If None, no calibration marginalization is used.
         phase_marginalization_kwargs: dict
             Phase marginalization parameters. If None, no phase marginalization is used.
+        phase_heterodyning_kwargs: dict = None
+            If set, apply phase heterodyning.
+        decimate: bool = False
+            If set, decimate data from domain.base_domain to domain
         """
+        # determine domains based on whether we decimate or not
+        if decimate:
+            if not hasattr(data_domain, "base_domain"):
+                raise ValueError("Decimation requires data domain to have base_domain.")
+            if not hasattr(wfg_domain, "base_domain"):
+                raise ValueError("Decimation requires wfg domain to have base_domain.")
+        else:
+            data_domain = getattr(data_domain, "base_domain", data_domain)
+            wfg_domain = getattr(wfg_domain, "base_domain", wfg_domain)
+
         super().__init__(
             wfg_kwargs=wfg_kwargs,
             wfg_domain=wfg_domain,
             data_domain=data_domain,
             ifo_list=list(event_data["waveform"].keys()),
             t_ref=t_ref,
+            phase_heterodyning_kwargs=phase_heterodyning_kwargs,
         )
 
-        self.asd = event_data["asds"]
+        # optionally heterodyne
+        if phase_heterodyning_kwargs is not None:
+            heterodyne = HeterodynePhase(
+                domain=getattr(data_domain, "base_domain", data_domain),
+                **phase_heterodyning_kwargs,
+            )
+            event_data = heterodyne(event_data)
 
-        self.whitened_strains = {
-            k: v / self.asd[k] / self.data_domain.noise_std
-            for k, v in event_data["waveform"].items()
-        }
-        if len(list(self.whitened_strains.values())[0]) != data_domain.max_idx + 1:
-            raise ValueError("Strain data does not match domain.")
+        # optionally decimate
+        if decimate:
+            # whiten (without noise std, do this after decimation!)
+            self.whitened_strains = {
+                k: v / event_data["asds"][k]
+                for k, v in event_data["waveform"].items()
+            }
+            # decimate
+            self.whitened_strains = {
+                ifo: data_domain.decimate(waveform_base) / data_domain.noise_std
+                for ifo, waveform_base in self.whitened_strains.items()
+            }
+            self.asd = {
+                ifo: 1 / data_domain.decimate(1 / asd_base)
+                for ifo, asd_base in event_data["asds"].items()
+            }
+            del event_data
+        else:
+            # whiten
+            self.whitened_strains = {
+                k: v / event_data["asds"][k] / data_domain.noise_std
+                for k, v in event_data["waveform"].items()
+            }
+            self.asd = event_data["asds"]
+            if len(list(self.whitened_strains.values())[0]) != data_domain.max_idx + 1:
+                raise ValueError("Strain data does not match domain.")
+            del event_data
+
         # log noise evidence, independent of theta and waveform model
         self.log_Zn = sum(
             [

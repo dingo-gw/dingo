@@ -15,6 +15,7 @@ from dingo.gw.transforms import (
     ProjectOntoDetectors,
     WhitenAndScaleStrain,
     ApplyCalibrationUncertainty,
+    HeterodynePhase,
 )
 from dingo.gw.waveform_generator.waveform_generator import (
     WaveformGenerator,
@@ -37,6 +38,7 @@ class GWSignal(object):
         data_domain: FrequencyDomain,
         ifo_list: list,
         t_ref: float,
+        phase_heterodyning_kwargs: dict = None,
     ):
         """
         Parameters
@@ -72,6 +74,7 @@ class GWSignal(object):
 
         self.t_ref = t_ref
         self.ifo_list = InterferometerList(ifo_list)
+        self.phase_heterodyning_kwargs = phase_heterodyning_kwargs
 
         # When we set self.whiten, the projection transforms are automatically prepared.
         self._calibration_envelope = None
@@ -144,6 +147,13 @@ class GWSignal(object):
             )
         if self.whiten:
             transforms.append(WhitenAndScaleStrain(self.data_domain.noise_std))
+        if self.phase_heterodyning_kwargs:
+            transforms.append(
+                HeterodynePhase(
+                    domain=self.data_domain,
+                    **self.phase_heterodyning_kwargs,
+                )
+            )
         self.projection_transforms = Compose(transforms)
 
     def signal(self, theta):

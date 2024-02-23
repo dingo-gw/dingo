@@ -59,6 +59,7 @@ def plot_corner_multi(
         p
         for p in samples[0].columns
         if p in set.intersection(*(set(s.columns) for s in samples))
+        and np.all([np.std(s[p]) > 0 for s in samples])  # remove constant columns
     ]
 
     fig = None
