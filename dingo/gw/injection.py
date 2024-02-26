@@ -8,7 +8,7 @@ from dingo.gw.domains import (
     build_domain,
     build_domain_from_model_metadata,
 )
-from dingo.gw.gwutils import get_extrinsic_prior_dict
+from dingo.gw.gwutils import get_extrinsic_prior_dict, inner_product
 from dingo.gw.prior import build_prior_with_defaults, split_off_extrinsic_parameters
 from dingo.gw.transforms import (
     GetDetectorTimes,
@@ -328,7 +328,7 @@ class Injection(GWSignal):
             t_ref=metadata["train_settings"]["data"]["ref_time"],
         )
 
-    def injection(self, theta):
+    def injection(self, theta, store_snr=False):
         """
         Generate an injection based on specified parameters.
 
@@ -350,7 +350,7 @@ class Injection(GWSignal):
                 waveform: data (signal + noise) in each detector
                 extrinsic_parameters: {}
                 parameters: waveform parameters
-                asd (if set): amplitude spectral density for each detector
+                asds (if set): amplitude spectral density for each detector
         """
         signal = self.signal(theta)
         try:
@@ -374,6 +374,24 @@ class Injection(GWSignal):
             d = s + noise
             data[ifo] = self.data_domain.update_data(d, low_value=0.0)
 
+        if store_snr:
+            kappa_squared = 0.0
+            rho_opt_squared = 0.0
+            for ifo, clean_waveform in signal["waveform"].items():
+                psd = asd[ifo] ** 2
+                kappa_squared += inner_product(
+                    clean_waveform, data[ifo], delta_f=self.data_domain.delta_f, psd=psd
+                )
+                rho_opt_squared += inner_product(
+                    clean_waveform,
+                    clean_waveform,
+                    delta_f=self.data_domain.delta_f,
+                    psd=psd,
+                )
+            signal["parameters"]["matched_filter_snr"] = float(
+                kappa_squared / np.sqrt(rho_opt_squared)
+            )
+
         signal["waveform"] = data
         return signal
 
@@ -394,7 +412,7 @@ class Injection(GWSignal):
                 waveform: data (signal + noise) in each detector
                 extrinsic_parameters: {}
                 parameters: waveform parameters
-                asd (if set): amplitude spectral density for each detector
+                asds (if set): amplitude spectral density for each detector
         """
         theta = self.prior.sample()
         return self.injection(theta)

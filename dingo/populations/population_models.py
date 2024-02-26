@@ -2,7 +2,11 @@ import copy
 
 from astropy.cosmology import FlatLambdaCDM
 from bilby.core.prior import PriorDict, PowerLaw, Constraint
-from bilby.gw.conversion import generate_mass_parameters
+from bilby.gw.conversion import (
+    generate_mass_parameters,
+    component_masses_to_mass_ratio,
+    component_masses_to_chirp_mass,
+)
 from bilby.gw.prior import UniformSourceFrame
 from pycbc.cosmology import DistToZ
 
@@ -59,6 +63,12 @@ class PowerLawPopulation(object):
             s["redshift"] = dist_to_z.get_redshift(s["luminosity_distance"])
             for k in ["mass_1", "mass_2"]:
                 s[k] = s[k + "_source"] * (1 + s["redshift"])
+            # IMPORTANT: We want all the mass parameters in order to avoid any problems
+            # combining with parameters sampled from the prior. We are leaving off
+            # things like total mass, symmetric mass ratio, because they don't tend to
+            # occur in our code. But this is something to watch for.
+            s["chirp_mass"] = component_masses_to_chirp_mass(s["mass_1"], s["mass_2"])
+            s["mass_ratio"] = component_masses_to_mass_ratio(s["mass_1"], s["mass_2"])
             return s
 
         return generation_func
