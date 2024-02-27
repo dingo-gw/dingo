@@ -1,4 +1,5 @@
 import copy
+from os.path import join
 
 import numpy as np
 import pandas as pd
@@ -93,7 +94,7 @@ class EventEmbeddingsDataset(DingoDataset):
         # TODO: Raise error if d > threshold distance? This would indicate that the
         #  coverage of the base population is too sparse. Alternatively, generate new
         #  samples for the base population.
-        return self.parameters.iloc[i].to_dict(), self.embeddings[i]
+        return i, self.parameters.iloc[i].to_dict(), self.embeddings[i]
 
     def restrict_to_subpopulation(self, s):
         """
@@ -105,9 +106,12 @@ class EventEmbeddingsDataset(DingoDataset):
         s : slice
             Slicing object to define subpopulation
         """
-        self.parameters = self.parameters.iloc[s].reset_index()
+        self.parameters = self.parameters.iloc[s].reset_index(drop=True)
         self.embeddings = self.embeddings[s].copy()
         self.settings["size"] = len(self.parameters)
+
+    def __len__(self):
+        return len(self.parameters)
 
 
 class PopulationDataset(torch.utils.data.Dataset):
@@ -171,6 +175,7 @@ class PopulationDataset(torch.utils.data.Dataset):
         self.sample_hyperparameters()
 
         self.transform = None
+        self.event_counter = np.zeros(len(self.event_embeddings))
 
     def __getitem__(self, idx):
         size = np.random.randint(
@@ -185,10 +190,11 @@ class PopulationDataset(torch.utils.data.Dataset):
         tries = 0
         while n < size:
             p = generate_event_func()
-            p_nearest, emb = self.event_embeddings.sample_nearest(p)
+            i, p_nearest, emb = self.event_embeddings.sample_nearest(p)
             if p_nearest["matched_filter_snr"] >= self.snr_threshold:
                 embeddings[n] = emb
                 n += 1
+                self.event_counter[i] += 1
             tries += 1
             if tries / (n + 1) > 100:
                 raise ValueError("Sampling efficiency < 1%")
@@ -232,3 +238,6 @@ class PopulationDataset(torch.utils.data.Dataset):
         mean = self.hyperparameters.mean().to_dict()
         std = self.hyperparameters.std().to_dict()
         return {"mean": mean, "std": std}
+
+    def save_stats(self, directory):
+        np.save(join(directory, "event_counts.npy"), self.event_counter)

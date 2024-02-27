@@ -92,6 +92,9 @@ def train(train_settings: dict, train_dir: str, local_settings: dict, resume=Fal
         use_wandb=local_settings.get("wandb", False),
         test_only=local_settings.get("test_only", False),
     )
+
+    population_model_train.save_stats(train_dir)
+
     if pm.epoch == train_settings["training"]["epochs"]:
         save_file = os.path.join(train_dir, f"model_complete.pt")
         print(f"Training complete. Saving to {save_file}.")
