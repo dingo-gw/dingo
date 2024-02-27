@@ -12,6 +12,8 @@ from dingo.core.transforms import GetItem, RenameKey
 from dingo.gw.domains import build_domain, MultibandedFrequencyDomain
 from dingo.gw.gwutils import get_window_factor
 from dingo.gw.result import Result
+from dingo.gw.gwutils import get_extrinsic_prior_dict
+from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.transforms import (
     WhitenAndScaleStrain,
     DecimateWaveformsAndASDS,
@@ -86,11 +88,9 @@ class GWSamplerMixin(object):
             Whether to apply instead the inverse transformation. This is used prior to
             calculating the log_prob.
         """
-        # FIXME: Update this method to make sure that for models that do not include sky
-        #  position, it does not do anything.
         if self.event_metadata is not None:
             t_event = self.event_metadata.get("time_event")
-            if t_event is not None and t_event != self.t_ref:
+            if t_event is not None and t_event != self.t_ref and "ra" in samples:
                 ra = samples["ra"]
                 time_reference = Time(self.t_ref, format="gps", scale="utc")
                 time_event = Time(t_event, format="gps", scale="utc")
@@ -110,7 +110,8 @@ class GWSamplerMixin(object):
         Post processing of parameter samples.
         * Correct the sky position for a potentially fixed reference time.
           (see self._correct_reference_time)
-        * Potentially sample a synthetic phase. (see self._sample_synthetic_phase)
+        * Add derived parameters.
+        * Add fixed parameters from the prior.
 
         This method modifies the samples in place.
 
@@ -121,21 +122,38 @@ class GWSamplerMixin(object):
             Whether to apply instead the inverse transformation. This is used prior to
             calculating the log_prob.
         """
+        # Correct reference time
         if not self.unconditional_model:
             self._correct_reference_time(samples, inverse)
-        # if not inverse:
-        #     self._correct_reference_time(samples, inverse)
-        #     # if self.synthetic_phase_kwargs is not None:
-        #     #     print(f"Sampling synthetic phase.")
-        #     #     t0 = time.time()
-        #     #     self._sample_synthetic_phase(samples, inverse)
-        #     #     print(f"Done. This took {time.time() - t0:.2f} seconds.")
-        #
-        # # If inverting, we go in reverse order.
-        # else:
-        #     # if self.synthetic_phase_kwargs is not None:
-        #     #     self._sample_synthetic_phase(samples, inverse)
-        #     self._correct_reference_time(samples, inverse)
+
+        # Add derived parameters
+        keys = samples.keys()
+        keys_new = [
+            k[len("delta_") :]
+            for k in keys
+            if k.startswith("delta_")
+            if k[len("delta_") :] not in keys and k[len("delta_") :] + "_proxy" in keys
+        ]
+        print(f"Adding parameters for {keys_new}.")
+        for k in keys_new:
+            samples[k] = samples["delta_" + k] + samples[k + "_proxy"]
+
+        # Add fixed parameters from prior
+        intrinsic_prior = self.metadata["dataset_settings"]["intrinsic_prior"]
+        extrinsic_prior = get_extrinsic_prior_dict(
+            self.metadata["train_settings"]["data"]["extrinsic_prior"]
+        )
+        priors = {**intrinsic_prior, **extrinsic_prior}
+        num_samples = len(samples[list(samples.keys())[0]])
+        for k, p in priors.items():
+            if (
+                p.startswith("bilby.core.prior.analytical.DeltaFunction")
+                or p.startswith("DeltaFunction")
+                and k not in samples
+            ):
+                v = float(p.split("(")[1].strip(")"))
+                print(f"Adding fixed parameter {k} = {v} from prior.")
+                samples[k] = v * np.ones(num_samples)
 
     def initialize_transforms_pre(self):
         """

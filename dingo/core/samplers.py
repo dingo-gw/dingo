@@ -227,16 +227,6 @@ class Sampler(object):
         self.samples = pd.DataFrame(samples)
         print(f"Done. This took {time.time() - t0:.1f} s.")
 
-        # Add derived parameters
-        keys = self.samples.keys()
-        keys_new = [
-            k[len("delta_"):] for k in keys if k.startswith("delta_")
-            if k[len("delta_"):] not in keys and k[len("delta_"):] + "_proxy" in keys
-        ]
-        print(f"Adding parameters for {keys_new}.")
-        for k in keys_new:
-            self.samples[k] = self.samples["delta_" + k] + self.samples[k + "_proxy"]
-
         sys.stdout.flush()
 
     def log_prob(self, samples: pd.DataFrame) -> np.ndarray:
