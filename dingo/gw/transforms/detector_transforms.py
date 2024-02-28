@@ -148,7 +148,8 @@ class ProjectOntoDetectors(object):
         extrinsic_parameters = sample["extrinsic_parameters"].copy()
         try:
             d_ref = parameters["luminosity_distance"]
-            d_new = extrinsic_parameters.pop("luminosity_distance")
+            # Use existing luminosity distance (d_ref) if no new distance provided.
+            d_new = extrinsic_parameters.pop("luminosity_distance", d_ref)
             ra = extrinsic_parameters.pop("ra")
             dec = extrinsic_parameters.pop("dec")
             psi = extrinsic_parameters.pop("psi")

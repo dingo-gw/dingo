@@ -4,13 +4,14 @@ from os.path import join
 import numpy as np
 import pandas as pd
 import torch.utils.data
+import yaml
 from bilby.core.prior import Constraint
 from bilby.gw.conversion import chirp_mass_and_mass_ratio_to_component_masses
 from bilby.gw.prior import BBHPriorDict
 from scipy.spatial import cKDTree
 
 from dingo.core.dataset import DingoDataset
-from dingo.populations.population_models import PowerLawPopulation
+from dingo.populations.population_models import build_population_model
 
 DATA_KEYS = ["parameters", "embeddings"]
 
@@ -148,20 +149,37 @@ class PopulationDataset(torch.utils.data.Dataset):
 
         self.event_embeddings.build_prior()
 
-        if population_model == "power_law":
-            minimum_distance = self.event_embeddings.prior[
-                "luminosity_distance"
-            ].minimum
-            maximum_distance = self.event_embeddings.prior[
-                "luminosity_distance"
-            ].maximum
-            self.population_model = PowerLawPopulation(
-                population_prior, minimum_distance, maximum_distance
+        if population_model != self.event_embeddings.settings["population_model"]:
+            print(
+                f"Warning:  Embeddings dataset generated from "
+                f"{self.event_embeddings.settings['population_model']} population "
+                f"model, which differs from requested {population_model}."
             )
-        else:
-            raise NotImplementedError(
-                f"Population model {population_model} is not " f"implemented."
+        if population_prior != self.event_embeddings.settings["population_prior"]:
+            print(
+                "Warning: Embeddings dataset generated using different population "
+                "prior than requested for training."
             )
+            print("Embeddings prior:")
+            print(
+                yaml.dump(
+                    self.event_embeddings.settings["population_prior"],
+                    default_flow_style=False,
+                    sort_keys=False,
+                )
+            )
+            print("Training prior:")
+            print(
+                yaml.dump(
+                    population_prior,
+                    default_flow_style=False,
+                    sort_keys=False,
+                )
+            )
+
+        self.population_model = build_population_model(
+            population_model, population_prior, self.event_embeddings.prior
+        )
 
         self.event_embeddings.initialize_nearest_neighbors(
             search_parameters=self.population_model.event_parameters

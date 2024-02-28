@@ -41,7 +41,7 @@ model:
 
 
 training:
-  epochs: 10
+  epochs: 1
   batch_size: 256
   optimizer:
     type: adam

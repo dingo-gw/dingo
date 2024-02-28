@@ -17,11 +17,13 @@ class PowerLawPopulation(object):
     law population model.
     """
 
+    model_type = "power_law"
+    event_parameters = ["mass_1", "mass_2", "luminosity_distance"]
+
     def __init__(self, prior, minimum_distance, maximum_distance):
         self.prior = PriorDict(copy.deepcopy(prior))
         self.minimum_distance = minimum_distance
         self.maximum_distance = maximum_distance
-        self.event_parameters = ["mass_1", "mass_2", "luminosity_distance"]
 
     def get_event_generator(self, p):
         cosmology = FlatLambdaCDM(Om0=0.3, H0=p["hubble_constant"])
@@ -74,8 +76,16 @@ class PowerLawPopulation(object):
         return generation_func
 
 
-# def build_population_model(settings, mode=None):
-#     population_model = settings["population_model"]
-#     kwargs = {k: v for k, v in settings.items() if k != "population_model"}
-#     if population_model == "power_law":
-#         return PowerLawPopulation(**kwargs, mode=mode)
+def build_population_model(population_model, population_prior, event_model_prior):
+    if population_model == "power_law":
+        minimum_distance = event_model_prior["luminosity_distance"].minimum
+        maximum_distance = event_model_prior["luminosity_distance"].maximum
+        return PowerLawPopulation(
+            population_prior,
+            minimum_distance=minimum_distance,
+            maximum_distance=maximum_distance,
+        )
+    else:
+        raise NotImplementedError(
+            f"Population model {population_model} is not " f"implemented."
+        )

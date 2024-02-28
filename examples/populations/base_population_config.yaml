@@ -1,6 +1,13 @@
 event_model_path: /Users/stephen/Documents/Research/dingo-gw/networks/npe_xphm_O3/model_225.pt
 asd_dataset_path: /Users/stephen/Documents/Research/dingo-gw/asd-datasets/asds_O3.hdf5
+population_model: power_law
+population_prior:
+  minimum_mass: bilby.core.prior.Uniform(minimum=18.0, maximum=30.0)
+  maximum_mass: bilby.core.prior.Uniform(minimum=37.0, maximum=47.0)
+  hubble_constant: bilby.core.prior.Uniform(minimum=40.0, maximum=140.0)
+  alpha: bilby.core.prior.Uniform(minimum=-2.0, maximum=2.0)
+  beta: bilby.core.prior.Uniform(minimum=-2.0, maximum=2.0)
 size: 10000
 device: cpu
-batch_size: 100
+batch_size: 1000
 num_workers: 0

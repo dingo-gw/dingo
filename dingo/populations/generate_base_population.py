@@ -7,6 +7,8 @@ import time
 import pandas as pd
 import torch
 import yaml
+from tqdm import tqdm
+from bilby.gw.prior import BBHPriorDict
 from threadpoolctl import threadpool_limits
 from torch.utils.data import DataLoader
 
@@ -16,8 +18,13 @@ from dingo.gw.dataset import WaveformDataset
 from dingo.gw.domains import build_domain
 from dingo.gw.prior import build_prior_with_defaults, autocomplete_full_prior_dict
 from dingo.gw.training import set_train_transforms
-from dingo.gw.transforms import AddWhiteNoiseComplex, UnpackDict
+from dingo.gw.transforms import (
+    AddWhiteNoiseComplex,
+    UnpackDict,
+    SampleExtrinsicParameters,
+)
 from dingo.gw.waveform_generator.waveform_generator import build_waveform_generator
+from dingo.populations.population_models import build_population_model
 from dingo.populations.training.population_dataset import EventEmbeddingsDataset
 
 
@@ -28,10 +35,13 @@ def generate_base_population(
     batch_size=None,
     device="cuda",
     num_workers=0,
+    population_model=None,
+    population_prior=None,
 ):
     """
-    Generate a "base" population, meaning a population drawn from a Dingo model prior:
-        (1) Sample event parameters from the prior.
+    Generate a "base" population, meaning a population drawn from the prior:
+        (1) Sample event parameters from the population prior and likelihood,
+        or optionally the event model prior.
         (2) For each set of event parameters, simulate detector data.
         (3) For each set of detector data, generate a Dingo embedding.
     These tasks are carried out based on a Dingo event model and its data generative
@@ -53,6 +63,11 @@ def generate_base_population(
     device : str
         "cuda" or "cpu"
     num_workers : int
+    population_model : str
+        Type of population model. The population model is used to generate parameters
+        for the embeddings, ensuring good coverage for later training. (Optional)
+    population_prior : dict
+        Prior for the population model. (Optional)
 
     Returns
     -------
@@ -62,7 +77,7 @@ def generate_base_population(
         model_filename=event_model_path, device=device, load_training_info=False
     )
     event_model_metadata = copy.deepcopy(event_model.metadata)
-    # Make sure this is not a GNPE network.
+    # TODO: Make sure this is not a GNPE network.
     event_model.set_embedding_only()
 
     # (1) Build a waveform dataset / dataloader. This should generate samples in real
@@ -74,10 +89,44 @@ def generate_base_population(
     waveform_dataset_dict["settings"]["num_samples"] = size
     del waveform_dataset_dict["settings"]["compression"]
 
-    prior = build_prior_with_defaults(
+    intrinsic_prior = build_prior_with_defaults(
         waveform_dataset_dict["settings"]["intrinsic_prior"]
     )
-    waveform_dataset_dict["parameters"] = pd.DataFrame(prior.sample(size))
+    full_prior_dict = autocomplete_full_prior_dict(
+        {
+            **waveform_dataset_dict["settings"]["intrinsic_prior"],
+            **event_model.metadata["train_settings"]["data"]["extrinsic_prior"],
+        }
+    )
+
+    if population_model is not None:
+        full_prior = BBHPriorDict(copy.deepcopy(full_prior_dict))
+        population_model = build_population_model(
+            population_model=population_model,
+            population_prior=population_prior,
+            event_model_prior=full_prior,
+        )
+        parameters_intrinsic = []
+        for _ in tqdm(range(size // batch_size)):
+            # We batch the sampling of parameters because preparing the cosmologies can
+            # be slow. For convenience, we generate populations of size batch_size.
+            # TODO: Deal with any remainder in the batching.
+            # TODO: Parallelize.
+            hyperparameters = population_model.prior.sample()
+            event_generation_func = population_model.get_event_generator(
+                hyperparameters
+            )
+            for _ in range(batch_size):
+                # Use the event model intrinsic prior, but updated with the population
+                # event parameters.
+                p = intrinsic_prior.sample()
+                p.update(event_generation_func())
+                parameters_intrinsic.append(p)
+        waveform_dataset_dict["parameters"] = pd.DataFrame(parameters_intrinsic)
+        # TODO: Ensure that the samples lie within the model prior, e.g., for masses.
+
+    else:
+        waveform_dataset_dict["parameters"] = pd.DataFrame(intrinsic_prior.sample(size))
 
     domain_update = event_model.metadata["train_settings"]["data"].get("domain_update")
 
@@ -111,6 +160,11 @@ def generate_base_population(
         if isinstance(t, UnpackDict):
             # Save all the parameters.
             t.selected_keys[0] = "parameters"
+        if isinstance(t, SampleExtrinsicParameters) and population_model is not None:
+            for p in population_model.event_parameters:
+                if p in t.extrinsic_prior_dict:
+                    t.extrinsic_prior_dict.pop(p)
+                    t.prior.pop(p)
 
     # (3) Data generation loop, similar to the training loop for a single-event
     # network, but with no backward pass. For each event, save the parameters,
@@ -150,19 +204,14 @@ def generate_base_population(
     # (4) Return PopulationDataset, containing this data, as well as relevant metadata
     # (e.g., prior, event generation process, pointer to Dingo model including hash).
 
-    prior_dict = autocomplete_full_prior_dict(
-        {
-            **waveform_dataset_dict["settings"]["intrinsic_prior"],
-            **event_model.metadata["train_settings"]["data"]["extrinsic_prior"],
-        }
-    )
-
     settings = {
         "event_model_path": event_model_path,
         "md5sum": hashlib.md5(open(event_model_path, "rb").read()).hexdigest(),
         "asd_dataset_path": asd_dataset_path,
         "size": size,
-        "prior": prior_dict,
+        "prior": full_prior_dict,
+        "population_model": population_model.model_type,
+        "population_prior": population_prior,
         "full_event_model_metadata": event_model_metadata,
     }
 

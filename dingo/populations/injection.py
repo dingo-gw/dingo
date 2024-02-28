@@ -1,11 +1,7 @@
 import numpy as np
 
 from dingo.gw.injection import Injection as EventInjection
-from dingo.populations.population_models import PowerLawPopulation
-
-
-# This duplicates some code from the PopulationDataset class. It would be nice to find
-# a clean way to avoid duplication.
+from dingo.populations.population_models import build_population_model
 
 
 class Injection(object):
@@ -35,16 +31,11 @@ class Injection(object):
         self.maximum_population_size = maximum_population_size
         self.event_injection = event_injection
 
-        if population_model == "power_law":
-            self.population_model = PowerLawPopulation(
-                population_prior,
-                self.event_injection.prior["luminosity_distance"].minimum,
-                self.event_injection.prior["luminosity_distance"].maximum,
-            )
-        else:
-            raise NotImplementedError(
-                f"Population model {population_model} is not yet " f"implemented."
-            )
+        self.population_model = build_population_model(
+            population_model=population_model,
+            population_prior=population_prior,
+            event_model_prior=self.event_injection.prior,
+        )
 
     @classmethod
     def from_posterior_model_metadata(cls, metadata):
