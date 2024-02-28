@@ -50,10 +50,12 @@ class SamplingInput(Input):
         self.num_samples = args.num_samples
         self.batch_size = args.batch_size
         self.density_recovery_settings = args.density_recovery_settings
-        if args.fixed_gnpe_proxies is not None:
-            self.fixed_gnpe_proxies = convert_string_to_dict(args.fixed_gnpe_proxies)
+        if args.fixed_context_parameters is not None:
+            self.fixed_context_parameters = convert_string_to_dict(
+                args.fixed_context_parameters
+            )
         else:
-            self.fixed_gnpe_proxies = None
+            self.fixed_context_parameters = None
 
         # self.sampler = args.sampler
         # self.sampler_kwargs = args.sampler_kwargs
@@ -123,11 +125,10 @@ class SamplingInput(Input):
                 model=model,
                 init_sampler=init_sampler,
                 num_iterations=self.num_gnpe_iterations,
-                fixed_gnpe_proxies=self.fixed_gnpe_proxies,
-                # fixed_conditioning_parameters=self.fixed_conditioning_parameters,
+                fixed_context_parameters=self.fixed_context_parameters,
             )
 
-        elif self.fixed_gnpe_proxies is not None:
+        elif self.fixed_context_parameters is not None:
             self.gnpe = False
             self.dingo_sampler = self._get_init_sampler(model)
 
@@ -166,13 +167,11 @@ class SamplingInput(Input):
 
         # fixed gnpe parameters
 
-        fixed_init_parameters = {}
         if "gnpe_chirp" in gnpe_keys:
-            try:
-                fixed_init_parameters["chirp_mass_proxy"] = self.fixed_gnpe_proxies[
-                    "chirp_mass_proxy"
-                ]
-            except TypeError or KeyError as e:
+            if (
+                self.fixed_context_parameters is None
+                or "chirp_mass_proxy" not in self.fixed_context_parameters
+            ):
                 raise ValueError(
                     f"Using GNPE initialization network with gnpe-chirp, "
                     f"but no fixed chirp mass proxy provided: {e}."
@@ -189,17 +188,17 @@ class SamplingInput(Input):
                 f"Unsupported gnpe keys {gnpe_keys} for fixed initialization."
             )
 
-        fixed_init_sampler = FixedInitSampler(fixed_init_parameters, log_prob=0)
+        fixed_init_sampler = FixedInitSampler(self.fixed_context_parameters, log_prob=0)
         print(
-            f"Using a GNPE initialization network with fixed conditioning proxies "
-            f"{fixed_init_parameters}."
+            f"Using a GNPE initialization network with fixed conditioning parameters "
+            f"{self.fixed_context_parameters}."
         )
 
         init_sampler = GWSamplerGNPE(
             model=init_model,
             init_sampler=fixed_init_sampler,
             num_iterations=1,
-            fixed_gnpe_proxies=self.fixed_gnpe_proxies,
+            fixed_context_parameters=self.fixed_context_parameters,
         )
 
         return init_sampler

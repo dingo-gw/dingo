@@ -94,7 +94,7 @@ class MainInput(BilbyMainInput):
         self.model = args.model
         self.model_init = args.model_init
         self.num_gnpe_iterations = args.num_gnpe_iterations
-        self.fixed_gnpe_proxies = args.fixed_gnpe_proxies
+        self.fixed_context_parameters = args.fixed_context_parameters
         self.importance_sampling_updates = importance_sampling_updates
 
         Input.__init__(self, args, unknown_args, print_msg=False)

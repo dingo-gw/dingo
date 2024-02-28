@@ -1209,10 +1209,10 @@ def create_parser(top_level=True):
         help="Number of GNPE iterations to perform when using a GNPE model. Default 30.",
     )
     sampler_parser.add(
-        "--fixed-gnpe-proxies",
+        "--fixed-context-parameters",
         type=nonestr,
         default=None,
-        help="Dictionary with fixed gnpe proxies.",
+        help="Dictionary with (fixed) context parameters.",
     )
     sampler_parser.add(
         "--num-samples",

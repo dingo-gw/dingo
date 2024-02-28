@@ -371,7 +371,7 @@ class GNPESampler(Sampler):
         model: PosteriorModel,
         init_sampler: Sampler,
         num_iterations: int = 1,
-        fixed_gnpe_proxies: dict = None,
+        fixed_context_parameters: Optional[dict] = None,
     ):
         """
         Parameters
@@ -381,17 +381,19 @@ class GNPESampler(Sampler):
             Used for generating initial samples
         num_iterations : int
             Number of GNPE iterations to be performed by sampler.
-        fixed_gnpe_proxies: dict
-            Dict with fixed gnpe proxies. For each parameter listed here, we do not
-            iterate in the GNPE loop, but instead use the fixed value provided.
+        fixed_context_parameters: dict
+            Dict with fixed context parameters. For each parameter listed here,
+            we do not iterate in the GNPE loop, but instead use the fixed value provided.
             Useful e.g. for prior-conditioning.
         """
         self.gnpe_parameters = []  # Should be set in subclass _initialize_transform()
-        if fixed_gnpe_proxies is not None:
-            self.fixed_gnpe_proxies = fixed_gnpe_proxies
-            print(f"Using fixed gnpe proxies for {fixed_gnpe_proxies.keys()}.")
+        if fixed_context_parameters is not None:
+            self.fixed_context_parameters = fixed_context_parameters
+            print(
+                f"Using fixed context parameters for {fixed_context_parameters.keys()}."
+            )
         else:
-            self.fixed_gnpe_proxies = {}
+            self.fixed_context_parameters = {}
 
         super().__init__(model)
         self.init_sampler = init_sampler
@@ -457,9 +459,12 @@ class GNPESampler(Sampler):
             thr = torch.quantile(init_samples["log_prob"], self.remove_init_outliers)
             inds = torch.where(init_samples["log_prob"] >= thr)[0][:num_samples]
             init_samples = {k: v[inds] for k, v in init_samples.items()}
-        # Insert fixed proxies into initialization samples.
+        # Insert fixed context parameters into initialization samples.
         init_samples.update(
-            {k: torch.ones(num_samples) * v for k, v in self.fixed_gnpe_proxies.items()}
+            {
+                k: torch.ones(num_samples) * v
+                for k, v in self.fixed_context_parameters.items()
+            }
         )
 
         # We could be starting with either the GNPE parameters *or* their proxies,
@@ -491,20 +496,19 @@ class GNPESampler(Sampler):
 
             if start_with_proxies and i == 0:
                 x["extrinsic_parameters"] = proxies.copy()
-                # TODO: check that this works when using fixed_gnpe_proxies
             else:
                 x["extrinsic_parameters"] = {
                     k: x["extrinsic_parameters"][k]
                     for k in self.gnpe_parameters
-                    if k + "_proxy" not in self.fixed_gnpe_proxies
+                    if k + "_proxy" not in self.fixed_context_parameters
                 }
-                # add fixed proxies
-                x["extrinsic_parameters"].update(
-                    {
-                        k: torch.ones(num_samples, dtype=torch.float32) * v
-                        for k, v in self.fixed_gnpe_proxies.items()
-                    }
-                )
+            # add fixed proxies/context parameters
+            x["extrinsic_parameters"].update(
+                {
+                    k: torch.ones(num_samples, dtype=torch.float32) * v
+                    for k, v in self.fixed_context_parameters.items()
+                }
+            )
 
             # TODO: Depending on whether start_with_proxies is True, this might end up
             #  comparing proxies vs gnpe_parameters for the first iteration.
@@ -534,7 +538,7 @@ class GNPESampler(Sampler):
             # since this is when they were placed here and their values should not have
             # changed.
             proxies = {
-                p: x["extrinsic_parameters"][p] for p in self.gnpe_proxy_parameters
+                p: x["extrinsic_parameters"][p] for p in self.fixed_context_parameters
             }
 
             print(
@@ -591,7 +595,7 @@ class GNPESampler(Sampler):
 
         # Safety check for unconditional flows. Make sure the proxies haven't changed.
         if start_with_proxies and self.num_iterations == 1:
-            for k in proxies:
+            for k in init_proxies:
                 assert torch.equal(proxies[k], init_proxies[k])
 
         return samples

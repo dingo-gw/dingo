@@ -333,7 +333,7 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 # make sure to apply the gnpe chirp transformation *before* the
                 # decimation, as decimation and the gnpe chirp phase transformation do
                 # not commute.
-                if "chirp_mass_proxy" in self.fixed_gnpe_proxies:
+                if "chirp_mass_proxy" in self.fixed_context_parameters:
                     # If we use a fixed chirp mass proxy, we can heterodyne the data in
                     # self.transform_pre (as opposed to transform_gnpe_loop_pre in the
                     # gnpe loop), which is much more efficient, as we only need to
@@ -348,7 +348,7 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                     #     the loop, but nevertheless condition the network on the proxy)
                     fixed_parameters = {
                         k[: -len("_proxy")]: v
-                        for k, v in self.fixed_gnpe_proxies.items()
+                        for k, v in self.fixed_context_parameters.items()
                     }
                     self.transform_pre.transforms.insert(
                         0,
@@ -401,7 +401,8 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 for k, v in transform.kernel.items():
                     self.gnpe_kernel[k] = v
         fixed_gnpe_parameters = [
-            k[: -len("_proxy")] for k in self.fixed_gnpe_proxies.keys()
+            k[: -len("_proxy")] for k in self.fixed_context_parameters.keys()
+            if k.endswith("_proxy")
         ]
         self.gnpe_parameters += fixed_gnpe_parameters
         print("GNPE parameters: ", self.gnpe_parameters)
