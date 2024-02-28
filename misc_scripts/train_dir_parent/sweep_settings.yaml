@@ -1,7 +1,15 @@
 training:
   stage_0:
     optimizer:
-      lr: [1.0e-5, 5.0e-05, 1.0e-05]
-    scheduler:
-      scheduler_1:
-        start_factor: [0.1, 0.25, 0.5]
+      lr: [2.0e-4, 1.0e-4, 5.0e-5]
+      betas: [[0.8, 0.99], [0.9, 0.995], [0.99, 0.999]]
+
+# If you want to change certain parameters together with a parameter listed above:
+# e.g. If the learning rate is modified, weight decay should be adapted as well (since these parameters
+# are not decoupled in pytorch: https://fabian-sp.github.io/posts/2024/02/decoupling/).
+joint_modification:
+  "training/stage_0/optimizer/lr": # path/to/parameter_of_interest
+    training: # specify any parameters to modify with lr in the format of the standard settings file
+      stage_0:
+        optimizer:
+          weight_decay: [0.005, 0.01, 0.02] # List has to be same size as lr list
