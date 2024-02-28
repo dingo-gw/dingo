@@ -99,6 +99,8 @@ def generate_base_population(
         }
     )
 
+    intrinsic_parameters = pd.DataFrame(intrinsic_prior.sample(size))
+
     if population_model is not None:
         full_prior = BBHPriorDict(copy.deepcopy(full_prior_dict))
         population_model = build_population_model(
@@ -106,7 +108,7 @@ def generate_base_population(
             population_prior=population_prior,
             event_model_prior=full_prior,
         )
-        parameters_intrinsic = []
+        population_parameters = []
         for _ in tqdm(range(size // batch_size)):
             # We batch the sampling of parameters because preparing the cosmologies can
             # be slow. For convenience, we generate populations of size batch_size.
@@ -117,16 +119,12 @@ def generate_base_population(
                 hyperparameters
             )
             for _ in range(batch_size):
-                # Use the event model intrinsic prior, but updated with the population
-                # event parameters.
-                p = intrinsic_prior.sample()
-                p.update(event_generation_func())
-                parameters_intrinsic.append(p)
-        waveform_dataset_dict["parameters"] = pd.DataFrame(parameters_intrinsic)
+                population_parameters.append(event_generation_func())
+        population_parameters = pd.DataFrame(population_parameters)
         # TODO: Ensure that the samples lie within the model prior, e.g., for masses.
+        intrinsic_parameters.update(population_parameters)
 
-    else:
-        waveform_dataset_dict["parameters"] = pd.DataFrame(intrinsic_prior.sample(size))
+    waveform_dataset_dict["parameters"] = intrinsic_parameters
 
     domain_update = event_model.metadata["train_settings"]["data"].get("domain_update")
 
