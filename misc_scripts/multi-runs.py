@@ -1,6 +1,8 @@
 from typing import Dict, List, Optional
 import argparse
 import itertools
+from functools import reduce
+import operator
 import os
 import sys
 from os.path import join
@@ -96,21 +98,42 @@ def construct_train_command(
     train_dir: str, dir_with_settings_file: Optional[str], use_condor: bool
 ):
     arguments = f" --train_dir={train_dir}"
-    if "python3" in sys.executable:
-        replace_arg = "python3"
-    else:
-        replace_arg = "python"
+
     if use_condor:
-        train_script_path = sys.executable.replace(replace_arg, "") + "dingo_train_condor"
+        train_script_path = sys.executable.replace("python", "") + "dingo_train_condor"
         arguments += f" --start_submission"
     else:
-        train_script_path = sys.executable.replace(replace_arg, "") + "dingo_train"
+        train_script_path = sys.executable.replace("python", "") + "dingo_train"
         arguments += (
             f" --settings={join(dir_with_settings_file, 'train_settings.yaml')}"
         )
     command = train_script_path + arguments
 
     return command
+
+
+def add_settings_to_modify_jointly(list_of_combination_dicts: List, joint_settings_dict: Dict, sweep_settings_dict: Dict):
+    def get_by_path(root, items):
+        """Access a nested object in root by item sequence."""
+        return reduce(operator.getitem, items, root)
+
+    # Check whether keys of joint_dict exist in combinations
+
+    # Loop over keys in joint_dict
+    for k, v in joint_settings_dict.items():
+        # Get ordering of values for k in sweep_settings
+        try:
+            sweep_vals_k = get_by_path(sweep_settings_dict, k)
+        except:
+            raise ValueError(f"Key within 'joint_modification' which was read in as {k} does not exist in sweep_settings.")
+        # Loop over combination dict
+        for combination_dict in list_of_combination_dicts:
+            # Get index of value to set
+            ind_k = sweep_vals_k.index(combination_dict[k])
+            # Set v_val[ind_k] for all elements of v
+            for v_key, v_val in v.items():
+                combination_dict[v_key] = v_val[ind_k]
+    return list_of_combination_dicts
 
 
 if __name__ == "__main__":
@@ -140,11 +163,25 @@ if __name__ == "__main__":
         with open(args.sweep_settings, "r") as f:
             sweep_settings = yaml.safe_load(f)
 
+        # If the sweep settings contain the key "joint_modification", extract the information
+        final_layer_dicts_joint = None
+        if "joint_modification" in sweep_settings.keys():
+            params_to_jointly_modify = sweep_settings.pop("joint_modification")
+            final_layer_dicts_joint = {tuple(k.split("/")): extract_final_layers(v) for k, v in params_to_jointly_modify.items()}
+
         with open(join(base_dir, "train_settings.yaml"), "r") as f:
             base_settings = yaml.safe_load(f)
 
         final_layer_dict = extract_final_layers(sweep_settings)
         combination_dicts = create_combinations(final_layer_dict)
+
+        # Add the joint settings
+        if final_layer_dicts_joint is not None:
+            combination_dicts = add_settings_to_modify_jointly(
+                combination_dicts,
+                final_layer_dicts_joint,
+                sweep_settings
+            )
 
         for i, settings in enumerate(combination_dicts):
             # create new dictionary that defaults to the base settings and replaces
