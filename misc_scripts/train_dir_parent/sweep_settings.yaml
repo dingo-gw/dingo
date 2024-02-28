@@ -1,0 +1,7 @@
+training:
+  stage_0:
+    optimizer:
+      lr: [1.0e-5, 5.0e-05, 1.0e-05]
+    scheduler:
+      scheduler_1:
+        start_factor: [0.1, 0.25, 0.5]
