@@ -16,7 +16,17 @@ from dingo.populations.training.population_dataset import PopulationDataset
 from dingo.populations.training.transform_builders import set_train_transforms
 
 
-def train(train_settings: dict, train_dir: str, local_settings: dict, resume=False):
+def train(
+    train_dir: str,
+    local_settings: dict,
+    resume=False,
+    train_settings: dict = None,
+    checkpoint=None,
+):
+    if resume:
+        pm = PosteriorModel(model_filename=checkpoint, device=local_settings["device"])
+        train_settings = pm.metadata["train_settings"]
+
     # (1) Prepare training data
 
     # Build population forward models (train and test). These use different halves of
@@ -67,8 +77,6 @@ def train(train_settings: dict, train_dir: str, local_settings: dict, resume=Fal
         pm.optimizer_kwargs = train_settings["training"]["optimizer"]
         pm.scheduler_kwargs = train_settings["training"]["scheduler"]
         pm.initialize_optimizer_and_scheduler()
-    else:
-        raise NotImplementedError("Resuming training not yet implemented.")
 
     num_params_encoder = get_number_of_model_parameters(pm.model.embedding_net)
     num_params_flow = get_number_of_model_parameters(pm.model.flow)
@@ -150,6 +158,7 @@ def train_local():
     if args.settings_file is not None:
         print("Beginning new training run.")
         resume = False
+        checkpoint = None
         with open(args.settings_file, "r") as fp:
             train_settings = yaml.safe_load(fp)
 
@@ -164,11 +173,19 @@ def train_local():
     else:
         print("Resuming training run.")
         resume = True
+        checkpoint = args.checkpoint
+        train_settings = None
         with open(os.path.join(args.train_dir, "local_settings.yaml"), "r") as f:
             local_settings = yaml.safe_load(f)
 
     with threadpool_limits(limits=1, user_api="blas"):
-        complete = train(train_settings, args.train_dir, local_settings, resume)
+        complete = train(
+            train_dir=args.train_dir,
+            local_settings=local_settings,
+            resume=resume,
+            train_settings=train_settings,
+            checkpoint=checkpoint,
+        )
 
     if complete:
         print("Training complete.")

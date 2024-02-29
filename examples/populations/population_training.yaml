@@ -48,6 +48,7 @@ training:
     lr: 1.0e-4
   scheduler:
     type: sequential
+    milestones: [10]
     scheduler_1:
       type: linear
       start_factor: 0.1

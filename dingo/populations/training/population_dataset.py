@@ -133,8 +133,12 @@ class PopulationDataset(torch.utils.data.Dataset):
         size,
         train_fraction,
         mode=None,
+        **kwargs,  # These are ignored (particularly 'standardization'). Not clean.
     ):
         super().__init__()
+
+        # TODO: Should we build the train transforms from within this class? Might be
+        #  better for treating the arguments.
 
         self.event_embeddings = EventEmbeddingsDataset(file_name=event_embeddings_path)
 
