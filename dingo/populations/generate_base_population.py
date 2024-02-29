@@ -102,6 +102,7 @@ def generate_base_population(
     intrinsic_parameters = pd.DataFrame(intrinsic_prior.sample(size))
 
     if population_model is not None:
+        print("Sampling from population prior and likelihood.")
         full_prior = BBHPriorDict(copy.deepcopy(full_prior_dict))
         population_model = build_population_model(
             population_model=population_model,
@@ -159,6 +160,8 @@ def generate_base_population(
             # Save all the parameters.
             t.selected_keys[0] = "parameters"
         if isinstance(t, SampleExtrinsicParameters) and population_model is not None:
+            # If certain event parameters are being provided by the population model,
+            # we do not want to resample them as extrinsic parameters.
             for p in population_model.event_parameters:
                 if p in t.extrinsic_prior_dict:
                     t.extrinsic_prior_dict.pop(p)

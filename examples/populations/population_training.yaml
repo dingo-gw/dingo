@@ -41,14 +41,20 @@ model:
 
 
 training:
-  epochs: 1
-  batch_size: 256
+  epochs: 50
+  batch_size: 2048
   optimizer:
-    type: adam
-    lr: 5.0e-5
+    type: adamw
+    lr: 1.0e-4
   scheduler:
-    type: cosine
-    T_max: 10
+    type: sequential
+    scheduler_1:
+      type: linear
+      start_factor: 0.1
+      total_iters: 10
+    scheduler_2:
+      type: cosine
+      T_max: 40
 
 local:
   device: cpu
