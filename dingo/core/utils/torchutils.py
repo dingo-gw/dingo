@@ -158,10 +158,18 @@ def get_scheduler_from_kwargs(
 
     if scheduler_kwargs["type"] == "sequential":
         # Load individual schedulers
-        scheduler_keys = [k for k in scheduler_kwargs.keys() if k.startswith("scheduler")]
+        scheduler_keys = []
+        num_scheduler = 1
+        while True:
+            scheduler_key = f"scheduler_{num_scheduler}"
+            if scheduler_key in scheduler_kwargs:
+                scheduler_keys.append(scheduler_key)
+                num_scheduler += 1
+            else:
+                break
         if len(scheduler_keys) < 2:
             raise KeyError("At least two schedulers need to be specified via "
-                           "'scheduler_1': {...}, 'scheduler_2: {...}' when using sequential.")
+                           "'scheduler_0': {...}, 'scheduler_1: {...}' when using sequential.")
         schedulers = []
         for scheduler_key in scheduler_keys:
             individual_scheduler_kwargs = scheduler_kwargs.pop(scheduler_key)
