@@ -30,6 +30,11 @@ def parse_args():
         help="Path to sweep_settings file which overrides the train_settings.yaml in the base_dir",
     )
     parser.add_argument(
+        "--overwrite_wandb_name",
+        default=True,
+        help="Whether to overwrite the wandb name with the name of the experiment folder. Default True.",
+    )
+    parser.add_argument(
         "--create_evaluation_dir",
         action="store_true",
         help="Whether to create an evaluation directory within the training directories."
@@ -39,6 +44,7 @@ def parse_args():
         action="store_true",
         help="Whether to submit the script with condor."
     )
+
     args = parser.parse_args()
 
     return args
@@ -184,11 +190,17 @@ if __name__ == "__main__":
             )
 
         for i, settings in enumerate(combination_dicts):
+            # set wandb run name to folder name
+            folder_name = str(i).zfill(3)
+            if args.overwrite_wandb_name and "wandb" in base_settings["local"].keys():
+                print(f"Wandb name is overwritten by {folder_name}.")
+                settings[("local", "wandb", "name")] = folder_name
+
             # create new dictionary that defaults to the base settings and replaces
             # keys that are contained in the run-specific settings:
             new_settings = replace_values(base_settings, settings)
 
-            train_dir = join(base_dir, str(i).zfill(3))
+            train_dir = join(base_dir, folder_name)
             os.makedirs(train_dir, exist_ok=True)
             if args.create_evaluation_dir:
                 eval_dir = join(train_dir, "evaluation")
