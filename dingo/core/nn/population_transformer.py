@@ -20,11 +20,12 @@ class PopulationTransformer(nn.Module):
         x = self.tokenizer(src)
         x = self.transformer_encoder(x, src_key_padding_mask=src_key_padding_mask)
 
-        # Mask again before averaging. Note that averaging includes the zero elements
-        # in the sequence.
+        # Average over non-masked components.
         if src_key_padding_mask is not None:
-            x = x * ~src_key_padding_mask.unsqueeze(-1)
-        x = torch.mean(x, dim=-2)
+            denominator = torch.sum(~src_key_padding_mask, -1, keepdim=True)
+            x = torch.sum(x * ~src_key_padding_mask.unsqueeze(-1), dim=-2) / denominator
+        else:
+            x = torch.mean(x, dim=-2)
 
         if self.final_net is not None:
             x = self.final_net(x)
