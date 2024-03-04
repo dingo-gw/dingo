@@ -265,6 +265,10 @@ class DenseResidualNet(nn.Module):
         self.hidden_dims = hidden_dims
         self.num_res_blocks = len(self.hidden_dims)
 
+        # This attribute is required by nflows.
+        if all([d == self.hidden_dims[0] for d in self.hidden_dims]):
+            self.hidden_features = self.hidden_dims[0]
+
         if context_features is not None:
             self.initial_layer = nn.Linear(input_dim + context_features, hidden_dims[0])
         else:
@@ -297,7 +301,7 @@ class DenseResidualNet(nn.Module):
             x = self.initial_layer(x)
         else:
             # Should dim=-1 below to allow for seq dimension?
-            temps = self.initial_layer(torch.cat((x, context), dim=1))
+            x = self.initial_layer(torch.cat((x, context), dim=1))
         for block, resize_layer in zip(self.blocks, self.resize_layers):
             x = block(x, context=context)
             x = resize_layer(x)
