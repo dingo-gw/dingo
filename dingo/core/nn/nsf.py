@@ -46,7 +46,7 @@ def create_base_transform(
     activation: str = "relu",
     dropout_probability: float = 0.0,
     batch_norm: bool = False,
-    layer_norm: bool = False,
+    # layer_norm: bool = False,
     num_bins: int = 8,
     tail_bound: float = 1.0,
     apply_unconditional_transform: bool = False,
@@ -87,8 +87,8 @@ def create_base_transform(
         dropout probability for regularization
     :param batch_norm: bool = False
         whether to use batch normalization
-    :param layer_norm: bool = False
-        whether to use layer normalization
+    # :param layer_norm: bool = False
+    #     whether to use layer normalization
     :param num_bins: int = 8
         number of bins for the spline
     :param tail_bound: float = 1.
@@ -112,30 +112,30 @@ def create_base_transform(
             )
         return transforms.PiecewiseRationalQuadraticCouplingTransform(
             mask=mask,
-            # transform_net_create_fn=(
-            #     lambda in_features, out_features: nflows_nets.ResidualNet(
-            #         in_features=in_features,
-            #         out_features=out_features,
-            #         hidden_features=hidden_dim,
-            #         context_features=context_dim,
-            #         num_blocks=num_transform_blocks,
-            #         activation=activation_fn,
-            #         dropout_probability=dropout_probability,
-            #         use_batch_norm=batch_norm,
-            #     )
-            # ),
             transform_net_create_fn=(
-                lambda in_features, out_features: DenseResidualNet(
-                    input_dim=in_features,
-                    output_dim=out_features,
-                    hidden_dims=(hidden_dim,) * num_transform_blocks,
+                lambda in_features, out_features: nflows_nets.ResidualNet(
+                    in_features=in_features,
+                    out_features=out_features,
+                    hidden_features=hidden_dim,
                     context_features=context_dim,
+                    num_blocks=num_transform_blocks,
                     activation=activation_fn,
-                    dropout=dropout_probability,
-                    batch_norm=batch_norm,
-                    layer_norm=layer_norm,
+                    dropout_probability=dropout_probability,
+                    use_batch_norm=batch_norm,
                 )
             ),
+            # transform_net_create_fn=(
+            #     lambda in_features, out_features: DenseResidualNet(
+            #         input_dim=in_features,
+            #         output_dim=out_features,
+            #         hidden_dims=(hidden_dim,) * num_transform_blocks,
+            #         context_features=context_dim,
+            #         activation=activation_fn,
+            #         dropout=dropout_probability,
+            #         batch_norm=batch_norm,
+            #         layer_norm=layer_norm,
+            #     )
+            # ),
             num_bins=num_bins,
             tails="linear",
             tail_bound=tail_bound,
