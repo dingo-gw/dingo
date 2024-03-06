@@ -116,6 +116,7 @@ class MainInput(BilbyMainInput):
             False  # dingo mod: Cannot use different sets of detectors.
         )
         self.data_dict = args.data_dict
+        self.channel_dict = args.channel_dict
         self.frame_type_dict = args.frame_type_dict
         self.data_find_url = args.data_find_url
         self.data_find_urltype = args.data_find_urltype
@@ -171,8 +172,8 @@ class MainInput(BilbyMainInput):
         self.gps_tuple = args.gps_tuple
         self.gps_file = args.gps_file
         self.timeslide_file = args.timeslide_file
-        # self.gaussian_noise = args.gaussian_noise
-        # self.zero_noise = args.zero_noise
+        self.gaussian_noise = False  # DINGO MOD: Cannot use different noise types.
+        self.zero_noise = False  # DINGO MOD: does not support zero noise yet
         # self.n_simulation = args.n_simulation
         #
         # self.injection = args.injection
