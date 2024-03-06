@@ -206,6 +206,7 @@ def create_enet_with_projection_layer_and_dense_resnet(
     activation: str = "elu",
     dropout: float = 0.0,
     batch_norm: bool = True,
+    layer_norm: bool = False,
     added_context: bool = False,
 ):
     """
@@ -260,6 +261,8 @@ def create_enet_with_projection_layer_and_dense_resnet(
         dropout probability for residual blocks used for reqularization
     :param batch_norm: bool
         flag that specifies whether to use batch normalization
+    :param layer_norm: bool
+        flag that specifies whether to use layer normalization
     :param added_context: bool
         if set to True, additional context z is concatenated to the embedded
         feature vector enet(x); note that in this case, the expected input is
@@ -275,6 +278,7 @@ def create_enet_with_projection_layer_and_dense_resnet(
         activation=activation_fn,
         dropout=dropout,
         batch_norm=batch_norm,
+        layer_norm=layer_norm,
     )
     enet = nn.Sequential(module_1, module_2)
 
@@ -296,6 +300,7 @@ def create_transformer_enet(
     dropout: float = 0.0,
     activation: str = "elu",
     batch_norm: bool = True,
+    layer_norm: bool = False,
 ):
     """
     Builder function for a transformer embedding network for complex 1D data
@@ -334,6 +339,8 @@ def create_transformer_enet(
         dropout
     batch_norm: bool
         whether to apply batch normalization
+    layer_norm: bool
+        whether to apply layer normalization
 
     Returns
     --------
@@ -350,6 +357,7 @@ def create_transformer_enet(
         hidden_dims_token_embedding=hidden_dims_token_embedding,
         activation=activation_fn,
         batch_norm=batch_norm,
+        layer_norm=layer_norm,
         individual_token_embedding=individual_token_embedding,
         frequency_encoding_type=freq_encoding_type,
         dropout=dropout,

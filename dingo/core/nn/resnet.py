@@ -1,7 +1,69 @@
 from typing import Callable, Tuple
+import torch
 from torch import nn
-from torch.nn import functional as F
-from glasflow.nflows.nn.nets.resnet import ResidualBlock
+from torch.nn import functional as F, init
+
+
+class MyResidualBlock(nn.Module):
+    """A general-purpose residual block. Works only with 1-dim inputs.
+    This is taken from nflows, but modified to allow for LayerNorm instead of
+    BatchNorm1D."""
+
+    def __init__(
+        self,
+        features,
+        context_features,
+        activation=F.relu,
+        dropout_probability=0.0,
+        use_batch_norm=False,
+        use_layer_norm=False,
+        zero_initialization=True,
+    ):
+        super().__init__()
+        self.activation = activation
+
+        if use_batch_norm and use_layer_norm:
+            raise ValueError(
+                "Residual block should not use both batch norm and layer " "norm."
+            )
+        self.use_batch_norm = use_batch_norm
+        self.use_layer_norm = use_layer_norm
+        if use_batch_norm:
+            self.batch_norm_layers = nn.ModuleList(
+                [nn.BatchNorm1d(features, eps=1e-3) for _ in range(2)]
+            )
+        if use_layer_norm:
+            self.layer_norm_layers = nn.ModuleList(
+                [nn.LayerNorm(features) for _ in range(2)]
+            )
+        if context_features is not None:
+            self.context_layer = nn.Linear(context_features, features)
+        self.linear_layers = nn.ModuleList(
+            [nn.Linear(features, features) for _ in range(2)]
+        )
+        self.dropout = nn.Dropout(p=dropout_probability)
+        if zero_initialization:
+            init.uniform_(self.linear_layers[-1].weight, -1e-3, 1e-3)
+            init.uniform_(self.linear_layers[-1].bias, -1e-3, 1e-3)
+
+    def forward(self, inputs, context=None):
+        temps = inputs
+        if self.use_batch_norm:
+            temps = self.batch_norm_layers[0](temps)
+        if self.use_layer_norm:
+            temps = self.layer_norm_layers[0](temps)
+        temps = self.activation(temps)
+        temps = self.linear_layers[0](temps)
+        if self.use_batch_norm:
+            temps = self.batch_norm_layers[1](temps)
+        if self.use_layer_norm:
+            temps = self.layer_norm_layers[1](temps)
+        temps = self.activation(temps)
+        temps = self.dropout(temps)
+        temps = self.linear_layers[1](temps)
+        if context is not None:
+            temps = F.glu(torch.cat((temps, self.context_layer(context)), dim=1), dim=1)
+        return inputs + temps
 
 
 class DenseResidualNet(nn.Module):
@@ -23,8 +85,10 @@ class DenseResidualNet(nn.Module):
         output_dim: int,
         hidden_dims: Tuple,
         activation: Callable = F.elu,
+        context_features: int = None,
         dropout: float = 0.0,
         batch_norm: bool = True,
+        layer_norm: bool = False,
     ):
         """
         Parameters
@@ -49,15 +113,23 @@ class DenseResidualNet(nn.Module):
         self.hidden_dims = hidden_dims
         self.num_res_blocks = len(self.hidden_dims)
 
-        self.initial_layer = nn.Linear(self.input_dim, hidden_dims[0])
+        # This attribute is required by nflows.
+        if all([d == self.hidden_dims[0] for d in self.hidden_dims]):
+            self.hidden_features = self.hidden_dims[0]
+
+        if context_features is not None:
+            self.initial_layer = nn.Linear(input_dim + context_features, hidden_dims[0])
+        else:
+            self.initial_layer = nn.Linear(self.input_dim, hidden_dims[0])
         self.blocks = nn.ModuleList(
             [
-                ResidualBlock(
+                MyResidualBlock(
                     features=self.hidden_dims[n],
-                    context_features=None,
+                    context_features=context_features,
                     activation=activation,
                     dropout_probability=dropout,
                     use_batch_norm=batch_norm,
+                    use_layer_norm=layer_norm,
                 )
                 for n in range(self.num_res_blocks)
             ]
@@ -72,9 +144,13 @@ class DenseResidualNet(nn.Module):
             + [nn.Linear(self.hidden_dims[-1], self.output_dim)]
         )
 
-    def forward(self, x):
-        x = self.initial_layer(x)
+    def forward(self, x, context=None):
+        if context is None:
+            x = self.initial_layer(x)
+        else:
+            # Should dim=-1 below to allow for seq dimension?
+            x = self.initial_layer(torch.cat((x, context), dim=1))
         for block, resize_layer in zip(self.blocks, self.resize_layers):
-            x = block(x, context=None)
+            x = block(x, context=context)
             x = resize_layer(x)
         return x
