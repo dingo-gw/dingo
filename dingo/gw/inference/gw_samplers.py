@@ -189,6 +189,7 @@ class GWSampler(GWSamplerMixin, Sampler):
                     data_settings["domain_update"]["f_min"],
                     data_settings["domain_update"]["f_max"],
                     df=1 / data_settings["window"]["T"],
+                    normalize_frequency=data_settings["tokenization"]["normalize_frequency_for_positional_encoding"]
                 )
             )
             selected_keys.append("blocks")
