@@ -47,6 +47,7 @@ class TokenEmbedding(nn.Module):
         activation: Callable,
         dropout: float,
         batch_norm: bool,
+        layer_norm: bool,
         individual_token_embedding: bool = False,
     ):
         """
@@ -64,8 +65,10 @@ class TokenEmbedding(nn.Module):
             activation function for DenseResidualNet
         dropout: float
             dropout rate for DenseResidualNet
-        batch_norm: Callable
-            batch normalization for DenseResidualNet
+        batch_norm: bool
+            whether to use batch normalization for DenseResidualNet
+        layer_norm: bool
+            whether to use layer normalization for DenseResidualNet
         individual_token_embedding: bool
             whether to use an individual linear layer for each token
         """
@@ -86,7 +89,8 @@ class TokenEmbedding(nn.Module):
                         hidden_dims=tuple(hidden_dims),
                         activation=activation,
                         dropout=dropout,
-                        batch_norm=batch_norm
+                        batch_norm=batch_norm,
+                        layer_norm=layer_norm,
                     )
                     for _ in range(self.num_tokens)
                 ])
@@ -107,7 +111,8 @@ class TokenEmbedding(nn.Module):
                     hidden_dims=tuple(hidden_dims),
                     activation=activation,
                     dropout=dropout,
-                    batch_norm=batch_norm
+                    batch_norm=batch_norm,
+                    layer_norm=layer_norm,
                 )
             else:
                 assert type(hidden_dims) is int
@@ -373,6 +378,7 @@ class TransformerModel(nn.Module):
         hidden_dims_token_embedding: Union[int, Tuple],
         activation: Callable,
         batch_norm: bool,
+        layer_norm: bool,
         individual_token_embedding: bool,
         frequency_encoding_type: str,
         dropout: float = 0.1,
@@ -397,7 +403,9 @@ class TransformerModel(nn.Module):
         activation: Callable
             activation function used in TokenEmbedding
         batch_norm: bool
-            whether to apply batch normalization
+            whether to apply batch normalization in the tokenizer
+        layer_norm: bool
+            whether to apply layer normalization in the tokenizer
         individual_token_embedding: bool
             whether to embed each raw token with an individual embedding network or not
         frequency_encoding_type: str
@@ -424,6 +432,7 @@ class TransformerModel(nn.Module):
             activation=activation,
             dropout=dropout,
             batch_norm=batch_norm,
+            layer_norm=layer_norm,
             individual_token_embedding=self.individual_token_embedding,
         )
         self.freq_encoder = FrequencyEncoding(
