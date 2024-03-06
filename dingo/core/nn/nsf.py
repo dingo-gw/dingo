@@ -12,7 +12,10 @@ import glasflow.nflows.nn.nets as nflows_nets
 
 from dingo.core.nn.population_transformer import create_population_transformer
 from dingo.core.utils import torchutils
-from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
+from dingo.core.nn.enets import (
+    create_enet_with_projection_layer_and_dense_resnet,
+    DenseResidualNet,
+)
 from typing import Union, Callable, Tuple
 
 
@@ -43,6 +46,7 @@ def create_base_transform(
     activation: str = "relu",
     dropout_probability: float = 0.0,
     batch_norm: bool = False,
+    layer_norm: bool = False,
     num_bins: int = 8,
     tail_bound: float = 1.0,
     apply_unconditional_transform: bool = False,
@@ -83,6 +87,8 @@ def create_base_transform(
         dropout probability for regularization
     :param batch_norm: bool = False
         whether to use batch normalization
+    :param layer_norm: bool = False
+        whether to use layer normalization
     :param num_bins: int = 8
         number of bins for the spline
     :param tail_bound: float = 1.
@@ -104,9 +110,24 @@ def create_base_transform(
             mask = nflows.utils.create_alternating_binary_mask(
                 param_dim, even=(i % 2 == 0)
             )
-        return transforms.PiecewiseRationalQuadraticCouplingTransform(
-            mask=mask,
-            transform_net_create_fn=(
+        # If possible (no layer norm), use the nflows version of the ResidualNet. This
+        # is for backwards compatibility, since our DenseResidualNet has different
+        # sub-nn.Modules.
+        if layer_norm:
+            transform_net_create_fn = (
+                lambda in_features, out_features: DenseResidualNet(
+                    input_dim=in_features,
+                    output_dim=out_features,
+                    hidden_dims=(hidden_dim,) * num_transform_blocks,
+                    context_features=context_dim,
+                    activation=activation_fn,
+                    dropout=dropout_probability,
+                    batch_norm=batch_norm,
+                    layer_norm=layer_norm,
+                )
+            )
+        else:
+            transform_net_create_fn = (
                 lambda in_features, out_features: nflows_nets.ResidualNet(
                     in_features=in_features,
                     out_features=out_features,
@@ -117,7 +138,10 @@ def create_base_transform(
                     dropout_probability=dropout_probability,
                     use_batch_norm=batch_norm,
                 )
-            ),
+            )
+        return transforms.PiecewiseRationalQuadraticCouplingTransform(
+            mask=mask,
+            transform_net_create_fn=transform_net_create_fn,
             num_bins=num_bins,
             tails="linear",
             tail_bound=tail_bound,

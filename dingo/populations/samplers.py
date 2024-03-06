@@ -41,12 +41,7 @@ class PopulationSampler(object):
         self._initialize_transforms()
 
     def _initialize_transforms(self):
-        transforms = [
-            PadMask(
-                0, 0, self.metadata["train_settings"]["data"]["maximum_population_size"]
-            )
-        ]
-        self.transform_pre = torchvision.transforms.Compose(transforms)
+        self.transform_pre = torchvision.transforms.Compose([])
 
         self.transform_post = SelectStandardizeRepackageParameters(
             {"inference_parameters": self.inference_parameters},

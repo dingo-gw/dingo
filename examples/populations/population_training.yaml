@@ -19,6 +19,7 @@ model:
     tokenizer:
       hidden_dims: [256, 512, 512]
       batch_norm: False
+      layer_norm: True
     transformer:
       d_model: 512
       dim_feedforward: 1024
@@ -28,6 +29,8 @@ model:
     final_net:
       hidden_dims: [512, 512, 256, 256, 128, 128]
       output_dim: 128
+      batch_norm: False
+      layer_norm: True
   nsf_kwargs:
     num_flow_steps: 15
     base_transform_kwargs:
@@ -35,14 +38,15 @@ model:
       num_transform_blocks: 5
       activation: elu
       dropout_probability: 0.0
-      batch_norm: true
+      batch_norm: False
+      layer_norm: True
       num_bins: 8
       base_transform_type: rq-coupling
 
 
 training:
   epochs: 50
-  batch_size: 2048
+  batch_size: 256
   optimizer:
     type: adamw
     lr: 1.0e-4
