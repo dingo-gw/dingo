@@ -99,7 +99,7 @@ class Injection(object):
                 injection[k][k2] = np.array([e[k][k2] for e in events])
         return injection
 
-    def random_injection(self):
+    def random_injection(self, population_size=None):
         """
         Generate a random injection.
 
@@ -112,8 +112,9 @@ class Injection(object):
                 strain
                 asd
         """
-        population_size = np.random.randint(
-            low=self.minimum_population_size, high=self.maximum_population_size + 1
-        )
+        if population_size is None:
+            population_size = np.random.randint(
+                low=self.minimum_population_size, high=self.maximum_population_size + 1
+            )
         hyperparameters = self.population_model.prior.sample()
         return self.injection(hyperparameters, population_size)
