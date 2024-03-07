@@ -164,6 +164,29 @@ def create_base_transform(
             use_batch_norm=batch_norm,
         )
 
+    elif base_transform_type == "affine":
+        if param_dim == 1:
+            mask = torch.tensor([1], dtype=torch.uint8)
+        else:
+            mask = nflows.utils.create_alternating_binary_mask(
+                param_dim, even=(i % 2 == 0)
+            )
+        return transforms.AffineCouplingTransform(
+            mask=mask,
+            transform_net_create_fn=(
+                lambda in_features, out_features: DenseResidualNet(
+                    input_dim=in_features,
+                    output_dim=out_features,
+                    hidden_dims=(hidden_dim,) * num_transform_blocks,
+                    context_features=context_dim,
+                    activation=activation_fn,
+                    dropout=dropout_probability,
+                    batch_norm=batch_norm,
+                    layer_norm=layer_norm,
+                )
+            ),
+            unconditional_transform=None,
+        )
     else:
         raise ValueError
 
