@@ -23,10 +23,17 @@ def create_submission_file(train_dir, condor_settings, filename="submission_file
     lines.append(f'request_cpus = {condor_settings["num_cpus"]}\n')
     lines.append(f'request_memory = {condor_settings["memory_cpus"]}\n')
     lines.append(f'request_gpus = {condor_settings["num_gpus"]}\n')
-    lines.append(
-        f"requirements = TARGET.CUDAGlobalMemoryMb > "
-        f'{condor_settings["memory_gpus"]}\n\n'
-    )
+    requirements = []
+    if "memory_gpus" in condor_settings:
+        requirements.append(
+            f"TARGET.CUDAGlobalMemoryMb > {condor_settings['memory_gpus']}"
+        )
+    if "cuda_capability" in condor_settings:
+        requirements.append(
+            f"TARGET.CUDACapability == {condor_settings['cuda_capability']}"
+        )
+    requirements = " && ".join(requirements)
+    lines.append(f"requirements = ({requirements})\n\n")
     lines.append(f'arguments = {condor_settings["arguments"]}\n')
     lines.append(f'error = {join(train_dir, "info.err")}\n')
     lines.append(f'output = {join(train_dir, "info.out")}\n')
