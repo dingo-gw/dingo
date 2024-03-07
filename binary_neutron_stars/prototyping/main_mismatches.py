@@ -87,7 +87,7 @@ if __name__ == "__main__":
             pols_het_mfd[pol_name],
             pols_het_dec[pol_name],
             mfd,
-            "aLIGO_ZERO_DET_high_P_asd.txt",
+            asd_file="aLIGO_ZERO_DET_high_P_asd.txt",
         )
         for pol_name in pols_het_mfd.keys()
     ]
@@ -140,7 +140,7 @@ if __name__ == "__main__":
             pols_hetp_mfd[pol_name],
             pols_hetp_dec[pol_name],
             mfd,
-            "aLIGO_ZERO_DET_high_P_asd.txt",
+            asd_file="aLIGO_ZERO_DET_high_P_asd.txt",
         )
         for pol_name in pols_het_mfd.keys()
     ]

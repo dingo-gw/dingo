@@ -43,7 +43,7 @@ def get_extrinsic_prior_dict(extrinsic_prior):
     return extrinsic_prior_dict
 
 
-def get_mismatch(a, b, domain, asd_file=None):
+def get_mismatch(a, b, domain=None, asd_file=None, min_idx=None, max_idx=None):
     """
     Mistmatch is 1 - overlap, where overlap is defined by
     inner(a, b) / sqrt(inner(a, a) * inner(b, b)).
@@ -69,10 +69,10 @@ def get_mismatch(a, b, domain, asd_file=None):
         asd_array = asd_interp(domain.sample_frequencies)
         a = a / asd_array
         b = b / asd_array
-    min_idx = domain.min_idx
-    inner_ab = np.sum((a.conj() * b)[...,min_idx:], axis=-1).real
-    inner_aa = np.sum((a.conj() * a)[...,min_idx:], axis=-1).real
-    inner_bb = np.sum((b.conj() * b)[...,min_idx:], axis=-1).real
+    min_idx = min_idx if min_idx is not None else domain.min_idx
+    inner_ab = np.sum((a.conj() * b)[...,min_idx:max_idx], axis=-1).real
+    inner_aa = np.sum((a.conj() * a)[...,min_idx:max_idx], axis=-1).real
+    inner_bb = np.sum((b.conj() * b)[...,min_idx:max_idx], axis=-1).real
     overlap = inner_ab / np.sqrt(inner_aa * inner_bb)
     return 1 - overlap
 
