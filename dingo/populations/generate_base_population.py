@@ -3,7 +3,10 @@ import copy
 import hashlib
 import textwrap
 import time
+from functools import partial
+from multiprocessing import Pool
 
+import bilby
 import numpy as np
 import pandas as pd
 import torch
@@ -101,6 +104,7 @@ def generate_base_population(
         }
     )
 
+    print("Generating intrinsic parameters from Dingo event model prior.")
     intrinsic_parameters = pd.DataFrame(intrinsic_prior.sample(size))
 
     if population_model is not None:
@@ -111,22 +115,26 @@ def generate_base_population(
             population_prior=population_prior,
             event_model_prior=full_prior,
         )
-        population_parameters = []
-        for _ in tqdm(range(size // batch_size)):
-            # We batch the sampling of parameters because preparing the cosmologies can
-            # be slow. For convenience, we generate populations of size batch_size.
-            # TODO: Deal with any remainder in the batching.
-            # TODO: Parallelize.
-            hyperparameters = population_model.prior.sample()
-            event_generation_func = population_model.get_event_generator(
-                hyperparameters
+
+        task_func = partial(sample_population, population_model=population_model)
+        population_sizes = (batch_size,) * (size // batch_size)
+        if size % batch_size > 0:
+            population_sizes += (size % batch_size,)
+        with Pool(processes=max(num_workers, 1), initializer=bilby_random_seed) as pool:
+            population_parameters = list(
+                tqdm(
+                    pool.imap(task_func, population_sizes), total=len(population_sizes)
+                )
             )
-            for _ in range(batch_size):
-                population_parameters.append(event_generation_func())
+        population_parameters = {
+            k: np.concatenate([p[k] for p in population_parameters])
+            for k in population_parameters[0]
+        }
         population_parameters = pd.DataFrame(population_parameters)
 
         # Ensure that the samples lie within the model prior, now that the samples have
         # been drawn from the populations.
+        print("Checking samples lie within Dingo event model prior.")
         param_keys = [k for k, v in full_prior.items() if not isinstance(v, Constraint)]
         theta = population_parameters[
             population_parameters.columns.intersection(param_keys)
@@ -190,7 +198,7 @@ def generate_base_population(
         waveform_dataset,
         batch_size=batch_size,
         shuffle=False,
-        pin_memory=True,
+        pin_memory=False,
         num_workers=num_workers,
         worker_init_fn=fix_random_seeds,
     )
@@ -240,6 +248,22 @@ def generate_base_population(
     }
 
     return EventEmbeddingsDataset(dictionary=population_dataset_dict)
+
+
+def sample_population(size: int, population_model):
+    hyperparameters = population_model.prior.sample()
+    event_generation_func = population_model.get_event_generator(hyperparameters)
+    population_parameters = []
+    for _ in range(size):
+        population_parameters.append(event_generation_func())
+    return {
+        k: np.array([p[k] for p in population_parameters])
+        for k in population_parameters[0]
+    }
+
+
+def bilby_random_seed():
+    bilby.core.utils.random.seed(None)
 
 
 def parse_args():
