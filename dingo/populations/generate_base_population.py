@@ -4,9 +4,11 @@ import hashlib
 import textwrap
 import time
 
+import numpy as np
 import pandas as pd
 import torch
 import yaml
+from bilby.core.prior import Constraint
 from tqdm import tqdm
 from bilby.gw.prior import BBHPriorDict
 from threadpoolctl import threadpool_limits
@@ -122,7 +124,21 @@ def generate_base_population(
             for _ in range(batch_size):
                 population_parameters.append(event_generation_func())
         population_parameters = pd.DataFrame(population_parameters)
-        # TODO: Ensure that the samples lie within the model prior, e.g., for masses.
+
+        # Ensure that the samples lie within the model prior, now that the samples have
+        # been drawn from the populations.
+        param_keys = [k for k, v in full_prior.items() if not isinstance(v, Constraint)]
+        theta = population_parameters[
+            population_parameters.columns.intersection(param_keys)
+        ]
+        out_of_bounds = np.isneginf(full_prior.ln_prob(theta, axis=0))
+        if True in out_of_bounds:
+            raise ValueError(
+                f"Parameter samples lie outside the Dingo event model "
+                f"prior:\n{population_parameters.iloc[out_of_bounds.argmax()]}.\n"
+                f"Use more constrained population prior."
+            )
+
         intrinsic_parameters.update(population_parameters)
 
     waveform_dataset_dict["parameters"] = intrinsic_parameters
