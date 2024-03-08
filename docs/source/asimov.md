@@ -1,5 +1,7 @@
-How to use asimov with dingo
-----------------------------
+# How to use asimov with dingo
+
+## GW150914 example
+
 If we want to run a series of analyses on many different events, asimov is a
 tool which will allow us to do this. To read more in depth about asimov, see
 https://asimov.docs.ligo.org/asimov/master/getting-started.html. In this tutorial, 
@@ -22,6 +24,17 @@ The first step is to start a project which can be done with
 mkdir project_tutorial
 cd project_tutorial
 asimov init "init message"
+```
+
+```{admonition}  Important
+If using a development installation of dingo, you will need to specify the
+location of the template file. To do this, copy the folder path to the 
+`dingo/asimov` directory on your local machine. Then in your
+asimov project, open up `.asimov/asimov.conf` and paste the the following at 
+the end of the file 
+
+[templating]
+/path/to/dingo/asimov
 ```
 
 If you type `ls -a` this should now show the following directory structure
@@ -93,8 +106,7 @@ asimov monitor
 to see the status of the runs. 
 
 
-Running on LIGO data
---------------------
+## Running on LIGO data
 
 If you would like to run on LVK data, you will need to 
 authenticate with your LVK credentials. This involves a
@@ -109,8 +121,7 @@ python -m pip install python-nds2-client
 conda install python-ldas-tools-framecpp==2.6.14
 ```
 
-Then, before running `asimov manage build` make sure to 
-run 
+Then, before running `asimov manage build` make sure to run 
 
 ```
 export GWDATAFIND_SERVER=datafind.igwn.org
