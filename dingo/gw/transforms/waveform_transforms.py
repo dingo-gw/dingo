@@ -1,8 +1,98 @@
 import lal
 import numpy as np
 import torch
+from typing import Optional
 
 from dingo.gw.domains import Domain, MultibandedFrequencyDomain, FrequencyDomain
+
+
+class ApplyFrequencyMasking(object):
+    """
+    Apply a variable frequency masking, truncating the waveform and ASDs.
+    """
+
+    def __init__(
+        self,
+        domain: Domain,
+        f_min_upper: Optional[float] = None,
+        f_max_lower: Optional[float] = None,
+    ):
+        """
+        Parameters
+        ----------
+        domain: Domain
+            Domain of the waveform data.
+        f_min_upper: float
+            New f_min is sampled in range [domain.f_min, domain.f_min_upper].
+            Sampling of f_min is uniform in bins (not in frequency) when the frequency
+            domain is not uniform (e.g., MultibandedFrequencyDomain).
+        f_max_lower: float
+            New f_max is sampled in range [domain.f_max, domain.f_max_lower].
+            Sampling of f_max is uniform in bins (not in frequency) when the frequency
+            domain is not uniform (e.g., MultibandedFrequencyDomain).
+        """
+        self.check_inputs(domain, f_min_upper, f_max_lower)
+        frequencies = domain()[domain.min_idx :]
+        if f_max_lower is not None:
+            self.sample_idx_upper = lambda: np.random.randint(
+                np.argmin(np.abs(f_max_lower - frequencies)), len(frequencies)
+            )
+        else:
+            self.sample_idx_upper = lambda: len(frequencies)
+        if f_min_upper is not None:
+            self.sample_idx_lower = lambda: np.random.randint(
+                0, np.argmin(np.abs(f_min_upper - frequencies))
+            )
+        else:
+            self.sample_idx_lower = lambda: 0
+
+    def check_inputs(self, domain, f_min_upper, f_max_lower):
+        # check domain
+        if not isinstance(domain, (FrequencyDomain, MultibandedFrequencyDomain)):
+            raise ValueError(
+                f"Domain should be a frequency domain type, got {type(domain)}."
+            )
+        # check validity of ranges
+        if f_min_upper is not None:
+            if not domain.f_min < f_min_upper < domain.f_max:
+                raise ValueError(
+                    f"Expected f_min_upper in domain range [{domain.f_min},"
+                    f" {domain.f_max}], got {f_min_upper}."
+                )
+        if f_max_lower is not None:
+            if not domain.f_min < f_max_lower < domain.f_max:
+                raise ValueError(
+                    f"Expected f_max_lower in domain range [{domain.f_min},"
+                    f" {domain.f_max}], got {f_max_lower}."
+                )
+        if f_min_upper and f_max_lower and f_min_upper >= f_max_lower:
+            raise ValueError(
+                f"Expected f_min_upper < f_max_lower, got {f_min_upper}, {f_max_lower}."
+            )
+
+    def __call__(self, input_sample: dict):
+        """
+        Parameters
+        ----------
+        input_sample : dict
+            sample["waveform"]: Dict with values being arrays containing waveforms,
+            or torch Tensor with the waveform.
+
+        Returns
+        -------
+        dict of the same form as the input, but with transformed (masked) waveforms.
+        """
+        sample = input_sample.copy()
+        lower = self.sample_idx_lower()
+        upper = self.sample_idx_upper()
+        # for k in sample["waveform"].keys():
+        # sample["waveform"][k][:lower] = 0
+        # sample["waveform"][k][upper:] = 0
+        # sample["asds"][k][:lower] = 0
+        # sample["asds"][k][upper:] = 0
+        sample["waveform"][..., :lower] = 0
+        sample["waveform"][..., upper:] = 0
+        return sample
 
 
 class HeterodynePhase(object):
