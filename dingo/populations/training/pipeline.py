@@ -2,6 +2,7 @@ import argparse
 import os
 import textwrap
 
+import torch
 import yaml
 from threadpoolctl import threadpool_limits
 from torch.utils.data import DataLoader
@@ -15,6 +16,11 @@ from dingo.core.utils import (
 from dingo.populations.training.population_dataset import PopulationDataset
 from dingo.populations.training.transform_builders import set_train_transforms
 
+
+# Allow use of TF32 datatype if available. This may speed up training, although
+# precision is somewhat reduced.
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
 
 def train(
     train_dir: str,
