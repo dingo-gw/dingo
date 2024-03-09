@@ -145,10 +145,14 @@ class PopulationDataset(torch.utils.data.Dataset):
         # Depending on whether we are in train or test mode, we take even or odd
         # elements of the base population (half for each).
         if mode == "train":
-            self.event_embeddings.restrict_to_subpopulation(slice(0, None, 2))
+            self.event_embeddings.restrict_to_subpopulation(
+                slice(None, len(self.event_embeddings) // 2, None)
+            )
             self.size = int(size * train_fraction)
         elif mode == "test":
-            self.event_embeddings.restrict_to_subpopulation(slice(1, None, 2))
+            self.event_embeddings.restrict_to_subpopulation(
+                slice(len(self.event_embeddings) // 2, None, None)
+            )
             self.size = int(size * (1 - train_fraction))
 
         self.event_embeddings.build_prior()
