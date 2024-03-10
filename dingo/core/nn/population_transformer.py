@@ -11,8 +11,20 @@ class PopulationTransformer(nn.Module):
         super().__init__()
         self.tokenizer = tokenizer
         self.transformer_encoder = transformer_encoder
-
         self.final_net = final_net
+
+        self.init_weights()
+
+    def init_weights(self) -> None:
+        """
+        Initialize parameters of transformer encoder explicitly due to Issue
+        https://github.com/pytorch/pytorch/issues/72253.
+        The parameters of the transformer encoder are initialized with xavier uniform.
+        """
+
+        for p in self.transformer_encoder.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
 
     def forward(
         self, src: torch.Tensor, src_key_padding_mask: torch.Tensor = None

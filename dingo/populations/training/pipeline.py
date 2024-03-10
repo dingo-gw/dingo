@@ -22,6 +22,7 @@ from dingo.populations.training.transform_builders import set_train_transforms
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
+
 def train(
     train_dir: str,
     local_settings: dict,
