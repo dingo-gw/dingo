@@ -198,7 +198,7 @@ def generate_base_population(
         waveform_dataset,
         batch_size=batch_size,
         shuffle=False,
-        pin_memory=False,
+        pin_memory=True,
         num_workers=num_workers,
         worker_init_fn=fix_random_seeds,
     )
