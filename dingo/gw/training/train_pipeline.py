@@ -4,13 +4,12 @@ import yaml
 import argparse
 import textwrap
 
-
+import torch
 from threadpoolctl import threadpool_limits
 
 from dingo.core.nn.nsf import autocomplete_model_kwargs_nsf
 from dingo.gw.training.train_builders import (
     build_dataset,
-    build_train_and_test_loaders,
     set_train_transforms,
     build_svd_for_embedding_network,
 )
@@ -22,6 +21,12 @@ from dingo.core.utils import (
     build_train_and_test_loaders,
 )
 from dingo.gw.dataset import WaveformDataset
+
+
+# Allow use of TF32 datatype if available. This may speed up training, although
+# precision is somewhat reduced.
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
 
 
 def prepare_training_new(train_settings: dict, train_dir: str, local_settings: dict):
