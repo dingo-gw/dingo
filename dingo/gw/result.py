@@ -13,7 +13,7 @@ from dingo.core.density import (
 from dingo.core.multiprocessing import apply_func_with_multiprocessing
 from dingo.core.result import Result as CoreResult
 from dingo.gw.conversion import change_spin_conversion_phase
-from dingo.gw.domains import build_domain
+from dingo.gw.domains import build_domain, FrequencyDomain
 from dingo.gw.gwutils import get_extrinsic_prior_dict, get_window_factor
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 from dingo.gw.prior import build_prior_with_defaults
@@ -335,11 +335,14 @@ class Result(CoreResult):
         else:
             phase_heterodyning_kwargs = None
 
+        event_data = self.context
+        data_domain = build_domain_from_event_metadata(self.event_metadata)
+
         self.likelihood = StationaryGaussianGWLikelihood(
             wfg_kwargs=self.base_metadata["dataset_settings"]["waveform_generator"],
             wfg_domain=wfg_domain,
-            data_domain=self.domain,
-            event_data=self.context,
+            data_domain=data_domain,
+            event_data=event_data,
             t_ref=self.t_ref,
             time_marginalization_kwargs=time_marginalization_kwargs,
             phase_marginalization_kwargs=phase_marginalization_kwargs,
@@ -608,3 +611,20 @@ class Result(CoreResult):
                 except AttributeError:
                     continue
         return prior
+
+
+def build_domain_from_event_metadata(event_metadata):
+    window_factor = get_window_factor(
+        dict(
+            type=event_metadata["window_type"],
+            T=event_metadata["T"],
+            f_s=event_metadata["f_s"],
+            roll_off=event_metadata["roll_off"],
+        )
+    )
+    return FrequencyDomain(
+        f_min=event_metadata["f_min"],
+        f_max=event_metadata["f_max"],
+        delta_f=1 / event_metadata["T"],
+        window_factor=window_factor,
+    )
