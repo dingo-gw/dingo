@@ -16,6 +16,7 @@ class ApplyFrequencyMasking(object):
         domain: Domain,
         f_min_upper: Optional[float] = None,
         f_max_lower: Optional[float] = None,
+        deterministic: bool = False,
     ):
         """
         Parameters
@@ -23,26 +24,33 @@ class ApplyFrequencyMasking(object):
         domain: Domain
             Domain of the waveform data.
         f_min_upper: float
-            New f_min is sampled in range [domain.f_min, domain.f_min_upper].
+            New f_min is sampled in range [domain.f_min, f_min_upper].
             Sampling of f_min is uniform in bins (not in frequency) when the frequency
             domain is not uniform (e.g., MultibandedFrequencyDomain).
         f_max_lower: float
-            New f_max is sampled in range [domain.f_max, domain.f_max_lower].
+            New f_max is sampled in range [domain.f_max, f_max_lower].
             Sampling of f_max is uniform in bins (not in frequency) when the frequency
             domain is not uniform (e.g., MultibandedFrequencyDomain).
+        deterministic: bool
+            If True, don't sample truncation range, but instead always truncate to range
+            [f_min_lower, f_max_lower].
         """
         self.check_inputs(domain, f_min_upper, f_max_lower)
         frequencies = domain()[domain.min_idx :]
         if f_max_lower is not None:
+            idx_bound_f_max = np.argmin(np.abs(f_max_lower - frequencies))
             self.sample_idx_upper = lambda: np.random.randint(
-                np.argmin(np.abs(f_max_lower - frequencies)), len(frequencies)
+                idx_bound_f_max, len(frequencies)
             )
+            if deterministic:
+                self.sample_idx_upper = lambda: idx_bound_f_max
         else:
             self.sample_idx_upper = lambda: len(frequencies)
         if f_min_upper is not None:
-            self.sample_idx_lower = lambda: np.random.randint(
-                0, np.argmin(np.abs(f_min_upper - frequencies))
-            )
+            idx_bound_f_min = np.argmin(np.abs(f_min_upper - frequencies))
+            self.sample_idx_lower = lambda: np.random.randint(0, idx_bound_f_min)
+            if deterministic:
+                self.sample_idx_lower = lambda: idx_bound_f_min
         else:
             self.sample_idx_lower = lambda: 0
 

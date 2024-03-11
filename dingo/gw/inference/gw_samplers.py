@@ -28,6 +28,7 @@ from dingo.gw.transforms import (
     CopyToExtrinsicParameters,
     GetDetectorTimes,
     HeterodynePhase,
+    ApplyFrequencyMasking,
 )
 
 
@@ -38,13 +39,14 @@ class GWSamplerMixin(object):
         * correction for fixed detector locations during training (t_ref)
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, frequency_masking=None, **kwargs):
         """
         Parameters
         ----------
         kwargs
             Keyword arguments that are forwarded to the superclass.
         """
+        self.frequency_masking = frequency_masking
         super().__init__(**kwargs)
         self.t_ref = self.base_model_metadata["train_settings"]["data"]["ref_time"]
         self._pesummary_package = "gw"
@@ -190,9 +192,17 @@ class GWSamplerMixin(object):
                 self.base_model_metadata["train_settings"]["data"]["detectors"],
                 first_index=self.domain.min_idx,
             ),
-            ToTorch(device=self.model.device),
-            GetItem("waveform"),
         ]
+        if self.frequency_masking:
+            transform_pre.append(
+                ApplyFrequencyMasking(
+                    domain=self.domain,
+                    f_min_upper=self.frequency_masking.get("f_min", None),
+                    f_max_lower=self.frequency_masking.get("f_max", None),
+                    deterministic=True,
+                )
+            )
+        transform_pre += [ToTorch(device=self.model.device), GetItem("waveform")]
         self.transform_pre = Compose(transform_pre)
 
 
@@ -401,7 +411,8 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 for k, v in transform.kernel.items():
                     self.gnpe_kernel[k] = v
         fixed_gnpe_parameters = [
-            k[: -len("_proxy")] for k in self.fixed_context_parameters.keys()
+            k[: -len("_proxy")]
+            for k in self.fixed_context_parameters.keys()
             if k.endswith("_proxy")
         ]
         self.gnpe_parameters += fixed_gnpe_parameters

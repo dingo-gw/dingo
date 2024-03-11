@@ -1215,6 +1215,12 @@ def create_parser(top_level=True):
         help="Dictionary with (fixed) context parameters.",
     )
     sampler_parser.add(
+        "--frequency-masking",
+        type=nonestr,
+        default=None,
+        help="Dictionary specifying f_min and/or f_max for frequency masking.",
+    )
+    sampler_parser.add(
         "--num-samples",
         type=int,
         default=50000,

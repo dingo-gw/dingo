@@ -50,6 +50,10 @@ class SamplingInput(Input):
         self.num_samples = args.num_samples
         self.batch_size = args.batch_size
         self.density_recovery_settings = args.density_recovery_settings
+        if args.frequency_masking is not None:
+            self.frequency_masking = convert_string_to_dict(args.frequency_masking)
+        else:
+            self.frequency_masking = None
         if args.fixed_context_parameters is not None:
             self.fixed_context_parameters = convert_string_to_dict(
                 args.fixed_context_parameters
@@ -126,6 +130,7 @@ class SamplingInput(Input):
                 init_sampler=init_sampler,
                 num_iterations=self.num_gnpe_iterations,
                 fixed_context_parameters=self.fixed_context_parameters,
+                frequency_masking=self.frequency_masking,
             )
 
         elif self.fixed_context_parameters is not None:
@@ -134,7 +139,9 @@ class SamplingInput(Input):
 
         else:
             self.gnpe = False
-            self.dingo_sampler = GWSampler(model=model)
+            self.dingo_sampler = GWSampler(
+                model=model, frequency_masking=self.frequency_masking
+            )
 
         self.dingo_sampler.context = self.context
         self.dingo_sampler.event_metadata = self.event_metadata
@@ -163,7 +170,7 @@ class SamplingInput(Input):
         gnpe_keys = [k for k in data_settings.keys() if k.startswith("gnpe_")]
 
         if len(gnpe_keys) == 0:
-            return GWSampler(model=init_model)
+            return GWSampler(model=init_model, frequency_masking=self.frequency_masking)
 
         # fixed gnpe parameters
 
@@ -173,8 +180,8 @@ class SamplingInput(Input):
                 or "chirp_mass_proxy" not in self.fixed_context_parameters
             ):
                 raise ValueError(
-                    f"Using GNPE initialization network with gnpe-chirp, "
-                    f"but no fixed chirp mass proxy provided: {e}."
+                    "Using GNPE initialization network with gnpe-chirp, "
+                    "but no fixed chirp mass proxy provided."
                 )
             gnpe_keys.remove("gnpe_chirp")
             if "chirp_mass" in data_settings["inference_parameters"]:
@@ -199,6 +206,7 @@ class SamplingInput(Input):
             init_sampler=fixed_init_sampler,
             num_iterations=1,
             fixed_context_parameters=self.fixed_context_parameters,
+            frequency_masking=self.frequency_masking,
         )
 
         return init_sampler
