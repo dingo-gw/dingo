@@ -335,13 +335,16 @@ class Result(CoreResult):
         else:
             phase_heterodyning_kwargs = None
 
-        event_data = self.context
-        data_domain = get_updated_domain_for_event(self.domain, self.event_metadata)
+        # event_data = self.context
+        # data_domain = get_updated_domain_for_event(self.domain, self.event_metadata)
+        event_domain, event_data = get_updated_event_domain_and_data(
+            self.domain, self.context, self.event_metadata
+        )
 
         self.likelihood = StationaryGaussianGWLikelihood(
             wfg_kwargs=self.base_metadata["dataset_settings"]["waveform_generator"],
             wfg_domain=wfg_domain,
-            data_domain=data_domain,
+            data_domain=event_domain,
             event_data=event_data,
             t_ref=self.t_ref,
             time_marginalization_kwargs=time_marginalization_kwargs,
@@ -613,7 +616,23 @@ class Result(CoreResult):
         return prior
 
 
+def get_updated_event_domain_and_data(domain, event_data, event_metadata):
+    # Get event domain, which is just the input domain with a potentially updated range.
+    domain = get_updated_domain_for_event(domain, event_metadata)
+
+    # Update event data to the new domain. This is a trivial operation if f_max is a
+    # node of the domain, but if not, we need to account for rounding errors.
+    base_domain = getattr(domain, "base_domain", domain)
+    event_data = {
+        k1: {k2: base_domain.update_data(v2) for k2, v2 in v1.items()}
+        for k1, v1 in event_data.items()
+    }
+
+    return domain, event_data
+
+
 def get_updated_domain_for_event(domain, event_metadata):
+    # check compatibility of window factors
     window_factor = get_window_factor(
         dict(
             type=event_metadata["window_type"],
@@ -627,6 +646,7 @@ def get_updated_domain_for_event(domain, event_metadata):
             f"Network trained with window factor {domain.window_factor}, but event data "
             f"requires window factor {window_factor}."
         )
+    # Get event domain, which is just the input domain with a potentially updated range.
     domain = build_domain(domain.domain_dict)
     domain.update(dict(f_min=event_metadata["f_min"], f_max=event_metadata["f_max"]))
     return domain
