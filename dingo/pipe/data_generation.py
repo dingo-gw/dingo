@@ -84,6 +84,9 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.sampling_frequency = args.sampling_frequency
         self.minimum_frequency = args.minimum_frequency
         self.maximum_frequency = args.maximum_frequency
+        # round frequencies
+        self.maximum_frequency -= (self.maximum_frequency % (1 / self.duration))
+        self.minimum_frequency -= (self.minimum_frequency % (1 / self.duration))
         # self.reference_frequency = args.reference_frequency
 
         # Waveform, source model and likelihood
