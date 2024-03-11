@@ -336,7 +336,7 @@ class Result(CoreResult):
             phase_heterodyning_kwargs = None
 
         event_data = self.context
-        data_domain = build_domain_from_event_metadata(self.event_metadata)
+        data_domain = get_updated_domain_for_event(self.domain, self.event_metadata)
 
         self.likelihood = StationaryGaussianGWLikelihood(
             wfg_kwargs=self.base_metadata["dataset_settings"]["waveform_generator"],
@@ -611,6 +611,25 @@ class Result(CoreResult):
                 except AttributeError:
                     continue
         return prior
+
+
+def get_updated_domain_for_event(domain, event_metadata):
+    window_factor = get_window_factor(
+        dict(
+            type=event_metadata["window_type"],
+            T=event_metadata["T"],
+            f_s=event_metadata["f_s"],
+            roll_off=event_metadata["roll_off"],
+        )
+    )
+    if domain.window_factor != window_factor:
+        raise ValueError(
+            f"Network trained with window factor {domain.window_factor}, but event data "
+            f"requires window factor {window_factor}."
+        )
+    domain = build_domain(domain.domain_dict)
+    domain.update(dict(f_min=event_metadata["f_min"], f_max=event_metadata["f_max"]))
+    return domain
 
 
 def build_domain_from_event_metadata(event_metadata):
