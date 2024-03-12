@@ -5,6 +5,7 @@ from torchvision.transforms import Compose
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.domains import (
     FrequencyDomain,
+    MultibandedFrequencyDomain,
     build_domain,
     build_domain_from_model_metadata,
 )
@@ -57,7 +58,7 @@ class GWSignal(object):
         """
 
         self._check_domains(wfg_domain, data_domain)
-        self.data_domain = data_domain
+        self.data_domain = self._get_data_domain(data_domain, wfg_domain)
 
         # The waveform generator potentially has a larger frequency range than the
         # domain of the trained network / requested injection / etc. This is typically
@@ -82,6 +83,16 @@ class GWSignal(object):
         self.whiten = False
 
         self.asd = None
+
+    @staticmethod
+    def _get_data_domain(data_domain, wfg_domain):
+        """Get copy of data domain, with truncation initialization for wfg_domain."""
+        data_domain_new = build_domain(wfg_domain.domain_dict)
+        data_domain_new.update({"f_min": data_domain.f_min, "f_max": data_domain.f_max})
+        data_domain_new.window_factor = data_domain.window_factor
+        assert data_domain_new.domain_dict == data_domain.domain_dict
+        assert np.all(data_domain_new() == data_domain())
+        return data_domain_new
 
     @staticmethod
     def _check_domains(domain_in, domain_out):
