@@ -1,5 +1,29 @@
 from copy import deepcopy
 
+import numpy as np
+
+
+class AdjustNumpyPrecision:
+    def __init__(self, dtypes_dict):
+        self.dtypes_dict = dtypes_dict
+
+    def __call__(self, input_sample: dict):
+        sample = input_sample.copy()
+        for input_key, dtype in self.dtypes_dict.items():
+            data = sample[input_key]
+            if isinstance(data, np.ndarray):
+                sample[input_key] = data.astype(dtype)
+            elif isinstance(data, dict):
+                # allow for one nested level
+                for k, v in data.items():
+                    if isinstance(v, np.ndarray):
+                        data[k] = v.astype(dtype)
+                    else:
+                        raise NotImplementedError()
+            else:
+                raise NotImplementedError()
+        return sample
+
 
 class GetItem:
     def __init__(self, key):

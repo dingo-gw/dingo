@@ -9,8 +9,9 @@ import pandas as pd
 from typing import Tuple, Dict
 from threadpoolctl import threadpool_limits
 from torchvision.transforms import Compose
-from bilby.gw.prior import BBHPriorDict
 
+from dingo.core.transforms import AdjustNumpyPrecision
+from bilby.gw.prior import BBHPriorDict
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.gw.prior import build_prior_with_defaults, default_intrinsic_dict
 from dingo.gw.domains import build_domain, build_domain_from_wfd_settings
@@ -77,7 +78,9 @@ def generate_parameters_and_polarizations(
     return parameters, polarizations
 
 
-def train_svd_basis(dataset: WaveformDataset, size: int, n_train: int):
+def train_svd_basis(
+    dataset: WaveformDataset, size: int, n_train: int, precision: str = None,
+):
     """
     Train (and optionally validate) an SVD basis.
 
@@ -91,6 +94,8 @@ def train_svd_basis(dataset: WaveformDataset, size: int, n_train: int):
         Number of training waveforms to use. Remaining are used for validation. Note
         that the actual number of training waveforms is n_train * len(polarizations),
         since there is one waveform used for each polarization.
+    precision: str
+        precision of the reduced basis, can be 'single' or 'double'
 
     Returns
     -------
@@ -114,7 +119,7 @@ def train_svd_basis(dataset: WaveformDataset, size: int, n_train: int):
 
     print("Building SVD basis.")
     basis = SVDBasis()
-    basis.generate_basis(train_data, size)
+    basis.generate_basis(train_data, size, precision=precision)
 
     assert np.allclose(basis.V[: dataset.domain.min_idx], 0)
 
@@ -190,6 +195,19 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
                 )
             )
 
+        precision = settings["compression"].get("precision")
+        if precision:
+            if precision == "double":
+                dtype = np.complex128
+            elif precision == "single":
+                dtype = np.complex64
+            else:
+                raise TypeError(
+                    f'Precision can only be changed to "single" or "double", '
+                    f"got {precision}."
+                )
+            compression_transforms.append(AdjustNumpyPrecision({"waveform": dtype}))
+
         # *NOTE*: svd will be built based on polarizations with all compression
         # transforms up to this point (i.e., if set, whitening, heterodyning).
         if "svd" in settings["compression"]:
@@ -232,7 +250,7 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
                     }
                 )
                 basis, n_train, n_test = train_svd_basis(
-                    svd_dataset, svd_settings["size"], n_train
+                    svd_dataset, svd_settings["size"], n_train, precision=precision
                 )
                 # Reset the true number of samples, in case this has changed due to
                 # failure to generate some EOB waveforms.

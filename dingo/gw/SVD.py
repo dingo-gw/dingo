@@ -19,13 +19,20 @@ class SVDBasis(DingoDataset):
         self.s = None
         self.n = None
         self.mismatches = None
+        self.precision = None
         super().__init__(
             file_name=file_name,
             dictionary=dictionary,
-            data_keys=["V", "s", "mismatches"],
+            data_keys=["V", "s", "mismatches", "precision"],
         )
 
-    def generate_basis(self, training_data: np.ndarray, n: int, method: str = "random"):
+    def generate_basis(
+        self,
+        training_data: np.ndarray,
+        n: int,
+        method: str = "random",
+        precision: str = None,
+    ):
         """Generate the SVD basis from training data and store it.
 
         The SVD decomposition takes
@@ -43,20 +50,34 @@ class SVDBasis(DingoDataset):
             n=0 keeps all basis elements.
         method: str
             Select SVD method, 'random' or 'scipy'
+        precision: str
+            precision of the reduced basis, can be 'single' or 'double'
         """
+        self.precision = precision
+        if precision is None or precision == "double":
+            dtype = np.complex128
+        elif precision == "single":
+            dtype = np.complex64
+        else:
+            raise TypeError(
+                f'Precision can only be changed to "single" or "double", '
+                f"got {precision}."
+            )
+
         if method == "random":
             if n == 0:
                 n = min(training_data.shape)
 
             U, s, Vh = randomized_svd(training_data, n, random_state=0)
 
-            self.Vh = Vh.astype(np.complex128)  # TODO: fix types
+            self.Vh = Vh.astype(dtype)
             self.V = self.Vh.T.conj()
             self.n = n
             self.s = s
         elif method == "scipy":
             # Code below uses scipy's svd tool. Likely slower.
             U, s, Vh = scipy.linalg.svd(training_data, full_matrices=False)
+            Vh = Vh.astype(dtype)
             V = Vh.T.conj()
 
             if (n == 0) or (n > len(V)):
