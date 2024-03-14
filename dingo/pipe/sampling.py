@@ -143,6 +143,17 @@ class SamplingInput(Input):
                 model=model, frequency_masking=self.frequency_masking
             )
 
+        # check that reference times of dingo samplers are consistent
+        try:
+            if self.dingo_sampler.t_ref != self.dingo_sampler.init_sampler.t_ref:
+                raise NotImplementedError(
+                    f"Expected consistent reference times for all dingo samplers, got "
+                    f"t_ref={self.dingo_sampler.t_ref} for sampler and "
+                    f"t_ref={self.dingo_sampler.init_sampler.t_ref} for init sampler."
+                )
+        except AttributeError:
+            pass
+
         self.dingo_sampler.context = self.context
         self.dingo_sampler.event_metadata = self.event_metadata
 

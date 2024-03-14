@@ -538,6 +538,7 @@ class GNPESampler(Sampler):
             # since this is when they were placed here and their values should not have
             # changed.
             proxies = {
+                # p: x["extrinsic_parameters"][p] for p in self.gnpe_proxy_parameters
                 p: x["extrinsic_parameters"][p] for p in self.fixed_context_parameters
             }
 

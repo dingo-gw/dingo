@@ -436,7 +436,7 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 as_type="dict",
             )
         ]
-        if gnpe_time_settings:
+        if gnpe_time_settings and gnpe_time_settings.get("exact_equiv"):
             transform_gnpe_loop_post.append(PostCorrectGeocentTime())
 
         transform_gnpe_loop_post.append(
@@ -445,7 +445,7 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
             )
         )
 
-        if gnpe_time_settings:
+        if {"geocent_time", "ra", "dec"}.issubset(self.inference_parameters):
             transform_gnpe_loop_post.append(
                 GetDetectorTimes(ifo_list, data_settings["ref_time"])
             )
