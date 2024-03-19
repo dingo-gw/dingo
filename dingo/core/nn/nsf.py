@@ -479,6 +479,5 @@ def autocomplete_model_kwargs_nsf(model_kwargs, data_sample):
             ]["output_dim"]
     # return model_kwargs
 
-
 if __name__ == "__main__":
     pass

@@ -1,83 +1,71 @@
-"""
-TODO: Docstring
-"""
-
-from typing import Callable
-import torch
-import dingo.core.utils as utils
-from torch.utils.data import Dataset
+from abc import abstractmethod
+from collections import OrderedDict
+import json
 import os
 import time
-import numpy as np
 from threadpoolctl import threadpool_limits
-import dingo.core.utils.trainutils
-import math
+
 import h5py
-import json
-from collections import OrderedDict
+import numpy as np
+import torch
 
-from dingo.core.nn.nsf import (
-    create_nsf_with_rb_projection_embedding_net,
-    create_nsf_with_transformer_embedding,
-    create_nsf_wrapped,
-
-)
-from dingo.core.nn.enets_pretraining import create_transformer_embedding_with_resnet
+import dingo
+import dingo.core.utils as utils
+from dingo.core.models.posterior_model import get_model_callable
 from dingo.core.utils.misc import get_version
 
 
-class PosteriorModel:
+class BaseModel:
     """
-    TODO: Docstring
+    Generic model class that builds a model based on a Callable and handles model independent tasks such as initializing
+    the model, the optimizer, and the scheduler, saving and loading the model, as well as putting it on a specific
+    device. This base class can be used to define derived classes with more specific methods such as 'train', 'evaluate'
+    or 'sample'.
+
+    This class is based on posterior_model.py without train and sample.
+    If this code is at one point included in the main dingo code, other model classes such as PosteriorModel should
+    inherit from this class to minimize duplicate code.
 
     Methods
     -------
 
     initialize_model:
-        initialize the NDE (including embedding net) as posterior model
-    initialize_training:
-        initialize for training, that includes storing the epoch, building
-        an optimizer and a learning rate scheduler
+        initialize the embedding net and the additional networks used for pretraining
+    initialize_optimizer_and_scheduler:
+        initialize optimizer and learning rate scheduler for training
+    model_to_device:
+        put model on specific device
+    load_model:
+        load and build a model from a file
     save_model:
         save the model, including all information required to rebuild it,
         except for the builder function
-    load_model:
-        load and build a model from a file
-    train_model:
-        train the model
-    inference:
-        perform inference
     """
 
     def __init__(
-        self,
-        model_filename: str = None,
-        metadata: dict = None,
-        initial_weights: dict = None,
-        device: str = "cuda",
-        load_training_info: bool = True,
+            self,
+            model_filename: str = None,
+            metadata: dict = None,
+            initial_weights: dict = None,
+            device: str = "cuda",
+            load_training_info: bool = True,
     ):
         """
 
         Parameters
         ----------
 
-        model_builder: Callable
-            builder function for the model,
-            self.model = model_builder(**model_kwargs)
-        model_kwargs: dict = None
-            kwargs for for the model,
-            self.model = model_builder(**model_kwargs)
         model_filename: str = None
             path to filename of loaded model
-        optimizer_kwargs: dict = None
-            kwargs for optimizer
-        scheduler_kwargs: dict = None
-            kwargs for scheduler
-        init_for_training: bool = False
-            flag whether initialization for training (e.g., optimizer) required
         metadata: dict = None
-            dict with metadata, used to save dataset_settings and train_settings
+            dict with metadata, e.g. model_kwargs, scheduler_kwargs, etc.
+            used to save dataset_settings and train_settings
+        initial_weights: dict = None
+            dict with initial weights of model
+        device: str = cuda
+            device for model
+        load_training_info: bool = True
+            whether to load the training info from the latest saved model
         """
         self.version = f"dingo={get_version()}"  # dingo version
 
@@ -107,27 +95,10 @@ class PosteriorModel:
             self.initialize_model()
             self.model_to_device(device)
 
-    def model_to_device(self, device):
-        """
-        Put model to device, and set self.device accordingly.
-        """
-        if device not in ("cpu", "cuda"):
-            raise ValueError(f"Device should be either cpu or cuda, got {device}.")
-        self.device = torch.device(device)
-        # Commented below so that code runs on first cuda device in the case of multiple.
-        # if device == 'cuda' and torch.cuda.device_count() > 1:
-        #     print("Using", torch.cuda.device_count(), "GPUs.")
-        #     raise NotImplementedError('This needs testing!')
-        #     # dim = 0 [512, ...] -> [256, ...], [256, ...] on 2 GPUs
-        #     self.model = torch.nn.DataParallel(self.model)
-        print(f"Putting posterior model to device {self.device}.")
-        self.model.to(self.device)
-
     def initialize_model(self):
         """
-        Initialize a model for the posterior by calling the
+        Initialize a model by calling the
         self.model_builder with self.model_kwargs.
-
         """
         model_builder = get_model_callable(self.model_kwargs["type"])
         model_kwargs = {k: v for k, v in self.model_kwargs.items() if k != "type"}
@@ -149,49 +120,21 @@ class PosteriorModel:
                 self.optimizer, **self.scheduler_kwargs
             )
 
-    def save_model(
-        self,
-        model_filename: str,
-        save_training_info: bool = True,
-    ):
+    def model_to_device(self, device):
         """
-        Save the posterior model to the disk.
-
-        Parameters
-        ----------
-        model_filename: str
-            filename for saving the model
-        save_training_info: bool
-            specifies whether information required to proceed with training is
-            saved, e.g. optimizer state dict
-
+        Put model to device, and set self.device accordingly.
         """
-        model_dict = {
-            "model_kwargs": self.model_kwargs,
-            "model_state_dict": self.model.state_dict(),
-            "epoch": self.epoch,
-            "version": self.version,
-        }
-
-        if self.metadata is not None:
-            model_dict["metadata"] = self.metadata
-
-        if self.context is not None:
-            model_dict["context"] = self.context
-
-        if self.event_metadata is not None:
-            model_dict["event_metadata"] = self.event_metadata
-
-        if save_training_info:
-            model_dict["optimizer_kwargs"] = self.optimizer_kwargs
-            model_dict["scheduler_kwargs"] = self.scheduler_kwargs
-            if self.optimizer is not None:
-                model_dict["optimizer_state_dict"] = self.optimizer.state_dict()
-            if self.scheduler is not None:
-                model_dict["scheduler_state_dict"] = self.scheduler.state_dict()
-            # TODO
-
-        torch.save(model_dict, model_filename)
+        if device not in ("cpu", "cuda"):
+            raise ValueError(f"Device should be either cpu or cuda, got {device}.")
+        self.device = torch.device(device)
+        # Commented below so that code runs on first cuda device in the case of multiple.
+        # if device == 'cuda' and torch.cuda.device_count() > 1:
+        #     print("Using", torch.cuda.device_count(), "GPUs.")
+        #     raise NotImplementedError('This needs testing!')
+        #     # dim = 0 [512, ...] -> [256, ...], [256, ...] on 2 GPUs
+        #     self.model = torch.nn.DataParallel(self.model)
+        print(f"Putting posterior model to device {self.device}.")
+        self.model.to(self.device)
 
     def _load_model_from_hdf5(self, model_filename: str):
         """
@@ -232,10 +175,10 @@ class PosteriorModel:
         return d
 
     def load_model(
-        self,
-        model_filename: str,
-        load_training_info: bool = True,
-        device: str = "cuda",
+            self,
+            model_filename: str,
+            load_training_info: bool = True,
+            device: str = "cuda",
     ):
         """
         Load a posterior model from the disk.
@@ -247,6 +190,8 @@ class PosteriorModel:
         load_training_info: bool #TODO: load information for training
             specifies whether information required to proceed with training is
             loaded, e.g. optimizer state dict
+        device: str
+            device to load
         """
         # Make sure that when the model is loaded, the torch tensors are put on the
         # device indicated in the saved metadata. External routines run on a cpu
@@ -293,15 +238,66 @@ class PosteriorModel:
             # put model in evaluation mode
             self.model.eval()
 
+    def save_model(
+            self,
+            model_filename: str,
+            save_training_info: bool = True,
+    ):
+        """
+        Save the model to the disk.
+
+        Parameters
+        ----------
+        model_filename: str
+            filename for saving the model
+        save_training_info: bool
+            specifies whether information required to proceed with training is
+            saved, e.g. optimizer state dict
+
+        """
+        model_dict = {
+            "model_kwargs": self.model_kwargs,
+            "model_state_dict": self.model.state_dict(),
+            "epoch": self.epoch,
+            "version": self.version,
+        }
+
+        if self.metadata is not None:
+            model_dict["metadata"] = self.metadata
+
+        if self.context is not None:
+            model_dict["context"] = self.context
+
+        if self.event_metadata is not None:
+            model_dict["event_metadata"] = self.event_metadata
+
+        if save_training_info:
+            model_dict["optimizer_kwargs"] = self.optimizer_kwargs
+            model_dict["scheduler_kwargs"] = self.scheduler_kwargs
+            if self.optimizer is not None:
+                model_dict["optimizer_state_dict"] = self.optimizer.state_dict()
+            if self.scheduler is not None:
+                model_dict["scheduler_state_dict"] = self.scheduler.state_dict()
+            # TODO
+
+        torch.save(model_dict, model_filename)
+
+    @abstractmethod
+    def loss(self, data, context):
+        """
+        Compute the loss for a batch of data.
+        """
+        pass
+
     def train(
-        self,
-        train_loader: torch.utils.data.DataLoader,
-        test_loader: torch.utils.data.DataLoader,
-        train_dir: str,
-        runtime_limits: object = None,
-        checkpoint_epochs: int = None,
-        use_wandb=False,
-        test_only=False,
+            self,
+            train_loader: torch.utils.data.DataLoader,
+            test_loader: torch.utils.data.DataLoader,
+            train_dir: str,
+            runtime_limits: object = None,
+            checkpoint_epochs: int = None,
+            use_wandb=False,
+            test_only=False,
     ):
         """
 
@@ -381,73 +377,6 @@ class PosteriorModel:
 
                 print(f"Finished training epoch {self.epoch}.\n")
 
-    def sample(
-        self,
-        *x,
-        batch_size=None,
-        get_log_prob=False,
-    ):
-        """
-        Sample from posterior model, conditioned on context x. x is expected to have a
-        batch dimension, i.e., to obtain N samples with additional context requires
-        x = x_.expand(N, *x_.shape).
-
-        This method takes care of the batching, makes sure that self.model is in
-        evaluation mode and disables gradient computation.
-
-        Parameters
-        ----------
-        *x:
-            input context to the neural network; has potentially multiple elements for,
-            e.g., gnpe proxies
-        batch_size: int = None
-            batch size for sampling
-        get_log_prob: bool = False
-            if True, also return log probability along with the samples
-
-        Returns
-        -------
-        samples: torch.Tensor
-            samples from posterior model
-        """
-        self.model.eval()
-        with torch.no_grad():
-            if batch_size is None:
-                samples = self.model.sample(*x)
-                if get_log_prob:
-                    log_prob = self.model.log_prob(samples, *x)
-            else:
-                samples = []
-                if get_log_prob:
-                    log_prob = []
-                num_batches = math.ceil(len(x[0]) / batch_size)
-                for idx_batch in range(num_batches):
-                    lower, upper = idx_batch * batch_size, (idx_batch + 1) * batch_size
-                    x_batch = [xi[lower:upper] for xi in x]
-                    samples.append(self.model.sample(*x_batch, num_samples=1))
-                    if get_log_prob:
-                        log_prob.append(self.model.log_prob(samples[-1], *x_batch))
-                samples = torch.cat(samples, dim=0)
-                if get_log_prob:
-                    log_prob = torch.cat(log_prob, dim=0)
-        if not get_log_prob:
-            return samples
-        else:
-            return samples, log_prob
-
-
-def get_model_callable(model_type: str):
-    if model_type == "nsf+embedding":
-        return create_nsf_with_rb_projection_embedding_net
-    elif model_type == "nsf+transformer":
-        return create_nsf_with_transformer_embedding
-    elif model_type == "nsf":
-        return create_nsf_wrapped
-    elif model_type == "transformer+resnet":
-        return create_transformer_embedding_with_resnet
-    else:
-        raise KeyError("Invalid model type.")
-
 
 def train_epoch(pm, dataloader):
     pm.model.train()
@@ -465,7 +394,7 @@ def train_epoch(pm, dataloader):
         # data to device
         data = [d.to(pm.device, non_blocking=True) for d in data]
         # compute loss
-        loss = -pm.model(data[0], *data[1:]).mean()
+        loss = pm.loss(data[0], *data[1:])
         # backward pass and optimizer step
         loss.backward()
         pm.optimizer.step()
@@ -492,7 +421,7 @@ def test_epoch(pm, dataloader):
             # data to device
             data = [d.to(pm.device, non_blocking=True) for d in data]
             # compute loss
-            loss = -pm.model(data[0], *data[1:]).mean()
+            loss = pm.loss(data[0], *data[1:])
             # update loss for history and logging
             loss_info.update(loss.item(), len(data[0]))
             loss_info.print_info(batch_idx)
