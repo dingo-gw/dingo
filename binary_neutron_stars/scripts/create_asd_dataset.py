@@ -61,6 +61,7 @@ for ifo in ["H1", "L1", "V1", "K1"]:
         psds[ifo] = data[1]
     except FileNotFoundError:
         pass
+print(f"Found PSDs for ifos {psds.keys()}.")
 
 # build target domain
 with open(wfd_settings, "r") as f:
