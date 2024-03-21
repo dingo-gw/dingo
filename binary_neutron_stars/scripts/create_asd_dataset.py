@@ -1,20 +1,20 @@
 """Create dingo ASD dataset based on txt PSD files.
 
 python create_asd_dataset.py \
-  --psd_filename "/Volumes/fast/groups/dingo/03_binary_neutron_stars/00_data/01_GW170817/02_asds/GW170817_discoveryPaper_PSD_<ifo>.txt" \
-  --wfd_dir /Volumes/fast/groups/dingo/03_binary_neutron_stars/01_wfd/03_generic_lowSpin/
+  --psd_filename "/fast/groups/dingo/03_binary_neutron_stars/00_data/01_GW170817/02_asds/GW170817_discoveryPaper_PSD_<ifo>.txt" \
+  --wfd_dir /fast/groups/dingo/03_binary_neutron_stars/01_wfd/03_generic_lowSpin/
 
 python create_asd_dataset.py \
   --psd_filename "/fast/groups/dingo/03_binary_neutron_stars/00_data/02_GW190425/02_asds/GW190425_GWTC_PSD_<ifo>.txt" \
-  --wfd_dir /Volumes/fast/groups/dingo/03_binary_neutron_stars/01_wfd/03_generic_lowSpin/
+  --wfd_dir /fast/groups/dingo/03_binary_neutron_stars/01_wfd/03_generic_lowSpin/
 
 python create_asd_dataset.py \
-  --psd_filename "/Volumes/fast/groups/dingo/03_binary_neutron_stars/00_data/01_GW170817/02_asds/GW170817_discoveryPaper_PSD_<ifo>.txt" \
-  --wfd_dir /Volumes/fast/groups/dingo/03_binary_neutron_stars/01_wfd/03_generic_highSpin/
+  --psd_filename "/fast/groups/dingo/03_binary_neutron_stars/00_data/01_GW170817/02_asds/GW170817_discoveryPaper_PSD_<ifo>.txt" \
+  --wfd_dir /fast/groups/dingo/03_binary_neutron_stars/01_wfd/03_generic_highSpin/
 
 python create_asd_dataset.py \
   --psd_filename "/fast/groups/dingo/03_binary_neutron_stars/00_data/02_GW190425/02_asds/GW190425_GWTC_PSD_<ifo>.txt" \
-  --wfd_dir /Volumes/fast/groups/dingo/03_binary_neutron_stars/01_wfd/03_generic_highSpin/
+  --wfd_dir /fast/groups/dingo/03_binary_neutron_stars/01_wfd/03_generic_highSpin/
 """
 import argparse
 import matplotlib.pyplot as plt
@@ -46,7 +46,7 @@ wfd_settings = os.path.join(
 )
 name = args.psd_filename.split("/")[-1].replace("_PSD_<ifo>.txt", "")
 os.makedirs(os.path.join(args.wfd_dir, "asds"), exist_ok=True)
-outname = os.path.join(args.wfd_dir, "asds", "asd_dataset_" + name)
+outname = os.path.join(args.wfd_dir, "asds", "asd_dataset_" + name + ".hdf5")
 
 # load PSDs
 psds = {}
