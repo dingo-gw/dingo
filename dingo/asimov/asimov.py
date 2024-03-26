@@ -10,7 +10,12 @@ import time
 
 from asimov import config, logger
 
-from asimov.pipeline import Pipeline, PipelineException, PipelineLogger, PESummaryPipeline
+from asimov.pipeline import (
+    Pipeline,
+    PipelineException,
+    PipelineLogger,
+    PESummaryPipeline,
+)
 
 
 class Dingo(Pipeline):
@@ -26,7 +31,7 @@ class Dingo(Pipeline):
         Defaults to "C01_offline".
     """
 
-    with importlib.resources.path("dingo.asimov", "datafind_template.ini") as template_file:
+    with importlib.resources.path("dingo.asimov", "dingo.ini") as template_file:
         config_template = template_file
 
     name = "dingo"
@@ -47,7 +52,11 @@ class Dingo(Pipeline):
         results_dir = glob.glob(f"{self.production.rundir}/result")
         if len(results_dir) > 0:
             if (
-                len(glob.glob(os.path.join(results_dir[0], f"*importance_sampling.hdf5")))
+                len(
+                    glob.glob(
+                        os.path.join(results_dir[0], f"*importance_sampling.hdf5")
+                    )
+                )
                 > 0
             ):
                 self.logger.info("Results files found, the job is finished.")
@@ -101,15 +110,7 @@ class Dingo(Pipeline):
         else:
             ini = f"{self.production.name}.ini"
 
-        if self.production.rundir:
-            rundir = self.production.rundir
-        else:
-            rundir = os.path.join(
-                os.path.expanduser("~"),
-                self.production.event.name,
-                self.production.name,
-            )
-            self.production.rundir = rundir
+        rundir = self.production.rundir
 
         if "job label" in self.production.meta:
             job_label = self.production.meta["job label"]
@@ -119,12 +120,6 @@ class Dingo(Pipeline):
         command = [
             os.path.join(config.get("pipelines", "environment"), "bin", "dingo_pipe"),
             ini,
-            "--label",
-            job_label,
-            "--outdir",
-            f"{cwd}/{self.production.rundir}",
-            "--accounting",
-            f"{self.production.meta['scheduler']['accounting group']}",
         ]
 
         if dryrun:
@@ -154,7 +149,9 @@ class Dingo(Pipeline):
         """
 
         results_dir = os.path.join(self.production.rundir, "result")
-        results_filenames = glob.glob(os.path.join(results_dir, f"*importance_sampling.hdf5"))
+        results_filenames = glob.glob(
+            os.path.join(results_dir, f"*importance_sampling.hdf5")
+        )
         return os.path.join(results_dir, results_filenames[0])
 
     def upload_assets(self):
@@ -192,9 +189,9 @@ class Dingo(Pipeline):
                     message = message.split("\n")
                     messages[log.split("/")[-1]] = "\n".join(message[-100:])
             except FileNotFoundError:
-                messages[
-                    log.split("/")[-1]
-                ] = "There was a problem opening this log file."
+                messages[log.split("/")[-1]] = (
+                    "There was a problem opening this log file."
+                )
         return messages
 
     def submit_dag(self, dryrun=False):
