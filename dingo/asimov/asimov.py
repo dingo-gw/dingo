@@ -31,7 +31,7 @@ class Dingo(Pipeline):
         Defaults to "C01_offline".
     """
 
-    with importlib.resources.path("dingo.asimov", "datafind_template.ini") as template_file:
+    with importlib.resources.path("dingo.asimov", "dingo.ini") as template_file:
         config_template = template_file
 
     name = "dingo"

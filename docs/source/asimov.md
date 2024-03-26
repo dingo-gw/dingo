@@ -26,17 +26,6 @@ cd project_tutorial
 asimov init "init message"
 ```
 
-```{admonition}  Important
-If using a development installation of dingo, you will need to specify the
-location of the template file. To do this, copy the folder path to the 
-`dingo/asimov` directory on your local machine. Then in your
-asimov project, open up `.asimov/asimov.conf` and paste the the following at 
-the end of the file 
-
-[templating]
-/path/to/dingo/asimov
-```
-
 If you type `ls -a` this should now show the following directory structure
 
 ```
@@ -77,7 +66,6 @@ asimov apply -f ../../analysis_dingo.yaml -e GW150914_095045
 
 We have now applied all the settings to GW150914 and are ready 
 to begin the asimov run! Start by creating the .ini file using 
-
 
 ```
 asimov manage build
