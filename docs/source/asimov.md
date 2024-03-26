@@ -57,7 +57,7 @@ asimov apply -f project_dingo.yaml
 ```
 
 Now that some basic project settings have been added, we can start to analyze events.
-Let's add the GW150914 event to the ledger. You can download the `GW150914_dingo.yaml`
+Let's add the GW150914 event to the ledger. You can download the `event_dingo.yaml`
 file from `https://github.com/dingo-gw/dingo/tree/main/examples/asimov` and apply it 
 with
 
