@@ -691,7 +691,7 @@ class WaveformGenerator:
             return hlm_fd, iota
         else:
             raise NotImplementedError(
-                f"Approximant {LS.GetApproximantFromString(self.approximant)} not "
+                f"Approximant {self.approximant_str} not "
                 f"implemented. When adding this approximant to this method, make sure "
                 f"the the output dict hlm_td contains the TD modes in the *L0 frame*. "
                 f"In particular, adding an approximant that is implemented in the same "
