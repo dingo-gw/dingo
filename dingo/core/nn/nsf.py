@@ -2,6 +2,7 @@
 Implementation of the neural spline flow (NSF). Most of this code is adapted
 from the uci.py example from https://github.com/bayesiains/nsf.
 """
+
 import copy
 
 import torch
@@ -218,7 +219,7 @@ class FlowWrapper(nn.Module):
         if self.embedding_net is not None:
             x = torchutils.forward_pass_with_unpacked_tuple(self.embedding_net, x)
         if len(x) > 0:
-            sample = self.flow.sample(num_samples)
+            sample = self.flow.sample(num_samples, x)
             sl = list(range(sample.ndim - 1))
             return torch.squeeze(sample, dim=sl)
         else:
