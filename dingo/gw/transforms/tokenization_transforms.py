@@ -1,5 +1,7 @@
 import numpy as np
 
+from dingo.gw.domains import FrequencyDomain
+
 
 class StrainTokenization(object):
     """
@@ -9,25 +11,26 @@ class StrainTokenization(object):
     and that the ordering of the blocks within 'waveform' is fixed.
     """
 
-    def __init__(self, num_tokens: int, f_min: float, f_max: float, df: float, normalize_frequency: bool = False):
+    def __init__(
+        self,
+        num_tokens: int,
+        domain: FrequencyDomain,
+        normalize_frequency: bool = False,
+    ):
         """
         Parameters
         ----------
         num_tokens: int
             Number of tokens into which the frequency bins should be divided.
-        f_min: float
-            Minimal frequency value.
-        f_max: float
-            Maximal frequency value.
-        df: float
-            Frequency interval between bins.
+        domain: FrequencyDomain
+            Contains domain information, e.g., f_min, f_max, delta_f
         normalize_frequency: bool
             Whether to normalize the frequency bins for the positional encoding
 
         """
-        num_f = np.array((f_max - f_min) / df) + 1
+        num_f = domain.frequency_mask_length
         self.num_bins_per_token = np.ceil(num_f / num_tokens).astype(int)
-        f_token_width = self.num_bins_per_token * df
+        f_token_width = self.num_bins_per_token * domain.delta_f
         self.token_indices = np.arange(
             0,
             num_tokens * self.num_bins_per_token,
@@ -35,11 +38,11 @@ class StrainTokenization(object):
             dtype=int,
         )
         assert num_tokens == len(self.token_indices)
-        self.f_min_per_token = np.arange(f_min, f_max, f_token_width)
-        self.f_max_per_token = self.f_min_per_token + f_token_width - df
+        self.f_min_per_token = np.arange(domain.f_min, domain.f_max, f_token_width)
+        self.f_max_per_token = self.f_min_per_token + f_token_width - domain.delta_f
         self.num_padded_f_bins = int(num_tokens * self.num_bins_per_token - num_f)
         self.normalize_freq = normalize_frequency
-        self.f_min = f_min
+        self.f_min = domain.f_min
         self.f_max = self.f_max_per_token.max()
         self.num_tokens = num_tokens
 
@@ -74,17 +77,32 @@ class StrainTokenization(object):
         )
         strain = strain.reshape(
             strain.shape[0], strain.shape[1], self.num_tokens, self.num_bins_per_token
-        )
+        )  # blocks, channels, seq, features
+        num_blocks = strain.shape[0]
+        num_channels = strain.shape[1]
+        strain = np.moveaxis(strain, 2, 0)  # seq, blocks, channels, features
+        strain = strain.reshape(
+            self.num_tokens * num_blocks, num_channels * self.num_bins_per_token
+        )  # seq, features
 
         sample["waveform"] = strain
         detector_dict = {"H1": 0, "L1": 1, "V1": 2}
-        detectors = [detector_dict[key] for key in input_sample["asds"]]
-        sample["blocks"] = np.array(detectors)
+        detectors = np.array([detector_dict[key] for key in input_sample["asds"]])
         if self.normalize_freq:
-            sample["f_min_per_token"] = (self.f_min_per_token - self.f_min)/(self.f_max - self.f_min)
-            sample["f_max_per_token"] = (self.f_max_per_token - self.f_min)/(self.f_max - self.f_min)
+            f_min_per_token = (self.f_min_per_token - self.f_min) / (
+                self.f_max - self.f_min
+            )
+            f_max_per_token = (self.f_max_per_token - self.f_min) / (
+                self.f_max - self.f_min
+            )
         else:
-            sample["f_min_per_token"] = self.f_min_per_token
-            sample["f_max_per_token"] = self.f_max_per_token
+            f_min_per_token = self.f_min_per_token
+            f_max_per_token = self.f_max_per_token
+
+        token_position = np.empty((strain.shape[0], 3))
+        token_position[:, 0] = np.repeat(f_min_per_token, len(detectors))
+        token_position[:, 1] = np.repeat(f_max_per_token, len(detectors))
+        token_position[:, 2] = np.tile(detectors, self.num_tokens)
+        sample["position"] = token_position
 
         return sample

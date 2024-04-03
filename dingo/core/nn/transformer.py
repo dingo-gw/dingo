@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from typing import Callable, List, Tuple, Union
 import math
 import torch
@@ -9,12 +10,14 @@ from dingo.core.nn.resnet import DenseResidualNet
 
 class MLP(nn.Module):
     """Simple MLP with one hidden layer."""
-    def __init__(self,
-                 input_size: int,
-                 hidden_size: int,
-                 output_size: int,
-                 activation_fn: Callable
-                 ):
+
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size: int,
+        output_size: int,
+        activation_fn: Callable,
+    ):
         super(MLP, self).__init__()
         self.linear0 = nn.Linear(input_size, hidden_size)
         self.activation = activation_fn
@@ -82,27 +85,33 @@ class TokenEmbedding(nn.Module):
         ) = input_dims
         if individual_token_embedding:
             if type(hidden_dims) is list:
-                self.stack_embedding_networks = nn.ModuleList([
-                    DenseResidualNet(
-                        input_dim=self.num_channels * self.num_bins_per_token,
-                        output_dim=emb_size,
-                        hidden_dims=tuple(hidden_dims),
-                        activation=activation,
-                        dropout=dropout,
-                        batch_norm=batch_norm,
-                        layer_norm=layer_norm,
-                    )
-                    for _ in range(self.num_tokens)
-                ])
+                self.stack_embedding_networks = nn.ModuleList(
+                    [
+                        DenseResidualNet(
+                            input_dim=self.num_channels * self.num_bins_per_token,
+                            output_dim=emb_size,
+                            hidden_dims=tuple(hidden_dims),
+                            activation=activation,
+                            dropout=dropout,
+                            batch_norm=batch_norm,
+                            layer_norm=layer_norm,
+                        )
+                        for _ in range(self.num_tokens)
+                    ]
+                )
             else:
                 assert type(hidden_dims) is int
-                self.stack_embedding_networks = nn.ModuleList([
-                    MLP(self.num_channels * self.num_bins_per_token,
-                        hidden_dims,
-                        emb_size,
-                        activation)
-                    for _ in range(self.num_tokens)
-                ])
+                self.stack_embedding_networks = nn.ModuleList(
+                    [
+                        MLP(
+                            self.num_channels * self.num_bins_per_token,
+                            hidden_dims,
+                            emb_size,
+                            activation,
+                        )
+                        for _ in range(self.num_tokens)
+                    ]
+                )
         else:
             if type(hidden_dims) is list:
                 self.embedding_networks = DenseResidualNet(
@@ -116,10 +125,12 @@ class TokenEmbedding(nn.Module):
                 )
             else:
                 assert type(hidden_dims) is int
-                self.embedding_networks = MLP(self.num_channels * self.num_bins_per_token,
-                                              hidden_dims,
-                                              emb_size,
-                                              activation)
+                self.embedding_networks = MLP(
+                    self.num_channels * self.num_bins_per_token,
+                    hidden_dims,
+                    emb_size,
+                    activation,
+                )
 
         self.individual_token_embedding = individual_token_embedding
         self.emb_size = emb_size
@@ -156,13 +167,15 @@ class TokenEmbedding(nn.Module):
                 # apply linear layer for tensor of shape [batch_size, num_channels, num_bins_per_token]
                 if self.individual_token_embedding:
                     out_b.append(
-                        self.stack_embedding_networks[i](x[:, b, :, i, :].flatten(start_dim=1))
+                        self.stack_embedding_networks[i](
+                            x[:, b, :, i, :].flatten(start_dim=1)
+                        )
                     )
                 else:
-                    out_b.append(self.embedding_networks(x[:, b, :, i, :].flatten(start_dim=1)))
-            out.append(
-                torch.stack(out_b, dim=1)
-            )
+                    out_b.append(
+                        self.embedding_networks(x[:, b, :, i, :].flatten(start_dim=1))
+                    )
+            out.append(torch.stack(out_b, dim=1))
         x = torch.stack(out, dim=1)
 
         return x
@@ -213,10 +226,16 @@ class FrequencyEncoding(nn.Module):
             )
         elif "continuous" in encoding_type:
             d_f_min = (
-                torch.pow(2, torch.arange(0, self.emb_size_f_min, 2) / self.emb_size_f_min) * math.pi
+                torch.pow(
+                    2, torch.arange(0, self.emb_size_f_min, 2) / self.emb_size_f_min
+                )
+                * math.pi
             )
             d_f_max = (
-                torch.pow(2, torch.arange(0, self.emb_size_f_max, 2) / self.emb_size_f_max) * math.pi
+                torch.pow(
+                    2, torch.arange(0, self.emb_size_f_max, 2) / self.emb_size_f_max
+                )
+                * math.pi
             )
         else:
             raise ValueError(
@@ -230,13 +249,14 @@ class FrequencyEncoding(nn.Module):
 
         self.emb_size = torch.tensor(emb_size)
 
-        self.register_buffer('d_f_min', d_f_min)
-        self.register_buffer('d_f_max', d_f_max)
+        self.register_buffer("d_f_min", d_f_min)
+        self.register_buffer("d_f_max", d_f_max)
 
     def initialize_linear(self):
         self.linear.bias.data = torch.zeros_like(self.linear.bias.data)
-        self.linear.weight.data = (torch.eye(self.linear.weight.data.shape[0])
-                                   + torch.normal(0, 0.01, size=self.linear.weight.data.shape))
+        self.linear.weight.data = torch.eye(
+            self.linear.weight.data.shape[0]
+        ) + torch.normal(0, 0.01, size=self.linear.weight.data.shape)
 
     def forward(self, x: Tensor, f_min: Tensor, f_max: Tensor) -> Tensor:
         """
@@ -273,7 +293,9 @@ class FrequencyEncoding(nn.Module):
         pos_embedding[:, :, :, self.emb_size_f_min : self.emb_size : 2] = torch.sin(
             f_max.reshape(batch_size, 1, num_tokens, 1) * self.d_f_max
         )
-        f_max_cos_dim = pos_embedding[:, :, :, self.emb_size_f_min + 1 : self.emb_size : 2].shape[3]
+        f_max_cos_dim = pos_embedding[
+            :, :, :, self.emb_size_f_min + 1 : self.emb_size : 2
+        ].shape[3]
         pos_embedding[:, :, :, self.emb_size_f_min + 1 : self.emb_size : 2] = torch.cos(
             f_max.reshape(batch_size, 1, num_tokens, 1) * self.d_f_max[:f_max_cos_dim]
         )
@@ -283,7 +305,7 @@ class FrequencyEncoding(nn.Module):
                 tmp.append(self.linear(pos_embedding[:, :, i, :]))
             pos_embedding = torch.stack(tmp, dim=2)
 
-        x = (x + pos_embedding)/2
+        x = (x + pos_embedding) / 2
 
         return x
 
@@ -317,8 +339,10 @@ class BlockEmbedding(nn.Module):
 
     def initialize_embedding(self):
         pi = torch.tensor(math.pi)
-        p_emb = torch.linspace(0, 2*pi, self.emb_size)
-        off_set = torch.tensor([i/self.num_blocks * 2*pi for i in range(self.num_blocks)])
+        p_emb = torch.linspace(0, 2 * pi, self.emb_size)
+        off_set = torch.tensor(
+            [i / self.num_blocks * 2 * pi for i in range(self.num_blocks)]
+        )
         self.block_embedding.weight.data = torch.sin(p_emb + off_set.unsqueeze(1))
 
     def forward(self, x: Tensor, blocks: Tensor) -> Tensor:
@@ -347,7 +371,7 @@ class BlockEmbedding(nn.Module):
             )
 
         x = x + torch.unsqueeze(self.block_embedding(blocks.long()), 2)
-        x = x.reshape(x.shape[0], x.shape[1]*x.shape[2], x.shape[3])/2
+        x = x.reshape(x.shape[0], x.shape[1] * x.shape[2], x.shape[3]) / 2
 
         return x
 
@@ -502,6 +526,121 @@ class TransformerModel(nn.Module):
             output = self.transformer_encoder(src)
         else:
             output = self.transformer_encoder(src, src_mask)
-        output = self.adapt_avg_pool(output.reshape(output.shape[0], self.d_out, -1)).squeeze()
+        output = self.adapt_avg_pool(
+            output.reshape(output.shape[0], self.d_out, -1)
+        ).squeeze()
 
         return output
+
+
+class MultiPositionalEncoding(nn.Module):
+
+    def __init__(self, d_model, max_vals, resolutions):
+        super().__init__()
+        num_encodings = len(max_vals)
+        encoding_sizes = [((d_model // 2) // num_encodings) * 2] * num_encodings
+        encoding_sizes[-1] += d_model - sum(encoding_sizes)
+        assert sum(encoding_sizes) == d_model
+
+        for i in range(num_encodings):
+            k = torch.arange(0, encoding_sizes[i], 2)
+            div_term = torch.exp(
+                torch.log(torch.tensor(max_vals[i] / resolutions[i]))
+                * (-k / encoding_sizes[i])
+            )
+            self.register_buffer("div_term_" + str(i), div_term)
+        self.num_encodings = num_encodings
+
+    def forward(self, x: Tensor, position: Tensor):
+        """
+        Parameters
+        ----------
+        x: Tensor, shape ``[batch_size, seq_length, embedding_dim]``
+        position: Tensor, shape ``[batch_size, seq_length, self.num_encodings]``
+        """
+        position = position.unsqueeze(-1)
+        start = 0
+        pe = torch.zeros_like(x)
+        for i in range(self.num_encodings):
+            div_term = getattr(self, "div_term_" + str(i))
+            end = start + 2 * len(div_term)
+            pe[:, :, start:end:2] = torch.sin(position[:, :, i, :] * div_term)
+            pe[:, :, start + 1 : end : 2] = torch.cos(position[:, :, i, :] * div_term)
+            start = end
+        return x + pe
+
+
+class PoolingTransformer(nn.Module):
+    def __init__(
+        self, tokenizer, positional_encoder, transformer_encoder, final_net=None
+    ):
+        super().__init__()
+        self.tokenizer = tokenizer
+        self.positional_encoder = positional_encoder
+        self.transformer_encoder = transformer_encoder
+        self.final_net = final_net
+
+        self.init_weights()
+
+    def init_weights(self) -> None:
+        """
+        Initialize parameters of transformer encoder explicitly due to Issue
+        https://github.com/pytorch/pytorch/issues/72253.
+        The parameters of the transformer encoder are initialized with xavier uniform.
+        """
+
+        for p in self.transformer_encoder.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+
+    def forward(
+        self,
+        src: torch.Tensor,
+        position: torch.Tensor = None,
+        src_key_padding_mask: torch.Tensor = None,
+    ) -> torch.Tensor:
+        x = self.tokenizer(src)
+        if position is not None:
+            # TODO: Update positional encoder to accept src_key_padding_mask.
+            x = self.positional_encoder(x, position)
+        x = self.transformer_encoder(x, src_key_padding_mask=src_key_padding_mask)
+
+        # Average over non-masked components.
+        if src_key_padding_mask is not None:
+            denominator = torch.sum(~src_key_padding_mask, -1, keepdim=True)
+            x = torch.sum(x * ~src_key_padding_mask.unsqueeze(-1), dim=-2) / denominator
+        else:
+            x = torch.mean(x, dim=-2)
+
+        if self.final_net is not None:
+            x = self.final_net(x)
+        return x
+
+
+def create_pooling_transformer(config):
+    """Builder function for a transformer based multi-event encoder."""
+    # autocomplete config
+    if isinstance(config, dict):
+        config = SimpleNamespace(**config)
+    # config.tokenizer["input_dim"] = config.d_dingo_encoding
+    config.positional_encoder["d_model"] = config.transformer["d_model"]
+    config.tokenizer["output_dim"] = config.transformer["d_model"]
+    config.final_net["input_dim"] = config.transformer["d_model"]
+
+    # build individual modules
+    tokenizer = DenseResidualNet(**config.tokenizer)
+    positional_encoder = MultiPositionalEncoding(**config.positional_encoder)
+    transformer_layer = nn.TransformerEncoderLayer(
+        d_model=config.transformer["d_model"],
+        dim_feedforward=config.transformer.get("dim_feedforward", 2048),
+        nhead=config.transformer["nhead"],
+        dropout=config.transformer.get("dropout", 0.1),
+        batch_first=True,
+    )
+    transformer = nn.TransformerEncoder(
+        transformer_layer, num_layers=config.transformer["num_layers"]
+    )
+    final_net = DenseResidualNet(**config.final_net)
+
+    encoder = PoolingTransformer(tokenizer, positional_encoder, transformer, final_net)
+    return encoder
