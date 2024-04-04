@@ -1,7 +1,7 @@
 """Create dingo ASD dataset based on txt PSD files.
 
 python create_asd_dataset.py \
-  --psd_filename "/fast/groups/dingo/03_binary_neutron_stars/00_data/01_GW170817/02_asds/GW170817_discoveryPaper_PSD_<ifo>.txt" \
+  --psd_filename "/fast/groups/dingo/03_binary_neutron_stars/00_data/01_GW170817/02_asds/GW170817_pePaper_PSD_<ifo>.txt" \
   --wfd_dir /fast/groups/dingo/03_binary_neutron_stars/01_wfd/03_generic_lowSpin/
 
 python create_asd_dataset.py \
@@ -9,7 +9,7 @@ python create_asd_dataset.py \
   --wfd_dir /fast/groups/dingo/03_binary_neutron_stars/01_wfd/03_generic_lowSpin/
 
 python create_asd_dataset.py \
-  --psd_filename "/fast/groups/dingo/03_binary_neutron_stars/00_data/01_GW170817/02_asds/GW170817_discoveryPaper_PSD_<ifo>.txt" \
+  --psd_filename "/fast/groups/dingo/03_binary_neutron_stars/00_data/01_GW170817/02_asds/GW170817_pePaper_PSD_<ifo>.txt" \
   --wfd_dir /fast/groups/dingo/03_binary_neutron_stars/01_wfd/03_generic_highSpin/
 
 python create_asd_dataset.py \
@@ -90,10 +90,10 @@ asd_dataset = ASDDataset(
         "gps_times": {ifo: np.array([-1]) for ifo in asds.keys()},
     }
 )
-asd_dataset.to_file(file_name=outname)
+# asd_dataset.to_file(file_name=outname)
 
 if args.plot:
-    asd_dataset_loaded = ASDDataset(file_name=outname)
+    asd_dataset_loaded = asd_dataset  # ASDDataset(file_name=outname)
     for ifo, psd in psds.items():
         plt.plot(frequencies, psd ** 0.5, label=ifo)
         plt.plot(asd_dataset_loaded.domain(), asd_dataset_loaded.asds[ifo][0])
