@@ -252,3 +252,11 @@ def save_model(pm, log_dir, model_prefix="model", checkpoint_epochs=None):
         print(f"Copy model to checkpoint {model_name_cp}.", end=" ")
         copyfile(model_name, model_name_cp)
         print("Done.")
+
+
+def set_tf32(allow_tf32):
+    import torch
+
+    print(f"Utils: Setting allow_tf32 = {allow_tf32}")
+    torch.backends.cuda.matmul.allow_tf32 = allow_tf32
+    torch.backends.cudnn.allow_tf32 = allow_tf32

@@ -15,7 +15,7 @@ from dingo.gw.training.train_builders import (
     build_svd_for_embedding_network,
 )
 from dingo.core.models.posterior_model import PosteriorModel
-from dingo.core.utils.trainutils import RuntimeLimits
+from dingo.core.utils.trainutils import RuntimeLimits, set_tf32
 from dingo.core.utils import (
     set_requires_grad_flag,
     get_number_of_model_parameters,
@@ -234,6 +234,11 @@ def train_stages(pm, wfd, train_dir, local_settings):
     runtime_limits = RuntimeLimits(
         epoch_start=pm.epoch, **local_settings["runtime_limits"]
     )
+
+    # Optionally enable/disable training with tf32 datatype
+    # If allow_tf32 is not set explicitly, use system default
+    if "allow_tf32" in train_settings["data"]:
+        set_tf32(train_settings["data"]["allow_tf32"])
 
     # Extract list of stages from settings dict
     stages = []
