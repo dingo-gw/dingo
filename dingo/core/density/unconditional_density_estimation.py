@@ -1,6 +1,9 @@
 import copy
+from typing import Optional
 
 import torch
+import yaml
+from os.path import dirname, join
 
 from dingo.core.utils import build_train_and_test_loaders
 from dingo.core.utils.trainutils import RuntimeLimits
@@ -8,13 +11,13 @@ import numpy as np
 import pandas as pd
 import argparse
 
-from dingo.core.models import PosteriorModel
+from dingo.core.posterior_models import NormalizingFlow
 
 
 class SampleDataset(torch.utils.data.Dataset):
     """
     Dataset class for unconditional density estimation.
-    This is required, since the training method of dingo.core.models.PosteriorModel
+    This is required, since the training method of dingo.core.posterior_models.Base
     expects a tuple of (theta, *context) as output of the DataLoader, but here we have
     no context, so len(context) = 0. This SampleDataset therefore returns a tuple
     (theta, ) instead of just theta.
@@ -42,7 +45,7 @@ def train_unconditional_density_estimator(
 
     Parameters
     ----------
-    samples: pd.DataFrame
+    result: pd.DataFrame
         DataFrame containing the samples to train the density estimator on.
     settings: dict
         Dictionary containing the settings for the density estimator.
@@ -51,7 +54,7 @@ def train_unconditional_density_estimator(
 
     Returns
     -------
-    model: PosteriorModel
+    model: Base
         trained density estimator
     """
     samples = result.samples
@@ -74,7 +77,8 @@ def train_unconditional_density_estimator(
     # set up density estimation network
     settings["model"]["input_dim"] = num_params
     settings["model"]["context_dim"] = None
-    model = PosteriorModel(
+    # TODO: ultimately, we want to replace this by FlowMatching, I guess
+    model = NormalizingFlow(
         metadata={"train_settings": settings, "base": copy.deepcopy(result.metadata)},
         device=settings["training"]["device"],
     )

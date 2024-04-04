@@ -1,32 +1,28 @@
 """
 TODO: Docstring
 """
-
-from typing import Callable
-import torch
-import dingo.core.utils as utils
-from torch.utils.data import Dataset
+import json
+import math
 import os
 import time
-import numpy as np
-from threadpoolctl import threadpool_limits
-import dingo.core.utils.trainutils
-import math
-import h5py
-import json
+from abc import abstractmethod
 from collections import OrderedDict
+from os.path import join
+from typing import Callable
 
-from dingo.core.nn.nsf import (
-    create_nsf_with_rb_projection_embedding_net,
-    create_nsf_with_transformer_embedding,
-    create_nsf_wrapped,
+import h5py
+import numpy as np
+import torch
+from threadpoolctl import threadpool_limits
+from torch.utils.data import Dataset
 
-)
-from dingo.core.nn.enets_pretraining import create_transformer_embedding_with_resnet
+import dingo.core.utils as utils
+import dingo.core.utils.trainutils
 from dingo.core.utils.misc import get_version
+from dingo.core.utils.trainutils import EarlyStopping
 
 
-class PosteriorModel:
+class Base:
     """
     TODO: Docstring
 
@@ -53,37 +49,35 @@ class PosteriorModel:
         self,
         model_filename: str = None,
         metadata: dict = None,
+        embedding_net_builder: Callable = None,
         initial_weights: dict = None,
         device: str = "cuda",
         load_training_info: bool = True,
     ):
         """
+        Initialize a model for the posterior distribution.
 
         Parameters
         ----------
-
-        model_builder: Callable
-            builder function for the model,
-            self.model = model_builder(**model_kwargs)
-        model_kwargs: dict = None
-            kwargs for for the model,
-            self.model = model_builder(**model_kwargs)
-        model_filename: str = None
-            path to filename of loaded model
-        optimizer_kwargs: dict = None
-            kwargs for optimizer
-        scheduler_kwargs: dict = None
-            kwargs for scheduler
-        init_for_training: bool = False
-            flag whether initialization for training (e.g., optimizer) required
-        metadata: dict = None
-            dict with metadata, used to save dataset_settings and train_settings
+        model_filename: str
+            If given, loads data from the given file.
+        metadata: dict
+            If given, initializes the model from these settings
+        embedding_net_builder: Callable
+            If given, builds embedding network using this function
+        initial_weights: dict
+            Initial weights for the model
+        device: str
+        load_training_info: bool
         """
+
         self.version = f"dingo={get_version()}"  # dingo version
 
+        self.device = None
         self.optimizer_kwargs = None
-        self.model_kwargs = None
+        self.network_kwargs = None
         self.scheduler_kwargs = None
+        self.embedding_net_builder = embedding_net_builder
         self.initial_weights = initial_weights
 
         self.metadata = metadata
@@ -93,6 +87,7 @@ class PosteriorModel:
             # separately, and before calling initialize_optimizer_and_scheduler().
 
         self.epoch = 0
+        self.network = None
         self.optimizer = None
         self.scheduler = None
         self.context = None
@@ -104,10 +99,82 @@ class PosteriorModel:
                 model_filename, load_training_info=load_training_info, device=device
             )
         else:
-            self.initialize_model()
-            self.model_to_device(device)
+            self.initialize_network()
+            self.network_to_device(device)
 
-    def model_to_device(self, device):
+    @abstractmethod
+    def initialize_network(self):
+        """
+        Initialize the network backbone for the posterior model
+
+        """
+        pass
+
+    @abstractmethod
+    def sample_batch(self, *context_data):
+        """
+        Sample a batch of data from the posterior model.
+
+        Parameters
+        ----------
+        context: Tensor
+        Returns
+        -------
+        batch: dict
+            dictionary with batch data
+        """
+        pass
+
+    @abstractmethod
+    def sample_and_log_prob_batch(self, *context_data):
+        """
+        Sample a batch of data and log probs from the posterior model.
+
+        Parameters
+        ----------
+        context: Tensor
+        Returns
+        -------
+        batch: dict
+            dictionary with batch data
+        """
+        pass
+
+    @abstractmethod
+    def log_prob_batch(self, data, *context_data):
+        """
+        Sample a batch of data from the posterior model.
+
+        Parameters
+        ----------
+        data: Tensor
+        context: Tensor
+
+        Returns
+        -------
+        batch: Tensor
+            containing batch data
+        """
+        pass
+
+    @abstractmethod
+    def loss(self, data, context):
+        """
+        Compute the loss for a batch of data.
+
+        Parameters
+        ----------
+        data: Tensor
+        context: Tensor
+
+        Returns
+        -------
+        loss: Tensor
+            loss for the batch
+        """
+        pass
+
+    def network_to_device(self, device):
         """
         Put model to device, and set self.device accordingly.
         """
@@ -119,21 +186,9 @@ class PosteriorModel:
         #     print("Using", torch.cuda.device_count(), "GPUs.")
         #     raise NotImplementedError('This needs testing!')
         #     # dim = 0 [512, ...] -> [256, ...], [256, ...] on 2 GPUs
-        #     self.model = torch.nn.DataParallel(self.model)
+        #     self.network = torch.nn.DataParallel(self.network)
         print(f"Putting posterior model to device {self.device}.")
-        self.model.to(self.device)
-
-    def initialize_model(self):
-        """
-        Initialize a model for the posterior by calling the
-        self.model_builder with self.model_kwargs.
-
-        """
-        model_builder = get_model_callable(self.model_kwargs["type"])
-        model_kwargs = {k: v for k, v in self.model_kwargs.items() if k != "type"}
-        if self.initial_weights is not None:
-            model_kwargs["initial_weights"] = self.initial_weights
-        self.model = model_builder(**model_kwargs)
+        self.network.to(self.device)
 
     def initialize_optimizer_and_scheduler(self):
         """
@@ -142,7 +197,7 @@ class PosteriorModel:
         """
         if self.optimizer_kwargs is not None:
             self.optimizer = utils.get_optimizer_from_kwargs(
-                self.model.parameters(), **self.optimizer_kwargs
+                self.network.parameters(), **self.optimizer_kwargs
             )
         if self.scheduler_kwargs is not None:
             self.scheduler = utils.get_scheduler_from_kwargs(
@@ -168,7 +223,7 @@ class PosteriorModel:
         """
         model_dict = {
             "model_kwargs": self.model_kwargs,
-            "model_state_dict": self.model.state_dict(),
+            "model_state_dict": self.network.state_dict(),
             "epoch": self.epoch,
             "version": self.version,
         }
@@ -189,7 +244,6 @@ class PosteriorModel:
                 model_dict["optimizer_state_dict"] = self.optimizer.state_dict()
             if self.scheduler is not None:
                 model_dict["scheduler_state_dict"] = self.scheduler.state_dict()
-            # TODO
 
         torch.save(model_dict, model_filename)
 
@@ -197,12 +251,10 @@ class PosteriorModel:
         """
         Helper function to load a trained model that has been
         saved in HDF5 format using `dingo_pt_to_hdf5`.
-
         Parameters
         ----------
         model_filename: str
             path to saved model; must have extension '.hdf5'
-
         Returns
         -------
         d: dict
@@ -247,7 +299,9 @@ class PosteriorModel:
         load_training_info: bool #TODO: load information for training
             specifies whether information required to proceed with training is
             loaded, e.g. optimizer state dict
+        device: str
         """
+
         # Make sure that when the model is loaded, the torch tensors are put on the
         # device indicated in the saved metadata. External routines run on a cpu
         # machine may have moved the model from 'cuda' to 'cpu'.
@@ -262,8 +316,8 @@ class PosteriorModel:
         self.version = d.get("version")
 
         self.model_kwargs = d["model_kwargs"]
-        self.initialize_model()
-        self.model.load_state_dict(d["model_state_dict"])
+        self.initialize_network()
+        self.network.load_state_dict(d["model_state_dict"])
 
         self.epoch = d["epoch"]
 
@@ -275,7 +329,7 @@ class PosteriorModel:
         if "event_metadata" in d:
             self.event_metadata = d["event_metadata"]
 
-        self.model_to_device(device)
+        self.network_to_device(device)
 
         if load_training_info:
             if "optimizer_kwargs" in d:
@@ -291,7 +345,7 @@ class PosteriorModel:
                 self.scheduler.load_state_dict(d["scheduler_state_dict"])
         else:
             # put model in evaluation mode
-            self.model.eval()
+            self.network.eval()
 
     def train(
         self,
@@ -302,29 +356,41 @@ class PosteriorModel:
         checkpoint_epochs: int = None,
         use_wandb=False,
         test_only=False,
+        early_stopping=False,
     ):
         """
 
         Parameters
         ----------
-        train_loader
-        test_loader
-        train_dir
-        runtime_limits
-        checkpoint_epochs
-        use_wandb
+        train_loader: torch.utils.data.DataLoader
+            torch data loader with training data
+        test_loader: torch.utils.data.DataLoader
+            torch data loader with test data
+        train_dir: str
+            directory for saving models and history
+        runtime_limits: object=None
+        checkpoint_epochs: int=None
+            number of epochs between checkpoints
+        use_wandb: bool=False
+            whether to use wand
         test_only: bool = False
             if True, training is skipped
+        early_stopping: bool=False
+            whether to use early stopping
 
         Returns
         -------
 
         """
+
         if test_only:
             test_loss = test_epoch(self, test_loader)
             print(f"test loss: {test_loss:.3f}")
 
         else:
+            if early_stopping:
+                early_stopping = EarlyStopping(patience=7, verbose=True)
+
             while not runtime_limits.limits_exceeded(self.epoch):
                 self.epoch += 1
 
@@ -379,12 +445,22 @@ class PosteriorModel:
                     except ImportError:
                         print("wandb not installed. Skipping logging to wandb.")
 
+                if early_stopping:
+                    best_model = early_stopping(test_loss, self)
+                    if best_model:
+                        self.save_model(
+                            join(train_dir, "best_model.pt"), save_training_info=False
+                        )
+                    if early_stopping.early_stop:
+                        print("Early stopping")
+                        break
                 print(f"Finished training epoch {self.epoch}.\n")
 
     def sample(
         self,
         *x,
         batch_size=None,
+        num_samples=None,
         get_log_prob=False,
     ):
         """
@@ -392,7 +468,7 @@ class PosteriorModel:
         batch dimension, i.e., to obtain N samples with additional context requires
         x = x_.expand(N, *x_.shape).
 
-        This method takes care of the batching, makes sure that self.model is in
+        This method takes care of the batching, makes sure that self.network is in
         evaluation mode and disables gradient computation.
 
         Parameters
@@ -402,6 +478,8 @@ class PosteriorModel:
             e.g., gnpe proxies
         batch_size: int = None
             batch size for sampling
+        num_samples: int = None
+            number of samples to draw from the posterior model
         get_log_prob: bool = False
             if True, also return log probability along with the samples
 
@@ -410,23 +488,45 @@ class PosteriorModel:
         samples: torch.Tensor
             samples from posterior model
         """
-        self.model.eval()
+
+        self.network.eval()
         with torch.no_grad():
             if batch_size is None:
-                samples = self.model.sample(*x)
                 if get_log_prob:
-                    log_prob = self.model.log_prob(samples, *x)
+                    samples, log_prob = self.sample_and_log_prob_batch(*x)
+                else:
+                    samples = self.sample_batch(*x)
             else:
+                if num_samples is None:
+                    num_samples = batch_size
                 samples = []
                 if get_log_prob:
                     log_prob = []
-                num_batches = math.ceil(len(x[0]) / batch_size)
+
+                num_batches = (
+                    math.ceil(len(x[0]) / batch_size)
+                    if x
+                    else math.ceil(num_samples / batch_size)
+                )
                 for idx_batch in range(num_batches):
-                    lower, upper = idx_batch * batch_size, (idx_batch + 1) * batch_size
-                    x_batch = [xi[lower:upper] for xi in x]
-                    samples.append(self.model.sample(*x_batch, num_samples=1))
+                    if x:
+                        lower, upper = (
+                            idx_batch * batch_size,
+                            (idx_batch + 1) * batch_size,
+                        )
+                        x_batch = [xi[lower:upper] for xi in x]
+                        batch_size = None
+                    else:
+                        x_batch = x
+
                     if get_log_prob:
-                        log_prob.append(self.model.log_prob(samples[-1], *x_batch))
+                        samples_batch, log_prob_batch = self.sample_and_log_prob_batch(
+                            *x_batch, batch_size=batch_size
+                        )
+                        samples.append(samples_batch)
+                        log_prob.append(log_prob_batch)
+                    else:
+                        samples.append(self.sample_batch(*x_batch))
                 samples = torch.cat(samples, dim=0)
                 if get_log_prob:
                     log_prob = torch.cat(log_prob, dim=0)
@@ -436,21 +536,8 @@ class PosteriorModel:
             return samples, log_prob
 
 
-def get_model_callable(model_type: str):
-    if model_type == "nsf+embedding":
-        return create_nsf_with_rb_projection_embedding_net
-    elif model_type == "nsf+transformer":
-        return create_nsf_with_transformer_embedding
-    elif model_type == "nsf":
-        return create_nsf_wrapped
-    elif model_type == "transformer+resnet":
-        return create_transformer_embedding_with_resnet
-    else:
-        raise KeyError("Invalid model type.")
-
-
 def train_epoch(pm, dataloader):
-    pm.model.train()
+    pm.network.train()
     loss_info = dingo.core.utils.trainutils.LossInfo(
         pm.epoch,
         len(dataloader.dataset),
@@ -465,7 +552,7 @@ def train_epoch(pm, dataloader):
         # data to device
         data = [d.to(pm.device, non_blocking=True) for d in data]
         # compute loss
-        loss = -pm.model(data[0], *data[1:]).mean()
+        loss = pm.loss(data[0], *data[1:])
         # backward pass and optimizer step
         loss.backward()
         pm.optimizer.step()
@@ -478,7 +565,7 @@ def train_epoch(pm, dataloader):
 
 def test_epoch(pm, dataloader):
     with torch.no_grad():
-        pm.model.eval()
+        pm.network.eval()
         loss_info = dingo.core.utils.trainutils.LossInfo(
             pm.epoch,
             len(dataloader.dataset),
@@ -492,7 +579,7 @@ def test_epoch(pm, dataloader):
             # data to device
             data = [d.to(pm.device, non_blocking=True) for d in data]
             # compute loss
-            loss = -pm.model(data[0], *data[1:]).mean()
+            loss = pm.loss(data[0], *data[1:])
             # update loss for history and logging
             loss_info.update(loss.item(), len(data[0]))
             loss_info.print_info(batch_idx)

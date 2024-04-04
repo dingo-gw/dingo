@@ -1,4 +1,5 @@
 from typing import Callable, Tuple
+
 import torch
 from torch import nn
 from torch.nn import functional as F, init
@@ -101,10 +102,15 @@ class DenseResidualNet(nn.Module):
             tuple with dimensions of hidden layers of this module
         activation: callable
             activation function used in residual blocks
-        dropout: float
+        context_features: int=None
+            Number of additional context features, which are provided to the residual
+            blocks via gated linear units. If None, no additional context expected.
+        dropout: float=0.0
             dropout probability for residual blocks used for reqularization
-        batch_norm: bool
+        batch_norm: bool=True
             flag that specifies whether to use batch normalization
+        layer_norm: bool=False
+            flag that specifies whether to use layer normalization
         """
 
         super(DenseResidualNet, self).__init__()

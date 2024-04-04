@@ -1,19 +1,21 @@
-from typing import Optional
-
-import torch
-import numpy as np
 import argparse
 import os
 from os.path import dirname, join
 from pathlib import Path
+from typing import Optional
+
+import numpy as np
+import torch
 import yaml
 
-from dingo.core.models import PosteriorModel
+from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.core.utils.plotting import plot_corner_multi
+from dingo.gw.data.data_preparation import (
+    get_event_data_and_domain,
+    parse_settings_for_raw_data,
+)
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
-from dingo.gw.data.data_preparation import get_event_data_and_domain, \
-    parse_settings_for_raw_data
 from dingo.gw.inference.visualization import load_ref_samples
 
 
@@ -160,8 +162,9 @@ def get_event_data(event, args, model, ref=None):
             args.event_dataset,
         )
 
-        event_metadata = parse_settings_for_raw_data(model.metadata, args.time_psd,
-                                                     args.time_buffer)
+        event_metadata = parse_settings_for_raw_data(
+            model.metadata, args.time_psd, args.time_buffer
+        )
 
         # Put the metadata in the same format as provided by dingo_pipe data_generation.
         # (This is a bit ad hoc, should be improved.)
@@ -262,7 +265,7 @@ def analyze_event():
     else:
         device = "cpu"
 
-    model = PosteriorModel(args.model, device=device, load_training_info=False)
+    model = build_model_from_kwargs(filename=args.model, device=device)
     epoch = model.epoch
     wf_model = model.metadata["dataset_settings"]["waveform_generator"]["approximant"]
 
@@ -280,8 +283,8 @@ def analyze_event():
 
     if args.model_init is not None:
         gnpe = True
-        init_model = PosteriorModel(
-            args.model_init, device=device, load_training_info=False
+        init_model = build_model_from_kwargs(
+            filename=args.model_init, device=device, load_training_info=False
         )
         init_sampler = GWSampler(model=init_model)
         sampler = GWSamplerGNPE(
@@ -346,7 +349,7 @@ def analyze_event():
             plot_corner_multi(
                 [ref_samples, sampler.samples],
                 labels=[ref_method, "Dingo"],
-                filename=join(args.out_directory, f"cornerplot_{label}.pdf")
+                filename=join(args.out_directory, f"cornerplot_{label}.pdf"),
             )
     if args.exit_command:
         os.system(" ".join(args.exit_command))

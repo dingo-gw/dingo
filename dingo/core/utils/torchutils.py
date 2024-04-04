@@ -1,19 +1,19 @@
 import copy
+from typing import Union, Tuple, Iterable
 
+import bilby
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
-from typing import Union, Tuple, Iterable
-import bilby
 
 
 def fix_random_seeds(_):
     """Utility function to set random seeds when using multiple workers for DataLoader."""
-    np.random.seed(int(torch.initial_seed()) % (2 ** 32 - 1))
+    np.random.seed(int(torch.initial_seed()) % (2**32 - 1))
     try:
-        bilby.core.utils.random.seed(int(torch.initial_seed()) % (2 ** 32 - 1))
+        bilby.core.utils.random.seed(int(torch.initial_seed()) % (2**32 - 1))
     except AttributeError:  # In case using an old version of Bilby.
         pass
 
@@ -33,6 +33,8 @@ def get_activation_function_from_string(activation_name: str):
         return F.relu
     elif activation_name.lower() == "leaky_relu":
         return F.leaky_relu
+    elif activation_name.lower() == "gelu":
+        return F.gelu
     else:
         raise ValueError("Invalid activation function.")
 
@@ -149,7 +151,7 @@ def get_scheduler_from_kwargs(
         "cosine": torch.optim.lr_scheduler.CosineAnnealingLR,
         "reduce_on_plateau": torch.optim.lr_scheduler.ReduceLROnPlateau,
         "sequential": torch.optim.lr_scheduler.SequentialLR,
-        "linear": torch.optim.lr_scheduler.LinearLR
+        "linear": torch.optim.lr_scheduler.LinearLR,
     }
     if not "type" in scheduler_kwargs:
         raise KeyError("Scheduler type needs to be specified.")
@@ -168,17 +170,23 @@ def get_scheduler_from_kwargs(
             else:
                 break
         if len(scheduler_keys) < 2:
-            raise KeyError("At least two schedulers need to be specified via "
-                           "'scheduler_0': {...}, 'scheduler_1: {...}' when using sequential.")
+            raise KeyError(
+                "At least two schedulers need to be specified via "
+                "'scheduler_0': {...}, 'scheduler_1: {...}' when using sequential."
+            )
         schedulers = []
         for scheduler_key in scheduler_keys:
             individual_scheduler_kwargs = scheduler_kwargs.pop(scheduler_key)
             if "type" not in individual_scheduler_kwargs:
-                raise KeyError(f"Scheduler type of {scheduler_key} needs to be specified.")
+                raise KeyError(
+                    f"Scheduler type of {scheduler_key} needs to be specified."
+                )
             individual_scheduler_type = individual_scheduler_kwargs.pop("type").lower()
             if individual_scheduler_type not in schedulers_dict:
                 raise ValueError(f"No valid scheduler specified for {scheduler_key}.")
-            individual_scheduler = schedulers_dict[individual_scheduler_type](optimizer, **individual_scheduler_kwargs)
+            individual_scheduler = schedulers_dict[individual_scheduler_type](
+                optimizer, **individual_scheduler_kwargs
+            )
             schedulers.append(individual_scheduler)
 
         # Create SequentialScheduler

@@ -1,35 +1,40 @@
-import os
-import numpy as np
-import yaml
 import argparse
+import os
 import textwrap
 
-
+import numpy as np
+import yaml
 from threadpoolctl import threadpool_limits
 
-from dingo.core.nn.nsf import autocomplete_model_kwargs_nsf
-from dingo.gw.training.train_builders import (
-    build_dataset,
-    build_train_and_test_loaders,
-    set_train_transforms,
-    build_svd_for_embedding_network,
+from dingo.core.posterior_models.base_model import Base
+from dingo.core.posterior_models.build_model import (
+    autocomplete_model_kwargs,
+    build_model_from_kwargs,
 )
-from dingo.core.models.posterior_model import PosteriorModel
-from dingo.core.models.pretraining_model import (
-    PretrainingModel,
-    autocomplete_model_kwargs_embedding_pretraining,
-    check_pretraining_model_compatibility
+from dingo.core.posterior_models.pretraining_model import (
+    check_pretraining_model_compatibility,
+    build_pretraining_model_kwargs,
 )
-from dingo.core.utils.trainutils import RuntimeLimits
 from dingo.core.utils import (
     set_requires_grad_flag,
     get_number_of_model_parameters,
     build_train_and_test_loaders,
 )
+from dingo.core.utils.trainutils import RuntimeLimits
 from dingo.gw.dataset import WaveformDataset
+from dingo.gw.training.train_builders import (
+    build_dataset,
+    set_train_transforms,
+    build_svd_for_embedding_network,
+)
 
 
-def prepare_training_new(train_settings: dict, train_dir: str, local_settings: dict, pretraining: bool = False):
+def prepare_training_new(
+    train_settings: dict,
+    train_dir: str,
+    local_settings: dict,
+    pretraining: bool = False,
+):
     """
     Based on a settings dictionary, initialize a WaveformDataset and PosteriorModel.
 
@@ -50,22 +55,23 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
 
     Returns
     -------
-    (WaveformDataset, PosteriorModel)
+    (WaveformDataset, Base)
     """
 
     wfd = build_dataset(train_settings["data"])  # No transforms yet
     initial_weights = {}
 
-    pm = None
-    full_settings = None
-
-    if train_settings["model"]["type"] == "nsf+embedding":
-        if "no_init" in train_settings["model"]["embedding_net_kwargs"]["svd"]:
-            initial_weights = None
-            print("Building model='nsf+embedding' without seeding embedding network with SVD")
-        else:
-            # First, build the SVD for seeding the embedding network.
-            print("\nBuilding SVD for initialization of embedding network.")
+    # Prepare initial embedding network weights: Build SVD or load pretrained network
+    if train_settings["model"].get("embedding_kwargs", None):
+        if (
+            train_settings["model"]["posterior_model_type"] == "normalizing_flow"
+            and train_settings["model"]["embedding_type"] == "DenseResidualNet"
+            and not train_settings["model"]["embedding_kwargs"]["svd"].get(
+                "no_init", False
+            )
+        ):
+            # Build the SVD for seeding the resnet embedding network.
+            print("\nBuilding SVD for initialization of ResNet embedding network.")
             initial_weights["V_rb_list"] = build_svd_for_embedding_network(
                 wfd,
                 train_settings["data"],
@@ -73,9 +79,39 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
                 num_workers=local_settings["num_workers"],
                 batch_size=train_settings["training"]["stage_0"]["batch_size"],
                 out_dir=train_dir,
-                **train_settings["model"]["embedding_net_kwargs"]["svd"],
+                **train_settings["model"]["embedding_kwargs"]["svd"],
             )
+        else:
+            initial_weights = None
+            print("Building embedding network without SVD initialization.")
 
+        if pretraining:
+            train_settings = build_pretraining_model_kwargs(train_settings)
+
+        if not pretraining and "pretraining" in train_settings.keys():
+            # Load pretrained embedding network
+            pretrained_model_path = os.path.join(
+                train_dir, "pretraining", "model_latest.pt"
+            )
+            if not os.path.isfile(pretrained_model_path):
+                raise ValueError(
+                    f"No pretrained model found at {pretrained_model_path}. If you want to start pretraining"
+                    f"from scratch, delete the pretraining folder in train_dir."
+                )
+            print(
+                f"Loading embedding weights from pretrained model at {pretrained_model_path}."
+            )
+            pm = build_model_from_kwargs(
+                filename=pretrained_model_path,
+                pretraining=False,
+                pretrained_embedding_net=None,
+                device=local_settings["device"],
+            )
+            # Check whether loaded model has same architecture as specified in train_settings
+            check_pretraining_model_compatibility(train_settings, pm.metadata)
+            pretrained_embedding_net = pm.network.embedding_net
+        else:
+            pretrained_embedding_net = None
 
         # Now set the transforms for training. We need to do this here so that we can (a)
         # get the data dimensions to configure the network, and (b) save the
@@ -89,9 +125,11 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
             train_settings["data"],
             train_settings["training"]["stage_0"]["asd_dataset_path"],
         )
-
         # This modifies the model settings in-place.
-        autocomplete_model_kwargs_nsf(train_settings["model"], wfd[0])
+        autocomplete_model_kwargs(
+            model_kwargs=train_settings["model"],
+            data_sample=wfd[0],
+        )
         full_settings = {
             "dataset_settings": wfd.settings,
             "train_settings": train_settings,
@@ -100,101 +138,20 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
         print("Complete settings:")
         print(yaml.dump(full_settings, default_flow_style=False, sort_keys=False))
 
-        pm = PosteriorModel(
-            metadata=full_settings,
+        pm = build_model_from_kwargs(
+            settings=full_settings,
+            pretraining=pretraining,
+            pretrained_embedding_net=pretrained_embedding_net,
             initial_weights=initial_weights,
             device=local_settings["device"],
         )
-
-    elif train_settings["model"]["type"] == "nsf+transformer":
-        # Check for pretraining
-        pretrained_embedding_net = None
-        if "pretraining" in train_settings:
-            # Check whether pretraining is currently run
-            if pretraining:
-                # Set the transforms for training. We need to do this here so that we can (a)
-                # get the data dimensions to configure the network, and (b) save the
-                # parameter standardization dict in the PosteriorModel. In principle, (a) could
-                # be done without generating data (by careful calculation) and (b) could also
-                # be done outside the transform setup. But for now, this is convenient. The
-                # transforms will be reset later by initialize_stage().
-
-                set_train_transforms(
-                    wfd,
-                    train_settings["data"],
-                    train_settings["pretraining"]["training"]["stage_0"]["asd_dataset_path"],
-                )
-                # This modifies the model settings in-place.
-                autocomplete_model_kwargs_embedding_pretraining(train_settings, wfd[0])
-                full_settings = {
-                    "dataset_settings": wfd.settings,
-                    "train_settings": train_settings,
-                }
-                print("\nInitializing new pretraining model.")
-                print("Complete pretraining settings:")
-                print(yaml.dump(full_settings, default_flow_style=False, sort_keys=False))
-
-                pm = PretrainingModel(
-                    metadata=full_settings,
-                    initial_weights=None,
-                    device=local_settings["device"]
-                )
-
-            else:
-                # Load weights of pretrained embedding network
-                pretrained_model_path = os.path.join(train_dir, 'pretraining', 'model_latest.pt')
-                if not os.path.isfile(pretrained_model_path):
-                    ValueError(f"No pretrained model found at {pretrained_model_path}. If you want to start pretraining"
-                               f"from scratch, delete the pretraining folder in train_dir.")
-                print(f"Loading embedding weights from pretrained model at {pretrained_model_path}.")
-                pm = PretrainingModel(
-                    model_filename=pretrained_model_path,
-                    device=local_settings["device"]
-                )
-                # Check whether loaded model has same architecture as specified in train_settings
-                check_pretraining_model_compatibility(train_settings, pm)
-                pretrained_embedding_net = pm.model.embedding_net
-
-        if not pretraining:
-            # Flow training
-
-            # Set the transforms for training. We need to do this here so that we can (a)
-            # get the data dimensions to configure the network, and (b) save the
-            # parameter standardization dict in the PosteriorModel. In principle, (a) could
-            # be done without generating data (by careful calculation) and (b) could also
-            # be done outside the transform setup. But for now, this is convenient. The
-            # transforms will be reset later by initialize_stage().
-
-            set_train_transforms(
-                wfd,
-                train_settings["data"],
-                train_settings["training"]["stage_0"]["asd_dataset_path"],
-            )
-
-            # This modifies the model settings in-place.
-            autocomplete_model_kwargs_nsf(train_settings["model"], wfd[0])
-            full_settings = {
-                "dataset_settings": wfd.settings,
-                "train_settings": train_settings,
-            }
-            print("\nInitializing new posterior model.")
-            print("Complete settings:")
-            print(yaml.dump(full_settings, default_flow_style=False, sort_keys=False))
-
-            pm = PosteriorModel(
-                metadata=full_settings,
-                initial_weights=initial_weights,
-                device=local_settings["device"],
-            )
-            if pretrained_embedding_net is not None:
-                pm.model.embedding_net = pretrained_embedding_net
-
     else:
-        raise ValueError('Model type must be "nsf+embedding" or "nsf+transformer".')
+        raise ValueError("No embedding_kwargs specified in model.")
 
     if local_settings.get("wandb", False):
         try:
             import wandb
+
             wandb.init(
                 config=full_settings,
                 dir=train_dir,
@@ -206,7 +163,9 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
     return pm, wfd
 
 
-def prepare_training_resume(checkpoint_name, local_settings, train_dir, pretraining: bool=False):
+def prepare_training_resume(
+    checkpoint_name, local_settings, train_dir, pretraining: bool = False
+):
     """
     Loads a PosteriorModel from a checkpoint, as well as the corresponding
     WaveformDataset, in order to continue training. It initializes the saved optimizer
@@ -225,17 +184,22 @@ def prepare_training_resume(checkpoint_name, local_settings, train_dir, pretrain
 
     Returns
     -------
-    (PosteriorModel, WaveformDataset)
+    (Base, WaveformDataset)
     """
-    if pretraining:
-        pm = PretrainingModel(model_filename=checkpoint_name, device=local_settings["device"])
-    else:
-        pm = PosteriorModel(model_filename=checkpoint_name, device=local_settings["device"])
+
+    pm = build_model_from_kwargs(
+        filename=checkpoint_name,
+        pretraining=pretraining,
+        pretrained_embedding_net=None,
+        device=local_settings["device"],
+    )
+
     wfd = build_dataset(pm.metadata["train_settings"]["data"])
 
     if local_settings.get("wandb", False):
         try:
             import wandb
+
             wandb.init(
                 resume="must",
                 dir=train_dir,
@@ -258,7 +222,7 @@ def initialize_stage(pm, wfd, stage, num_workers, resume=False):
 
     Parameters
     ----------
-    pm : PosteriorModel
+    pm : Base
     wfd : WaveformDataset
     stage : dict
         Settings specific to current stage of training
@@ -297,14 +261,14 @@ def initialize_stage(pm, wfd, stage, num_workers, resume=False):
     if "freeze_rb_layer" in stage:
         if stage["freeze_rb_layer"]:
             set_requires_grad_flag(
-                pm.model, name_contains="layers_rb", requires_grad=False
+                pm.network, name_contains="layers_rb", requires_grad=False
             )
         else:
             set_requires_grad_flag(
-                pm.model, name_contains="layers_rb", requires_grad=True
+                pm.network, name_contains="layers_rb", requires_grad=True
             )
-    n_grad = get_number_of_model_parameters(pm.model, (True,))
-    n_nograd = get_number_of_model_parameters(pm.model, (False,))
+    n_grad = get_number_of_model_parameters(pm.network, (True,))
+    n_nograd = get_number_of_model_parameters(pm.network, (False,))
     print(f"Fixed parameters: {n_nograd}\nLearnable parameters: {n_grad}\n")
 
     return train_loader, test_loader
@@ -317,7 +281,7 @@ def train_stages(pm, wfd, train_dir, local_settings):
 
     Parameters
     ----------
-    pm : PosteriorModel
+    pm : Base
     wfd : WaveformDataset
     train_dir : str
         Directory for saving checkpoints and train history.
@@ -419,9 +383,15 @@ def parse_args():
         help="Checkpoint file from which to resume training.",
     )
     parser.add_argument(
+        "--exit_command",
+        type=str,
+        default="",
+        help="Optional command to execute after completion of training.",
+    )
+    parser.add_argument(
         "--pretraining",
         action="store_true",
-        help="Whether to pretrain embedding network."
+        help="Whether to pretrain embedding network.",
     )
     args = parser.parse_args()
 
@@ -435,7 +405,6 @@ def parse_args():
 
 
 def train_local():
-
     args = parse_args()
 
     os.makedirs(args.train_dir, exist_ok=True)
@@ -454,15 +423,21 @@ def train_local():
 
         local_settings = train_settings.pop("local")
         with open(os.path.join(args.train_dir, "local_settings.yaml"), "w") as f:
-            if local_settings.get("wandb", False) and "id" not in local_settings["wandb"].keys():
+            if (
+                local_settings.get("wandb", False)
+                and "id" not in local_settings["wandb"].keys()
+            ):
                 try:
                     import wandb
+
                     local_settings["wandb"]["id"] = wandb.util.generate_id()
                 except ImportError:
                     print("wandb not installed, cannot generate run id.")
             yaml.dump(local_settings, f, default_flow_style=False, sort_keys=False)
 
-        pm, wfd = prepare_training_new(train_settings, args.train_dir, local_settings, args.pretraining)
+        pm, wfd = prepare_training_new(
+            train_settings, args.train_dir, local_settings, args.pretraining
+        )
 
     else:
         print("Resuming training run.")
@@ -476,6 +451,12 @@ def train_local():
         complete = train_stages(pm, wfd, args.train_dir, local_settings)
 
     if complete:
-        print("All training stages complete.")
+        if args.exit_command:
+            print(
+                f"All training stages complete. Executing exit command: {args.exit_command}."
+            )
+            os.system(args.exit_command)
+        else:
+            print("All training stages complete.")
     else:
         print("Program terminated due to runtime limit.")
