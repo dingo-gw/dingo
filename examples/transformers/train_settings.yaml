@@ -1,0 +1,116 @@
+data:
+  waveform_dataset_path: /home/pmzsrg/dingo-gw/waveform_datasets/xphm_1e7/waveform_dataset.hdf5  # Contains intrinsic waveforms
+  train_fraction: 0.95
+  window:  # Needed to calculate window factor for simulated data
+    type: tukey
+    f_s: 4096
+    T: 8.0
+    roll_off: 0.4
+  domain_update:
+    f_min: 20.0
+    f_max: 1024.0
+  svd_size_update: 200  # Optionally, reduce the SVD size when decompressing (for performance)
+  detectors:
+    - H1
+    - L1
+  extrinsic_prior:  # Sampled at train time
+    dec: default
+    ra: default
+    geocent_time: bilby.core.prior.Uniform(minimum=-0.10, maximum=0.10)
+    psi: default
+    luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=6000.0)
+  ref_time: 1126259462.391
+  inference_parameters:
+    - chirp_mass
+    - mass_ratio
+    - a_1
+    - a_2
+    - tilt_1
+    - tilt_2
+    - phi_12
+    - phi_jl
+    - theta_jn
+    - luminosity_distance
+    - geocent_time
+    - ra
+    - dec
+    - psi
+  tokenization:
+    num_tokens: 64
+    normalize_frequency_for_positional_encoding: False
+
+# Model architecture
+model:
+  type: nsf+transformer
+  # kwargs for neural spline flow
+  nsf_kwargs:
+    num_flow_steps: 30
+    base_transform_kwargs:
+      hidden_dim: 512
+      num_transform_blocks: 5
+      activation: elu
+      dropout_probability: 0.0
+      batch_norm: True
+      num_bins: 8
+      base_transform_type: rq-coupling
+  # kwargs for embedding net
+  transformer_kwargs:  # TODO: Configure positional encoder automatically
+    positional_encoder:
+      max_vals: [1024, 1024, 3]
+      resolutions: [.125, .125, 1]
+    tokenizer:
+      hidden_dims: [ 512, 512, 512, 512, 1024, 1024, 1024, 1024 ]
+      batch_norm: False
+      layer_norm: True
+    transformer:
+      d_model: 1024
+      dim_feedforward: 2048
+      nhead: 8
+      dropout: 0.0
+      num_layers: 8
+    final_net:
+      hidden_dims: [ 1024, 1024, 512, 512, 256, 256, 128, 128 ]
+      output_dim: 128
+      batch_norm: False
+      layer_norm: True
+
+# Training is divided in stages. They each require all settings as indicated below.
+training:
+  stage_0:
+    epochs: 100
+    asd_dataset_path: /home/pmzsrg/dingo-gw/asd_datasets/asds_O3_fiducial.hdf5 # this should just contain a single fiducial ASD per detector for pretraining
+    optimizer:
+      type: adamw
+      lr: 2.0e-4
+    scheduler:
+      type: sequential
+      milestones: [5]
+      scheduler_1:
+        type: linear
+        start_factor: 0.01
+        total_iters: 5
+      scheduler_2:
+        type: cosine
+        T_max: 145
+    batch_size: 1024
+
+  stage_1:
+    epochs: 50
+    asd_dataset_path: /home/pmzsrg/dingo-gw/asd_datasets/asds_O3.hdf5 # this should contain many different ASDS per detector for finetuning
+    optimizer:
+      type: adam
+      lr: 5.0e-5
+    scheduler:
+      type: cosine
+      T_max: 50
+    batch_size: 1024
+
+# Local settings for training that have no impact on the final trained network.
+local:
+  device: cuda # Change this to 'cuda' for training on a GPU.
+  num_workers: 4  # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
+  runtime_limits:
+    max_time_per_run: 3600000
+    max_epochs_per_run: 500
+  checkpoint_epochs: 25
+
