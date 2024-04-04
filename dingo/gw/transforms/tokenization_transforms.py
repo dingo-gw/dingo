@@ -29,18 +29,24 @@ class StrainTokenization(object):
 
         """
         num_f = domain.frequency_mask_length
-        self.num_bins_per_token = np.ceil(num_f / num_tokens).astype(int)
-        f_token_width = self.num_bins_per_token * domain.delta_f
-        self.token_indices = np.arange(
-            0,
-            num_tokens * self.num_bins_per_token,
-            self.num_bins_per_token,
-            dtype=int,
+        # To calculate the token length, we round down and truncate slightly the domain
+        # at the upper end. This means we don't have to zero-pad, improving the
+        # consistency between tokens. However, we lose some high-frequency information
+        # (hopefully not too important).
+        self.num_bins_per_token = num_f // num_tokens
+        self.f_min_per_token = domain.sample_frequencies[
+            domain.min_idx :: self.num_bins_per_token
+        ][:num_tokens]
+        self.f_max_per_token = domain.sample_frequencies[
+            domain.min_idx + self.num_bins_per_token - 1 :: self.num_bins_per_token
+        ][:num_tokens]
+        print(
+            f"Tokenization:\n"
+            f"  Token width {self.num_bins_per_token} frequency bins, "
+            f"{self.f_min_per_token[1] - self.f_min_per_token[0]} Hz\n"
+            f"  Truncating at maximum frequency of {self.f_max_per_token[-1]} Hz"
         )
-        assert num_tokens == len(self.token_indices)
-        self.f_min_per_token = np.arange(domain.f_min, domain.f_max, f_token_width)
-        self.f_max_per_token = self.f_min_per_token + f_token_width - domain.delta_f
-        self.num_padded_f_bins = int(num_tokens * self.num_bins_per_token - num_f)
+        self.total_frequency_bins = num_tokens * self.num_bins_per_token
         self.normalize_freq = normalize_frequency
         self.f_min = domain.f_min
         self.f_max = self.f_max_per_token.max()
@@ -69,12 +75,15 @@ class StrainTokenization(object):
         """
         sample = input_sample.copy()
 
+        # Truncate
+        strain = sample["waveform"][..., : self.total_frequency_bins]
+
         # pad last dimension
-        strain = np.pad(
-            sample["waveform"],
-            ((0, 0), (0, 0), (0, self.num_padded_f_bins)),
-            "constant",
-        )
+        # strain = np.pad(
+        #     sample["waveform"],
+        #     ((0, 0), (0, 0), (0, self.num_padded_f_bins)),
+        #     "constant",
+        # )
         strain = strain.reshape(
             strain.shape[0], strain.shape[1], self.num_tokens, self.num_bins_per_token
         )  # blocks, channels, seq, features
