@@ -1,0 +1,116 @@
+data:
+  waveform_dataset_path: training_data/waveform_dataset.hdf5  # Contains intrinsic waveforms
+  train_fraction: 0.95
+  window:  # Needed to calculate window factor for simulated data
+    type: tukey
+    f_s: 4096
+    T: 8.0
+    roll_off: 0.4
+  domain_update:
+    f_min: 20.0
+    f_max: 1024.0
+  svd_size_update: 200  # Optionally, reduce the SVD size when decompressing (for performance)
+  detectors:
+    - H1
+    - L1
+  extrinsic_prior:  # Sampled at train time
+    dec: default
+    ra: default
+    geocent_time: bilby.core.prior.Uniform(minimum=-0.10, maximum=0.10)
+    psi: default
+    luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0)
+  ref_time: 1126259462.391
+  tokenization:
+    num_tokens: 25
+    normalize_frequency_for_positional_encoding: True
+  inference_parameters:
+    - chirp_mass
+    - mass_ratio
+    - chi_1
+    - chi_2
+    - theta_jn
+    - dec
+    - ra
+    - geocent_time
+    - luminosity_distance
+    - psi
+
+# Model architecture
+model:
+  posterior_model_type: normalizing_flow # or flow_matching or score_matching
+  posterior_kwargs:
+    num_flow_steps: 30
+    base_transform_kwargs:
+      hidden_dim: 1024
+      num_transform_blocks: 5
+      activation: elu
+      dropout_probability: 0.0
+      batch_norm: True
+      num_bins: 8
+      base_transform_type: rq-coupling
+  embedding_type: transformer
+  embedding_kwargs:
+    tokenizer_kwargs:
+      individual_token_embedding: False
+      hidden_dims: [256, 512, 512]
+      activation: elu
+      batch_norm: False
+      layer_norm: True
+    positional_encoder_kwargs:
+       positional_encoding_type: continuous
+    block_encoder_kwargs:
+      block_encoding_type: sine
+    transformer_kwargs:
+      d_model: 512
+      dim_feedforward: 100
+      nhead: 1
+      num_layers: 5
+      dropout: 0.0
+    final_net_kwargs:
+      hidden_dims: [512, 512, 256, 256, 128, 128]
+      output_dim: 128
+      activation: elu
+      batch_norm: False
+      layer_norm: True
+    allow_tf32: True
+
+
+# Training is divided in stages. They each require all settings as indicated below.
+training:
+  stage_0:
+    epochs: 300
+    asd_dataset_path: training_data/asd_dataset_fiducial/asds_O1_fiducial.hdf5 # this should just contain a single fiducial ASD per detector for pretraining
+    optimizer:
+      type: adam
+      lr: 5.0e-5
+    scheduler:
+      type: cosine
+      T_max: 300
+    batch_size: 4096
+
+  stage_1:
+    epochs: 150
+    asd_dataset_path: training_data/asd_dataset/asds_O1.hdf5 # this should contain many different ASDS per detector for finetuning
+    optimizer:
+      type: adam
+      lr: 1.0e-5
+    scheduler:
+      type: cosine
+      T_max: 150
+    batch_size: 4096
+
+# Local settings for training that have no impact on the final trained network.
+local:
+  device: cuda # Change this to 'cuda' for training on a GPU.
+  num_workers: 32  # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
+  runtime_limits:
+    max_time_per_run: 3600000
+    max_epochs_per_run: 500
+  checkpoint_epochs: 50
+  # Local settings related to condor, remove if not used on cluster
+  condor:
+    bid: 100
+    num_cpus: 16
+    memory_cpus: 128000
+    num_gpus: 1
+    memory_gpus: 8000

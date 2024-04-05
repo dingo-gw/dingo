@@ -1,9 +1,7 @@
 import torch
 
-from dingo.core.nn.enets import (
-    create_enet_with_projection_layer_and_dense_resnet,
-    create_transformer_enet,
-)
+from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
+from dingo.core.nn.transformer import create_transformer_enet
 from dingo.core.posterior_models.flow_matching import FlowMatching
 from dingo.core.posterior_models.normalizing_flow import NormalizingFlow
 from dingo.core.posterior_models.pretraining_model import PretrainingModel
@@ -167,14 +165,27 @@ def autocomplete_model_kwargs(
 
     if data_sample is not None:
         # set input dims from ifo_list and domain information
-        model_kwargs["embedding_kwargs"]["input_dims"] = list(data_sample[1].shape)
+        if model_kwargs["embedding_type"].lower() == "denseresidualnet":
+            model_kwargs["embedding_kwargs"]["input_dims"] = list(data_sample[1].shape)
+            context_dim = model_kwargs["embedding_kwargs"]["output_dim"]
+        elif model_kwargs["embedding_type"].lower() == "transformer":
+            model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]["input_dims"] = list(data_sample[1].shape)
+            model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]["output_dim"] = \
+                model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
+            model_kwargs["embedding_kwargs"]["final_net_kwargs"]["input_dim"] = \
+                model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
+            context_dim = model_kwargs["embedding_kwargs"]["final_net_kwargs"]["output_dim"]
+        elif model_kwargs["embedding_type"] == "no_embedding":
+            context_dim = None
+            print("No embedding network specified.")
+        else:
+            raise ValueError(f"Embedding type {model_kwargs['embedding_type']} not in [DenseResidualNet, transformer, "
+                             f"no_embedding]")
 
         # check for pretraining
         if model_kwargs["posterior_model_type"] == "pretraining":
             # set input and output dim for pretraining network
-            model_kwargs["posterior_kwargs"]["input_dim"] = model_kwargs[
-                "embedding_kwargs"
-            ]["output_dim"]
+            model_kwargs["posterior_kwargs"]["input_dim"] = context_dim
             model_kwargs["posterior_kwargs"]["output_dim"] = len(data_sample[0])
         else:
             # set dimension of parameter space of posterior model
@@ -187,13 +198,11 @@ def autocomplete_model_kwargs(
                 gnpe_proxy_dim = len(data_sample[2])
                 model_kwargs["embedding_kwargs"]["added_context"] = True
                 model_kwargs["posterior_kwargs"]["context_dim"] = (
-                    model_kwargs["embedding_kwargs"]["output_dim"] + gnpe_proxy_dim
+                    context_dim + gnpe_proxy_dim
                 )
             else:
                 model_kwargs["embedding_kwargs"]["added_context"] = False
-                model_kwargs["posterior_kwargs"]["context_dim"] = model_kwargs[
-                    "embedding_kwargs"
-                ]["output_dim"]
+                model_kwargs["posterior_kwargs"]["context_dim"] = context_dim
     else:
         model_kwargs["posterior_kwargs"]["input_dim"] = input_dim
         model_kwargs["posterior_kwargs"]["context_dim"] = context_dim

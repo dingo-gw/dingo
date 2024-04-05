@@ -5,6 +5,7 @@ from torch import nn, Tensor
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
 from dingo.core.nn.resnet import DenseResidualNet
+from dingo.core.utils import torchutils
 
 
 class MLP(nn.Module):
@@ -26,7 +27,7 @@ class MLP(nn.Module):
         return x
 
 
-class TokenEmbedding(nn.Module):
+class Tokenizer(nn.Module):
     """
     A nn.Module that maps each frequency fragment of length num_bins_per_token and width num_channels
     into an embedding vector of fixed emb_size via (the same or individual) linear layers.
@@ -40,15 +41,15 @@ class TokenEmbedding(nn.Module):
     """
 
     def __init__(
-        self,
-        input_dims: List[int],
-        hidden_dims: Union[List, int],
-        emb_size: int,
-        activation: Callable,
-        dropout: float,
-        batch_norm: bool,
-        layer_norm: bool,
-        individual_token_embedding: bool = False,
+            self,
+            input_dims: List[int],
+            hidden_dims: Union[List, int],
+            output_dim: int,
+            activation: Callable,
+            dropout: float = 0.0,
+            batch_norm: bool = True,
+            layer_norm: bool = False,
+            individual_token_embedding: bool = False,
     ):
         """
         Parameters
@@ -59,8 +60,8 @@ class TokenEmbedding(nn.Module):
         hidden_dims: Optional[Tuple, int]
             if type List: dimensions of hidden layers for DenseResidualNet
             if type int: number of nodes in linear layer
-        emb_size: int
-            size of embedding dimension
+        output_dim: int
+            output dimension
         activation: str
             activation function for DenseResidualNet
         dropout: float
@@ -72,7 +73,7 @@ class TokenEmbedding(nn.Module):
         individual_token_embedding: bool
             whether to use an individual linear layer for each token
         """
-        super(TokenEmbedding, self).__init__()
+        super(Tokenizer, self).__init__()
 
         (
             self.num_blocks,
@@ -85,7 +86,7 @@ class TokenEmbedding(nn.Module):
                 self.stack_embedding_networks = nn.ModuleList([
                     DenseResidualNet(
                         input_dim=self.num_channels * self.num_bins_per_token,
-                        output_dim=emb_size,
+                        output_dim=output_dim,
                         hidden_dims=tuple(hidden_dims),
                         activation=activation,
                         dropout=dropout,
@@ -99,7 +100,7 @@ class TokenEmbedding(nn.Module):
                 self.stack_embedding_networks = nn.ModuleList([
                     MLP(self.num_channels * self.num_bins_per_token,
                         hidden_dims,
-                        emb_size,
+                        output_dim,
                         activation)
                     for _ in range(self.num_tokens)
                 ])
@@ -107,7 +108,7 @@ class TokenEmbedding(nn.Module):
             if type(hidden_dims) is list:
                 self.embedding_networks = DenseResidualNet(
                     input_dim=self.num_channels * self.num_bins_per_token,
-                    output_dim=emb_size,
+                    output_dim=output_dim,
                     hidden_dims=tuple(hidden_dims),
                     activation=activation,
                     dropout=dropout,
@@ -118,11 +119,10 @@ class TokenEmbedding(nn.Module):
                 assert type(hidden_dims) is int
                 self.embedding_networks = MLP(self.num_channels * self.num_bins_per_token,
                                               hidden_dims,
-                                              emb_size,
+                                              output_dim,
                                               activation)
 
         self.individual_token_embedding = individual_token_embedding
-        self.emb_size = emb_size
 
     def forward(self, x: Tensor):
         """
@@ -135,13 +135,13 @@ class TokenEmbedding(nn.Module):
         Returns
         --------
         x: Tensor
-            shape [batch_size, num_blocks, num_tokens, emb_size]
+            shape [batch_size, num_blocks, num_tokens, d_model]
         """
         if x.shape[1:] != (
-            self.num_blocks,
-            self.num_channels,
-            self.num_tokens,
-            self.num_bins_per_token,
+                self.num_blocks,
+                self.num_channels,
+                self.num_tokens,
+                self.num_bins_per_token,
         ):
             raise ValueError(
                 f"Invalid shape for token embedding layer. "
@@ -168,7 +168,7 @@ class TokenEmbedding(nn.Module):
         return x
 
 
-class FrequencyEncoding(nn.Module):
+class PositionalEncoding(nn.Module):
     """
     A nn.Module that adds the positional encoding for f_min and f_max to each token.
     Two different types of positional encoding are implemented:
@@ -185,38 +185,45 @@ class FrequencyEncoding(nn.Module):
         add the frequency encoding to the embedding matrix, dependent on f_min and f_max of each token
     """
 
-    def __init__(self, emb_size: int, encoding_type: str):
+    def __init__(self,
+                 d_model: int,
+                 positional_encoding_type: str
+                 ):
         """
         Parameters:
         --------
-        emb_size: int
-            size of embedding dimension
-        encoding_type: str
+        d_model: int
+            size of transformer embedding dimension
+        positional_encoding_type: str
             type of encoding, possibilities ["discrete", "continuous". "discrete+nn", "continuous+nn"]
+            'discrete' for discrete positional encoding (from paper 'Attention is all you need'),
+            'continuous' for continuous positional encoding (from paper
+            'NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis'
+
         """
-        super(FrequencyEncoding, self).__init__()
+        super(PositionalEncoding, self).__init__()
 
-        self.emb_size_f_min = int(torch.ceil(torch.tensor(emb_size) / 2))
-        self.emb_size_f_max = emb_size - self.emb_size_f_min
+        self.size_f_min = int(torch.ceil(torch.tensor(d_model) / 2))
+        self.size_f_max = d_model - self.size_f_min
 
-        self.encoding_type = encoding_type
-        if "discrete" in encoding_type:
+        self.positional_encoding_type = positional_encoding_type
+        if "discrete" in positional_encoding_type:
             d_f_min = torch.exp(
-                -torch.arange(0, self.emb_size_f_min, 2)
+                -torch.arange(0, self.size_f_min, 2)
                 * math.log(10000.0)
-                / self.emb_size_f_min
+                / self.size_f_min
             )
             d_f_max = torch.exp(
-                -torch.arange(0, self.emb_size_f_max, 2)
+                -torch.arange(0, self.size_f_max, 2)
                 * math.log(10000.0)
-                / self.emb_size_f_max
+                / self.size_f_max
             )
-        elif "continuous" in encoding_type:
+        elif "continuous" in positional_encoding_type:
             d_f_min = (
-                torch.pow(2, torch.arange(0, self.emb_size_f_min, 2) / self.emb_size_f_min) * math.pi
+                    torch.pow(2, torch.arange(0, self.size_f_min, 2) / self.size_f_min) * math.pi
             )
             d_f_max = (
-                torch.pow(2, torch.arange(0, self.emb_size_f_max, 2) / self.emb_size_f_max) * math.pi
+                    torch.pow(2, torch.arange(0, self.size_f_max, 2) / self.size_f_max) * math.pi
             )
         else:
             raise ValueError(
@@ -224,11 +231,11 @@ class FrequencyEncoding(nn.Module):
                 f"Expected one of ['discrete', 'continuous'] to be in {self.encoding_type}.",
             )
         self.linear = None
-        if "nn" in encoding_type:
-            self.linear = nn.Linear(emb_size, emb_size)
+        if "nn" in positional_encoding_type:
+            self.linear = nn.Linear(d_model, d_model)
             self.initialize_linear()
 
-        self.emb_size = torch.tensor(emb_size)
+        self.d_model = torch.tensor(d_model)
 
         self.register_buffer('d_f_min', d_f_min)
         self.register_buffer('d_f_max', d_f_max)
@@ -243,7 +250,7 @@ class FrequencyEncoding(nn.Module):
         Parameters
         --------
         x: Tensor
-            shape [batch_size, num_blocks, num_tokens, emb_size]
+            shape [batch_size, num_blocks, num_tokens, d_model]
         f_min: Tensor
             shape [batch_size, num_tokens]
         f_max: Tensor
@@ -257,24 +264,24 @@ class FrequencyEncoding(nn.Module):
             same shape as input x
         """
         batch_size, num_tokens = x.shape[0], x.shape[2]
-        assert self.emb_size == x.shape[3]
+        assert self.d_model == x.shape[3]
         device = x.device
 
         # Assuming that f_min and f_max are the same for all blocks
         pos_embedding = torch.zeros(
-            (batch_size, 1, num_tokens, self.emb_size), device=device
+            (batch_size, 1, num_tokens, self.d_model), device=device
         )
-        pos_embedding[:, :, :, 0 : self.emb_size_f_min : 2] = torch.sin(
+        pos_embedding[:, :, :, 0: self.size_f_min: 2] = torch.sin(
             f_min.reshape(batch_size, 1, num_tokens, 1) * self.d_f_min
         )
-        pos_embedding[:, :, :, 1 : self.emb_size_f_min + 1 : 2] = torch.cos(
+        pos_embedding[:, :, :, 1: self.size_f_min + 1: 2] = torch.cos(
             f_min.reshape(batch_size, 1, num_tokens, 1) * self.d_f_min
         )
-        pos_embedding[:, :, :, self.emb_size_f_min : self.emb_size : 2] = torch.sin(
+        pos_embedding[:, :, :, self.size_f_min: self.d_model: 2] = torch.sin(
             f_max.reshape(batch_size, 1, num_tokens, 1) * self.d_f_max
         )
-        f_max_cos_dim = pos_embedding[:, :, :, self.emb_size_f_min + 1 : self.emb_size : 2].shape[3]
-        pos_embedding[:, :, :, self.emb_size_f_min + 1 : self.emb_size : 2] = torch.cos(
+        f_max_cos_dim = pos_embedding[:, :, :, self.size_f_min + 1: self.d_model: 2].shape[3]
+        pos_embedding[:, :, :, self.size_f_min + 1: self.d_model: 2] = torch.cos(
             f_max.reshape(batch_size, 1, num_tokens, 1) * self.d_f_max[:f_max_cos_dim]
         )
         if self.linear:
@@ -283,12 +290,12 @@ class FrequencyEncoding(nn.Module):
                 tmp.append(self.linear(pos_embedding[:, :, i, :]))
             pos_embedding = torch.stack(tmp, dim=2)
 
-        x = (x + pos_embedding)/2
+        x = (x + pos_embedding) / 2
 
         return x
 
 
-class BlockEmbedding(nn.Module):
+class BlockEncoding(nn.Module):
     """
     A nn.Module that adds the embedding of different blocks to the input x.
     In the use case of GW, blocks refers to interferometers.
@@ -299,41 +306,41 @@ class BlockEmbedding(nn.Module):
         obtains embedding of employed blocks and adds it to x.
     """
 
-    def __init__(self, num_blocks: int, emb_size: int):
+    def __init__(self, num_blocks: int, d_model: int, block_encoding_type: str = 'sine'):
         """
         Parameters
         --------
         num_blocks: int
             number of blocks
-        emb_size: int
-            size of embedding dimension
+        d_model: int
+            size of transformer embedding dimension
         """
-        super(BlockEmbedding, self).__init__()
-        self.block_embedding = nn.Embedding(num_blocks, emb_size)
+        super(BlockEncoding, self).__init__()
+        self.block_encoding = nn.Embedding(num_blocks, d_model)
         self.num_blocks = num_blocks
-        self.emb_size = emb_size
+        self.d_model = d_model
 
         self.initialize_embedding()
 
     def initialize_embedding(self):
         pi = torch.tensor(math.pi)
-        p_emb = torch.linspace(0, 2*pi, self.emb_size)
-        off_set = torch.tensor([i/self.num_blocks * 2*pi for i in range(self.num_blocks)])
-        self.block_embedding.weight.data = torch.sin(p_emb + off_set.unsqueeze(1))
+        p_emb = torch.linspace(0, 2 * pi, self.d_model)
+        off_set = torch.tensor([i / self.num_blocks * 2 * pi for i in range(self.num_blocks)])
+        self.block_encoding.weight.data = torch.sin(p_emb + off_set.unsqueeze(1))
 
     def forward(self, x: Tensor, blocks: Tensor) -> Tensor:
         """
         Parameters
         --------
         x: Tensor
-            shape [batch_size, num_blocks, num_tokens, emb_size]
+            shape [batch_size, num_blocks, num_tokens, d_model]
         blocks: Tensor
             shape [batch_size, num_blocks], specifying the order of blocks in dim num_blocks of x.
 
         Returns
         --------
         x: Tensor
-            shape [batch_size, num_blocks*num_tokens, emb_size]
+            shape [batch_size, num_blocks*num_tokens, d_model]
         """
         if blocks.shape[1] != self.num_blocks:
             raise ValueError(
@@ -346,8 +353,8 @@ class BlockEmbedding(nn.Module):
                 f"Expected {self.num_blocks}, got {x.shape[1]}."
             )
 
-        x = x + torch.unsqueeze(self.block_embedding(blocks.long()), 2)
-        x = x.reshape(x.shape[0], x.shape[1]*x.shape[2], x.shape[3])/2
+        x = x + torch.unsqueeze(self.block_encoding(blocks.long()), 2)
+        x = x.reshape(x.shape[0], x.shape[1] * x.shape[2], x.shape[3]) / 2
 
         return x
 
@@ -369,89 +376,53 @@ class TransformerModel(nn.Module):
     """
 
     def __init__(
-        self,
-        input_dims: List[int],
-        d_out: int,
-        num_head: int,
-        num_layers: int,
-        d_hid: int,
-        hidden_dims_token_embedding: Union[int, Tuple],
-        activation: Callable,
-        batch_norm: bool,
-        layer_norm: bool,
-        individual_token_embedding: bool,
-        frequency_encoding_type: str,
-        dropout: float = 0.1,
+            self,
+            tokenizer: Tokenizer,
+            positional_encoder: PositionalEncoding,
+            block_encoder: BlockEncoding,
+            final_net: DenseResidualNet,
+            d_model: int,
+            dim_feedforward: int,
+            nhead: int,
+            num_layers: int,
+            dropout: float = 0.1,
     ):
         """
         Parameters
         --------
-        input_dims: List[int]
-            containing [num_blocks, num_channels, num_tokens, num_bins_per_token]
-            where num_blocks = number of interferometers in GW use case, and num_channels = [real, imag, asd]
-        d_out: int
-            dimension of output, corresponds to embedding size of transformer
-        num_head: int
+        tokenizer: Tokenizer
+        positional_encoder: PositionalEncoding
+        block_encoder: BlockEncoding
+        final_net: DenseResidualNet
+        d_model: int
+            embedding size of transformer
+        dim_feedforward: int
+            number of hidden dimensions in the feedforward neural networks of the transformer encoder
+        nhead: int
             number of transformer heads
         num_layers: int
             number of transformer layers
-        d_hid: int
-            number of hidden dimensions in the feedforward neural networks of the transformer encoder
-        hidden_dims_token_embedding: Union[int, Tuple]
-            if int: dimension of linear layer
-            if Tuple: dimensions of hidden layers of DenseResNet used in TokenEmbedding
-        activation: Callable
-            activation function used in TokenEmbedding
-        batch_norm: bool
-            whether to apply batch normalization in the tokenizer
-        layer_norm: bool
-            whether to apply layer normalization in the tokenizer
-        individual_token_embedding: bool
-            whether to embed each raw token with an individual embedding network or not
-        frequency_encoding_type: str
-            type of frequency encoding, either 'discrete' for discrete positional encoding (from paper
-            'Attention is all you need') or 'continuous' for continuous positional encoding (from paper
-            'NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis'
         dropout: float
             dropout
         """
         super().__init__()
         self.model_type = "Transformer"
-        self.individual_token_embedding = individual_token_embedding
 
-        (
-            self.num_blocks,
-            self.num_channels,
-            self.num_tokens,
-            self.num_bins_per_token,
-        ) = input_dims
-        self.embedding = TokenEmbedding(
-            input_dims=input_dims,
-            emb_size=d_out,
-            hidden_dims=hidden_dims_token_embedding,
-            activation=activation,
-            dropout=dropout,
-            batch_norm=batch_norm,
-            layer_norm=layer_norm,
-            individual_token_embedding=self.individual_token_embedding,
-        )
-        self.freq_encoder = FrequencyEncoding(
-            emb_size=d_out, encoding_type=frequency_encoding_type
-        )
-        self.block_embedding = BlockEmbedding(
-            num_blocks=self.num_blocks, emb_size=d_out
-        )
-        self.dropout = nn.Dropout(p=dropout)
+        self.tokenizer = tokenizer
+        self.positional_encoding = positional_encoder
+        self.block_encoding = block_encoder
         encoder_layers = TransformerEncoderLayer(
-            d_model=d_out,
-            nhead=num_head,
-            dim_feedforward=d_hid,
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
             dropout=dropout,
             batch_first=True,
         )
         self.transformer_encoder = TransformerEncoder(encoder_layers, num_layers)
         self.adapt_avg_pool = nn.AdaptiveAvgPool1d(1)
-        self.d_out = d_out
+        self.d_model = d_model
+
+        self.final_net = final_net
 
         self.init_weights()
 
@@ -467,17 +438,17 @@ class TransformerModel(nn.Module):
                 nn.init.xavier_uniform_(p)
 
     def forward(
-        self,
-        src: Tensor,
-        blocks: Tensor,
-        f_min: Tensor,
-        f_max: Tensor,
-        src_mask: Tensor = None,
+            self,
+            x: Tensor,
+            blocks: Tensor,
+            f_min: Tensor,
+            f_max: Tensor,
+            src_key_padding_mask: Tensor = None,
     ) -> Tensor:
         """
         Parameters
         --------
-        src: Tensor
+        x: Tensor
             shape [batch_size, num_blocks, num_channels, num_tokens, num_bins_per_token]
         blocks: Tensor
             shape [batch_size, num_blocks], determines the ordering of the blocks in BlockEmbedding
@@ -485,23 +456,112 @@ class TransformerModel(nn.Module):
             shape [batch_size, num_tokens]
         f_max: Tensor
             shape [batch_size, num_tokens]
-        src_mask: Tensor
-            shape [batch_size, num_tokens, num_tokens]
+        src_key_padding_mask: Tensor
+            shape [batch_size, num_tokens]
 
         Returns
         --------
         output: Tensor
-            shape [batch_size, d_out]
+            shape [batch_size, d_out_of_final_net if final_net else d_model]
         """
-        src = self.embedding(src)
-        src = self.freq_encoder(src, f_min, f_max)
-        src = self.block_embedding(src, blocks)
-        src = self.dropout(src)
+        if self.tokenizer is not None:
+            x = self.tokenizer(x)
+        if self.positional_encoding is not None:
+            x = self.positional_encoding(x, f_min, f_max)
+        if self.block_encoding is not None:
+            x = self.block_encoding(x, blocks)
 
-        if src_mask is None:
-            output = self.transformer_encoder(src)
+        x = self.transformer_encoder(x, src_key_padding_mask=src_key_padding_mask)
+
+        # Average over non-masked components.
+        if src_key_padding_mask is not None:
+            denominator = torch.sum(~src_key_padding_mask, -1, keepdim=True)
+            x = torch.sum(x * ~src_key_padding_mask.unsqueeze(-1), dim=-2) / denominator
         else:
-            output = self.transformer_encoder(src, src_mask)
-        output = self.adapt_avg_pool(output.reshape(output.shape[0], self.d_out, -1)).squeeze()
+            x = torch.mean(x, dim=-2)
 
-        return output
+        if self.final_net is not None:
+            x = self.final_net(x)
+
+        return x
+
+
+def create_transformer_enet(
+        transformer_kwargs: dict,
+        tokenizer_kwargs: dict = None,
+        positional_encoder_kwargs: dict = None,
+        block_encoder_kwargs: dict = None,
+        final_net_kwargs: dict = None,
+        allow_tf32: bool = False,
+        added_context: bool = False,
+):
+    """
+    Builder function for a transformer embedding network for complex 1D data
+    with multiple blocks and channels.
+    The complex signal has to be represented via the real part in channel 0 and
+    the imaginary part in channel 1. Auxiliary signals may be contained in
+    channels with indices => 2. In the GW use case, a block corresponds to a
+    detector and channel 2 is used for ASD information.
+
+    Parameters
+    --------
+    transformer_kwargs: dict
+        settings for transformer
+    tokenizer_kwargs: dict
+        settings for tokenizer
+    positional_encoder_kwargs: dict
+        settings for positional encoder
+    block_encoder_kwargs: dict
+        settings for block encoder
+    final_net_kwargs: dict
+        settings for final network
+    allow_tf32: bool
+        whether to allow the cuda backend to work with lower precision
+    added_context: bool = False
+        whether to add additional gnpe dimension to the context vector
+
+    Returns
+    --------
+    model: TransformerModel
+
+    """
+    if allow_tf32:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        print(f"Cuda and cudnn backends running with allow_tf32 = {torch.backends.cuda.matmul.allow_tf32}.")
+    if added_context:
+        raise ValueError("GNPE is not yet implemented for transformer embedding network.")
+
+    if tokenizer_kwargs is not None:
+        tokenizer_kwargs["activation"] = torchutils.get_activation_function_from_string(tokenizer_kwargs["activation"])
+        tokenizer = Tokenizer(**tokenizer_kwargs)
+    else:
+        tokenizer = None
+
+    if positional_encoder_kwargs is not None:
+        positional_encoder_kwargs["d_model"] = transformer_kwargs["d_model"]
+        positional_encoder = PositionalEncoding(**positional_encoder_kwargs)
+    else:
+        positional_encoder = None
+
+    if block_encoder_kwargs is not None:
+        block_encoder_kwargs["num_blocks"] = tokenizer_kwargs["input_dims"][0]
+        block_encoder_kwargs["d_model"] = transformer_kwargs["d_model"]
+        block_encoder = BlockEncoding(**block_encoder_kwargs)
+    else:
+        block_encoder = None
+
+    if final_net_kwargs is not None:
+        final_net_kwargs["activation"] = torchutils.get_activation_function_from_string(final_net_kwargs["activation"])
+        final_net = DenseResidualNet(**final_net_kwargs)
+    else:
+        final_net = None
+
+    model = TransformerModel(
+        tokenizer=tokenizer,
+        positional_encoder=positional_encoder,
+        block_encoder=block_encoder,
+        final_net=final_net,
+        **transformer_kwargs)
+
+    return model
