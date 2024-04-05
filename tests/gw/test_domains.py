@@ -181,7 +181,7 @@ def test_FD_caching(uniform_FD_params):
     domain._reset_caches()
     # after clearing the cache, the __call__ method should return the correct
     # result
-    assert np.all(domain() != domain_ref())
+    assert len(domain()) < len(domain_ref())
 
 
 def test_FD_window_factor(uniform_FD_params, window_setup):
