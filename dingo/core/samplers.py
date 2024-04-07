@@ -145,14 +145,11 @@ class Sampler(object):
             x["extrinsic_parameters"] = {}
 
             # transforms_pre are expected to transform the data in the same way for each
-            # requested sample. We therefore expand it across the batch *after*
-            # pre-processing.
+            # requested sample. We therefore apply pre-processing only once.
             x = self.transform_pre(context)
-            x = x.expand(num_samples, *x.shape)
+            # Require a batch dimension for the embedding network.
+            x = x.unsqueeze(0)
             x = [x]
-            # The number of samples is expressed via the first dimension of x,
-            # so we must pass num_samples = 1 to sample_and_log_prob().
-            num_samples = 1
         else:
             if context is not None:
                 print("Unconditional model. Ignoring context.")
@@ -166,6 +163,11 @@ class Sampler(object):
             y, log_prob = self.model.model.sample_and_log_prob(
                 *x, num_samples=num_samples
             )
+
+        if not self.unconditional_model:
+            # Squeeze the batch dimension added earlier.
+            y = y.squeeze(0)
+            log_prob = log_prob.squeeze(0)
 
         samples = self.transform_post({"parameters": y, "log_prob": log_prob})
         result = samples["parameters"]
@@ -492,10 +494,19 @@ class GNPESampler(Sampler):
 
             time_sample_start = time.time()
             self.model.model.eval()
+
             with torch.no_grad():
-                y, log_prob = self.model.model.sample_and_log_prob(
-                    x["data"], x["context_parameters"]
-                )
+                if "context_parameters" in x:
+                    y, log_prob = self.model.model.sample_and_log_prob(
+                        x["data"], x["context_parameters"]
+                    )
+                else:
+                    y, log_prob = self.model.model.sample_and_log_prob(x["data"])
+
+            # Squeeze the extra dimension added by sample_and_log_prob(num_samples=1).
+            y = y.squeeze(1)
+            log_prob = log_prob.squeeze(1)
+
             time_sample_end = time.time()
 
             x["parameters"] = y
