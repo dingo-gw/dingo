@@ -1,86 +1,8 @@
-from typing import Dict
-
-from functools import lru_cache
-from abc import ABC, abstractmethod
-
 import numpy as np
 import torch
 
+from .base import Domain
 from dingo.gw.gwutils import *
-
-
-class Domain(ABC):
-    """Defines the physical domain on which the data of interest live.
-
-    This includes a specification of the bins or points,
-    and a few additional properties associated with the data.
-    """
-
-    @abstractmethod
-    def __len__(self):
-        """Number of bins or points in the domain"""
-        pass
-
-    @abstractmethod
-    def __call__(self, *args, **kwargs) -> np.ndarray:
-        """Array of bins in the domain"""
-        pass
-
-    @abstractmethod
-    def update(self, new_settings: dict):
-        pass
-
-    @abstractmethod
-    def time_translate_data(self, data, dt) -> np.ndarray:
-        """Time translate strain data by dt seconds."""
-        pass
-
-    @property
-    @abstractmethod
-    def noise_std(self) -> float:
-        """Standard deviation of the whitened noise distribution"""
-        # FIXME: For this to make sense, it assumes knowledge about how the domain is used in conjunction
-        #  with (waveform) data, whitening and adding noise. Is this the best place to define this?
-        pass
-
-    @property
-    @abstractmethod
-    def sampling_rate(self) -> float:
-        """The sampling rate of the data [Hz]."""
-        pass
-
-    @property
-    @abstractmethod
-    def f_max(self) -> float:
-        """The maximum frequency [Hz] is set to half the sampling rate."""
-
-    @property
-    @abstractmethod
-    def duration(self) -> float:
-        """Waveform duration in seconds."""
-        pass
-
-    @property
-    @abstractmethod
-    def min_idx(self) -> int:
-        pass
-
-    @property
-    @abstractmethod
-    def max_idx(self) -> int:
-        pass
-
-    @property
-    @abstractmethod
-    def domain_dict(self):
-        """Enables to rebuild the domain via calling build_domain(domain_dict)."""
-        pass
-
-    def __eq__(self, other):
-        if self.domain_dict == other.domain_dict:
-            return True
-        else:
-            return False
 
 
 class FrequencyDomain(Domain):
@@ -234,7 +156,7 @@ class FrequencyDomain(Domain):
             phase_shift = 2 * np.pi * torch.einsum("...,i", dt, f)
         else:
             raise NotImplementedError(
-                f"Time translation not implemented for data of " "type {data}."
+                f"Time translation not implemented for data of type {data}."
             )
         return self.add_phase(data, phase_shift)
 
@@ -401,7 +323,7 @@ class FrequencyDomain(Domain):
 
     @window_factor.setter
     def window_factor(self, value):
-        """Set self._window_factor and clear cache of self.noise_std."""
+        """Set self._window_factor."""
         self._window_factor = float(value)
 
     @property
@@ -470,182 +392,3 @@ class FrequencyDomain(Domain):
             "delta_f": self.delta_f,
             "window_factor": self.window_factor,
         }
-
-
-class TimeDomain(Domain):
-    """Defines the physical time domain on which the data of interest live.
-
-    The time bins are assumed to be uniform between [0, duration]
-    with spacing 1 / sampling_rate.
-    window_factor is used to compute noise_std().
-    """
-
-    def __init__(self, time_duration: float, sampling_rate: float):
-        self._time_duration = time_duration
-        self._sampling_rate = sampling_rate
-
-    @lru_cache()
-    def __len__(self):
-        """Number of time bins given duration and sampling rate"""
-        return int(self._time_duration * self._sampling_rate)
-
-    @lru_cache()
-    def __call__(self) -> np.ndarray:
-        """Array of uniform times at which data is sampled"""
-        num_bins = self.__len__()
-        return np.linspace(
-            0.0, self._time_duration, num=num_bins, endpoint=False, dtype=np.float32
-        )
-
-    @property
-    def delta_t(self) -> float:
-        """The size of the time bins"""
-        return 1.0 / self._sampling_rate
-
-    @delta_t.setter
-    def delta_t(self, delta_t: float):
-        self._sampling_rate = 1.0 / delta_t
-
-    @property
-    def noise_std(self) -> float:
-        """Standard deviation of the whitened noise distribution.
-
-        To have noise that comes from a multivariate *unit* normal
-        distribution, you must divide by this factor. In practice, this means
-        dividing the whitened waveforms by this.
-
-        In the continuum limit in time domain, the standard deviation of white
-        noise would at each point go to infinity, hence the delta_t factor.
-        """
-        return 1.0 / np.sqrt(2.0 * self.delta_t)
-
-    def time_translate_data(self, data, dt) -> np.ndarray:
-        raise NotImplementedError
-
-    @property
-    def f_max(self) -> float:
-        """The maximum frequency [Hz] is typically set to half the sampling
-        rate."""
-        return self._sampling_rate / 2.0
-
-    @property
-    def duration(self) -> float:
-        """Waveform duration in seconds."""
-        return self._time_duration
-
-    @property
-    def sampling_rate(self) -> float:
-        return self._sampling_rate
-
-    @property
-    def min_idx(self) -> int:
-        return 0
-
-    @property
-    def max_idx(self) -> int:
-        return round(self._time_duration * self._sampling_rate)
-
-    @property
-    def domain_dict(self):
-        """Enables to rebuild the domain via calling build_domain(domain_dict)."""
-        return {
-            "type": "TimeDomain",
-            "time_duration": self._time_duration,
-            "sampling_rate": self._sampling_rate,
-        }
-
-
-class PCADomain(Domain):
-    """TODO"""
-
-    # Not super important right now
-    # FIXME: Should this be defined for FD or TD bases or both?
-    # Nrb instead of Nf
-
-    @property
-    def noise_std(self) -> float:
-        """Standard deviation of the whitened noise distribution.
-
-        To have noise that comes from a multivariate *unit* normal
-        distribution, you must divide by this factor. In practice, this means
-        dividing the whitened waveforms by this.
-
-        In the continuum limit in time domain, the standard deviation of white
-        noise would at each point go to infinity, hence the delta_t factor.
-        """
-        # FIXME
-        return np.sqrt(self.window_factor) / np.sqrt(4.0 * self.delta_f)
-
-
-def build_domain(settings: Dict) -> Domain:
-    """
-    Instantiate a domain class from settings.
-
-    Parameters
-    ----------
-    settings : dict
-        Dicionary with 'type' key denoting the type of domain, and keys corresponding
-        to the kwargs needed to construct the Domain.
-
-    Returns
-    -------
-    A Domain instance of the correct type.
-    """
-    if "type" not in settings:
-        raise ValueError(
-            f'Domain settings must include a "type" key. Settings included '
-            f"the keys {settings.keys()}."
-        )
-
-    # The settings other than 'type' correspond to the kwargs of the Domain constructor.
-    kwargs = {k: v for k, v in settings.items() if k != "type"}
-    if settings["type"] in ["FrequencyDomain", "FD"]:
-        return FrequencyDomain(**kwargs)
-    elif settings["type"] == ["TimeDomain", "TD"]:
-        return TimeDomain(**kwargs)
-    else:
-        raise NotImplementedError(f'Domain {settings["name"]} not implemented.')
-
-
-def build_domain_from_model_metadata(model_metadata) -> Domain:
-    """
-    Instantiate a domain class from settings of model.
-
-    Parameters
-    ----------
-    model_metadata: dict
-        model metadata containing information to build the domain
-        typically obtained from the model.metadata attribute
-
-    Returns
-    -------
-    A Domain instance of the correct type.
-    """
-    domain = build_domain(model_metadata["dataset_settings"]["domain"])
-    if "domain_update" in model_metadata["train_settings"]["data"]:
-        domain.update(model_metadata["train_settings"]["data"]["domain_update"])
-    domain.window_factor = get_window_factor(
-        model_metadata["train_settings"]["data"]["window"]
-    )
-    return domain
-
-
-if __name__ == "__main__":
-    kwargs = {"f_min": 20, "f_max": 2048, "delta_f": 0.125}
-    domain = FrequencyDomain(**kwargs)
-
-    d1 = domain()
-    d2 = domain()
-    print("Clearing cache.", end=" ")
-    domain.clear_cache_for_all_instances()
-    print("Done.")
-    d3 = domain()
-
-    print("Changing domain range.", end=" ")
-    domain.set_new_range(20, 100)
-    print("Done.")
-
-    d4 = domain()
-    d5 = domain()
-
-    print(len(d1), len(d4))

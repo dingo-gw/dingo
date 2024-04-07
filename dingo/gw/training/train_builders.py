@@ -107,8 +107,10 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     ifo_list = InterferometerList(data_settings["detectors"])
 
     # Build transforms.
-    transforms = [SampleExtrinsicParameters(extrinsic_prior_dict),
-                  GetDetectorTimes(ifo_list, ref_time)]
+    transforms = [
+        SampleExtrinsicParameters(extrinsic_prior_dict),
+        GetDetectorTimes(ifo_list, ref_time),
+    ]
 
     extra_context_parameters = []
     if "gnpe_time_shifts" in data_settings:
