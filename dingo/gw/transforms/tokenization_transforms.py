@@ -13,27 +13,43 @@ class StrainTokenization(object):
 
     def __init__(
         self,
-        num_tokens: int,
         domain: FrequencyDomain,
+        num_tokens: int = None,
+        token_size: int = None,
         normalize_frequency: bool = False,
     ):
         """
         Parameters
         ----------
-        num_tokens: int
-            Number of tokens into which the frequency bins should be divided.
         domain: FrequencyDomain
             Contains domain information, e.g., f_min, f_max, delta_f
+        num_tokens: int
+            Number of tokens into which the frequency bins should be divided.
+        token_size: int
+            Number of frequency bins per token. It is necessary to specify one of
+            num_tokens or token_size.
         normalize_frequency: bool
             Whether to normalize the frequency bins for the positional encoding
 
         """
+        if num_tokens is not None and token_size is not None:
+            raise ValueError("Cannot specify both num_tokens and token_size.")
+
         num_f = domain.frequency_mask_length
-        # To calculate the token length, we round down and truncate slightly the domain
-        # at the upper end. This means we don't have to zero-pad, improving the
-        # consistency between tokens. However, we lose some high-frequency information
-        # (hopefully not too important).
-        self.num_bins_per_token = num_f // num_tokens
+
+        if num_tokens is not None:
+            # To calculate the token length, we round down and truncate slightly the domain
+            # at the upper end. This means we don't have to zero-pad, improving the
+            # consistency between tokens. However, we lose some high-frequency information
+            # (hopefully not too important).
+            self.num_bins_per_token = num_f // num_tokens
+        elif token_size is not None:
+            self.num_bins_per_token = token_size
+            num_tokens = num_f // token_size
+        else:
+            raise ValueError(
+                "It is necessary to specify either num_tokens or " "token_size."
+            )
         self.f_min_per_token = domain.sample_frequencies[
             domain.min_idx :: self.num_bins_per_token
         ][:num_tokens]
@@ -42,8 +58,12 @@ class StrainTokenization(object):
         ][:num_tokens]
         print(
             f"Tokenization:\n"
-            f"  Token width {self.num_bins_per_token} frequency bins, "
-            f"{self.f_min_per_token[1] - self.f_min_per_token[0]} Hz\n"
+            f"  Token width {self.num_bins_per_token} frequency bins; {num_tokens} "
+            f"tokens total\n"
+            f"  First token width {self.f_min_per_token[1] - self.f_min_per_token[0]} "
+            f"Hz\n "
+            f"  Last token width {self.f_min_per_token[-1] - self.f_min_per_token[-2]} "
+            f"Hz\n"
             f"  Truncating at maximum frequency of {self.f_max_per_token[-1]} Hz"
         )
         self.total_frequency_bins = num_tokens * self.num_bins_per_token

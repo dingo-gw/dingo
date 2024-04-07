@@ -191,8 +191,9 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
             norm_freq = False
         transforms.append(
             StrainTokenization(
-                data_settings["tokenization"]["num_tokens"],
                 domain,
+                num_tokens=data_settings["tokenization"].get("num_tokens"),
+                token_size=data_settings["tokenization"].get("token_size"),
                 normalize_frequency=norm_freq,
             )
         )
@@ -302,7 +303,6 @@ def build_svd_for_embedding_network(
     )
     with threadpool_limits(limits=1, user_api="blas"):
         for idx, data in enumerate(loader):
-
             # This is for handling the last batch, which may otherwise push the total
             # number of samples above the number requested.
             lower = idx * batch_size
