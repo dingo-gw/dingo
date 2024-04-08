@@ -86,7 +86,7 @@ class GWSignal(object):
             raise ValueError(
                 "Output domain is not contained within WaveformGenerator domain."
             )
-        if domain_in.delta_f != domain_out.delta_f:
+        if np.any(domain_in.delta_f != domain_out.delta_f):
             raise ValueError("Domains must have same delta_f.")
 
     @property
@@ -275,6 +275,9 @@ class GWSignal(object):
         if isinstance(asd, ASDDataset):
             if set(asd.asds.keys()) != set(ifo_names):
                 raise KeyError("ASDDataset ifos do not match signal.")
+            if asd.domain.domain_dict != self.data_domain.domain_dict:
+                print("Updating ASDDataset domain to match data domain.")
+                asd.update_domain(self.data_domain.domain_dict)
         elif isinstance(asd, dict):
             if set(asd.keys()) != set(ifo_names):
                 raise KeyError("ASD ifos do not match signal.")

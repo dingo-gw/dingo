@@ -128,7 +128,7 @@ class ASDDataset(DingoDataset):
             self.domain.domain_dict["type"] == "FrequencyDomain"
             and domain_update["type"] == "MultibandedFrequencyDomain"
         ):
-            print("Updating ASD dataset to MultibandedFrequencyDomain")
+            print("Updating ASD dataset to MultibandedFrequencyDomain.")
             asd_dataset_decimated = {}
             mfd = build_domain(domain_update)
             ufd = mfd.base_domain

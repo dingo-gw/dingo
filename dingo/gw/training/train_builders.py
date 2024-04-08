@@ -172,6 +172,7 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     transforms.append(
         RepackageStrainsAndASDS(data_settings["detectors"], first_index=domain.min_idx)
     )
+
     if data_settings["context_parameters"]:
         selected_keys = ["inference_parameters", "waveform", "context_parameters"]
     else:

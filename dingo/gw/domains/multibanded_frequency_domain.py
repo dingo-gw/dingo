@@ -480,8 +480,8 @@ class MultibandedFrequencyDomain(Domain):
         raise NotImplementedError()
 
     @property
-    def delta_f(self) -> float:
-        raise NotImplementedError()
+    def delta_f(self):
+        return self._delta_f
 
     @delta_f.setter
     def delta_f(self, value):
