@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Union
 
 from functools import lru_cache
 from abc import ABC, abstractmethod
@@ -575,7 +575,7 @@ class PCADomain(Domain):
         return np.sqrt(self.window_factor) / np.sqrt(4.0 * self.delta_f)
 
 
-def build_domain(settings: Dict) -> Domain:
+def build_domain(settings: Dict) -> Union[TimeDomain, FrequencyDomain]:
     """
     Instantiate a domain class from settings.
 
