@@ -190,8 +190,8 @@ class GWSignal(object):
                 parameters: waveform parameters
                 asd (if set): amplitude spectral density for each detector
         """
+        theta = {k: float(v) for k, v in theta.items()}
         theta_intrinsic, theta_extrinsic = split_off_extrinsic_parameters(theta)
-        theta_intrinsic = {k: float(v) for k, v in theta_intrinsic.items()}
 
         # Step 1: generate polarizations h_plus and h_cross
         polarizations = self.waveform_generator.generate_hplus_hcross(theta_intrinsic)
