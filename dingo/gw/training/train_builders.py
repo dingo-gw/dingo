@@ -179,26 +179,10 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     else:
         selected_keys = ["inference_parameters", "waveform"]
 
-    try:
-        if (
-            "normalize_frequency_for_positional_encoding"
-            in data_settings["tokenization"]
-        ):
-            norm_freq = data_settings["tokenization"][
-                "normalize_frequency_for_positional_encoding"
-            ]
-        else:
-            norm_freq = False
-        transforms.append(
-            StrainTokenization(
-                domain,
-                num_tokens=data_settings["tokenization"].get("num_tokens"),
-                token_size=data_settings["tokenization"].get("token_size"),
-                normalize_frequency=norm_freq,
-            )
-        )
+    if "tokenization" in data_settings:
+        transforms.append(StrainTokenization(domain, **data_settings["tokenization"]))
         selected_keys.append("position")
-    except KeyError:
+    else:
         print(
             "No tokenization information found, omitting StrainTokenization transform."
         )

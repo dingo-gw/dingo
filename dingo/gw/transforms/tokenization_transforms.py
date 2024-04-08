@@ -1,19 +1,20 @@
 import numpy as np
 
-from dingo.gw.domains import FrequencyDomain
+from dingo.gw.domains import FrequencyDomain, Domain
 
 
 class StrainTokenization(object):
     """
-    Divide frequency bins into frequency segments of equal length and add frequency information and
-    encoding of blocks (i.e. interferometers in GW use case) to sample. It is assumed that f_min
-    and f_max are the same for all blocks, that all waveforms contain the same number of blocks
-    and that the ordering of the blocks within 'waveform' is fixed.
+    Divide frequency bins into frequency segments of equal bin-length and add frequency
+    information and encoding of blocks (i.e. interferometers in GW use case) to sample.
+    It is assumed that f_min and f_max are the same for all blocks, that all waveforms
+    contain the same number of blocks and that the ordering of the blocks within
+    'waveform' is fixed.
     """
 
     def __init__(
         self,
-        domain: FrequencyDomain,
+        domain: Domain,
         num_tokens: int = None,
         token_size: int = None,
         normalize_frequency: bool = False,
@@ -21,15 +22,17 @@ class StrainTokenization(object):
         """
         Parameters
         ----------
-        domain: FrequencyDomain
-            Contains domain information, e.g., f_min, f_max, delta_f
+        domain: Domain
+            Contains domain information, e.g., f_min, f_max, delta_f. Works with
+            FrequencyDomain and MultibandedFrequencyDomain.
         num_tokens: int
-            Number of tokens into which the frequency bins should be divided.
+            Number of tokens into which the domain should be divided. [Optional]
         token_size: int
             Number of frequency bins per token. It is necessary to specify one of
-            num_tokens or token_size.
+            num_tokens or token_size. [Optional]
         normalize_frequency: bool
-            Whether to normalize the frequency bins for the positional encoding
+            Whether to normalize the frequency bins for the positional encoding.
+            [Default: False]
 
         """
         if num_tokens is not None and token_size is not None:
@@ -59,9 +62,9 @@ class StrainTokenization(object):
         print(
             f"Tokenization:\n"
             f"  Token width {self.num_bins_per_token} frequency bins; {num_tokens} "
-            f"tokens total\n"
+            f"tokens per detector\n"
             f"  First token width {self.f_min_per_token[1] - self.f_min_per_token[0]} "
-            f"Hz\n "
+            f"Hz\n"
             f"  Last token width {self.f_min_per_token[-1] - self.f_min_per_token[-2]} "
             f"Hz\n"
             f"  Truncating at maximum frequency of {self.f_max_per_token[-1]} Hz"

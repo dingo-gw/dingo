@@ -181,25 +181,13 @@ class GWSampler(GWSamplerMixin, Sampler):
             ),
         ]
         selected_keys = ["waveform"]
-        try:
-            data_settings = self.model.metadata["train_settings"]["data"]
-            if "normalize_frequency_for_positional_encoding" in data_settings["tokenization"]:
-                norm_freq = data_settings["tokenization"]["normalize_frequency_for_positional_encoding"]
-            else:
-                norm_freq = False
+        data_settings = self.model.metadata["train_settings"]["data"]
+        if "tokenization" in data_settings:
             transforms.append(
-                StrainTokenization(
-                    data_settings["tokenization"]["num_tokens"],
-                    data_settings["domain_update"]["f_min"],
-                    data_settings["domain_update"]["f_max"],
-                    df=1 / data_settings["window"]["T"],
-                    normalize_frequency=norm_freq
-                )
+                StrainTokenization(self.domain, **data_settings["tokenization"])
             )
-            selected_keys.append("blocks")
-            selected_keys.append("f_min_per_token")
-            selected_keys.append("f_max_per_token")
-        except KeyError:
+            selected_keys.append("position")
+        else:
             print(
                 "No tokenization information found, omitting StrainTokenization transform."
             )
