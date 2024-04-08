@@ -1,16 +1,16 @@
-import copy
-
 import pandas as pd
 import torch.multiprocessing
 import torchvision
-from threadpoolctl import threadpool_limits
-from torch.utils.data import DataLoader
 from bilby.gw.detector import InterferometerList
+from threadpoolctl import threadpool_limits
 
+from dingo.core.utils import *
 from dingo.gw.SVD import SVDBasis
-
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.gw.domains import build_domain
+from dingo.gw.gwutils import *
+from dingo.gw.noise.asd_dataset import ASDDataset
+from dingo.gw.prior import default_inference_parameters
 from dingo.gw.transforms import (
     ProjectOntoDetectors,
     SampleNoiseASD,
@@ -22,12 +22,8 @@ from dingo.gw.transforms import (
     GNPECoalescenceTimes,
     SampleExtrinsicParameters,
     GetDetectorTimes,
-    StrainTokenization
+    StrainTokenization,
 )
-from dingo.gw.noise.asd_dataset import ASDDataset
-from dingo.gw.prior import default_inference_parameters
-from dingo.gw.gwutils import *
-from dingo.core.utils import *
 
 
 def build_dataset(data_settings):
@@ -108,8 +104,10 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     ifo_list = InterferometerList(data_settings["detectors"])
 
     # Build transforms.
-    transforms = [SampleExtrinsicParameters(extrinsic_prior_dict),
-                  GetDetectorTimes(ifo_list, ref_time)]
+    transforms = [
+        SampleExtrinsicParameters(extrinsic_prior_dict),
+        GetDetectorTimes(ifo_list, ref_time),
+    ]
 
     extra_context_parameters = []
     if "gnpe_time_shifts" in data_settings:
@@ -178,24 +176,28 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         selected_keys = ["inference_parameters", "waveform"]
 
     try:
-        if "normalize_frequency_for_positional_encoding" in data_settings["tokenization"]:
-            norm_freq = data_settings["tokenization"]["normalize_frequency_for_positional_encoding"]
+        if (
+            "normalize_frequency_for_positional_encoding"
+            in data_settings["tokenization"]
+        ):
+            norm_freq = data_settings["tokenization"][
+                "normalize_frequency_for_positional_encoding"
+            ]
         else:
             norm_freq = False
         transforms.append(
             StrainTokenization(
                 data_settings["tokenization"]["num_tokens"],
-                data_settings["domain_update"]["f_min"],
-                data_settings["domain_update"]["f_max"],
-                df=1 / data_settings["window"]["T"],
-                normalize_frequency=norm_freq
+                domain,
+                normalize_frequency=norm_freq,
             )
         )
+        selected_keys.append("position")
         selected_keys.append("blocks")
-        selected_keys.append("f_min_per_token")
-        selected_keys.append("f_max_per_token")
     except KeyError:
-        print("No tokenization information found, omitting StrainTokenization transform.")
+        print(
+            "No tokenization information found, omitting StrainTokenization transform."
+        )
 
     transforms.append(UnpackDict(selected_keys=selected_keys))
 
@@ -208,15 +210,15 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
 
 
 def build_svd_for_embedding_network(
-        wfd: WaveformDataset,
-        data_settings: dict,
-        asd_dataset_path: str,
-        size: int,
-        num_training_samples: int,
-        num_validation_samples: int,
-        num_workers: int = 0,
-        batch_size: int = 1000,
-        out_dir=None,
+    wfd: WaveformDataset,
+    data_settings: dict,
+    asd_dataset_path: str,
+    size: int,
+    num_training_samples: int,
+    num_validation_samples: int,
+    num_workers: int = 0,
+    batch_size: int = 1000,
+    out_dir=None,
 ):
     """
     Construct SVD matrices V based on clean waveforms in each interferometer. These
@@ -297,7 +299,6 @@ def build_svd_for_embedding_network(
     )
     with threadpool_limits(limits=1, user_api="blas"):
         for idx, data in enumerate(loader):
-
             # This is for handling the last batch, which may otherwise push the total
             # number of samples above the number requested.
             lower = idx * batch_size
@@ -309,7 +310,7 @@ def build_svd_for_embedding_network(
             )
             strain_data = data["waveform"]
             for ifo, strains in strain_data.items():
-                waveforms[ifo][lower: lower + n] = strains[:n]
+                waveforms[ifo][lower : lower + n] = strains[:n]
             if lower + n == num_waveforms:
                 break
     print(f"...done. This took {time.time() - time_start:.0f} s.")
@@ -350,7 +351,7 @@ def build_svd_for_embedding_network(
     for ifo in data_settings["detectors"]:
         V = basis_dict[ifo].V
         assert np.allclose(V[: wfd.domain.min_idx], 0)
-        V = V[wfd.domain.min_idx:]
+        V = V[wfd.domain.min_idx :]
         print("      " + str(V.shape))
         V_rb_list.append(V)
     print("\n")

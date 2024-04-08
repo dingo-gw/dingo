@@ -1,36 +1,20 @@
-from typing import Callable, List, Tuple, Union
+import copy
 import math
+from typing import Callable, List, Union
+
 import torch
-from torch import nn, Tensor
+from torch import nn, vmap, Tensor
+from torch.func import functional_call, stack_module_state
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
 from dingo.core.nn.resnet import DenseResidualNet
 from dingo.core.utils import torchutils
 
 
-class MLP(nn.Module):
-    """Simple MLP with one hidden layer."""
-    def __init__(self,
-                 input_size: int,
-                 hidden_size: int,
-                 output_size: int,
-                 activation_fn: Callable
-                 ):
-        super(MLP, self).__init__()
-        self.linear0 = nn.Linear(input_size, hidden_size)
-        self.activation = activation_fn
-        self.linear1 = nn.Linear(hidden_size, output_size)
-
-    def forward(self, x: Tensor) -> Tensor:
-        x = self.activation(self.linear0(x))
-        x = self.activation(self.linear1(x))
-        return x
-
-
 class Tokenizer(nn.Module):
     """
     A nn.Module that maps each frequency fragment of length num_bins_per_token and width num_channels
-    into an embedding vector of fixed emb_size via (the same or individual) linear layers.
+    into an embedding vector of fixed d_model via (the same or individual) linear layers.
 
     Methods
     -------
@@ -41,21 +25,21 @@ class Tokenizer(nn.Module):
     """
 
     def __init__(
-            self,
-            input_dims: List[int],
-            hidden_dims: Union[List, int],
-            output_dim: int,
-            activation: Callable,
-            dropout: float = 0.0,
-            batch_norm: bool = True,
-            layer_norm: bool = False,
-            individual_token_embedding: bool = False,
+        self,
+        input_dims: List[int],
+        hidden_dims: Union[List, int],
+        output_dim: int,
+        activation: Callable,
+        dropout: float = 0.0,
+        batch_norm: bool = True,
+        layer_norm: bool = False,
+        individual_token_embedding: bool = False,
     ):
         """
         Parameters
         --------
         input_dims: List[int]
-            containing [num_blocks, num_channels, num_tokens, num_bins_per_token]
+            containing [num_tokens, num_blocks, num_features]=[num_tokens, num_blocks, num_channels*num_bins_per_token]
             where num_blocks = number of interferometers in GW use case, and num_channels = [real, imag, asd]
         hidden_dims: Optional[Tuple, int]
             if type List: dimensions of hidden layers for DenseResidualNet
@@ -75,39 +59,11 @@ class Tokenizer(nn.Module):
         """
         super(Tokenizer, self).__init__()
 
-        (
-            self.num_blocks,
-            self.num_channels,
-            self.num_tokens,
-            self.num_bins_per_token,
-        ) = input_dims
+        self.num_tokens, self.num_blocks, self.num_features = input_dims
         if individual_token_embedding:
-            if type(hidden_dims) is list:
-                self.stack_embedding_networks = nn.ModuleList([
-                    DenseResidualNet(
-                        input_dim=self.num_channels * self.num_bins_per_token,
-                        output_dim=output_dim,
-                        hidden_dims=tuple(hidden_dims),
-                        activation=activation,
-                        dropout=dropout,
-                        batch_norm=batch_norm,
-                        layer_norm=layer_norm,
-                    )
-                    for _ in range(self.num_tokens)
-                ])
-            else:
-                assert type(hidden_dims) is int
-                self.stack_embedding_networks = nn.ModuleList([
-                    MLP(self.num_channels * self.num_bins_per_token,
-                        hidden_dims,
-                        output_dim,
-                        activation)
-                    for _ in range(self.num_tokens)
-                ])
-        else:
-            if type(hidden_dims) is list:
-                self.embedding_networks = DenseResidualNet(
-                    input_dim=self.num_channels * self.num_bins_per_token,
+            stack_embedding_networks = [
+                DenseResidualNet(
+                    input_dim=self.num_features,
                     output_dim=output_dim,
                     hidden_dims=tuple(hidden_dims),
                     activation=activation,
@@ -115,55 +71,70 @@ class Tokenizer(nn.Module):
                     batch_norm=batch_norm,
                     layer_norm=layer_norm,
                 )
-            else:
-                assert type(hidden_dims) is int
-                self.embedding_networks = MLP(self.num_channels * self.num_bins_per_token,
-                                              hidden_dims,
-                                              output_dim,
-                                              activation)
+                for _ in range(self.num_tokens)
+            ]
+            # combine states of models together by stacking each parameter
+            self.params, self.buffers = stack_module_state(stack_embedding_networks)
+            # Construct a "stateless" version of one of the models. It is "stateless" in
+            # the sense that the parameters are meta Tensors and do not have storage.
+            self.stateless_base_model = copy.deepcopy(stack_embedding_networks[0])
+        else:
+            self.embedding_network = DenseResidualNet(
+                input_dim=self.num_features,
+                output_dim=output_dim,
+                hidden_dims=tuple(hidden_dims),
+                activation=activation,
+                dropout=dropout,
+                batch_norm=batch_norm,
+                layer_norm=layer_norm,
+            )
 
         self.individual_token_embedding = individual_token_embedding
+
+    def evaluate_stateless_model(
+        self, params: dict, buffer: Tensor, x: Tensor
+    ) -> Tensor:
+        """Function used to apply torch.vmap to the individual tokenizer models.
+        Parameters
+        --------
+        params: dict
+            Dictionary of model parameters needed for evaluation of stateless model
+        buffer: torch.Tensor
+            Buffer for evaluation of stateless model
+        x: torch.Tensor
+            input tensor
+        """
+        return functional_call(
+            self.stateless_base_model.to("meta"), (params, buffer), (x,)
+        )
 
     def forward(self, x: Tensor):
         """
         Parameters
         --------
         x: Tensor
-            shape [batch_size, num_blocks, num_channels, num_tokens, num_bins_per_token]
+            shape [batch_size, num_blocks * num_tokens, num_features]
+                 =[batch_size, num_blocks, num_tokens, num_channels * num_bins_per_token]
             where num_blocks = number of interferometers in GW use case, and num_channels = [real, imag, asd]
 
         Returns
         --------
         x: Tensor
-            shape [batch_size, num_blocks, num_tokens, d_model]
+            shape [batch_size, num_blocks * num_tokens, d_model]
         """
-        if x.shape[1:] != (
-                self.num_blocks,
-                self.num_channels,
-                self.num_tokens,
-                self.num_bins_per_token,
-        ):
+        if x.shape[1:] != (self.num_tokens, self.num_blocks, self.num_features):
             raise ValueError(
                 f"Invalid shape for token embedding layer. "
-                f"Expected {(self.num_blocks, self.num_channels, self.num_tokens, self.num_bins_per_token)}, "
+                f"Expected {(self.num_tokens, self.num_blocks, self.num_features)}, "
                 f"got {tuple(x.shape[1:])}."
             )
-        out = []
-        # TODO: Rewrite with torch.vmap for more efficiency
-        for b in range(self.num_blocks):
-            out_b = []
-            for i in range(self.num_tokens):
-                # apply linear layer for tensor of shape [batch_size, num_channels, num_bins_per_token]
-                if self.individual_token_embedding:
-                    out_b.append(
-                        self.stack_embedding_networks[i](x[:, b, :, i, :].flatten(start_dim=1))
-                    )
-                else:
-                    out_b.append(self.embedding_networks(x[:, b, :, i, :].flatten(start_dim=1)))
-            out.append(
-                torch.stack(out_b, dim=1)
+        if self.individual_token_embedding:
+            x = vmap(self.evaluate_stateless_model, in_dims=(0, 0, 1), out_dims=1)(
+                self.params, self.buffers, x
             )
-        x = torch.stack(out, dim=1)
+
+        else:
+            x = self.embedding_network(x)
 
         return x
 
@@ -185,10 +156,7 @@ class PositionalEncoding(nn.Module):
         add the frequency encoding to the embedding matrix, dependent on f_min and f_max of each token
     """
 
-    def __init__(self,
-                 d_model: int,
-                 positional_encoding_type: str
-                 ):
+    def __init__(self, d_model: int, positional_encoding_type: str):
         """
         Parameters:
         --------
@@ -203,27 +171,29 @@ class PositionalEncoding(nn.Module):
         """
         super(PositionalEncoding, self).__init__()
 
-        self.size_f_min = int(torch.ceil(torch.tensor(d_model) / 2))
-        self.size_f_max = d_model - self.size_f_min
+        self.num_min_vals = int(torch.ceil(torch.tensor(d_model) / 2))
+        self.num_max_vals = d_model - self.num_min_vals
 
         self.positional_encoding_type = positional_encoding_type
         if "discrete" in positional_encoding_type:
-            d_f_min = torch.exp(
-                -torch.arange(0, self.size_f_min, 2)
+            factor_min = torch.exp(
+                -torch.arange(0, self.num_min_vals, 2)
                 * math.log(10000.0)
-                / self.size_f_min
+                / self.num_min_vals
             )
-            d_f_max = torch.exp(
-                -torch.arange(0, self.size_f_max, 2)
+            factor_max = torch.exp(
+                -torch.arange(0, self.num_max_vals, 2)
                 * math.log(10000.0)
-                / self.size_f_max
+                / self.num_max_vals
             )
         elif "continuous" in positional_encoding_type:
-            d_f_min = (
-                    torch.pow(2, torch.arange(0, self.size_f_min, 2) / self.size_f_min) * math.pi
+            factor_min = (
+                torch.pow(2, torch.arange(0, self.num_min_vals, 2) / self.num_min_vals)
+                * math.pi
             )
-            d_f_max = (
-                    torch.pow(2, torch.arange(0, self.size_f_max, 2) / self.size_f_max) * math.pi
+            factor_max = (
+                torch.pow(2, torch.arange(0, self.num_max_vals, 2) / self.num_max_vals)
+                * math.pi
             )
         else:
             raise ValueError(
@@ -237,58 +207,55 @@ class PositionalEncoding(nn.Module):
 
         self.d_model = torch.tensor(d_model)
 
-        self.register_buffer('d_f_min', d_f_min)
-        self.register_buffer('d_f_max', d_f_max)
+        self.register_buffer("factor_min", factor_min)
+        self.register_buffer("factor_max", factor_max)
 
     def initialize_linear(self):
         self.linear.bias.data = torch.zeros_like(self.linear.bias.data)
-        self.linear.weight.data = (torch.eye(self.linear.weight.data.shape[0])
-                                   + torch.normal(0, 0.01, size=self.linear.weight.data.shape))
+        self.linear.weight.data = torch.eye(
+            self.linear.weight.data.shape[0]
+        ) + torch.normal(0, 0.01, size=self.linear.weight.data.shape)
 
-    def forward(self, x: Tensor, f_min: Tensor, f_max: Tensor) -> Tensor:
+    def forward(self, x: Tensor, position: Tensor) -> Tensor:
         """
         Parameters
         --------
         x: Tensor
-            shape [batch_size, num_blocks, num_tokens, d_model]
-        f_min: Tensor
-            shape [batch_size, num_tokens]
-        f_max: Tensor
-            shape [batch_size, num_tokens]
-        device: str
-            current device
+            shape [batch_size, num_tokens, num_blocks, d_model]
+        position: Tensor
+            shape [batch_size, num_tokens, 2], last two dimensions correspond to min and max value of each token
 
         Returns
         --------
         x: Tensor
             same shape as input x
         """
-        batch_size, num_tokens = x.shape[0], x.shape[2]
+        batch_size, num_tokens, num_blocks = x.shape[0], x.shape[1], x.shape[2]
         assert self.d_model == x.shape[3]
         device = x.device
+        min_vals, max_vals = position[..., 0], position[..., 1]
 
-        # Assuming that f_min and f_max are the same for all blocks
+        # Assuming that min_val and max_val are the same for all blocks
         pos_embedding = torch.zeros(
-            (batch_size, 1, num_tokens, self.d_model), device=device
+            (batch_size, num_tokens, num_blocks, self.d_model), device=device
         )
-        pos_embedding[:, :, :, 0: self.size_f_min: 2] = torch.sin(
-            f_min.reshape(batch_size, 1, num_tokens, 1) * self.d_f_min
+        pos_embedding[..., 0 : self.num_min_vals : 2] = torch.sin(
+            min_vals.unsqueeze(3) * self.factor_min
         )
-        pos_embedding[:, :, :, 1: self.size_f_min + 1: 2] = torch.cos(
-            f_min.reshape(batch_size, 1, num_tokens, 1) * self.d_f_min
+        pos_embedding[..., 1 : self.num_min_vals + 1 : 2] = torch.cos(
+            min_vals.unsqueeze(3) * self.factor_min
         )
-        pos_embedding[:, :, :, self.size_f_min: self.d_model: 2] = torch.sin(
-            f_max.reshape(batch_size, 1, num_tokens, 1) * self.d_f_max
+        pos_embedding[..., self.num_min_vals : self.d_model : 2] = torch.sin(
+            max_vals.unsqueeze(3) * self.factor_max
         )
-        f_max_cos_dim = pos_embedding[:, :, :, self.size_f_min + 1: self.d_model: 2].shape[3]
-        pos_embedding[:, :, :, self.size_f_min + 1: self.d_model: 2] = torch.cos(
-            f_max.reshape(batch_size, 1, num_tokens, 1) * self.d_f_max[:f_max_cos_dim]
+        f_max_cos_dim = pos_embedding[
+            ..., self.num_min_vals + 1 : self.d_model : 2
+        ].shape[3]
+        pos_embedding[..., self.num_min_vals + 1 : self.d_model : 2] = torch.cos(
+            max_vals.unsqueeze(3) * self.factor_max[:f_max_cos_dim]
         )
         if self.linear:
-            tmp = []
-            for i in range(num_tokens):
-                tmp.append(self.linear(pos_embedding[:, :, i, :]))
-            pos_embedding = torch.stack(tmp, dim=2)
+            pos_embedding = self.linear(pos_embedding)
 
         x = (x + pos_embedding) / 2
 
@@ -306,7 +273,9 @@ class BlockEncoding(nn.Module):
         obtains embedding of employed blocks and adds it to x.
     """
 
-    def __init__(self, num_blocks: int, d_model: int, block_encoding_type: str = 'sine'):
+    def __init__(
+        self, num_blocks: int, d_model: int, block_encoding_type: str = "sine"
+    ):
         """
         Parameters
         --------
@@ -325,7 +294,9 @@ class BlockEncoding(nn.Module):
     def initialize_embedding(self):
         pi = torch.tensor(math.pi)
         p_emb = torch.linspace(0, 2 * pi, self.d_model)
-        off_set = torch.tensor([i / self.num_blocks * 2 * pi for i in range(self.num_blocks)])
+        off_set = torch.tensor(
+            [i / self.num_blocks * 2 * pi for i in range(self.num_blocks)]
+        )
         self.block_encoding.weight.data = torch.sin(p_emb + off_set.unsqueeze(1))
 
     def forward(self, x: Tensor, blocks: Tensor) -> Tensor:
@@ -345,15 +316,15 @@ class BlockEncoding(nn.Module):
         if blocks.shape[1] != self.num_blocks:
             raise ValueError(
                 f"Invalid shape for block indices in block encoding layer. "
-                f"Expected {self.num_blocks}, got {len(blocks)}."
+                f"Expected {self.num_blocks}, got {blocks.shape}."
             )
-        if x.shape[1] != self.num_blocks:
+        if x.shape[2] != self.num_blocks:
             raise ValueError(
                 f"Invalid input shape in block encoding layer. "
-                f"Expected {self.num_blocks}, got {x.shape[1]}."
+                f"Expected {self.num_blocks} at index 2, got {x.shape}."
             )
 
-        x = x + torch.unsqueeze(self.block_encoding(blocks.long()), 2)
+        x = x + torch.unsqueeze(self.block_encoding(blocks.long()), 1)
         x = x.reshape(x.shape[0], x.shape[1] * x.shape[2], x.shape[3]) / 2
 
         return x
@@ -376,16 +347,16 @@ class TransformerModel(nn.Module):
     """
 
     def __init__(
-            self,
-            tokenizer: Tokenizer,
-            positional_encoder: PositionalEncoding,
-            block_encoder: BlockEncoding,
-            final_net: DenseResidualNet,
-            d_model: int,
-            dim_feedforward: int,
-            nhead: int,
-            num_layers: int,
-            dropout: float = 0.1,
+        self,
+        tokenizer: Tokenizer,
+        positional_encoder: PositionalEncoding,
+        block_encoder: BlockEncoding,
+        final_net: DenseResidualNet,
+        d_model: int,
+        dim_feedforward: int,
+        nhead: int,
+        num_layers: int,
+        dropout: float = 0.1,
     ):
         """
         Parameters
@@ -438,24 +409,21 @@ class TransformerModel(nn.Module):
                 nn.init.xavier_uniform_(p)
 
     def forward(
-            self,
-            x: Tensor,
-            blocks: Tensor,
-            f_min: Tensor,
-            f_max: Tensor,
-            src_key_padding_mask: Tensor = None,
+        self,
+        x: Tensor,
+        position: Tensor,
+        blocks: Tensor,
+        src_key_padding_mask: Tensor = None,
     ) -> Tensor:
         """
         Parameters
         --------
         x: Tensor
             shape [batch_size, num_blocks, num_channels, num_tokens, num_bins_per_token]
+        position: Tensor
+            shape [batch_size, num_blocks, 2], where the last dimension corresponds to min and max per token
         blocks: Tensor
-            shape [batch_size, num_blocks], determines the ordering of the blocks in BlockEmbedding
-        f_min: Tensor
-            shape [batch_size, num_tokens]
-        f_max: Tensor
-            shape [batch_size, num_tokens]
+            blocks determines the ordering of the blocks in BlockEmbedding
         src_key_padding_mask: Tensor
             shape [batch_size, num_tokens]
 
@@ -467,7 +435,7 @@ class TransformerModel(nn.Module):
         if self.tokenizer is not None:
             x = self.tokenizer(x)
         if self.positional_encoding is not None:
-            x = self.positional_encoding(x, f_min, f_max)
+            x = self.positional_encoding(x, position)
         if self.block_encoding is not None:
             x = self.block_encoding(x, blocks)
 
@@ -487,13 +455,13 @@ class TransformerModel(nn.Module):
 
 
 def create_transformer_enet(
-        transformer_kwargs: dict,
-        tokenizer_kwargs: dict = None,
-        positional_encoder_kwargs: dict = None,
-        block_encoder_kwargs: dict = None,
-        final_net_kwargs: dict = None,
-        allow_tf32: bool = False,
-        added_context: bool = False,
+    transformer_kwargs: dict,
+    tokenizer_kwargs: dict = None,
+    positional_encoder_kwargs: dict = None,
+    block_encoder_kwargs: dict = None,
+    final_net_kwargs: dict = None,
+    allow_tf32: bool = False,
+    added_context: bool = False,
 ):
     """
     Builder function for a transformer embedding network for complex 1D data
@@ -528,12 +496,18 @@ def create_transformer_enet(
     if allow_tf32:
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
-        print(f"Cuda and cudnn backends running with allow_tf32 = {torch.backends.cuda.matmul.allow_tf32}.")
+        print(
+            f"Cuda and cudnn backends running with allow_tf32 = {torch.backends.cuda.matmul.allow_tf32}."
+        )
     if added_context:
-        raise ValueError("GNPE is not yet implemented for transformer embedding network.")
+        raise ValueError(
+            "GNPE is not yet implemented for transformer embedding network."
+        )
 
     if tokenizer_kwargs is not None:
-        tokenizer_kwargs["activation"] = torchutils.get_activation_function_from_string(tokenizer_kwargs["activation"])
+        tokenizer_kwargs["activation"] = torchutils.get_activation_function_from_string(
+            tokenizer_kwargs["activation"]
+        )
         tokenizer = Tokenizer(**tokenizer_kwargs)
     else:
         tokenizer = None
@@ -545,14 +519,16 @@ def create_transformer_enet(
         positional_encoder = None
 
     if block_encoder_kwargs is not None:
-        block_encoder_kwargs["num_blocks"] = tokenizer_kwargs["input_dims"][0]
+        block_encoder_kwargs["num_blocks"] = tokenizer_kwargs["input_dims"][1]
         block_encoder_kwargs["d_model"] = transformer_kwargs["d_model"]
         block_encoder = BlockEncoding(**block_encoder_kwargs)
     else:
         block_encoder = None
 
     if final_net_kwargs is not None:
-        final_net_kwargs["activation"] = torchutils.get_activation_function_from_string(final_net_kwargs["activation"])
+        final_net_kwargs["activation"] = torchutils.get_activation_function_from_string(
+            final_net_kwargs["activation"]
+        )
         final_net = DenseResidualNet(**final_net_kwargs)
     else:
         final_net = None
@@ -562,6 +538,7 @@ def create_transformer_enet(
         positional_encoder=positional_encoder,
         block_encoder=block_encoder,
         final_net=final_net,
-        **transformer_kwargs)
+        **transformer_kwargs,
+    )
 
     return model

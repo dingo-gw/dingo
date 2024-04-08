@@ -130,7 +130,8 @@ def autocomplete_model_kwargs(
     the dataloader:
     (*) set input dimension of embedding net to shape of data_sample[1]
     (*) set dimension of parameter space of posterior model to len(data_sample[0])
-    (*) set added_context flag of embedding net if required for gnpe proxies
+    (*) not in this branch: set added_context flag of embedding net if required for gnpe proxies
+        -> not possible to use gnpe with transformer because no quick-fix solution available
     (*) set context dim of posterior model to output dim of embedding net + gnpe proxy dim
     (*) if pretraining: set input dimension of pretraining net to output dimension of embedding network and
                         set output dimension of pretraining net to number of posterior parameters
@@ -169,18 +170,26 @@ def autocomplete_model_kwargs(
             model_kwargs["embedding_kwargs"]["input_dims"] = list(data_sample[1].shape)
             context_dim = model_kwargs["embedding_kwargs"]["output_dim"]
         elif model_kwargs["embedding_type"].lower() == "transformer":
-            model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]["input_dims"] = list(data_sample[1].shape)
-            model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]["output_dim"] = \
-                model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
-            model_kwargs["embedding_kwargs"]["final_net_kwargs"]["input_dim"] = \
-                model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
-            context_dim = model_kwargs["embedding_kwargs"]["final_net_kwargs"]["output_dim"]
+            model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]["input_dims"] = list(
+                data_sample[1].shape
+            )
+            model_kwargs["embedding_kwargs"]["tokenizer_kwargs"][
+                "output_dim"
+            ] = model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
+            model_kwargs["embedding_kwargs"]["final_net_kwargs"][
+                "input_dim"
+            ] = model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
+            context_dim = model_kwargs["embedding_kwargs"]["final_net_kwargs"][
+                "output_dim"
+            ]
         elif model_kwargs["embedding_type"] == "no_embedding":
             context_dim = None
             print("No embedding network specified.")
         else:
-            raise ValueError(f"Embedding type {model_kwargs['embedding_type']} not in [DenseResidualNet, transformer, "
-                             f"no_embedding]")
+            raise ValueError(
+                f"Embedding type {model_kwargs['embedding_type']} not in [DenseResidualNet, transformer, "
+                f"no_embedding]"
+            )
 
         # check for pretraining
         if model_kwargs["posterior_model_type"] == "pretraining":
@@ -192,17 +201,22 @@ def autocomplete_model_kwargs(
             model_kwargs["posterior_kwargs"]["input_dim"] = len(data_sample[0])
 
             # additional information for GNPE
-            if len(data_sample) == 3:
-                # set added_context flag of embedding net if gnpe proxies are required
-                # set context dim of nsf to output dim of embedding net + gnpe proxy dim
-                gnpe_proxy_dim = len(data_sample[2])
-                model_kwargs["embedding_kwargs"]["added_context"] = True
-                model_kwargs["posterior_kwargs"]["context_dim"] = (
-                    context_dim + gnpe_proxy_dim
-                )
-            else:
-                model_kwargs["embedding_kwargs"]["added_context"] = False
-                model_kwargs["posterior_kwargs"]["context_dim"] = context_dim
+            # TODO: get GNPE running with transformer for backwards compatibility
+            # Currently: not possible to use GNPE, no quick fix available on how to determine whether gnpe is used
+            # previously: ```try: len(data_sample[2])```
+            # but position element of transformer input has values at data_sample[2] ...
+            # if len(data_sample) == 3:
+            #    # set added_context flag of embedding net if gnpe proxies are required
+            #    # set context dim of nsf to output dim of embedding net + gnpe proxy dim
+            #    gnpe_proxy_dim = len(data_sample[2])
+            #    model_kwargs["embedding_kwargs"]["added_context"] = True
+            #    model_kwargs["posterior_kwargs"]["context_dim"] = (
+            #        context_dim + gnpe_proxy_dim
+            #    )
+            # else:
+            #    model_kwargs["embedding_kwargs"]["added_context"] = False
+            #    model_kwargs["posterior_kwargs"]["context_dim"] = context_dim
+            model_kwargs["posterior_kwargs"]["context_dim"] = context_dim
     else:
         model_kwargs["posterior_kwargs"]["input_dim"] = input_dim
         model_kwargs["posterior_kwargs"]["context_dim"] = context_dim
