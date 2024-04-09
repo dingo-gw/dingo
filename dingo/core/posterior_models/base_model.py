@@ -8,7 +8,7 @@ import time
 from abc import abstractmethod
 from collections import OrderedDict
 from os.path import join
-from typing import Callable
+from typing import Callable, Optional
 
 import h5py
 import numpy as np
@@ -190,7 +190,7 @@ class Base:
         print(f"Putting posterior model to device {self.device}.")
         self.network.to(self.device)
 
-    def initialize_optimizer_and_scheduler(self):
+    def initialize_optimizer_and_scheduler(self, num_steps: Optional[int] = None):
         """
         Initializes the optimizer and scheduler with self.optimizer_kwargs
         and self.scheduler_kwargs, respectively.
@@ -200,8 +200,11 @@ class Base:
                 self.network.parameters(), **self.optimizer_kwargs
             )
         if self.scheduler_kwargs is not None:
+            if "update_scheduler_every_batch" not in self.scheduler_kwargs:
+                self.scheduler_kwargs["update_scheduler_every_batch"] = False
+
             self.scheduler = utils.get_scheduler_from_kwargs(
-                self.optimizer, **self.scheduler_kwargs
+                self.optimizer, num_steps, **self.scheduler_kwargs
             )
 
     def save_model(
@@ -419,9 +422,9 @@ class Base:
                             *divmod(time.time() - time_start, 60)
                         )
                     )
-
-                # scheduler step for learning rate
-                utils.perform_scheduler_step(self.scheduler, test_loss)
+                if self.scheduler_kwargs["update_scheduler_every_batch"] is False:
+                    # scheduler step for learning rate
+                    utils.perform_scheduler_step(self.scheduler, test_loss)
 
                 # write history and save model
                 utils.write_history(train_dir, self.epoch, train_loss, test_loss, lr)
@@ -559,6 +562,8 @@ def train_epoch(pm, dataloader):
         # update loss for history and logging
         loss_info.update(loss.detach().item(), len(data[0]))
         loss_info.print_info(batch_idx)
+        if pm.scheduler_kwargs["update_scheduler_every_batch"]:
+            pm.scheduler.step()
 
     return loss_info.get_avg()
 

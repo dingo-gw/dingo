@@ -255,7 +255,13 @@ def initialize_stage(pm, wfd, stage, num_workers, resume=False):
         print("Initializing new optimizer and scheduler.")
         pm.optimizer_kwargs = stage["optimizer"]
         pm.scheduler_kwargs = stage["scheduler"]
-        pm.initialize_optimizer_and_scheduler()
+        pm.initialize_optimizer_and_scheduler(
+            num_steps=np.ceil(
+                wfd.settings["num_samples"]
+                * train_settings["data"]["train_fraction"]
+                / stage["batch_size"]
+            )
+        )
 
     # Freeze/unfreeze RB layer if necessary
     if "freeze_rb_layer" in stage:

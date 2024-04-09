@@ -86,6 +86,7 @@ training:
     scheduler:
       type: cosine
       T_max: 300
+      update_scheduler_every_batch: True # default: False
     batch_size: 4096
 
   stage_1:
@@ -97,6 +98,7 @@ training:
     scheduler:
       type: cosine
       T_max: 150
+      update_scheduler_every_batch: True # default: False
     batch_size: 4096
 
 # Local settings for training that have no impact on the final trained network.

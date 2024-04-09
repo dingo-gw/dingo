@@ -1,5 +1,5 @@
 import copy
-from typing import Union, Tuple, Iterable
+from typing import Optional, Union, Tuple, Iterable
 
 import bilby
 import numpy as np
@@ -124,10 +124,11 @@ def get_optimizer_from_kwargs(
 
 def get_scheduler_from_kwargs(
     optimizer: torch.optim.Optimizer,
+    num_batches: Optional[int] = None,
     **scheduler_kwargs,
 ):
     """
-    Builds and returns an scheduler for optimizer. The type of the
+    Builds and returns a scheduler for optimizer. The type of the
     scheduler is determined by kwarg type, the remaining kwargs are passed to
     the scheduler.
 
@@ -135,6 +136,8 @@ def get_scheduler_from_kwargs(
     ----------
     optimizer: torch.optim.optimizer.Optimizer
         optimizer for which the scheduler is used
+    num_batches: Optional[int]
+        number of batches to update the scheduler parameters if scheduler.update_scheduler_every_batch=True
     scheduler_kwargs:
         kwargs for scheduler; type needs to be one of [step, cosine,
         reduce_on_plateau, sequential, linear], the remaining kwargs are used for
@@ -144,6 +147,22 @@ def get_scheduler_from_kwargs(
     -------
     scheduler
     """
+
+    def adapt_scheduler_kwargs_to_update_every_batch(kwargs, n_batches):
+        if kwargs["type"] == "step":
+            kwargs["step_size"] = kwargs["step_size"] * n_batches
+        elif kwargs["type"] == "cosine":
+            kwargs["T_max"] = kwargs["T_max"] * n_batches
+        elif kwargs["type"] == "reduce_on_plateau":
+            raise ValueError(
+                "The scheduler ReduceOnPlateau cannot be used with update_scheduler_every_batch=True,"
+                "because it depends on the validation loss."
+            )
+        elif kwargs["type"] == "linear":
+            kwargs["total_iters"] = kwargs["total_iters"] * n_batches
+        if "last_epoch" in kwargs:
+            kwargs["last_epoch"] = kwargs["last_epoch"] * n_batches
+
     scheduler_kwargs = copy.deepcopy(scheduler_kwargs)
 
     schedulers_dict = {
@@ -161,7 +180,7 @@ def get_scheduler_from_kwargs(
     if scheduler_kwargs["type"] == "sequential":
         # Load individual schedulers
         scheduler_keys = []
-        num_scheduler = 1
+        num_scheduler = 0
         while True:
             scheduler_key = f"scheduler_{num_scheduler}"
             if scheduler_key in scheduler_kwargs:
@@ -174,12 +193,23 @@ def get_scheduler_from_kwargs(
                 "At least two schedulers need to be specified via "
                 "'scheduler_0': {...}, 'scheduler_1: {...}' when using sequential."
             )
+        update_scheduler_every_batch = scheduler_kwargs.pop(
+            "update_scheduler_every_batch"
+        )
+        if update_scheduler_every_batch:
+            scheduler_kwargs["milestones"] = [
+                milestone * num_batches for milestone in scheduler_kwargs["milestones"]
+            ]
         schedulers = []
         for scheduler_key in scheduler_keys:
             individual_scheduler_kwargs = scheduler_kwargs.pop(scheduler_key)
             if "type" not in individual_scheduler_kwargs:
                 raise KeyError(
                     f"Scheduler type of {scheduler_key} needs to be specified."
+                )
+            if update_scheduler_every_batch and num_batches is not None:
+                adapt_scheduler_kwargs_to_update_every_batch(
+                    individual_scheduler_kwargs, num_batches
                 )
             individual_scheduler_type = individual_scheduler_kwargs.pop("type").lower()
             if individual_scheduler_type not in schedulers_dict:
@@ -193,7 +223,13 @@ def get_scheduler_from_kwargs(
         scheduler_kwargs.pop("type")
         return schedulers_dict["sequential"](optimizer, schedulers, **scheduler_kwargs)
     else:
-        scheduler = schedulers_dict[scheduler_kwargs.pop("type")]
+        if (
+            scheduler_kwargs.pop("update_scheduler_every_batch")
+            and num_batches is not None
+        ):
+            adapt_scheduler_kwargs_to_update_every_batch(scheduler_kwargs, num_batches)
+        scheduler_type = scheduler_kwargs.pop("type")
+        scheduler = schedulers_dict[scheduler_type]
         return scheduler(optimizer, **scheduler_kwargs)
 
 
