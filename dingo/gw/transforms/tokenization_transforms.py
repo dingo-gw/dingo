@@ -38,12 +38,14 @@ class StrainTokenization(object):
             dtype=int,
         )
         assert num_tokens == len(self.token_indices)
-        self.f_min_per_token = np.arange(domain.f_min, domain.f_max, f_token_width)
+        f_max_pad = domain.f_min + num_tokens * f_token_width
+        self.f_min_per_token = np.arange(domain.f_min, f_max_pad, f_token_width)
         self.f_max_per_token = self.f_min_per_token + f_token_width - domain.delta_f
+        assert num_tokens == len(self.f_min_per_token) == len(self.f_max_per_token)
         self.num_padded_f_bins = int(num_tokens * self.num_bins_per_token - num_f)
         self.normalize_freq = normalize_frequency
         self.f_min = domain.f_min
-        self.f_max = self.f_max_per_token.max()
+        self.f_max = f_max_pad
         self.num_tokens = num_tokens
 
     def __call__(self, input_sample):
