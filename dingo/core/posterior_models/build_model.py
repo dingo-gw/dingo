@@ -170,18 +170,23 @@ def autocomplete_model_kwargs(
             model_kwargs["embedding_kwargs"]["input_dims"] = list(data_sample[1].shape)
             context_dim = model_kwargs["embedding_kwargs"]["output_dim"]
         elif model_kwargs["embedding_type"].lower() == "transformer":
-            model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]["input_dims"] = list(
-                data_sample[1].shape
-            )
-            model_kwargs["embedding_kwargs"]["tokenizer_kwargs"][
-                "output_dim"
-            ] = model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
-            model_kwargs["embedding_kwargs"]["final_net_kwargs"][
-                "input_dim"
-            ] = model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
-            context_dim = model_kwargs["embedding_kwargs"]["final_net_kwargs"][
-                "output_dim"
-            ]
+            if "tokenizer_kwargs" in model_kwargs["embedding_kwargs"]:
+                model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]["input_dims"] = list(
+                    data_sample[1].shape
+                )
+                model_kwargs["embedding_kwargs"]["tokenizer_kwargs"][
+                    "output_dim"
+                ] = model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
+            if "final_net_kwargs" in model_kwargs["embedding_kwargs"]:
+                model_kwargs["embedding_kwargs"]["final_net_kwargs"][
+                    "input_dim"
+                ] = model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
+                context_dim = model_kwargs["embedding_kwargs"]["final_net_kwargs"][
+                    "output_dim"
+                ]
+            else:
+                context_dim = model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
+
         elif model_kwargs["embedding_type"] == "no_embedding":
             context_dim = None
             print("No embedding network specified.")
