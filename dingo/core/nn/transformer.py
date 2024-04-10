@@ -61,7 +61,7 @@ class Tokenizer(nn.Module):
 
         self.num_tokens, self.num_blocks, self.num_features = input_dims
         if individual_token_embedding:
-            stack_embedding_networks = [
+            self.stack_tokenizer_nets = nn.ModuleList([
                 DenseResidualNet(
                     input_dim=self.num_features,
                     output_dim=output_dim,
@@ -72,14 +72,10 @@ class Tokenizer(nn.Module):
                     layer_norm=layer_norm,
                 )
                 for _ in range(self.num_tokens)
-            ]
-            # combine states of models together by stacking each parameter
-            self.params, self.buffers = stack_module_state(stack_embedding_networks)
-            # Construct a "stateless" version of one of the models. It is "stateless" in
-            # the sense that the parameters are meta Tensors and do not have storage.
-            self.stateless_base_model = copy.deepcopy(stack_embedding_networks[0])
+            ])
+
         else:
-            self.embedding_network = DenseResidualNet(
+            self.tokenizer_net = DenseResidualNet(
                 input_dim=self.num_features,
                 output_dim=output_dim,
                 hidden_dims=tuple(hidden_dims),
@@ -90,23 +86,6 @@ class Tokenizer(nn.Module):
             )
 
         self.individual_token_embedding = individual_token_embedding
-
-    def evaluate_stateless_model(
-        self, params: dict, buffer: Tensor, x: Tensor
-    ) -> Tensor:
-        """Function used to apply torch.vmap to the individual tokenizer models.
-        Parameters
-        --------
-        params: dict
-            Dictionary of model parameters needed for evaluation of stateless model
-        buffer: torch.Tensor
-            Buffer for evaluation of stateless model
-        x: torch.Tensor
-            input tensor
-        """
-        return functional_call(
-            self.stateless_base_model.to("meta"), (params, buffer), (x,)
-        )
 
     def forward(self, x: Tensor):
         """
@@ -129,12 +108,9 @@ class Tokenizer(nn.Module):
                 f"got {tuple(x.shape[1:])}."
             )
         if self.individual_token_embedding:
-            x = vmap(self.evaluate_stateless_model, in_dims=(0, 0, 1), out_dims=1)(
-                self.params, self.buffers, x
-            )
-
+            x = torch.stack([self.stack_tokenizer_nets[i](x[:, i, ...]) for i in range(self.num_tokens)], dim=1)
         else:
-            x = self.embedding_network(x)
+            x = self.tokenizer_net(x)
 
         return x
 
