@@ -7,6 +7,7 @@ from dingo.gw.domains import (
     FrequencyDomain,
     build_domain,
     build_domain_from_model_metadata,
+    Domain,
 )
 from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.prior import build_prior_with_defaults, split_off_extrinsic_parameters
@@ -33,8 +34,8 @@ class GWSignal(object):
     def __init__(
         self,
         wfg_kwargs: dict,
-        wfg_domain: FrequencyDomain,
-        data_domain: FrequencyDomain,
+        wfg_domain: Domain,
+        data_domain: Domain,
         ifo_list: list,
         t_ref: float,
     ):
@@ -43,10 +44,10 @@ class GWSignal(object):
         ----------
         wfg_kwargs : dict
             Waveform generator parameters [approximant, f_ref, and (optionally) f_start].
-        wfg_domain : FrequencyDomain
+        wfg_domain : Domain
             Domain used for waveform generation. This can potentially deviate from the
             final domain, having a wider frequency range needed for waveform generation.
-        data_domain : FrequencyDomain
+        data_domain : Domain
             Domain object for final signal.
         ifo_list : list
             Names of interferometers for projection.
@@ -86,8 +87,12 @@ class GWSignal(object):
             raise ValueError(
                 "Output domain is not contained within WaveformGenerator domain."
             )
-        if np.any(domain_in.delta_f != domain_out.delta_f):
-            raise ValueError("Domains must have same delta_f.")
+        if (
+            domain_in.domain_dict["type"] == "FrequencyDomain"
+            and domain_out.domain_dict["type"] == "FrequencyDomain"
+        ):
+            if domain_in.delta_f != domain_out.delta_f:
+                raise ValueError("Domains must have same delta_f.")
 
     @property
     def whiten(self):
