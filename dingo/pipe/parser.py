@@ -7,6 +7,7 @@ import argparse
 import configargparse
 from bilby_pipe.bilbyargparser import BilbyArgParser
 from bilby_pipe.utils import (
+    ENVIRONMENT_DEFAULTS,
     get_version_information,
     logger,
     nonefloat,
@@ -216,15 +217,15 @@ def create_parser(top_level=True):
         ),
         default=None,
     )
-    # data_gen_pars.add(
-    #     "--timeslide-dict",
-    #     type=nonestr,
-    #     help=(
-    #         "Dictionary containing detector timeslides: applies a fixed offset"
-    #         " per detector. E.g. to apply +1s in H1, {H1: 1}"
-    #     ),
-    #     default=None,
-    # )
+    data_gen_pars.add(
+        "--timeslide-dict",
+        type=nonestr,
+        help=(
+            "Dictionary containing detector timeslides: applies a fixed offset"
+            " per detector. E.g. to apply +1s in H1, {H1: 1}"
+        ),
+        default=None,
+    )
     data_gen_pars.add(
         "--trigger-time",
         default=None,
@@ -280,6 +281,26 @@ def create_parser(top_level=True):
             "dictionary should follow basic python dict syntax."
         ),
     )
+    data_gen_pars.add(
+        "--frame-type-dict",
+        type=nonestr,
+        default=None,
+        help=(
+            "Frame type to use when finding data. If not given, defaults will "
+            "be used based on the gps time using bilby_pipe.utils.default_frame_type,"
+            " e.g., {H1: H1_HOFT_C00_AR}."
+        ),
+    )
+    data_gen_pars.add(
+        "--data-find-url",
+        default="https://datafind.ligo.org",
+        help="URL to use for datafind, default is https://datafind.ligo.org to query CVMFS",
+    )
+    data_gen_pars.add(
+        "--data-find-urltype",
+        default="osdf",
+        help="URL type to use for datafind, default is osdf",
+    )
     # data_type_pars = data_gen_pars.add_mutually_exclusive_group()
     # data_type_pars.add(
     #     "--gaussian-noise",
@@ -287,9 +308,9 @@ def create_parser(top_level=True):
     #     help="If true, use simulated Gaussian noise",
     # )
     # data_gen_pars.add(
-        # "--zero-noise",
-        # action="store_true",
-        # help="Use a zero noise realisation",
+    # "--zero-noise",
+    # action="store_true",
+    # help="Use a zero noise realisation",
     # )
 
     det_parser = parser.add_argument_group(
@@ -475,16 +496,16 @@ def create_parser(top_level=True):
         help="random seed to use when generating noise realization(s) from PSD",
     )
     # injection_parser.add(
-        # "--injection-numbers",
-        # action="append",
-        # type=nonestr,
-        # default=None,
-        # help=(
-            # "Specific injections rows to use from the injection_file, e.g. "
-            # "`injection_numbers=[0,3] selects the zeroth and third row. Can be "
-            # "a list of slice-syntax values, e.g, [0, 2:4] will produce [0, 2, 3]. "
-            # "Repeated entries will be ignored."
-        # ),
+    # "--injection-numbers",
+    # action="append",
+    # type=nonestr,
+    # default=None,
+    # help=(
+    # "Specific injections rows to use from the injection_file, e.g. "
+    # "`injection_numbers=[0,3] selects the zeroth and third row. Can be "
+    # "a list of slice-syntax values, e.g, [0, 2:4] will produce [0, 2, 3]. "
+    # "Repeated entries will be ignored."
+    # ),
     # )
     injection_parser.add(
         "--injection-waveform-approximant",
@@ -505,7 +526,7 @@ def create_parser(top_level=True):
         type=int,
         default=100,
         help="When using zero noise, the number of noise realisations to average over."
-        "This is the number of dingo proposals to average over before importance sampling."
+        "This is the number of dingo proposals to average over before importance sampling.",
     )
 
     # injection_parser.add(
@@ -702,13 +723,44 @@ def create_parser(top_level=True):
         ),
     )
     submission_parser.add(
+        "--environment-variables",
+        default=None,
+        type=nonestr,
+        help=(
+            "Key value pairs for environment variables formatted as a json string, "
+            "e.g., '{'OMP_NUM_THREADS': 1, 'LAL_DATA_PATH'='/home/data'}'. These values "
+            f"take precedence over --getenv. The default values are {ENVIRONMENT_DEFAULTS}."
+        ),
+    )
+    submission_parser.add(
+        "--getenv",
+        default=None,
+        action="append",
+        type=nonestr,
+        help="List of environment variables to copy from the current session.",
+    )
+    submission_parser.add(
+        "--additional-transfer-paths",
+        action="append",
+        default=None,
+        type=nonestr,
+        help=(
+            "Additional files that should be transferred to the analysis jobs. "
+            "The default is not transferring any additional files. Additional "
+            "files can be specified as a list in the configuration file [a, b] "
+            "or on the command line as --additional-transfer-paths a "
+            "--additonal-transfer-paths b"
+        ),
+    )
+    submission_parser.add(
         "--disable-hdf5-locking",
         action=StoreBoolean,
-        default=True,
+        default=False,
         help=(
             "If true (default), disable HDF5 locking. This can improve "
             "stability on some clusters, but may cause issues if multiple "
             "processes are reading/writing to the same file."
+            "This argument is deprecated and should be passed through --environment-variables"
         ),
     )
     submission_parser.add(

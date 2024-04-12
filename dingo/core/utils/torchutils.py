@@ -4,6 +4,16 @@ import torch.nn as nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from typing import Union, Tuple, Iterable
+import bilby
+
+
+def fix_random_seeds(_):
+    """Utility function to set random seeds when using multiple workers for DataLoader."""
+    np.random.seed(int(torch.initial_seed()) % (2 ** 32 - 1))
+    try:
+        bilby.core.utils.random.seed(int(torch.initial_seed()) % (2 ** 32 - 1))
+    except AttributeError:  # In case using an old version of Bilby.
+        pass
 
 
 def get_activation_function_from_string(activation_name: str):
@@ -230,9 +240,7 @@ def build_train_and_test_loaders(
         shuffle=True,
         pin_memory=True,
         num_workers=num_workers,
-        worker_init_fn=lambda _: np.random.seed(
-            int(torch.initial_seed()) % (2 ** 32 - 1)
-        ),
+        worker_init_fn=fix_random_seeds,
     )
     test_loader = DataLoader(
         test_dataset,
@@ -240,9 +248,7 @@ def build_train_and_test_loaders(
         shuffle=False,
         pin_memory=True,
         num_workers=num_workers,
-        worker_init_fn=lambda _: np.random.seed(
-            int(torch.initial_seed()) % (2 ** 32 - 1)
-        ),
+        worker_init_fn=fix_random_seeds,
     )
 
     return train_loader, test_loader

@@ -107,13 +107,13 @@ class SamplingInput(Input):
         self._load_sampler()
 
     def _load_event(self):
-        # iterating through event data which will be used for noise averaging 
+        # iterating through event data which will be used for noise averaging
         self.contexts, self.event_metadatas = [], []
         for event_data_file in self.event_data_files:
             event_dataset = EventDataset(file_name=event_data_file)
             self.contexts.append(event_dataset.data)
-            
-        # event metadata is the same 
+
+        # event metadata is the same
         self.event_metadata = event_dataset.settings
 
     def _load_sampler(self):
@@ -136,7 +136,6 @@ class SamplingInput(Input):
             self.gnpe = False
             self.dingo_sampler = GWSampler(model=model)
 
-
     @property
     def density_recovery_settings(self):
         return self._density_recovery_settings
@@ -158,6 +157,20 @@ class SamplingInput(Input):
             else:
                 self._density_recovery_settings.update(convert_string_to_dict(settings))
 
+        # If there is only one detector, and no context, we cannot use a coupling transform. In this case, we use an
+        # autoregressive transform for the density estimator.
+        # FIXME: If there are proxies other than time, the condition needs to be updated.
+        if len(self.detectors) == 1:
+            model_settings = self._density_recovery_settings["nde_settings"]["model"]
+            if model_settings["type"] == "nsf":
+                base_transform_kwargs = model_settings["base_transform_kwargs"]
+                if base_transform_kwargs["base_transform_type"] == "rq-coupling":
+                    logger.info(
+                        "Using autoregressive transform for density estimator since there is only one GNPE proxy "
+                        "parameter because there is only one detector."
+                    )
+                    base_transform_kwargs["base_transform_type"] = "rq-autoregressive"
+
     # @property
     # def result_directory(self):
     #     result_dir = os.path.join(self.outdir, "result")
@@ -165,7 +178,7 @@ class SamplingInput(Input):
 
     def run_sampler(self):
 
-        # Iterating through all event data files, you will 
+        # Iterating through all event data files, you will
         # only have more than one if you are noise averaging
         self.dingo_sampler.event_metadata = self.event_metadata
         samples_list = []
@@ -188,29 +201,38 @@ class SamplingInput(Input):
             # Training unconditional density estimator if zero noise
             elif self.zero_noise:
                 n_training_samples = 1_000_000
-                self.dingo_sampler.run_sampler(int(n_training_samples / self.num_noise_realizations), batch_size=self.batch_size)
+                self.dingo_sampler.run_sampler(
+                    int(n_training_samples / self.num_noise_realizations),
+                    batch_size=self.batch_size,
+                )
                 samples_list.append(self.dingo_sampler.samples)
 
-                logger.info("Training unconditional density estimator on pool of noise realizations")
+                logger.info(
+                    "Training unconditional density estimator on pool of noise realizations"
+                )
                 training_result = self.dingo_sampler.to_result()
                 outdir = Path(self.result_directory)
                 training_result.to_file(outdir / "training_samples.hdf5")
                 inference_parameters = list(self.dingo_sampler.samples.columns)
-                # removing proxies since this makes training the unconditional flow easier 
-                inference_parameters = [x for x in inference_parameters if "proxy" not in x]
+                # removing proxies since this makes training the unconditional flow easier
+                inference_parameters = [
+                    x for x in inference_parameters if "proxy" not in x
+                ]
                 unconditional_flow = training_result.train_unconditional_flow(
-                    inference_parameters, 
-                    nde_settings=self.density_recovery_settings["nde_settings"]
-                    )
+                    inference_parameters,
+                    nde_settings=self.density_recovery_settings["nde_settings"],
+                )
 
                 nde_sampler = GWSampler(model=unconditional_flow)
-                nde_sampler.run_sampler(num_samples=self.num_samples, batch_size=self.batch_size)
+                nde_sampler.run_sampler(
+                    num_samples=self.num_samples, batch_size=self.batch_size
+                )
                 self.dingo_sampler = nde_sampler
 
-
-        # run the sampler 
-        self.dingo_sampler.run_sampler(num_samples=self.num_samples, batch_size=self.batch_size)
-
+        # run the sampler
+        self.dingo_sampler.run_sampler(
+            num_samples=self.num_samples, batch_size=self.batch_size
+        )
 
         self.dingo_sampler.to_hdf5(label=self.label, outdir=self.result_directory)
         if self.n_parallel > 1:

@@ -187,8 +187,11 @@ class DataGenerationInput(BilbyDataGenerationInput):
             args.injection_numbers = None
             args.injection_file = None
             args.injection_dict = None
-            args.gaussian_noise = False
             args.injection_waveform_arguments = None
+            args.injection_frequency_domain_source_model = None
+            self.frequency_domain_source_model = None
+            self.gaussian_noise = False
+
             self.create_data(args)
 
     def generate_injection(self, args):

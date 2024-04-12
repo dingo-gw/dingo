@@ -42,16 +42,13 @@ def fill_in_arguments_from_model(args):
         "tukey_roll_off": data_settings["window"]["roll_off"],
         "waveform_approximant": model_metadata["dataset_settings"][
             "waveform_generator"
-        ][
-            "approximant"
-        ],  # TODO: Update approximant in IS
+        ]["approximant"],
     }
 
     changed_args = {}
     for k, v in model_args.items():
         args_v = getattr(args, k)
         if args_v is not None:
-
             # Convert type from str to enable comparison.
             try:
                 if isinstance(v, float):
@@ -62,6 +59,10 @@ def fill_in_arguments_from_model(args):
                 pass
 
             if args_v != v:
+                if k in ["waveform_approximant"]:
+                    raise NotImplementedError(
+                        "Cannot change waveform approximant during importance sampling."
+                    )  # TODO: Implement this. Also no error if passed explicitly as an update.
                 logger.warning(
                     f"Argument {k} provided to dingo_pipe as {args_v} "
                     f"does not match value {v} in model file. Using model value for "
@@ -89,7 +90,6 @@ def fill_in_arguments_from_model(args):
 
 class MainInput(BilbyMainInput):
     def __init__(self, args, unknown_args, importance_sampling_updates):
-
         # Settings added for dingo.
 
         self.model = args.model
@@ -116,8 +116,14 @@ class MainInput(BilbyMainInput):
         self.coherence_test = (
             False  # dingo mod: Cannot use different sets of detectors.
         )
+        self.data_dict = args.data_dict
+        self.channel_dict = args.channel_dict
+        self.frame_type_dict = args.frame_type_dict
+        self.data_find_url = args.data_find_url
+        self.data_find_urltype = args.data_find_urltype
         self.n_parallel = args.n_parallel
-        # self.transfer_files = args.transfer_files
+        self.transfer_files = args.transfer_files
+        self.additional_transfer_paths = args.additional_transfer_paths
         self.osg = args.osg
         self.desired_sites = args.desired_sites
         # self.analysis_executable = args.analysis_executable
@@ -138,6 +144,8 @@ class MainInput(BilbyMainInput):
         self.scheduler_env = args.scheduler_env
         self.scheduler_analysis_time = args.scheduler_analysis_time
         self.disable_hdf5_locking = args.disable_hdf5_locking
+        self.environment_variables = args.environment_variables
+        self.getenv = args.getenv
 
         # self.waveform_approximant = args.waveform_approximant
         #
@@ -147,7 +155,7 @@ class MainInput(BilbyMainInput):
         # self.likelihood_type = args.likelihood_type
         self.duration = args.duration
         # self.phase_marginalization = args.phase_marginalization
-        # self.prior_file = args.prior_file
+        self.prior_file = None  # Dingo update. To change prior use the priod_dict.
         self.prior_dict = args.prior_dict
         self.default_prior = "PriorDict"
         self.minimum_frequency = args.minimum_frequency
@@ -162,8 +170,8 @@ class MainInput(BilbyMainInput):
         # self.ignore_gwpy_data_quality_check = args.ignore_gwpy_data_quality_check
         self.trigger_time = args.trigger_time
         # self.deltaT = args.deltaT
-        # self.gps_tuple = args.gps_tuple
-        # self.gps_file = args.gps_file
+        self.gps_tuple = args.gps_tuple
+        self.gps_file = args.gps_file
         self.timeslide_file = args.timeslide_file
         # self.gaussian_noise = args.gaussian_noise
         self.zero_noise = args.zero_noise
@@ -213,8 +221,13 @@ class MainInput(BilbyMainInput):
         # self.single_postprocessing_arguments = args.single_postprocessing_arguments
         #
         self.summarypages_arguments = args.summarypages_arguments
-        #
+
         self.psd_dict = args.psd_dict
+        self.psd_maximum_duration = args.psd_maximum_duration
+        self.psd_length = args.psd_length
+        self.psd_fractional_overlap = args.psd_fractional_overlap
+        self.psd_start_time = args.psd_start_time
+        self.spline_calibration_envelope_dict = args.spline_calibration_envelope_dict
 
         # self.check_source_model(args)
 
