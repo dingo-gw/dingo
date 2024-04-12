@@ -2,10 +2,12 @@ import pytest
 import types
 import torch
 import torch.optim as optim
-from dingo.core.nn.nsf import create_nsf_model, FlowWrapper, \
-    create_nsf_with_rb_projection_embedding_net
-from dingo.core.nn.enets import \
-    create_enet_with_projection_layer_and_dense_resnet
+from dingo.core.nn.nsf import (
+    create_nsf_model,
+    FlowWrapper,
+    create_nsf_with_rb_projection_embedding_net,
+)
+from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
 from dingo.core.utils import torchutils
 
 
@@ -25,18 +27,41 @@ def data_setup_nsf_large():
         "base_transform_type": "rq-coupling",
     }
     d.embedding_net_kwargs = {
-        'input_dims': (2, 3, 8033),
+        "input_dims": (2, 3, 8033),
         # 'n_rb': 200,
-        'svd': {'size': 200},
-        'V_rb_list': None,
-        'output_dim': 128,
-        'hidden_dims': [1024, 1024, 1024, 1024, 1024, 1024, 512, 512, 512, 512,
-                        512, 512, 256, 256, 256, 256, 256, 256, 128, 128, 128,
-                        128, 128, 128],
-        'activation': 'elu',
-        'dropout': 0.0,
-        'batch_norm': True,
-        'added_context': True,
+        "svd": {"size": 200},
+        "V_rb_list": None,
+        "output_dim": 128,
+        "hidden_dims": [
+            1024,
+            1024,
+            1024,
+            1024,
+            1024,
+            1024,
+            512,
+            512,
+            512,
+            512,
+            512,
+            512,
+            256,
+            256,
+            256,
+            256,
+            256,
+            256,
+            128,
+            128,
+            128,
+            128,
+            128,
+            128,
+        ],
+        "activation": "elu",
+        "dropout": 0.0,
+        "batch_norm": True,
+        "added_context": True,
     }
     d.embedding_net_builder = create_enet_with_projection_layer_and_dense_resnet
     d.nde_builder = create_nsf_model
@@ -65,16 +90,16 @@ def data_setup_nsf_small():
         "base_transform_type": "rq-coupling",
     }
     d.embedding_net_kwargs = {
-        'input_dims': (2, 3, 20),
+        "input_dims": (2, 3, 20),
         # 'n_rb': 10,
-        'V_rb_list': None,
-        'output_dim': 8,
-        'hidden_dims': [32, 16, 8],
-        'activation': 'elu',
-        'dropout': 0.0,
-        'batch_norm': True,
-        'added_context': True,
-        'svd': {'size': 10},
+        "V_rb_list": None,
+        "output_dim": 8,
+        "hidden_dims": [32, 16, 8],
+        "activation": "elu",
+        "dropout": 0.0,
+        "batch_norm": True,
+        "added_context": True,
+        "svd": {"size": 10},
     }
     d.embedding_net_builder = create_enet_with_projection_layer_and_dense_resnet
     d.nde_builder = create_nsf_model
@@ -86,9 +111,10 @@ def data_setup_nsf_small():
     }
 
     d.batch_size = 20
-    d.x = torch.rand((d.batch_size, *d.embedding_net_kwargs['input_dims']))
-    d.z = torch.ones((d.batch_size,
-                      d.context_dim - d.embedding_net_kwargs['output_dim']))
+    d.x = torch.rand((d.batch_size, *d.embedding_net_kwargs["input_dims"]))
+    d.z = torch.ones(
+        (d.batch_size, d.context_dim - d.embedding_net_kwargs["output_dim"])
+    )
     d.y = torch.ones((d.batch_size, d.input_dim))
 
     # build d.yy, which depends on input d.zz
@@ -113,7 +139,7 @@ def test_nsf_number_of_parameters(data_setup_nsf_large):
     model = FlowWrapper(flow, embedding_net)
 
     num_params = torchutils.get_number_of_model_parameters(model)
-    assert num_params == 131448775, 'Unexpected number of model parameters.'
+    assert num_params == 131448775, "Unexpected number of model parameters."
 
 
 def test_sample_method_of_nsf(data_setup_nsf_small):
@@ -128,11 +154,14 @@ def test_sample_method_of_nsf(data_setup_nsf_small):
     model = FlowWrapper(flow, embedding_net)
 
     samples = model.sample(d.x, d.z)
+    # model.sample(num_samples=1) adds an extra dimension that needs to be squeezed.
+    samples = samples.squeeze(1)
 
-    assert samples.shape == d.y.shape, 'Unexpected shape of samples.'
-    assert torch.all(samples > -10) and torch.all(samples < 10), \
-        'Unexpected samples encountered. Network initialization or ' \
-        'normalization seems broken.'
+    assert samples.shape == d.y.shape, "Unexpected shape of samples."
+    assert torch.all(samples > -10) and torch.all(samples < 10), (
+        "Unexpected samples encountered. Network initialization or "
+        "normalization seems broken."
+    )
 
     with pytest.raises(ValueError):
         model.sample(d.z, d.x)
@@ -153,11 +182,12 @@ def test_forward_pass_for_log_prob_of_nsf(data_setup_nsf_small):
     flow = d.nde_builder(**d.nde_kwargs)
     model = FlowWrapper(flow, embedding_net)
 
-    loss = - model(d.y, d.x, d.z)
-    assert list(loss.shape) == [d.batch_size], 'Unexpected output shape.'
-    assert torch.all(loss > 0) and torch.all(loss < 40), \
-        'Unexpected log prob encountered. Network initialization or ' \
-        'normalization seems broken.'
+    loss = -model(d.y, d.x, d.z)
+    assert list(loss.shape) == [d.batch_size], "Unexpected output shape."
+    assert torch.all(loss > 0) and torch.all(loss < 40), (
+        "Unexpected log prob encountered. Network initialization or "
+        "normalization seems broken."
+    )
 
     with pytest.raises(ValueError):
         model(d.y, d.z, d.x)
@@ -187,16 +217,17 @@ def test_backward_pass_for_log_prob_of_nsf(data_setup_nsf_small):
     for idx in range(40):
         yy = d.yy + 0.02 * torch.rand_like(d.yy)
         xx = torch.rand_like(d.xx)
-        loss = - torch.mean(model(yy, xx, d.zz))
+        loss = -torch.mean(model(yy, xx, d.zz))
         losses.append(loss.detach().item())
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
     samples_n = torch.mean(model.sample(d.xx, d.zz, num_samples=100), axis=1)
 
-    assert losses[-1] < losses[0], 'Loss did not improve in training.'
-    assert torch.mean((torch.abs(samples_n - d.yy) > 0.8).float()) < 0.3, \
-        'Training may not have worked. Check manually that sampling improves.'
+    assert losses[-1] < losses[0], "Loss did not improve in training."
+    assert (
+        torch.mean((torch.abs(samples_n - d.yy) > 0.8).float()) < 0.3
+    ), "Training may not have worked. Check manually that sampling improves."
 
 
 def test_model_builder_for_nsf_with_rb_embedding_net(data_setup_nsf_small):
@@ -206,14 +237,16 @@ def test_model_builder_for_nsf_with_rb_embedding_net(data_setup_nsf_small):
 
     d = data_setup_nsf_small
 
-    model = create_nsf_with_rb_projection_embedding_net(d.nde_kwargs,
-                                                        d.embedding_net_kwargs)
+    model = create_nsf_with_rb_projection_embedding_net(
+        d.nde_kwargs, d.embedding_net_kwargs
+    )
 
-    loss = - model(d.y, d.x, d.z)
-    assert list(loss.shape) == [d.batch_size], 'Unexpected output shape.'
-    assert torch.all(loss > 0) and torch.all(loss < 40), \
-        'Unexpected log prob encountered. Network initialization or ' \
-        'normalization seems broken.'
+    loss = -model(d.y, d.x, d.z)
+    assert list(loss.shape) == [d.batch_size], "Unexpected output shape."
+    assert torch.all(loss > 0) and torch.all(loss < 40), (
+        "Unexpected log prob encountered. Network initialization or "
+        "normalization seems broken."
+    )
 
     with pytest.raises(ValueError):
         model(d.y, d.z, d.x)
