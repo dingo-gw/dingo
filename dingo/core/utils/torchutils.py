@@ -124,7 +124,6 @@ def get_optimizer_from_kwargs(
 
 def get_scheduler_from_kwargs(
     optimizer: torch.optim.Optimizer,
-    num_batches: Optional[int] = None,
     **scheduler_kwargs,
 ):
     """
@@ -136,8 +135,6 @@ def get_scheduler_from_kwargs(
     ----------
     optimizer: torch.optim.optimizer.Optimizer
         optimizer for which the scheduler is used
-    num_batches: Optional[int]
-        number of batches to update the scheduler parameters if scheduler.update_scheduler_every_batch=True
     scheduler_kwargs:
         kwargs for scheduler; type needs to be one of [step, cosine,
         reduce_on_plateau, sequential, linear], the remaining kwargs are used for
@@ -196,10 +193,13 @@ def get_scheduler_from_kwargs(
         update_scheduler_every_batch = scheduler_kwargs.pop(
             "update_scheduler_every_batch"
         )
-        if update_scheduler_every_batch:
+        if update_scheduler_every_batch and scheduler_kwargs["num_batches"] is not None:
+            num_batches = scheduler_kwargs.pop("num_batches")
             scheduler_kwargs["milestones"] = [
                 milestone * num_batches for milestone in scheduler_kwargs["milestones"]
             ]
+        else:
+            num_batches = None
         schedulers = []
         for scheduler_key in scheduler_keys:
             individual_scheduler_kwargs = scheduler_kwargs.pop(scheduler_key)
@@ -225,8 +225,9 @@ def get_scheduler_from_kwargs(
     else:
         if (
             scheduler_kwargs.pop("update_scheduler_every_batch")
-            and num_batches is not None
+            and scheduler_kwargs["num_batches"] is not None
         ):
+            num_batches = scheduler_kwargs.pop("num_batches")
             adapt_scheduler_kwargs_to_update_every_batch(scheduler_kwargs, num_batches)
         scheduler_type = scheduler_kwargs.pop("type")
         scheduler = schedulers_dict[scheduler_type]

@@ -190,7 +190,7 @@ class Base:
         print(f"Putting posterior model to device {self.device}.")
         self.network.to(self.device)
 
-    def initialize_optimizer_and_scheduler(self, num_steps: Optional[int] = None):
+    def initialize_optimizer_and_scheduler(self, num_batches: Optional[int] = None):
         """
         Initializes the optimizer and scheduler with self.optimizer_kwargs
         and self.scheduler_kwargs, respectively.
@@ -202,9 +202,11 @@ class Base:
         if self.scheduler_kwargs is not None:
             if "update_scheduler_every_batch" not in self.scheduler_kwargs:
                 self.scheduler_kwargs["update_scheduler_every_batch"] = False
+            elif num_batches is not None:
+                self.scheduler_kwargs["num_batches"] = num_batches
 
             self.scheduler = utils.get_scheduler_from_kwargs(
-                self.optimizer, num_steps, **self.scheduler_kwargs
+                self.optimizer, **self.scheduler_kwargs
             )
 
     def save_model(

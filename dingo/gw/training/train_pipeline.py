@@ -256,7 +256,7 @@ def initialize_stage(pm, wfd, stage, num_workers, resume=False):
         pm.optimizer_kwargs = stage["optimizer"]
         pm.scheduler_kwargs = stage["scheduler"]
         pm.initialize_optimizer_and_scheduler(
-            num_steps=np.ceil(
+            num_batches=np.ceil(
                 wfd.settings["num_samples"]
                 * train_settings["data"]["train_fraction"]
                 / stage["batch_size"]
