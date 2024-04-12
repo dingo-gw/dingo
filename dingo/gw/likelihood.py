@@ -11,7 +11,7 @@ from threadpoolctl import threadpool_limits
 from dingo.core.likelihood import Likelihood
 from dingo.gw.injection import GWSignal
 from dingo.gw.waveform_generator import WaveformGenerator
-from dingo.gw.domains import build_domain
+from dingo.gw.domains import build_domain, FrequencyDomain, MultibandedFrequencyDomain
 from dingo.gw.data.data_preparation import get_event_data_and_domain
 
 
@@ -265,6 +265,37 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
     def log_likelihood_phase_grid(self, theta, phases=None):
+        if isinstance(self.waveform_generator.domain, FrequencyDomain):
+            return self._log_likelihood_phase_grid_mode_decomposed(theta, phases=phases)
+        elif isinstance(self.waveform_generator.domain, MultibandedFrequencyDomain):
+            return self._log_likelihood_phase_grid_manual(theta, phases=phases)
+        else:
+            raise NotImplementedError(
+                f"Phase grid not implemented for "
+                f"{type(self.waveform_generator.domain)}."
+            )
+
+    def _log_likelihood_phase_grid_manual(self, theta, phases=None):
+        if self.phase_marginalization:
+            raise ValueError(
+                "Can't compute likelihood on a phase grid for "
+                "phase-marginalized posteriors"
+            )
+        if self.time_marginalization:
+            raise NotImplementedError(
+                "log_likelihood on phase grid not yet implemented."
+            )
+
+        if phases is None:
+            phases = self.phase_grid
+
+        log_likelihoods = np.ones(len(phases))
+        for idx, p in enumerate(phases):
+            log_likelihoods[idx] = self._log_likelihood({**theta, "phase": p})
+
+        return log_likelihoods
+
+    def _log_likelihood_phase_grid_mode_decomposed(self, theta, phases=None):
         # TODO: Implement for time marginalization
         if self.phase_marginalization:
             raise ValueError(

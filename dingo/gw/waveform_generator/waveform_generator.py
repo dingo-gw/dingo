@@ -278,7 +278,7 @@ class WaveformGenerator:
         Returns
         -------
         lal_parameter_tuple:
-            A tuple of parameters for the lalsimulation waveform generator
+            A tuple of parameters for the lalsimulation waveform generator.
         lal_target_function:
             Target lal function for waveform generation, only returned if
             return_lal_target_function = True.
@@ -584,7 +584,7 @@ class WaveformGenerator:
             if max(np.max(np.abs(hp.data.data)), np.max(np.abs(hc.data.data))) > 1e-20:
                 print(
                     f"Warning: turning off multibanding for parameters {parameters_lal}"
-                    f"likely numerically might not have fixed it, check manually."
+                    f" likely numerically might not have fixed it, check manually."
                 )
 
         # Postprocessing, specific for lal_target_function.
@@ -618,8 +618,7 @@ class WaveformGenerator:
             time_shift = np.exp(-1j * 2 * np.pi * dt * frequency_array)
             h_plus *= time_shift
             h_cross *= time_shift
-            pol_dict = {"h_plus": h_plus, "h_cross": h_cross}
-            return pol_dict
+            return {"h_plus": h_plus, "h_cross": h_cross}
 
         elif lal_target_function == LS.SimInspiralChooseFDWaveformSequence:
             frequency_array = self.domain()[self.domain.min_idx :]

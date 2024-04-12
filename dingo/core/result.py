@@ -584,7 +584,7 @@ class Result(DingoDataset):
 
         return self.samples.replace(-np.inf, np.nan).dropna(axis=0)
 
-    def plot_corner(self, parameters=None, filename="corner.pdf"):
+    def plot_corner(self, parameters=None, filename="corner.pdf", truths=None):
         """
         Generate a corner plot of the samples.
 
@@ -604,12 +604,16 @@ class Result(DingoDataset):
         if parameters:
             theta = theta[parameters]
 
+        if truths:
+            truths = [truths.get(k) for k in theta.columns]
+
         if "weights" in theta:
             plot_corner_multi(
                 [theta, theta],
                 weights=[None, theta["weights"].to_numpy()],
                 labels=["Dingo", "Dingo-IS"],
                 filename=filename,
+                truths=truths,
             )
         else:
             plot_corner_multi(
@@ -683,7 +687,6 @@ class Result(DingoDataset):
 
 
 def check_equal_dict_of_arrays(a, b):
-
     if type(a) != type(b):
         return False
 

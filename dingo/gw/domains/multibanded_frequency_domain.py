@@ -433,7 +433,7 @@ class MultibandedFrequencyDomain(Domain):
 
     @property
     def max_idx(self):
-        raise NotImplementedError()
+        return len(self) - 1
 
     @property
     def window_factor(self):
