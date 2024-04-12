@@ -40,7 +40,7 @@ args = parser.parse_args()
 result = Result(file_name=args.samples_filename)
 weights = result.samples["weights"] * result.samples["luminosity_distance"] ** 2
 samples = result.samples.sample(args.num_samples, weights=weights, replace=True)
-ra_dec_dL = np.array(samples[['ra', 'dec', 'luminosity_distance']])
+ra_dec_dL = np.array(samples[["ra", "dec", "luminosity_distance"]])
 
 # Generate skymap fit and save to file
 skypost = kde.Clustered2DSkyKDE(ra_dec_dL, trials=args.num_trials, jobs=args.num_jobs)
