@@ -48,5 +48,5 @@ skypost = kde.Clustered2DSkyKDE(ra_dec_dL, trials=args.num_trials, jobs=args.num
 hpmap = skypost.as_healpix()
 io.write_sky_map(args.fit_filename, hpmap, nest=True)
 
-stats = crossmatch(io.fits.read_sky_map(args.fits_filename, moc=True), contours=[0.9])
+stats = crossmatch(io.fits.read_sky_map(args.fit_filename, moc=True), contours=[0.9])
 print(f"90% credible region: {stats[4][0]:.1f} degree**2")
