@@ -65,6 +65,7 @@ class Result(CoreResult):
     dataset_type = "gw_result"
 
     def __init__(self, **kwargs):
+        self._use_base_domain = False
         super().__init__(**kwargs)
 
     @property
@@ -123,6 +124,26 @@ class Result(CoreResult):
         else:
             return self.base_metadata["train_settings"]["data"]["ref_time"]
 
+    @property
+    def use_base_domain(self):
+        return self._use_base_domain
+
+    @use_base_domain.setter
+    def use_base_domain(self, value):
+        self._use_base_domain = value
+        self._build_domain()
+
+    @property
+    def context(self):
+        if self.use_base_domain:
+            return self._context["base_data"]
+        else:
+            return self._context
+
+    @context.setter
+    def context(self, value):
+        self._context = value
+
     def _build_domain(self):
         """
         Construct the domain object based on model metadata. Includes the window factor
@@ -131,6 +152,8 @@ class Result(CoreResult):
         Called by __init__() immediately after _build_prior().
         """
         self.domain = build_domain(self.base_metadata["dataset_settings"]["domain"])
+        if self._use_base_domain:
+            self.domain = self.domain.base_domain
 
         data_settings = self.base_metadata["train_settings"]["data"]
         if "domain_update" in data_settings:
@@ -320,7 +343,12 @@ class Result(CoreResult):
         # TODO: Add functionality to update other waveform settings, i.e., approximant, generation minimum and
         #  maximum frequencies, reference frequency, and starting frequency.
 
-        wfg_domain_dict = self.base_metadata["dataset_settings"]["domain"].copy()
+        if self.use_base_domain:
+            wfg_domain_dict = self.base_metadata["dataset_settings"]["domain"][
+                "base_domain"
+            ].copy()
+        else:
+            wfg_domain_dict = self.base_metadata["dataset_settings"]["domain"].copy()
         if "updates" in self.importance_sampling_metadata:
             if "T" in self.importance_sampling_metadata["updates"]:
                 delta_f_new = 1 / self.importance_sampling_metadata["updates"]["T"]

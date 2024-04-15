@@ -8,6 +8,7 @@ from dingo.gw.domains import (
     build_domain,
     build_domain_from_model_metadata,
     Domain,
+    MultibandedFrequencyDomain,
 )
 from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.prior import build_prior_with_defaults, split_off_extrinsic_parameters
@@ -54,7 +55,7 @@ class GWSignal(object):
         t_ref : float
             Reference time that specifies ifo locations.
         """
-
+        self._use_base_domain = False
         self._check_domains(wfg_domain, data_domain)
         self.data_domain = data_domain
 
@@ -93,6 +94,25 @@ class GWSignal(object):
         ):
             if domain_in.delta_f != domain_out.delta_f:
                 raise ValueError("Domains must have same delta_f.")
+
+    @property
+    def use_base_domain(self):
+        return self._use_base_domain
+
+    @use_base_domain.setter
+    def use_base_domain(self, value: bool):
+        if value:
+            if hasattr(self.data_domain, "base_domain"):
+                self.waveform_generator.domain = (
+                    self.waveform_generator.domain.base_domain
+                )
+                self.data_domain = self.data_domain.base_domain
+                self._use_base_domain = True
+                self._initialize_transform()
+            else:
+                print(f"{type(self.data_domain)} has no base domain. Nothing to do.")
+        else:
+            raise NotImplementedError()
 
     @property
     def whiten(self):
@@ -281,7 +301,11 @@ class GWSignal(object):
                 raise KeyError("ASDDataset ifos do not match signal.")
             if asd.domain.domain_dict != self.data_domain.domain_dict:
                 print("Updating ASDDataset domain to match data domain.")
-                asd.update_domain(self.data_domain.domain_dict)
+                domain_dict = self.data_domain.domain_dict
+                if "window_factor" in domain_dict:
+                    print("Dropping window factor for update.")
+                    del domain_dict["window_factor"]
+                asd.update_domain(domain_dict)
         elif isinstance(asd, dict):
             if set(asd.keys()) != set(ifo_names):
                 raise KeyError("ASD ifos do not match signal.")
