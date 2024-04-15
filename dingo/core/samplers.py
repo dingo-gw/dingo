@@ -75,12 +75,12 @@ class Sampler(object):
             # is needed for calculating the likelihood for importance sampling.
             # However, it will not be used when sampling from the model, since it is
             # unconditional.
-            self.context = self.model.context
+            self._context = self.model.context
             self.event_metadata = self.model.event_metadata
             self.base_model_metadata = self.metadata["base"]
         else:
             self.unconditional_model = False
-            self.context = None
+            self._context = None
             self.event_metadata = None
             self.base_model_metadata = self.metadata
 
