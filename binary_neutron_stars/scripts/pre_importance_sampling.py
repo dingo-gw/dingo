@@ -50,7 +50,9 @@ except KeyError:
 kde_result = gaussian_kde(result_1D)
 kde_reference = gaussian_kde(reference_1D, weights=reference_weights)
 x = np.linspace(
-    np.min((result_1D, reference_1D)), np.max((result_1D, reference_1D)), 100
+    min(np.min(result_1D), np.min(reference_1D)), 
+    max(np.max(result_1D), np.max(reference_1D)), 
+    100,
 )
 alpha = lambda theta: kde_reference(theta) / kde_result(theta)
 weights = BSpline(*splrep(x, alpha(x)))(result_1D)
