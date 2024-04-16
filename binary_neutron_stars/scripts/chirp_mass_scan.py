@@ -42,6 +42,12 @@ def parse_args():
     parser.add_argument(
         "--f_max", type=float, default=None, help="Upper frequency bound for GW data."
     )
+    parser.add_argument(
+        "--num_processes",
+        type=int,
+        default=0,
+        help="Number of parallel processes for likelihood computation.",
+    )
     parser.add_argument("--plot", action="store_true")
     args = parser.parse_args()
     return args
@@ -177,7 +183,9 @@ def main(args):
     theta = theta.iloc[indices]
     log_prior = log_prior[indices]
     t0 = time.time()
-    log_likelihoods = likelihood.log_likelihood_multi(theta, num_processes=0)
+    log_likelihoods = likelihood.log_likelihood_multi(
+        theta, num_processes=args.num_processes
+    )
     log_probs = log_likelihoods + log_prior
     print(f"Wall time for likelihoods: {time.time() - t0:.2f}")
 
