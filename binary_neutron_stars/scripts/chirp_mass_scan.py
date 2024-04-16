@@ -40,7 +40,16 @@ def parse_args():
         "--num_samples", type=int, default=10, help="Number of samples per chirp mass."
     )
     parser.add_argument(
-        "--f_max", type=float, default=None, help="Upper frequency bound for GW data."
+        "--f_max_dingo",
+        type=float,
+        default=None,
+        help="Upper frequency bound for GW data for dingo sampling.",
+    )
+    parser.add_argument(
+        "--f_max_likelihood",
+        type=float,
+        default=None,
+        help="Upper frequency bound for GW data for likelihood computation.",
     )
     parser.add_argument(
         "--num_processes",
@@ -155,7 +164,9 @@ def main(args):
     # load data for event
     event_dataset = EventDataset(args.event_data)
     # set data transforms
-    transform_pre, transform_post = get_transforms(model.metadata, f_max=args.f_max)
+    transform_pre, transform_post = get_transforms(
+        model.metadata, f_max=args.f_max_dingo
+    )
     # get chirp masses for scan
     chirp_masses = get_scan_chirp_masses(model.metadata, overlap_factor=2)
     # generate nn input data for chirp mass scan
@@ -173,7 +184,7 @@ def main(args):
 
     # build likelihood
     prior, likelihood = build_prior_and_likelihood(
-        model.metadata, event_dataset.data, f_max=args.f_max
+        model.metadata, event_dataset.data, f_max=args.f_max_likelihood
     )
 
     # compute log priors and likelihoods
