@@ -147,9 +147,7 @@ class ImportanceSamplingInput(Input):
                     IMPORTANCE_SAMPLING_SETTINGS["PhaseRecoveryDefault"]
                 )
             else:
-                self._importance_sampling_settings.update(
-                    convert_string_to_dict(settings)
-                )
+                self._importance_sampling_settings = convert_string_to_dict(settings)
         else:
             self._importance_sampling_settings = dict()
 
