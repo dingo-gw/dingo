@@ -17,6 +17,7 @@ class ApplyFrequencyMasking(object):
         f_min_upper: Optional[float] = None,
         f_max_lower: Optional[float] = None,
         deterministic: bool = False,
+        masking_probability: float = 1.0,
     ):
         """
         Parameters
@@ -35,7 +36,8 @@ class ApplyFrequencyMasking(object):
             If True, don't sample truncation range, but instead always truncate to range
             [f_min_lower, f_max_lower].
         """
-        self.check_inputs(domain, f_min_upper, f_max_lower)
+        self.check_inputs(domain, f_min_upper, f_max_lower, masking_probability)
+        self.masking_probability = masking_probability
         frequencies = domain()[domain.min_idx :]
         if f_max_lower is not None:
             idx_bound_f_max = np.argmin(np.abs(f_max_lower - frequencies))
@@ -54,7 +56,7 @@ class ApplyFrequencyMasking(object):
         else:
             self.sample_idx_lower = lambda: 0
 
-    def check_inputs(self, domain, f_min_upper, f_max_lower):
+    def check_inputs(self, domain, f_min_upper, f_max_lower, masking_probability):
         # check domain
         if not isinstance(domain, (FrequencyDomain, MultibandedFrequencyDomain)):
             raise ValueError(
@@ -77,6 +79,10 @@ class ApplyFrequencyMasking(object):
             raise ValueError(
                 f"Expected f_min_upper < f_max_lower, got {f_min_upper}, {f_max_lower}."
             )
+        if not 0 <= masking_probability <= 1.0:
+            raise ValueError(
+                f"Masking probability should be in [0, 1], got {masking_probability}."
+            )
 
     def __call__(self, input_sample: dict):
         """
@@ -91,15 +97,11 @@ class ApplyFrequencyMasking(object):
         dict of the same form as the input, but with transformed (masked) waveforms.
         """
         sample = input_sample.copy()
-        lower = self.sample_idx_lower()
-        upper = self.sample_idx_upper()
-        # for k in sample["waveform"].keys():
-        # sample["waveform"][k][:lower] = 0
-        # sample["waveform"][k][upper:] = 0
-        # sample["asds"][k][:lower] = 0
-        # sample["asds"][k][upper:] = 0
-        sample["waveform"][..., :lower] = 0
-        sample["waveform"][..., upper:] = 0
+        if np.random.uniform() <= self.masking_probability:
+            lower = self.sample_idx_lower()
+            upper = self.sample_idx_upper()
+            sample["waveform"][..., :lower] = 0
+            sample["waveform"][..., upper:] = 0
         return sample
 
 
