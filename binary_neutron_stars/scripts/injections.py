@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 from copy import deepcopy
 import matplotlib.pyplot as plt
+from bilby.core.prior import PriorDict, Uniform
 from os.path import join
 import argparse
 import pdb
@@ -66,11 +67,11 @@ def set_chirp_mass(sampler, chirp_mass):
     sampler.fixed_context_parameters = {"chirp_mass_proxy": chirp_mass}
     sampler.transform_pre.transforms[0].fixed_parameters['chirp_mass'] = chirp_mass
 
-def adjust_chirp_mass_prior(injection_generator, model_metadata):
-    lower = float(model_metadata['train_settings']['data']['gnpe_chirp']['kernel']['chirp_mass'].split("minimum=")[1].split(',')[0])
-    upper = float(model_metadata['train_settings']['data']['gnpe_chirp']['kernel']['chirp_mass'].split("maximum=")[1].split(')')[0])
-    injection_generator.prior["chirp_mass"].minimum -= lower
-    injection_generator.prior["chirp_mass"].maximum -= upper
+# def adjust_chirp_mass_prior(injection_generator, model_metadata):
+#     lower = float(model_metadata['train_settings']['data']['gnpe_chirp']['kernel']['chirp_mass'].split("minimum=")[1].split(',')[0])
+#     upper = float(model_metadata['train_settings']['data']['gnpe_chirp']['kernel']['chirp_mass'].split("maximum=")[1].split(')')[0])
+#     injection_generator.prior["chirp_mass"].minimum -= lower
+#     injection_generator.prior["chirp_mass"].maximum -= upper
 
 # model_path = "/fast/groups/dingo/03_binary_neutron_stars/03_models/03_30M_datasets/02_GW190425_lowSpin/02_dataset-g_nn-xl_epochs-400/model_400.pt"
 # ed_path = "/fast/groups/dingo/03_binary_neutron_stars/03_models/03_30M_datasets/02_GW190425_lowSpin/02_dataset-g_nn-xl_epochs-400/inference/01_model312_100k/data/GW190425_data0_1240215503-02_generation_event_data.hdf5"
@@ -105,7 +106,7 @@ def main(args):
     model_metadata['dataset_settings']['domain'] = sampler.domain.base_domain.domain_dict
     model_metadata['train_settings']['data'].pop('domain_update')
     injection_generator = injection.Injection.from_posterior_model_metadata(model_metadata)
-    adjust_chirp_mass_prior(injection_generator, model_metadata)
+    # adjust_chirp_mass_prior(injection_generator, model_metadata)
     asd_fname = model.metadata["train_settings"]["training"]["stage_0"]["asd_dataset_path"]
     asd_dataset = ASDDataset(file_name=asd_fname)
     injection_generator.asd = {k: asd_to_ufd(v[0], asd_dataset.domain) for k,v in asd_dataset.asds.items()}
@@ -116,12 +117,30 @@ def main(args):
     }
     event_metadata['window_type'] = event_metadata.pop('type')
 
+    # get chirp mass hyperprior
+    chirp_mass_kernel= PriorDict(deepcopy(model_metadata["train_settings"]["data"]["gnpe_chirp"]["kernel"]))["chirp_mass"]
+    if not isinstance(chirp_mass_kernel, Uniform):
+        raise NotImplementedError()
+    chirp_mass_hyperprior = PriorDict(deepcopy(model_metadata["dataset_settings"]["intrinsic_prior"]))["chirp_mass"]
+    chirp_mass_hyperprior.minimum -= chirp_mass_kernel.minimum
+    chirp_mass_hyperprior.maximum -= chirp_mass_kernel.maximum
+
+
     for i in range(args.num_injections):
+        # sample from hyperprior and set corresponding chirp mass prior for injection generator
+        chirp_mass_proxy = chirp_mass_hyperprior.sample()
+        chirp_mass_prior = Uniform(
+            minimum=chirp_mass_proxy + chirp_mass_kernel.minimum,
+            maximum=chirp_mass_proxy + chirp_mass_kernel.maximum,
+        )
+        injection_generator.prior["chirp_mass"] = chirp_mass_prior
+
+        # generate an injection
         data = injection_generator.random_injection()
         theta = deepcopy(data['parameters'])
 
         sampler.context = data
-        set_chirp_mass(sampler, theta["chirp_mass"])
+        set_chirp_mass(sampler, chirp_mass_proxy)
 
         sampler.run_sampler(num_samples=args.num_samples, batch_size=args.batch_size)
         result = sampler.to_result()
@@ -143,24 +162,27 @@ def main(args):
             percentiles = {k: [] for k in common_keys}
             percentiles_is = {k: [] for k in common_keys}
             sample_efficiencies = []
+            chirp_mass_percentiles = {2: [], 10: [], 50: [], 90: [], 98: []}
         for k in common_keys:
             weights = np.array(result.samples["weights"])
             samples = np.array(result.samples[k])
             percentiles[k].append(weighted_percentile_of_score(samples, theta[k]))
             percentiles_is[k].append(weighted_percentile_of_score(samples, theta[k], weights=weights))
         sample_efficiencies.append(sample_efficiency)
-
+        for k in chirp_mass_percentiles.keys():
+            chirp_mass_percentiles[k].append(np.percentile(result.samples["delta_chirp_mass"], k))
 
     summary_data = {
         "sample_efficiencies": sample_efficiencies,
         **{"dingo:" + k: np.array(v) for k, v in percentiles.items()},
         **{"dingo-is:" + k: np.array(v) for k, v in percentiles_is.items()},
+        **{"chirp-mass-percentile-" + str(k): np.array(v) for k, v in chirp_mass_percentiles.items()}
     }
     pd.DataFrame(summary_data).to_pickle(join(args.outdirectory, args.label + ".pd"))
 
     if args.plot:
         make_pp_plot(np.stack(list(percentiles.values())).T, list(percentiles.keys()), join(args.outdirectory, args.label + "_pp.pdf"))
-        make_pp_plot(np.stack(list(percentiles_is.values())).T, list(percentiles.keys()), join(args.outdirectory, args.label + "_pp-is.pdf"))
+        make_pp_plot(np.stack(list(percentiles_is.values())).T, list(percentiles_is.keys()), join(args.outdirectory, args.label + "_pp-is.pdf"))
 
 
 if __name__ == "__main__":
