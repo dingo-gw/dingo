@@ -6,7 +6,7 @@ from pathlib import Path
 from bilby_pipe.input import Input
 from bilby_pipe.utils import parse_args, logger, convert_string_to_dict
 
-from dingo.core.models import PosteriorModel
+from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
 from dingo.gw.inference.inference_pipeline import prepare_log_prob
@@ -106,11 +106,11 @@ class SamplingInput(Input):
 
     def _load_sampler(self):
         """Load the sampler and set its context based on event data."""
-        model = PosteriorModel(self.model, device=self.device, load_training_info=False)
+        model = build_model_from_kwargs(self.model, device=self.device, load_training_info=False)
 
         if self.model_init is not None:
             self.gnpe = True
-            init_model = PosteriorModel(
+            init_model = build_model_from_kwargs(
                 self.model_init, device=self.device, load_training_info=False
             )
             init_sampler = GWSampler(model=init_model)

@@ -51,7 +51,11 @@ def build_model_from_kwargs(
     }
 
     if filename is not None:
-        d = torch.load(filename, map_location="cpu")
+        if "device" in kwargs:
+            device = kwargs["device"]
+        else:
+            device = "cpu"
+        d = torch.load(filename, map_location=device)
         posterior_model_type = d["metadata"]["train_settings"]["model"][
             "posterior_model_type"
         ]
