@@ -118,10 +118,14 @@ def update_summary_data(summary_data, args, theta, samples, weights=None, **kwar
     if hasattr(args, "skymap"):
         data["skymap_areas"] = get_skymap_area(samples, weights=weights, **args.skymap)
 
-    samples_rej = samples.sample(len(samples), weights=weights, replace=True)
+    if weights is not None:
+        samples_rej = samples.sample(len(samples), weights=weights, replace=True)
+    else:
+        samples_rej = samples
 
-    # insert chirp mass std
-    data["std_chirp_mass"] = np.std(samples_rej["chirp_mass"])
+    # insert stds
+    for p in common_parameters:
+        data["std-" + p] = np.std(samples_rej[p])
 
     # insert fraction of samples above requested thresholds
     if hasattr(args, "fraction_geq"):
@@ -192,7 +196,7 @@ def main(args):
     aux = {}
     if hasattr(args, "f_max"):
         if isinstance(args.f_max, list):
-            f_max = args.f_max[args.process_id]
+            f_max = args.f_max[args.process_id % len(args.f_max)]
         else:
             f_max = args.f_max
         frequency_update = {"f_max": f_max}
