@@ -35,11 +35,17 @@ def parse_args():
         required=True,
         help="Path to outdirectory, containing injection_settings.yaml.",
     )
-    outdirectory = parser.parse_args().outdirectory
+    parser.add_argument(
+        "--process_id", type=int, default=None, help="Index of process for injection."
+    )
+    args = parser.parse_args()
+    outdirectory = args.outdirectory
+    process_id = args.process_id
     with open(join(outdirectory, "injection_settings.yaml"), "r") as f:
         args = yaml.safe_load(f)
     args = SimpleNamespace(**args)
     args.outdirectory = outdirectory
+    args.process_id = process_id
     return args
 
 
@@ -183,6 +189,17 @@ def get_chirp_mass_kernel_and_hyperprior(
 
 
 def main(args):
+    aux = {}
+    if hasattr(args, "f_max"):
+        if isinstance(args.f_max, list):
+            f_max = args.f_max[args.process_id]
+        else:
+            f_max = args.f_max
+        frequency_update = {"f_max": f_max}
+        aux["f_max"] = f_max
+    else:
+        frequency_update = None
+
     # load model and initialize dingo sampler
     model = PosteriorModel(
         device="cuda" if torch.cuda.is_available() else "cpu",
@@ -194,7 +211,7 @@ def main(args):
         init_sampler=FixedInitSampler({}, log_prob=0),
         fixed_context_parameters={"chirp_mass_proxy": np.nan},
         num_iterations=1,
-        frequency_masking=getattr(args, "frequency_update", None),
+        frequency_masking=frequency_update,
     )
 
     # IS kwargs
@@ -225,7 +242,8 @@ def main(args):
         "f_max": injection_generator.data_domain.f_max,
         **deepcopy(model.metadata["train_settings"]["data"]["window"]),
     }
-    event_metadata = {**event_metadata, **getattr(args, "frequency_update", {})}
+    if frequency_update is not None:
+        event_metadata = {**event_metadata, **frequency_update}
     event_metadata["window_type"] = event_metadata.pop("type")
 
     # get chirp mass hyperprior
@@ -267,7 +285,9 @@ def main(args):
         sampler.run_sampler(num_samples=args.num_samples, batch_size=args.batch_size)
         result = sampler.to_result()
 
-        update_summary_data(summary_dingo, args, theta, result.samples, weights=None)
+        update_summary_data(
+            summary_dingo, args, theta, result.samples, weights=None, **aux
+        )
 
         if getattr(args, "importance_sampling", False):
             result.event_metadata = event_metadata
@@ -285,6 +305,7 @@ def main(args):
                 result.samples,
                 weights=np.array(result.samples["weights"]),
                 log_evidence=result.log_evidence,
+                **aux,
             )
 
     print(summary_dingo)
