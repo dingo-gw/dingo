@@ -313,10 +313,14 @@ def main(args):
 
     summary_dingo = pd.DataFrame(summary_dingo)
     summary_dingo_is = pd.DataFrame(summary_dingo_is)
-    summary_dingo.to_pickle(join(args.outdirectory, f"summary-dingo_{args.label}.pd"))
+    if args.process_id is not None:
+        label = f"_{args.process_id}"
+    else:
+        label = ""
+    summary_dingo.to_pickle(join(args.outdirectory, f"summary-dingo{label}.pd"))
     if len(summary_dingo_is) > 0:
         summary_dingo_is.to_pickle(
-            join(args.outdirectory, f"summary-dingo-is_{args.label}.pd")
+            join(args.outdirectory, f"summary-dingo-is{label}.pd")
         )
 
     # if args.plot:
