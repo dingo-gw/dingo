@@ -62,6 +62,7 @@ class PowerLawPopulation(object):
         # hyperparameters.
         def generation_func():
             s = prior.sample()
+            s['ln_prob'] = prior.ln_prob(s)
             s["redshift"] = dist_to_z.get_redshift(s["luminosity_distance"])
             for k in ["mass_1", "mass_2"]:
                 s[k] = s[k + "_source"] * (1 + s["redshift"])
