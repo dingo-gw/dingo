@@ -53,7 +53,7 @@ class Injection(object):
             event_injection=event_injection,
         )
 
-    def injection(self, hyperparameters, population_size):
+    def injection(self, hyperparameters, population_size, store_total_generated_number=False):
         """
         Generate an injection.
 
@@ -63,6 +63,8 @@ class Injection(object):
             Population hyperparameters used for the injection.
         population_size : int
             Number of events in the population.
+        store_total_generated_number : boolean
+            Whether the total amount of signals is saved.
 
         Returns
         -------
@@ -72,6 +74,7 @@ class Injection(object):
                 parameters
                 strain
                 asd
+                total_generated_events (optional, depending on whether store_total_generated_number is true)
         """
         generate_event_func = self.population_model.get_event_generator(hyperparameters)
 
@@ -93,6 +96,10 @@ class Injection(object):
 
         # Collate the events and return along with hyperparameters.
         injection = {"hyperparameters": hyperparameters}
+
+        if(store_total_generated_number):
+            injection['total_generated_events'] = tries
+
         for k in ["waveform", "parameters", "asds"]:
             injection[k] = {}
             for k2 in events[0][k]:
