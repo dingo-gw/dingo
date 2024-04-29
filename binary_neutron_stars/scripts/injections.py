@@ -3,25 +3,20 @@ import dingo.gw.injection as injection
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.inference.gw_samplers import GWSamplerGNPE
 from dingo.core.samplers import FixedInitSampler
-from dingo.gw.domains import build_domain
-from dingo.gw.data.event_dataset import EventDataset
-from dingo.gw.result import Result
 
 import yaml
 from types import SimpleNamespace
-from pp_utils import weighted_percentile_of_score, make_pp_plot
+from pp_utils import weighted_percentile_of_score
 import numpy as np
 import pandas as pd
 import torch
 from copy import deepcopy
-import matplotlib.pyplot as plt
 from bilby.core.prior import PriorDict, Uniform, DeltaFunction
 from bilby.gw.conversion import chirp_mass_and_mass_ratio_to_component_masses
 from ligo.skymap import kde, io
 from ligo.skymap.postprocess import crossmatch
 from os.path import join
 import argparse
-import pdb
 
 
 def parse_args():
@@ -166,18 +161,24 @@ def get_injection_generator(model_metadata, base_domain_dict, fixed_parameters=N
     return injection_generator
 
 
-def get_chirp_mass_kernel_and_hyperprior(
-    model_metadata, injection_generator, fixed_chirp_mass=None
+def get_chirp_mass_functions(
+    model_metadata=None, injection_generator=None, fixed_chirp_mass=None
 ):
-    chirp_mass_kernel = PriorDict(
-        deepcopy(model_metadata["train_settings"]["data"]["gnpe_chirp"]["kernel"])
-    )["chirp_mass"]
-    if not isinstance(chirp_mass_kernel, Uniform):
-        raise NotImplementedError()
-    if fixed_chirp_mass is None:
+    if fixed_chirp_mass is not None:
+        sample_chirp_mass_proxy = DeltaFunction(fixed_chirp_mass).sample
+        get_chirp_mass_prior = lambda chirp_mass_proxy: DeltaFunction(chirp_mass_proxy)
+    else:
+        # get chirp mass kernel
+        chirp_mass_kernel = PriorDict(
+            deepcopy(model_metadata["train_settings"]["data"]["gnpe_chirp"]["kernel"])
+        )["chirp_mass"]
+        if not isinstance(chirp_mass_kernel, Uniform):
+            raise NotImplementedError()
+        # get chirp mass hyperprior from model metadata
         chirp_mass_hyperprior = PriorDict(
             deepcopy(model_metadata["dataset_settings"]["intrinsic_prior"])
         )["chirp_mass"]
+        # exclude chirp mass regions that are forbidden by m1, m2 constraints
         if {"mass_1", "mass_2"}.issubset(injection_generator.prior.keys()):
             m1 = injection_generator.prior["mass_1"]
             m2 = injection_generator.prior["mass_2"]
@@ -185,24 +186,25 @@ def get_chirp_mass_kernel_and_hyperprior(
             mc_min = (m1.minimum * m2.minimum) ** 0.6 / (m1.minimum + m2.minimum) ** 0.2
             chirp_mass_hyperprior.maximum = min(chirp_mass_hyperprior.maximum, mc_max)
             chirp_mass_hyperprior.minimum = max(chirp_mass_hyperprior.minimum, mc_min)
+        # decrease chirp mass hyperprior by kernel width to remove boundary effects
         chirp_mass_hyperprior.minimum -= chirp_mass_kernel.minimum
         chirp_mass_hyperprior.maximum -= chirp_mass_kernel.maximum
-    else:
-        chirp_mass_hyperprior = DeltaFunction(fixed_chirp_mass)
-    return chirp_mass_kernel, chirp_mass_hyperprior
+        # functions for sampling chirp mass proxy and building the corresponding prior
+        sample_chirp_mass_proxy = chirp_mass_hyperprior.sample
+        get_chirp_mass_prior = lambda chirp_mass_proxy: Uniform(
+            minimum=chirp_mass_proxy + chirp_mass_kernel.minimum,
+            maximum=chirp_mass_proxy + chirp_mass_kernel.maximum,
+        )
+    return sample_chirp_mass_proxy, get_chirp_mass_prior
 
 
 def main(args):
-    aux = {}
+    f_max_scan = [None]
     if hasattr(args, "f_max"):
         if isinstance(args.f_max, list):
-            f_max = args.f_max[args.process_id % len(args.f_max)]
+            f_max_scan = args.f_max
         else:
-            f_max = args.f_max
-        frequency_update = {"f_max": f_max}
-        aux["f_max"] = f_max
-    else:
-        frequency_update = None
+            f_max_scan = [args.f_max]
 
     # load model and initialize dingo sampler
     model = PosteriorModel(
@@ -210,13 +212,14 @@ def main(args):
         model_filename=args.dingo_model,
         load_training_info=False,
     )
-    sampler = GWSamplerGNPE(
+    sampler_kwargs = dict(
         model=model,
         init_sampler=FixedInitSampler({}, log_prob=0),
         fixed_context_parameters={"chirp_mass_proxy": np.nan},
         num_iterations=1,
-        frequency_masking=frequency_update,
     )
+    base_sampler = GWSamplerGNPE(**sampler_kwargs)
+    base_domain = base_sampler.domain.base_domain
 
     # IS kwargs
     likelihood_kwargs = dict(
@@ -235,23 +238,19 @@ def main(args):
 
     # build injection generator
     injection_generator = get_injection_generator(
-        model.metadata,
-        sampler.domain.base_domain.domain_dict,
-        getattr(args, "fixed_parameters", None),
+        model.metadata, base_domain.domain_dict, getattr(args, "fixed_parameters", None)
     )
 
     # initialize event metadata
-    event_metadata = {
+    base_event_metadata = {
         "f_min": injection_generator.data_domain.f_min,
         "f_max": injection_generator.data_domain.f_max,
         **deepcopy(model.metadata["train_settings"]["data"]["window"]),
     }
-    if frequency_update is not None:
-        event_metadata = {**event_metadata, **frequency_update}
-    event_metadata["window_type"] = event_metadata.pop("type")
+    base_event_metadata["window_type"] = base_event_metadata.pop("type")
 
     # get chirp mass hyperprior
-    chirp_mass_kernel, chirp_mass_hyperprior = get_chirp_mass_kernel_and_hyperprior(
+    sample_chirp_mass_proxy, get_chirp_mass_prior = get_chirp_mass_functions(
         model.metadata,
         injection_generator,
         getattr(args, "fixed_parameters", {}).get("chirp_mass"),
@@ -261,59 +260,60 @@ def main(args):
     summary_dingo_is = {}
 
     for i in range(args.num_injections):
-        # sample from hyperprior and set corresponding chirp mass prior for injection generator
-        chirp_mass_proxy = chirp_mass_hyperprior.sample()
-
-        if getattr(args, "fixed_parameters", {}).get("chirp_mass") is not None:
-            injection_generator.prior["chirp_mass"] = DeltaFunction(
-                args.fixed_parameters["chirp_mass"]
-            )
-        else:
-            chirp_mass_prior = Uniform(
-                minimum=chirp_mass_proxy + chirp_mass_kernel.minimum,
-                maximum=chirp_mass_proxy + chirp_mass_kernel.maximum,
-            )
-            injection_generator.prior["chirp_mass"] = chirp_mass_prior
-            # print(chirp_mass_prior)
-
+        # sample from hyperprior and set corresponding prior for injection generator
+        chirp_mass_proxy = sample_chirp_mass_proxy()
+        injection_generator.prior["chirp_mass"] = get_chirp_mass_prior(chirp_mass_proxy)
         # generate an injection
         data = injection_generator.random_injection()
         theta = deepcopy(data["parameters"])
         print(chirp_mass_proxy, theta["chirp_mass"])
 
-        # sampler.frequency_masking = dict(f_max=40)
-        # sampler._initialize_transforms()
-        sampler.context = data
-        set_chirp_mass(sampler, chirp_mass_proxy)
+        for f_max in f_max_scan:
+            print(f"\n\nf_max: {f_max}")
+            # set f_max in sampler and event_metadata for importance sampling
+            aux = {"f_max": f_max}
+            if f_max is not None:
+                frequency_update = {"f_max": f_max}
+                sampler = GWSamplerGNPE(
+                    **sampler_kwargs, frequency_masking=frequency_update
+                )
+                event_metadata = {**base_event_metadata, **frequency_update}
+            else:
+                sampler = base_sampler
+                event_metadata = base_event_metadata
 
-        sampler.run_sampler(num_samples=args.num_samples, batch_size=args.batch_size)
-        result = sampler.to_result()
+            sampler.context = data
+            set_chirp_mass(sampler, chirp_mass_proxy)
 
-        update_summary_data(
-            summary_dingo, args, theta, result.samples, weights=None, **aux
-        )
-
-        if getattr(args, "importance_sampling", False):
-            result.event_metadata = event_metadata
-            # result.sample_synthetic_phase(
-            #     synthetic_phase_kwargs, likelihood_kwargs_synthetic_phase
-            # )
-            result.importance_sample(
-                num_processes=args.num_processes, **likelihood_kwargs
+            sampler.run_sampler(
+                num_samples=args.num_samples, batch_size=args.batch_size
             )
-            print(f"{i:2.0f}: Sample efficiency {result.sample_efficiency * 100:.1f}%")
+            result = sampler.to_result()
+
             update_summary_data(
-                summary_dingo_is,
-                args,
-                theta,
-                result.samples,
-                weights=np.array(result.samples["weights"]),
-                log_evidence=result.log_evidence,
-                **aux,
+                summary_dingo, args, theta, result.samples, weights=None, **aux
             )
 
-    print(summary_dingo)
-    print(summary_dingo_is)
+            if getattr(args, "importance_sampling", False):
+                result.event_metadata = event_metadata
+                # result.sample_synthetic_phase(
+                #     synthetic_phase_kwargs, likelihood_kwargs_synthetic_phase
+                # )
+                result.importance_sample(
+                    num_processes=args.num_processes, **likelihood_kwargs
+                )
+                print(
+                    f"{i:2.0f}: Sample efficiency {result.sample_efficiency * 100:.1f}%"
+                )
+                update_summary_data(
+                    summary_dingo_is,
+                    args,
+                    theta,
+                    result.samples,
+                    weights=np.array(result.samples["weights"]),
+                    log_evidence=result.log_evidence,
+                    **aux,
+                )
 
     summary_dingo = pd.DataFrame(summary_dingo)
     summary_dingo_is = pd.DataFrame(summary_dingo_is)
@@ -326,18 +326,6 @@ def main(args):
         summary_dingo_is.to_pickle(
             join(args.outdirectory, f"summary-dingo-is{label}.pd")
         )
-
-    # if args.plot:
-    #     make_pp_plot(
-    #         np.stack(list(percentiles.values())).T,
-    #         list(percentiles.keys()),
-    #         join(args.outdirectory, args.label + "_pp.pdf"),
-    #     )
-    #     make_pp_plot(
-    #         np.stack(list(percentiles_is.values())).T,
-    #         list(percentiles_is.keys()),
-    #         join(args.outdirectory, args.label + "_pp-is.pdf"),
-    #     )
 
 
 if __name__ == "__main__":
