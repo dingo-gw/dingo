@@ -223,12 +223,10 @@ def get_scheduler_from_kwargs(
         scheduler_kwargs.pop("type")
         return schedulers_dict["sequential"](optimizer, schedulers, **scheduler_kwargs)
     else:
-        if (
-            scheduler_kwargs.pop("update_scheduler_every_batch")
-            and scheduler_kwargs["num_batches"] is not None
-        ):
+        if scheduler_kwargs["num_batches"] is not None:
             num_batches = scheduler_kwargs.pop("num_batches")
-            adapt_scheduler_kwargs_to_update_every_batch(scheduler_kwargs, num_batches)
+            if scheduler_kwargs.pop("update_scheduler_every_batch"):
+                adapt_scheduler_kwargs_to_update_every_batch(scheduler_kwargs, num_batches)
         scheduler_type = scheduler_kwargs.pop("type")
         scheduler = schedulers_dict[scheduler_type]
         return scheduler(optimizer, **scheduler_kwargs)
