@@ -316,13 +316,9 @@ class Base:
         elif ext == ".hdf5":
             d = self._load_model_from_hdf5(model_filename)
         else:
-            raise ValueError("Models should be ether in .pt or .hdf5 format.")
+            raise ValueError("Models should be either in .pt or .hdf5 format.")
 
         self.version = d.get("version")
-
-        self.model_kwargs = d["model_kwargs"]
-        self.initialize_network()
-        self.network.load_state_dict(d["model_state_dict"])
 
         self.epoch = d["epoch"]
 
@@ -334,23 +330,28 @@ class Base:
         if "event_metadata" in d:
             self.event_metadata = d["event_metadata"]
 
-        self.network_to_device(device)
+        self.model_kwargs = d["model_kwargs"]
+        if device is not "meta":
+            self.initialize_network()
+            self.network.load_state_dict(d["model_state_dict"])
 
-        if load_training_info:
-            if "optimizer_kwargs" in d:
-                self.optimizer_kwargs = d["optimizer_kwargs"]
-            if "scheduler_kwargs" in d:
-                self.scheduler_kwargs = d["scheduler_kwargs"]
-            # initialize optimizer and scheduler
-            self.initialize_optimizer_and_scheduler()
-            # load optimizer and scheduler state dict
-            if "optimizer_state_dict" in d:
-                self.optimizer.load_state_dict(d["optimizer_state_dict"])
-            if "scheduler_state_dict" in d:
-                self.scheduler.load_state_dict(d["scheduler_state_dict"])
-        else:
-            # put model in evaluation mode
-            self.network.eval()
+            self.network_to_device(device)
+
+            if load_training_info:
+                if "optimizer_kwargs" in d:
+                    self.optimizer_kwargs = d["optimizer_kwargs"]
+                if "scheduler_kwargs" in d:
+                    self.scheduler_kwargs = d["scheduler_kwargs"]
+                # initialize optimizer and scheduler
+                self.initialize_optimizer_and_scheduler()
+                # load optimizer and scheduler state dict
+                if "optimizer_state_dict" in d:
+                    self.optimizer.load_state_dict(d["optimizer_state_dict"])
+                if "scheduler_state_dict" in d:
+                    self.scheduler.load_state_dict(d["scheduler_state_dict"])
+            else:
+                # put model in evaluation mode
+                self.network.eval()
 
     def train(
         self,
