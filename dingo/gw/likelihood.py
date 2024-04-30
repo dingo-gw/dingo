@@ -246,6 +246,37 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         else:
             return self._log_likelihood(theta)
 
+    def matched_filter_snr(self, theta):
+        """Matched filter signal-to-noise ratio (snr).
+
+        This computes the snr for a given set of parameters theta, using equation (48)
+        in https://arxiv.org/pdf/1809.02293.
+
+        Parameters
+        ----------
+        theta: Dict[str, float]
+            Dict with parameters
+
+        Returns
+        -------
+        rho_mf: float
+            Matched filter snr
+        """
+        # Step 1: Compute whitened GW strain mu(theta) for parameters theta.
+        mu = self.signal(theta)["waveform"]
+        d = self.whitened_strains
+
+        # Step 2: Compute snr from rho2opt and kappa2.
+        rho2opt = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
+        kappa2 = sum(
+            [
+                inner_product(d_ifo, mu_ifo)
+                for d_ifo, mu_ifo in zip(d.values(), mu.values())
+            ],
+        )
+        rho_mf = kappa2 / rho2opt ** 0.5
+        return rho_mf
+
     def _log_likelihood(self, theta):
         """
         The likelihood is given by
