@@ -305,13 +305,14 @@ def main(args):
                 print(
                     f"{i:2.0f}: Sample efficiency {result.sample_efficiency * 100:.1f}%"
                 )
+                aux["log_noise_evidence"] = result.log_noise_evidence
+                aux["log_evidence"] = result.log_evidence
                 update_summary_data(
                     summary_dingo_is,
                     args,
                     theta,
                     result.samples,
                     weights=np.array(result.samples["weights"]),
-                    log_evidence=result.log_evidence,
                     **aux,
                 )
 
