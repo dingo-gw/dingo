@@ -197,6 +197,31 @@ def get_chirp_mass_functions(
         )
     return sample_chirp_mass_proxy, get_chirp_mass_prior
 
+def compute_snr(result):
+    """Compute the maximum matched filter signal-to-noise ratio."""
+    likelihood = result.likelihood
+    theta = result.samples.iloc[np.argmax(result.samples["log_likelihood"])]
+    theta = theta.to_dict()
+
+    # recover max-likelihood phase if not already in theta
+    if "phase" not in theta:
+        pm_flag = likelihood.phase_marginalization
+        likelihood.phase_marginalization = False
+        phase_grid = np.linspace(0, 2 * np.pi, 100)
+        logl = likelihood.log_likelihood_phase_grid(theta, phase_grid)
+        theta["phase"] = phase_grid[np.argmax(logl)]
+        # logsumexp = lambda a: np.log(
+        #     np.mean(np.exp(a - np.max(a)))
+        # ) + np.max(a)
+        # print(logsumexp(logl_phases) - theta['log_likelihood'])
+        # assert np.min(result.likelihood.log_likelihood(theta) - logl) == 0
+        likelihood.phase_marginalization = pm_flag
+
+    # compute snr
+    snr = likelihood.matched_filter_snr(theta)
+
+    return snr
+
 
 def main(args):
     f_max_scan = [None]
@@ -305,6 +330,8 @@ def main(args):
                 print(
                     f"{i:2.0f}: Sample efficiency {result.sample_efficiency * 100:.1f}%"
                 )
+
+                aux["snr"] = compute_snr(result)
                 aux["log_noise_evidence"] = result.log_noise_evidence
                 aux["log_evidence"] = result.log_evidence
                 update_summary_data(
@@ -316,6 +343,7 @@ def main(args):
                     **aux,
                 )
 
+    print(summary_dingo_is)
     summary_dingo = pd.DataFrame(summary_dingo)
     summary_dingo_is = pd.DataFrame(summary_dingo_is)
     if args.process_id is not None:
