@@ -91,8 +91,8 @@ class Injection(object):
             if event["parameters"]["matched_filter_snr"] >= self.snr_threshold:
                 events.append(event)
             tries += 1
-            if tries / (len(events) + 1) > 100:
-                raise ValueError("Sampling efficiency < 1%")
+            if tries / (len(events) + 1) > 10000:
+                raise ValueError("Sampling efficiency < 0.01%")
 
         # Collate the events and return along with hyperparameters.
         injection = {"hyperparameters": hyperparameters}
