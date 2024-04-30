@@ -343,7 +343,6 @@ def main(args):
                     **aux,
                 )
 
-    print(summary_dingo_is)
     summary_dingo = pd.DataFrame(summary_dingo)
     summary_dingo_is = pd.DataFrame(summary_dingo_is)
     if args.process_id is not None:
