@@ -222,8 +222,8 @@ class PopulationDataset(torch.utils.data.Dataset):
                 n += 1
                 self.event_counter[i] += 1
             tries += 1
-            if tries / (n + 1) > 100:
-                raise ValueError("Sampling efficiency < 1%")
+            if tries / (n + 1) > 10000:
+                raise ValueError("Sampling efficiency < 0.01%")
 
         # Prepare output, consisting of hyperparameters and an array of embeddings.
         sample = {
