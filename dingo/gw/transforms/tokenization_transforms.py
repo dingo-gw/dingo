@@ -63,11 +63,10 @@ class StrainTokenization(object):
         ----------
         sample: Dict
             input_sample with modified value for key
-            - 'waveform', shape [num_blocks, num_channels, num_tokens, num_bins_per_token]
+            - 'waveform', shape [num_tokens, num_blocks, num_channels * num_bins_per_token]
             and additional keys
-            - 'position', shape [num_blocks]
-            - 'f_min_per_token', shape [num_tokens]
-            - 'f_max_per_token', shape [num_tokens]
+            - 'position', shape [num_tokens, num_blocks, 2]
+            - 'blocks', shape [num_blocks]
         """
         sample = input_sample.copy()
 
