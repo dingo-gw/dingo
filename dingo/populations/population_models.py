@@ -77,6 +77,7 @@ class PowerLawPopulation(object):
             tries = 0
             while(not cond):
                 s = prior.sample()
+                s['ln_prob'] = prior.ln_prob(s)
 
                 s["redshift"] = dist_to_z.get_redshift(s["luminosity_distance"])
                 for k in ["mass_1", "mass_2"]:
@@ -87,8 +88,6 @@ class PowerLawPopulation(object):
                 
                 if(tries > 1000):
                     raise 'Sampling efficiency below 0.1%. '
-                            
-            s['ln_prob'] = prior.ln_prob(s)
             
             # IMPORTANT: We want all the mass parameters in order to avoid any problems
             # combining with parameters sampled from the prior. We are leaving off
