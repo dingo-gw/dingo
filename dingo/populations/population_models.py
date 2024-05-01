@@ -31,7 +31,7 @@ class PowerLawPopulation(object):
         self.maximum_distance = maximum_distance
         self.batch_prior = batch_prior
 
-    def get_event_generator(self, p):
+    def get_event_generator(self, p, kwargs_selection_cut={}):
         cosmology = FlatLambdaCDM(Om0=0.3, H0=p["hubble_constant"])
         prior_dict = PriorDict(
             {
@@ -61,6 +61,9 @@ class PowerLawPopulation(object):
         # function for z(d_L) directly, since it interpolates.
         dist_to_z = DistToZ(cosmology=cosmology)
 
+        # Compute simple selection function, so far away events are discarded directly
+        selection_cut_func = generate_selection_cut_function(kwargs_selection_cut)
+
         # We return the generating function for event parameters for two reasons:
         # (1) Because of selection effects, we don't know a priori how many events we
         # have to generate.
@@ -68,11 +71,25 @@ class PowerLawPopulation(object):
         # slow to construct, so we should avoid doing so repeatedly for each set of
         # hyperparameters.
         def generation_func():
-            s = prior.sample()
+            # if a condition is given, this is faster, since it discards events 
+            # with low SNR directly
+            cond = False
+            tries = 0
+            while(not cond):
+                s = prior.sample()
+
+                s["redshift"] = dist_to_z.get_redshift(s["luminosity_distance"])
+                for k in ["mass_1", "mass_2"]:
+                    s[k] = s[k + "_source"] * (1 + s["redshift"])
+
+                cond = selection_cut_func(s)
+                tries += 1
+                
+                if(tries > 1000):
+                    raise 'Sampling efficiency below 0.1%. '
+                            
             s['ln_prob'] = prior.ln_prob(s)
-            s["redshift"] = dist_to_z.get_redshift(s["luminosity_distance"])
-            for k in ["mass_1", "mass_2"]:
-                s[k] = s[k + "_source"] * (1 + s["redshift"])
+            
             # IMPORTANT: We want all the mass parameters in order to avoid any problems
             # combining with parameters sampled from the prior. We are leaving off
             # things like total mass, symmetric mass ratio, because they don't tend to
@@ -196,6 +213,35 @@ class WrapperPrior(PriorDict):
 
         self.counter += 1
         return {k: v[self.counter - 1] for k, v in self._samples.items()}
+    
+def generate_selection_cut_function(kwargs_selection_cut):
+
+    if(kwargs_selection_cut=={}):
+        # if the dict is empty, we always generate the waveform
+        def pass_selection_cut_func(sample):
+            return True
+    elif(kwargs_selection_cut['name']=='linear'):
+
+        def pass_selection_cut_func(sample):
+
+            m1 = sample['mass_1']
+            dL_max = linear_function_through_x_x1_x2_y1_y2(
+                m1,
+                kwargs_selection_cut['m_anchor_min'],
+                kwargs_selection_cut['m_anchor_max'],
+                kwargs_selection_cut['dL_anchor_min'],
+                kwargs_selection_cut['dL_anchor_max']
+            )
+
+            return dL_max > sample['luminosity_distance']
+
+    else:
+        raise NotImplementedError
+    
+    return pass_selection_cut_func
+
+def linear_function_through_x_x1_x2_y1_y2(x, x1, x2, y1, y2):
+    return y1 + (x - x1) / (x2 - x1) * (y2 - y1)
 
         
 
