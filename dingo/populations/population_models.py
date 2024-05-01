@@ -15,19 +15,25 @@ class PowerLawPopulation(object):
     """
     Describes the prior $p(\Lambda)$ and likelihood $p(\theta | \Lambda)$ of a power
     law population model.
+
+    Parameters
+    ----------
+    batch_prior (int):
+        The number of precomputed sample to make sampling faster
     """
 
     model_type = "power_law"
     event_parameters = ["mass_1", "mass_2", "luminosity_distance"]
 
-    def __init__(self, prior, minimum_distance, maximum_distance):
+    def __init__(self, prior, minimum_distance, maximum_distance, batch_prior=5_000):
         self.prior = PriorDict(copy.deepcopy(prior))
         self.minimum_distance = minimum_distance
         self.maximum_distance = maximum_distance
+        self.batch_prior = batch_prior
 
     def get_event_generator(self, p):
         cosmology = FlatLambdaCDM(Om0=0.3, H0=p["hubble_constant"])
-        prior = PriorDict(
+        prior_dict = PriorDict(
             {
                 "mass_1_source": PowerLaw(
                     alpha=-p["alpha"],
@@ -49,6 +55,7 @@ class PowerLawPopulation(object):
             },
             conversion_function=lambda x: generate_mass_parameters(x, source=True),
         )
+        prior = WrapperPrior(prior_dict, self.batch_prior)
 
         # We use the PyCBC class DistToZ, which is much faster than using the astropy
         # function for z(d_L) directly, since it interpolates.
@@ -165,3 +172,31 @@ def build_population_model(population_model, population_prior, event_model_prior
         raise NotImplementedError(
             f"Population model {population_model} is not " f"implemented."
         )
+
+class WrapperPrior(PriorDict):
+    
+    def __init__(self, prior_dict, N):
+        
+        self.prior_dict = prior_dict
+        self.N = N
+        
+        super().__init__(prior_dict)
+        
+        self.precompute_samples()
+                
+    def precompute_samples(self):
+        
+        self.counter = 0
+        self._samples = super().sample(self.N)
+        
+    def sample(self):
+        
+        if(self.counter>=self.N):
+            self.precompute_samples()
+
+        self.counter += 1
+        return {k: v[self.counter - 1:self.counter] for k, v in self._samples.items()}
+
+        
+
+        
