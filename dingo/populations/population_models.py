@@ -195,7 +195,7 @@ class WrapperPrior(PriorDict):
             self.precompute_samples()
 
         self.counter += 1
-        return {k: v[self.counter - 1:self.counter] for k, v in self._samples.items()}
+        return {k: v[self.counter - 1] for k, v in self._samples.items()}
 
         
 
