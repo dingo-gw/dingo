@@ -133,6 +133,7 @@ class PopulationDataset(torch.utils.data.Dataset):
         size,
         train_fraction,
         mode=None,
+        kwargs_selection_cut={},
         **kwargs,  # These are ignored (particularly 'standardization'). Not clean.
     ):
         super().__init__()
@@ -141,6 +142,9 @@ class PopulationDataset(torch.utils.data.Dataset):
         #  better for treating the arguments.
 
         self.event_embeddings = EventEmbeddingsDataset(file_name=event_embeddings_path)
+
+        # if non-empty dictionary, events that do not pass this cut are directly discarded
+        self.kwargs_selection_cut = kwargs_selection_cut
 
         # Depending on whether we are in train or test mode, we take even or odd
         # elements of the base population (half for each).
@@ -208,7 +212,7 @@ class PopulationDataset(torch.utils.data.Dataset):
             low=self.minimum_population_size, high=self.maximum_population_size + 1
         )
         p = self.hyperparameters.iloc[idx]
-        generate_event_func = self.population_model.get_event_generator(p)
+        generate_event_func = self.population_model.get_event_generator(p, self.kwargs_selection_cut)
 
         # Keep generating events until the desired size is reached.
         embeddings = np.empty((size, self.embedding_size))
