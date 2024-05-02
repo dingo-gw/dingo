@@ -8,6 +8,7 @@ import yaml
 from types import SimpleNamespace
 from pp_utils import weighted_percentile_of_score
 import numpy as np
+import os
 import pandas as pd
 import torch
 from copy import deepcopy
@@ -197,6 +198,7 @@ def get_chirp_mass_functions(
         )
     return sample_chirp_mass_proxy, get_chirp_mass_prior
 
+
 def compute_snr(result):
     """Compute the maximum matched filter signal-to-noise ratio."""
     likelihood = result.likelihood
@@ -221,6 +223,24 @@ def compute_snr(result):
     snr = likelihood.matched_filter_snr(theta)
 
     return snr
+
+
+def aggregate_results(
+    outdirectory, prefix="summary-dingo_", percentiles=(10, 25, 50, 75, 90)
+):
+    filenames = [f for f in os.listdir(outdirectory) if f.startswith(prefix)]
+    data = pd.concat([pd.read_pickle(join(outdirectory, f)) for f in filenames])
+    keys = data.keys()
+    f = sorted(list(set(data["f_max"])))
+    data = {f_max: data.iloc[np.where(data["f_max"] == f_max)[0]] for f_max in f}
+    summary = {}
+    for key in keys:
+        summary[key] = {}
+        for percentile in percentiles:
+            summary[key][percentile] = {
+                f: np.percentile(d[key], percentile) for f, d in data.items()
+            }
+    return {"frequencies": f, "percentiles": summary}
 
 
 def main(args):
