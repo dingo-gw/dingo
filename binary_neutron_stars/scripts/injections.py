@@ -221,10 +221,14 @@ def compute_snr(result):
 
 
 def aggregate_results(
-    outdirectory, prefix="summary-dingo_", percentiles=(10, 25, 50, 75, 90)
+    outdirectory,
+    prefix="summary-dingo_",
+    percentiles=(10, 25, 50, 75, 90),
+    filename=None,
 ):
     filenames = [f for f in os.listdir(outdirectory) if f.startswith(prefix)]
     data = pd.concat([pd.read_pickle(join(outdirectory, f)) for f in filenames])
+    data["log_bayes_factor"] = data["log_evidence"] - data["log_noise_evidence"]
     keys = data.keys()
     f = sorted(list(set(data["f_max"])))
     data = {f_max: data.iloc[np.where(data["f_max"] == f_max)[0]] for f_max in f}
@@ -232,10 +236,13 @@ def aggregate_results(
     for key in keys:
         summary[key] = {}
         for percentile in percentiles:
-            summary[key][percentile] = {
-                f: np.percentile(d[key], percentile) for f, d in data.items()
-            }
-    return {"frequencies": f, "percentiles": summary}
+            summary[key][percentile] = np.array(
+                [np.percentile(d[key], percentile) for d in data.values()]
+            )
+    summary = {"frequencies": f, "percentiles": summary}
+    if filename is not None:
+        np.save(filename, summary)
+    return summary
 
 
 def main(args):
