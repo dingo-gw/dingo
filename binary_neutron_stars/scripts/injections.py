@@ -1,6 +1,7 @@
 from dingo.core.models import PosteriorModel
 import dingo.gw.injection as injection
 from dingo.gw.noise.asd_dataset import ASDDataset
+from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.inference.gw_samplers import GWSamplerGNPE
 from dingo.core.samplers import FixedInitSampler
 
@@ -95,12 +96,15 @@ def update_summary_data(summary_data, args, theta, samples, weights=None, **kwar
     insert_component_masses(samples)
 
     # insert percentiles
-    common_parameters = theta.keys() & samples.keys()
-    for p in common_parameters:
-        key = "percentiles-" + p
-        data[key] = weighted_percentile_of_score(
-            np.array(samples[p]), theta[p], weights=weights
-        )
+    if theta is not None:
+        common_parameters = theta.keys() & samples.keys()
+        for p in common_parameters:
+            key = "percentiles-" + p
+            data[key] = weighted_percentile_of_score(
+                np.array(samples[p]), theta[p], weights=weights
+            )
+    else:
+        common_parameters = samples.keys()
     # optionally insert sample efficiency
     if weights is not None:
         ESS = np.sum(weights) ** 2 / np.sum(weights ** 2)
@@ -307,13 +311,27 @@ def main(args):
     summary_dingo_is = {}
 
     for i in range(args.num_injections):
-        # sample from hyperprior and set corresponding prior for injection generator
-        chirp_mass_proxy = sample_chirp_mass_proxy()
-        injection_generator.prior["chirp_mass"] = get_chirp_mass_prior(chirp_mass_proxy)
-        # generate an injection
-        data = injection_generator.random_injection()
-        theta = deepcopy(data["parameters"])
-        print(chirp_mass_proxy, theta["chirp_mass"])
+        # Generate data: either use provided event dataset or generate an injection
+        if hasattr(args, "event_dataset"):
+            event_dataset = EventDataset(file_name=args.event_dataset)
+            chirp_mass_proxy = args.chirp_mass_trigger
+            theta = None
+            data = event_dataset.data
+            assert event_dataset.settings["T"] == 1 / base_domain.delta_f
+            data = {
+                k1: {k2: base_domain.update_data(v2) for k2, v2 in v1.items()}
+                for k1, v1 in data.items()
+            }
+        else:
+            # sample from hyperprior and set corresponding prior for injection generator
+            chirp_mass_proxy = sample_chirp_mass_proxy()
+            injection_generator.prior["chirp_mass"] = get_chirp_mass_prior(
+                chirp_mass_proxy
+            )
+            # generate an injection
+            data = injection_generator.random_injection()
+            theta = deepcopy(data["parameters"])
+            print(chirp_mass_proxy, theta["chirp_mass"])
 
         for f_max in f_max_scan:
             print(f"\n\nf_max: {f_max}")
@@ -364,6 +382,8 @@ def main(args):
                     weights=np.array(result.samples["weights"]),
                     **aux,
                 )
+        if hasattr(args, "event_dataset"):
+            break
 
     summary_dingo = pd.DataFrame(summary_dingo)
     summary_dingo_is = pd.DataFrame(summary_dingo_is)
