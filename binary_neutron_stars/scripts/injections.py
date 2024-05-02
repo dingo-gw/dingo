@@ -35,13 +35,8 @@ def parse_args():
         "--process_id", type=int, default=None, help="Index of process for injection."
     )
     args = parser.parse_args()
-    outdirectory = args.outdirectory
-    process_id = args.process_id
-    with open(join(outdirectory, "injection_settings.yaml"), "r") as f:
-        args = yaml.safe_load(f)
-    args = SimpleNamespace(**args)
-    args.outdirectory = outdirectory
-    args.process_id = process_id
+    with open(join(args.outdirectory, "injection_settings.yaml"), "r") as f:
+        args.__dict__.update(yaml.safe_load(f))
     return args
 
 
