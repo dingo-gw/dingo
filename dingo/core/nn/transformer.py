@@ -534,7 +534,6 @@ class TransformerModel(nn.Module):
 
 
 class MultiPositionalEncoding(nn.Module):
-
     def __init__(self, d_model, max_vals, resolutions):
         super().__init__()
         num_encodings = len(max_vals)
@@ -572,13 +571,19 @@ class MultiPositionalEncoding(nn.Module):
 
 class PoolingTransformer(nn.Module):
     def __init__(
-        self, tokenizer, positional_encoder, transformer_encoder, final_net=None
+        self,
+        tokenizer,
+        positional_encoder,
+        transformer_encoder,
+        final_net=None,
+        extra_skip=False,
     ):
         super().__init__()
         self.tokenizer = tokenizer
         self.positional_encoder = positional_encoder
         self.transformer_encoder = transformer_encoder
         self.final_net = final_net
+        self.extra_skip = extra_skip
 
         self.init_weights()
 
@@ -600,10 +605,14 @@ class PoolingTransformer(nn.Module):
         src_key_padding_mask: torch.Tensor = None,
     ) -> torch.Tensor:
         x = self.tokenizer(src)
+        if self.extra_skip:
+            skip = x
         if position is not None:
             # TODO: Update positional encoder to accept src_key_padding_mask.
             x = self.positional_encoder(x, position)
         x = self.transformer_encoder(x, src_key_padding_mask=src_key_padding_mask)
+        if self.extra_skip:
+            x = x + skip
 
         # Average over non-masked components.
         if src_key_padding_mask is not None:
@@ -626,6 +635,7 @@ def create_pooling_transformer(config):
     config.positional_encoder["d_model"] = config.transformer["d_model"]
     config.tokenizer["output_dim"] = config.transformer["d_model"]
     config.final_net["input_dim"] = config.transformer["d_model"]
+    extra_skip = config.transformer.get("extra_skip", False)
 
     # build individual modules
     tokenizer = DenseResidualNet(**config.tokenizer)
@@ -642,5 +652,7 @@ def create_pooling_transformer(config):
     )
     final_net = DenseResidualNet(**config.final_net)
 
-    encoder = PoolingTransformer(tokenizer, positional_encoder, transformer, final_net)
+    encoder = PoolingTransformer(
+        tokenizer, positional_encoder, transformer, final_net, extra_skip
+    )
     return encoder
