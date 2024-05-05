@@ -577,6 +577,8 @@ class PoolingTransformer(nn.Module):
         transformer_encoder,
         final_net=None,
         extra_skip=False,
+        extra_skip_2=False,
+        extra_skip_3=False,
     ):
         super().__init__()
         self.tokenizer = tokenizer
@@ -584,6 +586,8 @@ class PoolingTransformer(nn.Module):
         self.transformer_encoder = transformer_encoder
         self.final_net = final_net
         self.extra_skip = extra_skip
+        self.extra_skip_2 = extra_skip_2
+        self.extra_skip_3 = extra_skip_3
 
         self.init_weights()
 
@@ -605,14 +609,22 @@ class PoolingTransformer(nn.Module):
         src_key_padding_mask: torch.Tensor = None,
     ) -> torch.Tensor:
         x = self.tokenizer(src)
-        if self.extra_skip:
-            skip = x
+
+        if self.extra_skip or self.extra_skip_2:
+            # Skip is mean (across tokens) of x right after the tokenizer.
+            if src_key_padding_mask is not None:
+                denominator = torch.sum(~src_key_padding_mask, -1, keepdim=True)
+                skip = (
+                    torch.sum(x * ~src_key_padding_mask.unsqueeze(-1), dim=-2)
+                    / denominator
+                )
+            else:
+                skip = torch.mean(x, dim=-2)
+
         if position is not None:
             # TODO: Update positional encoder to accept src_key_padding_mask.
             x = self.positional_encoder(x, position)
         x = self.transformer_encoder(x, src_key_padding_mask=src_key_padding_mask)
-        if self.extra_skip:
-            x = x + skip
 
         # Average over non-masked components.
         if src_key_padding_mask is not None:
@@ -621,8 +633,26 @@ class PoolingTransformer(nn.Module):
         else:
             x = torch.mean(x, dim=-2)
 
+        if self.extra_skip:
+            x = x + skip
+        if self.extra_skip_2:
+            x = torch.cat((x, skip), dim=-1)
+
         if self.final_net is not None:
             x = self.final_net(x)
+
+        if self.extra_skip_3:
+            # Skip is mean (across tokens) of initial input.
+            if src_key_padding_mask is not None:
+                denominator = torch.sum(~src_key_padding_mask, -1, keepdim=True)
+                skip = (
+                    torch.sum(src * ~src_key_padding_mask.unsqueeze(-1), dim=-2)
+                    / denominator
+                )
+            else:
+                skip = torch.mean(src, dim=-2)
+            x = torch.cat((x, skip), dim=-1)
+
         return x
 
 
@@ -635,7 +665,14 @@ def create_pooling_transformer(config):
     config.positional_encoder["d_model"] = config.transformer["d_model"]
     config.tokenizer["output_dim"] = config.transformer["d_model"]
     config.final_net["input_dim"] = config.transformer["d_model"]
+
+    # Experiment with extra skip connections for boosting performance and avoiding
+    # local minima.
     extra_skip = config.transformer.get("extra_skip", False)
+    extra_skip_2 = config.transformer.get("extra_skip_2", False)
+    extra_skip_3 = config.transformer.get("extra_skip_3", False)
+    if extra_skip_2:
+        config.final_net["input_dim"] *= 2
 
     # build individual modules
     tokenizer = DenseResidualNet(**config.tokenizer)
@@ -653,6 +690,12 @@ def create_pooling_transformer(config):
     final_net = DenseResidualNet(**config.final_net)
 
     encoder = PoolingTransformer(
-        tokenizer, positional_encoder, transformer, final_net, extra_skip
+        tokenizer,
+        positional_encoder,
+        transformer,
+        final_net,
+        extra_skip,
+        extra_skip_2,
+        extra_skip_3,
     )
     return encoder

@@ -482,6 +482,17 @@ def autocomplete_model_kwargs_nsf(model_kwargs, data_sample):
             model_kwargs["nsf_kwargs"]["context_dim"] = model_kwargs[
                 "embedding_net_kwargs"
             ]["output_dim"]
+
+            # Trying to add extra skips for improved performance. For extra_skip_3 =
+            # True, we concatenate pooled input tokens with flow context. We therefore
+            # need to adjust the context dimension.
+            if model_kwargs["transformer_kwargs"]["transformer"].get(
+                "extra_skip_3", False
+            ):
+                model_kwargs["nsf_kwargs"]["context_dim"] += model_kwargs[
+                    "transformer_kwargs"
+                ]["tokenizer"]["input_dim"]
+
         else:
             # set added_context flag of embedding net if gnpe proxies are required
             # set context dim of nsf to output dim of embedding net + gnpe proxy dim
