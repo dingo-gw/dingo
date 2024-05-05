@@ -443,9 +443,13 @@ def create_nsf_with_transformer_embedding(
 ):
     transformer_kwargs = copy.deepcopy(transformer_kwargs)
     transformer = create_pooling_transformer(transformer_kwargs)
-    flow = create_nsf_model(
-        context_dim=transformer_kwargs["final_net"]["output_dim"], **nsf_kwargs
-    )
+    context_dim = transformer_kwargs["final_net"]["output_dim"]
+    if transformer_kwargs["transformer"].get("extra_skip_3", False):
+        # Trying to add extra skips for improved performance. For extra_skip_3 =
+        # True, we concatenate pooled input tokens with flow context. We therefore
+        # need to adjust the context dimension.
+        context_dim += transformer_kwargs["tokenizer"]["input_dim"]
+    flow = create_nsf_model(context_dim=context_dim, **nsf_kwargs)
     model = FlowWrapper(flow, transformer)
     return model
 
@@ -482,17 +486,6 @@ def autocomplete_model_kwargs_nsf(model_kwargs, data_sample):
             model_kwargs["nsf_kwargs"]["context_dim"] = model_kwargs[
                 "embedding_net_kwargs"
             ]["output_dim"]
-
-            # Trying to add extra skips for improved performance. For extra_skip_3 =
-            # True, we concatenate pooled input tokens with flow context. We therefore
-            # need to adjust the context dimension.
-            if model_kwargs["transformer_kwargs"]["transformer"].get(
-                "extra_skip_3", False
-            ):
-                model_kwargs["nsf_kwargs"]["context_dim"] += model_kwargs[
-                    "transformer_kwargs"
-                ]["tokenizer"]["input_dim"]
-
         else:
             # set added_context flag of embedding net if gnpe proxies are required
             # set context dim of nsf to output dim of embedding net + gnpe proxy dim
