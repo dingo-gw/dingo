@@ -584,7 +584,7 @@ class Result(DingoDataset):
 
         return self.samples.replace(-np.inf, np.nan).dropna(axis=0)
 
-    def plot_corner(self, parameters=None, filename="corner.pdf"):
+    def plot_corner(self, parameters: list = None, filename: str = "corner.pdf", truths: dict = None):
         """
         Generate a corner plot of the samples.
 
@@ -595,6 +595,8 @@ class Result(DingoDataset):
             (Default: None)
         filename : str
             Where to save samples.
+        truths:
+            Dict of truth values to include.
         """
         theta = self._cleaned_samples()
         # delta_log_prob_target is not interesting so never plot it.
@@ -604,12 +606,16 @@ class Result(DingoDataset):
         if parameters:
             theta = theta[parameters]
 
+        if truths:
+            truths = [truths.get(k) for k in theta.column]
+
         if "weights" in theta:
             plot_corner_multi(
                 [theta, theta],
                 weights=[None, theta["weights"].to_numpy()],
                 labels=["Dingo", "Dingo-IS"],
                 filename=filename,
+                truths=truths,
             )
         else:
             plot_corner_multi(
