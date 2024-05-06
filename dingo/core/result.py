@@ -607,7 +607,7 @@ class Result(DingoDataset):
             theta = theta[parameters]
 
         if truths:
-            truths = [truths.get(k) for k in theta.column]
+            truths = [truths.get(k) for k in theta.columns]
 
         if "weights" in theta:
             plot_corner_multi(
