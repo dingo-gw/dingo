@@ -150,6 +150,7 @@ class Sampler(object):
             if type(x) is list:
                 # If additional variables have to be passed to the embedding network,
                 # we need to expand all of them across the batch.
+                # TODO: This treatment here is suboptimal because one might want to use batch_size != num_samples
                 x = [x[i].expand(num_samples, *x[i].shape) for i in range(len(x))]
             else:
                 # Require a batch dimension for the embedding network.
@@ -165,14 +166,17 @@ class Sampler(object):
         # have a flag for whether to calculate the log_prob.
         self.model.network.eval()
         with torch.no_grad():
+            # FIXME: ContinuousFlowBase.sample requires the argument batch_size for an unconditional model,
+            #  but NormalizingFlow.sample does not have this argument.
+            # For a conditional model, the number of samples is determined from the batch_size of the context.
             y, log_prob = self.model.sample(
                 *x, get_log_prob=True, num_samples=num_samples
             )
 
         if not self.unconditional_model:
-            # Squeeze the batch dimension added earlier.
-            y = y.squeeze(0)
-            log_prob = log_prob.squeeze(0)
+            # Squeeze the batch dimension added earlier (and potential num_samples=1 in NormalizingFlow).
+            y = y.squeeze()
+            log_prob = log_prob.squeeze()
 
         samples = self.transform_post({"parameters": y, "log_prob": log_prob})
         result = samples["parameters"]
