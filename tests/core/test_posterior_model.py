@@ -30,9 +30,8 @@ def data_setup_pm_1():
             "base_transform_type": "rq-coupling",
         },
     }
-    d.embedding_net_kwargs = {
+    d.embedding_kwargs = {
         "input_dims": (2, 3, 20),
-        # 'n_rb': 10,
         "svd": {"size": 10},
         "V_rb_list": None,
         "output_dim": 8,
@@ -44,9 +43,10 @@ def data_setup_pm_1():
     }
 
     d.model_kwargs = {
-        "type": "nsf+embedding",
-        "nsf_kwargs": d.nsf_kwargs,
-        "embedding_net_kwargs": d.embedding_net_kwargs,
+        "posterior_model_type": "normalizing_flow",
+        "posterior_kwargs": d.nsf_kwargs,
+        "embedding_type": "DenseResidualNet",
+        "embedding_kwargs": d.embedding_kwargs,
     }
 
     d.metadata = {"train_settings": {"model": d.model_kwargs}}
