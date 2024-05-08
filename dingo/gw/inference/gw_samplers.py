@@ -1,5 +1,6 @@
 from typing import Union
 
+import copy
 import numpy as np
 import pandas as pd
 from astropy.time import Time
@@ -8,8 +9,8 @@ from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 
 from dingo.core.samplers import Sampler, GNPESampler
-from dingo.core.transforms import GetItem, RenameKey
-from dingo.gw.domains import build_domain
+from dingo.core.transforms import RenameKey
+from dingo.gw.domains import build_domain, MultibandedFrequencyDomain
 from dingo.gw.gwutils import get_window_factor
 from dingo.gw.result import Result
 from dingo.gw.transforms import (
@@ -219,6 +220,25 @@ class GWSampler(GWSamplerMixin, Sampler):
             inverse=True,
             as_type="dict",
         )
+
+    @Sampler.context.setter
+    def context(self, value):
+        super(GWSampler, type(self)).context.fset(self, value)
+        if isinstance(self.domain, MultibandedFrequencyDomain):
+            d = list(self._context["waveform"].values())[0]
+            if d.shape[-1] == len(self.domain.base_domain):
+                print("Decimating data to multi-banded frequency domain.")
+                base_context = copy.deepcopy(self._context)
+                self._context = {}
+                self._context["waveform"] = {
+                    k: self.domain.decimate(v)
+                    for k, v in base_context["waveform"].items()
+                }
+                self._context["asds"] = {
+                    k: 1 / self.domain.decimate(1 / v)
+                    for k, v in base_context["asds"].items()
+                }
+                self._context["base_data"] = base_context
 
 
 class GWSamplerGNPE(GWSamplerMixin, GNPESampler):

@@ -185,15 +185,30 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
             ]
         else:
             norm_freq = False
+        if "num_tokens" in data_settings["tokenization"]:
+            num_tokens = data_settings["tokenization"]["num_tokens"]
+        else:
+            num_tokens = None
+        if "token_size" in data_settings["tokenization"]:
+            token_size = data_settings["tokenization"]["token_size"]
+        else:
+            token_size = None
+        if "single_tokenizer" in data_settings["tokenization"]:
+            single_tokenizer = data_settings["tokenization"]["single_tokenizer"]
+        else:
+            single_tokenizer = False
         transforms.append(
             StrainTokenization(
-                data_settings["tokenization"]["num_tokens"],
                 domain,
+                num_tokens=num_tokens,
+                token_size=token_size,
                 normalize_frequency=norm_freq,
+                single_tokenizer=single_tokenizer,
             )
         )
         selected_keys.append("position")
-        selected_keys.append("blocks")
+        if not single_tokenizer:
+            selected_keys.append("blocks")
     except KeyError:
         print(
             "No tokenization information found, omitting StrainTokenization transform."

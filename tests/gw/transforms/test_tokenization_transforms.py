@@ -11,7 +11,11 @@ def test_StrainTokenization():
     T = 8.0
     num_f = int((f_max - f_min) * T) + 1
     domain = FrequencyDomain(f_min, f_max, delta_f=1/T)
-    token_transformation = StrainTokenization(num_tokens, domain)
+    single_tokenizer = False
+    norm_freq = False
+    token_transformation = StrainTokenization(
+        domain, num_tokens, normalize_frequency=norm_freq, single_tokenizer=single_tokenizer
+    )
 
     waveform = np.random.random_sample([2, 3, num_f])
     asds = {"H1": np.random.random_sample(num_f), "L1": np.random.random_sample(num_f)}

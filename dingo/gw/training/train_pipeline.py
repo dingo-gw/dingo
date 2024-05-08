@@ -151,7 +151,6 @@ def prepare_training_new(
     if local_settings.get("wandb", False):
         try:
             import wandb
-
             wandb.init(
                 config=full_settings,
                 dir=train_dir,
@@ -199,7 +198,6 @@ def prepare_training_resume(
     if local_settings.get("wandb", False):
         try:
             import wandb
-
             wandb.init(
                 resume="must",
                 dir=train_dir,
@@ -435,7 +433,6 @@ def train_local():
             ):
                 try:
                     import wandb
-
                     local_settings["wandb"]["id"] = wandb.util.generate_id()
                 except ImportError:
                     print("wandb not installed, cannot generate run id.")

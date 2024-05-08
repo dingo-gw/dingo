@@ -1,7 +1,7 @@
 import torch
 
 from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
-from dingo.core.nn.transformer import create_transformer_enet
+from dingo.core.nn.transformer import create_transformer_enet, create_pooling_transformer
 from dingo.core.posterior_models.flow_matching import FlowMatching
 from dingo.core.posterior_models.normalizing_flow import NormalizingFlow
 from dingo.core.posterior_models.pretraining_model import PretrainingModel
@@ -47,6 +47,7 @@ def build_model_from_kwargs(
     embedding_net_builder_dict = {
         "denseresidualnet": create_enet_with_projection_layer_and_dense_resnet,
         "transformer": create_transformer_enet,
+        "pooling_transformer": create_pooling_transformer,
         "no_embedding": None,
     }
 
@@ -190,14 +191,32 @@ def autocomplete_model_kwargs(
                 ]
             else:
                 context_dim = model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
-
+        elif model_kwargs["embedding_type"].lower() == "pooling_transformer":
+            if "tokenizer_kwargs" in model_kwargs["embedding_kwargs"]:
+                model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]["input_dim"] = data_sample[1].shape[-1]
+                model_kwargs["embedding_kwargs"]["tokenizer_kwargs"][
+                    "output_dim"
+                ] = model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
+            if "positional_encoder_kwargs" in model_kwargs["embedding_kwargs"]:
+                model_kwargs["embedding_kwargs"]["positional_encoder_kwargs"][
+                    "d_model"
+                ] = model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
+            if "final_net_kwargs" in model_kwargs["embedding_kwargs"]:
+                model_kwargs["embedding_kwargs"]["final_net_kwargs"][
+                    "input_dim"
+                ] = model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
+                context_dim = model_kwargs["embedding_kwargs"]["final_net_kwargs"][
+                    "output_dim"
+                ]
+            else:
+                context_dim = model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
         elif model_kwargs["embedding_type"] == "no_embedding":
             context_dim = None
             print("No embedding network specified.")
         else:
             raise ValueError(
                 f"Embedding type {model_kwargs['embedding_type']} not in [DenseResidualNet, transformer, "
-                f"no_embedding]"
+                f"pooling_transformer, no_embedding]"
             )
 
         # check for pretraining

@@ -689,7 +689,6 @@ class Result(DingoDataset):
 
 
 def check_equal_dict_of_arrays(a, b):
-
     if type(a) != type(b):
         return False
 

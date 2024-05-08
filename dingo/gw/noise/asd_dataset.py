@@ -1,7 +1,7 @@
 import copy
 from typing import Iterable
 
-from dingo.gw.domains import build_domain
+from dingo.gw.domains import build_domain, FrequencyDomain, MultibandedFrequencyDomain
 from dingo.gw.gwutils import *
 from dingo.gw.dataset import DingoDataset
 
@@ -106,22 +106,60 @@ class ASDDataset(DingoDataset):
             Settings dictionary. Must contain a subset of the keys contained in
             domain_dict.
         """
-        len_domain_original = len(self.domain)
-        self.domain.update(domain_update)
-        self.settings["domain"] = copy.deepcopy(self.domain.domain_dict)
+        if self.domain.domain_dict["type"] == domain_update["type"]:
+            len_domain_original = len(self.domain)
+            self.domain.update(domain_update)
+            self.settings["domain"] = copy.deepcopy(self.domain.domain_dict)
 
-        # truncate the dataset
-        for ifo, asds in self.asds.items():
+            # truncate the dataset
+            for ifo, asds in self.asds.items():
+                # Is there a reason this check is needed? I would think that a dataset
+                # should never be saved with this not matching.
+                assert asds.shape[-1] == len_domain_original, (
+                    f"ASDs with shape {asds.shape[-1]} are not compatible"
+                    f"with the domain of length {len_domain_original}."
+                )
+                self.asds[ifo] = self.domain.update_data(
+                    asds,
+                    low_value=HIGH_ASD_VALUE,
+                )
 
-            # Is there a reason this check is needed? I would think that a dataset
-            # should never be saved with this not matching.
-            assert asds.shape[-1] == len_domain_original, (
-                f"ASDs with shape {asds.shape[-1]} are not compatible"
-                f"with the domain of length {len_domain_original}."
-            )
-            self.asds[ifo] = self.domain.update_data(
-                asds,
-                low_value=HIGH_ASD_VALUE,
+        elif (
+            self.domain.domain_dict["type"] == "FrequencyDomain"
+            and domain_update["type"] == "MultibandedFrequencyDomain"
+        ):
+            print("Updating ASD dataset to MultibandedFrequencyDomain.")
+            asd_dataset_decimated = {}
+            mfd = build_domain(domain_update)
+            ufd = mfd.base_domain
+            decimation_method = "inverse-asd-decimation"
+
+            for ifo, asds in self.asds.items():
+                asd_dataset_decimated[ifo] = np.zeros((len(asds), len(mfd)))
+                for idx, asd in enumerate(asds):
+                    interp = interp1d(self.domain(), asd)
+                    asd_ufd = interp(ufd())
+                    if decimation_method == "inverse-asd-decimation":
+                        asd_dataset_decimated[ifo][idx, :] = 1 / mfd.decimate(
+                            1 / asd_ufd
+                        )
+                    elif decimation_method == "psd-decimation":
+                        asd_dataset_decimated[ifo][idx, :] = (
+                            1e-20 * mfd.decimate((asd_ufd * 1e20) ** 2) ** 0.5
+                        )
+                    else:
+                        raise NotImplementedError(
+                            f"Unknown decimation method " f"{decimation_method}."
+                        )
+
+            self.asds = asd_dataset_decimated
+            self.settings["domain_dict"] = mfd.domain_dict
+            self.domain = mfd
+
+        else:
+            raise NotImplementedError(
+                f"Cannot update ASD domain type "
+                f"{self.domain.domain_dict['type']} to {domain_update['type']}"
             )
 
     def sample_random_asds(self):

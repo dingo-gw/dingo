@@ -1,10 +1,9 @@
-import copy
 import math
+from types import SimpleNamespace
 from typing import Callable, List, Union
 
 import torch
-from torch import nn, vmap, Tensor
-from torch.func import functional_call, stack_module_state
+from torch import nn, Tensor
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
 from dingo.core.nn.resnet import DenseResidualNet
@@ -59,7 +58,12 @@ class Tokenizer(nn.Module):
         """
         super(Tokenizer, self).__init__()
 
-        self.num_tokens, self.num_blocks, self.num_features = input_dims
+        if len(input_dims) == 2:
+            self.seq_len, self.num_features = input_dims
+        elif len(input_dims) == 3:
+            self.num_tokens, self.num_blocks, self.num_features = input_dims
+        else:
+            raise ValueError(f"Invalid shape of input_dims: {input_dims} in Tokenizer")
         if individual_token_embedding:
             self.stack_tokenizer_nets = nn.ModuleList([
                 DenseResidualNet(
@@ -92,20 +96,20 @@ class Tokenizer(nn.Module):
         Parameters
         --------
         x: Tensor
-            shape [batch_size, num_blocks * num_tokens, num_features]
-                 =[batch_size, num_blocks, num_tokens, num_channels * num_bins_per_token]
+            shape [batch_size, ..., num_features]
+                 =[batch_size, ..., num_channels * num_bins_per_token]
             where num_blocks = number of interferometers in GW use case, and num_channels = [real, imag, asd]
+            and ... can either be [num_tokens * num_blocks] or [num_tokens, num_blocks]
 
         Returns
         --------
         x: Tensor
-            shape [batch_size, num_blocks * num_tokens, d_model]
+            shape [batch_size, ..., d_model]
         """
-        if x.shape[1:] != (self.num_tokens, self.num_blocks, self.num_features):
+        if x.shape[-1] != self.num_features:
             raise ValueError(
                 f"Invalid shape for token embedding layer. "
-                f"Expected {(self.num_tokens, self.num_blocks, self.num_features)}, "
-                f"got {tuple(x.shape[1:])}."
+                f"Expected last dimension to be {self.num_features}, got {tuple(x.shape[-1])}."
             )
         if self.individual_token_embedding:
             x = torch.stack([self.stack_tokenizer_nets[i](x[:, i, ...]) for i in range(self.num_tokens)], dim=1)
@@ -306,6 +310,42 @@ class BlockEncoding(nn.Module):
         return x
 
 
+class MultiPositionalEncoding(nn.Module):
+    def __init__(self, d_model: int, max_vals: list, resolutions: list):
+        super().__init__()
+        num_encodings = len(max_vals)
+        encoding_sizes = [((d_model // 2) // num_encodings) * 2] * num_encodings
+        encoding_sizes[-1] += d_model - sum(encoding_sizes)
+        assert sum(encoding_sizes) == d_model
+
+        for i in range(num_encodings):
+            k = torch.arange(0, encoding_sizes[i], 2)
+            div_term = torch.exp(
+                torch.log(torch.tensor(max_vals[i] / resolutions[i]))
+                * (-k / encoding_sizes[i])
+            )
+            self.register_buffer("div_term_" + str(i), div_term)
+        self.num_encodings = num_encodings
+
+    def forward(self, x: Tensor, position: Tensor):
+        """
+        Parameters
+        ----------
+        x: Tensor, shape ``[batch_size, seq_length, embedding_dim]``
+        position: Tensor, shape ``[batch_size, seq_length, self.num_encodings]``
+        """
+        position = position.unsqueeze(-1)
+        start = 0
+        pe = torch.zeros_like(x)
+        for i in range(self.num_encodings):
+            div_term = getattr(self, "div_term_" + str(i))
+            end = start + 2 * len(div_term)
+            pe[:, :, start:end:2] = torch.sin(position[:, :, i, :] * div_term)
+            pe[:, :, start + 1 : end : 2] = torch.cos(position[:, :, i, :] * div_term)
+            start = end
+        return x + pe
+
+
 class TransformerModel(nn.Module):
     """
     This nn.Module specifies the transformer encoder that can be used as an embedding network
@@ -395,7 +435,9 @@ class TransformerModel(nn.Module):
         Parameters
         --------
         x: Tensor
-            shape [batch_size, num_blocks, num_channels, num_tokens, num_bins_per_token]
+            shape depends on which type of tokenization transform was used
+            either [batch_size, num_tokens, num_blocks, num_channels * num_bins_per_token]
+            or [batch_size, num_tokens * num_blocks, num_channels * num_bins_per_token]
         position: Tensor
             shape [batch_size, num_blocks, 2], where the last dimension corresponds to min and max per token
         blocks: Tensor
@@ -518,3 +560,147 @@ def create_transformer_enet(
     )
 
     return model
+
+
+class PoolingTransformer(nn.Module):
+    def __init__(
+        self,
+        tokenizer,
+        positional_encoder,
+        transformer_encoder,
+        final_net=None,
+        extra_skip=False,
+        extra_skip_2=False,
+        extra_skip_3=False,
+    ):
+        super().__init__()
+        self.tokenizer = tokenizer
+        self.positional_encoder = positional_encoder
+        self.transformer_encoder = transformer_encoder
+        self.final_net = final_net
+        self.extra_skip = extra_skip
+        self.extra_skip_2 = extra_skip_2
+        self.extra_skip_3 = extra_skip_3
+
+        self.init_weights()
+
+    def init_weights(self) -> None:
+        """
+        Initialize parameters of transformer encoder explicitly due to Issue
+        https://github.com/pytorch/pytorch/issues/72253.
+        The parameters of the transformer encoder are initialized with xavier uniform.
+        """
+
+        for p in self.transformer_encoder.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+
+    def forward(
+        self,
+        src: torch.Tensor,
+        position: torch.Tensor = None,
+        src_key_padding_mask: torch.Tensor = None,
+    ) -> torch.Tensor:
+        x = self.tokenizer(src)
+
+        if self.extra_skip or self.extra_skip_2:
+            # Skip is mean (across tokens) of x right after the tokenizer.
+            if src_key_padding_mask is not None:
+                denominator = torch.sum(~src_key_padding_mask, -1, keepdim=True)
+                skip = (
+                    torch.sum(x * ~src_key_padding_mask.unsqueeze(-1), dim=-2)
+                    / denominator
+                )
+            else:
+                skip = torch.mean(x, dim=-2)
+
+        if position is not None:
+            # TODO: Update positional encoder to accept src_key_padding_mask.
+            x = self.positional_encoder(x, position)
+        x = self.transformer_encoder(x, src_key_padding_mask=src_key_padding_mask)
+
+        # Average over non-masked components.
+        if src_key_padding_mask is not None:
+            denominator = torch.sum(~src_key_padding_mask, -1, keepdim=True)
+            x = torch.sum(x * ~src_key_padding_mask.unsqueeze(-1), dim=-2) / denominator
+        else:
+            x = torch.mean(x, dim=-2)
+
+        if self.extra_skip:
+            x = x + skip
+        if self.extra_skip_2:
+            x = torch.cat((x, skip), dim=-1)
+
+        if self.final_net is not None:
+            x = self.final_net(x)
+
+        if self.extra_skip_3:
+            # Skip is mean (across tokens) of initial input.
+            if src_key_padding_mask is not None:
+                denominator = torch.sum(~src_key_padding_mask, -1, keepdim=True)
+                skip = (
+                    torch.sum(src * ~src_key_padding_mask.unsqueeze(-1), dim=-2)
+                    / denominator
+                )
+            else:
+                skip = torch.mean(src, dim=-2)
+            x = torch.cat((x, skip), dim=-1)
+
+        return x
+
+
+def create_pooling_transformer(
+        transformer_kwargs: dict,
+        tokenizer_kwargs: dict = None,
+        positional_encoder_kwargs: dict = None,
+        final_net_kwargs: dict = None,
+        allow_tf32: bool = False,
+        added_context: bool = False,
+):
+    """Builder function for a transformer based multi-event encoder."""
+    if allow_tf32:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        print(
+            f"Cuda and cudnn backends running with allow_tf32 = {torch.backends.cuda.matmul.allow_tf32}."
+        )
+
+    # Experiment with extra skip connections for boosting performance and avoiding
+    # local minima.
+    extra_skip = transformer_kwargs.get("extra_skip", False)
+    extra_skip_2 = transformer_kwargs.get("extra_skip_2", False)
+    extra_skip_3 = transformer_kwargs.get("extra_skip_3", False)
+    if extra_skip_2:
+        final_net_kwargs["input_dim"] *= 2
+
+    # build individual modules
+    tokenizer_kwargs["activation"] = torchutils.get_activation_function_from_string(
+        tokenizer_kwargs["activation"]
+    )
+    tokenizer = DenseResidualNet(**tokenizer_kwargs)
+    positional_encoder = MultiPositionalEncoding(**positional_encoder_kwargs)
+    transformer_layer = nn.TransformerEncoderLayer(
+        d_model=transformer_kwargs["d_model"],
+        dim_feedforward=transformer_kwargs.get("dim_feedforward", 2048),
+        nhead=transformer_kwargs["nhead"],
+        dropout=transformer_kwargs.get("dropout", 0.1),
+        batch_first=True,
+    )
+    transformer = nn.TransformerEncoder(
+        transformer_layer, num_layers=transformer_kwargs["num_layers"]
+    )
+    final_net_kwargs["activation"] = torchutils.get_activation_function_from_string(
+        final_net_kwargs["activation"]
+    )
+    final_net = DenseResidualNet(**final_net_kwargs)
+
+    encoder = PoolingTransformer(
+        tokenizer,
+        positional_encoder,
+        transformer,
+        final_net,
+        extra_skip,
+        extra_skip_2,
+        extra_skip_3,
+    )
+    return encoder

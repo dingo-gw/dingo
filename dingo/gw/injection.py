@@ -7,6 +7,8 @@ from dingo.gw.domains import (
     FrequencyDomain,
     build_domain,
     build_domain_from_model_metadata,
+    Domain,
+    MultibandedFrequencyDomain,
 )
 from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.prior import build_prior_with_defaults, split_off_extrinsic_parameters
@@ -33,8 +35,8 @@ class GWSignal(object):
     def __init__(
         self,
         wfg_kwargs: dict,
-        wfg_domain: FrequencyDomain,
-        data_domain: FrequencyDomain,
+        wfg_domain: Domain,
+        data_domain: Domain,
         ifo_list: list,
         t_ref: float,
     ):
@@ -43,17 +45,17 @@ class GWSignal(object):
         ----------
         wfg_kwargs : dict
             Waveform generator parameters [approximant, f_ref, and (optionally) f_start].
-        wfg_domain : FrequencyDomain
+        wfg_domain : Domain
             Domain used for waveform generation. This can potentially deviate from the
             final domain, having a wider frequency range needed for waveform generation.
-        data_domain : FrequencyDomain
+        data_domain : Domain
             Domain object for final signal.
         ifo_list : list
             Names of interferometers for projection.
         t_ref : float
             Reference time that specifies ifo locations.
         """
-
+        self._use_base_domain = False
         self._check_domains(wfg_domain, data_domain)
         self.data_domain = data_domain
 
@@ -86,8 +88,31 @@ class GWSignal(object):
             raise ValueError(
                 "Output domain is not contained within WaveformGenerator domain."
             )
-        if domain_in.delta_f != domain_out.delta_f:
-            raise ValueError("Domains must have same delta_f.")
+        if (
+            domain_in.domain_dict["type"] == "FrequencyDomain"
+            and domain_out.domain_dict["type"] == "FrequencyDomain"
+        ):
+            if domain_in.delta_f != domain_out.delta_f:
+                raise ValueError("Domains must have same delta_f.")
+
+    @property
+    def use_base_domain(self):
+        return self._use_base_domain
+
+    @use_base_domain.setter
+    def use_base_domain(self, value: bool):
+        if value:
+            if hasattr(self.data_domain, "base_domain"):
+                self.waveform_generator.domain = (
+                    self.waveform_generator.domain.base_domain
+                )
+                self.data_domain = self.data_domain.base_domain
+                self._use_base_domain = True
+                self._initialize_transform()
+            else:
+                print(f"{type(self.data_domain)} has no base domain. Nothing to do.")
+        else:
+            raise NotImplementedError()
 
     @property
     def whiten(self):
@@ -274,6 +299,13 @@ class GWSignal(object):
         if isinstance(asd, ASDDataset):
             if set(asd.asds.keys()) != set(ifo_names):
                 raise KeyError("ASDDataset ifos do not match signal.")
+            if asd.domain.domain_dict != self.data_domain.domain_dict:
+                print("Updating ASDDataset domain to match data domain.")
+                domain_dict = self.data_domain.domain_dict
+                if "window_factor" in domain_dict:
+                    print("Dropping window factor for update.")
+                    del domain_dict["window_factor"]
+                asd.update_domain(domain_dict)
         elif isinstance(asd, dict):
             if set(asd.keys()) != set(ifo_names):
                 raise KeyError("ASD ifos do not match signal.")
