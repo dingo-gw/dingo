@@ -11,8 +11,9 @@ import ligo.skymap.io.events
 from typing import Optional, Dict, List
 from bilby.gw.conversion import generate_mass_parameters
 from bilby.gw.detector import InterferometerList
+from pprint import pprint
 
-from dingo.gw.domains import FrequencyDomain
+from dingo.gw.domains import FrequencyDomain, build_domain
 from dingo.gw.result import Result
 from dingo.gw.transforms.detector_transforms import time_delay_from_geocenter
 from dingo.gw.waveform_generator import WaveformGenerator
@@ -360,10 +361,29 @@ class DingoEvent(ligo.skymap.io.events.Event):
             random parameters
         ifos: Optional[List[str]] = None
             interferometers used, if None use interferometers from dingo result
-        single_event_kwargs:
-            kwargs passed to DingoSingleEvent: duration, f_lower, f_upper, time_window
+        duration: float = None
+            duration of snr time series in seconds
+        f_lower: float = None
+            lower frequency bound for snr time series,
+            if None use dingo_result.event_metadata["f_min"]
+        f_upper: float = None
+            upper frequency bound for snr time series,
+            if None use dingo_result.event_metadata["f_max"]
+        t_search_window_width: float = None
+            width of search window (in seconds) for peak in snr time series,
+            window is centered around the merger time according to the template sample
 
+        Returns
+        -------
+        event: DingoEvent
+            event object, that can be passed to bayestar.localize
         """
+        # build domain object
+        domain = getattr(dingo_result.domain, "base_domain", dingo_result.domain)
+        domain = build_domain(domain.domain_dict)
+        if "f_max" in dingo_result.event_metadata:
+            domain.update({"f_max": dingo_result.event_metadata["f_max"]})
+
         # get parameters theta for template
         if max_likelihood_template:
             # use template with maximum likelihood
@@ -371,22 +391,23 @@ class DingoEvent(ligo.skymap.io.events.Event):
                 idx = np.argmax(dingo_result.samples["log_likelihood"])
                 theta = dingo_result.samples.iloc[idx].to_dict()
                 theta = generate_mass_parameters(theta)
-                print(f"Using maximum likelihood parameters for template: {theta}")
+                print(f"Using maximum likelihood parameters for template: ")
+                pprint(theta)
             except KeyError:
                 raise ValueError(
                     "Can only use max_likelihood_template if likelihoods are available, "
                     "but samples in dingo results don't have log_likelihood column."
                 )
         else:
-            # Draw random paramter sample. If dingo_samples have a "weights" column,
+            # Draw random parameter sample. If dingo_samples have a "weights" column,
             # sample from the weighted distribution.
             weights = dingo_result.samples.get("weights", None)
             theta = dingo_result.samples.sample(1, weights=weights).iloc[0].to_dict()
             theta = generate_mass_parameters(theta)
-            print(f"Using sampled parameters: {theta}")
+            print(f"Using sampled parameters: ")
+            pprint(theta)
 
         # generate template
-        domain = getattr(dingo_result.domain, "base_domain", dingo_result.domain)
         wfg = WaveformGenerator(
             domain=domain,
             **dingo_result.metadata["dataset_settings"]["waveform_generator"],
@@ -394,9 +415,9 @@ class DingoEvent(ligo.skymap.io.events.Event):
         template = wfg.generate_hplus_hcross({**theta, **dict(phase=0)})["h_plus"]
 
         if f_lower is None:
-            f_lower = domain.f_min
+            f_lower = dingo_result.event_metadata["f_min"]
         if f_upper is None:
-            f_upper = domain.f_upper
+            f_upper = dingo_result.event_metadata["f_max"]
 
         # set up interferometer list
         if ifos is None:
@@ -434,7 +455,70 @@ class DingoEvent(ligo.skymap.io.events.Event):
         }
         print(f"Merger times according to snr series: {merger_times_snr}")
 
-        return cls(singles=singles, template_args=theta)
+        template_args = dict(mass1=theta["mass_1"], mass2=theta["mass_2"])
+        return cls(singles=singles, template_args=template_args)
+
+
+def generate_bayestar_skymap_from_dingo_result(
+    dingo_result: Result,
+    prior_distance_power: int = 2,
+    cosmology: bool = False,
+    use_mcmc: bool = False,
+    enable_snr_series: bool = True,
+    f_high_truncate: float = 1.0,
+    rescale_loglikelihood: float = 0.83,  # why??
+    **event_kwargs,
+):
+    """Generate a bayestar skymap from a dingo result instance.
+
+    Parameters
+    ----------
+    dingo_result: Result
+        dingo result file
+    prior_distance_power: int
+        see ligo.skymap.bayestar.localize
+        power of distance prior
+    cosmology: bool
+        see ligo.skymap.bayestar.localize
+        whether to use comoving volume prior.
+    use_mcmc: bool
+        see ligo.skymap.bayestar.localize
+    enable_snr_series: bool
+        see ligo.skymap.bayestar.localize
+    f_high_truncate: float
+        see ligo.skymap.bayestar.localize
+        truncate at f_high_truncate * f_max to suppress psd artifacts
+    rescale_loglikelihood: float
+        see ligo.skymap.bayestar.localize
+    event_kwargs
+        kwargs for DingoEvent.from_dingo_result(dingo_result, **event_kwargs)
+
+    Returns
+    -------
+    skymap_bayestar:
+        bayestar skymap for event localization
+    """
+    f_low = event_kwargs.get("f_lower")
+    if f_low is None:
+        f_low = dingo_result.event_metadata["f_min"]
+    event = DingoEvent.from_dingo_result(dingo_result, **event_kwargs)
+    skymap_bayestar = ligo.skymap.bayestar.localize(
+        event=event,
+        waveform="o2-uberbank",
+        f_low=f_low,
+        min_inclination=0,
+        max_inclination=np.pi / 2,
+        min_distance=dingo_result.prior["luminosity_distance"].minimum,
+        max_distance=dingo_result.prior["luminosity_distance"].maximum,
+        prior_distance_power=prior_distance_power,
+        cosmology=cosmology,
+        mcmc=use_mcmc,
+        chain_dump=None,
+        enable_snr_series=enable_snr_series,
+        f_high_truncate=f_high_truncate,
+        rescale_loglikelihood=rescale_loglikelihood,
+    )
+    return skymap_bayestar
 
 
 if __name__ == "__main__":
