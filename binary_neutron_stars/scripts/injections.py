@@ -106,9 +106,11 @@ def get_skymap_summary(
     num_jobs=1,
     num_trials=1,
     credible_levels=(0.5, 0.9),
+    use_injection_parameters_for_bayestar=False,
 ):
     skymap_bayestar = generate_bayestar_skymap_from_dingo_result(
         dingo_result,
+        template_parameters=theta if use_injection_parameters_for_bayestar else None,
         prior_distance_power=prior_distance_power,
         cosmology=cosmology,
         t_search_window_width=t_search_window,

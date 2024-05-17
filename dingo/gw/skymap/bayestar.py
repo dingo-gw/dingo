@@ -339,6 +339,7 @@ class DingoEvent(ligo.skymap.io.events.Event):
     def from_dingo_result(
         cls,
         dingo_result: Result,
+        template_parameters: Dict[str, float] = None,
         max_likelihood_template: bool = True,
         ifos: Optional[List[str]] = None,
         duration: float = 0.1,
@@ -349,12 +350,15 @@ class DingoEvent(ligo.skymap.io.events.Event):
         """Instantiate a DingoEvent based on a dingo result instance.
 
         This uses the strain and asd data from dingo_result.context and a template
-        generated from inferred dingo parameters.
+        generated from inferred dingo parameters, or from template_parameters if provided.
 
         Parameters
         ----------
         dingo_result: Result
             dingo result file
+        template_parameters: Dict
+            parameters for the template generation, if None use parameters from dingo
+            results file
         max_likelihood_template: bool = True
             if true, use maximum likelihood parameters for template, otherwise sample
             random parameters
@@ -384,27 +388,36 @@ class DingoEvent(ligo.skymap.io.events.Event):
             domain.update({"f_max": dingo_result.event_metadata["f_max"]})
 
         # get parameters theta for template
-        if max_likelihood_template:
-            # use template with maximum likelihood
-            try:
-                idx = np.argmax(dingo_result.samples["log_likelihood"])
-                theta = dingo_result.samples.iloc[idx].to_dict()
-                theta = generate_mass_parameters(theta)
-                print(f"Using maximum likelihood parameters for template: ")
-                pprint(theta)
-            except KeyError:
-                raise ValueError(
-                    "Can only use max_likelihood_template if likelihoods are available, "
-                    "but samples in dingo results don't have log_likelihood column."
-                )
-        else:
-            # Draw random parameter sample. If dingo_samples have a "weights" column,
-            # sample from the weighted distribution.
-            weights = dingo_result.samples.get("weights", None)
-            theta = dingo_result.samples.sample(1, weights=weights).iloc[0].to_dict()
+        if template_parameters is not None:
+            theta = template_parameters
             theta = generate_mass_parameters(theta)
-            print(f"Using sampled parameters: ")
+            print("Using provided (non-dingo) parameters for template: ")
             pprint(theta)
+        else:
+            if max_likelihood_template:
+                # use template with maximum likelihood
+                try:
+                    idx = np.argmax(dingo_result.samples["log_likelihood"])
+                    theta = dingo_result.samples.iloc[idx].to_dict()
+                    theta = generate_mass_parameters(theta)
+                    print("Using maximum likelihood parameters for template: ")
+                    pprint(theta)
+                except KeyError:
+                    raise ValueError(
+                        "Can only use max_likelihood_template if likelihoods are "
+                        "available, but samples in dingo result don't have "
+                        "log_likelihood column."
+                    )
+            else:
+                # Draw random parameter sample. If dingo_samples have a "weights" column,
+                # sample from the weighted distribution.
+                weights = dingo_result.samples.get("weights", None)
+                theta = (
+                    dingo_result.samples.sample(1, weights=weights).iloc[0].to_dict()
+                )
+                theta = generate_mass_parameters(theta)
+                print("Using sampled parameters: ")
+                pprint(theta)
 
         # generate template
         wfg = WaveformGenerator(
