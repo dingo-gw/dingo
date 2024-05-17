@@ -4,6 +4,11 @@ from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.inference.gw_samplers import GWSamplerGNPE
 from dingo.core.samplers import FixedInitSampler
+from dingo.gw.skymap import (
+    generate_skymap_from_dingo_result,
+    generate_bayestar_skymap_from_dingo_result,
+)
+from dingo.gw.skymap import utils as skymap_utils
 
 import yaml
 from types import SimpleNamespace
@@ -91,7 +96,68 @@ def insert_component_masses(samples):
     )
 
 
-def update_summary_data(summary_data, args, theta, samples, weights=None, **kwargs):
+def get_skymap_summary(
+    dingo_result,
+    theta,
+    prior_distance_power=2,
+    cosmology=False,
+    t_search_window=0.25,
+    num_samples=5_000,
+    num_jobs=5,
+    num_trials=1,
+    credible_levels=(0.5, 0.9),
+):
+    print("log_likelihood" in dingo_result.samples)
+    skymap_bayestar = generate_bayestar_skymap_from_dingo_result(
+        dingo_result,
+        prior_distance_power=prior_distance_power,
+        cosmology=cosmology,
+        t_search_window_width=t_search_window,
+        max_likelihood_template="log_likelihood" in dingo_result.samples,
+    )
+    skymap_dingo = generate_skymap_from_dingo_result(
+        dingo_result,
+        num_samples=num_samples,
+        num_jobs=num_jobs,
+        num_trials=num_trials,
+        prior_distance_power=prior_distance_power,
+        cosmology=cosmology,
+    )
+
+    skymap_summary = {}
+
+    # areas at specified credible levels
+    areas_bayestar = skymap_utils.credible_areas(skymap_bayestar, credible_levels)
+    areas_dingo = skymap_utils.credible_areas(skymap_dingo, credible_levels)
+    # coverage of dingo skymap by bayestar skymap
+    coverage = skymap_utils.coverage(skymap_bayestar, skymap_dingo, credible_levels)
+    for cl, ab, ad, co in zip(credible_levels, areas_bayestar, areas_dingo, coverage):
+        skymap_summary[f"bayestar-area-{cl}"] = ab
+        skymap_summary[f"dingo-area-{cl}"] = ad
+        skymap_summary[f"dingo-bayestar-coverage-{cl}"] = co
+
+    # credible level of True sky position
+    if theta is not None:
+        skymap_summary[
+            "bayestar-credible-level-true-position"
+        ] = skymap_utils.credible_levels_at_position(
+            skymap_bayestar, ra=theta["ra"], dec=-theta["dec"]
+        )
+        skymap_summary[
+            "dingo-credible-level-true-position"
+        ] = skymap_utils.credible_levels_at_position(
+            skymap_dingo, ra=theta["ra"], dec=-theta["dec"]
+        )
+
+    return skymap_summary
+
+
+def update_summary_data(summary_data, args, theta, result, **kwargs):
+    samples = result.samples
+    if "weights" in samples:
+        weights = np.array(samples["weights"])
+    else:
+        weights = None
     data = {}
     insert_component_masses(samples)
 
@@ -111,6 +177,8 @@ def update_summary_data(summary_data, args, theta, samples, weights=None, **kwar
         data["sample_efficiencies"] = ESS / len(weights)
     # optionally insert skymap
     if hasattr(args, "skymap"):
+        skymap_summary = get_skymap_summary(result, theta)
+        data.update({"skymap_" + k: v for k, v in skymap_summary.items()})
         data["skymap_areas"] = get_skymap_area(samples, weights=weights, **args.skymap)
 
     if weights is not None:
@@ -296,6 +364,7 @@ def main(args):
     base_event_metadata = {
         "f_min": injection_generator.data_domain.f_min,
         "f_max": injection_generator.data_domain.f_max,
+        "time_event": base_sampler.metadata["train_settings"]["data"]["ref_time"],
         **deepcopy(model.metadata["train_settings"]["data"]["window"]),
     }
     base_event_metadata["window_type"] = base_event_metadata.pop("type")
@@ -314,6 +383,7 @@ def main(args):
         # Generate data: either use provided event dataset or generate an injection
         if hasattr(args, "event_dataset"):
             event_dataset = EventDataset(file_name=args.event_dataset)
+            base_event_metadata = event_dataset.settings
             chirp_mass_proxy = args.chirp_mass_trigger
             theta = None
             data = event_dataset.data
@@ -346,6 +416,7 @@ def main(args):
             else:
                 sampler = base_sampler
                 event_metadata = base_event_metadata
+                event_metadata["f_max"] = injection_generator.data_domain.f_max
 
             sampler.context = data
             set_chirp_mass(sampler, chirp_mass_proxy)
@@ -354,13 +425,12 @@ def main(args):
                 num_samples=args.num_samples, batch_size=args.batch_size
             )
             result = sampler.to_result()
+            assert "f_max" in event_metadata
+            result.event_metadata = event_metadata
 
-            update_summary_data(
-                summary_dingo, args, theta, result.samples, weights=None, **aux
-            )
+            update_summary_data(summary_dingo, args, theta, result, **aux)
 
             if getattr(args, "importance_sampling", False):
-                result.event_metadata = event_metadata
                 # result.sample_synthetic_phase(
                 #     synthetic_phase_kwargs, likelihood_kwargs_synthetic_phase
                 # )
@@ -374,14 +444,7 @@ def main(args):
                 aux["snr"] = compute_snr(result)
                 aux["log_noise_evidence"] = result.log_noise_evidence
                 aux["log_evidence"] = result.log_evidence
-                update_summary_data(
-                    summary_dingo_is,
-                    args,
-                    theta,
-                    result.samples,
-                    weights=np.array(result.samples["weights"]),
-                    **aux,
-                )
+                update_summary_data(summary_dingo_is, args, theta, result, **aux)
         if hasattr(args, "event_dataset"):
             break
 
@@ -399,5 +462,21 @@ def main(args):
 
 
 if __name__ == "__main__":
+    # aggregate_results(
+    #     "/Volumes/fast/groups/dingo/03_binary_neutron_stars/03_models/03_30M_datasets/03_DesignSensitivity/03_pre-merger_lowSpin/01_masked-33-200_t-100_epochs-100/inference/02_injections/05/data",
+    #     prefix="summary-dingo-is_",
+    #     filename="/Users/maxdax/Documents/Projects/GW-Inference/01_bns/results/02_injections-pre-merger/data/02/summary_data_design-sensitivity.npy",
+    # )
+    # aggregate_results(
+    #     "/Volumes/fast/groups/dingo/03_binary_neutron_stars/03_models/03_30M_datasets/01_GW170817_lowSpin/03_pre-merger/01_masked-33-200_t-100_epochs-200/inference/03_injections/01/data",
+    #     prefix="summary-dingo-is_",
+    #     filename="/Users/maxdax/Documents/Projects/GW-Inference/01_bns/results/02_injections-pre-merger/data/02/summary_data_GW170817-like.npy",
+    # )
+    # aggregate_results(
+    #     "/Volumes/fast/groups/dingo/03_binary_neutron_stars/03_models/03_30M_datasets/01_GW170817_lowSpin/03_pre-merger/01_masked-33-200_t-100_epochs-200/inference/03_injections/02_GW170817",
+    #     prefix="summary-dingo-is",
+    #     percentiles=(50, ),
+    #     filename="/Users/maxdax/Documents/Projects/GW-Inference/01_bns/results/02_injections-pre-merger/data/02/summary_data_GW170817.npy",
+    # )
     args = parse_args()
     main(args)
