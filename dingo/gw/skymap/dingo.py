@@ -26,10 +26,16 @@ def generate_skymap_from_dingo_result(
         Set to enable a uniform in comoving volume prior (default: false).
     """
     samples = dingo_result.samples
+
+    # extract weights, also veto invalid [ra, dec] values
     if "weights" in samples:
         weights = np.array(samples["weights"])
     else:
         weights = np.ones(len(samples))
+    weights *= np.array(samples["ra"]) >= 0
+    weights *= np.array(samples["ra"]) <= 2 * np.pi
+    weights *= np.array(samples["dec"]) >= -np.pi / 2
+    weights *= np.array(samples["dec"]) <= np.pi / 2
 
     # apply distance reweighting
     distance = np.array(samples["luminosity_distance"])
