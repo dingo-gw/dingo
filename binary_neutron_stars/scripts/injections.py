@@ -103,11 +103,10 @@ def get_skymap_summary(
     cosmology=False,
     t_search_window=0.25,
     num_samples=5_000,
-    num_jobs=5,
+    num_jobs=1,
     num_trials=1,
     credible_levels=(0.5, 0.9),
 ):
-    print("log_likelihood" in dingo_result.samples)
     skymap_bayestar = generate_bayestar_skymap_from_dingo_result(
         dingo_result,
         prior_distance_power=prior_distance_power,
@@ -177,9 +176,9 @@ def update_summary_data(summary_data, args, theta, result, **kwargs):
         data["sample_efficiencies"] = ESS / len(weights)
     # optionally insert skymap
     if hasattr(args, "skymap"):
-        skymap_summary = get_skymap_summary(result, theta)
+        skymap_summary = get_skymap_summary(result, theta, **args.skymap)
         data.update({"skymap_" + k: v for k, v in skymap_summary.items()})
-        data["skymap_areas"] = get_skymap_area(samples, weights=weights, **args.skymap)
+        # data["skymap_areas"] = get_skymap_area(samples, weights=weights, **args.skymap)
 
     if weights is not None:
         samples_rej = samples.sample(len(samples), weights=weights, replace=True)
