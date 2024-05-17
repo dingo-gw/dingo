@@ -148,17 +148,18 @@ class DingoSingleEvent(ligo.skymap.io.events.SingleEvent):
         # t_upper: float
         #     upper gps time bound for peak in snr series
         """
-        # if not (len(domain) == len(data) == len(asd) == len(template)):
-        #     raise ValueError(
-        #         f"Domain, data, asd and template should all have the same lengths, "
-        #         f"got {len(domain)}, {len(data)}, {len(asd)}, {len(template)}."
-        #     )
+        if not (len(domain) == len(data) == len(asd) == len(template)):
+            raise ValueError(
+                f"Domain, data, asd and template should all have the same lengths, "
+                f"got {len(domain)}, {len(data)}, {len(asd)}, {len(template)}."
+            )
 
         # store input args
         self._detector = ifo
         self._gps_time_data = gps_time_data
-        self._data = domain.update_data(data)
-        self._asd = domain.update_data(asd, low_value=1.0)
+        self._data = data
+        self._asd = np.copy(asd)
+        self._asd[: domain.min_idx] = 1
         self._template = template
         self._domain = domain
         self._duration = duration
@@ -435,8 +436,8 @@ class DingoEvent(ligo.skymap.io.events.Event):
             single = DingoSingleEvent(
                 ifo.name,
                 time_event,
-                data=dingo_result.context["waveform"][ifo.name],
-                asd=dingo_result.context["asds"][ifo.name],
+                data=domain.update_data(dingo_result.context["waveform"][ifo.name]),
+                asd=domain.update_data(dingo_result.context["asds"][ifo.name]),
                 template=template,
                 domain=domain,
                 duration=duration,
