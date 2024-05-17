@@ -140,12 +140,12 @@ def get_skymap_summary(
         skymap_summary[
             "bayestar-credible-level-true-position"
         ] = skymap_utils.credible_levels_at_position(
-            skymap_bayestar, ra=theta["ra"], dec=-theta["dec"]
+            skymap_bayestar, ra=theta["ra"], dec=theta["dec"]
         )
         skymap_summary[
             "dingo-credible-level-true-position"
         ] = skymap_utils.credible_levels_at_position(
-            skymap_dingo, ra=theta["ra"], dec=-theta["dec"]
+            skymap_dingo, ra=theta["ra"], dec=theta["dec"]
         )
 
     return skymap_summary
