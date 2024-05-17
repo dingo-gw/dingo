@@ -158,7 +158,7 @@ class DingoSingleEvent(ligo.skymap.io.events.SingleEvent):
         self._detector = ifo
         self._gps_time_data = gps_time_data
         self._data = domain.update_data(data)
-        self._asd = domain.update_data(asd, low_value=1.0)
+        self._asd = domain.update_data(asd, low_value=1.0).astype(np.float64)
         self._template = template
         self._domain = domain
         self._duration = duration
