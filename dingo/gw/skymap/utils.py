@@ -7,7 +7,7 @@ from ligo.skymap.postprocess import crossmatch, find_greedy_credible_levels
 from ligo.skymap.moc import rasterize
 
 
-def skymap_from_uniq_to_nested(skymap, normalize=True):
+def skymap_from_uniq_to_nested(skymap, normalize=True, order=-1):
     """Convert skymap from unique identifier convention to nested convention.
 
     See https://healpix.sourceforge.io/html/intro_Geometric_Algebraic_Propert.htm.
@@ -38,6 +38,7 @@ def skymap_from_uniq_to_nested(skymap, normalize=True):
     ----------
     skymap: input skymap in unique identifier convention
     normalize: if True, normalize skymap to sum 1.
+    order: order for rasterization, if -1 use max resolution of skymap
 
     Returns
     -------
@@ -48,7 +49,7 @@ def skymap_from_uniq_to_nested(skymap, normalize=True):
 
     # step 1: rasterize to remove multi-order pixels
     # pixel labeling: UNIQ ids => Ring
-    skymap = pd.DataFrame(rasterize(skymap))
+    skymap = pd.DataFrame(rasterize(skymap, order=order))
     skymap = np.array(skymap["PROBDENSITY"])
 
     # step 2: convert from ring to nested pixel labels
@@ -93,9 +94,9 @@ def coverage(skymap_proposal, skymap_reference, credible_levels):
 
     # convert to nested convention
     if "UNIQ" in skymap_proposal.columns:
-        skymap_proposal = skymap_from_uniq_to_nested(skymap_proposal)
+        skymap_proposal = skymap_from_uniq_to_nested(skymap_proposal, order=10)
     if "UNIQ" in skymap_reference.columns:
-        skymap_reference = skymap_from_uniq_to_nested(skymap_reference)
+        skymap_reference = skymap_from_uniq_to_nested(skymap_reference, order=10)
 
     # find credible levels
     credible_levels_proposal = find_greedy_credible_levels(skymap_proposal)
@@ -120,7 +121,7 @@ def coverage(skymap_proposal, skymap_reference, credible_levels):
     return coverages
 
 
-def credible_levels_at_position(skymap, ra, dec):
+def credible_levels_at_position(skymap, ra, dec, order=-1):
     """Compute credible level at which position [ra, dec] is covered by skymap.
 
     Parameters
@@ -128,6 +129,7 @@ def credible_levels_at_position(skymap, ra, dec):
     skymap: skymap with estimated position
     ra: ra coordinate in rad, array or float
     dec: dec coordinate in rad, array or float
+    order: order for rasterization, if -1 use max resolution of skymap
 
     Returns
     -------
@@ -135,7 +137,7 @@ def credible_levels_at_position(skymap, ra, dec):
     """
     # convert to nested convention
     if "UNIQ" in skymap.columns:
-        skymap = skymap_from_uniq_to_nested(skymap)
+        skymap = skymap_from_uniq_to_nested(skymap, order=order)
     # compute pixel id corresponding to [ra, dec]
     nside = hp.npix2nside(len(skymap))
     ipix = hp.ang2pix(nside, 0.5 * np.pi - dec, ra)  # ra, dec in rad!
