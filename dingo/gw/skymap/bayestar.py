@@ -436,8 +436,8 @@ class DingoEvent(ligo.skymap.io.events.Event):
             single = DingoSingleEvent(
                 ifo.name,
                 time_event,
-                data=dingo_result.context["waveform"][ifo.name],
-                asd=dingo_result.context["asds"][ifo.name],
+                data=domain.update_data(dingo_result.context["waveform"][ifo.name]),
+                asd=domain.update_data(dingo_result.context["asds"][ifo.name]),
                 template=template,
                 domain=domain,
                 duration=duration,
