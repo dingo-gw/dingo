@@ -78,7 +78,14 @@ def plot_corner_multi(
             **corner_params,
         )
         handles.append(
-            plt.Line2D([], [], color=colors[i], label=l, linewidth=5, markersize=20)
+            plt.Line2D(
+                [],
+                [],
+                color=colors[i] if colors is not None else None,
+                label=l,
+                linewidth=5,
+                markersize=20,
+            )
         )
 
     # Eliminate spacing between the 2D plots
