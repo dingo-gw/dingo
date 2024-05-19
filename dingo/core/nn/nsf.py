@@ -2,6 +2,7 @@
 Implementation of the neural spline flow (NSF). Most of this code is adapted
 from the uci.py example from https://github.com/bayesiains/nsf.
 """
+
 import copy
 
 import torch
@@ -218,6 +219,7 @@ class FlowWrapper(nn.Module):
         if self.embedding_net is not None:
             x = torchutils.forward_pass_with_unpacked_tuple(self.embedding_net, x)
         if len(x) > 0:
+<<<<<<< HEAD
             sample = self.flow.sample(num_samples, x)
             sl = [i for i in range(sample.ndim - 1)]
             return torch.squeeze(sample, dim=sl)
@@ -226,11 +228,18 @@ class FlowWrapper(nn.Module):
             sample = self.flow.sample(num_samples)
             sl = [i for i in range(sample.ndim - 1)]
             return torch.squeeze(sample, dim=sl)
+=======
+            return self.flow.sample(num_samples, x)
+        else:
+            # if there is no context, omit the context argument
+            return self.flow.sample(num_samples)
+>>>>>>> main
 
     def sample_and_log_prob(self, *x, num_samples=1):
         if self.embedding_net is not None:
             x = torchutils.forward_pass_with_unpacked_tuple(self.embedding_net, x)
         if len(x) > 0:
+<<<<<<< HEAD
             sample, log_prob = self.flow.sample_and_log_prob(num_samples, x)
             sl = [i for i in range(sample.ndim - 1)]
             return torch.squeeze(sample, dim=sl), torch.squeeze(log_prob, dim=sl)
@@ -239,6 +248,12 @@ class FlowWrapper(nn.Module):
             sample, log_prob = self.flow.sample_and_log_prob(num_samples)
             sl = [i for i in range(sample.ndim - 1)]
             return torch.squeeze(sample, dim=sl), torch.squeeze(log_prob, dim=sl)
+=======
+            return self.flow.sample_and_log_prob(num_samples, x)
+        else:
+            # if there is no context, omit the context argument
+            return self.flow.sample_and_log_prob(num_samples)
+>>>>>>> main
 
     def forward(self, y, *x):
         if len(x) > 0:

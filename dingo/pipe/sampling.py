@@ -160,6 +160,20 @@ class SamplingInput(Input):
             else:
                 self._density_recovery_settings.update(convert_string_to_dict(settings))
 
+        # If there is only one detector, and no context, we cannot use a coupling transform. In this case, we use an
+        # autoregressive transform for the density estimator.
+        # FIXME: If there are proxies other than time, the condition needs to be updated.
+        if len(self.detectors) == 1:
+            model_settings = self._density_recovery_settings["nde_settings"]["model"]
+            if model_settings["type"] == "nsf":
+                base_transform_kwargs = model_settings["base_transform_kwargs"]
+                if base_transform_kwargs["base_transform_type"] == "rq-coupling":
+                    logger.info(
+                        "Using autoregressive transform for density estimator since there is only one GNPE proxy "
+                        "parameter because there is only one detector."
+                    )
+                    base_transform_kwargs["base_transform_type"] = "rq-autoregressive"
+
     # @property
     # def result_directory(self):
     #     result_dir = os.path.join(self.outdir, "result")

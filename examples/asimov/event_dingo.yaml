@@ -1,0 +1,19 @@
+kind: event
+name: GW150914_095045
+data:
+  channels:
+    H1: GWOSC
+    L1: GWOSC
+  frame types:
+    H1: H1_HOFT_C02
+    L1: L1_HOFT_C02
+  segment length: 8
+event time: 1126259462.391 
+psd length: 128
+interferometers:
+- H1
+- L1
+quality:
+  minimum frequency:
+    H1: 20
+    L1: 20
