@@ -424,7 +424,9 @@ class DingoEvent(ligo.skymap.io.events.Event):
             domain=domain,
             **dingo_result.metadata["dataset_settings"]["waveform_generator"],
         )
-        template = wfg.generate_hplus_hcross({**theta, **dict(phase=0)})["h_plus"]
+        polarizations = wfg.generate_hplus_hcross({**theta, **dict(phase=0)})
+        template = polarizations["h_plus"]
+        # template = 0.5 * (polarizations["h_plus"] + 1j * polarizations["h_cross"])
 
         if f_lower is None:
             f_lower = dingo_result.event_metadata["f_min"]
