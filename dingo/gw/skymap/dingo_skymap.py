@@ -1,12 +1,10 @@
 """Generation of ligo skymaps from dingo results."""
-import ligo.skymap.bayestar
-from ligo.skymap.postprocess import crossmatch
-from ligo.skymap import kde, io, moc, postprocess, plot
+from ligo.skymap import kde
 from typing import Optional
 from bilby.gw.prior import UniformComovingVolume
 from bilby.core.prior.analytical import PowerLaw
-
 import numpy as np
+
 from dingo.gw.result import Result
 
 
@@ -15,15 +13,31 @@ def generate_skymap_from_dingo_result(
     num_samples: int = 5_000,
     num_trials: int = 1,
     num_jobs: int = 1,
-    prior_distance_power: Optional[float] = None,
+    prior_distance_power: Optional[float] = 2,
     cosmology: bool = False,
 ):
-    """
-    prior_distance_power : int, optional
+    """Generate a skymap based on the estimated sky position of the dingo result.
+
+    Parameters
+    ----------
+    dingo_result: Result
+        dingo result file
+    num_samples: int
+        number of samples for skymap kde
+    num_trials: int
+        number of trials for skymap kde
+    num_jobs: int
+        number of parallel job for skymap kde
+    prior_distance_power: int, optional
         The power of distance that appears in the prior
-        (default: 2, uniform in volume).
+        default: 2, uniform in volume
+        if None, use prior from dingo result (i.e., no reweighting)
     cosmology: bool, optional
         Set to enable a uniform in comoving volume prior (default: false).
+
+    Returns
+    -------
+    skymap: skymap for estimated dingo position
     """
     samples = dingo_result.samples
 
