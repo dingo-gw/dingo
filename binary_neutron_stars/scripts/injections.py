@@ -11,7 +11,6 @@ from dingo.gw.skymap import (
 from dingo.gw.skymap import utils as skymap_utils
 
 import yaml
-from types import SimpleNamespace
 from pp_utils import weighted_percentile_of_score
 import numpy as np
 import os
@@ -22,6 +21,8 @@ from bilby.core.prior import PriorDict, Uniform, DeltaFunction
 from bilby.gw.conversion import chirp_mass_and_mass_ratio_to_component_masses
 from ligo.skymap import kde, io
 from ligo.skymap.postprocess import crossmatch
+from astropy.coordinates import SkyCoord
+import astropy.units as u
 from os.path import join
 import argparse
 
@@ -137,18 +138,17 @@ def get_skymap_summary(
         skymap_summary[f"dingo-area-{cl}"] = ad
         skymap_summary[f"dingo-bayestar-coverage-{cl}"] = co
 
-    # credible level of True sky position
+    # searched area and credible level of true sky position
     if theta is not None:
-        skymap_summary[
-            "bayestar-credible-level-true-position"
-        ] = skymap_utils.credible_levels_at_position(
-            skymap_bayestar, ra=theta["ra"], dec=theta["dec"]
-        )
-        skymap_summary[
-            "dingo-credible-level-true-position"
-        ] = skymap_utils.credible_levels_at_position(
-            skymap_dingo, ra=theta["ra"], dec=theta["dec"]
-        )
+        coordinates = SkyCoord(ra=theta["ra"] * u.rad, dec=theta["dec"] * u.rad)
+        # bayestar
+        stats = crossmatch(skymap_bayestar, coordinates=coordinates)
+        skymap_summary["bayestar-searched-prob"] = stats.searched_prob
+        skymap_summary["bayestar-searched-area"] = stats.searched_area
+        # dingo
+        stats = crossmatch(skymap_dingo, coordinates=coordinates)
+        skymap_summary["dingo-searched-prob"] = stats.searched_prob
+        skymap_summary["dingo-searched-area"] = stats.searched_area
 
     return skymap_summary
 
