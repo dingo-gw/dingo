@@ -71,7 +71,9 @@ def credible_areas(skymap, credible_levels):
     return crossmatch(skymap, contours=credible_levels).contour_areas
 
 
-def coverage(skymap_proposal, skymap_reference, credible_levels):
+def coverage(
+    skymap_proposal, skymap_reference, credible_levels, check_consistency=False
+):
     """Compute skymap_proposal's coverage fraction of skymap_reference at credible_levels.
 
     For each credible level p, this computes the fraction f of skymap_reference that is
@@ -84,6 +86,10 @@ def coverage(skymap_proposal, skymap_reference, credible_levels):
     skymap_proposal: proposal skymap
     skymap_reference: reference skymap
     credible_levels: credible levels at which to evaluate coverage
+    check_consistency: If True, check that the coverages of the proposal with itself are
+        consistent with the credible_levels input. This sanity check may fail due to
+        quantization errors when the sky area is too tight and only consists of a few
+        pixels.
 
     Returns
     -------
@@ -115,8 +121,9 @@ def coverage(skymap_proposal, skymap_reference, credible_levels):
         )
 
     # check that proposal coverages are close to input credible_levels
-    deviation = np.array(coverages_proposal) - np.array(credible_levels)
-    assert np.max(np.abs(deviation)) < 1e-3, (coverages, coverages_proposal)
+    if check_consistency:
+        deviation = np.array(coverages_proposal) - np.array(credible_levels)
+        assert np.max(np.abs(deviation)) < 1e-3, (coverages, coverages_proposal)
 
     return coverages
 
