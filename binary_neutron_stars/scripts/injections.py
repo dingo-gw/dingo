@@ -344,6 +344,14 @@ def aggregate_results(
     return summary
 
 
+def set_delta_chirp_mass_prior(result, model_metadata):
+    """Set delta chirp mass prior to veto samples outside of the dingo prior support."""
+    k = model_metadata["train_settings"]["data"]["gnpe_chirp"]["kernel"]["chirp_mass"]
+    result.prior["delta_chirp_mass"] = PriorDict({"delta_chirp_mass": k})[
+        "delta_chirp_mass"
+    ]
+
+
 def main(args):
     f_max_scan = [None]
     if hasattr(args, "f_max"):
@@ -464,6 +472,7 @@ def main(args):
                 # result.sample_synthetic_phase(
                 #     synthetic_phase_kwargs, likelihood_kwargs_synthetic_phase
                 # )
+                set_delta_chirp_mass_prior(result, model.metadata)
                 result.importance_sample(
                     num_processes=args.num_processes, **likelihood_kwargs
                 )
