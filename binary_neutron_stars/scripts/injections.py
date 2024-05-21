@@ -231,8 +231,29 @@ def get_injection_generator(model_metadata, base_domain_dict, fixed_parameters=N
 
 
 def get_chirp_mass_functions(
-    model_metadata=None, injection_generator=None, fixed_chirp_mass=None
+    model_metadata=None,
+    injection_generator=None,
+    fixed_chirp_mass=None,
+    centered_injection_chirp_mass=False,
 ):
+    """Build functions for sampling from chirp mass hyperprior and prior.
+
+    Parameters
+    ----------
+    model_metadata: Dictionary with model metadata
+    injection_generator: Dingo injection generator
+    fixed_chirp_mass: if set, use this value as a fixed chirp mass prior center AND
+        fixed injection chirp mass
+    centered_injection_chirp_mass: If set, always sample injection chirp mass at the
+        center of the hyperprior. In this case, PP plots won't work anymore, but this
+        option is useful when we want to make sure to not truncate the posterior.
+
+    Returns
+    -------
+    sample_chirp_mass_proxy: hyper prior, samples center of chirp mass prior
+    get_chirp_mass_prior: function to build chirp mass prior for a proxy/center sampled
+        from the hyperprior
+    """
     if fixed_chirp_mass is not None:
         sample_chirp_mass_proxy = DeltaFunction(fixed_chirp_mass).sample
         get_chirp_mass_prior = lambda chirp_mass_proxy: DeltaFunction(chirp_mass_proxy)
@@ -260,10 +281,15 @@ def get_chirp_mass_functions(
         chirp_mass_hyperprior.maximum -= chirp_mass_kernel.maximum
         # functions for sampling chirp mass proxy and building the corresponding prior
         sample_chirp_mass_proxy = chirp_mass_hyperprior.sample
-        get_chirp_mass_prior = lambda chirp_mass_proxy: Uniform(
-            minimum=chirp_mass_proxy + chirp_mass_kernel.minimum,
-            maximum=chirp_mass_proxy + chirp_mass_kernel.maximum,
-        )
+        if not centered_injection_chirp_mass:
+            get_chirp_mass_prior = lambda chirp_mass_proxy: Uniform(
+                minimum=chirp_mass_proxy + chirp_mass_kernel.minimum,
+                maximum=chirp_mass_proxy + chirp_mass_kernel.maximum,
+            )
+        else:
+            get_chirp_mass_prior = lambda chirp_mass_proxy: DeltaFunction(
+                chirp_mass_proxy
+            )
     return sample_chirp_mass_proxy, get_chirp_mass_prior
 
 
@@ -375,6 +401,9 @@ def main(args):
         model.metadata,
         injection_generator,
         getattr(args, "fixed_parameters", {}).get("chirp_mass"),
+        centered_injection_chirp_mass=getattr(
+            args, "centered_injection_chirp_mass", False
+        ),
     )
 
     summary_dingo = {}
