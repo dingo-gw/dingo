@@ -475,6 +475,7 @@ class DingoEvent(ligo.skymap.io.events.Event):
 
 def generate_bayestar_skymap_from_dingo_result(
     dingo_result: Result,
+    waveform: str = "TaylorF2threePointFivePN",
     prior_distance_power: int = 2,
     cosmology: bool = False,
     use_mcmc: bool = False,
@@ -489,6 +490,14 @@ def generate_bayestar_skymap_from_dingo_result(
     ----------
     dingo_result: Result
         dingo result file
+    waveform: str
+        string specifying waveform. Some options:
+        * o1-uberbank: use TaylorF2threePointFivePN (m1+m2<4) or SEOBNRv2_ROM_DoubleSpin
+        * o2-uberbank: use TaylorF2threePointFivePN (m1+m2<4) or SEOBNRv4_ROM
+        * TaylorF2threePointFivePN
+        * SEOBNRv2_ROM_DoubleSpin
+        * SEOBNRv4_ROM
+        see lscsoft.docs.ligo.org/ligo.skymap/_modules/ligo/skymap/bayestar/filter.html.
     prior_distance_power: int
         see ligo.skymap.bayestar.localize
         power of distance prior
@@ -518,7 +527,7 @@ def generate_bayestar_skymap_from_dingo_result(
     event = DingoEvent.from_dingo_result(dingo_result, **event_kwargs)
     skymap_bayestar = ligo.skymap.bayestar.localize(
         event=event,
-        waveform="o2-uberbank",
+        waveform=waveform,
         f_low=f_low,
         min_inclination=0,
         max_inclination=np.pi / 2,
