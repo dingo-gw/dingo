@@ -482,6 +482,7 @@ def generate_bayestar_skymap_from_dingo_result(
     enable_snr_series: bool = True,
     f_high_truncate: float = 1.0,
     rescale_loglikelihood: float = 0.83,  # why??
+    return_aux: bool = False,
     **event_kwargs,
 ):
     """Generate a bayestar skymap from a dingo result instance.
@@ -513,6 +514,8 @@ def generate_bayestar_skymap_from_dingo_result(
         truncate at f_high_truncate * f_max to suppress psd artifacts
     rescale_loglikelihood: float
         see ligo.skymap.bayestar.localize
+    return_aux: bool
+        if set, also return aux information (including detector snrs)
     event_kwargs
         kwargs for DingoEvent.from_dingo_result(dingo_result, **event_kwargs)
 
@@ -525,7 +528,7 @@ def generate_bayestar_skymap_from_dingo_result(
     if f_low is None:
         f_low = dingo_result.event_metadata["f_min"]
     event = DingoEvent.from_dingo_result(dingo_result, **event_kwargs)
-    skymap_bayestar = ligo.skymap.bayestar.localize(
+    bayestar_kwargs = dict(
         event=event,
         waveform=waveform,
         f_low=f_low,
@@ -541,7 +544,26 @@ def generate_bayestar_skymap_from_dingo_result(
         f_high_truncate=f_high_truncate,
         rescale_loglikelihood=rescale_loglikelihood,
     )
-    return skymap_bayestar
+    aux = {"snr_" + single.detector: single.snr for single in event.singles}
+    try:
+        skymap_bayestar = ligo.skymap.bayestar.localize(**bayestar_kwargs)
+    except ValueError:
+        dt = event_kwargs["t_search_window_width"] - 0.001
+        singles = []
+        for single in event.singles:
+            if abs(single.time - ((single._t_upper + single._t_lower) / 2)) < dt:
+                singles.append(single)
+            else:
+                print(f"Omitting {single.detector} snr time series for Bayestar.")
+                aux["snr_" + single.detector] *= -1  # make negative to mark inactive
+        event = DingoEvent(singles, event.template_args)
+        bayestar_kwargs["event"] = event
+        skymap_bayestar = ligo.skymap.bayestar.localize(**bayestar_kwargs)
+
+    if not return_aux:
+        return skymap_bayestar
+    else:
+        return skymap_bayestar, aux
 
 
 if __name__ == "__main__":
