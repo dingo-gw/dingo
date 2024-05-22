@@ -108,7 +108,10 @@ def get_skymap_summary(
     num_trials=1,
     credible_levels=(0.5, 0.9),
     use_injection_parameters_for_bayestar=False,
+    weight_clipping_kwargs=None,
 ):
+    skymap_summary = {}
+
     skymap_bayestar = generate_bayestar_skymap_from_dingo_result(
         dingo_result,
         template_parameters=theta if use_injection_parameters_for_bayestar else None,
@@ -117,16 +120,17 @@ def get_skymap_summary(
         t_search_window_width=t_search_window,
         max_likelihood_template="log_likelihood" in dingo_result.samples,
     )
-    skymap_dingo = generate_skymap_from_dingo_result(
+    skymap_dingo, aux_dingo = generate_skymap_from_dingo_result(
         dingo_result,
         num_samples=num_samples,
         num_jobs=num_jobs,
         num_trials=num_trials,
         prior_distance_power=prior_distance_power,
         cosmology=cosmology,
+        weight_clipping_kwargs=weight_clipping_kwargs,
+        return_aux=True,
     )
-
-    skymap_summary = {}
+    skymap_summary.update({"aux-dingo_" + k: v for k, v in aux_dingo.items()})
 
     # areas at specified credible levels
     areas_bayestar = skymap_utils.credible_areas(skymap_bayestar, credible_levels)

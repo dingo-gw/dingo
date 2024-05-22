@@ -1,6 +1,6 @@
 """Generation of ligo skymaps from dingo results."""
 from ligo.skymap import kde
-from typing import Optional
+from typing import Optional, Dict, Any
 from bilby.gw.prior import UniformComovingVolume
 from bilby.core.prior.analytical import PowerLaw
 import numpy as np
@@ -15,6 +15,8 @@ def generate_skymap_from_dingo_result(
     num_jobs: int = 1,
     prior_distance_power: Optional[float] = 2,
     cosmology: bool = False,
+    weight_clipping_kwargs: Optional[Dict[str, Any]] = None,
+    return_aux: bool = False,
 ):
     """Generate a skymap based on the estimated sky position of the dingo result.
 
@@ -34,10 +36,15 @@ def generate_skymap_from_dingo_result(
         if None, use prior from dingo result (i.e., no reweighting)
     cosmology: bool, optional
         Set to enable a uniform in comoving volume prior (default: false).
+    weight_clipping_kwargs: dict
+        if set, clip the weights before rejection sampling based on these kwargs
+    return_aux: bool
+        if True, return dict with aux information
 
     Returns
     -------
     skymap: skymap for estimated dingo position
+    aux: dict with aux information
     """
     samples = dingo_result.samples
 
@@ -77,9 +84,67 @@ def generate_skymap_from_dingo_result(
         weights[np.where(np.isinf(prior_result.ln_prob(distance)))[0]] = 0
         weights /= weights.mean()
 
+    if weight_clipping_kwargs is not None:
+        weights = clip_weights(weights, **weight_clipping_kwargs)
+
     samples = samples.sample(num_samples, weights=weights, replace=True)
     ra_dec_dL = np.array(samples[["ra", "dec", "luminosity_distance"]])
     skypost = kde.Clustered2DSkyKDE(ra_dec_dL, trials=num_trials, jobs=num_jobs)
     skymap = skypost.as_healpix()
 
-    return skymap
+    if not return_aux:
+        return skymap
+    else:
+        aux = {
+            "n_eff": int(np.sum(weights) ** 2 / np.sum(weights ** 2)),
+            "n_rejection": int(np.sum(weights / np.max(weights))),
+        }
+        return skymap, aux
+
+
+def clip_weights(weights, num_clip, mode="mean", print_stats=False):
+    """Clip the num_clip highest weights and return the result.
+
+    See e.g. https://ieeexplore.ieee.org/document/8450722.
+    Clipping is leads to asymptotically correct results if num_clip <= sqrt(num_samples).
+
+    Parameters
+    ----------
+    weights: array with weights
+    num_clip: number of samples to clip
+    mode: whether to set the clipped weight to mean or min weight of the clipped samples
+    print_stats: if True, print the ess and ns before and after clipping
+
+    Returns
+    -------
+    weights: updated (clipped) weights
+    """
+    weights = np.copy(weights)
+    ess_before = np.sum(weights) ** 2 / np.sum(weights ** 2)
+    ns_before = np.sum(weights / np.max(weights))
+
+    # get indices of clipped samples
+    # clipped_indices = np.argsort(-weights)[:num_clip]
+    clipped_indices = np.argpartition(-weights, num_clip)[:num_clip]  # more efficient
+
+    # get new weight for clipped samples
+    if mode == "mean":
+        weight_new = np.mean(weights[clipped_indices])
+    elif mode == "min":
+        weight_new = np.min(weights[clipped_indices])
+    else:
+        raise ValueError(f"Mode should be mean or min, got {mode}.")
+
+    # set new weight
+    weights[clipped_indices] = weight_new
+    ess_after = np.sum(weights) ** 2 / np.sum(weights ** 2)
+    ns_after = np.sum(weights / np.max(weights))
+
+    if print_stats:
+        print(f"Statistics before / after clipping (N = {len(weights)}):")
+        print(f"ESS:\t{ess_before:.0f} / {ess_after:.0f}")
+        print(f"NS: \t{ns_before:.0f} / {ns_after:.0f}")
+
+    weights = weights / np.mean(weights)
+
+    return weights
