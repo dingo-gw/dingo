@@ -168,6 +168,7 @@ def update_summary_data(summary_data, args, theta, result, **kwargs):
 
     # insert percentiles
     if theta is not None:
+        data.update({"injection-parameter_" + k: v for k, v in theta.items()})
         common_parameters = theta.keys() & samples.keys()
         for p in common_parameters:
             key = "percentiles-" + p
