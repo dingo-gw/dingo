@@ -109,6 +109,7 @@ def get_skymap_summary(
     credible_levels=(0.5, 0.9),
     use_injection_parameters_for_bayestar=False,
     weight_clipping_kwargs=None,
+    allow_duplicates=True,
 ):
     skymap_summary = {}
 
@@ -129,6 +130,7 @@ def get_skymap_summary(
         cosmology=cosmology,
         weight_clipping_kwargs=weight_clipping_kwargs,
         return_aux=True,
+        allow_duplicates=allow_duplicates,
     )
     skymap_summary.update({"aux-dingo_" + k: v for k, v in aux_dingo.items()})
 

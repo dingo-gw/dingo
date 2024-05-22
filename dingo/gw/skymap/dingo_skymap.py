@@ -17,6 +17,7 @@ def generate_skymap_from_dingo_result(
     cosmology: bool = False,
     weight_clipping_kwargs: Optional[Dict[str, Any]] = None,
     return_aux: bool = False,
+    allow_duplicates: bool = True,
 ):
     """Generate a skymap based on the estimated sky position of the dingo result.
 
@@ -40,6 +41,8 @@ def generate_skymap_from_dingo_result(
         if set, clip the weights before rejection sampling based on these kwargs
     return_aux: bool
         if True, return dict with aux information
+    allow_duplicates: bool
+        if False, the KDE samples are sampled without replacement
 
     Returns
     -------
@@ -85,9 +88,13 @@ def generate_skymap_from_dingo_result(
         weights /= weights.mean()
 
     if weight_clipping_kwargs is not None:
+        if not allow_duplicates:
+            raise ValueError(
+                "Weight clipping should not be set when dropping duplicates."
+            )
         weights = clip_weights(weights, **weight_clipping_kwargs)
 
-    samples = samples.sample(num_samples, weights=weights, replace=True)
+    samples = samples.sample(num_samples, weights=weights, replace=allow_duplicates)
     ra_dec_dL = np.array(samples[["ra", "dec", "luminosity_distance"]])
     skypost = kde.Clustered2DSkyKDE(ra_dec_dL, trials=num_trials, jobs=num_jobs)
     skymap = skypost.as_healpix()
