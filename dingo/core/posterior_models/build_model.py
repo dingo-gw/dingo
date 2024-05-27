@@ -51,12 +51,10 @@ def build_model_from_kwargs(
         "no_embedding": None,
     }
 
+    allow_tf32 = False
     if filename is not None:
-        if "device" in kwargs:
-            device = kwargs["device"]
-        else:
-            device = "cpu"
-        d = torch.load(filename, map_location=device)
+        # Load model to extract settings
+        d = torch.load(filename, map_location="meta")
         posterior_model_type = d["metadata"]["train_settings"]["model"][
             "posterior_model_type"
         ]
@@ -64,6 +62,7 @@ def build_model_from_kwargs(
             embedding_network_type = d["metadata"]["train_settings"]["model"][
                 "embedding_type"
             ]
+            allow_tf32 = d["metadata"]["train_settings"]["model"]["embedding_kwargs"]["allow_tf32"]
         else:
             embedding_network_type = "no_embedding"
     else:
@@ -74,6 +73,7 @@ def build_model_from_kwargs(
             embedding_network_type = settings["train_settings"]["model"][
                 "embedding_type"
             ]
+            allow_tf32 = settings["train_settings"]["model"]["embedding_kwargs"]["allow_tf32"]
         else:
             embedding_network_type = "no_embedding"
 
@@ -111,6 +111,15 @@ def build_model_from_kwargs(
         if "cf_kwargs" in settings["train_settings"]["model"].keys():
             del settings["train_settings"]["model"]["cf_kwargs"]
 
+    # Set precision
+    if allow_tf32:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        print(
+            f"Cuda and cudnn backends running with allow_tf32 = {torch.backends.cuda.matmul.allow_tf32}."
+        )
+
+    # Create/Load model
     pm = model(
         model_filename=filename,
         metadata=settings,

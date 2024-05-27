@@ -126,6 +126,9 @@ class ContinuousFlowsBase(Base):
         if self.initial_weights is not None:
             model_kwargs["initial_weights"] = self.initial_weights
         if self.embedding_net_builder is not None:
+            # TODO: move allow_tf32 one level up in settings file and exclude it similar to embedding_type
+            if "allow_tf32" in model_kwargs["embedding_kwargs"]:
+                model_kwargs["embedding_kwargs"].pop("allow_tf32")
             model_kwargs["embedding_net_builder"] = self.embedding_net_builder
         self.network = create_cf_model(**model_kwargs)
 

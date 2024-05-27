@@ -478,7 +478,6 @@ def create_transformer_enet(
     positional_encoder_kwargs: dict = None,
     block_encoder_kwargs: dict = None,
     final_net_kwargs: dict = None,
-    allow_tf32: bool = False,
     added_context: bool = False,
 ):
     """
@@ -501,8 +500,6 @@ def create_transformer_enet(
         settings for block encoder
     final_net_kwargs: dict
         settings for final network
-    allow_tf32: bool
-        whether to allow the cuda backend to work with lower precision
     added_context: bool = False
         whether to add additional gnpe dimension to the context vector
 
@@ -511,12 +508,6 @@ def create_transformer_enet(
     model: TransformerModel
 
     """
-    if allow_tf32:
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-        print(
-            f"Cuda and cudnn backends running with allow_tf32 = {torch.backends.cuda.matmul.allow_tf32}."
-        )
     if added_context:
         raise ValueError(
             "GNPE is not yet implemented for transformer embedding network."
@@ -654,16 +645,9 @@ def create_pooling_transformer(
         tokenizer_kwargs: dict = None,
         positional_encoder_kwargs: dict = None,
         final_net_kwargs: dict = None,
-        allow_tf32: bool = False,
         added_context: bool = False,
 ):
     """Builder function for a transformer based multi-event encoder."""
-    if allow_tf32:
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-        print(
-            f"Cuda and cudnn backends running with allow_tf32 = {torch.backends.cuda.matmul.allow_tf32}."
-        )
 
     # Experiment with extra skip connections for boosting performance and avoiding
     # local minima.
