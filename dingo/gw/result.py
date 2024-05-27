@@ -285,6 +285,7 @@ class Result(CoreResult):
         phase_marginalization_kwargs: Optional[dict] = None,
         calibration_marginalization_kwargs: Optional[dict] = None,
         phase_grid: Optional[np.ndarray] = None,
+        decimate: Optional[bool] = False,
     ):
         """
         Build the likelihood function based on model metadata. This is called at the
@@ -300,6 +301,8 @@ class Result(CoreResult):
             kwargs for phase marginalization.
         calibration_marginalization_kwargs: dict
             Calibration marginalization parameters. If None, no calibration marginalization is used.
+        decimate : bool, optional
+            If set, decimate data from domain.base_domain to domain
         """
         if time_marginalization_kwargs is not None:
             if self.geocent_time_prior is None:
@@ -330,6 +333,7 @@ class Result(CoreResult):
         self.time_marginalization_kwargs = time_marginalization_kwargs
         self.phase_marginalization_kwargs = phase_marginalization_kwargs
         self.calibration_marginalization_kwargs = calibration_marginalization_kwargs
+        self.decimate = decimate
 
         # Choose the WaveformGenerator domain. This is ultimately projected to the data domain, but generally we
         # allow it to be different, e.g., to start integrating from lower frequencies than the lower bound of the
@@ -358,6 +362,10 @@ class Result(CoreResult):
                 wfg_domain_dict["delta_f"] = delta_f_new
         wfg_domain = build_domain(wfg_domain_dict)
 
+        event_domain, event_data = get_updated_event_domain_and_data(
+            self.domain, self.context, self.event_metadata
+        )
+
         self.likelihood = StationaryGaussianGWLikelihood(
             wfg_kwargs=self.base_metadata["dataset_settings"]["waveform_generator"],
             wfg_domain=wfg_domain,
@@ -368,11 +376,13 @@ class Result(CoreResult):
             phase_marginalization_kwargs=phase_marginalization_kwargs,
             calibration_marginalization_kwargs=calibration_marginalization_kwargs,
             phase_grid=phase_grid,
+            decimate=decimate
         )
 
     def sample_synthetic_phase(
         self,
         synthetic_phase_kwargs,
+        likelihood_kwargs: Optional[dict] = None,
         inverse: bool = False,
     ):
         """
@@ -460,7 +470,9 @@ class Result(CoreResult):
 
         if not inverse:
             # TODO: This can probably be removed.
-            self._build_likelihood()
+            if likelihood_kwargs is None:
+                likelihood_kwargs = {}
+            self._build_likelihood(**likelihood_kwargs)
 
         if inverse:
             # We estimate the log_prob for given phases, so first save the evaluation
@@ -626,3 +638,39 @@ class Result(CoreResult):
                 except AttributeError:
                     continue
         return prior
+
+
+def get_updated_event_domain_and_data(domain, event_data, event_metadata):
+    # Get event domain, which is just the input domain with a potentially updated range.
+    domain = get_updated_domain_for_event(domain, event_metadata)
+
+    # Update event data to the new domain. This is a trivial operation if f_max is a
+    # node of the domain, but if not, we need to account for rounding errors.
+    base_domain = getattr(domain, "base_domain", domain)
+    event_data = {
+        k1: {k2: base_domain.update_data(v2) for k2, v2 in v1.items()}
+        for k1, v1 in event_data.items()
+    }
+
+    return domain, event_data
+
+
+def get_updated_domain_for_event(domain, event_metadata):
+    # check compatibility of window factors
+    window_factor = get_window_factor(
+        dict(
+            type=event_metadata["window_type"],
+            T=event_metadata["T"],
+            f_s=event_metadata["f_s"],
+            roll_off=event_metadata["roll_off"],
+        )
+    )
+    if domain.window_factor != window_factor:
+        raise ValueError(
+            f"Network trained with window factor {domain.window_factor}, but event data "
+            f"requires window factor {window_factor}."
+        )
+    # Get event domain, which is just the input domain with a potentially updated range.
+    domain = build_domain(domain.domain_dict)
+    domain.update(dict(f_min=event_metadata["f_min"], f_max=event_metadata["f_max"]))
+    return domain

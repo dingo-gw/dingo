@@ -156,24 +156,32 @@ class ImportanceSamplingInput(Input):
             self._importance_sampling_settings = dict()
 
     def run_sampler(self):
-        if "synthetic_phase" in self.importance_sampling_settings:
-            logger.info("Sampling synthetic phase.")
-            synthetic_phase_kwargs = {
-                **self.importance_sampling_settings["synthetic_phase"],
-                "num_processes": self.request_cpus,
-            }
-            self.result.sample_synthetic_phase(synthetic_phase_kwargs)
-
-        self.result.importance_sample(
-            num_processes=self.request_cpus,
+        likelihood_kwargs = dict(
             time_marginalization_kwargs=self.importance_sampling_settings.get(
                 "time_marginalization"
             ),
             phase_marginalization_kwargs=self.importance_sampling_settings.get(
                 "phase_marginalization"
             ),
-            calibration_marginalization_kwargs=self.calibration_marginalization_kwargs,
+            decimate=self.importance_sampling_settings.get("decimate"),
         )
+
+        if "synthetic_phase" in self.importance_sampling_settings:
+            logger.info("Sampling synthetic phase.")
+            synthetic_phase_kwargs = {
+                **self.importance_sampling_settings["synthetic_phase"],
+                "num_processes": self.request_cpus,
+            }
+            likelihood_kwargs_synthetic_phase = {
+                k: v
+                for k, v in likelihood_kwargs.items()
+                if not k.endswith("_marginalization_kwargs")
+            }  # can't use marginalizations in phase recovery
+            self.result.sample_synthetic_phase(
+                synthetic_phase_kwargs, likelihood_kwargs_synthetic_phase
+            )
+
+        self.result.importance_sample(num_processes=self.request_cpus, **likelihood_kwargs)
 
         if self.prior_dict:
             logger.info("Updating prior from network prior. Changes:")
