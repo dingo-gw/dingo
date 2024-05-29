@@ -12,6 +12,9 @@ import pandas as pd
 import lal
 import lalsimulation as LS
 
+from lalsimulation.gwsignal.core import waveform
+from lalsimulation.gwsignal.models import gwsignal_get_waveform_generator
+
 from bilby.gw.conversion import (
     convert_to_lal_binary_black_hole_parameters,
     bilby_to_lalsimulation_spins,
