@@ -331,7 +331,7 @@ class Base:
             self.event_metadata = d["event_metadata"]
 
         self.model_kwargs = d["model_kwargs"]
-        if device is not "meta":
+        if device != "meta":
             self.initialize_network()
             self.network.load_state_dict(d["model_state_dict"])
 
