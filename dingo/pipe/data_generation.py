@@ -165,8 +165,9 @@ class DataGenerationInput(BilbyDataGenerationInput):
     def save_hdf5(self):
         """
         Save frequency-domain strain and ASDs as DingoDataset HDF5 format.
+
         This method will also save the PSDs as .txt files in the data directory
-        for easy reading by pesummary and Bilby
+        for easy reading by pesummary and Bilby.
         """
 
         # PSD and strain data.
