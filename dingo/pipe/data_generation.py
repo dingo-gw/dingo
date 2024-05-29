@@ -163,7 +163,11 @@ class DataGenerationInput(BilbyDataGenerationInput):
             self.create_data(args)
 
     def save_hdf5(self):
-        """Save frequency-domain strain and ASDs as DingoDataset HDF5 format."""
+        """
+        Save frequency-domain strain and ASDs as DingoDataset HDF5 format.
+        This method will also save the PSDs as .txt files in the data directory
+        for easy reading by pesummary and Bilby
+        """
 
         # PSD and strain data.
         data = {"waveform": {}, "asds": {}}  # TODO: Rename these keys.
@@ -241,7 +245,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
         for ifo in self.interferometers:
             np.savetxt(
                 os.path.join(self.data_directory, f"{ifo.name}_psd.txt"),
-                np.vstack([domain(), data["asds"][ifo.name]]).T,
+                np.vstack([domain(), data["asds"][ifo.name] ** 2]).T,
             )
 
     @property
