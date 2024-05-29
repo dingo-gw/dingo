@@ -406,7 +406,6 @@ class TransformerModel(nn.Module):
             batch_first=True,
         )
         self.transformer_encoder = TransformerEncoder(encoder_layers, num_layers)
-        self.adapt_avg_pool = nn.AdaptiveAvgPool1d(1)
         self.d_model = d_model
 
         self.final_net = final_net
