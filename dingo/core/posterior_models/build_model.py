@@ -62,7 +62,7 @@ def build_model_from_kwargs(
             embedding_network_type = d["metadata"]["train_settings"]["model"][
                 "embedding_type"
             ]
-            allow_tf32 = d["metadata"]["train_settings"]["model"]["embedding_kwargs"]["allow_tf32"]
+            allow_tf32 = d["metadata"]["train_settings"]["model"]["embedding_kwargs"].get("allow_tf32", False)
         else:
             embedding_network_type = "no_embedding"
     else:
@@ -73,7 +73,7 @@ def build_model_from_kwargs(
             embedding_network_type = settings["train_settings"]["model"][
                 "embedding_type"
             ]
-            allow_tf32 = settings["train_settings"]["model"]["embedding_kwargs"]["allow_tf32"]
+            allow_tf32 = settings["train_settings"]["model"]["embedding_kwargs"].get("allow_tf32", False)
         else:
             embedding_network_type = "no_embedding"
 
