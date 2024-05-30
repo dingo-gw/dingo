@@ -3,8 +3,9 @@ from scipy.signal.windows import tukey
 from scipy.interpolate import interp1d
 from bilby.gw.detector import PowerSpectralDensity
 
-from dingo.gw.prior import default_extrinsic_dict
+from dingo.gw.prior import default_extrinsic_dict, default_intrinsic_dict
 from dingo.gw.prior import BBHExtrinsicPriorDict
+from pesummary.gw.conversions import convert
 
 
 def get_window(window_kwargs):
@@ -41,6 +42,20 @@ def get_extrinsic_prior_dict(extrinsic_prior):
         if v.lower() != "default":
             extrinsic_prior_dict[k] = v
     return extrinsic_prior_dict
+
+def get_intrinsic_prior_dict(intrinsic_prior):
+    """Build dict for extrinsic prior by starting with
+    default_extrinsic_dict, and overwriting every element for which
+    extrinsic_prior is not default.
+    TODO: Move to dingo.gw.prior.py?"""
+    intrinsic_prior_dict = default_intrinsic_dict.copy()
+    for k, v in intrinsic_prior.items():
+        if isinstance(v, int) or isinstance(v, float):
+            intrinsic_prior_dict[k] = v
+            continue
+        if v.lower() != "default":
+            intrinsic_prior_dict[k] = v
+    return intrinsic_prior_dict
 
 
 def get_mismatch(a, b, domain, asd_file=None):
@@ -143,3 +158,23 @@ def get_standardization_dict(
         "std": {k: std[k] for k in selected_parameters},
     }
     return standardization_dict
+
+def fill_missing_available_parameters(df):
+    """ 
+    This function will take a dataframe of parameters, and 
+    derive as many missing parameters as possible. For example,
+    if the dataframe has mass_ratio and mass_1, this function 
+    will populate it with chirp_mass and mass_2 as well. 
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Dataframe of samples with missing parameters.  
+    """
+    # if mass_2 not available obtain it first
+    if "mass_2" not in df.keys() and "mass_ratio" in df.keys() and "mass_1" in df.keys():
+        df["mass_2"] = df["mass_1"] * df["mass_ratio"]
+
+    df = convert(df.to_dict(orient='list')).to_pandas()
+
+    return df 
