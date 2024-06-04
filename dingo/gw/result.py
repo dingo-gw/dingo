@@ -369,8 +369,8 @@ class Result(CoreResult):
         self.likelihood = StationaryGaussianGWLikelihood(
             wfg_kwargs=self.base_metadata["dataset_settings"]["waveform_generator"],
             wfg_domain=wfg_domain,
-            data_domain=self.domain,
-            event_data=self.context,
+            data_domain=event_domain,
+            event_data=event_data,
             t_ref=self.t_ref,
             time_marginalization_kwargs=time_marginalization_kwargs,
             phase_marginalization_kwargs=phase_marginalization_kwargs,
