@@ -647,10 +647,16 @@ def get_updated_event_domain_and_data(domain, event_data, event_metadata):
     # Update event data to the new domain. This is a trivial operation if f_max is a
     # node of the domain, but if not, we need to account for rounding errors.
     base_domain = getattr(domain, "base_domain", domain)
+    if "base_data" in event_data:
+        base_data = event_data["base_data"]
+    else:
+        base_data = None
     event_data = {
         k1: {k2: base_domain.update_data(v2) for k2, v2 in v1.items()}
-        for k1, v1 in event_data.items()
+        for k1, v1 in event_data.items() if k1 != "base_data"
     }
+    if base_data is not None:
+        event_data["base_data"] = base_data
 
     return domain, event_data
 
