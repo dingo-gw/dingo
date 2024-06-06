@@ -65,8 +65,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             if not hasattr(wfg_domain, "base_domain"):
                 raise ValueError("Decimation requires wfg domain to have base_domain.")
         else:
-            data_domain = getattr(data_domain, "base_domain", data_domain)
-            wfg_domain = getattr(wfg_domain, "base_domain", wfg_domain)
+            data_domain = data_domain
+            wfg_domain = wfg_domain
 
         super().__init__(
             wfg_kwargs=wfg_kwargs,
