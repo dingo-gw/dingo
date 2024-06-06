@@ -652,7 +652,7 @@ def get_updated_event_domain_and_data(domain, event_data, event_metadata):
     else:
         base_data = None
     event_data = {
-        "asds": {k: base_domain.update_data(v, low_value=1.) for k, v in event_data["asds"].items()},
+        "asds": {k: base_domain.update_data(v, low_value=1e-20) for k, v in event_data["asds"].items()},
         "waveform": {k: base_domain.update_data(v, low_value=0.) for k, v in event_data["waveform"].items()}
     }
     if base_data is not None:
