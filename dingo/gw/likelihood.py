@@ -80,8 +80,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         if decimate:
             # whiten (without noise std, do this after decimation!), avoid division by asd = 0.
             self.whitened_strains = {
-                k: np.where(data_domain.frequency_mask, v / event_data["asds"][k], 0.)
-                for k, v in event_data["waveform"].items()
+                k: v / event_data["asds"][k] for k, v in event_data["waveform"].items()
             }
             # decimate
             self.whitened_strains = {
@@ -89,14 +88,14 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 for ifo, waveform_base in self.whitened_strains.items()
             }
             self.asd = {
-                ifo: np.where(data_domain.frequency_mask, 1 / data_domain.decimate(1 / asd_base), 0.)
+                ifo: 1 / data_domain.decimate(1 / asd_base)
                 for ifo, asd_base in event_data["asds"].items()
             }
             del event_data
         else:
             # whiten, avoid division by asd = 0.
             self.whitened_strains = {
-                k: np.where(data_domain.frequency_mask, v / event_data["asds"][k] / self.data_domain.noise_std, 0.)
+                k: v / event_data["asds"][k] / self.data_domain.noise_std
                 for k, v in event_data["waveform"].items()
             }
             self.asd = event_data["asds"]
