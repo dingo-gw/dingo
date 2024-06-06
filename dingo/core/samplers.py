@@ -107,6 +107,8 @@ class Sampler(object):
     def context(self, value):
         if value is not None and "parameters" in value:
             self.metadata["injection_parameters"] = value.pop("parameters")
+        if value is not None and "extrinsic_parameters" in value:
+            self.metadata["injection_extrinsic_parameters"] = value.pop("extrinsic_parameters")
         self._context = value
 
     @property
