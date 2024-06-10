@@ -263,7 +263,6 @@ class PosteriorModel:
 
         self.model_kwargs = d["model_kwargs"]
         self.initialize_model()
-        self.model.load_state_dict(d["model_state_dict"])
 
         self.epoch = d["epoch"]
 
@@ -275,23 +274,26 @@ class PosteriorModel:
         if "event_metadata" in d:
             self.event_metadata = d["event_metadata"]
 
-        self.model_to_device(device)
+        if device != "meta":
+            self.model.load_state_dict(d["model_state_dict"])
 
-        if load_training_info:
-            if "optimizer_kwargs" in d:
-                self.optimizer_kwargs = d["optimizer_kwargs"]
-            if "scheduler_kwargs" in d:
-                self.scheduler_kwargs = d["scheduler_kwargs"]
-            # initialize optimizer and scheduler
-            self.initialize_optimizer_and_scheduler()
-            # load optimizer and scheduler state dict
-            if "optimizer_state_dict" in d:
-                self.optimizer.load_state_dict(d["optimizer_state_dict"])
-            if "scheduler_state_dict" in d:
-                self.scheduler.load_state_dict(d["scheduler_state_dict"])
-        else:
-            # put model in evaluation mode
-            self.model.eval()
+            self.model_to_device(device)
+
+            if load_training_info:
+                if "optimizer_kwargs" in d:
+                    self.optimizer_kwargs = d["optimizer_kwargs"]
+                if "scheduler_kwargs" in d:
+                    self.scheduler_kwargs = d["scheduler_kwargs"]
+                # initialize optimizer and scheduler
+                self.initialize_optimizer_and_scheduler()
+                # load optimizer and scheduler state dict
+                if "optimizer_state_dict" in d:
+                    self.optimizer.load_state_dict(d["optimizer_state_dict"])
+                if "scheduler_state_dict" in d:
+                    self.scheduler.load_state_dict(d["scheduler_state_dict"])
+            else:
+                # put model in evaluation mode
+                self.model.eval()
 
     def train(
         self,
