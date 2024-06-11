@@ -89,7 +89,7 @@ Step 2 Generating an ASD dataset
 To generate an ASD dataset we can run the same command as in the previous tutorial.
 
 ```
-dingo_generate_asd_dataset --settings_file asd_dataset_settings_fiducial.yaml --data_dir training_data/asd_dataset_fiducial -out_name training_data/asd_dataset_fiducial/asds_O1_fiducial.hdf5
+dingo_generate_asd_dataset --settings_file asd_dataset_settings_fiducial.yaml --data_dir training_data/asd_dataset_fiducial --out_name training_data/asd_dataset_fiducial/asds_O1_fiducial.hdf5
 ```
 
 However, this time, during training we will need two sets of ASDs. The first one will be
@@ -103,7 +103,7 @@ of ASDs from the observing run. We find this split leads to an improvement in
 overall performance. To generate this second dataset run
 
 ```
-dingo_generate_asd_dataset --settings_file asd_dataset_settings.yaml --data_dir training_data/asd_dataset -out_name training_data/asd_dataset/asds_O1.hdf5
+dingo_generate_asd_dataset --settings_file asd_dataset_settings.yaml --data_dir training_data/asd_dataset --out_name training_data/asd_dataset/asds_O1.hdf5
 ```
 
 We can see that in `asd_dataset_settings.yaml` the `num_psds_max`
