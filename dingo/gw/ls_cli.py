@@ -23,7 +23,6 @@ def ls():
     if path.suffix == ".pt":
         print("Extracting information about torch model.\n")
         d = torch.load(path, map_location="meta")
-        print(d.keys())
         print(f"Version: {d.get('version')}\n")
         print(f"Model epoch: {d['epoch']}\n")
         print("Model metadata:")
