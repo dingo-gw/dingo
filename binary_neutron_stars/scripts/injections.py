@@ -10,6 +10,7 @@ from dingo.gw.skymap import (
 )
 from dingo.gw.skymap import utils as skymap_utils
 
+import json
 import yaml
 from pp_utils import weighted_percentile_of_score
 import numpy as np
@@ -442,13 +443,21 @@ def main(args):
                 for k1, v1 in data.items()
             }
         else:
+            # load or sample parameters
+            if hasattr(args, "injection_parameter_file"):
+                with open(args.injection_parameter_file, "r") as f:
+                    theta = json.load(f)
+                if isinstance(list(theta.values())[0], dict):
+                    theta = theta[str(injection_id)]
+                chirp_mass_proxy = theta["chirp_mass"]
+            else:
+                chirp_mass_proxy = sample_chirp_mass_proxy()
+                theta = injection_generator.prior.sample()
             # sample from hyperprior and set corresponding prior for injection generator
-            chirp_mass_proxy = sample_chirp_mass_proxy()
             injection_generator.prior["chirp_mass"] = get_chirp_mass_prior(
                 chirp_mass_proxy
             )
-            # generate an injection
-            theta = injection_generator.prior.sample()
+            # generate injection
             data = injection_generator.injection(theta)
             theta = deepcopy(data["parameters"])  # for float conversion
             print(chirp_mass_proxy, theta["chirp_mass"])
