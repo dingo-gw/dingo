@@ -83,9 +83,16 @@ class GWSamplerMixin(object):
             Whether to apply instead the inverse transformation. This is used prior to
             calculating the log_prob.
         """
-        # FIXME: Update this method to make sure that for models that do not include sky
-        #  position, it does not do anything.
-        if self.event_metadata is not None:
+        # Check whether model has sky position as parameter
+        model_with_sky_position = False
+        if isinstance(samples, dict):
+            if 'ra' in samples.keys() and 'dec' in samples.keys():
+                model_with_sky_position = True
+        elif isinstance(samples, pd.DataFrame):
+            if 'ra' in samples.columns and 'dec' in samples.columns:
+                model_with_sky_position = True
+
+        if self.event_metadata is not None and model_with_sky_position:
             t_event = self.event_metadata.get("time_event")
             if t_event is not None and t_event != self.t_ref:
                 ra = samples["ra"]
