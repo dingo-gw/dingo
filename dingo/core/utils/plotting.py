@@ -45,7 +45,7 @@ def plot_corner_multi(
         "levels": [0.5, 0.9],
         "bins": 30,
     }
-    if "truths" in kwargs and "truth_color" not in kwargs:
+    if "truths" in kwargs and kwargs["truths"] is not None and "truth_color" not in kwargs:
         corner_params["truth_color"] = "black"
     corner_params.update(kwargs)
 
@@ -94,7 +94,7 @@ def plot_corner_multi(
         space = 1 / (4 * len(common_parameters))
         fig.subplots_adjust(wspace=space, hspace=space)
 
-    if "truths" in corner_params:
+    if "truths" in corner_params and corner_params["truths"] is not None:
         handles.append(
             plt.Line2D(
                 [],
