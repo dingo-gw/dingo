@@ -584,7 +584,14 @@ class Result(DingoDataset):
 
         return self.samples.replace(-np.inf, np.nan).dropna(axis=0)
 
-    def plot_corner(self, parameters=None, filename="corner.pdf"):
+    def plot_corner(
+        self,
+        parameters: list = None,
+        filename: str = "corner.pdf",
+        legend_font_size: int = 50,
+        truths: dict = None,
+        truth_color: str = None,
+    ):
         """
         Generate a corner plot of the samples.
 
@@ -595,27 +602,46 @@ class Result(DingoDataset):
             (Default: None)
         filename : str
             Where to save samples.
+        legend_font_size: int
+            Font size of the legend.
+        truths : dict
+            Dictionary of truth values to include.
+        truth_color: str
+            Color of the truth values.
         """
         theta = self._cleaned_samples()
         # delta_log_prob_target is not interesting so never plot it.
         theta = theta.drop(columns="delta_log_prob_target", errors="ignore")
 
+        if "weights" in theta:
+            weights = theta["weights"]
+        else:
+            weights = None
         # User option to plot specific parameters.
         if parameters:
             theta = theta[parameters]
 
-        if "weights" in theta:
+        if truths:
+            truths = [truths.get(k) for k in theta.columns]
+
+        if weights is not None:
             plot_corner_multi(
                 [theta, theta],
-                weights=[None, theta["weights"].to_numpy()],
+                weights=[None, weights.to_numpy()],
                 labels=["Dingo", "Dingo-IS"],
                 filename=filename,
+                legend_font_size=legend_font_size,
+                truths=truths,
+                truth_color=truth_color,
             )
         else:
             plot_corner_multi(
                 theta,
-                labels="Dingo",
+                labels=["Dingo"],
                 filename=filename,
+                legend_font_size=legend_font_size,
+                truths=truths,
+                truth_color=truth_color,
             )
 
     def plot_log_probs(self, filename="log_probs.png"):
