@@ -260,7 +260,7 @@ class Result(DingoDataset):
             delta_log_prob_target = 0.0
 
         # select parameters in self.samples (required as log_prob and potentially gnpe
-        # proxies are also stored in self.samples, but are not needed for the likelihood.
+        # proxies are also stored in self.samples, but are not needed for the likelihood.)
         param_keys = self.metadata["train_settings"]["data"]["inference_parameters"]
         theta = self.samples[param_keys]
 
