@@ -446,8 +446,8 @@ def main(args):
                 chirp_mass_proxy
             )
             # generate an injection
-            data = injection_generator.random_injection()
-            theta = deepcopy(data["parameters"])
+            theta = injection_generator.prior.sample()
+            data =  injection_generator.injection(theta)
             print(chirp_mass_proxy, theta["chirp_mass"])
 
         for f_max in f_max_scan:
