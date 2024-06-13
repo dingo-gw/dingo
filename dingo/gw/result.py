@@ -5,6 +5,7 @@ from typing import Optional
 import numpy as np
 import yaml
 from bilby.core.prior import Uniform, Constraint, PriorDict
+from bilby.core.prior.analytical import DeltaFunction
 
 from dingo.core.density import (
     interpolated_sample_and_log_prob_multi,
@@ -401,7 +402,9 @@ class Result(CoreResult):
             "approximation_22_mode", True
         )
 
-        if not (
+        if isinstance(self.phase_prior, DeltaFunction):
+            print("Phase prior is DeltaFunction. Phase is not synthetically sampled.")
+        elif not (
             isinstance(self.phase_prior, Uniform)
             and (self.phase_prior._minimum, self.phase_prior._maximum) == (0, 2 * np.pi)
         ):
@@ -409,115 +412,116 @@ class Result(CoreResult):
                 f"Phase prior should be uniform [0, 2pi) to work with synthetic phase."
                 f" However, the prior is {self.phase_prior}."
             )
-
-        # This builds on the Bilby approach to sampling the phase when using a
-        # phase-marginalized likelihood.
-
-        # Restrict to samples that are within the prior.
-        param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
-        theta = self.samples[param_keys]
-        log_prior = self.prior.ln_prob(theta, axis=0)
-        constraints = self.prior.evaluate_constraints(theta)
-        np.putmask(log_prior, constraints == 0, -np.inf)
-        within_prior = log_prior != -np.inf
-
-        # Put a cap on the number of processes to avoid overhead:
-        num_valid_samples = np.sum(within_prior)
-        num_processes = min(
-            self.synthetic_phase_kwargs.get("num_processes", 1), num_valid_samples // 10
-        )
-
-        print(f"Estimating synthetic phase for {num_valid_samples} samples.")
-        t0 = time.time()
-
-        if not inverse:
-            # TODO: This can probably be removed.
-            self._build_likelihood()
-
-        if inverse:
-            # We estimate the log_prob for given phases, so first save the evaluation
-            # points.
-            sample_phase = theta["phase"].to_numpy(copy=True)
-
-        # For each sample, build the posterior over phase given the remaining parameters.
-
-        phases = np.linspace(0, 2 * np.pi, self.synthetic_phase_kwargs["n_grid"])
-        if approximation_22_mode:
-            # For each sample, the un-normalized posterior depends only on (d | h(phase)):
-            # The prior p(phase), and the inner products (h | h), and (d | d) only contribute
-            # to the normalization. (We check above that p(phase) is constant.)
-            theta["phase"] = 0.0
-            d_inner_h_complex = self.likelihood.d_inner_h_complex_multi(
-                theta.iloc[within_prior],
-                num_processes,
-            )
-
-            # Evaluate the log posterior over the phase across the grid.
-            phasor = np.exp(2j * phases)
-            phase_log_posterior = np.outer(d_inner_h_complex, phasor).real
         else:
-            self.likelihood.phase_grid = phases
+            # Sample synthetic phase:
+            # This builds on the Bilby approach to sampling the phase when using a
+            # phase-marginalized likelihood.
 
-            phase_log_posterior = apply_func_with_multiprocessing(
-                self.likelihood.log_likelihood_phase_grid,
-                theta.iloc[within_prior],
-                num_processes=num_processes,
+            # Restrict to samples that are within the prior.
+            param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
+            theta = self.samples[param_keys]
+            log_prior = self.prior.ln_prob(theta, axis=0)
+            constraints = self.prior.evaluate_constraints(theta)
+            np.putmask(log_prior, constraints == 0, -np.inf)
+            within_prior = log_prior != -np.inf
+
+            # Put a cap on the number of processes to avoid overhead:
+            num_valid_samples = np.sum(within_prior)
+            num_processes = min(
+                self.synthetic_phase_kwargs.get("num_processes", 1), num_valid_samples // 10
             )
 
-        phase_posterior = np.exp(
-            phase_log_posterior - np.amax(phase_log_posterior, axis=1, keepdims=True)
-        )
-        # Include a floor value to maintain mass coverage.
-        phase_posterior += phase_posterior.mean(
-            axis=-1, keepdims=True
-        ) * self.synthetic_phase_kwargs.get("uniform_weight", 0.01)
+            print(f"Estimating synthetic phase for {num_valid_samples} samples.")
+            t0 = time.time()
 
-        if not inverse:
-            # Forward direction:
-            #   (1) Sample a new phase according to the synthetic posterior.
-            #   (2) Add the log_prob to the existing log_prob.
+            if not inverse:
+                # TODO: This can probably be removed.
+                self._build_likelihood()
 
-            new_phase, delta_log_prob = interpolated_sample_and_log_prob_multi(
-                phases,
-                phase_posterior,
-                num_processes,
+            if inverse:
+                # We estimate the log_prob for given phases, so first save the evaluation
+                # points.
+                sample_phase = theta["phase"].to_numpy(copy=True)
+
+            # For each sample, build the posterior over phase given the remaining parameters.
+
+            phases = np.linspace(0, 2 * np.pi, self.synthetic_phase_kwargs["n_grid"])
+            if approximation_22_mode:
+                # For each sample, the un-normalized posterior depends only on (d | h(phase)):
+                # The prior p(phase), and the inner products (h | h), and (d | d) only contribute
+                # to the normalization. (We check above that p(phase) is constant.)
+                theta["phase"] = 0.0
+                d_inner_h_complex = self.likelihood.d_inner_h_complex_multi(
+                    theta.iloc[within_prior],
+                    num_processes,
+                )
+
+                # Evaluate the log posterior over the phase across the grid.
+                phasor = np.exp(2j * phases)
+                phase_log_posterior = np.outer(d_inner_h_complex, phasor).real
+            else:
+                self.likelihood.phase_grid = phases
+
+                phase_log_posterior = apply_func_with_multiprocessing(
+                    self.likelihood.log_likelihood_phase_grid,
+                    theta.iloc[within_prior],
+                    num_processes=num_processes,
+                )
+
+            phase_posterior = np.exp(
+                phase_log_posterior - np.amax(phase_log_posterior, axis=1, keepdims=True)
             )
+            # Include a floor value to maintain mass coverage.
+            phase_posterior += phase_posterior.mean(
+                axis=-1, keepdims=True
+            ) * self.synthetic_phase_kwargs.get("uniform_weight", 0.01)
 
-            phase_array = np.full(len(theta), 0.0)
-            phase_array[within_prior] = new_phase
-            delta_log_prob_array = np.full(len(theta), -np.nan)
-            delta_log_prob_array[within_prior] = delta_log_prob
+            if not inverse:
+                # Forward direction:
+                #   (1) Sample a new phase according to the synthetic posterior.
+                #   (2) Add the log_prob to the existing log_prob.
 
-            self.samples["phase"] = phase_array
-            self.samples["log_prob"] += delta_log_prob_array
+                new_phase, delta_log_prob = interpolated_sample_and_log_prob_multi(
+                    phases,
+                    phase_posterior,
+                    num_processes,
+                )
 
-            # Insert the phase prior in the prior, since now the phase is present.
-            self.prior["phase"] = self.phase_prior
-            self.phase_prior = None
+                phase_array = np.full(len(theta), 0.0)
+                phase_array[within_prior] = new_phase
+                delta_log_prob_array = np.full(len(theta), -np.nan)
+                delta_log_prob_array[within_prior] = delta_log_prob
 
-            # reset likelihood for safety
-            # TODO: Can this be removed?
-            self.likelihood = None
+                self.samples["phase"] = phase_array
+                self.samples["log_prob"] += delta_log_prob_array
 
-        else:
-            # TODO: Possibly remove.
-            # Inverse direction:
-            #   (1) Evaluate the synthetic log prob for given phase points, and save it.
+                # Insert the phase prior in the prior, since now the phase is present.
+                self.prior["phase"] = self.phase_prior
+                self.phase_prior = None
 
-            log_prob = interpolated_log_prob_multi(
-                phases,
-                phase_posterior,
-                sample_phase[within_prior],
-                num_processes,
-            )
+                # reset likelihood for safety
+                # TODO: Can this be removed?
+                self.likelihood = None
 
-            # Outside of prior, set log_prob to -np.nan.
-            log_prob_array = np.full(len(theta), -np.nan)
-            log_prob_array[within_prior] = log_prob
-            self.samples["log_prob"] = log_prob_array
-            del self.samples["phase"]
+            else:
+                # TODO: Possibly remove.
+                # Inverse direction:
+                #   (1) Evaluate the synthetic log prob for given phase points, and save it.
 
-        print(f"Done. This took {time.time() - t0:.2f} s.")
+                log_prob = interpolated_log_prob_multi(
+                    phases,
+                    phase_posterior,
+                    sample_phase[within_prior],
+                    num_processes,
+                )
+
+                # Outside of prior, set log_prob to -np.nan.
+                log_prob_array = np.full(len(theta), -np.nan)
+                log_prob_array[within_prior] = log_prob
+                self.samples["log_prob"] = log_prob_array
+                del self.samples["phase"]
+
+            print(f"Done. This took {time.time() - t0:.2f} s.")
 
     def get_samples_bilby_phase(self):
         """
