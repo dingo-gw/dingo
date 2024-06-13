@@ -39,7 +39,7 @@ def parse_args():
         help="Path to outdirectory, containing injection_settings.yaml.",
     )
     parser.add_argument(
-        "--process_id", type=int, default=None, help="Index of process for injection."
+        "--process_id", type=int, default=0, help="Index of process for injection."
     )
     args = parser.parse_args()
     with open(join(args.outdirectory, "injection_settings.yaml"), "r") as f:
@@ -427,6 +427,8 @@ def main(args):
     summary_dingo_is = {}
 
     for i in range(args.num_injections):
+        injection_id = args.process_id * args.num_injections + i
+
         # Generate data: either use provided event dataset or generate an injection
         if hasattr(args, "event_dataset"):
             event_dataset = EventDataset(file_name=args.event_dataset)
@@ -447,13 +449,14 @@ def main(args):
             )
             # generate an injection
             theta = injection_generator.prior.sample()
-            data =  injection_generator.injection(theta)
+            data = injection_generator.injection(theta)
+            theta = deepcopy(data["parameters"])  # for float conversion
             print(chirp_mass_proxy, theta["chirp_mass"])
 
         for f_max in f_max_scan:
-            print(f"\n\nf_max: {f_max}")
+            print(f"\n\ninjection_id: {injection_id}, f_max: {f_max}")
             # set f_max in sampler and event_metadata for importance sampling
-            aux = {"f_max": f_max}
+            aux = {"injection_id": injection_id, "f_max": f_max}
             if f_max is not None:
                 frequency_update = {"f_max": f_max}
                 sampler = GWSamplerGNPE(
@@ -498,10 +501,7 @@ def main(args):
 
     summary_dingo = pd.DataFrame(summary_dingo)
     summary_dingo_is = pd.DataFrame(summary_dingo_is)
-    if args.process_id is not None:
-        label = f"_{args.process_id}"
-    else:
-        label = ""
+    label = f"_{args.process_id}"
     summary_dingo.to_pickle(join(args.outdirectory, f"summary-dingo{label}.pd"))
     if len(summary_dingo_is) > 0:
         summary_dingo_is.to_pickle(
