@@ -261,8 +261,7 @@ class Result(DingoDataset):
 
         # select parameters in self.samples (required as log_prob and potentially gnpe
         # proxies are also stored in self.samples, but are not needed for the likelihood.
-        # TODO: replace by self.metadata["train_settings"]["data"]["inference_parameters"]
-        param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
+        param_keys = self.metadata["train_settings"]["data"]["inference_parameters"]
         theta = self.samples[param_keys]
 
         # Calculate the (un-normalized) target density as prior times likelihood,
