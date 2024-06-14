@@ -28,7 +28,7 @@ from dingo.gw.transforms import (
     CopyToExtrinsicParameters,
     GetDetectorTimes,
     HeterodynePhase,
-    ApplyFrequencyMasking,
+    ApplyRandomFrequencyMasking,
 )
 
 
@@ -195,7 +195,7 @@ class GWSamplerMixin(object):
         ]
         if self.frequency_masking:
             transform_pre.append(
-                ApplyFrequencyMasking(
+                ApplyRandomFrequencyMasking(
                     domain=self.domain,
                     f_min_upper=self.frequency_masking.get("f_min", None),
                     f_max_lower=self.frequency_masking.get("f_max", None),

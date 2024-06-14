@@ -6,7 +6,7 @@ from typing import Optional
 from dingo.gw.domains import Domain, MultibandedFrequencyDomain, FrequencyDomain
 
 
-class ApplyFrequencyMasking(object):
+class ApplyRandomFrequencyMasking(object):
     """
     Apply a variable frequency masking, truncating the waveform and ASDs.
     """

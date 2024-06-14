@@ -5,7 +5,7 @@ from dingo.gw.transforms import (
     DecimateWaveformsAndASDS,
     WhitenAndScaleStrain,
     RepackageStrainsAndASDS,
-    ApplyFrequencyMasking,
+    ApplyRandomFrequencyMasking,
     SelectStandardizeRepackageParameters,
     ToTorch,
 )
@@ -101,7 +101,7 @@ def get_transforms(model_metadata, f_max=None):
         DecimateWaveformsAndASDS(domain, decimation_mode="whitened"),
         WhitenAndScaleStrain(scale_factor=domain.noise_std),
         RepackageStrainsAndASDS(data_settings["detectors"]),
-        ApplyFrequencyMasking(domain=domain, f_max_lower=f_max, deterministic=True),
+        ApplyRandomFrequencyMasking(domain=domain, f_max_lower=f_max, deterministic=True),
         SelectStandardizeRepackageParameters(
             {"context_parameters": ["chirp_mass_proxy"]},
             data_settings["standardization"],
