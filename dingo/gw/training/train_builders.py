@@ -24,6 +24,7 @@ from dingo.gw.transforms import (
     SampleExtrinsicParameters,
     GetDetectorTimes,
     ApplyRandomFrequencyMasking,
+    ApplyChirpFrequencyMasking,
 )
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.prior import default_inference_parameters
@@ -182,6 +183,12 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         transforms.append(
             ApplyRandomFrequencyMasking(domain, **data_settings["frequency_masking"])
         )
+    if "frequency_masking_chirp" in data_settings:
+        transforms.append(
+            ApplyChirpFrequencyMasking(
+                domain, **data_settings["frequency_masking_chirp"]
+            )
+        )
     if data_settings["context_parameters"]:
         selected_keys = ["inference_parameters", "waveform", "context_parameters"]
     else:
@@ -260,6 +267,7 @@ def build_svd_for_embedding_network(
             RepackageStrainsAndASDS,
             SelectStandardizeRepackageParameters,
             ApplyRandomFrequencyMasking,
+            ApplyChirpFrequencyMasking,
             UnpackDict,
         ],
     )
