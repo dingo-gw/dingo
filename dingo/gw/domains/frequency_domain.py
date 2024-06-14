@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import math
 
 from .base import Domain
 from dingo.gw.gwutils import *
@@ -66,6 +67,7 @@ class FrequencyDomain(Domain):
         if f_min is not None and f_max is not None and f_min >= f_max:
             raise ValueError("f_min must not be larger than f_max.")
         if f_min is not None:
+            f_min = math.floor(f_min // self.delta_f) * self.delta_f
             if self.f_min <= f_min <= self.f_max:
                 self.f_min = f_min
             else:
@@ -74,6 +76,7 @@ class FrequencyDomain(Domain):
                     f"[{self.f_min,self.f_max}]."
                 )
         if f_max is not None:
+            f_max = math.ceil(f_max // self.delta_f) * self.delta_f
             if self.f_min <= f_max <= self.f_max:
                 self.f_max = f_max
             else:
