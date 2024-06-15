@@ -90,7 +90,7 @@ asd_dataset = ASDDataset(
         "gps_times": {ifo: np.array([-1]) for ifo in asds.keys()},
     }
 )
-# asd_dataset.to_file(file_name=outname)
+asd_dataset.to_file(file_name=outname)
 
 if args.plot:
     asd_dataset_loaded = asd_dataset  # ASDDataset(file_name=outname)
