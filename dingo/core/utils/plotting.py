@@ -12,7 +12,6 @@ def plot_corner_multi(
     weights=None,
     labels=None,
     filename: str = "corner.pdf",
-    legend_font_size: int = 50,
     **kwargs,
 ):
     """
@@ -29,10 +28,14 @@ def plot_corner_multi(
         Labels for the posteriors.
     filename : str
         Where to save samples.
+
+    Other Parameters
+    ----------------
+    truth_color : str
+        Color of the truth values. Defaults to black. 
     legend_font_size: int
         Font size used in legend. Defaults to 50.
-    **kwargs :
-        Forwarded to corner.corner.
+    Also contains additional parameters forwarded to corner.corner.
     """
     # Define plot properties
     cmap = "Dark2"
@@ -109,7 +112,7 @@ def plot_corner_multi(
     fig.legend(
         handles=handles,
         loc="upper right",
-        fontsize=legend_font_size,
+        fontsize=kwargs.get("legend_font_size", 50),
         labelcolor="linecolor",
     )
 

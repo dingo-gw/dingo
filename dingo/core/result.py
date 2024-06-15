@@ -588,9 +588,8 @@ class Result(DingoDataset):
         self,
         parameters: list = None,
         filename: str = "corner.pdf",
-        legend_font_size: int = 50,
         truths: dict = None,
-        truth_color: str = None,
+        **kwargs,
     ):
         """
         Generate a corner plot of the samples.
@@ -602,12 +601,16 @@ class Result(DingoDataset):
             (Default: None)
         filename : str
             Where to save samples.
-        legend_font_size: int
-            Font size of the legend.
         truths : dict
             Dictionary of truth values to include.
-        truth_color: str
+
+        Other Parameters
+        ----------------
+        truth_color : str
             Color of the truth values.
+        legend_font_size: int
+            Font size of the legend.
+
         """
         theta = self._cleaned_samples()
         # delta_log_prob_target is not interesting so never plot it.
@@ -630,18 +633,16 @@ class Result(DingoDataset):
                 weights=[None, weights.to_numpy()],
                 labels=["Dingo", "Dingo-IS"],
                 filename=filename,
-                legend_font_size=legend_font_size,
                 truths=truths,
-                truth_color=truth_color,
+                **kwargs,
             )
         else:
             plot_corner_multi(
                 theta,
                 labels=["Dingo"],
                 filename=filename,
-                legend_font_size=legend_font_size,
                 truths=truths,
-                truth_color=truth_color,
+                **kwargs
             )
 
     def plot_log_probs(self, filename="log_probs.png"):
