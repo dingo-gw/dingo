@@ -584,7 +584,13 @@ class Result(DingoDataset):
 
         return self.samples.replace(-np.inf, np.nan).dropna(axis=0)
 
-    def plot_corner(self, parameters=None, filename="corner.pdf"):
+    def plot_corner(
+        self,
+        parameters: list = None,
+        filename: str = "corner.pdf",
+        truths: dict = None,
+        **kwargs,
+    ):
         """
         Generate a corner plot of the samples.
 
@@ -595,27 +601,48 @@ class Result(DingoDataset):
             (Default: None)
         filename : str
             Where to save samples.
+        truths : dict
+            Dictionary of truth values to include.
+
+        Other Parameters
+        ----------------
+        truth_color : str
+            Color of the truth values.
+        legend_font_size: int
+            Font size of the legend.
+
         """
         theta = self._cleaned_samples()
         # delta_log_prob_target is not interesting so never plot it.
         theta = theta.drop(columns="delta_log_prob_target", errors="ignore")
 
+        if "weights" in theta:
+            weights = theta["weights"]
+        else:
+            weights = None
         # User option to plot specific parameters.
         if parameters:
             theta = theta[parameters]
 
-        if "weights" in theta:
+        if truths:
+            truths = [truths.get(k) for k in theta.columns]
+
+        if weights is not None:
             plot_corner_multi(
                 [theta, theta],
-                weights=[None, theta["weights"].to_numpy()],
+                weights=[None, weights.to_numpy()],
                 labels=["Dingo", "Dingo-IS"],
                 filename=filename,
+                truths=truths,
+                **kwargs,
             )
         else:
             plot_corner_multi(
                 theta,
-                labels="Dingo",
+                labels=["Dingo"],
                 filename=filename,
+                truths=truths,
+                **kwargs
             )
 
     def plot_log_probs(self, filename="log_probs.png"):

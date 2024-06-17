@@ -8,7 +8,11 @@ import pandas as pd
 
 
 def plot_corner_multi(
-    samples, weights=None, labels=None, filename="corner.pdf", **kwargs
+    samples,
+    weights=None,
+    labels=None,
+    filename: str = "corner.pdf",
+    **kwargs,
 ):
     """
     Generate a corner plot for multiple posteriors.
@@ -24,8 +28,14 @@ def plot_corner_multi(
         Labels for the posteriors.
     filename : str
         Where to save samples.
-    **kwargs :
-        Forwarded to corner.corner.
+
+    Other Parameters
+    ----------------
+    truth_color : str
+        Color of the truth values. Defaults to black. 
+    legend_font_size: int
+        Font size used in legend. Defaults to 50.
+    Also contains additional parameters forwarded to corner.corner.
     """
     # Define plot properties
     cmap = "Dark2"
@@ -38,6 +48,8 @@ def plot_corner_multi(
         "levels": [0.5, 0.9],
         "bins": 30,
     }
+    if "truths" in kwargs and kwargs["truths"] is not None and "truth_color" not in kwargs:
+        corner_params["truth_color"] = "black"
     corner_params.update(kwargs)
 
     serif_old = mpl.rcParams["font.family"]
@@ -72,7 +84,7 @@ def plot_corner_multi(
             color=color,
             no_fill_contours=True,
             fig=fig,
-            **corner_params
+            **corner_params,
         )
         handles.append(
             plt.Line2D([], [], color=color, label=l, linewidth=5, markersize=20)
@@ -85,10 +97,22 @@ def plot_corner_multi(
         space = 1 / (4 * len(common_parameters))
         fig.subplots_adjust(wspace=space, hspace=space)
 
+    if "truths" in corner_params and corner_params["truths"] is not None:
+        handles.append(
+            plt.Line2D(
+                [],
+                [],
+                color=corner_params["truth_color"],
+                label="Truth",
+                linewidth=5,
+                markersize=20,
+            )
+        )
+
     fig.legend(
         handles=handles,
         loc="upper right",
-        fontsize=50,
+        fontsize=kwargs.get("legend_font_size", 50),
         labelcolor="linecolor",
     )
 
