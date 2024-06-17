@@ -588,7 +588,6 @@ class Result(DingoDataset):
         self,
         parameters: list = None,
         filename: str = "corner.pdf",
-        truths: dict = None,
         **kwargs,
     ):
         """
@@ -601,13 +600,11 @@ class Result(DingoDataset):
             (Default: None)
         filename : str
             Where to save samples.
-        truths : dict
-            Dictionary of truth values to include.
 
         Other Parameters
         ----------------
-        truth_color : str
-            Color of the truth values.
+        truths : dict
+            Dictionary of truth values to include.
         legend_font_size: int
             Font size of the legend.
 
@@ -623,9 +620,8 @@ class Result(DingoDataset):
         # User option to plot specific parameters.
         if parameters:
             theta = theta[parameters]
-
-        if truths:
-            truths = [truths.get(k) for k in theta.columns]
+            if "truths" in kwargs.keys():
+                kwargs["truths"] = [kwargs["truths"].get(k) for k in theta.columns]
 
         if weights is not None:
             plot_corner_multi(
@@ -633,7 +629,6 @@ class Result(DingoDataset):
                 weights=[None, weights.to_numpy()],
                 labels=["Dingo", "Dingo-IS"],
                 filename=filename,
-                truths=truths,
                 **kwargs,
             )
         else:
@@ -641,7 +636,6 @@ class Result(DingoDataset):
                 theta,
                 labels=["Dingo"],
                 filename=filename,
-                truths=truths,
                 **kwargs
             )
 
