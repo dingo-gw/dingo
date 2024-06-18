@@ -122,10 +122,12 @@ def tolerances(approximant):
         # happens on the level of complex modes.
         # We tested the mismatches for 20k waveforms, and the largest mismatch encountered
         # was 7e-4, while almost all mismatches were of order 1e-5.
+        print('nah')
         return 5e-4, 5e-4
 
     elif approximant in ["SEOBNRv5PHM", "SEOBNRv5HM"]:
         # Tested on 1000 mismatches.
+        print("seob")
         return 1e-9, 1e-12
 
     else:
@@ -133,7 +135,12 @@ def tolerances(approximant):
 
 
 # Uncomment to test only one approximant.
-# @pytest.mark.parametrize("approximant", ["IMRPhenomXPHM"])
+try:
+    import pyseobnr
+    approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM"]
+except ImportError:
+    approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM"]
+@pytest.mark.parametrize("approximant", approximant_list)
 def test_generate_hplus_hcross_m(intrinsic_prior, wfg, num_evaluations, tolerances):
     mismatches = []
     for idx in range(num_evaluations):
