@@ -31,8 +31,6 @@ def plot_corner_multi(
 
     Other Parameters
     ----------------
-    truths : list
-        Contains truth values for posterior in same order as samples.
     legend_font_size: int
         Font size used in legend. Defaults to 50.
     Also contains additional parameters forwarded to corner.corner.
