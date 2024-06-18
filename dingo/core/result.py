@@ -597,7 +597,6 @@ class Result(DingoDataset):
         parameters: list = None,
         filename: str = "corner.pdf",
         truths: dict = None,
-        include_fixed_parameters: bool = False,
         **kwargs,
     ):
         """
@@ -612,13 +611,9 @@ class Result(DingoDataset):
             Where to save samples.
         truths : dict
             Dictionary of truth values to include.
-        include_fixed_parameters : bool
-            Whether to plot parameters that have delta-function priors. (Default: False)
 
         Other Parameters
         ----------------
-        truth_color : str
-            Color of the truth values.
         legend_font_size: int
             Font size of the legend.
 
@@ -626,9 +621,8 @@ class Result(DingoDataset):
         theta = self._cleaned_samples()
         # delta_log_prob_target is not interesting so never plot it.
         theta = theta.drop(columns="delta_log_prob_target", errors="ignore")
-
-        if not include_fixed_parameters:
-            theta = theta.drop(columns=self.fixed_parameter_keys, errors="ignore")
+        # corner cannot handle fixed parameters
+        theta = theta.drop(columns=self.fixed_parameter_keys, errors="ignore")
 
         if "weights" in theta:
             weights = theta["weights"]
@@ -637,9 +631,8 @@ class Result(DingoDataset):
         # User option to plot specific parameters.
         if parameters:
             theta = theta[parameters]
-
-        if truths:
-            truths = [truths.get(k) for k in theta.columns]
+        if truths is not None:
+            kwargs["truths"] = [truths.get(k) for k in theta.columns]
 
         if weights is not None:
             plot_corner_multi(
@@ -647,12 +640,14 @@ class Result(DingoDataset):
                 weights=[None, weights.to_numpy()],
                 labels=["Dingo", "Dingo-IS"],
                 filename=filename,
-                truths=truths,
                 **kwargs,
             )
         else:
             plot_corner_multi(
-                theta, labels=["Dingo"], filename=filename, truths=truths, **kwargs
+                theta,
+                labels=["Dingo"],
+                filename=filename,
+                **kwargs
             )
 
     def plot_log_probs(self, filename="log_probs.png"):

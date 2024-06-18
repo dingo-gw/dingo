@@ -31,8 +31,6 @@ def plot_corner_multi(
 
     Other Parameters
     ----------------
-    truth_color : str
-        Color of the truth values. Defaults to black. 
     legend_font_size: int
         Font size used in legend. Defaults to 50.
     Also contains additional parameters forwarded to corner.corner.
@@ -48,8 +46,6 @@ def plot_corner_multi(
         "levels": [0.5, 0.9],
         "bins": 30,
     }
-    if "truths" in kwargs and kwargs["truths"] is not None and "truth_color" not in kwargs:
-        corner_params["truth_color"] = "black"
     corner_params.update(kwargs)
 
     serif_old = mpl.rcParams["font.family"]
@@ -96,18 +92,6 @@ def plot_corner_multi(
     else:
         space = 1 / (4 * len(common_parameters))
         fig.subplots_adjust(wspace=space, hspace=space)
-
-    if "truths" in corner_params and corner_params["truths"] is not None:
-        handles.append(
-            plt.Line2D(
-                [],
-                [],
-                color=corner_params["truth_color"],
-                label="Truth",
-                linewidth=5,
-                markersize=20,
-            )
-        )
 
     fig.legend(
         handles=handles,
