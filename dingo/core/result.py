@@ -621,8 +621,8 @@ class Result(DingoDataset):
         # User option to plot specific parameters.
         if parameters:
             theta = theta[parameters]
-            if truths is not None:
-                kwargs["truths"] = [truths.get(k) for k in theta.columns]
+        if truths is not None:
+            kwargs["truths"] = [truths.get(k) for k in theta.columns]
 
         if weights is not None:
             plot_corner_multi(
