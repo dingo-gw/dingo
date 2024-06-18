@@ -259,15 +259,23 @@ class Result(DingoDataset):
         else:
             delta_log_prob_target = 0.0
 
+        # Calculate the (un-normalized) target density as prior times likelihood,
+        # evaluated at the same sample points. The prior must be evaluated only for the
+        # non-fixed (delta) parameters.
+        param_keys_non_fixed = [
+            k
+            for k, v in self.prior.items()
+            if not isinstance(v, (Constraint, DeltaFunction))
+        ]
+        theta_non_fixed = self.samples[param_keys_non_fixed]
+        log_prior = self.prior.ln_prob(theta_non_fixed, axis=0)
+
         # select parameters in self.samples (required as log_prob and potentially gnpe
         # proxies are also stored in self.samples, but are not needed for the likelihood.
+        # For evaluating the likelihood, we want to keep the fixed parameters.
         # TODO: replace by self.metadata["train_settings"]["data"]["inference_parameters"]
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
         theta = self.samples[param_keys]
-
-        # Calculate the (un-normalized) target density as prior times likelihood,
-        # evaluated at the same sample points.
-        log_prior = self.prior.ln_prob(theta, axis=0)
 
         # The prior or delta_log_prob_target may be -inf for certain samples.
         # For these, we do not want to evaluate the likelihood, in particular because
