@@ -34,16 +34,21 @@ def parse_args():
         description="Evaluate on injections.",
     )
     parser.add_argument(
-        "--outdirectory",
+        "--outdirectory", type=str, required=True, help="Path to outdirectory."
+    )
+    parser.add_argument(
+        "--settings",
         type=str,
-        required=True,
-        help="Path to outdirectory, containing injection_settings.yaml.",
+        default=None,
+        help="Path to settings file, if None use outdirectory/injection_settings.yaml.",
     )
     parser.add_argument(
         "--process_id", type=int, default=0, help="Index of process for injection."
     )
     args = parser.parse_args()
-    with open(join(args.outdirectory, "injection_settings.yaml"), "r") as f:
+    if args.settings is None:
+        args.settings = join(args.outdirectory, "injection_settings.yaml")
+    with open(args.settings, "r") as f:
         args.__dict__.update(yaml.safe_load(f))
     return args
 
@@ -511,6 +516,8 @@ def main(args):
     summary_dingo = pd.DataFrame(summary_dingo)
     summary_dingo_is = pd.DataFrame(summary_dingo_is)
     label = f"_{args.process_id}"
+    if not os.path.exists(args.outdirectory):
+        os.makedirs(args.outdirectory)
     summary_dingo.to_pickle(join(args.outdirectory, f"summary-dingo{label}.pd"))
     if len(summary_dingo_is) > 0:
         summary_dingo_is.to_pickle(
