@@ -122,12 +122,10 @@ def tolerances(approximant):
         # happens on the level of complex modes.
         # We tested the mismatches for 20k waveforms, and the largest mismatch encountered
         # was 7e-4, while almost all mismatches were of order 1e-5.
-        print('nah')
         return 5e-4, 5e-4
 
     elif approximant in ["SEOBNRv5PHM", "SEOBNRv5HM"]:
         # Tested on 1000 mismatches.
-        print("seob")
         return 1e-9, 1e-12
 
     else:
