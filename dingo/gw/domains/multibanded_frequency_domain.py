@@ -98,7 +98,10 @@ class MultibandedFrequencyDomain(Domain):
         self._sample_frequencies_torch = None
         self._sample_frequencies_torch_cuda = None
         # this should always just be the decimated version of the base domain
-        assert (self._sample_frequencies == self.decimate(self.base_domain())).all()
+        assert (
+            self._sample_frequencies
+            == self.decimate(self.base_domain().astype(np.float64))
+        ).all()
 
         # update base domain to required range
         assert self.f_min in self.base_domain()
