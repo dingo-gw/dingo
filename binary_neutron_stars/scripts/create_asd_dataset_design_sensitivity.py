@@ -13,8 +13,10 @@ from dingo.gw.noise.asd_dataset import ASDDataset
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--wfd_dir",
+    type=str,
     help="Directory with waveform dataset settings. ASDs saved in wfd_dir/asds.",
 )
+parser.add_argument("--setup", type=str, default="LVK", choices=["lvk", "ce"])
 parser.add_argument("--plot", action="store_true")
 args = parser.parse_args()
 
@@ -33,15 +35,33 @@ psd_ligo = PowerSpectralDensity.from_power_spectral_density_file(
 psd_virgo = PowerSpectralDensity.from_power_spectral_density_file(
     psd_file="AdV_psd.txt"
 )
-psds = {"H1": psd_ligo, "L1": psd_ligo, "V1": psd_virgo}
-
+psd_ce = PowerSpectralDensity.from_power_spectral_density_file(psd_file="CE_psd.txt")
+psd_ce_wb = PowerSpectralDensity.from_power_spectral_density_file(
+    psd_file="CE_wb_psd.txt"
+)
+if args.setup.lower() == "lvk":
+    label = "lvk-design-sensitivity"
+    psds = {"H1": psd_ligo, "L1": psd_ligo, "V1": psd_virgo}
+elif args.setup.lower() == "ce":
+    label = "ce-design-sensitivity"
+    # For cosmic explorer (CE), use H1 for the primary and L1 for the secondary ifo.
+    # Using H1 instead of the proper bilby.gw.detector.detectors.CE.interferometer
+    # (with the proper arm length of 40km instead of 4km) leads to only very small
+    # errors in the waveform (~1e-4 relative deviation for GW170817-like signal).
+    psds = {"H1": psd_ce, "L1": psd_ce_wb}
+else:
+    raise NotImplementedError(f"Unknown detector setup {args.setup.lower()}.")
 
 # Decimate to domain. We decimate the inverse ASDs, i.e.,
 # ASD_decimated = 1 / decimate(1 / ASD), which is the appropriate operation for the ASD
 # when we decimate the data *after* whitening (which best preserves the signal).
 frequencies_base_domain = domain.base_domain()[domain.base_domain.min_idx :]
 asds_base_domain = {
-    ifo: interp1d(psd.frequency_array, psd.asd_array)(frequencies_base_domain)
+    ifo: interp1d(
+        psd.frequency_array,
+        psd.asd_array,
+        # bounds_error=False, fill_value=1.0
+    )(frequencies_base_domain)
     for ifo, psd in psds.items()
 }
 asds = {ifo: 1 / domain.decimate(1 / asd) for ifo, asd in asds_base_domain.items()}
@@ -55,9 +75,7 @@ asd_dataset = ASDDataset(
         "gps_times": {ifo: np.array([-1]) for ifo in asds.keys()},
     }
 )
-asd_dataset.to_file(
-    file_name=join(args.wfd_dir, "asds", "asd_dataset_design_sensitivity.hdf5")
-)
+asd_dataset.to_file(file_name=join(args.wfd_dir, "asds", f"asd_dataset_{label}.hdf5"))
 
 if args.plot:
     asd_dir = join(args.wfd_dir, "asds")
@@ -78,7 +96,10 @@ if args.plot:
                     ax.set_yscale("log")
                 else:
                     # relative
-                    y = asd_dataset.asds[ifo][0] / asds[ifo][:len(asd_dataset.asds[ifo][0])]
+                    y = (
+                        asd_dataset.asds[ifo][0]
+                        / asds[ifo][: len(asd_dataset.asds[ifo][0])]
+                    )
                     ax.plot(f, y, label=filename, c=color)
                     ax.set_ylim(0, 5)
             except KeyError:
