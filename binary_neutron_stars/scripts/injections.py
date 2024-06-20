@@ -116,18 +116,10 @@ def get_skymap_summary(
     use_injection_parameters_for_bayestar=False,
     weight_clipping_kwargs=None,
     allow_duplicates=True,
+    run_bayestar=True,
 ):
     skymap_summary = {}
 
-    skymap_bayestar, aux_bayestar = generate_bayestar_skymap_from_dingo_result(
-        dingo_result,
-        template_parameters=theta if use_injection_parameters_for_bayestar else None,
-        prior_distance_power=prior_distance_power,
-        cosmology=cosmology,
-        return_aux=True,
-        t_search_window_width=t_search_window,
-        max_likelihood_template="log_likelihood" in dingo_result.samples,
-    )
     skymap_dingo, aux_dingo = generate_skymap_from_dingo_result(
         dingo_result,
         num_samples=num_samples,
@@ -140,13 +132,30 @@ def get_skymap_summary(
         allow_duplicates=allow_duplicates,
     )
     skymap_summary.update({"aux-dingo_" + k: v for k, v in aux_dingo.items()})
-    skymap_summary.update({"aux_bayestar_" + k: v for k, v in aux_bayestar.items()})
-
     # areas at specified credible levels
-    areas_bayestar = skymap_utils.credible_areas(skymap_bayestar, credible_levels)
     areas_dingo = skymap_utils.credible_areas(skymap_dingo, credible_levels)
-    # coverage of dingo skymap by bayestar skymap
-    coverage = skymap_utils.coverage(skymap_bayestar, skymap_dingo, credible_levels)
+
+    if run_bayestar:
+        skymap_bayestar, aux_bayestar = generate_bayestar_skymap_from_dingo_result(
+            dingo_result,
+            template_parameters=theta
+            if use_injection_parameters_for_bayestar
+            else None,
+            prior_distance_power=prior_distance_power,
+            cosmology=cosmology,
+            return_aux=True,
+            t_search_window_width=t_search_window,
+            max_likelihood_template="log_likelihood" in dingo_result.samples,
+        )
+        skymap_summary.update({"aux_bayestar_" + k: v for k, v in aux_bayestar.items()})
+        # areas at specified credible levels
+        areas_bayestar = skymap_utils.credible_areas(skymap_bayestar, credible_levels)
+        # coverage of dingo skymap by bayestar skymap
+        coverage = skymap_utils.coverage(skymap_bayestar, skymap_dingo, credible_levels)
+    else:
+        areas_bayestar = [None] * len(areas_dingo)
+        coverage = [None] * len(areas_dingo)
+
     for cl, ab, ad, co in zip(credible_levels, areas_bayestar, areas_dingo, coverage):
         skymap_summary[f"bayestar-area-{cl}"] = ab
         skymap_summary[f"dingo-area-{cl}"] = ad
@@ -155,10 +164,11 @@ def get_skymap_summary(
     # searched area and credible level of true sky position
     if theta is not None:
         coordinates = SkyCoord(ra=theta["ra"] * u.rad, dec=theta["dec"] * u.rad)
-        # bayestar
-        stats = crossmatch(skymap_bayestar, coordinates=coordinates)
-        skymap_summary["bayestar-searched-prob"] = stats.searched_prob
-        skymap_summary["bayestar-searched-area"] = stats.searched_area
+        if run_bayestar:
+            # bayestar
+            stats = crossmatch(skymap_bayestar, coordinates=coordinates)
+            skymap_summary["bayestar-searched-prob"] = stats.searched_prob
+            skymap_summary["bayestar-searched-area"] = stats.searched_area
         # dingo
         stats = crossmatch(skymap_dingo, coordinates=coordinates)
         skymap_summary["dingo-searched-prob"] = stats.searched_prob
