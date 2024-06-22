@@ -177,6 +177,47 @@ def get_skymap_summary(
     return skymap_summary
 
 
+def weighted_quantile(
+    values, quantiles, weights=None, values_sorted=False, old_style=False
+):
+    """Very close to numpy.percentile, but supports weights.
+
+    from https://stackoverflow.com/questions/21844024/weighted-percentile-using-numpy
+
+    NOTE: quantiles should be in [0, 100]!
+    :param values: numpy.array with data
+    :param quantiles: array-like with many quantiles needed
+    :param weights: array-like of the same length as `array`
+    :param values_sorted: bool, if True, then will avoid sorting of
+        initial array
+    :param old_style: if True, will correct output to be consistent
+        with numpy.percentile.
+    :return: numpy.array with computed quantiles.
+    """
+    values = np.array(values)
+    quantiles = np.array(quantiles) / 100
+    if weights is None:
+        weights = np.ones(len(values))
+    weights = np.array(weights)
+    assert np.all(quantiles >= 0) and np.all(
+        quantiles <= 1
+    ), "quantiles should be in [0, 100]"
+
+    if not values_sorted:
+        sorter = np.argsort(values)
+        values = values[sorter]
+        weights = weights[sorter]
+
+    weighted_quantiles = np.cumsum(weights) - 0.5 * weights
+    if old_style:
+        # To be convenient with numpy.percentile
+        weighted_quantiles -= weighted_quantiles[0]
+        weighted_quantiles /= weighted_quantiles[-1]
+    else:
+        weighted_quantiles /= np.sum(weights)
+    return np.interp(quantiles, weighted_quantiles, values)
+
+
 def update_summary_data(summary_data, args, theta, result, **kwargs):
     samples = result.samples
     if "weights" in samples:
@@ -186,7 +227,7 @@ def update_summary_data(summary_data, args, theta, result, **kwargs):
     data = {}
     insert_component_masses(samples)
 
-    # insert percentiles
+    # insert percentiles of injection parameters
     if theta is not None:
         data.update({"injection-parameter_" + k: v for k, v in theta.items()})
         common_parameters = theta.keys() & samples.keys()
@@ -197,6 +238,15 @@ def update_summary_data(summary_data, args, theta, result, **kwargs):
             )
     else:
         common_parameters = samples.keys()
+
+    # insert percentiles of posterior
+    if hasattr(args, "posterior_percentiles"):
+        percentiles = args.posterior_percentiles
+        for p in common_parameters:
+            values = weighted_quantile(samples[p], percentiles, weights=weights)
+            for percentile, v in zip(percentiles, values):
+                data[f"posterior-percentile-{p}-{percentile}"] = v
+
     # optionally insert sample efficiency
     if weights is not None:
         ESS = np.sum(weights) ** 2 / np.sum(weights ** 2)
