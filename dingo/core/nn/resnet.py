@@ -1,3 +1,4 @@
+"""Resnet adapted from glasflow.nflows.nn.nets.resnet, but with support for layernorm."""
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -5,10 +6,7 @@ from torch.nn import init
 
 
 class ResidualBlock(nn.Module):
-    """A general-purpose residual block. Works only with 1-dim inputs.
-
-    Adapted from glasflow.nflows.nn.nets.resnet, but with support for layernorm.
-    """
+    """A general-purpose residual block. Works only with 1-dim inputs."""
 
     def __init__(
         self,
@@ -69,3 +67,53 @@ class ResidualBlock(nn.Module):
         if context is not None:
             temps = F.glu(torch.cat((temps, self.context_layer(context)), dim=1), dim=1)
         return inputs + temps
+
+
+class ResidualNet(nn.Module):
+    """A general-purpose residual network. Works only with 1-dim inputs."""
+
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        hidden_features,
+        context_features=None,
+        num_blocks=2,
+        activation=F.relu,
+        dropout_probability=0.0,
+        use_batch_norm=False,
+        use_layer_norm=False,
+    ):
+        super().__init__()
+        self.hidden_features = hidden_features
+        self.context_features = context_features
+        if context_features is not None:
+            self.initial_layer = nn.Linear(
+                in_features + context_features, hidden_features
+            )
+        else:
+            self.initial_layer = nn.Linear(in_features, hidden_features)
+        self.blocks = nn.ModuleList(
+            [
+                ResidualBlock(
+                    features=hidden_features,
+                    context_features=context_features,
+                    activation=activation,
+                    dropout_probability=dropout_probability,
+                    use_batch_norm=use_batch_norm,
+                    use_layer_norm=use_layer_norm,
+                )
+                for _ in range(num_blocks)
+            ]
+        )
+        self.final_layer = nn.Linear(hidden_features, out_features)
+
+    def forward(self, inputs, context=None):
+        if context is None:
+            temps = self.initial_layer(inputs)
+        else:
+            temps = self.initial_layer(torch.cat((inputs, context), dim=1))
+        for block in self.blocks:
+            temps = block(temps, context=context)
+        outputs = self.final_layer(temps)
+        return outputs

@@ -8,10 +8,11 @@ import torch
 import torch.nn as nn
 import glasflow.nflows as nflows  # nflows not maintained, so use this maintained fork
 from glasflow.nflows import distributions, flows, transforms
-import glasflow.nflows.nn.nets as nflows_nets
+from typing import Union, Callable, Tuple
+
 from dingo.core.utils import torchutils
 from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
-from typing import Union, Callable, Tuple
+from dingo.core.nn.resnet import ResidualNet
 
 
 def create_linear_transform(param_dim: int):
@@ -41,6 +42,7 @@ def create_base_transform(
     activation: str = "relu",
     dropout_probability: float = 0.0,
     batch_norm: bool = False,
+    layer_norm: bool = False,
     num_bins: int = 8,
     tail_bound: float = 1.0,
     apply_unconditional_transform: bool = False,
@@ -81,6 +83,8 @@ def create_base_transform(
         dropout probability for regularization
     :param batch_norm: bool = False
         whether to use batch normalization
+    :param layer_norm: bool = False
+        whether to use layer normalization
     :param num_bins: int = 8
         number of bins for the spline
     :param tail_bound: float = 1.
@@ -105,7 +109,7 @@ def create_base_transform(
         return transforms.PiecewiseRationalQuadraticCouplingTransform(
             mask=mask,
             transform_net_create_fn=(
-                lambda in_features, out_features: nflows_nets.ResidualNet(
+                lambda in_features, out_features: ResidualNet(
                     in_features=in_features,
                     out_features=out_features,
                     hidden_features=hidden_dim,
@@ -114,6 +118,7 @@ def create_base_transform(
                     activation=activation_fn,
                     dropout_probability=dropout_probability,
                     use_batch_norm=batch_norm,
+                    use_layer_norm=layer_norm,
                 )
             ),
             num_bins=num_bins,
@@ -123,6 +128,8 @@ def create_base_transform(
         )
 
     elif base_transform_type == "rq-autoregressive":
+        if layer_norm:
+            raise NotImplementedError("rq-autoregressive does not support layer norm.")
         return transforms.MaskedPiecewiseRationalQuadraticAutoregressiveTransform(
             features=param_dim,
             hidden_features=hidden_dim,
