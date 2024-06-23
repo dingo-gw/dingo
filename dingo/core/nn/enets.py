@@ -287,6 +287,7 @@ def create_enet_with_projection_layer_and_dense_resnet(
     dropout: float = 0.0,
     batch_norm: bool = True,
     layer_norm: bool = False,
+    rb_layer_norm: bool = False,
     added_context: bool = False,
 ):
     """
@@ -343,6 +344,8 @@ def create_enet_with_projection_layer_and_dense_resnet(
         flag that specifies whether to use batch normalization
     :param layer_norm: bool
         flag that specifies whether to use layer normalization
+    :param layer_norm: bool
+        whether to use layer normalization directly after rb module
     :param added_context: bool
         if set to True, additional context z is concatenated to the embedded
         feature vector enet(x); note that in this case, the expected input is
@@ -360,7 +363,11 @@ def create_enet_with_projection_layer_and_dense_resnet(
         batch_norm=batch_norm,
         layer_norm=layer_norm,
     )
-    enet = nn.Sequential(module_1, module_2)
+    if rb_layer_norm:
+        norm = nn.LayerNorm(module_1.output_dim)
+        enet = nn.Sequential(module_1, norm, module_2)
+    else:
+        enet = nn.Sequential(module_1, module_2)
 
     if not added_context:
         return enet
