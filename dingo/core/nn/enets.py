@@ -5,7 +5,7 @@ import torch
 import numpy as np
 import torch.nn as nn
 from torch.nn import functional as F
-from glasflow.nflows.nn.nets.resnet import ResidualBlock
+from dingo.core.nn.resnet import ResidualBlock
 from dingo.core.utils import torchutils
 
 
@@ -177,6 +177,7 @@ class DenseResidualNet(nn.Module):
         activation: Callable = F.elu,
         dropout: float = 0.0,
         batch_norm: bool = True,
+        layer_norm: bool = False,
     ):
         """
         Parameters
@@ -192,6 +193,8 @@ class DenseResidualNet(nn.Module):
         dropout: float
             dropout probability for residual blocks used for reqularization
         batch_norm: bool
+            flag that specifies whether to use batch normalization
+        layer_norm: bool
             flag that specifies whether to use batch normalization
         """
 
@@ -210,6 +213,7 @@ class DenseResidualNet(nn.Module):
                     activation=activation,
                     dropout_probability=dropout,
                     use_batch_norm=batch_norm,
+                    use_layer_norm=layer_norm,
                 )
                 for n in range(self.num_res_blocks)
             ]
@@ -282,6 +286,7 @@ def create_enet_with_projection_layer_and_dense_resnet(
     activation: str = "elu",
     dropout: float = 0.0,
     batch_norm: bool = True,
+    layer_norm: bool = False,
     added_context: bool = False,
 ):
     """
@@ -336,6 +341,8 @@ def create_enet_with_projection_layer_and_dense_resnet(
         dropout probability for residual blocks used for reqularization
     :param batch_norm: bool
         flag that specifies whether to use batch normalization
+    :param layer_norm: bool
+        flag that specifies whether to use layer normalization
     :param added_context: bool
         if set to True, additional context z is concatenated to the embedded
         feature vector enet(x); note that in this case, the expected input is
@@ -351,6 +358,7 @@ def create_enet_with_projection_layer_and_dense_resnet(
         activation=activation_fn,
         dropout=dropout,
         batch_norm=batch_norm,
+        layer_norm=layer_norm,
     )
     enet = nn.Sequential(module_1, module_2)
 
