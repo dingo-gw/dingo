@@ -131,6 +131,7 @@ def get_skymap_summary(
         return_aux=True,
         allow_duplicates=allow_duplicates,
     )
+    skymap_summary["skymap_dingo"] = skymap_dingo
     skymap_summary.update({"aux-dingo_" + k: v for k, v in aux_dingo.items()})
     # areas at specified credible levels
     areas_dingo = skymap_utils.credible_areas(skymap_dingo, credible_levels)
@@ -147,6 +148,7 @@ def get_skymap_summary(
             t_search_window_width=t_search_window,
             max_likelihood_template="log_likelihood" in dingo_result.samples,
         )
+        skymap_summary["skymap_bayestar"] = skymap_bayestar
         skymap_summary.update({"aux_bayestar_" + k: v for k, v in aux_bayestar.items()})
         # areas at specified credible levels
         areas_bayestar = skymap_utils.credible_areas(skymap_bayestar, credible_levels)
@@ -218,6 +220,22 @@ def weighted_quantile(
     return np.interp(quantiles, weighted_quantiles, values)
 
 
+def save_skymap(args, skymap_summary, weights, injection_id, f_max, **_):
+    """Remove skymaps from summary data, and optionally save them to disk."""
+    skymap_dingo = skymap_summary.pop("skymap_dingo")
+    skymap_bayestar = skymap_summary.pop("skymap_bayestar", None)
+    if getattr(args, "save_skymaps", False):
+        if weights is None:
+            label = f"skymap_id-{injection_id}_fmax-{str(f_max)}_dingo"
+        else:
+            label = f"skymap_id-{injection_id}_fmax-{str(f_max)}_dingo-is"
+        filename_dingo = os.path.join(args.outdirectory, f"{label}.fits")
+        filename_bayestar = os.path.join(args.outdirectory, f"{label}_bayestar.fits")
+        io.write_sky_map(filename_dingo, skymap_dingo, nest=True)
+        if skymap_bayestar is not None:
+            io.write_sky_map(filename_bayestar, skymap_bayestar, nest=True)
+
+
 def update_summary_data(summary_data, args, theta, result, **kwargs):
     samples = result.samples
     if "weights" in samples:
@@ -254,6 +272,7 @@ def update_summary_data(summary_data, args, theta, result, **kwargs):
     # optionally insert skymap
     if hasattr(args, "skymap"):
         skymap_summary = get_skymap_summary(result, theta, **args.skymap)
+        save_skymap(args, skymap_summary, weights, **kwargs)
         data.update({"skymap_" + k: v for k, v in skymap_summary.items()})
         # data["skymap_areas"] = get_skymap_area(samples, weights=weights, **args.skymap)
 
@@ -428,6 +447,9 @@ def set_delta_chirp_mass_prior(result, model_metadata):
 
 
 def main(args):
+    if not os.path.exists(args.outdirectory):
+        os.makedirs(args.outdirectory)
+
     f_max_scan = [None]
     if hasattr(args, "f_max"):
         if isinstance(args.f_max, list):
@@ -576,8 +598,6 @@ def main(args):
     summary_dingo = pd.DataFrame(summary_dingo)
     summary_dingo_is = pd.DataFrame(summary_dingo_is)
     label = f"_{args.process_id}"
-    if not os.path.exists(args.outdirectory):
-        os.makedirs(args.outdirectory)
     summary_dingo.to_pickle(join(args.outdirectory, f"summary-dingo{label}.pd"))
     if len(summary_dingo_is) > 0:
         summary_dingo_is.to_pickle(
