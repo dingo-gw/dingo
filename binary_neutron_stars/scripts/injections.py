@@ -22,6 +22,7 @@ from bilby.core.prior import PriorDict, Uniform, DeltaFunction
 from bilby.gw.conversion import chirp_mass_and_mass_ratio_to_component_masses
 from ligo.skymap import kde, io
 from ligo.skymap.postprocess import crossmatch
+import lal
 from astropy.coordinates import SkyCoord
 import astropy.units as u
 from os.path import join
@@ -446,6 +447,43 @@ def set_delta_chirp_mass_prior(result, model_metadata):
     ]
 
 
+def get_f_min(model_metadata, chirp_mass, f_min_lower=0):
+    """Compute f_min based on model configuration and chirp mass.
+
+    If the model does not apply frequency masking based on the chirp frequency,
+    then returns None. Else compute f_min = f(-duration, chirp_mass) + f_buffer.
+    If f_min > f_min_lower, return f_min, also return None.
+
+    Parameters
+    ----------
+    model_metadata: model metadata used to extract signal duration and chirp masking.
+    chirp_mass: chirp mass proxy used to compute f(t)
+    f_min_lower: minimum value for f_min. If computed f_min is below that, return None
+
+    Returns
+    -------
+    f_min: lower frequency bound that the model expects for the given chirp mass
+    """
+    if "frequency_masking_chirp" not in model_metadata["train_settings"]["data"]:
+        return None
+    else:
+        f_buffer = model_metadata["train_settings"]["data"]["frequency_masking_chirp"][
+            "f_buffer"
+        ]
+        duration = (
+            1 / model_metadata["dataset_settings"]["domain"]["base_domain"]["delta_f"]
+        )
+        f_min = (
+            (1 / (8 * np.pi))
+            * (duration / 5) ** (-3 / 8)
+            * (chirp_mass * lal.MTSUN_SI) ** (-5 / 8)
+        )
+        f_min += f_buffer
+        if f_min < f_min_lower:
+            f_min = None
+        return f_min
+
+
 def main(args):
     if not os.path.exists(args.outdirectory):
         os.makedirs(args.outdirectory)
@@ -549,19 +587,26 @@ def main(args):
             theta = deepcopy(data["parameters"])  # for float conversion
             print(chirp_mass_proxy, theta["chirp_mass"])
 
+        f_min = get_f_min(model.metadata, chirp_mass_proxy, base_sampler.domain.f_min)
+
         for f_max in f_max_scan:
-            print(f"\n\ninjection_id: {injection_id}, f_max: {f_max}")
-            # set f_max in sampler and event_metadata for importance sampling
-            aux = {"injection_id": injection_id, "f_max": f_max}
+            print(f"\n\ninjection_id: {injection_id}")
+            print(f"Mc proxy: {chirp_mass_proxy}, f_min: {f_min}, f_max: {f_max}")
+            aux = {"injection_id": injection_id, "f_min": f_min, "f_max": f_max}
+            # set f_min/f_max in sampler and event_metadata for importance sampling
+            frequency_update = {}
+            if f_min is not None:
+                frequency_update["f_min"] = f_min
             if f_max is not None:
-                frequency_update = {"f_max": f_max}
+                frequency_update["f_max"] = f_max
+            if len(frequency_update) > 0:
                 sampler = GWSamplerGNPE(
                     **sampler_kwargs, frequency_masking=frequency_update
                 )
-                event_metadata = {**base_event_metadata, **frequency_update}
             else:
                 sampler = base_sampler
-                event_metadata = base_event_metadata
+            event_metadata = {**base_event_metadata, **frequency_update}
+            if "f_max" not in event_metadata:
                 event_metadata["f_max"] = injection_generator.data_domain.f_max
 
             sampler.context = data
