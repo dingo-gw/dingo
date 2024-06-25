@@ -305,11 +305,14 @@ def update_summary_data(summary_data, args, theta, result, **kwargs):
             summary_data[k].append(v)
 
 
-def get_injection_generator(model_metadata, base_domain_dict, fixed_parameters=None):
+def get_injection_generator(
+    model_metadata, base_domain_dict, fixed_parameters=None, prior_updates=None
+):
     model_metadata = deepcopy(model_metadata)
     # generate injection in base domain
     model_metadata["dataset_settings"]["domain"] = base_domain_dict
     model_metadata["train_settings"]["data"].pop("domain_update")
+    # build injection generator
     injection_generator = injection.Injection.from_posterior_model_metadata(
         model_metadata
     )
@@ -320,6 +323,11 @@ def get_injection_generator(model_metadata, base_domain_dict, fixed_parameters=N
         for k, v in asd_dataset.asds.items()
         if k in model_metadata["train_settings"]["data"]["detectors"]
     }
+    # optionally update prior
+    if prior_updates is not None:
+        prior_updates = PriorDict(prior_updates)
+        for k, v in prior_updates.items():
+            injection_generator.prior[k] = v
     if fixed_parameters is not None:
         for k, v in fixed_parameters.items():
             injection_generator.prior[k] = DeltaFunction(v)
@@ -528,7 +536,10 @@ def main(args):
 
     # build injection generator
     injection_generator = get_injection_generator(
-        model.metadata, base_domain.domain_dict, getattr(args, "fixed_parameters", None)
+        model.metadata,
+        base_domain.domain_dict,
+        getattr(args, "fixed_parameters", None),
+        getattr(args, "injection_prior", None),
     )
 
     # initialize event metadata
