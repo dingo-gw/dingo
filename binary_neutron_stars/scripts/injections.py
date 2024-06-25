@@ -578,11 +578,13 @@ def main(args):
                 chirp_mass_proxy = theta["chirp_mass"]
             else:
                 chirp_mass_proxy = sample_chirp_mass_proxy()
+                # sample from hyperprior and set corresponding prior for injection generator
+                injection_generator.prior["chirp_mass"] = get_chirp_mass_prior(
+                    chirp_mass_proxy
+                )
+                # sample parameters
                 theta = injection_generator.prior.sample()
-            # sample from hyperprior and set corresponding prior for injection generator
-            injection_generator.prior["chirp_mass"] = get_chirp_mass_prior(
-                chirp_mass_proxy
-            )
+
             # generate injection
             data = injection_generator.injection(theta)
             theta = deepcopy(data["parameters"])  # for float conversion
