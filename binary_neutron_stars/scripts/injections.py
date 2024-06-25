@@ -11,6 +11,7 @@ from dingo.gw.skymap import (
 from dingo.gw.skymap import utils as skymap_utils
 
 import json
+import copy
 import yaml
 from pp_utils import weighted_percentile_of_score
 import numpy as np
@@ -609,7 +610,7 @@ def main(args):
             if "f_max" not in event_metadata:
                 event_metadata["f_max"] = injection_generator.data_domain.f_max
 
-            sampler.context = data
+            sampler.context = copy.deepcopy(data)
             set_chirp_mass(sampler, chirp_mass_proxy)
 
             sampler.run_sampler(
