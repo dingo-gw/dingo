@@ -1,4 +1,5 @@
 import copy
+import os
 from typing import Union, Tuple, Iterable
 
 import bilby
@@ -6,7 +7,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, DistributedSampler
+import torch.distributed as dist
 
 
 def fix_random_seeds(_):
@@ -291,6 +293,8 @@ def build_train_and_test_loaders(
     train_fraction: float,
     batch_size: int,
     num_workers: int,
+    world_size: int = None,
+    rank: int = None,
 ):
     """
     Split the dataset into train and test sets, and build corresponding DataLoaders.
@@ -304,6 +308,10 @@ def build_train_and_test_loaders(
         Should lie between 0 and 1.
     batch_size : int
     num_workers : int
+    world_size: int = None
+        total number of devices required for distributed data parallel training
+    rank: int = None
+        device rank required for distributed data parallel training
 
     Returns
     -------
@@ -315,6 +323,14 @@ def build_train_and_test_loaders(
         dataset, train_fraction
     )
 
+    if rank is not None and world_size is not None:
+        # Create DistributedSampler
+        train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
+        test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank)
+    else:
+        train_sampler = None
+        test_sampler = None
+
     # Build DataLoaders
     train_loader = DataLoader(
         train_dataset,
@@ -323,6 +339,7 @@ def build_train_and_test_loaders(
         pin_memory=True,
         num_workers=num_workers,
         worker_init_fn=fix_random_seeds,
+        sampler=train_sampler,
     )
     test_loader = DataLoader(
         test_dataset,
@@ -331,6 +348,7 @@ def build_train_and_test_loaders(
         pin_memory=True,
         num_workers=num_workers,
         worker_init_fn=fix_random_seeds,
+        sampler=test_sampler,
     )
 
     return train_loader, test_loader
@@ -357,3 +375,16 @@ def torch_detach_to_cpu(x):
     if isinstance(x, torch.Tensor):
         return x.detach().cpu()
     return x
+
+
+def setup_ddp(rank: int, world_size: int):
+    os.environ["MASTER_ADDR"] = "localhost"
+    os.environ["MASTER_PORT"] = "12355"
+
+    # initialize the process group
+    dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
+
+
+def cleanup_ddp():
+    dist.destroy_process_group()
+

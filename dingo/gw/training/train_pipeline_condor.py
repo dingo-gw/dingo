@@ -4,11 +4,15 @@ from os.path import join, isfile
 import yaml
 import argparse
 
+import torch.multiprocessing as mp
+
 from dingo.gw.training import (
     prepare_training_new,
     prepare_training_resume,
     train_stages,
 )
+from dingo.core.utils.torchutils import setup_ddp, cleanup_ddp
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 
 def create_submission_file(train_dir, condor_settings, filename="submission_file.sub"):
@@ -52,6 +56,68 @@ def copy_logfiles(log_dir, epoch, name="info", suffixes=(".err", ".log", ".out")
             print("Could not copy " + src)
 
 
+def run_training(
+        train_settings: dict,
+        local_settings: dict,
+        train_dir: str,
+        checkpoint: str,
+        resume: bool,
+):
+    if not resume:
+        pm, wfd = prepare_training_new(
+            train_settings, train_dir, local_settings
+        )
+    else:
+        ckpt_file = os.path.join(train_dir, checkpoint)
+        pm, wfd = prepare_training_resume(
+            checkpoint_name=ckpt_file,
+            local_settings=local_settings,
+            train_dir=train_dir,
+        )
+
+    complete = train_stages(pm, wfd, train_dir, local_settings)
+
+    return complete, pm.epoch
+
+
+def run_training_ddp(
+        rank: int,
+        world_size: int,
+        train_settings: dict,
+        local_settings: dict,
+        train_dir: str,
+        checkpoint: str,
+        resume: bool,
+):
+    # Initialize process group
+    setup_ddp(rank, world_size)
+
+    local_settings["device"] = f"cuda:{rank}"
+    local_settings["rank"] = rank
+    local_settings["world_size"] = world_size
+
+    if not resume:
+        pm, wfd = prepare_training_new(
+            train_settings, train_dir, local_settings
+        )
+    else:
+        ckpt_file = os.path.join(train_dir, checkpoint)
+        pm, wfd = prepare_training_resume(
+            checkpoint_name=ckpt_file,
+            local_settings=local_settings,
+            train_dir=train_dir,
+        )
+
+    # Wrap the model with DDP
+    pm_ddp = DDP(pm, device_ids=[rank])
+
+    complete = train_stages(pm_ddp, wfd, train_dir, local_settings)
+
+    cleanup_ddp()
+
+    return complete, pm.epoch
+
+
 def train_condor():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -82,6 +148,7 @@ def train_condor():
 
         if not isfile(join(args.train_dir, args.checkpoint)):
             print("Beginning new training run.")
+            resume = False
             with open(join(args.train_dir, "train_settings.yaml"), "r") as f:
                 train_settings = yaml.safe_load(f)
 
@@ -92,8 +159,8 @@ def train_condor():
             local_settings = train_settings.pop("local")
             with open(os.path.join(args.train_dir, "local_settings.yaml"), "w") as f:
                 if (
-                    local_settings.get("wandb", False)
-                    and "id" not in local_settings["wandb"].keys()
+                        local_settings.get("wandb", False)
+                        and "id" not in local_settings["wandb"].keys()
                 ):
                     try:
                         import wandb
@@ -103,24 +170,31 @@ def train_condor():
                         print("wandb not installed, cannot generate run id.")
                 yaml.dump(local_settings, f, default_flow_style=False, sort_keys=False)
 
-            pm, wfd = prepare_training_new(
-                train_settings, args.train_dir, local_settings
-            )
-
         else:
             print("Resuming training run.")
+            resume = True
             with open(os.path.join(args.train_dir, "local_settings.yaml"), "r") as f:
                 local_settings = yaml.safe_load(f)
-            pm, wfd = prepare_training_resume(
-                join(args.train_dir, args.checkpoint),
-                local_settings,
-                train_dir=args.train_dir,
-            )
 
-        complete = train_stages(pm, wfd, args.train_dir, local_settings)
+        # Setup multi-GPU training
+        if (local_settings["device"] == "cuda"
+                and "condor" in local_settings
+                and "num_gpus" in local_settings["condor"]
+                and local_settings["condor"]["num_gpus"] > 1.):
+            # Specify the number of processes (typically the number of GPUs available)
+            world_size = local_settings["condor"]["num_gpus"]
+
+            complete, pm_epoch = mp.spawn(run_training_ddp,
+                                args=(
+                                    world_size, train_settings, local_settings, args.train_dir, args.checkpoint,
+                                    resume),
+                                nprocs=world_size,
+                                join=True)
+        else:
+            complete, pm_epoch = run_training(train_settings, local_settings, args.train_dir, args.checkpoint, resume)
 
         print("Copying log files")
-        copy_logfiles(args.train_dir, epoch=pm.epoch)
+        copy_logfiles(args.train_dir, epoch=pm_epoch)
 
         #
         # PREPARE NEXT SUBMISSION

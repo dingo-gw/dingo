@@ -163,7 +163,7 @@ def prepare_training_new(
 
 
 def prepare_training_resume(
-    checkpoint_name, local_settings, train_dir, pretraining: bool = False
+    checkpoint_name: str, local_settings: dict, train_dir: str, pretraining: bool = False
 ):
     """
     Loads a PosteriorModel from a checkpoint, as well as the corresponding
@@ -209,11 +209,11 @@ def prepare_training_resume(
     return pm, wfd
 
 
-def initialize_stage(pm, wfd, stage, num_workers, resume=False):
+def initialize_stage(pm, wfd, stage, num_workers, world_size: int = None, rank: int = None, resume=False):
     """
     Initializes training based on PosteriorModel metadata and current stage:
         * Builds transforms (based on noise settings for current stage);
-        * Builds DataLoaders;
+        * Builds DataLoaders (optional: for distributed training);
         * At the beginning of a stage (i.e., if not resuming mid-stage), initializes
         a new optimizer and scheduler;
         * Freezes / unfreezes SVD layer of embedding network
@@ -225,6 +225,10 @@ def initialize_stage(pm, wfd, stage, num_workers, resume=False):
     stage : dict
         Settings specific to current stage of training
     num_workers : int
+    world_size: int = None
+        total number of devices required for distributed data parallel training
+    rank: int = None
+        device rank required for distributed data parallel training
     resume : bool
         Whether training is resuming mid-stage. This controls whether the optimizer and
         scheduler should be re-initialized based on contents of stage dict.
@@ -245,6 +249,8 @@ def initialize_stage(pm, wfd, stage, num_workers, resume=False):
         train_settings["data"]["train_fraction"],
         stage["batch_size"],
         num_workers,
+        world_size=world_size,
+        rank=rank,
     )
 
     if not resume:
@@ -322,13 +328,13 @@ def train_stages(pm, wfd, train_dir, local_settings):
             print(f"\nBeginning training stage {n}. Settings:")
             print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
             train_loader, test_loader = initialize_stage(
-                pm, wfd, stage, local_settings["num_workers"], resume=False
+                pm, wfd, stage, local_settings["num_workers"], local_settings["world_size"], local_settings["rank"], resume=False
             )
         else:
             print(f"\nResuming training in stage {n}. Settings:")
             print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
             train_loader, test_loader = initialize_stage(
-                pm, wfd, stage, local_settings["num_workers"], resume=True
+                pm, wfd, stage, local_settings["num_workers"], local_settings["world_size"], local_settings["rank"], resume=True
             )
 
         runtime_limits.max_epochs_total = end_epochs[n]
@@ -338,6 +344,7 @@ def train_stages(pm, wfd, train_dir, local_settings):
             train_dir=train_dir,
             runtime_limits=runtime_limits,
             checkpoint_epochs=local_settings["checkpoint_epochs"],
+            rank=local_settings["rank"],
             use_wandb=local_settings.get("wandb", False),
             test_only=local_settings.get("test_only", False),
         )
@@ -346,9 +353,11 @@ def train_stages(pm, wfd, train_dir, local_settings):
             return True
 
         if pm.epoch == end_epochs[n]:
-            save_file = os.path.join(train_dir, f"model_stage_{n}.pt")
-            print(f"Training stage complete. Saving to {save_file}.")
-            pm.save_model(save_file, save_training_info=True)
+            # Only save model on one device
+            if local_settings.get("rank", 0.) == 0.:
+                save_file = os.path.join(train_dir, f"model_stage_{n}.pt")
+                print(f"Training stage complete. Saving to {save_file}.")
+                pm.save_model(save_file, save_training_info=True)
         if runtime_limits.local_limits_exceeded(pm.epoch):
             print("Local runtime limits reached. Ending program.")
             break

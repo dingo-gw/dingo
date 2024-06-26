@@ -360,6 +360,7 @@ class Base:
         train_dir: str,
         runtime_limits: object = None,
         checkpoint_epochs: int = None,
+        rank: int = None,
         use_wandb=False,
         test_only=False,
         early_stopping=False,
@@ -377,6 +378,8 @@ class Base:
         runtime_limits: object=None
         checkpoint_epochs: int=None
             number of epochs between checkpoints
+        rank: int = None
+            device rank required for distributed data parallel training
         use_wandb: bool=False
             whether to use wand
         test_only: bool = False
@@ -391,7 +394,9 @@ class Base:
 
         if test_only:
             test_loss = test_epoch(self, test_loader)
-            print(f"test loss: {test_loss:.3f}")
+            # Only print for one device
+            if rank is None or rank == 0.:
+                print(f"test loss: {test_loss:.3f}")
 
         else:
             if early_stopping:
@@ -403,28 +408,33 @@ class Base:
                 # Training
                 lr = utils.get_lr(self.optimizer)
                 with threadpool_limits(limits=1, user_api="blas"):
-                    print(f"\nStart training epoch {self.epoch} with lr {lr}")
+                    # Only print for one device
+                    if rank is None or rank == 0.:
+                        print(f"\nStart training epoch {self.epoch} with lr {lr}")
                     time_start = time.time()
                     train_loss = train_epoch(self, train_loader)
                     train_time = time.time() - time_start
-
-                    print(
-                        "Done. This took {:2.0f}:{:2.0f} min.".format(
-                            *divmod(train_time, 60)
+                    # Only print for one device
+                    if rank is None or rank == 0.:
+                        print(
+                            "Done. This took {:2.0f}:{:2.0f} min.".format(
+                                *divmod(train_time, 60)
+                            )
                         )
-                    )
 
-                    # Testing
-                    print(f"Start testing epoch {self.epoch}")
+                        # Testing
+                        print(f"Start testing epoch {self.epoch}")
                     time_start = time.time()
                     test_loss = test_epoch(self, test_loader)
                     test_time = time.time() - time_start
 
-                    print(
-                        "Done. This took {:2.0f}:{:2.0f} min.".format(
-                            *divmod(time.time() - time_start, 60)
+                    # Only print for one device
+                    if rank is None or rank == 0.:
+                        print(
+                            "Done. This took {:2.0f}:{:2.0f} min.".format(
+                                *divmod(time.time() - time_start, 60)
+                            )
                         )
-                    )
                 if self.scheduler_kwargs["update_scheduler_every_batch"] is False:
                     # scheduler step for learning rate
                     utils.perform_scheduler_step(self.scheduler, test_loss)
@@ -432,7 +442,7 @@ class Base:
                 # write history and save model
                 utils.write_history(train_dir, self.epoch, train_loss, test_loss, lr)
                 utils.save_model(self, train_dir, checkpoint_epochs=checkpoint_epochs)
-                if use_wandb:
+                if use_wandb and (rank is None or rank == 0.):
                     try:
                         import wandb
 
@@ -453,7 +463,7 @@ class Base:
 
                 if early_stopping:
                     best_model = early_stopping(test_loss, self)
-                    if best_model:
+                    if best_model and (rank is None or rank == 0.):
                         self.save_model(
                             join(train_dir, "best_model.pt"), save_training_info=False
                         )
