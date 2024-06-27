@@ -15,6 +15,7 @@ import copy
 import yaml
 from pp_utils import weighted_percentile_of_score
 import numpy as np
+from scipy.interpolate import interp1d
 import os
 import pandas as pd
 import torch
@@ -368,10 +369,8 @@ def get_chirp_mass_functions(
         )["chirp_mass"]
         if not isinstance(chirp_mass_kernel, Uniform):
             raise NotImplementedError()
-        # get chirp mass hyperprior from model metadata
-        chirp_mass_hyperprior = PriorDict(
-            deepcopy(model_metadata["dataset_settings"]["intrinsic_prior"])
-        )["chirp_mass"]
+        # get chirp mass hyperprior from injection generator
+        chirp_mass_hyperprior = copy.deepcopy(injection_generator.prior["chirp_mass"])
         # exclude chirp mass regions that are forbidden by m1, m2 constraints
         if {"mass_1", "mass_2"}.issubset(injection_generator.prior.keys()):
             m1 = injection_generator.prior["mass_1"]
@@ -493,16 +492,31 @@ def get_f_min(model_metadata, chirp_mass, f_min_lower=0):
         return f_min
 
 
+def frequency_lookup(lookup_table, t_from_merger, chirp_mass):
+    f_max = interp1d(
+        lookup_table[t_from_merger]["chirp_masses"],
+        lookup_table[t_from_merger]["f_max"],
+    )(chirp_mass).item()
+    return f_max
+
+
 def main(args):
     if not os.path.exists(args.outdirectory):
         os.makedirs(args.outdirectory)
 
     f_max_scan = [None]
     if hasattr(args, "f_max"):
-        if isinstance(args.f_max, list):
-            f_max_scan = args.f_max
-        else:
-            f_max_scan = [args.f_max]
+        f_max_scan = args.f_max
+    if hasattr(args, "t_from_merger"):
+        if f_max_scan != [None]:
+            raise ValueError(
+                "Can only specify one of [f_max, t_from_merger], got both."
+            )
+        t_scan = args.t_from_merger
+        f_max_scan = [None] * len(t_scan)
+        args.f_lookup = np.load(args.f_lookup, allow_pickle=True).item()
+    else:
+        t_scan = [None] * len(f_max_scan)
 
     # load model and initialize dingo sampler
     model = PosteriorModel(
@@ -603,10 +617,18 @@ def main(args):
 
         f_min = get_f_min(model.metadata, chirp_mass_proxy, base_sampler.domain.f_min)
 
-        for f_max in f_max_scan:
+        for t_merger, f_max in zip(t_scan, f_max_scan):
+            if t_merger is not None:
+                f_max = frequency_lookup(args.f_lookup, t_merger, chirp_mass_proxy)
+
             print(f"\n\ninjection_id: {injection_id}")
             print(f"Mc proxy: {chirp_mass_proxy}, f_min: {f_min}, f_max: {f_max}")
-            aux = {"injection_id": injection_id, "f_min": f_min, "f_max": f_max}
+            aux = {
+                "injection_id": injection_id,
+                "f_min": f_min,
+                "f_max": f_max,
+                "t-merger": t_merger,
+            }
             # set f_min/f_max in sampler and event_metadata for importance sampling
             frequency_update = {}
             if f_min is not None:
