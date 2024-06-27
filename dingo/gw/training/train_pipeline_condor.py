@@ -109,9 +109,9 @@ def run_training_ddp(
         )
 
     # Wrap the model with DDP
-    pm_ddp = DDP(pm, device_ids=[rank])
+    pm.network = DDP(pm.network, device_ids=[rank])
 
-    complete = train_stages(pm_ddp, wfd, train_dir, local_settings)
+    complete = train_stages(pm, wfd, train_dir, local_settings)
 
     cleanup_ddp()
 
