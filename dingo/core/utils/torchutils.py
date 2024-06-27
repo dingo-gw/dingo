@@ -323,33 +323,48 @@ def build_train_and_test_loaders(
         dataset, train_fraction
     )
 
+    # Create dataloaders for multi-GPU training separately, because arguments `shuffle` and `sampler` in DataLoader
+    # are mutually exclusive
     if rank is not None and world_size is not None:
         # Create DistributedSampler
-        train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
-        test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank)
-    else:
-        train_sampler = None
-        test_sampler = None
+        train_sampler = DistributedSampler(train_dataset, shuffle=True, num_replicas=world_size, rank=rank)
+        test_sampler = DistributedSampler(test_dataset, shuffle=True, num_replicas=world_size, rank=rank)
 
-    # Build DataLoaders
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        pin_memory=True,
-        num_workers=num_workers,
-        worker_init_fn=fix_random_seeds,
-        sampler=train_sampler,
-    )
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        pin_memory=True,
-        num_workers=num_workers,
-        worker_init_fn=fix_random_seeds,
-        sampler=test_sampler,
-    )
+        # Build DataLoaders
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            pin_memory=True,
+            num_workers=num_workers,
+            worker_init_fn=fix_random_seeds,
+            sampler=train_sampler,
+        )
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            worker_init_fn=fix_random_seeds,
+            sampler=test_sampler,
+        )
+    else:
+        # Build DataLoaders
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            pin_memory=True,
+            num_workers=num_workers,
+            worker_init_fn=fix_random_seeds,
+        )
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            pin_memory=True,
+            num_workers=num_workers,
+            worker_init_fn=fix_random_seeds,
+        )
 
     return train_loader, test_loader
 
