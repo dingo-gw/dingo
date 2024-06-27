@@ -178,7 +178,7 @@ class Base:
         """
         Put model to device, and set self.device accordingly.
         """
-        if "cpu" not in device or "cuda" not in device:
+        if "cpu" not in device and "cuda" not in device:
             raise ValueError(f"Device should contain either cpu or cuda, got {device}.")
         self.device = torch.device(device)
         print(f"Putting posterior model to device {self.device}.")
