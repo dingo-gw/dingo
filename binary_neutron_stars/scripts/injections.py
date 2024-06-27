@@ -493,6 +493,8 @@ def get_f_min(model_metadata, chirp_mass, f_min_lower=0):
 
 
 def frequency_lookup(lookup_table, t_from_merger, chirp_mass):
+    if t_from_merger is None:
+        return None
     f_max = interp1d(
         lookup_table[t_from_merger]["chirp_masses"],
         lookup_table[t_from_merger]["f_max"],
