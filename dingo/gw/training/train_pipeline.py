@@ -148,7 +148,7 @@ def prepare_training_new(
     else:
         raise ValueError("No embedding_kwargs specified in model.")
 
-    if local_settings.get("wandb", False):
+    if local_settings.get("wandb", False) and local_settings.get("rank", 0.) == 0.:
         try:
             import wandb
             wandb.init(
