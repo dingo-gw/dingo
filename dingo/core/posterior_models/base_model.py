@@ -433,27 +433,28 @@ class Base:
                     # scheduler step for learning rate
                     utils.perform_scheduler_step(self.scheduler, test_loss)
 
-                # write history and save model
-                utils.write_history(train_dir, self.epoch, train_loss, test_loss, lr)
-                utils.save_model(self, train_dir, checkpoint_epochs=checkpoint_epochs)
-                if use_wandb and (rank is None or rank == 0.):
-                    try:
-                        import wandb
+                if rank is None or rank == 0.:
+                    # write history and save model
+                    utils.write_history(train_dir, self.epoch, train_loss, test_loss, lr)
+                    utils.save_model(self, train_dir, checkpoint_epochs=checkpoint_epochs)
+                    if use_wandb:
+                        try:
+                            import wandb
 
-                        wandb.define_metric("epoch")
-                        wandb.define_metric("*", step_metric="epoch")
-                        wandb.log(
-                            {
-                                "epoch": self.epoch,
-                                "learning_rate": lr[0],
-                                "train_loss": train_loss,
-                                "test_loss": test_loss,
-                                "train_time": train_time,
-                                "test_time": test_time,
-                            }
-                        )
-                    except ImportError:
-                        print("wandb not installed. Skipping logging to wandb.")
+                            wandb.define_metric("epoch")
+                            wandb.define_metric("*", step_metric="epoch")
+                            wandb.log(
+                                {
+                                    "epoch": self.epoch,
+                                    "learning_rate": lr[0],
+                                    "train_loss": train_loss,
+                                    "test_loss": test_loss,
+                                    "train_time": train_time,
+                                    "test_time": test_time,
+                                }
+                            )
+                        except ImportError:
+                            print("wandb not installed. Skipping logging to wandb.")
 
                 if early_stopping:
                     best_model = early_stopping(test_loss, self)
