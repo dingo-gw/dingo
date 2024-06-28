@@ -113,6 +113,14 @@ def run_training_ddp(
 
     complete = train_stages(pm, wfd, train_dir, local_settings)
 
+    if complete and local_settings.get("wandb", False) and rank == 0.:
+        try:
+            import wandb
+
+            wandb.finish()
+        except ImportError:
+            print("wandb not installed. Skipping logging to wandb.")
+
     cleanup_ddp()
 
     return complete, pm.epoch
