@@ -206,7 +206,7 @@ def main(args):
     print(f"Wall time for likelihoods: {time.time() - t0:.2f}")
 
     # extract chirp mass from max log prob samples
-    chirp_mass_trigger = theta["chirp_mass"][np.argmax(log_likelihoods)]
+    chirp_mass_trigger = np.array(theta["chirp_mass"])[np.argmax(log_likelihoods)]
     print(f"Chirp mass trigger: {chirp_mass_trigger:.4f} seconds.")
 
     # optionally plot
@@ -231,7 +231,10 @@ def main(args):
 
     if args.outfile is not None:
         pd.DataFrame(
-            dict(chirp_mass=theta["chirp_mass"], log_likelihoods=log_likelihoods)
+            dict(
+                chirp_mass=np.array(theta["chirp_mass"]),
+                log_likelihoods=log_likelihoods,
+            )
         ).to_pickle(args.outfile)
 
 
