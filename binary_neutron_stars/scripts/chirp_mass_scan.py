@@ -58,6 +58,7 @@ def parse_args():
         help="Number of parallel processes for likelihood computation.",
     )
     parser.add_argument("--plot", action="store_true")
+    parser.add_argument("--outfile", type=str, default=None)
     args = parser.parse_args()
     return args
 
@@ -101,7 +102,9 @@ def get_transforms(model_metadata, f_max=None):
         DecimateWaveformsAndASDS(domain, decimation_mode="whitened"),
         WhitenAndScaleStrain(scale_factor=domain.noise_std),
         RepackageStrainsAndASDS(data_settings["detectors"]),
-        ApplyRandomFrequencyMasking(domain=domain, f_max_lower=f_max, deterministic=True),
+        ApplyRandomFrequencyMasking(
+            domain=domain, f_max_lower=f_max, deterministic=True
+        ),
         SelectStandardizeRepackageParameters(
             {"context_parameters": ["chirp_mass_proxy"]},
             data_settings["standardization"],
@@ -159,7 +162,9 @@ def main(args):
 
     # load model and initialize dingo sampler
     model = PosteriorModel(
-        device="cpu", model_filename=args.dingo_model, load_training_info=False
+        device="cuda" if torch.cuda.is_available() else "cpu",
+        model_filename=args.dingo_model,
+        load_training_info=False,
     )
     # load data for event
     event_dataset = EventDataset(args.event_data)
@@ -223,6 +228,11 @@ def main(args):
         #     axis=1),
         # )
         # plt.show()
+
+    if args.outfile is not None:
+        pd.DataFrame(
+            dict(chirp_mass=theta["chirp_mass"], log_likelihoods=log_likelihoods)
+        ).to_pickle(args.outfile)
 
 
 if __name__ == "__main__":
