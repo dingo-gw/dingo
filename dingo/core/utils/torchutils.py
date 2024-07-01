@@ -397,7 +397,13 @@ def setup_ddp(rank: int, world_size: int):
     os.environ["MASTER_PORT"] = "12355"
 
     # initialize the process group
-    dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
+    if dist.is_nccl_available():
+        dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
+    elif dist.is_gloo_available():
+        dist.init_process_group(backend="gloo", rank=rank, world_size=world_size)
+    else:
+        raise ValueError("Both backends nccl and gloo not available for multi-GPU training with distributed data "
+                         "parallel. Go back to single-GPU training.")
 
 
 def cleanup_ddp():
