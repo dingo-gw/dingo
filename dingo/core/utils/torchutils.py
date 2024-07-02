@@ -404,6 +404,12 @@ def setup_ddp(rank: int, world_size: int):
     else:
         raise ValueError("Both backends nccl and gloo not available for multi-GPU training with distributed data "
                          "parallel. Go back to single-GPU training.")
+    # Assign correct device to process
+    torch.cuda.set_device(rank)
+
+
+def replace_BatchNorm_with_SyncBatchNorm(network: nn.Module):
+    return nn.SyncBatchNorm.convert_sync_batchnorm(network)
 
 
 def cleanup_ddp():

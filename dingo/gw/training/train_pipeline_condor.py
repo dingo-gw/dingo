@@ -11,7 +11,7 @@ from dingo.gw.training import (
     prepare_training_resume,
     train_stages,
 )
-from dingo.core.utils.torchutils import setup_ddp, cleanup_ddp
+from dingo.core.utils.torchutils import setup_ddp, cleanup_ddp, replace_BatchNorm_with_SyncBatchNorm
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 
@@ -108,6 +108,8 @@ def run_training_ddp(
             train_dir=train_dir,
         )
 
+    # Replace BatchNorm layers with SyncBatchNorm
+    pm.network = replace_BatchNorm_with_SyncBatchNorm(pm.network)
     # Wrap the model with DDP
     pm.network = DDP(pm.network, device_ids=[rank])
 
@@ -121,6 +123,7 @@ def run_training_ddp(
         except ImportError:
             print("wandb not installed. Skipping logging to wandb.")
 
+    # Delete process group
     cleanup_ddp()
 
     return complete, pm.epoch
