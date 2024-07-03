@@ -337,6 +337,8 @@ class Result(DingoDataset):
                 delta_log_prob_target = 0.0
 
             # *Un-normalized* log weights are needed to calculate evidence.
+            assert np.sum(np.isnan(log_likelihood) * (log_prior > -np.inf)) == 0
+            assert np.sum(np.isnan(log_prob_proposal) * (log_prior > -np.inf)) == 0
             log_weights = (
                 log_prior
                 + np.nan_to_num(log_likelihood)  # NaN = no log_likelihood evaluation

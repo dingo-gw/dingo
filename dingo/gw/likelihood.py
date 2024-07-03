@@ -108,11 +108,11 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             del event_data
         else:
             # whiten
+            self.asd = event_data["asds"]
             self.whitened_strains = {
-                k: v / event_data["asds"][k] / data_domain.noise_std
+                k: v / self.asd[k] / data_domain.noise_std
                 for k, v in event_data["waveform"].items()
             }
-            self.asd = event_data["asds"]
             if len(list(self.whitened_strains.values())[0]) != data_domain.max_idx + 1:
                 raise ValueError("Strain data does not match domain.")
             del event_data
