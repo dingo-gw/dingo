@@ -212,6 +212,8 @@ def main(args):
     # get chirp masses for scan
     chirp_masses = get_scan_chirp_masses(model.metadata, overlap_factor=2)
 
+    theta_out = None
+
     times = get_scan_times(model.metadata, args.time_scan_range, overlap_factor=1)
     for dt in times:
         # load data for event, optionally time shift
@@ -256,9 +258,12 @@ def main(args):
 
         # extract chirp mass from max log prob samples
         chirp_mass_trigger = np.array(theta["chirp_mass"])[np.argmax(log_likelihoods)]
+        time_trigger = np.array(theta["geocent_time"])[np.argmax(log_likelihoods)]
         if dt is not None:
-            print(f"GPS time: {event_dataset.settings['time_event']:.2f}", end="\t")
-        print(f"Chirp mass trigger: {chirp_mass_trigger:.4f} Msun.")
+            print(f"dt: {dt:.2f}", end="\t\t")
+        print(f"Chirp mass trigger: {chirp_mass_trigger:.4f} Msun.", end="\t\t")
+        print(f"SNR: {snrs[np.argmax(log_likelihoods)]:.1f}", end="\t\t")
+        print(f"GPS trigger: {event_dataset.settings['time_event'] + time_trigger:.2f}")
 
         # optionally plot
         if args.plot:
@@ -276,14 +281,16 @@ def main(args):
             plt.ylim(np.max(log_likelihoods) - 100, np.max(log_likelihoods) + 10)
             plt.show()
 
-        if args.outfile is not None:
-            theta["log_likelihood"] = log_likelihoods
-            theta["snr"] = snrs
-            theta["time_event"] = event_dataset.settings["time_event"]
-            outfile = args.outfile
-            if dt is not None:
-                outfile = outfile[:-3] + f"_dt{dt:.2f}.pd"
-            theta.reset_index().to_pickle(outfile)
+        theta["log_likelihood"] = log_likelihoods
+        theta["snr"] = snrs
+        theta["time_event"] = event_dataset.settings["time_event"]
+        if theta_out is None:
+            theta_out = theta
+        else:
+            theta_out = pd.concat((theta_out, theta))
+
+    if args.outfile is not None:
+        theta_out.reset_index().to_pickle(args.outfile)
 
 
 if __name__ == "__main__":
