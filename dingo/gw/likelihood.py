@@ -170,6 +170,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         # Initialize calibration marginalization using the setter from GWSignal.
         self.calibration_marginalization_kwargs = calibration_marginalization_kwargs
 
+        self.return_aux_snr = False
+
     def initialize_time_marginalization(self, t_lower, t_upper, n_fft=1):
         """
         Initialize time marginalization. Time marginalization can be performed via FFT,
@@ -339,7 +341,14 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 for d_ifo, mu_ifo in zip(d.values(), mu.values())
             ],
         )
-        return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+        log_likelihood = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+
+        # optionally return snr
+        if self.return_aux_snr:
+            snr = kappa2 / rho2opt ** 0.5
+            return log_likelihood, snr
+
+        return log_likelihood
 
     def log_likelihood_phase_grid(self, theta, phases=None):
         if isinstance(self.waveform_generator.domain, FrequencyDomain):
@@ -353,6 +362,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             )
 
     def _log_likelihood_phase_grid_manual(self, theta, phases=None):
+        if self.return_aux_snr:
+            raise NotImplementedError
         if self.phase_marginalization:
             raise ValueError(
                 "Can't compute likelihood on a phase grid for "
@@ -374,6 +385,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
     def _log_likelihood_phase_grid_mode_decomposed(self, theta, phases=None):
         # TODO: Implement for time marginalization
+        if self.return_aux_snr:
+            raise NotImplementedError
         if self.phase_marginalization:
             raise ValueError(
                 "Can't compute likelihood on a phase grid for "
@@ -530,9 +543,19 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                     for d_ifo, mu_ifo in zip(d.values(), mu.values())
                 ]
             )
-            return self.log_Zn + ln_i0(np.abs(kappa2C)) - 1 / 2.0 * rho2opt
+
+            log_likelihood = self.log_Zn + ln_i0(np.abs(kappa2C)) - 1 / 2.0 * rho2opt
+
+            # optionally return snr
+            if self.return_aux_snr:
+                snr = ln_i0(np.abs(kappa2C)) / rho2opt ** 0.5
+                return log_likelihood, snr
+
+            return log_likelihood
 
         else:
+            if self.return_aux_snr:
+                raise NotImplementedError
             log_likelihoods_phase_grid = self.log_likelihood_phase_grid(theta)
             # Marginalize over phase. The phase-marginalized posterior is given by
             #
@@ -614,7 +637,14 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         alpha = np.max(exponent)
         kappa2 = alpha + np.log(np.sum(np.exp(exponent - alpha)))
 
-        return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+        log_likelihood = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+
+        # optionally return snr
+        if self.return_aux_snr:
+            snr = kappa2 / rho2opt ** 0.5
+            return log_likelihood, snr
+
+        return log_likelihood
 
     def _log_likelihood_calibration_marginalized(self, theta):
         """
@@ -629,6 +659,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         -------
         log_likelihood: float
         """
+        if self.return_aux_snr:
+            raise NotImplementedError
 
         # Step 1: Compute whitened GW strain mu(theta) for parameters theta.
         mu = self.signal(theta)["waveform"]
