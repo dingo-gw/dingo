@@ -178,7 +178,7 @@ def time_translate_event_dataset(event_dataset, dt):
         k: domain.time_translate_data(v, dt)
         for k, v in event_dataset.data["waveform"].items()
     }
-    event_dataset.settings["time_event"] += dt
+    event_dataset.settings["time_event"] -= dt
 
 
 def get_scan_times(model_metadata, time_scan_range, overlap_factor=1):
