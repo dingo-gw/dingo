@@ -1,3 +1,5 @@
+import copy
+
 from dingo.core.models import PosteriorModel
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.transforms import (
@@ -9,7 +11,11 @@ from dingo.gw.transforms import (
     SelectStandardizeRepackageParameters,
     ToTorch,
 )
-from dingo.gw.domains import build_domain, build_domain_from_model_metadata
+from dingo.gw.domains import (
+    build_domain,
+    build_domain_from_model_metadata,
+    FrequencyDomain,
+)
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.prior import build_prior_with_defaults
@@ -59,6 +65,13 @@ def parse_args():
     )
     parser.add_argument("--plot", action="store_true")
     parser.add_argument("--outfile", type=str, default=None)
+    parser.add_argument(
+        "--time_scan_range",
+        type=float,
+        nargs=2,
+        default=None,
+        help="Range for time scan of the data, (t_min, t_max).",
+    )
     args = parser.parse_args()
     return args
 
@@ -158,6 +171,32 @@ def build_prior_and_likelihood(model_metadata, event_data, f_max=None):
     return prior, likelihood
 
 
+def time_translate_event_dataset(event_dataset, dt):
+    s = event_dataset.settings
+    domain = FrequencyDomain(f_min=s["f_min"], f_max=s["f_max"], delta_f=1 / s["T"])
+    event_dataset.data["waveform"] = {
+        k: domain.time_translate_data(v, dt)
+        for k, v in event_dataset.data["waveform"].items()
+    }
+    event_dataset.settings["time_event"] += dt
+
+
+def get_scan_times(model_metadata, time_scan_range, overlap_factor=1):
+    if time_scan_range is None:
+        return [None]
+    else:
+        prior_dict = copy.deepcopy(
+            model_metadata["train_settings"]["data"]["extrinsic_prior"]
+        )
+        prior = PriorDict(prior_dict)["geocent_time"]
+        delta_t = prior.maximum - prior.minimum
+        delta_t /= overlap_factor
+        t_min, t_max = time_scan_range
+        N = int((t_max - t_min) / delta_t) + 1
+        dt = np.linspace(t_min, t_max, N)
+        return dt
+
+
 def main(args):
 
     # load model and initialize dingo sampler
@@ -166,77 +205,85 @@ def main(args):
         model_filename=args.dingo_model,
         load_training_info=False,
     )
-    # load data for event
-    event_dataset = EventDataset(args.event_data)
     # set data transforms
     transform_pre, transform_post = get_transforms(
         model.metadata, f_max=args.f_max_dingo
     )
     # get chirp masses for scan
     chirp_masses = get_scan_chirp_masses(model.metadata, overlap_factor=2)
-    # generate nn input data for chirp mass scan
-    data = generate_data_for_scan(
-        transform_pre, event_dataset.data, chirp_masses, num_samples=args.num_samples
-    )
 
-    # sample from the model
-    t0 = time.time()
-    samples = model.sample(*data).detach().cpu().numpy()
-    samples = transform_post(dict(parameters=samples))["parameters"]
-    delta_chirp_mass = samples.pop("delta_chirp_mass")
-    samples["chirp_mass"] = chirp_masses.repeat(args.num_samples) + delta_chirp_mass
-    print(f"Wall time for NN sampling: {time.time() - t0:.2f} seconds.")
+    times = get_scan_times(model.metadata, args.time_scan_range, overlap_factor=1)
+    for dt in times:
+        # load data for event, optionally time shift
+        event_dataset = EventDataset(args.event_data)
+        if dt is not None:
+            time_translate_event_dataset(event_dataset, dt)
 
-    # build likelihood
-    prior, likelihood = build_prior_and_likelihood(
-        model.metadata, event_dataset.data, f_max=args.f_max_likelihood
-    )
+        # generate nn input data for chirp mass scan
+        data = generate_data_for_scan(
+            transform_pre,
+            event_dataset.data,
+            chirp_masses,
+            num_samples=args.num_samples,
+        )
 
-    # compute log priors and likelihoods
-    theta = pd.DataFrame(samples)
-    log_prior = prior.ln_prob(theta, axis=0)
-    indices = np.where(log_prior > -np.inf)[0]
-    theta = theta.iloc[indices]
-    log_prior = log_prior[indices]
-    t0 = time.time()
-    likelihood.return_aux_snr = True
-    log_likelihoods, snrs = likelihood.log_likelihood_multi(
-        theta, num_processes=args.num_processes
-    ).T
-    log_probs = log_likelihoods + log_prior
-    print(f"Wall time for likelihoods: {time.time() - t0:.2f}")
+        # sample from the model
+        t0 = time.time()
+        samples = model.sample(*data).detach().cpu().numpy()
+        samples = transform_post(dict(parameters=samples))["parameters"]
+        delta_chirp_mass = samples.pop("delta_chirp_mass")
+        samples["chirp_mass"] = chirp_masses.repeat(args.num_samples) + delta_chirp_mass
+        print(f"Wall time for NN sampling: {time.time() - t0:.2f} seconds.")
 
-    # extract chirp mass from max log prob samples
-    chirp_mass_trigger = np.array(theta["chirp_mass"])[np.argmax(log_likelihoods)]
-    print(f"Chirp mass trigger: {chirp_mass_trigger:.4f} seconds.")
+        # build likelihood
+        prior, likelihood = build_prior_and_likelihood(
+            model.metadata, event_dataset.data, f_max=args.f_max_likelihood
+        )
 
-    # optionally plot
-    if args.plot:
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(4, 6), gridspec_kw={"hspace": 0})
-        ax1.sharex(ax2)
-        ax1.tick_params(labelbottom=False)
-        ax1.plot(theta["chirp_mass"], np.exp(log_probs - np.max(log_probs)), ".")
-        ax1.set_xlim(chirp_mass_trigger - 0.01, chirp_mass_trigger + 0.01)
-        ax2.plot(theta["chirp_mass"], snrs, ".")
-        plt.show()
+        # compute log priors and likelihoods
+        theta = pd.DataFrame(samples)
+        log_prior = prior.ln_prob(theta, axis=0)
+        indices = np.where(log_prior > -np.inf)[0]
+        theta = theta.iloc[indices]
+        log_prior = log_prior[indices]
+        t0 = time.time()
+        likelihood.return_aux_snr = True
+        log_likelihoods, snrs = likelihood.log_likelihood_multi(
+            theta, num_processes=args.num_processes
+        ).T
+        log_probs = log_likelihoods + log_prior
+        print(f"Wall time for likelihoods: {time.time() - t0:.2f}")
 
-        plt.plot(theta["chirp_mass"], log_likelihoods)
-        plt.ylim(np.max(log_likelihoods) - 100, np.max(log_likelihoods) + 10)
-        plt.show()
+        # extract chirp mass from max log prob samples
+        chirp_mass_trigger = np.array(theta["chirp_mass"])[np.argmax(log_likelihoods)]
+        if dt is not None:
+            print(f"GPS time: {event_dataset.settings['time_event']:.2f}", end="\t")
+        print(f"Chirp mass trigger: {chirp_mass_trigger:.4f} Msun.")
 
-        # assert torch.all(torch.std(data[1].reshape(len(chirp_masses), args.num_samples,
-        # *data[1].shape[1:]), dim=1) == 0)
-        # plt.plot(
-        #     chirp_masses,
-        #     np.std(delta_chirp_mass.reshape(len(chirp_masses), args.num_samples),
-        #     axis=1),
-        # )
-        # plt.show()
+        # optionally plot
+        if args.plot:
+            fig, (ax1, ax2) = plt.subplots(
+                2, 1, figsize=(4, 6), gridspec_kw={"hspace": 0}
+            )
+            ax1.sharex(ax2)
+            ax1.tick_params(labelbottom=False)
+            ax1.plot(theta["chirp_mass"], np.exp(log_probs - np.max(log_probs)), ".")
+            ax1.set_xlim(chirp_mass_trigger - 0.01, chirp_mass_trigger + 0.01)
+            ax2.plot(theta["chirp_mass"], snrs, ".")
+            plt.show()
 
-    if args.outfile is not None:
-        theta["log_likelihood"] = log_likelihoods
-        theta["snr"] = snrs
-        theta.reset_index().to_pickle(args.outfile)
+            plt.plot(theta["chirp_mass"], log_likelihoods)
+            plt.ylim(np.max(log_likelihoods) - 100, np.max(log_likelihoods) + 10)
+            plt.show()
+
+        if args.outfile is not None:
+            theta["log_likelihood"] = log_likelihoods
+            theta["snr"] = snrs
+            theta["time_event"] = event_dataset.settings["time_event"]
+            outfile = args.outfile
+            if dt is not None:
+                outfile = outfile[:-3] + f"_dt{dt:.2f}.pd"
+            theta.reset_index().to_pickle(outfile)
 
 
 if __name__ == "__main__":
