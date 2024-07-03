@@ -199,9 +199,10 @@ def main(args):
     theta = theta.iloc[indices]
     log_prior = log_prior[indices]
     t0 = time.time()
-    log_likelihoods = likelihood.log_likelihood_multi(
+    likelihood.return_aux_snr = True
+    log_likelihoods, snrs = likelihood.log_likelihood_multi(
         theta, num_processes=args.num_processes
-    )
+    ).T
     log_probs = log_likelihoods + log_prior
     print(f"Wall time for likelihoods: {time.time() - t0:.2f}")
 
@@ -211,9 +212,12 @@ def main(args):
 
     # optionally plot
     if args.plot:
-        plt.plot(theta["chirp_mass"], np.exp(log_probs - np.max(log_probs)))
-        plt.plot(theta["chirp_mass"], np.exp(log_probs - np.max(log_probs)), ".")
-        plt.xlim(1.19, 1.23)
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(4, 6), gridspec_kw={"hspace": 0})
+        ax1.sharex(ax2)
+        ax1.tick_params(labelbottom=False)
+        ax1.plot(theta["chirp_mass"], np.exp(log_probs - np.max(log_probs)), ".")
+        ax1.set_xlim(chirp_mass_trigger - 0.01, chirp_mass_trigger + 0.01)
+        ax2.plot(theta["chirp_mass"], snrs, ".")
         plt.show()
 
         plt.plot(theta["chirp_mass"], log_likelihoods)
@@ -230,12 +234,9 @@ def main(args):
         # plt.show()
 
     if args.outfile is not None:
-        pd.DataFrame(
-            dict(
-                chirp_mass=np.array(theta["chirp_mass"]),
-                log_likelihoods=log_likelihoods,
-            )
-        ).to_pickle(args.outfile)
+        theta["log_likelihood"] = log_likelihoods
+        theta["snr"] = snrs
+        theta.reset_index().to_pickle(args.outfile)
 
 
 if __name__ == "__main__":
