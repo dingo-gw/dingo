@@ -413,7 +413,7 @@ class Base:
                     if rank is None or rank == 0.:
                         print(f"\nStart training epoch {self.epoch} with lr {lr}")
                     time_start = time.time()
-                    train_loss = train_epoch(self, train_loader, train_sampler)
+                    train_loss = train_epoch(self, train_loader)
                     train_time = time.time() - time_start
                     # Only print for one device
                     if rank is None or rank == 0.:
