@@ -393,6 +393,23 @@ def torch_detach_to_cpu(x):
     return x
 
 
+def set_seed_based_on_rank(rank: int):
+    """
+    Sets Numpy and Torch seeds for each GPU process based on the torch seed
+    to ensure that they are different.
+    """
+    initial_torch_seed = torch.initial_seed()
+    torch.manual_seed(initial_torch_seed + rank)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(initial_torch_seed + rank)
+        # Only use deterministic convolution algorithms
+        torch.backends.cudnn.deterministic = True
+
+    # Numpy expect a different seed range
+    reduced_seed = int(initial_torch_seed) % (2 ** 32 - 1)
+    np.random.seed(reduced_seed + rank)
+
+
 def setup_ddp(rank: int, world_size: int):
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12355"

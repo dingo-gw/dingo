@@ -11,7 +11,7 @@ from dingo.gw.training import (
     prepare_training_resume,
     train_stages,
 )
-from dingo.core.utils.torchutils import setup_ddp, cleanup_ddp, replace_BatchNorm_with_SyncBatchNorm
+from dingo.core.utils.torchutils import setup_ddp, cleanup_ddp, replace_BatchNorm_with_SyncBatchNorm, set_seed_based_on_rank
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 
@@ -91,6 +91,8 @@ def run_training_ddp(
 ):
     # Initialize process group
     setup_ddp(rank, world_size)
+    # Set seeds for each GPU to different value
+    set_seed_based_on_rank(rank)
 
     local_settings["device"] = f"cuda:{rank}"
     local_settings["rank"] = rank
