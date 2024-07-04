@@ -351,7 +351,7 @@ class Base:
         self,
         train_loader: torch.utils.data.DataLoader,
         test_loader: torch.utils.data.DataLoader,
-        train_sampler: torch.distributed.DistributedSampler,
+        train_sampler: torch.utils.data.DistributedSampler,
         train_dir: str,
         runtime_limits: object = None,
         checkpoint_epochs: int = None,
