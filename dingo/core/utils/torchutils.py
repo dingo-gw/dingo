@@ -315,7 +315,7 @@ def build_train_and_test_loaders(
 
     Returns
     -------
-    (train_loader, test_loader)
+    (train_loader, test_loader, Optional(train_sampler, None))
     """
 
     # Split the dataset. This function uses a fixed seed for reproducibility.
@@ -348,6 +348,7 @@ def build_train_and_test_loaders(
             sampler=test_sampler,
         )
     else:
+        train_sampler = None
         # Build DataLoaders
         train_loader = DataLoader(
             train_dataset,
@@ -366,7 +367,7 @@ def build_train_and_test_loaders(
             worker_init_fn=fix_random_seeds,
         )
 
-    return train_loader, test_loader
+    return train_loader, test_loader, train_sampler
 
 
 def set_requires_grad_flag(
@@ -407,6 +408,9 @@ def setup_ddp(rank: int, world_size: int):
     # Assign correct device to process
     torch.cuda.set_device(rank)
 
+    print(f"Process group initialized with backend {dist.get_backend()}, rank {dist.get_rank()}, "
+          f"world size {dist.get_world_size()}.")
+
 
 def replace_BatchNorm_with_SyncBatchNorm(network: nn.Module):
     return nn.SyncBatchNorm.convert_sync_batchnorm(network)
@@ -414,4 +418,5 @@ def replace_BatchNorm_with_SyncBatchNorm(network: nn.Module):
 
 def cleanup_ddp():
     dist.destroy_process_group()
+    print(f"Destroyed process group.")
 

@@ -351,6 +351,7 @@ class Base:
         self,
         train_loader: torch.utils.data.DataLoader,
         test_loader: torch.utils.data.DataLoader,
+        train_sampler: torch.distributed.DistributedSampler,
         train_dir: str,
         runtime_limits: object = None,
         checkpoint_epochs: int = None,
@@ -367,6 +368,8 @@ class Base:
             torch data loader with training data
         test_loader: torch.utils.data.DataLoader
             torch data loader with test data
+        train_sampler: torch.distributed.DistributedSampler
+            torch distributed sampler for training data
         train_dir: str
             directory for saving models and history
         runtime_limits: object=None
@@ -402,11 +405,15 @@ class Base:
                 # Training
                 lr = utils.get_lr(self.optimizer)
                 with threadpool_limits(limits=1, user_api="blas"):
+                    if train_sampler is not None:
+                        # Ensure that data is shuffled every epoch in multi-GPU training
+                        train_sampler.set_epoch(self.epoch)
+
                     # Only print for one device
                     if rank is None or rank == 0.:
                         print(f"\nStart training epoch {self.epoch} with lr {lr}")
                     time_start = time.time()
-                    train_loss = train_epoch(self, train_loader)
+                    train_loss = train_epoch(self, train_loader, train_sampler)
                     train_time = time.time() - time_start
                     # Only print for one device
                     if rank is None or rank == 0.:

@@ -235,7 +235,7 @@ def initialize_stage(pm, wfd, stage, num_workers, world_size: int = None, rank: 
 
     Returns
     -------
-    (train_loader, test_loader)
+    (train_loader, test_loader, train_sampler)
     """
 
     train_settings = pm.metadata["train_settings"]
@@ -244,7 +244,7 @@ def initialize_stage(pm, wfd, stage, num_workers, world_size: int = None, rank: 
     set_train_transforms(wfd, train_settings["data"], stage["asd_dataset_path"])
 
     # Allows for changes in batch size between stages.
-    train_loader, test_loader = build_train_and_test_loaders(
+    train_loader, test_loader, train_sampler = build_train_and_test_loaders(
         wfd,
         train_settings["data"]["train_fraction"],
         stage["batch_size"],
@@ -281,7 +281,7 @@ def initialize_stage(pm, wfd, stage, num_workers, world_size: int = None, rank: 
     n_nograd = get_number_of_model_parameters(pm.network, (False,))
     print(f"Fixed parameters: {n_nograd}\nLearnable parameters: {n_grad}\n")
 
-    return train_loader, test_loader
+    return train_loader, test_loader, train_sampler
 
 
 def train_stages(pm, wfd, train_dir, local_settings):
@@ -327,24 +327,31 @@ def train_stages(pm, wfd, train_dir, local_settings):
         if pm.epoch == end_epochs[n] - stage["epochs"]:
             print(f"\nBeginning training stage {n}. Settings:")
             print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
-            train_loader, test_loader = initialize_stage(
-                pm, wfd, stage, local_settings["num_workers"], local_settings["world_size"], local_settings["rank"], resume=False
+            train_loader, test_loader, train_sampler = initialize_stage(
+                pm, wfd, stage, local_settings["num_workers"],
+                world_size=local_settings.get("world_size", None),
+                rank=local_settings.get("rank", None),
+                resume=False
             )
         else:
             print(f"\nResuming training in stage {n}. Settings:")
             print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
-            train_loader, test_loader = initialize_stage(
-                pm, wfd, stage, local_settings["num_workers"], local_settings["world_size"], local_settings["rank"], resume=True
+            train_loader, test_loader, train_sampler = initialize_stage(
+                pm, wfd, stage, local_settings["num_workers"],
+                world_size=local_settings.get("world_size", None),
+                rank=local_settings.get("rank", None),
+                resume=True
             )
 
         runtime_limits.max_epochs_total = end_epochs[n]
         pm.train(
             train_loader,
             test_loader,
+            train_sampler,
             train_dir=train_dir,
             runtime_limits=runtime_limits,
             checkpoint_epochs=local_settings["checkpoint_epochs"],
-            rank=local_settings["rank"],
+            rank=local_settings.get("rank", None),
             use_wandb=local_settings.get("wandb", False),
             test_only=local_settings.get("test_only", False),
         )
