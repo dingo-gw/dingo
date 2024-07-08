@@ -388,6 +388,10 @@ class Base:
         -------
 
         """
+        if rank is not None:
+            multi_gpu_training = True
+        else:
+            multi_gpu_training = False
 
         if test_only:
             test_loss = test_epoch(self, test_loader)
@@ -410,13 +414,13 @@ class Base:
                         train_sampler.set_epoch(self.epoch)
 
                     # Only print for one device
-                    if rank is None or rank == 0.:
+                    if multi_gpu_training or rank == 0.:
                         print(f"\nStart training epoch {self.epoch} with lr {lr}")
                     time_start = time.time()
-                    train_loss = train_epoch(self, train_loader)
+                    train_loss = train_epoch(self, train_loader, multi_gpu=multi_gpu_training)
                     train_time = time.time() - time_start
                     # Only print for one device
-                    if rank is None or rank == 0.:
+                    if multi_gpu_training or rank == 0.:
                         print(
                             "Done. This took {:2.0f}:{:2.0f} min.".format(
                                 *divmod(train_time, 60)
@@ -426,11 +430,11 @@ class Base:
                         # Testing
                         print(f"Start testing epoch {self.epoch}")
                     time_start = time.time()
-                    test_loss = test_epoch(self, test_loader)
+                    test_loss = test_epoch(self, test_loader, multi_gpu=multi_gpu_training)
                     test_time = time.time() - time_start
 
                     # Only print for one device
-                    if rank is None or rank == 0.:
+                    if multi_gpu_training or rank == 0.:
                         print(
                             "Done. This took {:2.0f}:{:2.0f} min.".format(
                                 *divmod(time.time() - time_start, 60)
@@ -440,7 +444,7 @@ class Base:
                     # scheduler step for learning rate
                     utils.perform_scheduler_step(self.scheduler, test_loss)
 
-                if rank is None or rank == 0.:
+                if multi_gpu_training or rank == 0.:
                     # write history and save model
                     utils.write_history(train_dir, self.epoch, train_loss, test_loss, lr)
                     utils.save_model(self, train_dir, checkpoint_epochs=checkpoint_epochs)
@@ -554,7 +558,7 @@ class Base:
             return samples, log_prob
 
 
-def train_epoch(pm, dataloader):
+def train_epoch(pm, dataloader, multi_gpu: bool = False):
     pm.network.train()
     loss_info = dingo.core.utils.trainutils.LossInfo(
         pm.epoch,
@@ -562,6 +566,7 @@ def train_epoch(pm, dataloader):
         dataloader.batch_size,
         mode="Train",
         print_freq=1,
+        multi_gpu=multi_gpu,
     )
 
     for batch_idx, data in enumerate(dataloader):
@@ -583,7 +588,7 @@ def train_epoch(pm, dataloader):
     return loss_info.get_avg()
 
 
-def test_epoch(pm, dataloader):
+def test_epoch(pm, dataloader, multi_gpu: bool = False):
     with torch.no_grad():
         pm.network.eval()
         loss_info = dingo.core.utils.trainutils.LossInfo(
@@ -592,6 +597,7 @@ def test_epoch(pm, dataloader):
             dataloader.batch_size,
             mode="Test",
             print_freq=1,
+            multi_gpu=multi_gpu,
         )
 
         for batch_idx, data in enumerate(dataloader):

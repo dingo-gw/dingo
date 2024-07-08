@@ -4,6 +4,8 @@ import time
 from os.path import join, isfile
 
 import numpy as np
+import torch
+import torch.distributed as dist
 
 
 class AvgTracker:
@@ -45,7 +47,7 @@ class EarlyStopping:
         elif score < self.best_score + self.delta:
             self.counter += 1
             if self.verbose:
-                print(f'EarlyStopping counter: {self.counter} out of {self.patience}')
+                print(f"EarlyStopping counter: {self.counter} out of {self.patience}")
             if self.counter >= self.patience:
                 self.early_stop = True
             return False
@@ -56,13 +58,22 @@ class EarlyStopping:
 
 
 class LossInfo:
-    def __init__(self, epoch, len_dataset, batch_size, mode="Train", print_freq=1):
+    def __init__(
+        self,
+        epoch: int,
+        len_dataset: int,
+        batch_size: int,
+        mode: str = "Train",
+        print_freq: int = 1,
+        multi_gpu: bool = False,
+    ):
         # data for print statements
         self.epoch = epoch
         self.len_dataset = len_dataset
         self.batch_size = batch_size
         self.mode = mode
         self.print_freq = print_freq
+        self.multi_gpu = multi_gpu
         # track loss
         self.loss_tracker = AvgTracker()
         self.loss = None
@@ -74,7 +85,15 @@ class LossInfo:
         self.times[timer_mode].update(time.time() - self.t)
         self.t = time.time()
 
-    def update(self, loss, n):
+    def update(self, loss: torch.tensor, n: torch.tensor):
+        # loss and n need to be torch tensors for reduce_all
+        if self.multi_gpu:
+            # Sync all processes before aggregating values
+            dist.barrier()
+            # Aggregate values
+            dist.all_reduce(loss)
+            dist.all_reduce(n)
+
         self.loss = loss
         self.loss_tracker.update(loss * n, n)
         self.update_timer(timer_mode="Network")
