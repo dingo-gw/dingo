@@ -476,7 +476,8 @@ class Base:
                     if early_stopping.early_stop:
                         print("Early stopping")
                         break
-                print(f"Finished training epoch {self.epoch}.\n")
+                if not multi_gpu_training or rank == 0.:
+                    print(f"Finished training epoch {self.epoch}.\n")
 
     def sample(
         self,
@@ -608,7 +609,8 @@ def test_epoch(pm, dataloader, multi_gpu: bool = False):
             # compute loss
             loss = pm.loss(data[0], *data[1:])
             # update loss for history and logging
-            loss_info.update(loss.item(), len(data[0]))
+            num_samples = torch.tensor(len(data[0]), device=pm.device)
+            loss_info.update(loss, num_samples)
             loss_info.print_info(batch_idx)
 
         return loss_info.get_avg()

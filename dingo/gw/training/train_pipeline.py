@@ -134,9 +134,10 @@ def prepare_training_new(
             "dataset_settings": wfd.settings,
             "train_settings": train_settings,
         }
-        print("\nInitializing new posterior model.")
-        print("Complete settings:")
-        print(yaml.dump(full_settings, default_flow_style=False, sort_keys=False))
+        if "rank" not in local_settings or local_settings.get("rank", None) == 0:
+            print("\nInitializing new posterior model.")
+            print("Complete settings:")
+            print(yaml.dump(full_settings, default_flow_style=False, sort_keys=False))
 
         pm = build_model_from_kwargs(
             settings=full_settings,
