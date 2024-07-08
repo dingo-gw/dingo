@@ -65,7 +65,8 @@ class LossInfo:
         batch_size: int,
         mode: str = "Train",
         print_freq: int = 1,
-        multi_gpu: bool = False,
+        device: torch.device = torch.device("cuda"),
+        num_processes: int = 0,
     ):
         # data for print statements
         self.epoch = epoch
@@ -73,7 +74,8 @@ class LossInfo:
         self.batch_size = batch_size
         self.mode = mode
         self.print_freq = print_freq
-        self.multi_gpu = multi_gpu
+        self.num_processes = num_processes
+        self.device = device
         # track loss
         self.loss_tracker = AvgTracker()
         self.loss = None
@@ -82,12 +84,24 @@ class LossInfo:
         self.t = time.time()
 
     def update_timer(self, timer_mode="Dataloader"):
-        self.times[timer_mode].update(time.time() - self.t)
+        if self.num_processes > 0 and timer_mode == "Network":
+            # Put dt on GPU to call all_reduce
+            dt = torch.tensor(time.time() - self.t, device=self.device)
+            # Sync all processes before aggregating values
+            dist.barrier()
+            # Aggregate values
+            dist.all_reduce(dt)
+            dt /= self.num_processes
+            dt = dt.detach().item()
+        else:
+            dt = time.time() - self.t
+
+        self.times[timer_mode].update(dt)
         self.t = time.time()
 
     def update(self, loss: torch.tensor, n: torch.tensor):
         # loss and n need to be torch tensors for reduce_all
-        if self.multi_gpu:
+        if self.num_processes > 0:
             # Sync all processes before aggregating values
             dist.barrier()
             # Aggregate values

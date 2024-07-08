@@ -15,6 +15,7 @@ import numpy as np
 import torch
 from threadpoolctl import threadpool_limits
 from torch.utils.data import Dataset
+import torch.distributed as dist
 
 import dingo.core.utils as utils
 import dingo.core.utils.trainutils
@@ -52,6 +53,7 @@ class Base:
         embedding_net_builder: Callable = None,
         initial_weights: dict = None,
         device: str = "cuda",
+        world_size: int = None,
         load_training_info: bool = True,
     ):
         """
@@ -68,12 +70,16 @@ class Base:
         initial_weights: dict
             Initial weights for the model
         device: str
+        world_size:
+            Number of GPU processes in Distributed Data Parallel training
         load_training_info: bool
         """
 
         self.version = f"dingo={get_version()}"  # dingo version
 
         self.device = None
+        self.rank = None
+        self.world_size = world_size
         self.optimizer_kwargs = None
         self.network_kwargs = None
         self.scheduler_kwargs = None
@@ -180,6 +186,8 @@ class Base:
         """
         if "cpu" not in device and "cuda" not in device:
             raise ValueError(f"Device should contain either cpu or cuda, got {device}.")
+        if ":" in device:
+            self.rank = int(device.split(":")[1])
         self.device = torch.device(device)
         print(f"Putting posterior model to device {self.device}.")
         self.network.to(self.device)
@@ -355,7 +363,6 @@ class Base:
         train_dir: str,
         runtime_limits: object = None,
         checkpoint_epochs: int = None,
-        rank: int = None,
         use_wandb=False,
         test_only=False,
         early_stopping=False,
@@ -375,8 +382,6 @@ class Base:
         runtime_limits: object=None
         checkpoint_epochs: int=None
             number of epochs between checkpoints
-        rank: int = None
-            device rank required for distributed data parallel training
         use_wandb: bool=False
             whether to use wand
         test_only: bool = False
@@ -388,15 +393,11 @@ class Base:
         -------
 
         """
-        if rank is not None:
-            multi_gpu_training = True
-        else:
-            multi_gpu_training = False
 
         if test_only:
             test_loss = test_epoch(self, test_loader)
             # Only print for one device
-            if rank is None or rank == 0.:
+            if self.rank is None or self.rank == 0:
                 print(f"test loss: {test_loss:.3f}")
 
         else:
@@ -414,37 +415,51 @@ class Base:
                         train_sampler.set_epoch(self.epoch)
 
                     # Only print for one device
-                    if not multi_gpu_training or rank == 0.:
+                    if self.rank is None or self.rank == 0:
                         print(f"\nStart training epoch {self.epoch} with lr {lr}")
                     time_start = time.time()
-                    train_loss = train_epoch(self, train_loader, multi_gpu=multi_gpu_training)
-                    train_time = time.time() - time_start
+                    train_loss = train_epoch(self, train_loader)
+                    train_time = torch.tensor(time.time() - time_start, device=self.device)
+                    if self.rank is not None:
+                        # Sync all processes before aggregating value
+                        dist.barrier()
+                        # Aggregate values
+                        dist.all_reduce(train_time)
+                        train_time /= self.world_size
+
                     # Only print for one device
-                    if not multi_gpu_training or rank == 0.:
+                    if self.rank is None or self.rank == 0:
                         print(
                             "Done. This took {:2.0f}:{:2.0f} min.".format(
-                                *divmod(train_time, 60)
+                                *divmod(train_time.detach().item(), 60)
                             )
                         )
 
                         # Testing
                         print(f"Start testing epoch {self.epoch}")
                     time_start = time.time()
-                    test_loss = test_epoch(self, test_loader, multi_gpu=multi_gpu_training)
-                    test_time = time.time() - time_start
+                    test_loss = test_epoch(self, test_loader)
+                    test_time = torch.tensor(time.time() - time_start, device=self.device)
+
+                    if self.rank is not None:
+                        # Sync all processes before aggregating value
+                        dist.barrier()
+                        # Aggregate values
+                        dist.all_reduce(test_time)
+                        test_time /= self.world_size
 
                     # Only print for one device
-                    if not multi_gpu_training or rank == 0.:
+                    if self.rank is None or self.rank == 0:
                         print(
                             "Done. This took {:2.0f}:{:2.0f} min.".format(
-                                *divmod(time.time() - time_start, 60)
+                                *divmod(test_time.detach().item(), 60)
                             )
                         )
                 if self.scheduler_kwargs["update_scheduler_every_batch"] is False:
                     # scheduler step for learning rate
                     utils.perform_scheduler_step(self.scheduler, test_loss)
 
-                if not multi_gpu_training or rank == 0.:
+                if self.rank is None or self.rank == 0:
                     # write history and save model
                     utils.write_history(train_dir, self.epoch, train_loss, test_loss, lr)
                     utils.save_model(self, train_dir, checkpoint_epochs=checkpoint_epochs)
@@ -469,14 +484,14 @@ class Base:
 
                 if early_stopping:
                     best_model = early_stopping(test_loss, self)
-                    if best_model and (rank is None or rank == 0.):
+                    if best_model and (self.rank is None or self.rank == 0):
                         self.save_model(
                             join(train_dir, "best_model.pt"), save_training_info=False
                         )
                     if early_stopping.early_stop:
                         print("Early stopping")
                         break
-                if not multi_gpu_training or rank == 0.:
+                if self.rank is None or self.rank == 0.:
                     print(f"Finished training epoch {self.epoch}.\n")
 
     def sample(
@@ -559,7 +574,7 @@ class Base:
             return samples, log_prob
 
 
-def train_epoch(pm, dataloader, multi_gpu: bool = False):
+def train_epoch(pm, dataloader):
     pm.network.train()
     loss_info = dingo.core.utils.trainutils.LossInfo(
         pm.epoch,
@@ -567,7 +582,8 @@ def train_epoch(pm, dataloader, multi_gpu: bool = False):
         dataloader.batch_size,
         mode="Train",
         print_freq=1,
-        multi_gpu=multi_gpu,
+        device=pm.device,
+        num_processes=pm.world_size,
     )
 
     for batch_idx, data in enumerate(dataloader):
@@ -583,14 +599,15 @@ def train_epoch(pm, dataloader, multi_gpu: bool = False):
         # update loss for history and logging
         num_samples = torch.tensor(len(data[0]), device=pm.device)
         loss_info.update(loss, num_samples)
-        loss_info.print_info(batch_idx)
+        if pm.rank == 0:
+            loss_info.print_info(batch_idx)
         if pm.scheduler_kwargs["update_scheduler_every_batch"]:
             pm.scheduler.step()
 
     return loss_info.get_avg()
 
 
-def test_epoch(pm, dataloader, multi_gpu: bool = False):
+def test_epoch(pm, dataloader):
     with torch.no_grad():
         pm.network.eval()
         loss_info = dingo.core.utils.trainutils.LossInfo(
@@ -599,7 +616,8 @@ def test_epoch(pm, dataloader, multi_gpu: bool = False):
             dataloader.batch_size,
             mode="Test",
             print_freq=1,
-            multi_gpu=multi_gpu,
+            device=pm.device,
+            num_processes=pm.world_size,
         )
 
         for batch_idx, data in enumerate(dataloader):
@@ -611,6 +629,7 @@ def test_epoch(pm, dataloader, multi_gpu: bool = False):
             # update loss for history and logging
             num_samples = torch.tensor(len(data[0]), device=pm.device)
             loss_info.update(loss, num_samples)
-            loss_info.print_info(batch_idx)
+            if pm.rank == 0:
+                loss_info.print_info(batch_idx)
 
         return loss_info.get_avg()

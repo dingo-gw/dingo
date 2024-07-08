@@ -106,6 +106,7 @@ def prepare_training_new(
                 pretraining=False,
                 pretrained_embedding_net=None,
                 device=local_settings["device"],
+                world_size=local_settings.get("world_size", None),
             )
             # Check whether loaded model has same architecture as specified in train_settings
             check_pretraining_model_compatibility(train_settings, pm.metadata)
@@ -145,6 +146,7 @@ def prepare_training_new(
             pretrained_embedding_net=pretrained_embedding_net,
             initial_weights=initial_weights,
             device=local_settings["device"],
+            world_size=local_settings.get("world_size", None),
         )
     else:
         raise ValueError("No embedding_kwargs specified in model.")
@@ -192,6 +194,7 @@ def prepare_training_resume(
         pretraining=pretraining,
         pretrained_embedding_net=None,
         device=local_settings["device"],
+        world_size=local_settings.get("world_size", None),
     )
 
     wfd = build_dataset(pm.metadata["train_settings"]["data"])
