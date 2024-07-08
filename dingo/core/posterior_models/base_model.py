@@ -414,13 +414,13 @@ class Base:
                         train_sampler.set_epoch(self.epoch)
 
                     # Only print for one device
-                    if multi_gpu_training or rank == 0.:
+                    if not multi_gpu_training or rank == 0.:
                         print(f"\nStart training epoch {self.epoch} with lr {lr}")
                     time_start = time.time()
                     train_loss = train_epoch(self, train_loader, multi_gpu=multi_gpu_training)
                     train_time = time.time() - time_start
                     # Only print for one device
-                    if multi_gpu_training or rank == 0.:
+                    if not multi_gpu_training or rank == 0.:
                         print(
                             "Done. This took {:2.0f}:{:2.0f} min.".format(
                                 *divmod(train_time, 60)
@@ -434,7 +434,7 @@ class Base:
                     test_time = time.time() - time_start
 
                     # Only print for one device
-                    if multi_gpu_training or rank == 0.:
+                    if not multi_gpu_training or rank == 0.:
                         print(
                             "Done. This took {:2.0f}:{:2.0f} min.".format(
                                 *divmod(time.time() - time_start, 60)
@@ -444,7 +444,7 @@ class Base:
                     # scheduler step for learning rate
                     utils.perform_scheduler_step(self.scheduler, test_loss)
 
-                if multi_gpu_training or rank == 0.:
+                if not multi_gpu_training or rank == 0.:
                     # write history and save model
                     utils.write_history(train_dir, self.epoch, train_loss, test_loss, lr)
                     utils.save_model(self, train_dir, checkpoint_epochs=checkpoint_epochs)
@@ -580,7 +580,8 @@ def train_epoch(pm, dataloader, multi_gpu: bool = False):
         loss.backward()
         pm.optimizer.step()
         # update loss for history and logging
-        loss_info.update(loss.detach().item(), len(data[0]))
+        num_samples = torch.tensor(len(data[0]), device=pm.device)
+        loss_info.update(loss, num_samples)
         loss_info.print_info(batch_idx)
         if pm.scheduler_kwargs["update_scheduler_every_batch"]:
             pm.scheduler.step()

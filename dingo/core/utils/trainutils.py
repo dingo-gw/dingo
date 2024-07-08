@@ -94,8 +94,9 @@ class LossInfo:
             dist.all_reduce(loss)
             dist.all_reduce(n)
 
-        self.loss = loss
-        self.loss_tracker.update(loss * n, n)
+        self.loss = loss.detach().item()
+        n = n.detach().item()
+        self.loss_tracker.update(self.loss * n, n)
         self.update_timer(timer_mode="Network")
 
     def get_avg(self):
