@@ -355,7 +355,6 @@ def train_stages(pm, wfd, train_dir, local_settings):
             train_dir=train_dir,
             runtime_limits=runtime_limits,
             checkpoint_epochs=local_settings["checkpoint_epochs"],
-            rank=local_settings.get("rank", None),
             use_wandb=local_settings.get("wandb", False),
             test_only=local_settings.get("test_only", False),
         )
