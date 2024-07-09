@@ -102,11 +102,15 @@ class LossInfo:
     def update(self, loss: torch.tensor, n: torch.tensor):
         # loss and n need to be torch tensors for reduce_all
         if self.num_processes > 0:
+            # Calculate absolute loss value to ensure correct normalization
+            # if GPUs have different number of samples
+            abs_loss = loss * n
             # Sync all processes before aggregating values
             dist.barrier()
             # Aggregate values
-            dist.all_reduce(loss)
+            dist.all_reduce(abs_loss)
             dist.all_reduce(n)
+            loss = abs_loss / n
 
         self.loss = loss.detach().item()
         n = n.detach().item()
