@@ -53,7 +53,6 @@ class Base:
         embedding_net_builder: Callable = None,
         initial_weights: dict = None,
         device: str = "cuda",
-        world_size: int = None,
         load_training_info: bool = True,
     ):
         """
@@ -70,8 +69,6 @@ class Base:
         initial_weights: dict
             Initial weights for the model
         device: str
-        world_size:
-            Number of GPU processes in Distributed Data Parallel training
         load_training_info: bool
         """
 
@@ -79,7 +76,6 @@ class Base:
 
         self.device = None
         self.rank = None
-        self.world_size = world_size
         self.optimizer_kwargs = None
         self.network_kwargs = None
         self.scheduler_kwargs = None
@@ -423,9 +419,8 @@ class Base:
                     if self.rank is not None:
                         # Sync all processes before aggregating value
                         dist.barrier()
-                        # Aggregate values
-                        dist.all_reduce(train_time)
-                        train_time /= self.world_size
+                        # Aggregate maximal time
+                        dist.reduce(train_time, dst=0, op=dist.ReduceOp.MAX)
 
                     # Only print for one device
                     if self.rank is None or self.rank == 0:
@@ -445,8 +440,7 @@ class Base:
                         # Sync all processes before aggregating value
                         dist.barrier()
                         # Aggregate values
-                        dist.all_reduce(test_time)
-                        test_time /= self.world_size
+                        dist.reduce(test_time, dst=0, op=dist.ReduceOp.MAX)
 
                     # Only print for one device
                     if self.rank is None or self.rank == 0:
