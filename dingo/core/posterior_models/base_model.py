@@ -610,7 +610,6 @@ def test_epoch(pm, dataloader):
             mode="Test",
             print_freq=1,
             device=pm.device,
-            num_processes=pm.world_size,
         )
 
         for batch_idx, data in enumerate(dataloader):
