@@ -577,7 +577,6 @@ def train_epoch(pm, dataloader):
         mode="Train",
         print_freq=1,
         device=pm.device,
-        num_processes=pm.world_size,
     )
 
     for batch_idx, data in enumerate(dataloader):

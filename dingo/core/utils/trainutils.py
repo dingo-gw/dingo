@@ -66,7 +66,6 @@ class LossInfo:
         mode: str = "Train",
         print_freq: int = 1,
         device: torch.device = torch.device("cuda"),
-        num_processes: int = 0,
     ):
         # data for print statements
         self.epoch = epoch
@@ -74,7 +73,6 @@ class LossInfo:
         self.batch_size = batch_size
         self.mode = mode
         self.print_freq = print_freq
-        self.num_processes = num_processes
         self.device = device
         # track loss
         self.loss_tracker = AvgTracker()
@@ -84,14 +82,13 @@ class LossInfo:
         self.t = time.time()
 
     def update_timer(self, timer_mode="Dataloader"):
-        if self.num_processes > 0 and timer_mode == "Network":
+        if self.device.type == "cuda" and timer_mode == "Network":
             # Put dt on GPU to call all_reduce
             dt = torch.tensor(time.time() - self.t, device=self.device)
             # Sync all processes before aggregating values
             dist.barrier()
-            # Aggregate values
-            dist.all_reduce(dt)
-            dt /= self.num_processes
+            # Aggregate maximal time value
+            dist.reduce(dt, dst=0, op=dist.ReduceOp.MAX)
             dt = dt.detach().item()
         else:
             dt = time.time() - self.t
@@ -100,20 +97,22 @@ class LossInfo:
         self.t = time.time()
 
     def update(self, loss: torch.tensor, n: torch.tensor):
-        # loss and n need to be torch tensors for reduce_all
-        if self.num_processes > 0:
+        # detach tensors from compute graph
+        loss = loss.detach()
+        n = n.detach()
+        if self.device.type == "cuda":
             # Calculate absolute loss value to ensure correct normalization
             # if GPUs have different number of samples
             abs_loss = loss * n
             # Sync all processes before aggregating values
             dist.barrier()
             # Aggregate values
-            dist.all_reduce(abs_loss)
-            dist.all_reduce(n)
+            dist.reduce(abs_loss, dst=0)
+            dist.reduce(n, dst=0)
             loss = abs_loss / n
 
-        self.loss = loss.detach().item()
-        n = n.detach().item()
+        self.loss = loss.item()
+        n = n.item()
         self.loss_tracker.update(self.loss * n, n)
         self.update_timer(timer_mode="Network")
 
