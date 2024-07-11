@@ -143,10 +143,12 @@ class LossInfo:
             td, td_avg = self.times["Dataloader"].x, self.times["Dataloader"].get_avg()
             tn, tn_avg = self.times["Network"].x, self.times["Network"].get_avg()
             print(f"Time Dataloader: {td:.3f} ({td_avg:.3f})", end="\t\t")
-            print(f"Time Network: {tn:.3f} ({tn_avg:.3f})", end="\t\t")
             if self.multi_gpu:
+                print(f"Time Network: {tn:.3f} ({tn_avg:.3f})", end="\t\t")
                 ta, ta_avg = self.times["Aggregation"].x, self.times["Aggregation"].get_avg()
                 print(f"Time Loss Aggregation: {ta:.3f} ({ta_avg:.3f})")
+            else:
+                print(f"Time Network: {tn:.3f} ({tn_avg:.3f})")
 
 
 class RuntimeLimits:
