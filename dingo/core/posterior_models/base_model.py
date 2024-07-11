@@ -580,7 +580,7 @@ def train_epoch(pm, dataloader):
     )
 
     for batch_idx, data in enumerate(dataloader):
-        loss_info.update_timer()
+        loss_info.stop_timer("Dataloader")
         pm.optimizer.zero_grad()
         # data to device
         data = [d.to(pm.device, non_blocking=True) for d in data]
@@ -596,6 +596,7 @@ def train_epoch(pm, dataloader):
             loss_info.print_info(batch_idx)
         if pm.scheduler_kwargs["update_scheduler_every_batch"]:
             pm.scheduler.step()
+        loss_info.start_timer()
 
     return loss_info.get_avg()
 

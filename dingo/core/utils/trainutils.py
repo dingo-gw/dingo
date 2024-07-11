@@ -81,9 +81,12 @@ class LossInfo:
         self.times = {"Dataloader": AvgTracker(), "Network": AvgTracker()}
         self.t = time.time()
 
-    def update_timer(self, timer_mode="Dataloader"):
-        if self.device.type == "cuda" and timer_mode == "Network":
-            # Put dt on GPU to call all_reduce
+    def start_timer(self):
+        self.t = time.time()
+
+    def stop_timer(self, timer_mode="Dataloader"):
+        if self.device.type == "cuda":
+            # Put dt on GPU to call reduce
             dt = torch.tensor(time.time() - self.t, device=self.device)
             # Sync all processes before aggregating values
             dist.barrier()
@@ -94,9 +97,10 @@ class LossInfo:
             dt = time.time() - self.t
 
         self.times[timer_mode].update(dt)
-        self.t = time.time()
+        self.start_timer()
 
     def update(self, loss: torch.tensor, n: torch.tensor):
+        self.stop_timer(timer_mode="Network")
         # detach tensors from compute graph
         loss = loss.detach()
         n = n.detach()
@@ -114,7 +118,7 @@ class LossInfo:
         self.loss = loss.item()
         n = n.item()
         self.loss_tracker.update(self.loss * n, n)
-        self.update_timer(timer_mode="Network")
+        self.start_timer()
 
     def get_avg(self):
         return self.loss_tracker.get_avg()
