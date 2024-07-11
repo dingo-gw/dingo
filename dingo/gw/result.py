@@ -624,7 +624,10 @@ def get_updated_event_domain_and_data(domain, event_data, event_metadata):
     # node of the domain, but if not, we need to account for rounding errors.
     base_domain = getattr(domain, "base_domain", domain)
     event_data = {
-        k1: {k2: base_domain.update_data(v2) for k2, v2 in v1.items()}
+        k1: {
+            k2: base_domain.update_data(v2, low_value=(1 if k1 == "asds" else 0))
+            for k2, v2 in v1.items()
+        }
         for k1, v1 in event_data.items()
     }
 
