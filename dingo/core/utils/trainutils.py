@@ -79,13 +79,15 @@ class LossInfo:
         self.loss = None
         # track computation times
         self.times = {"Dataloader": AvgTracker(), "Network": AvgTracker()}
+        if torch.cuda.device_count() > 1:
+            self.multi_gpu = True
+            self.times["Aggregation"] = AvgTracker()
+        else:
+            self.multi_gpu = False
         self.t = time.time()
 
-    def start_timer(self):
-        self.t = time.time()
-
-    def stop_timer(self, timer_mode="Dataloader"):
-        if self.device.type == "cuda":
+    def update_timer(self, timer_mode="Dataloader"):
+        if self.multi_gpu:
             # Put dt on GPU to call reduce
             dt = torch.tensor(time.time() - self.t, device=self.device)
             # Sync all processes before aggregating values
@@ -97,14 +99,14 @@ class LossInfo:
             dt = time.time() - self.t
 
         self.times[timer_mode].update(dt)
-        self.start_timer()
+        self.t = time.time()
 
     def update(self, loss: torch.tensor, n: torch.tensor):
-        self.stop_timer(timer_mode="Network")
+        self.update_timer(timer_mode="Network")
         # detach tensors from compute graph
         loss = loss.detach()
         n = n.detach()
-        if self.device.type == "cuda":
+        if self.multi_gpu:
             # Calculate absolute loss value to ensure correct normalization
             # if GPUs have different number of samples
             abs_loss = loss * n
@@ -114,11 +116,11 @@ class LossInfo:
             dist.reduce(abs_loss, dst=0)
             dist.reduce(n, dst=0)
             loss = abs_loss / n
+            self.update_timer(timer_mode="Aggregation")
 
         self.loss = loss.item()
         n = n.item()
         self.loss_tracker.update(self.loss * n, n)
-        self.start_timer()
 
     def get_avg(self):
         return self.loss_tracker.get_avg()
@@ -141,7 +143,10 @@ class LossInfo:
             td, td_avg = self.times["Dataloader"].x, self.times["Dataloader"].get_avg()
             tn, tn_avg = self.times["Network"].x, self.times["Network"].get_avg()
             print(f"Time Dataloader: {td:.3f} ({td_avg:.3f})", end="\t\t")
-            print(f"Time Network: {tn:.3f} ({tn_avg:.3f})")
+            print(f"Time Network: {tn:.3f} ({tn_avg:.3f})", end="\t\t")
+            if self.multi_gpu:
+                ta, ta_avg = self.times["Aggregation"].x, self.times["Aggregation"].get_avg()
+                print(f"Time Loss Aggregation: {ta:.3f} ({ta_avg:.3f})")
 
 
 class RuntimeLimits:
