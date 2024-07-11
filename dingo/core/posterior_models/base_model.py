@@ -592,7 +592,7 @@ def train_epoch(pm, dataloader):
         # update loss for history and logging
         num_samples = torch.tensor(len(data[0]), device=pm.device)
         loss_info.update(loss, num_samples)
-        if pm.rank == 0:
+        if pm.rank is None or pm.rank == 0:
             loss_info.print_info(batch_idx)
         if pm.scheduler_kwargs["update_scheduler_every_batch"]:
             pm.scheduler.step()
