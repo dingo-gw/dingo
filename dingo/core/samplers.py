@@ -524,6 +524,22 @@ class GNPESampler(Sampler):
             time_sample_start = time.time()
             self.model.model.eval()
             with torch.no_grad():
+                # for speed benchmark, uncomment below
+                # TODO: make this more elegant, and merge into main, gives ~2x speed up
+                # if (
+                #     torch.std(x["context_parameters"], axis=0).max() < 1e-5
+                #     and torch.std(x["data"], axis=0).max() < 1e-5
+                # ):
+                #     y, log_prob = self.model.model.sample_and_log_prob(
+                #         x["data"][:1],
+                #         x["context_parameters"][:1],
+                #         num_samples=x["data"].shape[0],
+                #     )
+                # else:
+                #     y, log_prob = self.model.model.sample_and_log_prob(
+                #         x["data"], x["context_parameters"]
+                #     )
+
                 y, log_prob = self.model.model.sample_and_log_prob(
                     x["data"], x["context_parameters"]
                 )
@@ -539,7 +555,8 @@ class GNPESampler(Sampler):
             # changed.
             proxies = {
                 # p: x["extrinsic_parameters"][p] for p in self.gnpe_proxy_parameters
-                p: x["extrinsic_parameters"][p] for p in self.fixed_context_parameters
+                p: x["extrinsic_parameters"][p]
+                for p in self.fixed_context_parameters
             }
 
             print(
