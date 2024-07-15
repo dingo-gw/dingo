@@ -5,6 +5,8 @@ import yaml
 import argparse
 
 import torch.multiprocessing as mp
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.nn.modules import Module
 
 from dingo.gw.training import (
     prepare_wfd_and_initialization_for_embedding_network,
@@ -16,21 +18,27 @@ from dingo.gw.training import (
     train_stages,
 )
 from dingo.gw.training.train_builders import build_dataset
+from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.core.utils.torchutils import (
     setup_ddp,
     cleanup_ddp,
     replace_BatchNorm_with_SyncBatchNorm,
     set_seed_based_on_rank,
 )
-from torch.nn.parallel import DistributedDataParallel as DDP
 
 
-def create_submission_file(train_dir, condor_settings, filename="submission_file.sub"):
+def create_submission_file(train_dir: str, condor_settings: dict, filename: str ="submission_file.sub"):
     """
-    TODO: documentation
-    :param train_dir:
-    :param filename:
-    :return:
+    Creates submission file and writes it to filename.
+
+    Parameters
+    ----------
+    train_dir: str
+        Path to training directory
+    condor_settings: dict
+        Condor settings
+    filename: str
+        Filename of submission file
     """
     lines = []
     lines.append(f'executable = {condor_settings["executable"]}\n')
@@ -72,7 +80,30 @@ def run_training(
     train_dir: str,
     ckpt_file: str,
     resume: bool,
-):
+) -> (bool, int):
+    """
+    Starts a training run for single-GPU training.
+
+    Parameters
+    ----------
+    train_settings: dict
+        Settings for training
+    local_settings: dict
+        Local settings
+    train_dir: str
+        Directory to store training output
+    ckpt_file: str
+        if resume=True, path to the model checkpoint
+    resume: bool
+        Whether to resume training from checkpoint
+
+    Returns
+    ----------
+    complete: bool
+        Whether the training run was successful
+    epoch: int
+        The epoch number where the training finished
+    """
     if not resume:
         pm, wfd = prepare_training_new(
             train_settings, train_dir, local_settings
@@ -94,10 +125,35 @@ def run_multi_gpu_training(
     train_settings: dict,
     local_settings: dict,
     train_dir: str,
-    checkpoint: str,
+    ckpt_file: str,
     resume: bool,
-):
-    initial_weights, pretrained_emb_net, ckpt_file = None, None, None
+) -> (bool, int):
+    """
+    Starts a training run for multi-GPU distributed data parallel (DDP) training.
+
+    Parameters
+    ----------
+    world_size: int
+        The number of GPUs to use for DDP training.
+    train_settings: dict
+        Settings for training
+    local_settings: dict
+        Local settings
+    train_dir: str
+        Directory to store training output
+    ckpt_file: str
+        if resume=True, path to the model checkpoint
+    resume: bool
+        Whether to resume training from checkpoint
+
+    Returns
+    ----------
+    complete: bool
+        Whether the training run was successful
+    epoch: int
+        The epoch number where the training finished
+    """
+    initial_weights, pretrained_emb_net, checkpoint_file = None, None, None
     if not resume:
         wfd, initial_weights, pretrained_emb_net = (
             prepare_wfd_and_initialization_for_embedding_network(
@@ -105,9 +161,13 @@ def run_multi_gpu_training(
             )
         )
     else:
-        ckpt_file = os.path.join(train_dir, checkpoint)
+        checkpoint_file = os.path.join(train_dir, ckpt_file)
         train_settings = load_settings_from_ckpt(ckpt_file)
         wfd = build_dataset(train_settings["data"])
+    if pretrained_emb_net is not None:
+        pretraining = True
+    else:
+        pretraining = False
 
     complete, pm_epoch = mp.spawn(
         run_training_ddp,
@@ -118,8 +178,9 @@ def run_multi_gpu_training(
             train_dir,
             wfd,
             initial_weights,
+            pretraining,
             pretrained_emb_net,
-            ckpt_file,
+            checkpoint_file,
             resume,
         ),
         nprocs=world_size,
@@ -135,12 +196,48 @@ def run_training_ddp(
     train_settings: dict,
     local_settings: dict,
     train_dir: str,
-    wfd,
+    wfd: WaveformDataset,
     initial_weights: dict,
-    pretrained_emb_net,
+    pretraining: bool,
+    pretrained_emb_net: Module,
     ckpt_file: str,
     resume: bool,
-):
+) -> (bool, int):
+    """
+    Initializes each GPU process of the distributed data parallel (DDP) training.
+
+    Parameters
+    ----------
+    rank: int
+        The rank of the current GPU process.
+    world_size: int
+        The number of GPUs to use for DDP training.
+    train_settings: dict
+        Settings for training
+    local_settings: dict
+        Local settings
+    train_dir: str
+        Directory to store training output
+    wfd: WaveformDataset
+        Waveform dataset
+    initial_weights: dict
+        Weights for initial layer of resnet embedding network constructed from SVD.
+    pretraining: bool
+        Whether to use the pretrained embedding network
+    pretrained_emb_net: torch.nn.Module
+        Weights of pretrained embedding network
+    ckpt_file: str
+        if resume=True, path to the model checkpoint
+    resume: bool
+        Whether to resume training from checkpoint
+
+    Returns
+    ----------
+    complete: bool
+        Whether the training run was successful
+    epoch: int
+        The epoch number where the training finished
+    """
     # Initialize process group
     setup_ddp(rank, world_size)
     # Set seeds for each GPU to different value
@@ -157,7 +254,7 @@ def run_training_ddp(
             local_settings,
             wfd=wfd,
             initial_weights=initial_weights,
-            pretraining=False,
+            pretraining=pretraining,
             pretrained_embedding_net=pretrained_emb_net,
         )
     else:
