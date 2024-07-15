@@ -417,11 +417,9 @@ def setup_ddp(rank: int, world_size: int):
     # initialize the process group
     if dist.is_nccl_available():
         dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
-    elif dist.is_gloo_available():
-        dist.init_process_group(backend="gloo", rank=rank, world_size=world_size)
     else:
-        raise ValueError("Both backends nccl and gloo not available for multi-GPU training with distributed data "
-                         "parallel. Go back to single-GPU training.")
+        raise ValueError("Backends nccl not available for multi-GPU training with distributed data parallel."
+                         "Go back to single-GPU training.")
     # Assign correct device to process
     torch.cuda.set_device(rank)
 
