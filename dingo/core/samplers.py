@@ -496,19 +496,6 @@ class GNPESampler(Sampler):
             self.model.model.eval()
 
             with torch.no_grad():
-<<<<<<< HEAD
-                # If we are running with one detector, we need not pass extra context to
-                # the network. This is because there is a global shift which is applied to the
-                # geocent_time according to the time proxies.
-                # Here len(x["extrinsic_parameters"]) == 2, is only the 1 detector proxy and
-                # the geocent time.
-                if len(x["extrinsic_parameters"]) == 2:
-                    y, log_prob = self.model.model.sample_and_log_prob(x["data"])
-                else:
-                    y, log_prob = self.model.model.sample_and_log_prob(
-                        x["data"], x["context_parameters"]
-                    )
-=======
                 if "context_parameters" in x:
                     y, log_prob = self.model.model.sample_and_log_prob(
                         x["data"], x["context_parameters"]
@@ -516,11 +503,6 @@ class GNPESampler(Sampler):
                 else:
                     y, log_prob = self.model.model.sample_and_log_prob(x["data"])
 
-            # Squeeze the extra dimension added by sample_and_log_prob(num_samples=1).
-            y = y.squeeze(1)
-            log_prob = log_prob.squeeze(1)
-
->>>>>>> main
             time_sample_end = time.time()
 
             x["parameters"] = y

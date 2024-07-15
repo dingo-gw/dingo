@@ -12,13 +12,13 @@ import lalsimulation as LS
 import pandas as pd
 import bilby.core.utils as bilby_utils
 
-try:
-    from lalsimulation.gwsignal.core import waveform as gws_wfm
-    from lalsimulation.gwsignal.models import (
-        gwsignal_get_waveform_generator as new_interface_get_waveform_generator,
-    )
-except ImportError:
-    pass
+# try:
+    # from lalsimulation.gwsignal.core import waveform as gws_wfm
+    # from lalsimulation.gwsignal.models import (
+        # gwsignal_get_waveform_generator as new_interface_get_waveform_generator,
+    # )
+# except ImportError:
+    # pass
 
 from bilby.gw.conversion import (
     convert_to_lal_binary_black_hole_parameters,
