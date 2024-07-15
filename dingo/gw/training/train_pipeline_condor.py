@@ -7,11 +7,21 @@ import argparse
 import torch.multiprocessing as mp
 
 from dingo.gw.training import (
+    prepare_wfd_and_initialization_for_embedding_network,
+    prepare_model_new,
+    load_settings_from_ckpt,
+    prepare_model_resume,
     prepare_training_new,
     prepare_training_resume,
     train_stages,
 )
-from dingo.core.utils.torchutils import setup_ddp, cleanup_ddp, replace_BatchNorm_with_SyncBatchNorm, set_seed_based_on_rank
+from dingo.gw.training.train_builders import build_dataset
+from dingo.core.utils.torchutils import (
+    setup_ddp,
+    cleanup_ddp,
+    replace_BatchNorm_with_SyncBatchNorm,
+    set_seed_based_on_rank,
+)
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 
@@ -31,7 +41,7 @@ def create_submission_file(train_dir, condor_settings, filename="submission_file
         f"requirements = TARGET.CUDAGlobalMemoryMb > "
         f'{condor_settings["memory_gpus"]}\n\n'
     )
-    lines.append(f'arguments = \"{condor_settings["arguments"]}\"\n')
+    lines.append(f'arguments = "{condor_settings["arguments"]}"\n')
     lines.append(f'error = {join(train_dir, "info.err")}\n')
     lines.append(f'output = {join(train_dir, "info.out")}\n')
     lines.append(f'log = {join(train_dir, "info.log")}\n')
@@ -57,18 +67,17 @@ def copy_logfiles(log_dir, epoch, name="info", suffixes=(".err", ".log", ".out")
 
 
 def run_training(
-        train_settings: dict,
-        local_settings: dict,
-        train_dir: str,
-        checkpoint: str,
-        resume: bool,
+    train_settings: dict,
+    local_settings: dict,
+    train_dir: str,
+    ckpt_file: str,
+    resume: bool,
 ):
     if not resume:
         pm, wfd = prepare_training_new(
             train_settings, train_dir, local_settings
         )
     else:
-        ckpt_file = os.path.join(train_dir, checkpoint)
         pm, wfd = prepare_training_resume(
             checkpoint_name=ckpt_file,
             local_settings=local_settings,
@@ -80,14 +89,57 @@ def run_training(
     return complete, pm.epoch
 
 
+def run_multi_gpu_training(
+    world_size: int,
+    train_settings: dict,
+    local_settings: dict,
+    train_dir: str,
+    checkpoint: str,
+    resume: bool,
+):
+    initial_weights, pretrained_emb_net, ckpt_file = None, None, None
+    if not resume:
+        wfd, initial_weights, pretrained_emb_net = (
+            prepare_wfd_and_initialization_for_embedding_network(
+                train_settings, train_dir, local_settings
+            )
+        )
+    else:
+        ckpt_file = os.path.join(train_dir, checkpoint)
+        train_settings = load_settings_from_ckpt(ckpt_file)
+        wfd = build_dataset(train_settings["data"])
+
+    complete, pm_epoch = mp.spawn(
+        run_training_ddp,
+        args=(
+            world_size,
+            train_settings,
+            local_settings,
+            train_dir,
+            wfd,
+            initial_weights,
+            pretrained_emb_net,
+            ckpt_file,
+            resume,
+        ),
+        nprocs=world_size,
+        join=True,
+    )
+
+    return complete, pm_epoch
+
+
 def run_training_ddp(
-        rank: int,
-        world_size: int,
-        train_settings: dict,
-        local_settings: dict,
-        train_dir: str,
-        checkpoint: str,
-        resume: bool,
+    rank: int,
+    world_size: int,
+    train_settings: dict,
+    local_settings: dict,
+    train_dir: str,
+    wfd,
+    initial_weights: dict,
+    pretrained_emb_net,
+    ckpt_file: str,
+    resume: bool,
 ):
     # Initialize process group
     setup_ddp(rank, world_size)
@@ -99,12 +151,17 @@ def run_training_ddp(
     local_settings["world_size"] = world_size
 
     if not resume:
-        pm, wfd = prepare_training_new(
-            train_settings, train_dir, local_settings
+        pm = prepare_model_new(
+            train_settings,
+            train_dir,
+            local_settings,
+            wfd=wfd,
+            initial_weights=initial_weights,
+            pretraining=False,
+            pretrained_embedding_net=pretrained_emb_net,
         )
     else:
-        ckpt_file = os.path.join(train_dir, checkpoint)
-        pm, wfd = prepare_training_resume(
+        pm = prepare_model_resume(
             checkpoint_name=ckpt_file,
             local_settings=local_settings,
             train_dir=train_dir,
@@ -117,7 +174,7 @@ def run_training_ddp(
 
     complete = train_stages(pm, wfd, train_dir, local_settings)
 
-    if complete and local_settings.get("wandb", False) and rank == 0.:
+    if complete and local_settings.get("wandb", False) and rank == 0.0:
         try:
             import wandb
 
@@ -172,8 +229,8 @@ def train_condor():
             local_settings = train_settings.pop("local")
             with open(os.path.join(args.train_dir, "local_settings.yaml"), "w") as f:
                 if (
-                        local_settings.get("wandb", False)
-                        and "id" not in local_settings["wandb"].keys()
+                    local_settings.get("wandb", False)
+                    and "id" not in local_settings["wandb"].keys()
                 ):
                     try:
                         import wandb
@@ -190,21 +247,27 @@ def train_condor():
                 local_settings = yaml.safe_load(f)
 
         # Setup multi-GPU training
-        if (local_settings["device"] == "cuda"
-                and "condor" in local_settings
-                and "num_gpus" in local_settings["condor"]
-                and local_settings["condor"]["num_gpus"] > 1.):
+        if (
+            local_settings["device"] == "cuda"
+            and "condor" in local_settings
+            and "num_gpus" in local_settings["condor"]
+            and local_settings["condor"]["num_gpus"] > 1.0
+        ):
             # Specify the number of processes (typically the number of GPUs available)
             world_size = local_settings["condor"]["num_gpus"]
 
-            complete, pm_epoch = mp.spawn(run_training_ddp,
-                                args=(
-                                    world_size, train_settings, local_settings, args.train_dir, args.checkpoint,
-                                    resume),
-                                nprocs=world_size,
-                                join=True)
+            complete, pm_epoch = run_multi_gpu_training(
+                world_size,
+                train_settings,
+                local_settings,
+                args.train_dir,
+                args.checkpoint,
+                resume,
+            )
         else:
-            complete, pm_epoch = run_training(train_settings, local_settings, args.train_dir, args.checkpoint, resume)
+            complete, pm_epoch = run_training(
+                train_settings, local_settings, args.train_dir, args.checkpoint, resume
+            )
 
         print("Copying log files")
         copy_logfiles(args.train_dir, epoch=pm_epoch)
@@ -214,7 +277,9 @@ def train_condor():
         #
 
         if complete:
-            print(f"Training complete, job will not be resubmitted. Executing exit command: {args.exit_command}.")
+            print(
+                f"Training complete, job will not be resubmitted. Executing exit command: {args.exit_command}."
+            )
             if args.exit_command:
                 os.system(args.exit_command)
             sys.exit()
