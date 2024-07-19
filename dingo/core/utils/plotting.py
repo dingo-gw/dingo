@@ -3,8 +3,6 @@ from itertools import zip_longest
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import corner
-import numpy as np
-import pandas as pd
 
 
 def plot_corner_multi(
