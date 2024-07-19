@@ -7,6 +7,14 @@ from dingo.pipe.utils import _strip_unwanted_submission_keys
 
 class ImportanceSamplingNode(AnalysisNode):
     def __init__(self, inputs, sampling_node, generation_node, parallel_idx, dag):
+        if inputs.cpu_osg:
+            inputs.osg = True
+            inputs.desired_sites = inputs.cpu_desired_sites
+            self.run_node_on_osg = True
+        else:
+            inputs.osg = False
+            inputs.desired_sites = None 
+            self.run_node_on_osg = False
         super(AnalysisNode, self).__init__(inputs)
         self.dag = dag
         self.sampling_node = sampling_node
@@ -30,19 +38,20 @@ class ImportanceSamplingNode(AnalysisNode):
 
         self.setup_arguments()
 
-        # if self.inputs.transfer_files or self.inputs.osg:
-        #     data_dump_file = generation_node.data_dump_file
-        #     input_files_to_transfer = [
-        #         str(data_dump_file),
-        #         str(self.inputs.complete_ini_file),
-        #     ]
-        #     self.extra_lines.extend(
-        #         self._condor_file_transfer_lines(
-        #             input_files_to_transfer,
-        #             [self._relative_topdir(self.inputs.outdir, self.inputs.initialdir)],
-        #         )
-        #     )
-        #     self.arguments.add("outdir", os.path.relpath(self.inputs.outdir))
+        if self.inputs.transfer_files or self.inputs.osg:
+            input_files_to_transfer = [
+                str(generation_node.event_data_file),
+                str(self.inputs.complete_ini_file),
+                str(proposal_samples_file),
+                *[str(envelope_path) for envelope_path in self.inputs.spline_calibration_envelope_dict.values()],
+            ]
+            self.extra_lines.extend(
+                self._condor_file_transfer_lines(
+                    input_files_to_transfer,
+                    [self._relative_topdir(self.inputs.outdir, self.inputs.initialdir)],
+                )
+            )
+            self.arguments.add("outdir", os.path.relpath(self.inputs.outdir))
 
         # Add extra arguments for dingo
         self.arguments.add("label", self.label)

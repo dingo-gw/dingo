@@ -121,8 +121,13 @@ class MainInput(BilbyMainInput):
         self.n_parallel = args.n_parallel
         self.transfer_files = args.transfer_files
         self.additional_transfer_paths = args.additional_transfer_paths
-        self.osg = args.osg
-        self.desired_sites = args.desired_sites
+        self.cpu_osg = args.cpu_osg
+        self.cpu_desired_sites = args.cpu_desired_sites
+        self.gpu_osg = args.gpu_osg
+        self.gpu_desired_sites = args.gpu_desired_sites
+        # self.ogs and self.desired_sites will be set depending on the gpu_osg and cpu_osg settings
+        self.osg = False
+        self.desired_sites = None
         # self.analysis_executable = args.analysis_executable
         # self.analysis_executable_parser = args.analysis_executable_parser
         self.result_format = "hdf5"

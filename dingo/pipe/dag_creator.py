@@ -82,8 +82,7 @@ def generate_dag(inputs, model_args):
         )
         sampling_node_list.append(sampling_node)
 
-    if inputs.importance_sample:
-        #
+    if inputs.importance_sample: #
         # 3. Generate new data for importance sampling **if different settings requested**.
         #
         # If injecting into simulated noise, be sure to use consistent noise realization.
