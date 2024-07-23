@@ -9,10 +9,6 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.nn.modules import Module
 
 from dingo.gw.training import (
-    prepare_wfd_and_initialization_for_embedding_network,
-    prepare_model_new,
-    load_settings_from_ckpt,
-    prepare_model_resume,
     prepare_training_new,
     prepare_training_resume,
     train_stages,
@@ -80,6 +76,7 @@ def run_training(
     train_dir: str,
     ckpt_file: str,
     resume: bool,
+    pretraining: bool = False
 ) -> (bool, int):
     """
     Starts a training run for single-GPU training.
@@ -96,6 +93,8 @@ def run_training(
         if resume=True, path to the model checkpoint
     resume: bool
         Whether to resume training from checkpoint
+    pretraining: bool=False
+        Whether to run pretraining
 
     Returns
     ----------
@@ -122,11 +121,12 @@ def run_training(
 
 def run_multi_gpu_training(
     world_size: int,
-    train_settings: dict,
+    train_settings: dict | None,
     local_settings: dict,
     train_dir: str,
     ckpt_file: str,
     resume: bool,
+    pretraining: bool = False,
 ) -> (bool, int):
     """
     Starts a training run for multi-GPU distributed data parallel (DDP) training.
@@ -145,6 +145,8 @@ def run_multi_gpu_training(
         if resume=True, path to the model checkpoint
     resume: bool
         Whether to resume training from checkpoint
+    pretraining: bool=False
+        Whether to run pretraining
 
     Returns
     ----------
@@ -153,22 +155,6 @@ def run_multi_gpu_training(
     epoch: int
         The epoch number where the training finished
     """
-    initial_weights, pretrained_emb_net, checkpoint_file = None, None, None
-    if not resume:
-        wfd, initial_weights, pretrained_emb_net = (
-            prepare_wfd_and_initialization_for_embedding_network(
-                train_settings, train_dir, local_settings
-            )
-        )
-    else:
-        checkpoint_file = os.path.join(train_dir, ckpt_file)
-        train_settings = load_settings_from_ckpt(ckpt_file)
-        wfd = build_dataset(train_settings["data"])
-    if pretrained_emb_net is not None:
-        pretraining = True
-    else:
-        pretraining = False
-
     complete, pm_epoch = mp.spawn(
         run_training_ddp,
         args=(
@@ -176,11 +162,8 @@ def run_multi_gpu_training(
             train_settings,
             local_settings,
             train_dir,
-            wfd,
-            initial_weights,
             pretraining,
-            pretrained_emb_net,
-            checkpoint_file,
+            ckpt_file,
             resume,
         ),
         nprocs=world_size,
@@ -196,10 +179,7 @@ def run_training_ddp(
     train_settings: dict,
     local_settings: dict,
     train_dir: str,
-    wfd: WaveformDataset,
-    initial_weights: dict,
     pretraining: bool,
-    pretrained_emb_net: Module,
     ckpt_file: str,
     resume: bool,
 ) -> (bool, int):
@@ -218,14 +198,8 @@ def run_training_ddp(
         Local settings
     train_dir: str
         Directory to store training output
-    wfd: WaveformDataset
-        Waveform dataset
-    initial_weights: dict
-        Weights for initial layer of resnet embedding network constructed from SVD.
     pretraining: bool
         Whether to use the pretrained embedding network
-    pretrained_emb_net: torch.nn.Module
-        Weights of pretrained embedding network
     ckpt_file: str
         if resume=True, path to the model checkpoint
     resume: bool
@@ -248,20 +222,19 @@ def run_training_ddp(
     local_settings["world_size"] = world_size
 
     if not resume:
-        pm = prepare_model_new(
-            train_settings,
-            train_dir,
-            local_settings,
-            wfd=wfd,
-            initial_weights=initial_weights,
+        pm, wfd = prepare_training_new(
+            train_settings=train_settings,
+            train_dir=train_dir,
+            local_settings=local_settings,
             pretraining=pretraining,
-            pretrained_embedding_net=pretrained_emb_net,
         )
     else:
-        pm = prepare_model_resume(
+        ckpt_file = os.path.join(train_dir, ckpt_file)
+        pm, wfd = prepare_training_resume(
             checkpoint_name=ckpt_file,
             local_settings=local_settings,
             train_dir=train_dir,
+            pretraining=pretraining,
         )
 
     # Replace BatchNorm layers with SyncBatchNorm
@@ -297,6 +270,11 @@ def train_condor():
         type=str,
         default="",
         help="Optional command to execute after completion of training.",
+    )
+    parser.add_argument(
+        "--pretraining",
+        action="store_true",
+        help="Whether to pretrain embedding network.",
     )
     args = parser.parse_args()
 
@@ -340,6 +318,7 @@ def train_condor():
         else:
             print("Resuming training run.")
             resume = True
+            train_settings = None
             with open(os.path.join(args.train_dir, "local_settings.yaml"), "r") as f:
                 local_settings = yaml.safe_load(f)
 
@@ -360,10 +339,11 @@ def train_condor():
                 args.train_dir,
                 args.checkpoint,
                 resume,
+                args.pretraining,
             )
         else:
             complete, pm_epoch = run_training(
-                train_settings, local_settings, args.train_dir, args.checkpoint, resume
+                train_settings, local_settings, args.train_dir, args.checkpoint, resume, args.pretraining,
             )
 
         print("Copying log files")
