@@ -60,6 +60,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             file_name=file_name,
             dictionary=dictionary,
             data_keys=["parameters", "polarizations", "svd"],
+            leave_on_disk_keys=["h_cross", "h_plus"],
         )
 
         if (
@@ -101,12 +102,17 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                 raise TypeError(
                     'precision can only be changed to "single" or "double".'
                 )
-            self.parameters = self.parameters.astype(real_type, copy=False)
-            for k, v in self.polarizations.items():
-                self.polarizations[k] = v.astype(complex_type, copy=False)
+            if "parameters" not in self.leave_on_disk_keys:
+                self.parameters = self.parameters.astype(real_type, copy=False)
+            if (
+                "h_cross" not in self.leave_on_disk_keys
+                and "h_plus" not in self.leave_on_disk_keys
+            ):
+                for k, v in self.polarizations.items():
+                    self.polarizations[k] = v.astype(complex_type, copy=False)
 
             # This should probably be moved to the SVDBasis class.
-            if self.svd is not None:
+            if self.svd is not None and "svd" not in self.leave_on_disk_keys:
                 self.svd["V"] = self.svd["V"].astype(complex_type, copy=False)
                 # For backward compatibility; in future, this will be there.
                 if "s" in self.svd:
@@ -164,7 +170,11 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         # These transforms must be in reverse order compared to when dataset was
         # constructed.
 
-        if "svd" in self.settings["compression"]:
+        if (
+            "svd" in self.settings["compression"]
+            and "svd" not in self.leave_on_disk_keys
+            and "polarizations" not in self.leave_on_disk_keys
+        ):
             assert self.svd is not None
 
             # We allow the option to reduce the size of the SVD used for decompression,
@@ -207,7 +217,12 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         for sample with index `idx`. If defined, a chain of transformations is applied to
         the waveform data.
         """
-        parameters = self.parameters.iloc[idx].to_dict()
+        if "parameters" not in self.leave_on_disk_keys:
+            parameters = self.parameters.iloc[idx].to_dict()
+        else:
+            # TODO
+            raise NotImplementedError
+        # This code works for both cases if waveforms is loaded into RAM or if it is still on disk
         polarizations = {
             pol: waveforms[idx] for pol, waveforms in self.polarizations.items()
         }

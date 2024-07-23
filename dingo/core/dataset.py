@@ -24,27 +24,32 @@ def recursive_hdf5_save(group, d):
             raise TypeError(f"Cannot save datatype {type(v)} as hdf5 dataset.")
 
 
-def recursive_hdf5_load(group, keys=None):
+def recursive_hdf5_load(group, keys=None, leave_on_disk_keys=None):
     d = {}
     for k, v in group.items():
         if keys is None or k in keys:
             if isinstance(v, h5py.Group):
-                d[k] = recursive_hdf5_load(v)
+                d[k] = recursive_hdf5_load(v, leave_on_disk_keys=leave_on_disk_keys)
             else:
-                d[k] = v[...]
-                # If the array has column names, load it as a pandas DataFrame
-                if d[k].dtype.names is not None:
-                    d[k] = pd.DataFrame(d[k])
-                # Convert arrays of size 1 to scalars
-                elif d[k].size == 1:
-                    d[k] = d[k].item()
-                    if isinstance(d[k], bytes):
-                        # Assume this is a string.
-                        d[k] = d[k].decode()
-                # If an array is 1D and of type object, assume it originated as a list
-                # of strings.
-                elif d[k].ndim == 1 and d[k].dtype == "O":
-                    d[k] = [x.decode() for x in d[k]]
+                if leave_on_disk_keys is not None and k in leave_on_disk_keys:
+                    # Only store reference without loading content
+                    d[k] = v
+                else:
+                    # Load value
+                    d[k] = v[...]
+                    # If the array has column names, convert it to a pandas DataFrame
+                    if d[k].dtype.names is not None:
+                        d[k] = pd.DataFrame(d[k])
+                    # Convert arrays of size 1 to scalars
+                    elif d[k].size == 1:
+                        d[k] = d[k].item()
+                        if isinstance(d[k], bytes):
+                            # Assume this is a string.
+                            d[k] = d[k].decode()
+                    # If an array is 1D and of type object, assume it originated as a list
+                    # of strings.
+                    elif d[k].ndim == 1 and d[k].dtype == "O":
+                        d[k] = [x.decode() for x in d[k]]
     return d
 
 
@@ -61,7 +66,9 @@ class DingoDataset:
 
     dataset_type = "dingo_dataset"
 
-    def __init__(self, file_name=None, dictionary=None, data_keys=None):
+    def __init__(
+        self, file_name=None, dictionary=None, data_keys=None, leave_on_disk_keys=None
+    ):
         """
         For constructing, provide either file_name, or dictionary containing data and
         settings entries, or neither.
@@ -86,10 +93,11 @@ class DingoDataset:
             vars(self)[key] = None
         self.settings = None
         self.version = None
+        self.leave_on_disk_keys = leave_on_disk_keys
 
         # If data provided, load it
         if file_name is not None:
-            self.from_file(file_name)
+            self.from_file(file_name, leave_on_disk_keys)
         elif dictionary is not None:
             self.from_dictionary(dictionary)
 
@@ -107,11 +115,28 @@ class DingoDataset:
             if self.dataset_type:
                 f.attrs["dataset_type"] = self.dataset_type
 
-    def from_file(self, file_name):
+                # Explicit line for loading and closing, only close it if there's nothing left on disk
+
+    def from_file(self, file_name, leave_on_disk_keys=None):
         print("Loading dataset from " + str(file_name) + ".")
-        with h5py.File(file_name, "r") as f:
+        if leave_on_disk_keys is None or leave_on_disk_keys == []:
+            with h5py.File(file_name, "r") as f:
+                # Load only the keys that the class expects
+                loaded_dict = recursive_hdf5_load(f, keys=self._data_keys)
+                for k, v in loaded_dict.items():
+                    assert k in self._data_keys
+                    setattr(self, k, v)
+                try:
+                    self.settings = ast.literal_eval(f.attrs["settings"])
+                except KeyError:
+                    self.settings = None  # Is this necessary?
+        else:
+            # Open hdf5 file
+            f = h5py.File(file_name, "r")
             # Load only the keys that the class expects
-            loaded_dict = recursive_hdf5_load(f, keys=self._data_keys)
+            loaded_dict = recursive_hdf5_load(
+                f, keys=self._data_keys, leave_on_disk_keys=leave_on_disk_keys
+            )
             for k, v in loaded_dict.items():
                 assert k in self._data_keys
                 setattr(self, k, v)
@@ -119,6 +144,10 @@ class DingoDataset:
                 self.settings = ast.literal_eval(f.attrs["settings"])
             except KeyError:
                 self.settings = None  # Is this necessary?
+            # The hdf5 file is not closed here since the values corresponding to the leave_on_disk_keys are only loaded
+            # by reference at this point. They will be loaded on the fly in WaveformDataset.__getitem__()
+            # The file should be closed when the DataLoader enters the garbage collection. Does this happen
+            # automatically?
 
     def to_dictionary(self):
         dictionary = {
