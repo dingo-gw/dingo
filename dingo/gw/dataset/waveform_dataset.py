@@ -170,17 +170,15 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         # These transforms must be in reverse order compared to when dataset was
         # constructed.
 
-        if (
-            "svd" in self.settings["compression"]
-            and "svd" not in self.leave_on_disk_keys
-            and "polarizations" not in self.leave_on_disk_keys
-        ):
+        if "svd" in self.settings["compression"]:
             assert self.svd is not None
 
             # We allow the option to reduce the size of the SVD used for decompression,
             # since decompression is the costliest preprocessing operation. Be careful
             # when using this to not introduce a large mismatch.
-            if svd_size_update is not None:
+            if (svd_size_update is not None
+                and "svd" not in self.leave_on_disk_keys
+                and "polarizations" not in self.leave_on_disk_keys):
                 if svd_size_update > self.svd["V"].shape[-1] or svd_size_update < 0:
                     raise ValueError(
                         f"Cannot truncate SVD from size "
