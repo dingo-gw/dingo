@@ -272,9 +272,9 @@ def compute_model_log_prob(
     while lower < num_samples:
         upper = min(upper, num_samples)
         with torch.no_grad():
-            y_idx = y[lower:upper]
+            y_idx = y[lower:upper].to(device)
             x_idx = [v.expand(len(y_idx), *v.shape[1:]) for v in x]
-            log_probs_idx = model.model.log_prob(y, *x_idx)
+            log_probs_idx = model.model.log_prob(y_idx, *x_idx)
             log_probs.append(log_probs_idx)
         lower += batch_size
         upper += batch_size
