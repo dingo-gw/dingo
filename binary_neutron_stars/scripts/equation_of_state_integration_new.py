@@ -14,6 +14,55 @@ from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.inference.gw_samplers import GWSamplerGNPE
 from dingo.core.samplers import FixedInitSampler
 from dingo.gw.transforms import SelectStandardizeRepackageParameters
+import argparse
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Integration for equation of state likelihood.",
+    )
+    parser.add_argument(
+        "--model_path", type=str, required=True, help="Path to dingo model."
+    )
+    parser.add_argument(
+        "--event_dataset_path", type=str, required=True, help="Path to even dataset."
+    )
+    parser.add_argument(
+        "--eos_params",
+        type=float,
+        nargs="+",
+        required=True,
+        help="Coefficient for EOS polynomical.",
+    )
+    parser.add_argument(
+        "--chirp_mass_grid",
+        type=float,
+        nargs=3,
+        required=True,
+        help="Linear grid for chirp mass.",
+    )
+    parser.add_argument(
+        "--mass_ratio_grid",
+        type=float,
+        nargs=3,
+        required=True,
+        help="Linear grid for mass_ratio.",
+    )
+    parser.add_argument("--batch_size", type=int, default=None, help="Batch size")
+    parser.add_argument(
+        "--num_samples_is",
+        type=int,
+        default=None,
+        help="Number of IS samples for evidence estimate.",
+    )
+    parser.add_argument("--outname", type=str, default=None, help="Name for out file.")
+    args = parser.parse_args()
+    if args.chirp_mass_grid is not None:
+        args.chirp_mass_grid[2] = int(args.chirp_mass_grid[2])
+    if args.mass_ratio_grid is not None:
+        args.mass_ratio_grid[2] = int(args.mass_ratio_grid[2])
+    return args
 
 
 def get_expanded_parameters(
@@ -354,60 +403,44 @@ def polynomial(x, a, *coefficients):
 
 
 if __name__ == "__main__":
-    # inputs
-    model_path_c = "/Users/maxdax/Documents/Projects/GW-Inference/01_bns/prototyping/equation-of-state/conditional-model/model.pt"
-    event_dataset_path_c = "/Users/maxdax/Documents/Projects/GW-Inference/01_bns/prototyping/equation-of-state/conditional-model/GW170817_event_data.hdf5"
-    model_path_m = "/Users/maxdax/Documents/Projects/GW-Inference/01_bns/prototyping/equation-of-state/marginalized-model/model.pt"
-    event_dataset_path_m = "/Users/maxdax/Documents/Projects/GW-Inference/01_bns/prototyping/equation-of-state/marginalized-model/GW170817_event_data.hdf5"
-    num_samples = 100
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    args = parse_args()
+
     fixed_context_parameters = {
         "chirp_mass_proxy": 1.1974457502365112,
         "ra": 3.44616,
         "dec": -0.408084,
     }
 
-    chirp_masses = np.linspace(1.1972, 1.198, 15)
-    mass_ratios = np.linspace(0.5, 1.0, 10)
-
-    eos_1 = lambda mass: polynomial(mass, 1.4, 1000, -6000, 10000)
-    eos_2 = lambda mass: polynomial(mass, 1.4, 1000, -1000)
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    log_evidence_m, log_evidence_std_m, eps_m = compute_eos_integrand_on_grid(
-        eos_1,
-        model_path_m,
-        event_dataset_path_m,
+    # chirp_masses = np.linspace(1.1972, 1.198, 15)
+    # mass_ratios = np.linspace(0.5, 1.0, 10)
+    chirp_masses = np.linspace(*args.chirp_mass_grid)
+    mass_ratios = np.linspace(*args.mass_ratio_grid)
+    log_evidence, log_evidence_std, eps = compute_eos_integrand_on_grid(
+        lambda mass: polynomial(mass, *args.eos_params),
+        args.model_path,
+        args.event_dataset_path,
         fixed_context_parameters,
         chirp_masses,
         mass_ratios,
-        batch_size=10000,
+        num_samples_is=args.num_samples_is,
+        batch_size=args.batch_size,
         device=device,
     )
 
-    log_evidence_c, log_evidence_std_c, eps_c = compute_eos_integrand_on_grid(
-        eos_1,
-        model_path_c,
-        event_dataset_path_c,
-        fixed_context_parameters,
-        chirp_masses,
-        mass_ratios,
-        num_samples_is=100,
-        batch_size=10000,
-        device=device,
+    data = dict(
+        log_evidence=log_evidence,
+        log_evidence_std=log_evidence_std,
+        sample_efficiency=eps,
+        chirp_masses=chirp_masses,
+        mass_ratios=mass_ratios,
     )
+    np.save(args.outname, data)
 
     import matplotlib.pyplot as plt
 
     plt.imshow(
-        np.exp(log_evidence_m - np.max(log_evidence_m)).reshape(
-            len(chirp_masses), len(mass_ratios)
-        )
-    )
-    plt.show()
-
-    plt.imshow(
-        np.exp(log_evidence_c - np.max(log_evidence_c)).reshape(
+        np.exp(log_evidence - np.max(log_evidence)).reshape(
             len(chirp_masses), len(mass_ratios)
         )
     )
