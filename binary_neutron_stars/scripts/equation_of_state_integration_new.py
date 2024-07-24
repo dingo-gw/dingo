@@ -56,6 +56,9 @@ def parse_args():
         default=None,
         help="Number of IS samples for evidence estimate.",
     )
+    parser.add_argument(
+        "--num_processes_is", type=int, default=0, help="Number of processes for IS."
+    )
     parser.add_argument("--outname", type=str, default=None, help="Name for out file.")
     args = parser.parse_args()
     if args.chirp_mass_grid is not None:
@@ -340,7 +343,7 @@ def compute_eos_integrand_on_grid(
     mass_ratios: np.ndarray,
     batch_size: Optional[int] = None,
     num_samples_is: Optional[int] = None,
-    num_processes: int = 0,
+    num_processes_is: int = 0,
     device: str = "cpu",
 ):
     # load model and event data, set up sampler and data
@@ -385,7 +388,7 @@ def compute_eos_integrand_on_grid(
             fixed_context_parameters=fixed_context_parameters,
             num_samples=num_samples_is,
             device=device,
-            num_processes=num_processes,
+            num_processes=num_processes_is,
         )
         fn = lambda x: compute_log_evidences(
             varied_context_parameters=x, **fixed_kwargs
@@ -425,6 +428,7 @@ if __name__ == "__main__":
         mass_ratios,
         num_samples_is=args.num_samples_is,
         batch_size=args.batch_size,
+        num_processes_is=args.num_processes_is,
         device=device,
     )
 
