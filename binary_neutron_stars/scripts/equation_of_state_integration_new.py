@@ -549,6 +549,7 @@ if __name__ == "__main__":
         )
         log_prob_proposal = None
     data = dict(
+        eos_params=args.eos_params,
         log_evidence=log_evidence,
         log_evidence_std=log_evidence_std,
         sample_efficiency=eps,
