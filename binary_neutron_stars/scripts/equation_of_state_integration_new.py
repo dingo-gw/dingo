@@ -39,15 +39,24 @@ def parse_args():
         "--chirp_mass_grid",
         type=float,
         nargs=3,
-        required=True,
+        default=None,
         help="Linear grid for chirp mass.",
     )
     parser.add_argument(
         "--mass_ratio_grid",
         type=float,
         nargs=3,
-        required=True,
+        default=None,
         help="Linear grid for mass_ratio.",
+    )
+    parser.add_argument(
+        "--proposal_path", type=str, default=None, help="Path to proposal for EOS IS."
+    )
+    parser.add_argument(
+        "--num_samples_eos_is",
+        type=int,
+        default=None,
+        help="Number of samples in outer IS loop (EOS IS), when proposal_path provided.",
     )
     parser.add_argument("--batch_size", type=int, default=None, help="Batch size")
     parser.add_argument(
@@ -293,11 +302,9 @@ def build_grid(
     mass_ratio = mass_ratios_m.ravel()
 
     # compute lambdas from eos
-    mass_1, mass_2 = chirp_mass_and_mass_ratio_to_component_masses(
-        chirp_mass, mass_ratio
-    )
-    lambda_1 = eos(mass_1)
-    lambda_2 = eos(mass_2)
+    m1, m2 = chirp_mass_and_mass_ratio_to_component_masses(chirp_mass, mass_ratio)
+    lambda_1 = eos(m1)
+    lambda_2 = eos(m2)
 
     return {
         "chirp_mass": chirp_mass,
@@ -341,8 +348,8 @@ def compute_eos_integrand_on_grid(
     fixed_context_parameters: Dict[str, float],
     chirp_masses: np.ndarray,
     mass_ratios: np.ndarray,
-    batch_size: Optional[int] = None,
     num_samples_is: Optional[int] = None,
+    batch_size: Optional[int] = None,
     num_processes_is: int = 0,
     device: str = "cpu",
 ):
@@ -398,6 +405,88 @@ def compute_eos_integrand_on_grid(
     return log_evidence, log_evidence_std, eps
 
 
+def sample_from_proposal(eos, proposal_path, num_samples):
+    # sample from proposal
+    proposal_data = np.load(proposal_path, allow_pickle=True).item()
+    log_probs = proposal_data["log_evidence"]
+    p_proposal = np.exp(log_probs - log_probs.max())
+    p_proposal /= p_proposal.sum()
+    inds = np.random.choice(
+        np.arange(len(p_proposal)), size=num_samples, replace=True, p=p_proposal
+    )
+
+    # get proposal log prob
+    log_prob_proposal = log_probs[inds]
+
+    # compute chirp mass and mass ratio values for sample points
+    chirp_masses_m, mass_ratios_m = np.meshgrid(
+        proposal_data["chirp_masses"], proposal_data["mass_ratios"], indexing="ij"
+    )
+    chirp_mass = chirp_masses_m.ravel()[inds]
+    mass_ratio = mass_ratios_m.ravel()[inds]
+
+    # add lambda parameters
+    m1, m2 = chirp_mass_and_mass_ratio_to_component_masses(chirp_mass, mass_ratio)
+    lambda_1 = eos(m1)
+    lambda_2 = eos(m2)
+
+    grid = {
+        "chirp_mass": chirp_mass,
+        "mass_ratio": mass_ratio,
+        "lambda_1": lambda_1,
+        "lambda_2": lambda_2,
+    }
+
+    return log_prob_proposal, grid
+
+
+def compute_eos_integrand_with_is(
+    eos: Callable[[float], float],
+    model_path: str,
+    event_dataset_path: str,
+    fixed_context_parameters: Dict[str, float],
+    proposal_path: str,
+    num_samples: int,
+    num_samples_is: int,
+    batch_size: Optional[int] = None,
+    num_processes_is: int = 0,
+    device: str = "cpu",
+):
+    # load model and event data, set up sampler and data
+    model = PosteriorModel(model_path, device=device)
+    event_dataset = EventDataset(event_dataset_path)
+    sampler = GWSamplerGNPE(
+        model=model,
+        init_sampler=FixedInitSampler({}, log_prob=0),
+        fixed_context_parameters=fixed_context_parameters,
+        num_iterations=1,
+    )
+    sampler.context = event_dataset.data
+    data = sampler.transform_pre(event_dataset.data)
+
+    # build grid
+    log_prob_proposal, grid = sample_from_proposal(eos, proposal_path, num_samples)
+    grid["delta_chirp_mass"] = (
+        grid["chirp_mass"] - fixed_context_parameters["chirp_mass_proxy"]
+    )
+
+    if batch_size is not None:
+        batch_size = int(batch_size / num_samples_is)
+    fixed_kwargs = dict(
+        sampler=sampler,
+        event_dataset=event_dataset,
+        data=data,
+        fixed_context_parameters=fixed_context_parameters,
+        num_samples=num_samples_is,
+        device=device,
+        num_processes=num_processes_is,
+    )
+    fn = lambda x: compute_log_evidences(varied_context_parameters=x, **fixed_kwargs)
+    log_evidence, log_evidence_std, eps = batched_execution(fn, grid, batch_size)
+
+    return log_evidence, log_evidence_std, eps, grid, log_prob_proposal
+
+
 def polynomial(x, a, *coefficients):
     result = 0
     for p, c in enumerate(coefficients):
@@ -415,37 +504,65 @@ if __name__ == "__main__":
         "dec": -0.408084,
     }
 
-    # chirp_masses = np.linspace(1.1972, 1.198, 15)
-    # mass_ratios = np.linspace(0.5, 1.0, 10)
-    chirp_masses = np.linspace(*args.chirp_mass_grid)
-    mass_ratios = np.linspace(*args.mass_ratio_grid)
-    log_evidence, log_evidence_std, eps = compute_eos_integrand_on_grid(
-        lambda mass: polynomial(mass, *args.eos_params),
-        args.model_path,
-        args.event_dataset_path,
-        fixed_context_parameters,
-        chirp_masses,
-        mass_ratios,
-        num_samples_is=args.num_samples_is,
-        batch_size=args.batch_size,
-        num_processes_is=args.num_processes_is,
-        device=device,
-    )
-
+    if args.proposal_path is not None:
+        # importance-sampled integration
+        (
+            log_evidence,
+            log_evidence_std,
+            eps,
+            parameters,
+            log_prob_proposal,
+        ) = compute_eos_integrand_with_is(
+            lambda mass: polynomial(mass, *args.eos_params),
+            args.model_path,
+            args.event_dataset_path,
+            fixed_context_parameters,
+            args.proposal_path,
+            num_samples=args.num_samples_eos_is,
+            num_samples_is=args.num_samples_is,
+            batch_size=args.batch_size,
+            num_processes_is=args.num_processes_is,
+            device=device,
+        )
+        log_w = (log_evidence - log_prob_proposal)
+        w = np.exp(log_w - log_w.max())
+        n_eff = np.sum(w) ** 2 / np.sum(w ** 2)
+        print(f"Sample efficiency {n_eff / len(w)*100:.1f}%")
+        chirp_masses = parameters["chirp_mass"]
+        mass_ratios = parameters["mass_ratio"]
+    else:
+        # chirp_masses = np.linspace(1.1972, 1.198, 15)
+        # mass_ratios = np.linspace(0.5, 1.0, 10)
+        chirp_masses = np.linspace(*args.chirp_mass_grid)
+        mass_ratios = np.linspace(*args.mass_ratio_grid)
+        log_evidence, log_evidence_std, eps = compute_eos_integrand_on_grid(
+            lambda mass: polynomial(mass, *args.eos_params),
+            args.model_path,
+            args.event_dataset_path,
+            fixed_context_parameters,
+            chirp_masses,
+            mass_ratios,
+            num_samples_is=args.num_samples_is,
+            batch_size=args.batch_size,
+            num_processes_is=args.num_processes_is,
+            device=device,
+        )
+        log_prob_proposal = None
     data = dict(
         log_evidence=log_evidence,
         log_evidence_std=log_evidence_std,
         sample_efficiency=eps,
         chirp_masses=chirp_masses,
         mass_ratios=mass_ratios,
+        log_prob_proposal=log_prob_proposal,
     )
     np.save(args.outname, data)
 
-    import matplotlib.pyplot as plt
-
-    plt.imshow(
-        np.exp(log_evidence - np.max(log_evidence)).reshape(
-            len(chirp_masses), len(mass_ratios)
-        )
-    )
-    plt.show()
+    # import matplotlib.pyplot as plt
+    #
+    # plt.imshow(
+    #     np.exp(log_evidence - np.max(log_evidence)).reshape(
+    #         len(chirp_masses), len(mass_ratios)
+    #     )
+    # )
+    # plt.show()
