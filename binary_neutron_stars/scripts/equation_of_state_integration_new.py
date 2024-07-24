@@ -151,7 +151,7 @@ def convert_to_result(
 ) -> Result:
     """Parse output of dingo model into Result object."""
     samples = sampler.transform_gnpe_loop_post(
-        {"parameters": y, "extrinsic_parameters": {}}
+        {"parameters": y.cpu(), "extrinsic_parameters": {}}
     )["parameters"]
     samples["log_prob"] = log_prob.cpu().numpy()
     for k, v in conditioning_parameters.items():
