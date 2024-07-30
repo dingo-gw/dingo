@@ -1,7 +1,11 @@
+from typing import Tuple
 import ast
 import h5py
 import numpy as np
 import pandas as pd
+
+import ctypes
+import multiprocessing.sharedctypes
 
 from dingo.core.utils.misc import get_version
 
@@ -24,6 +28,24 @@ def recursive_hdf5_save(group, d):
             raise TypeError(f"Cannot save datatype {type(v)} as hdf5 dataset.")
 
 
+def create_shared_array(shape: Tuple[int, ...], dtype):
+    # Create the shared array
+    size = np.asarray(shape).prod()
+    if dtype == complex: size *= 2
+    if dtype == int:
+        cty = ctypes.c_long
+    else:
+        cty = ctypes.c_double
+    # RawArray requires lock for data to ensure synchronization of write
+    # mp_arr = multiprocessing.sharedctypes.RawArray(cty, int(size))
+
+    mp_arr = multiprocessing.Array(cty, int(size))
+    np_arr = np.frombuffer(mp_arr, dtype=dtype)
+    np_arr = np_arr.reshape(shape)
+
+    return np_arr, mp_arr
+
+
 def recursive_hdf5_load(group, keys=None, leave_on_disk_keys=None):
     d = {}
     for k, v in group.items():
@@ -32,8 +54,12 @@ def recursive_hdf5_load(group, keys=None, leave_on_disk_keys=None):
                 d[k] = recursive_hdf5_load(v, leave_on_disk_keys=leave_on_disk_keys)
             else:
                 if leave_on_disk_keys is not None and k in leave_on_disk_keys:
-                    # Only store reference without loading content
-                    d[k] = v
+                    # Allocate shared memory
+                    np_arr, mp_arr = create_shared_array(v.shape, dtype=v.dtype)
+                    # Assign data to shared memory
+                    np_arr[:] = v[...]
+                    # Insert into dict
+                    d[k] = np_arr
                 else:
                     # Load value
                     d[k] = v[...]
