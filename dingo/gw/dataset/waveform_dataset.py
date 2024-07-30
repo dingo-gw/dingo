@@ -1,10 +1,10 @@
-import copy
+import h5py
 from typing import Dict, Union
 import numpy as np
 import torch.utils.data
 from torchvision.transforms import Compose
 
-from dingo.core.dataset import DingoDataset
+from dingo.core.dataset import DingoDataset, recursive_hdf5_load
 from dingo.gw.SVD import SVDBasis, ApplySVD
 from dingo.gw.domains import build_domain
 from dingo.gw.transforms import WhitenFixedASD
@@ -31,6 +31,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         precision=None,
         domain_update=None,
         svd_size_update=None,
+        leave_on_disk_keys=None,
     ):
         """
         For constructing, provide either file_name, or dictionary containing data and
@@ -51,6 +52,8 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             If provided, update domain from existing domain using new settings.
         svd_size_update : int
             If provided, reduces the SVD size when decompressing (for speed).
+        leave_on_disk_keys : dict
+            If provided, not load the values for these keys into RAM. They are loaded lazily in __getitem__().
         """
         self.domain = None
         self.transform = transform
@@ -60,8 +63,9 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             file_name=file_name,
             dictionary=dictionary,
             data_keys=["parameters", "polarizations", "svd"],
-            leave_on_disk_keys=["h_cross", "h_plus"],
+            leave_on_disk_keys=leave_on_disk_keys,
         )
+        self.file_name = file_name
 
         if (
             self.parameters is not None
@@ -215,15 +219,19 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         for sample with index `idx`. If defined, a chain of transformations is applied to
         the waveform data.
         """
-        if "parameters" not in self.leave_on_disk_keys:
-            parameters = self.parameters.iloc[idx].to_dict()
+        if self.leave_on_disk_keys is not None and "parameters" in self.leave_on_disk_keys:
+            with h5py.File(self.file_name, "r") as f:
+                parameters = recursive_hdf5_load(f, keys=["parameters"], idx=idx)["parameters"]
         else:
-            # TODO
-            raise NotImplementedError
-        # This code works for both cases if waveforms is loaded into RAM or if it is still on disk
-        polarizations = {
-            pol: waveforms[idx] for pol, waveforms in self.polarizations.items()
-        }
+            parameters = self.parameters.iloc[idx].to_dict()
+
+        if self.leave_on_disk_keys is not None and ("h_cross" in self.leave_on_disk_keys or "h_plus" in self.leave_on_disk_keys):
+            with h5py.File(self.file_name, "r") as f:
+                polarizations = recursive_hdf5_load(f, keys=["polarizations"], idx=idx)["polarizations"]
+        else:
+            polarizations = {
+                pol: waveforms[idx] for pol, waveforms in self.polarizations.items()
+            }
 
         # Decompression transforms are assumed to apply only to the waveform,
         # and do not involve parameters.

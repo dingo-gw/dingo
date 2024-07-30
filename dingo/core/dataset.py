@@ -28,44 +28,29 @@ def recursive_hdf5_save(group, d):
             raise TypeError(f"Cannot save datatype {type(v)} as hdf5 dataset.")
 
 
-def create_shared_array(shape: Tuple[int, ...], dtype):
-    # Create the shared array
-    size = np.asarray(shape).prod()
-    if dtype == complex: size *= 2
-    if dtype == int:
-        cty = ctypes.c_long
-    else:
-        cty = ctypes.c_double
-    # RawArray requires lock for data to ensure synchronization of write
-    # mp_arr = multiprocessing.sharedctypes.RawArray(cty, int(size))
-
-    mp_arr = multiprocessing.Array(cty, int(size))
-    np_arr = np.frombuffer(mp_arr, dtype=dtype)
-    np_arr = np_arr.reshape(shape)
-
-    return np_arr, mp_arr
-
-
-def recursive_hdf5_load(group, keys=None, leave_on_disk_keys=None):
+def recursive_hdf5_load(group, keys=None, leave_on_disk_keys=None, idx: Tuple[int,...] = None):
     d = {}
     for k, v in group.items():
         if keys is None or k in keys:
             if isinstance(v, h5py.Group):
-                d[k] = recursive_hdf5_load(v, leave_on_disk_keys=leave_on_disk_keys)
+                d[k] = recursive_hdf5_load(v, leave_on_disk_keys=leave_on_disk_keys, idx=idx)
             else:
                 if leave_on_disk_keys is not None and k in leave_on_disk_keys:
-                    # Allocate shared memory
-                    np_arr, mp_arr = create_shared_array(v.shape, dtype=v.dtype)
-                    # Assign data to shared memory
-                    np_arr[:] = v[...]
-                    # Insert into dict
-                    d[k] = np_arr
+                    # Insert dummy value into dict
+                    d[k] = None
                 else:
-                    # Load value
-                    d[k] = v[...]
+                    # Load complete array or only specific idx
+                    if idx is None or v.shape == ():
+                        d[k] = v[...]
+                    else:
+                        d[k] = v[idx]
                     # If the array has column names, convert it to a pandas DataFrame
                     if d[k].dtype.names is not None:
-                        d[k] = pd.DataFrame(d[k])
+                        # Convert row v[idx] into list for pd
+                        if type(d[k]) == np.void:
+                            d[k] = pd.DataFrame([list(d[k])], columns=d[k].dtype.names)
+                        else:
+                            d[k] = pd.DataFrame(d[k])
                     # Convert arrays of size 1 to scalars
                     elif d[k].size == 1:
                         d[k] = d[k].item()
