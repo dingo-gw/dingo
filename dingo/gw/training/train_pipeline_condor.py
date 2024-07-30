@@ -9,6 +9,10 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.nn.modules import Module
 
 from dingo.gw.training import (
+    prepare_wfd_and_initialization_for_embedding_network,
+    prepare_model_new,
+    load_settings_from_ckpt,
+    prepare_model_resume,
     prepare_training_new,
     prepare_training_resume,
     train_stages,
@@ -155,6 +159,22 @@ def run_multi_gpu_training(
     epoch: int
         The epoch number where the training finished
     """
+    initial_weights, pretrained_emb_net, checkpoint_file = None, None, None
+    if not resume:
+        wfd, initial_weights, pretrained_emb_net = (
+            prepare_wfd_and_initialization_for_embedding_network(
+                train_settings, train_dir, local_settings
+            )
+        )
+    else:
+        checkpoint_file = os.path.join(train_dir, ckpt_file)
+        train_settings = load_settings_from_ckpt(ckpt_file)
+        wfd = build_dataset(train_settings["data"])
+    if pretrained_emb_net is not None:
+        pretraining = True
+    else:
+        pretraining = False
+
     complete, pm_epoch = mp.spawn(
         run_training_ddp,
         args=(
@@ -162,8 +182,11 @@ def run_multi_gpu_training(
             train_settings,
             local_settings,
             train_dir,
+            wfd,
+            initial_weights,
             pretraining,
-            ckpt_file,
+            pretrained_emb_net,
+            checkpoint_file,
             resume,
         ),
         nprocs=world_size,
@@ -179,7 +202,10 @@ def run_training_ddp(
     train_settings: dict,
     local_settings: dict,
     train_dir: str,
+    wfd: WaveformDataset,
+    initial_weights: dict,
     pretraining: bool,
+    pretrained_emb_net: Module,
     ckpt_file: str,
     resume: bool,
 ) -> (bool, int):
@@ -222,19 +248,20 @@ def run_training_ddp(
     local_settings["world_size"] = world_size
 
     if not resume:
-        pm, wfd = prepare_training_new(
-            train_settings=train_settings,
-            train_dir=train_dir,
-            local_settings=local_settings,
+        pm = prepare_model_new(
+            train_settings,
+            train_dir,
+            local_settings,
+            wfd=wfd,
+            initial_weights=initial_weights,
             pretraining=pretraining,
+            pretrained_embedding_net=pretrained_emb_net,
         )
     else:
-        ckpt_file = os.path.join(train_dir, ckpt_file)
-        pm, wfd = prepare_training_resume(
+        pm = prepare_model_resume(
             checkpoint_name=ckpt_file,
             local_settings=local_settings,
             train_dir=train_dir,
-            pretraining=pretraining,
         )
 
     # Replace BatchNorm layers with SyncBatchNorm
