@@ -300,16 +300,11 @@ def create_parser(top_level=True):
         default="osdf",
         help="URL type to use for datafind, default is osdf",
     )
-    # data_type_pars = data_gen_pars.add_mutually_exclusive_group()
+    data_type_pars = data_gen_pars.add_mutually_exclusive_group()
     # data_type_pars.add(
-    #     "--gaussian-noise",
-    #     action="store_true",
-    #     help="If true, use simulated Gaussian noise",
-    # )
-    # data_gen_pars.add(
-        # "--zero-noise",
+        # "--gaussian-noise",
         # action="store_true",
-        # help="Use a zero noise realisation",
+        # help="If true, use simulated Gaussian noise",
     # )
 
     det_parser = parser.add_argument_group(
@@ -519,6 +514,11 @@ def create_parser(top_level=True):
         "--zero-noise",
         action="store_true",
         help="Use a zero noise realisation",
+    )
+    injection_parser.add(
+        "--gaussian-noise",
+        action="store_true",
+        help="If true, use simulated Gaussian noise",
     )
     injection_parser.add(
         "--num-noise-realizations",

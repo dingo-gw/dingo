@@ -1,6 +1,7 @@
 import numpy as np
 import pycbc.psd
 from gwpy.timeseries import TimeSeries
+from astropy.utils import data as astropy_data
 
 from dingo.gw.domains import FrequencyDomain
 from dingo.gw.gwutils import (
@@ -76,6 +77,7 @@ def estimate_single_psd(
         avg_method="median",
     )
 
+    astropy_data.clear_download_cache()
     return np.array(psd)
 
 

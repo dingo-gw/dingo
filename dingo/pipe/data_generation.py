@@ -67,12 +67,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.duration = args.duration
         self.post_trigger_duration = args.post_trigger_duration
 
-        self.zero_noise = args.zero_noise
-        if self.zero_noise:
-            self.num_noise_realizations = args.num_noise_realizations
-        else:
-            self.num_noise_realizations = 1
-
         # Whether to generate data for importance sampling. This must be done when
         # desired data settings differ from those used for network training. If this is
         # the case, save the new data to a different file name.
@@ -90,6 +84,8 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.allow_tape = args.allow_tape
         self.tukey_roll_off = args.tukey_roll_off
         self.resampling_method = args.resampling_method
+        self.zero_noise = args.zero_noise
+        self.gaussian_noise = args.gaussian_noise
 
         # Frequencies
         self.sampling_frequency = args.sampling_frequency
@@ -99,6 +95,13 @@ class DataGenerationInput(BilbyDataGenerationInput):
 
         # If creating an injection no need for real data generation
         if args.injection_dict is not None:
+            if self.zero_noise:
+                self.gaussian_noise = False
+                self.num_noise_realizations = args.num_noise_realizations
+            else:
+                self.gaussian_noise = True
+                self.num_noise_realizations = 1
+
             if args.asd_dataset is not None:
                 args.use_psd_of_trigger = False
                 logger.info("asd-dataset is set, not using psd of trigger")
