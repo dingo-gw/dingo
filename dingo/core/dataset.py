@@ -40,7 +40,7 @@ def recursive_hdf5_load(group, keys=None, leave_on_disk_keys=None, idx: Tuple[in
                     d[k] = None
                 else:
                     # Load complete array or only specific idx
-                    if idx is None or v.shape == ():
+                    if idx is None or v.shape == () or k == "V" or k == "mismatches" or k == "s":
                         d[k] = v[...]
                     else:
                         d[k] = v[idx]
