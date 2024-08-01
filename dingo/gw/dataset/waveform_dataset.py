@@ -66,6 +66,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             leave_on_disk_keys=leave_on_disk_keys,
         )
         self.file_name = file_name
+        self.file_handle = None
 
         if (
             self.parameters is not None
@@ -106,17 +107,17 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                 raise TypeError(
                     'precision can only be changed to "single" or "double".'
                 )
-            if "parameters" not in self.leave_on_disk_keys:
+            if self.parameters is not None:
                 self.parameters = self.parameters.astype(real_type, copy=False)
             if (
-                "h_cross" not in self.leave_on_disk_keys
-                and "h_plus" not in self.leave_on_disk_keys
+                self.polarizations["h_cross"] is not None
+                    and self.polarizations["h_plus"] is not None
             ):
                 for k, v in self.polarizations.items():
                     self.polarizations[k] = v.astype(complex_type, copy=False)
 
             # This should probably be moved to the SVDBasis class.
-            if self.svd is not None and "svd" not in self.leave_on_disk_keys:
+            if self.svd is not None:
                 self.svd["V"] = self.svd["V"].astype(complex_type, copy=False)
                 # For backward compatibility; in future, this will be there.
                 if "s" in self.svd:
@@ -219,15 +220,17 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         for sample with index `idx`. If defined, a chain of transformations is applied to
         the waveform data.
         """
+        if self.file_handle is None:
+            # Open hdf5 file
+            self.file_handle = h5py.File(self.file_name, "r")
+
         if self.leave_on_disk_keys is not None and "parameters" in self.leave_on_disk_keys:
-            with h5py.File(self.file_name, "r") as f:
-                parameters = recursive_hdf5_load(f, keys=["parameters"], idx=idx)["parameters"]
+            parameters = recursive_hdf5_load(self.file_handle, keys=["parameters"], idx=idx)["parameters"]
         else:
             parameters = self.parameters.iloc[idx].to_dict()
 
         if self.leave_on_disk_keys is not None and ("h_cross" in self.leave_on_disk_keys or "h_plus" in self.leave_on_disk_keys):
-            with h5py.File(self.file_name, "r") as f:
-                polarizations = recursive_hdf5_load(f, keys=["polarizations"], idx=idx)["polarizations"]
+            polarizations = recursive_hdf5_load(self.file_handle, keys=["polarizations"], idx=idx)["polarizations"]
         else:
             polarizations = {
                 pol: waveforms[idx] for pol, waveforms in self.polarizations.items()
