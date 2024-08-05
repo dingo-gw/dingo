@@ -44,7 +44,7 @@ def recursive_hdf5_load(group, keys=None, leave_on_disk_keys=None, idx: Tuple[in
                             d[k] = v[idx]
                         except:
                             # boolean indexing requires mask to have same shape as v
-                            d[k] = v[np.tile(idx[:, np.newaxis], (1, v.shape[1]))].reshape(v.shape)
+                            d[k] = v[np.tile(idx[:, np.newaxis], (1, v.shape[1]))].reshape([-1, v.shape[1]])
                     # If the array has column names, convert it to a pandas DataFrame
                     if d[k].dtype.names is not None:
                         # Convert row v[idx] into list for pd
