@@ -4,9 +4,6 @@ import h5py
 import numpy as np
 import pandas as pd
 
-import ctypes
-import multiprocessing.sharedctypes
-
 from dingo.core.utils.misc import get_version
 
 
@@ -28,7 +25,7 @@ def recursive_hdf5_save(group, d):
             raise TypeError(f"Cannot save datatype {type(v)} as hdf5 dataset.")
 
 
-def recursive_hdf5_load(group, keys=None, leave_on_disk_keys=None, idx: Tuple[int,...] = None):
+def recursive_hdf5_load(group, keys=None, leave_on_disk_keys=None, idx: Tuple[int|bool,...] = None):
     d = {}
     for k, v in group.items():
         if keys is None or k in keys:
@@ -43,7 +40,11 @@ def recursive_hdf5_load(group, keys=None, leave_on_disk_keys=None, idx: Tuple[in
                     if idx is None or v.shape == () or k == "V" or k == "mismatches" or k == "s":
                         d[k] = v[...]
                     else:
-                        d[k] = v[idx]
+                        try:
+                            d[k] = v[idx]
+                        except:
+                            # boolean indexing requires mask to have same shape as v
+                            d[k] = v[np.tile(idx[:, np.newaxis], (1, 200))].reshape(v.shape)
                     # If the array has column names, convert it to a pandas DataFrame
                     if d[k].dtype.names is not None:
                         # Convert row v[idx] into list for pd
