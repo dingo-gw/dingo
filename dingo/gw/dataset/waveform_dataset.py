@@ -220,21 +220,30 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         for sample with index `idx`. If defined, a chain of transformations is applied to
         the waveform data.
         """
-        if self.file_handle is None:
+        if self.file_handle is None and self.leave_on_disk_keys is not None:
             # Open hdf5 file
             self.file_handle = h5py.File(self.file_name, "r")
 
-        if self.leave_on_disk_keys is not None and "parameters" in self.leave_on_disk_keys:
-            parameters = recursive_hdf5_load(self.file_handle, keys=["parameters"], idx=idx)["parameters"]
-        else:
+        if self.leave_on_disk_keys is None:
             parameters = self.parameters.iloc[idx].to_dict()
-
-        if self.leave_on_disk_keys is not None and ("h_cross" in self.leave_on_disk_keys or "h_plus" in self.leave_on_disk_keys):
-            polarizations = recursive_hdf5_load(self.file_handle, keys=["polarizations"], idx=idx)["polarizations"]
-        else:
             polarizations = {
                 pol: waveforms[idx] for pol, waveforms in self.polarizations.items()
             }
+        else:
+            if "parameters" in self.leave_on_disk_keys and "h_cross" in self.leave_on_disk_keys and "h_plus" in self.leave_on_disk_keys:
+                data = recursive_hdf5_load(self.file_handle, keys=["parameters", "polarizations"], idx=idx)
+                parameters, polarizations = data["parameters"], data["polarizations"]
+            elif "parameters" in self.leave_on_disk_keys:
+                parameters = recursive_hdf5_load(self.file_handle, keys=["parameters"], idx=idx)["parameters"]
+                polarizations = {
+                    pol: waveforms[idx] for pol, waveforms in self.polarizations.items()
+                }
+            elif "h_cross" in self.leave_on_disk_keys or "h_plus" in self.leave_on_disk_keys:
+                polarizations = recursive_hdf5_load(self.file_handle, keys=["polarizations"], idx=idx)["polarizations"]
+                parameters = self.parameters.iloc[idx].to_dict()
+            else:
+                raise ValueError(f"Unknown leave_on_disk_keys {self.leave_on_disk_keys}. "
+                                 f"Cannot be loaded during __getitem__().")
 
         # Decompression transforms are assumed to apply only to the waveform,
         # and do not involve parameters.
@@ -246,6 +255,10 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         if self.transform is not None:
             data = self.transform(data)
         return data
+
+    def __del__(self):
+        if self.file_handle is not None:
+            self.file_handle.close()
 
     def parameter_mean_std(self):
         mean = self.parameters.mean().to_dict()
