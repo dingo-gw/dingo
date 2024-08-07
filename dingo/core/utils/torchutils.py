@@ -328,24 +328,26 @@ def build_train_and_test_loaders(
     if rank is not None and world_size is not None:
         # Create DistributedSampler
         train_sampler = DistributedSampler(train_dataset, shuffle=True, num_replicas=world_size, rank=rank)
-        test_sampler = DistributedSampler(test_dataset, shuffle=True, num_replicas=world_size, rank=rank)
+        test_sampler = DistributedSampler(test_dataset, shuffle=False, num_replicas=world_size, rank=rank)
 
         # Build DataLoaders
         train_loader = DataLoader(
             train_dataset,
             batch_size=batch_size,
-            pin_memory=True,
+            pin_memory=False,
             num_workers=num_workers,
             worker_init_fn=fix_random_seeds,
             sampler=train_sampler,
+            persistent_workers=True,
         )
         test_loader = DataLoader(
             test_dataset,
             batch_size=batch_size,
-            shuffle=False,
+            pin_memory=False,
             num_workers=num_workers,
             worker_init_fn=fix_random_seeds,
             sampler=test_sampler,
+            persistent_workers=True,
         )
     else:
         train_sampler = None
@@ -357,6 +359,7 @@ def build_train_and_test_loaders(
             pin_memory=True,
             num_workers=num_workers,
             worker_init_fn=fix_random_seeds,
+            persistent_workers=True,
         )
         test_loader = DataLoader(
             test_dataset,
@@ -365,6 +368,7 @@ def build_train_and_test_loaders(
             pin_memory=True,
             num_workers=num_workers,
             worker_init_fn=fix_random_seeds,
+            persistent_workers=True,
         )
 
     return train_loader, test_loader, train_sampler
