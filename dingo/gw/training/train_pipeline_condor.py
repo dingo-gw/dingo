@@ -49,6 +49,10 @@ def create_submission_file(train_dir: str, condor_settings: dict, filename: str 
         f"requirements = TARGET.CUDAGlobalMemoryMb > "
         f'{condor_settings["memory_gpus"]}\n\n'
     )
+    if condor_settings["num_gpus"] == 8:
+        # Request full node
+        lines.append("use template : FullNode")
+
     lines.append(f'arguments = "{condor_settings["arguments"]}"\n')
     lines.append(f'error = {join(train_dir, "info.err")}\n')
     lines.append(f'output = {join(train_dir, "info.out")}\n')
