@@ -362,6 +362,7 @@ class Base:
         use_wandb=False,
         test_only=False,
         early_stopping=False,
+        world_size: int = 1,
     ):
         """
 
@@ -384,6 +385,8 @@ class Base:
             if True, training is skipped
         early_stopping: bool=False
             whether to use early stopping
+        world_size: int=1
+            the number of GPUs used for training, value is used to adjust the batch_size when printing updates.
 
         Returns
         -------
@@ -414,7 +417,7 @@ class Base:
                     if self.rank is None or self.rank == 0:
                         print(f"\nStart training epoch {self.epoch} with lr {lr}")
                     time_start = time.time()
-                    train_loss = train_epoch(self, train_loader)
+                    train_loss = train_epoch(self, train_loader, world_size)
                     train_time = torch.tensor(time.time() - time_start, device=self.device)
                     if self.rank is not None:
                         # Sync all processes before aggregating value
@@ -433,7 +436,7 @@ class Base:
                         # Testing
                         print(f"Start testing epoch {self.epoch}")
                     time_start = time.time()
-                    test_loss = test_epoch(self, test_loader)
+                    test_loss = test_epoch(self, test_loader, world_size)
                     test_time = torch.tensor(time.time() - time_start, device=self.device)
 
                     if self.rank is not None:
@@ -568,7 +571,7 @@ class Base:
             return samples, log_prob
 
 
-def train_epoch(pm, dataloader):
+def train_epoch(pm, dataloader, world_size: int = 1):
     pm.network.train()
     if pm.rank is None:
         loss_info = dingo.core.utils.trainutils.LossInfo(
@@ -584,7 +587,7 @@ def train_epoch(pm, dataloader):
         loss_info = dingo.core.utils.trainutils.LossInfo(
             pm.epoch,
             len(dataloader.dataset),
-            dataloader.batch_size*pm.rank,
+            dataloader.batch_size*world_size,
             mode="Train",
             print_freq=1,
             device=pm.device,
@@ -611,13 +614,24 @@ def train_epoch(pm, dataloader):
     return loss_info.get_avg()
 
 
-def test_epoch(pm, dataloader):
+def test_epoch(pm, dataloader, world_size: int = 1):
     with torch.no_grad():
         pm.network.eval()
+        if pm.rank is None:
+            loss_info = dingo.core.utils.trainutils.LossInfo(
+                pm.epoch,
+                len(dataloader.dataset),
+                dataloader.batch_size,
+                mode="Test",
+                print_freq=1,
+                device=pm.device,
+            )
+        else:
+        # Multiply batch size used for printing with rank=num_gpus
         loss_info = dingo.core.utils.trainutils.LossInfo(
             pm.epoch,
             len(dataloader.dataset),
-            dataloader.batch_size,
+            dataloader.batch_size * world_size,
             mode="Test",
             print_freq=1,
             device=pm.device,

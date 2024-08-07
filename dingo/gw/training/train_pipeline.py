@@ -517,6 +517,7 @@ def train_stages(pm, wfd, train_dir, local_settings):
             checkpoint_epochs=local_settings["checkpoint_epochs"],
             use_wandb=local_settings.get("wandb", False),
             test_only=local_settings.get("test_only", False),
+            world_size=local_settings.get("world_size", 1),
         )
         # if test_only, model should not be saved, and run is complete
         if local_settings.get("test_only", False):
