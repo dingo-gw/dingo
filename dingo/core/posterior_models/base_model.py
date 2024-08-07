@@ -418,7 +418,9 @@ class Base:
                         print(f"\nStart training epoch {self.epoch} with lr {lr}")
                     time_start = time.time()
                     train_loss = train_epoch(self, train_loader, world_size)
-                    train_time = torch.tensor(time.time() - time_start, device=self.device)
+                    train_time = torch.tensor(
+                        time.time() - time_start, device=self.device
+                    )
                     if self.rank is not None:
                         # Sync all processes before aggregating value
                         dist.barrier()
@@ -437,7 +439,9 @@ class Base:
                         print(f"Start testing epoch {self.epoch}")
                     time_start = time.time()
                     test_loss = test_epoch(self, test_loader, world_size)
-                    test_time = torch.tensor(time.time() - time_start, device=self.device)
+                    test_time = torch.tensor(
+                        time.time() - time_start, device=self.device
+                    )
 
                     if self.rank is not None:
                         # Sync all processes before aggregating value
@@ -458,8 +462,12 @@ class Base:
 
                 if self.rank is None or self.rank == 0:
                     # write history and save model
-                    utils.write_history(train_dir, self.epoch, train_loss, test_loss, lr)
-                    utils.save_model(self, train_dir, checkpoint_epochs=checkpoint_epochs)
+                    utils.write_history(
+                        train_dir, self.epoch, train_loss, test_loss, lr
+                    )
+                    utils.save_model(
+                        self, train_dir, checkpoint_epochs=checkpoint_epochs
+                    )
                     if use_wandb:
                         try:
                             import wandb
@@ -488,7 +496,7 @@ class Base:
                     if early_stopping.early_stop:
                         print("Early stopping")
                         break
-                if self.rank is None or self.rank == 0.:
+                if self.rank is None or self.rank == 0.0:
                     print(f"Finished training epoch {self.epoch}.\n")
 
     def sample(
@@ -587,7 +595,7 @@ def train_epoch(pm, dataloader, world_size: int = 1):
         loss_info = dingo.core.utils.trainutils.LossInfo(
             pm.epoch,
             len(dataloader.dataset),
-            dataloader.batch_size*world_size,
+            dataloader.batch_size * world_size,
             mode="Train",
             print_freq=1,
             device=pm.device,
@@ -627,15 +635,15 @@ def test_epoch(pm, dataloader, world_size: int = 1):
                 device=pm.device,
             )
         else:
-        # Multiply batch size used for printing with rank=num_gpus
-        loss_info = dingo.core.utils.trainutils.LossInfo(
-            pm.epoch,
-            len(dataloader.dataset),
-            dataloader.batch_size * world_size,
-            mode="Test",
-            print_freq=1,
-            device=pm.device,
-        )
+            # Multiply batch size used for printing with rank=num_gpus
+            loss_info = dingo.core.utils.trainutils.LossInfo(
+                pm.epoch,
+                len(dataloader.dataset),
+                dataloader.batch_size * world_size,
+                mode="Test",
+                print_freq=1,
+                device=pm.device,
+            )
 
         for batch_idx, data in enumerate(dataloader):
             loss_info.update_timer()
