@@ -570,14 +570,25 @@ class Base:
 
 def train_epoch(pm, dataloader):
     pm.network.train()
-    loss_info = dingo.core.utils.trainutils.LossInfo(
-        pm.epoch,
-        len(dataloader.dataset),
-        dataloader.batch_size,
-        mode="Train",
-        print_freq=1,
-        device=pm.device,
-    )
+    if pm.rank is None:
+        loss_info = dingo.core.utils.trainutils.LossInfo(
+            pm.epoch,
+            len(dataloader.dataset),
+            dataloader.batch_size,
+            mode="Train",
+            print_freq=1,
+            device=pm.device,
+        )
+    else:
+        # Multiply batch size used for printing with rank=num_gpus
+        loss_info = dingo.core.utils.trainutils.LossInfo(
+            pm.epoch,
+            len(dataloader.dataset),
+            dataloader.batch_size*pm.rank,
+            mode="Train",
+            print_freq=1,
+            device=pm.device,
+        )
 
     for batch_idx, data in enumerate(dataloader):
         loss_info.update_timer("Dataloader")
