@@ -175,25 +175,52 @@ def run_multi_gpu_training(
     else:
         pretraining = False
 
-    complete, pm_epoch = mp.spawn(
-        run_training_ddp,
-        args=(
-            world_size,
-            train_settings,
-            local_settings,
-            train_dir,
-            wfd,
-            initial_weights,
-            pretraining,
-            pretrained_emb_net,
-            checkpoint_file,
-            resume,
-        ),
-        nprocs=world_size,
-        join=True,
-    )
+    # complete, pm_epoch = mp.spawn(
+    #     run_training_ddp,
+    #     args=(
+    #         world_size,
+    #         train_settings,
+    #         local_settings,
+    #         train_dir,
+    #         wfd,
+    #         initial_weights,
+    #         pretraining,
+    #         pretrained_emb_net,
+    #         checkpoint_file,
+    #         resume,
+    #     ),
+    #     nprocs=world_size,
+    #     join=True,
+    # )
+    # try queue
+    result_queue = mp.Queue()
+    for rank in range(world_size):
+        mp.Process(target=run_training_ddp,
+                   args=(
+                        rank,
+                        world_size,
+                        train_settings,
+                        local_settings,
+                        train_dir,
+                        wfd,
+                        initial_weights,
+                        pretraining,
+                        pretrained_emb_net,
+                        checkpoint_file,
+                        resume,
+                        result_queue,
+                    )
+                   ).start()
 
-    return complete, pm_epoch
+    complete, pm_epoch = [], []
+    for _ in range(world_size):
+        temp_result = result_queue.get()
+        complete.append(temp_result[0])
+        pm_epoch.append(temp_result[1])
+    assert all(complete) is True, f"Not all processes exited successfully: {complete}."
+    assert len(set(pm_epoch)) == 1, f"Processes do not return the same epochs: {pm_epoch}."
+
+    return complete[0], pm_epoch[0]
 
 
 def run_training_ddp(
@@ -208,6 +235,7 @@ def run_training_ddp(
     pretrained_emb_net: Module,
     ckpt_file: str,
     resume: bool,
+    result_queue: mp.Queue = None,
 ) -> (bool, int):
     """
     Initializes each GPU process of the distributed data parallel (DDP) training.
@@ -279,10 +307,10 @@ def run_training_ddp(
         except ImportError:
             print("wandb not installed. Skipping logging to wandb.")
 
+    # Put return info on queue
+    result_queue.put((complete, pm.epoch))
     # Delete process group
     cleanup_ddp()
-
-    return complete, pm.epoch
 
 
 def train_condor():
