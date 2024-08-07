@@ -51,7 +51,10 @@ def create_submission_file(train_dir: str, condor_settings: dict, filename: str 
     )
     if condor_settings["num_gpus"] == 8:
         # Request full node
-        lines.append("use template : FullNode")
+        lines.append('use template : FullNode\n')
+    elif condor_settings["num_gpus"] >= 6:
+        # Still request full nodes because wait times are long
+        lines.append(f'use template : FullNode("{condor_settings["num_gpus"]}")\n')
 
     lines.append(f'arguments = "{condor_settings["arguments"]}"\n')
     lines.append(f'error = {join(train_dir, "info.err")}\n')
