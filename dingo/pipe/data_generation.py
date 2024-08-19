@@ -5,6 +5,7 @@ from bilby_pipe.input import Input
 from bilby_pipe.main import parse_args
 from bilby_pipe.utils import logger, convert_string_to_dict
 from bilby_pipe.data_generation import DataGenerationInput as BilbyDataGenerationInput
+import numpy as np
 
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import FrequencyDomain
@@ -68,13 +69,13 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.zero_noise = False  # dingo mod
         self.resampling_method = args.resampling_method
 
-        # if args.timeslide_dict is not None:
-        #     self.timeslide_dict = convert_string_to_dict(args.timeslide_dict)
-        #     logger.info(f"Read-in timeslide dict directly: {self.timeslide_dict}")
-        # elif args.timeslide_file is not None:
-        #     self.gps_file = args.gps_file
-        #     self.timeslide_file = args.timeslide_file
-        #     self.timeslide_dict = self.get_timeslide_dict(self.idx)
+        if args.timeslide_dict is not None:
+            self.timeslide_dict = convert_string_to_dict(args.timeslide_dict)
+            logger.info(f"Read-in timeslide dict directly: {self.timeslide_dict}")
+        elif args.timeslide_file is not None:
+            self.gps_file = args.gps_file
+            self.timeslide_file = args.timeslide_file
+            self.timeslide_dict = self.get_timeslide_dict(self.idx)
 
         # Data duration arguments
         self.duration = args.duration
@@ -85,8 +86,8 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.minimum_frequency = args.minimum_frequency
         self.maximum_frequency = args.maximum_frequency
         # round frequencies
-        self.maximum_frequency -= (self.maximum_frequency % (1 / self.duration))
-        self.minimum_frequency -= (self.minimum_frequency % (1 / self.duration))
+        self.maximum_frequency -= self.maximum_frequency % (1 / self.duration)
+        self.minimum_frequency -= self.minimum_frequency % (1 / self.duration)
         # self.reference_frequency = args.reference_frequency
 
         # Waveform, source model and likelihood
@@ -157,8 +158,10 @@ class DataGenerationInput(BilbyDataGenerationInput):
             args.injection_numbers = None
             args.injection_file = None
             args.injection_dict = None
-            args.gaussian_noise = False
             args.injection_waveform_arguments = None
+            args.injection_frequency_domain_source_model = None
+            self.frequency_domain_source_model = None
+            self.gaussian_noise = False
 
             self.create_data(args)
 
@@ -168,7 +171,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # PSD and strain data.
         data = {"waveform": {}, "asds": {}}  # TODO: Rename these keys.
         for ifo in self.interferometers:
-
             strain = ifo.strain_data.frequency_domain_strain
             frequency_array = ifo.strain_data.frequency_array
             asd = ifo.power_spectral_density.get_amplitude_spectral_density_array(

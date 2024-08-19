@@ -7,6 +7,7 @@ import argparse
 import configargparse
 from bilby_pipe.bilbyargparser import BilbyArgParser
 from bilby_pipe.utils import (
+    ENVIRONMENT_DEFAULTS,
     get_version_information,
     logger,
     nonefloat,
@@ -172,27 +173,27 @@ def create_parser(top_level=True):
             "noise) is obtained from time when the IFOs are in science mode."
         ),
     )
-    #
-    # data_gen_pars.add(
-    #     "--gps-tuple",
-    #     type=nonestr,
-    #     help=(
-    #         "Tuple of the (start, step, number) of GPS start times. For"
-    #         " example, (10, 1, 3) produces the gps start times [10, 11, 12]."
-    #         " If given, gps-file is ignored."
-    #     ),
-    #     default=None,
-    # )
-    # data_gen_pars.add(
-    #     "--gps-file",
-    #     type=nonestr,
-    #     help=(
-    #         "File containing segment GPS start times. This can be a multi-"
-    #         "column file if (a) it is comma-separated and (b) the zeroth "
-    #         "column contains the gps-times to use"
-    #     ),
-    #     default=None,
-    # )
+
+    data_gen_pars.add(
+        "--gps-tuple",
+        type=nonestr,
+        help=(
+            "Tuple of the (start, step, number) of GPS start times. For"
+            " example, (10, 1, 3) produces the gps start times [10, 11, 12]."
+            " If given, gps-file is ignored."
+        ),
+        default=None,
+    )
+    data_gen_pars.add(
+        "--gps-file",
+        type=nonestr,
+        help=(
+            "File containing segment GPS start times. This can be a multi-"
+            "column file if (a) it is comma-separated and (b) the zeroth "
+            "column contains the gps-times to use"
+        ),
+        default=None,
+    )
     data_gen_pars.add(
         "--timeslide-file",
         type=nonestr,
@@ -204,15 +205,15 @@ def create_parser(top_level=True):
         ),
         default=None,
     )
-    # data_gen_pars.add(
-    #     "--timeslide-dict",
-    #     type=nonestr,
-    #     help=(
-    #         "Dictionary containing detector timeslides: applies a fixed offset"
-    #         " per detector. E.g. to apply +1s in H1, {H1: 1}"
-    #     ),
-    #     default=None,
-    # )
+    data_gen_pars.add(
+        "--timeslide-dict",
+        type=nonestr,
+        help=(
+            "Dictionary containing detector timeslides: applies a fixed offset"
+            " per detector. E.g. to apply +1s in H1, {H1: 1}"
+        ),
+        default=None,
+    )
     data_gen_pars.add(
         "--trigger-time",
         default=None,
@@ -267,6 +268,26 @@ def create_parser(top_level=True):
             "set the channel-dict keys to 'GWOSC'. Note, the "
             "dictionary should follow basic python dict syntax."
         ),
+    )
+    data_gen_pars.add(
+        "--frame-type-dict",
+        type=nonestr,
+        default=None,
+        help=(
+            "Frame type to use when finding data. If not given, defaults will "
+            "be used based on the gps time using bilby_pipe.utils.default_frame_type,"
+            " e.g., {H1: H1_HOFT_C00_AR}."
+        ),
+    )
+    data_gen_pars.add(
+        "--data-find-url",
+        default="https://datafind.ligo.org",
+        help="URL to use for datafind, default is https://datafind.ligo.org to query CVMFS",
+    )
+    data_gen_pars.add(
+        "--data-find-urltype",
+        default="osdf",
+        help="URL type to use for datafind, default is osdf",
     )
     # data_type_pars = data_gen_pars.add_mutually_exclusive_group()
     # data_type_pars.add(
@@ -499,6 +520,22 @@ def create_parser(top_level=True):
         ),
     )
     submission_parser.add(
+        "--generation-pool",
+        default="local-pool",
+        choices=["local", "local-pool", "igwn-pool"],
+        help=(
+            "Where to run the data generation job. Options are [local-pool, "
+            "local, igwn-pool]. If local-pool, the data generation job is "
+            "submitted to the local HTCondor pool. If local, the data "
+            "generation job is run on the submit node. If igwn-pool, the "
+            "data generation job is submitted to the IGWN HTCondor pool (osg)"
+            " if the submit node has access to the IGWN pool. In general, "
+            "the igwn-pool should be used when possible, but some large files, "
+            "e.g., ROQ bases may not be available via CVMFS and so the local-pool "
+            "should be used. (default: local-pool)"
+        ),
+    )
+    submission_parser.add(
         "--local-plot", action="store_true", help="Run the plot job locally"
     )
 
@@ -648,6 +685,47 @@ def create_parser(top_level=True):
             " Note: the log files are automatically synced, but to sync the "
             " results during the run (e.g. to inspect progress), use the "
             " executable bilby_pipe_htcondor_sync"
+        ),
+    )
+    submission_parser.add(
+        "--environment-variables",
+        default=None,
+        type=nonestr,
+        help=(
+            "Key value pairs for environment variables formatted as a json string, "
+            "e.g., '{'OMP_NUM_THREADS': 1, 'LAL_DATA_PATH'='/home/data'}'. These values "
+            f"take precedence over --getenv. The default values are {ENVIRONMENT_DEFAULTS}."
+        ),
+    )
+    submission_parser.add(
+        "--getenv",
+        default=None,
+        action="append",
+        type=nonestr,
+        help="List of environment variables to copy from the current session.",
+    )
+    submission_parser.add(
+        "--additional-transfer-paths",
+        action="append",
+        default=None,
+        type=nonestr,
+        help=(
+            "Additional files that should be transferred to the analysis jobs. "
+            "The default is not transferring any additional files. Additional "
+            "files can be specified as a list in the configuration file [a, b] "
+            "or on the command line as --additional-transfer-paths a "
+            "--additonal-transfer-paths b"
+        ),
+    )
+    submission_parser.add(
+        "--disable-hdf5-locking",
+        action=StoreBoolean,
+        default=False,
+        help=(
+            "If true (default), disable HDF5 locking. This can improve "
+            "stability on some clusters, but may cause issues if multiple "
+            "processes are reading/writing to the same file."
+            "This argument is deprecated and should be passed through --environment-variables"
         ),
     )
     submission_parser.add(
