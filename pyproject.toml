@@ -27,7 +27,7 @@ classifiers = [
 dependencies = [
     "astropy",
     "bilby",
-    "bilby_pipe",
+    "bilby_pipe==1.4",
     "configargparse",
     "corner",
     "cryptography",
