@@ -6,7 +6,6 @@ import torch.nn as nn
 
 from dingo.core.utils import torchutils
 from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
-from typing import Union, Callable
 
 from dingo.core.nn.enets import DenseResidualNet
 
@@ -88,9 +87,11 @@ class ContinuousFlowModel(nn.Module):
         # if all tensors in batch are the same: do forward pass with batch_size 1
         if all([(x == x[:1]).all() for x in context]):
             self._cached_context = [x[:1] for x in context]
-            self._cached_context_embedding = torchutils.forward_pass_with_unpacked_tuple(
-                self.context_embedding_net, *self._cached_context
-            ).detach()
+            self._cached_context_embedding = (
+                torchutils.forward_pass_with_unpacked_tuple(
+                    self.context_embedding_net, *self._cached_context
+                ).detach()
+            )
         else:
             self._cached_context = context
             self._cached_context_embedding = (
@@ -102,7 +103,8 @@ class ContinuousFlowModel(nn.Module):
     def _get_cached_context_embedding(self, batch_size):
         if self._cached_context_embedding.size(0) == 1:
             return self._cached_context_embedding.repeat(
-                batch_size, *[1 for _ in range(len(self._cached_context_embedding.shape) - 1)]
+                batch_size,
+                *[1 for _ in range(len(self._cached_context_embedding.shape) - 1)],
             )
         return self._cached_context_embedding
 
@@ -122,7 +124,9 @@ class ContinuousFlowModel(nn.Module):
             )
         else:
             self._update_cached_context(*context)
-            context_embedding = self._get_cached_context_embedding(batch_size=len(context[0]))
+            context_embedding = self._get_cached_context_embedding(
+                batch_size=len(context[0])
+            )
 
         if len(t_and_theta_embedding.shape) != 2 or len(context_embedding.shape) != 2:
             raise NotImplementedError()
@@ -237,7 +241,6 @@ def create_cf_model(
 
 
 def get_theta_embedding_net(embedding_kwargs: dict, input_dim):
-
     if "encoding" in embedding_kwargs:
         input_dim = get_dim_positional_embedding(
             embedding_kwargs["encoding"], input_dim

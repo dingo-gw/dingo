@@ -4,18 +4,22 @@ TODO: Docstring
 from abc import abstractmethod
 import os
 from os.path import join
-from typing import OrderedDict
 import h5py
 
 import torch
 import dingo.core.utils as utils
 from torch.utils.data import Dataset
 import time
+import numpy as np
 from threadpoolctl import threadpool_limits
 import dingo.core.utils.trainutils
 import math
+import json
+from collections import OrderedDict
+
 from dingo.core.utils.misc import get_version
 from dingo.core.utils.trainutils import EarlyStopping
+
 
 class Base:
     """
@@ -238,43 +242,42 @@ class Base:
 
         torch.save(model_dict, model_filename)
 
-    def _load_model_from_hdf5(
-         self,
-         model_filename: str
-     ):
-         """
-         Helper function to load a trained model that has been
-         saved in HDF5 format using `dingo_pt_to_hdf5`.
-         Parameters
-         ----------
-         model_filename: str
-             path to saved model; must have extension '.hdf5'
-         Returns
-         -------
-         d: dict
-             A stripped down version of the dict saved by torch.save()
-             Specifically, it does not include 'optimizer_state_dict'
-             to save space at inference time.
-         """
-         d = {}
-         with h5py.File(model_filename, 'r') as fp:
-             model_basename = os.path.basename(model_filename)
-             if fp.attrs['CANONICAL_FILE_BASENAME'] != model_basename:
-                 raise ValueError('HDF5 attribute CANONICAL_FILE_BASENAME differs from model name',
-                         model_basename)
+    def _load_model_from_hdf5(self, model_filename: str):
+        """
+        Helper function to load a trained model that has been
+        saved in HDF5 format using `dingo_pt_to_hdf5`.
+        Parameters
+        ----------
+        model_filename: str
+            path to saved model; must have extension '.hdf5'
+        Returns
+        -------
+        d: dict
+            A stripped down version of the dict saved by torch.save()
+            Specifically, it does not include 'optimizer_state_dict'
+            to save space at inference time.
+        """
+        d = {}
+        with h5py.File(model_filename, "r") as fp:
+            model_basename = os.path.basename(model_filename)
+            if fp.attrs["CANONICAL_FILE_BASENAME"] != model_basename:
+                raise ValueError(
+                    "HDF5 attribute CANONICAL_FILE_BASENAME differs from model name",
+                    model_basename,
+                )
 
-             # Load small nested dicts from json
-             for k, v in fp['serialized_dicts'].items():
-                 d[k] = json.loads(v[()])
+            # Load small nested dicts from json
+            for k, v in fp["serialized_dicts"].items():
+                d[k] = json.loads(v[()])
 
-             # Load model weights
-             model_state_dict = OrderedDict()
-             for k, v in fp['model_weights'].items():
-                 model_state_dict[k] = torch.from_numpy(np.array(v, dtype=np.float32))
-             d['model_state_dict'] = model_state_dict
+            # Load model weights
+            model_state_dict = OrderedDict()
+            for k, v in fp["model_weights"].items():
+                model_state_dict[k] = torch.from_numpy(np.array(v, dtype=np.float32))
+            d["model_state_dict"] = model_state_dict
 
-         return d
-    
+        return d
+
     def load_model(
         self,
         model_filename: str,
@@ -298,13 +301,12 @@ class Base:
         # device indicated in the saved metadata. External routines run on a cpu
         # machine may have moved the model from 'cuda' to 'cpu'.
         ext = os.path.splitext(model_filename)[-1]
-        if ext == '.pt':
+        if ext == ".pt":
             d = torch.load(model_filename, map_location=device)
-        elif ext == '.hdf5':
+        elif ext == ".hdf5":
             d = self._load_model_from_hdf5(model_filename)
         else:
-            raise ValueError('Models should be ether in .pt or .hdf5 format.')
-
+            raise ValueError("Models should be ether in .pt or .hdf5 format.")
 
         self.version = d.get("version")
 
@@ -434,7 +436,9 @@ class Base:
                 if early_stopping:
                     best_model = early_stopping(test_loss, self)
                     if best_model:
-                        self.save_model(join(train_dir, "best_model.pt"), save_training_info=False)
+                        self.save_model(
+                            join(train_dir, "best_model.pt"), save_training_info=False
+                        )
                     if early_stopping.early_stop:
                         print("Early stopping")
                         break
@@ -485,10 +489,17 @@ class Base:
                 if get_log_prob:
                     log_prob = []
 
-                num_batches = math.ceil(len(x[0]) / batch_size) if x else math.ceil(num_samples / batch_size)
+                num_batches = (
+                    math.ceil(len(x[0]) / batch_size)
+                    if x
+                    else math.ceil(num_samples / batch_size)
+                )
                 for idx_batch in range(num_batches):
                     if x:
-                        lower, upper = idx_batch * batch_size, (idx_batch + 1) * batch_size
+                        lower, upper = (
+                            idx_batch * batch_size,
+                            (idx_batch + 1) * batch_size,
+                        )
                         x_batch = [xi[lower:upper] for xi in x]
                         batch_size = None
                     else:

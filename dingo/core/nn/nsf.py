@@ -320,7 +320,7 @@ def create_nsf_with_rb_projection_embedding_net(
 
     Parameters
     ----------
-    network_kwargs : dict
+    posterior_kwargs : dict
         kwargs for neural spline flow
     embedding_kwargs : dict
         kwargs for emebedding network
