@@ -1,7 +1,7 @@
 """
 TODO: Docstring
 """
-from abc import abstractmethod
+from abc import abstractmethod, ABC
 import os
 from os.path import join
 import h5py
@@ -21,7 +21,7 @@ from dingo.core.utils.misc import get_version
 from dingo.core.utils.trainutils import EarlyStopping
 
 
-class BasePosteriorModel:
+class BasePosteriorModel(ABC):
     """
     TODO: Docstring
 
