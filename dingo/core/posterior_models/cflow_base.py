@@ -4,14 +4,15 @@ from abc import abstractmethod
 
 from torchdiffeq import odeint
 
-from .base_model import Base
+from .base_model import BasePosteriorModel
 
 from dingo.core.nn.cfnets import (
     # create_cf_with_rb_projection_embedding_net,
-    create_cf_model,
+    create_cf,
 )
 
-class ContinuousFlowsBase(Base):
+
+class ContinuousFlowPosteriorModel(BasePosteriorModel):
     """
     Base class for continuous normalizing flows (CNF).
 
@@ -46,8 +47,12 @@ class ContinuousFlowsBase(Base):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.eps = 0
-        self.time_prior_exponent = self.model_kwargs["posterior_kwargs"]["time_prior_exponent"]
-        self.theta_dim = self.metadata["train_settings"]["model"]["posterior_kwargs"]["input_dim"]
+        self.time_prior_exponent = self.model_kwargs["posterior_kwargs"][
+            "time_prior_exponent"
+        ]
+        self.theta_dim = self.metadata["train_settings"]["model"]["posterior_kwargs"][
+            "input_dim"
+        ]
 
     def sample_t(self, batch_size):
         t = (1 - self.eps) * torch.rand(batch_size, device=self.device)
@@ -105,7 +110,7 @@ class ContinuousFlowsBase(Base):
         if hutchinson:
             divergence_fun = compute_hutchinson_divergence
 
-        theta_t = theta_and_div_t[:, :-1].detach() # extract theta_t
+        theta_t = theta_and_div_t[:, :-1].detach()  # extract theta_t
         # context_data = context_data[0].detach().clone()
         t = t.detach()
         with torch.enable_grad():
@@ -118,7 +123,7 @@ class ContinuousFlowsBase(Base):
         model_kwargs = {k: v for k, v in self.model_kwargs.items() if k != "type"}
         if self.initial_weights is not None:
             model_kwargs["initial_weights"] = self.initial_weights
-        self.network = create_cf_model(**model_kwargs)
+        self.network = create_cf(**model_kwargs)
 
     def sample_batch(self, *context_data, batch_size: int = None):
         """
@@ -246,7 +251,7 @@ class ContinuousFlowsBase(Base):
             atol=1e-7,
             rtol=1e-7,
             method="dopri5",
-            options={"norm": norm_without_divergence_component}
+            options={"norm": norm_without_divergence_component},
         )
 
         theta_1, log_prob_1 = theta_and_div_1[:, :-1], theta_and_div_1[:, -1]

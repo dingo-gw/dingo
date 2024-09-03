@@ -21,7 +21,7 @@ from dingo.core.utils.misc import get_version
 from dingo.core.utils.trainutils import EarlyStopping
 
 
-class Base:
+class BasePosteriorModel:
     """
     TODO: Docstring
 

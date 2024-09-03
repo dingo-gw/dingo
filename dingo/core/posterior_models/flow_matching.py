@@ -1,10 +1,10 @@
 import torch
 from torch import nn
 
-from .cflow_base import ContinuousFlowsBase
+from .cflow_base import ContinuousFlowPosteriorModel
 
 
-class FlowMatching(ContinuousFlowsBase):
+class FlowMatchingPosteriorModel(ContinuousFlowPosteriorModel):
     """
     Class for continuous normalizing flows trained with flow matching.
 

@@ -9,7 +9,7 @@ from os import rename, makedirs
 from os.path import dirname, join, isfile, exists
 import argparse
 
-from dingo.core.posterior_models import NormalizingFlow
+from dingo.core.posterior_models import NormalizingFlowPosteriorModel
 from dingo.gw.result import Result
 from dingo.gw.inference.gw_samplers import GWSampler
 from dingo.gw.importance_sampling.diagnostics import plot_diagnostics
@@ -102,7 +102,7 @@ def main():
         if isfile(nde_name):
             print(f"Loading nde at {nde_name} for event {event_name}.")
             # TODO: again ultimately relpace with FlowMatching
-            nde = NormalizingFlow(
+            nde = NormalizingFlowPosteriorModel(
                 model_filename=nde_name,
                 device=settings["nde"]["training"]["device"],
                 load_training_info=False,

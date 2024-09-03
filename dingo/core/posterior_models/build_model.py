@@ -1,8 +1,8 @@
 import torch
 
-from dingo.core.posterior_models.normalizing_flow import NormalizingFlow
-from dingo.core.posterior_models.flow_matching import FlowMatching
-from dingo.core.posterior_models.score_matching import ScoreDiffusion
+from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
+from dingo.core.posterior_models.flow_matching import FlowMatchingPosteriorModel
+from dingo.core.posterior_models.score_matching import ScoreDiffusionPosteriorModel
 
 
 def build_model_from_kwargs(filename=None, settings=None, **kwargs):
@@ -24,9 +24,9 @@ def build_model_from_kwargs(filename=None, settings=None, **kwargs):
     assert filename is not None or settings is not None
 
     models_dict = {
-        "normalizing_flow": NormalizingFlow,
-        "flow_matching": FlowMatching,
-        "score_matching": ScoreDiffusion,
+        "normalizing_flow": NormalizingFlowPosteriorModel,
+        "flow_matching": FlowMatchingPosteriorModel,
+        "score_matching": ScoreDiffusionPosteriorModel,
     }
 
     if filename is not None:

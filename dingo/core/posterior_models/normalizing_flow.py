@@ -1,4 +1,4 @@
-from .base_model import Base
+from .base_model import BasePosteriorModel
 
 from dingo.core.nn.nsf import (
     create_nsf_with_rb_projection_embedding_net,
@@ -6,7 +6,7 @@ from dingo.core.nn.nsf import (
 )
 
 
-class NormalizingFlow(Base):
+class NormalizingFlowPosteriorModel(BasePosteriorModel):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 

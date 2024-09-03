@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import argparse
 
-from dingo.core.posterior_models import NormalizingFlow
+from dingo.core.posterior_models import NormalizingFlowPosteriorModel
 
 
 class SampleDataset(torch.utils.data.Dataset):
@@ -78,7 +78,7 @@ def train_unconditional_density_estimator(
     settings["model"]["input_dim"] = num_params
     settings["model"]["context_dim"] = None
     # TODO: ultimately, we want to replace this by FlowMatching, I guess
-    model = NormalizingFlow(
+    model = NormalizingFlowPosteriorModel(
         metadata={"train_settings": settings, "base": copy.deepcopy(result.metadata)},
         device=settings["training"]["device"],
     )

@@ -14,7 +14,7 @@ from dingo.core.nn.enets import DenseResidualNet
 
 
 # TODO make this inherent from an abstract wrapper?
-class ContinuousFlowModel(nn.Module):
+class ContinuousFlow(nn.Module):
     """
     This class wraps the continuous flow models. It combines an embedding net and a continuous flow model that
      learns a vector field (score or flow).
@@ -43,7 +43,7 @@ class ContinuousFlowModel(nn.Module):
         :param  continuous_flow: nn.Module
         :param embedding_net: nn.Module
         """
-        super(ContinuousFlowModel, self).__init__()
+        super(ContinuousFlow, self).__init__()
         self.continuous_flow = continuous_flow
         self.context_embedding_net = context_embedding_net
         self.theta_embedding_net = theta_embedding_net
@@ -157,7 +157,7 @@ class ContinuousFlowModel(nn.Module):
             return self.continuous_flow(input, glu_context)
 
 
-def create_cf_model(
+def create_cf(
     posterior_kwargs: dict, embedding_kwargs: dict = None, initial_weights: dict = None
 ):
     """
@@ -230,7 +230,7 @@ def create_cf_model(
         context_features=glu_dim,
     )
 
-    model = ContinuousFlowModel(
+    model = ContinuousFlow(
         continuous_flow,
         context_embedding,
         theta_embedding,

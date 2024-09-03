@@ -15,7 +15,7 @@ from dingo.gw.training.train_builders import (
     set_train_transforms,
     build_svd_for_embedding_network,
 )
-from dingo.core.posterior_models.base_model import Base
+from dingo.core.posterior_models.base_model import BasePosteriorModel
 from dingo.core.utils.trainutils import RuntimeLimits
 from dingo.core.utils import (
     set_requires_grad_flag,
@@ -45,7 +45,7 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
 
     Returns
     -------
-    (WaveformDataset, Base)
+    (WaveformDataset, BasePosteriorModel)
     """
 
     wfd = build_dataset(train_settings["data"])  # No transforms yet
@@ -139,7 +139,7 @@ def prepare_training_resume(checkpoint_name, local_settings, train_dir):
 
     Returns
     -------
-    (Base, WaveformDataset)
+    (BasePosteriorModel, WaveformDataset)
     """
 
     pm = build_model_from_kwargs(
@@ -173,7 +173,7 @@ def initialize_stage(pm, wfd, stage, num_workers, resume=False):
 
     Parameters
     ----------
-    pm : Base
+    pm : BasePosteriorModel
     wfd : WaveformDataset
     stage : dict
         Settings specific to current stage of training
@@ -232,7 +232,7 @@ def train_stages(pm, wfd, train_dir, local_settings):
 
     Parameters
     ----------
-    pm : Base
+    pm : BasePosteriorModel
     wfd : WaveformDataset
     train_dir : str
         Directory for saving checkpoints and train history.

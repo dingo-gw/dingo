@@ -1,10 +1,10 @@
 # implementing Score-based diffusion based on VP SDE. Potential TODO: other SDEs, and in in separate file
 import torch
 
-from .cflow_base import ContinuousFlowsBase
+from .cflow_base import ContinuousFlowPosteriorModel
 
 
-class ScoreDiffusion(ContinuousFlowsBase):
+class ScoreDiffusionPosteriorModel(ContinuousFlowPosteriorModel):
     """
     Class for continuous normalizing flows trained with score matching.
 
@@ -102,7 +102,7 @@ class ScoreDiffusion(ContinuousFlowsBase):
         return weighting
 
     def alpha(self, t):
-        T = t * self.beta_min + 1 / 2 * (self.beta_max - self.beta_min) * (t ** 2)
+        T = t * self.beta_min + 1 / 2 * (self.beta_max - self.beta_min) * (t**2)
         return torch.exp(-1 / 2 * T)
 
     def beta(self, t):

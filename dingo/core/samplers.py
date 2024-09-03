@@ -10,7 +10,7 @@ import pandas as pd
 import torch
 from torchvision.transforms import Compose
 
-from dingo.core.posterior_models import Base
+from dingo.core.posterior_models import BasePosteriorModel
 from dingo.core.result import Result
 from dingo.core.result import DATA_KEYS as RESULT_DATA_KEYS
 from dingo.core.utils import torch_detach_to_cpu, IterationTracker
@@ -42,7 +42,7 @@ class Sampler(object):
 
     Attributes
     ----------
-    model : Base
+    model : BasePosteriorModel
     inference_parameters : list
     samples : DataFrame
         Samples produced from the model by run_sampler().
@@ -59,12 +59,12 @@ class Sampler(object):
 
     def __init__(
         self,
-        model: Base,
+        model: BasePosteriorModel,
     ):
         """
         Parameters
         ----------
-        model : Base
+        model : BasePosteriorModel
         """
         self.model = model
 
@@ -163,9 +163,7 @@ class Sampler(object):
         # have a flag for whether to calculate the log_prob.
         self.model.network.eval()
         with torch.no_grad():
-            y, log_prob = self.model.sample(
-                *x, get_log_prob=True
-            )
+            y, log_prob = self.model.sample(*x, get_log_prob=True)
 
         samples = self.transform_post({"parameters": y, "log_prob": log_prob})
         result = samples["parameters"]
@@ -366,14 +364,14 @@ class GNPESampler(Sampler):
 
     def __init__(
         self,
-        model: Base,
+        model: BasePosteriorModel,
         init_sampler: Sampler,
         num_iterations: int = 1,
     ):
         """
         Parameters
         ----------
-        model : Base
+        model : BasePosteriorModel
         init_sampler : Sampler
             Used for generating initial samples
         num_iterations : int
