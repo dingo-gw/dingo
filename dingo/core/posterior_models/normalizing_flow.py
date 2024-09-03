@@ -20,16 +20,14 @@ class NormalizingFlowPosteriorModel(BasePosteriorModel):
         else:
             self.network = create_nsf_wrapped(**model_kwargs["posterior_kwargs"])
 
-    def log_prob_batch(self, y, *context_data):
-        return self.network(y, *context_data)
+    def log_prob(self, theta, *context):
+        return self.network(theta, *context)
 
-    def sample_batch(self, *context_data):
-        samples = self.network.sample(*context_data)
-        return samples
+    def sample(self, *context, num_samples: int = 1):
+        return self.network.sample(*context, num_samples)
 
-    def sample_and_log_prob_batch(self, *context_data):
-        samples, log_probs = self.network.sample_and_log_prob(*context_data)
-        return samples, log_probs
+    def sample_and_log_prob(self, *context, num_samples: int = 1):
+        return self.network.sample_and_log_prob(*context, num_samples)
 
-    def loss(self, data, *context_data):
-        return -self.network(data, *context_data).mean()
+    def loss(self, theta, *context):
+        return -self.network(theta, *context).mean()

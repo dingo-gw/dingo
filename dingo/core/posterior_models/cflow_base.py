@@ -14,7 +14,7 @@ from dingo.core.nn.cfnets import (
 
 class ContinuousFlowPosteriorModel(BasePosteriorModel):
     """
-    Base class for continuous normalizing flows (CNF).
+    Abstract base class for posterior models based on continuous normalizing flows (CNFs).
 
     CNFs are parameterized with a vector field v(theta_t, t), that transports a simple
     base distribution (typically a gaussian N(0,1) with same dimension as theta) at
@@ -125,16 +125,16 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
             model_kwargs["initial_weights"] = self.initial_weights
         self.network = create_cf(**model_kwargs)
 
-    def sample_batch(self, *context_data, batch_size: int = None):
+    def sample(self, *context, num_samples: int = None):
         """
         Returns num_sample conditional samples for a batch of contexts by solving an ODE
         forwards in time.
 
         Parameters
         ----------
-        *context_data: list[torch.Tensor]
+        *context: list[torch.Tensor]
             context data (e.g., gravitational-wave data)
-        batch_size: int = None
+        num_samples: int = None
             batch_size for sampling. If len(context_data) > 0, we automatically set
             batch_size = len(context_data[0]), so this option is only used for
             unconditional sampling.
@@ -146,22 +146,22 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
         """
         self.network.eval()
 
-        if len(context_data) == 0 and batch_size is None:
+        if len(context) == 0 and num_samples is None:
             raise ValueError(
                 "For unconditional sampling, the batch size needs to be set."
             )
-        elif len(context_data) > 0:
-            if batch_size is not None:
+        elif len(context) > 0:
+            if num_samples is not None:
                 raise ValueError(
                     "For conditional sampling, the batch_size can not be set manually as "
                     "it is automatically determined by the context_data."
                 )
-            batch_size = len(context_data[0])
+            num_samples = len(context[0])
 
         with torch.no_grad():
-            theta_0 = self.sample_theta_0(batch_size)
+            theta_0 = self.sample_theta_0(num_samples)
             _, theta_1 = odeint(
-                lambda t, theta_t: self.evaluate_vectorfield(t, theta_t, *context_data),
+                lambda t, theta_t: self.evaluate_vectorfield(t, theta_t, *context),
                 theta_0,
                 self.integration_range,
                 atol=1e-7,
@@ -173,7 +173,7 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
         return theta_1
 
     # MD: rename log_prob_batch, extract eps from self.epsilon_ode_integration
-    def log_prob_batch(self, theta, *context_data, hutchinson=False):
+    def log_prob(self, theta, *context, hutchinson=False):
         """
         Evaluates log_probs of theta conditional on provided context. For this we solve
         an ODE backwards in time until we reach the initial pure noise distribution.
@@ -200,7 +200,7 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
         )
         _, theta_and_div_0 = odeint(
             lambda t, theta_and_div_t: self.rhs_of_joint_ode(
-                t, theta_and_div_t, *context_data, hutchinson=hutchinson
+                t, theta_and_div_t, *context, hutchinson=hutchinson
             ),
             theta_and_div_init,
             torch.flip(
@@ -216,7 +216,7 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
         log_prior = compute_log_prior(theta_0)
         return (log_prior - divergence).detach()
 
-    def sample_and_log_prob_batch(self, *context_data, batch_size: int = None):
+    def sample_and_log_prob(self, *context, num_samples: int = None):
         """
         Returns conditional samples and their likelihoods for a batch of contexts by solving the joint ODE
         forwards in time. This is more efficient than calling sample_batch and log_prob_batch separately.
@@ -226,25 +226,25 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
         """
         self.network.eval()
 
-        if len(context_data) == 0 and batch_size is None:
+        if len(context) == 0 and num_samples is None:
             raise ValueError(
                 "For unconditional sampling, the batch size needs to be set."
             )
-        elif len(context_data) > 0:
-            if batch_size is not None:
+        elif len(context) > 0:
+            if num_samples is not None:
                 raise ValueError(
                     "For conditional sampling, the batch_size can not be set manually as "
                     "it is automatically determined by the context_data."
                 )
-            batch_size = len(context_data[0])
+            num_samples = len(context[0])
 
-        theta_0 = self.sample_theta_0(batch_size)
+        theta_0 = self.sample_theta_0(num_samples)
         log_prior = compute_log_prior(theta_0)
         theta_and_div_init = torch.cat((theta_0, log_prior.unsqueeze(1)), dim=1)
 
         _, theta_and_div_1 = odeint(
             lambda t, theta_and_div_t: self.rhs_of_joint_ode(
-                t, theta_and_div_t, *context_data
+                t, theta_and_div_t, *context
             ),
             theta_and_div_init,
             self.integration_range,  # integrate forwards in time, [0, 1-eps]

@@ -36,7 +36,7 @@ class FlowMatchingPosteriorModel(ContinuousFlowPosteriorModel):
         t = t * torch.ones(len(theta_t), device=theta_t.device)
         return self.network(t, theta_t, *context_data)
 
-    def loss(self, theta, *context_data):
+    def loss(self, theta, *context):
         """
         Calculates loss as the the mean squared error between the predicted vectorfield
         and the vector field for transporting the parameter data to samples from the
@@ -46,7 +46,7 @@ class FlowMatchingPosteriorModel(ContinuousFlowPosteriorModel):
         ----------
         theta: torch.tensor
             parameters (e.g., binary-black hole parameters)
-        *context_data: list[torch.Tensor]
+        *context: list[torch.Tensor]
             context data (e.g., gravitational-wave data)
 
         Returns
@@ -63,7 +63,7 @@ class FlowMatchingPosteriorModel(ContinuousFlowPosteriorModel):
         theta_t = ot_conditional_flow(theta_0, theta_1, t, self.sigma_min)
         true_vf = theta - (1 - self.sigma_min) * theta_0
 
-        predicted_vf = self.network(t, theta_t, *context_data)
+        predicted_vf = self.network(t, theta_t, *context)
         loss = mse(predicted_vf, true_vf)
         return loss
 

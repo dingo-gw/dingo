@@ -1,5 +1,6 @@
 """
-TODO: Docstring
+This module contains the abstract base class for representing posterior models,
+as well as functions for training and testing across an epoch.
 """
 from abc import abstractmethod, ABC
 import os
@@ -13,7 +14,6 @@ import time
 import numpy as np
 from threadpoolctl import threadpool_limits
 import dingo.core.utils.trainutils
-import math
 import json
 from collections import OrderedDict
 
@@ -23,25 +23,12 @@ from dingo.core.utils.trainutils import EarlyStopping
 
 class BasePosteriorModel(ABC):
     """
-    TODO: Docstring
+    Abstract base class for PosteriorModels. This is intended to construct and hold a
+    neural network for estimating the posterior density, as well as saving / loading,
+    and training.
 
-    Methods
-    -------
-
-    initialize_model:
-        initialize the NDE (including embedding net) as posterior model
-    initialize_training:
-        initialize for training, that includes storing the epoch, building
-        an optimizer and a learning rate scheduler
-    save_model:
-        save the model, including all information required to rebuild it,
-        except for the builder function
-    load_model:
-        load and build a model from a file
-    train_model:
-        train the model
-    inference:
-        perform inference
+    Subclasses must implement methods for constructing the specific network, sampling,
+    density evaluation, and computing the loss during training.
     """
 
     def __init__(
@@ -100,72 +87,98 @@ class BasePosteriorModel(ABC):
     @abstractmethod
     def initialize_network(self):
         """
-        Initialize the network backbone for the posterior model
-
+        Initialize the network backbone for the posterior model.
         """
         pass
 
     @abstractmethod
-    def sample_batch(self, *context_data):
+    def sample(self, *context, num_samples: int = 1):
         """
-        Sample a batch of data from the posterior model.
+        Sample parameters theta from the posterior model,
+
+        theta ~ p(theta | context)
 
         Parameters
         ----------
-        context: Tensor
+        context: torch.Tensor
+            Context information (typically observed data). Should have a batch
+            dimension (even if size B = 1).
+        num_samples: int = 1
+            Number of samples to generate.
+
         Returns
         -------
-        batch: dict
-            dictionary with batch data
+        samples: torch.Tensor
+            Shape (B, num_samples, dim(theta))
         """
         pass
 
     @abstractmethod
-    def sample_and_log_prob_batch(self, *context_data):
+    def sample_and_log_prob(self, *context, num_samples: int = 1):
         """
-        Sample a batch of data and log probs from the posterior model.
+        Sample parameters theta from the posterior model,
+
+        theta ~ p(theta | context)
+
+        and also return the log_prob. For models such as normalizing flows, it is more
+        economical to calculate the log_prob at the same time as sampling, rather than
+        as a separate step.
 
         Parameters
         ----------
-        context: Tensor
+        context: torch.Tensor
+            Context information (typically observed data). Should have a batch
+            dimension (even if size B = 1).
+        num_samples: int = 1
+            Number of samples to generate.
+
         Returns
         -------
-        batch: dict
-            dictionary with batch data
+        samples, log_prob: torch.Tensor, torch.Tensor
+            Shapes (B, num_samples, dim(theta)), (B, num_samples)
         """
         pass
 
     @abstractmethod
-    def log_prob_batch(self, data, *context_data):
+    def log_prob(self, theta, *context):
         """
-        Sample a batch of data from the posterior model.
+        Evaluate the log posterior density,
+
+        log p(theta | context)
 
         Parameters
         ----------
-        data: Tensor
-        context: Tensor
+        theta: torch.Tensor
+            Parameter values at which to evaluate the density. Should have a batch
+            dimension (even if size B = 1).
+        context: torch.Tensor
+            Context information (typically observed data). Must have context.shape[0] = B.
 
         Returns
         -------
-        batch: dict
-            dictionary with batch data
+        log_prob: torch.Tensor
+            Shape (B,)
         """
         pass
 
     @abstractmethod
-    def loss(self, data, context):
+    def loss(self, theta, context):
         """
         Compute the loss for a batch of data.
 
         Parameters
         ----------
-        data: Tensor
-        context: Tensor
+        theta: torch.Tensor
+            Parameter values at which to evaluate the density. Should have a batch
+            dimension (even if size B = 1).
+        context: torch.Tensor
+            Context information (typically observed data). Must have the same leading
+            (batch) dimension as theta.
 
         Returns
         -------
-        loss: Tensor
-            loss for the batch
+        loss: torch.Tensor
+            Mean loss across the batch (a scalar).
         """
         pass
 
@@ -443,83 +456,6 @@ class BasePosteriorModel(ABC):
                         print("Early stopping")
                         break
                 print(f"Finished training epoch {self.epoch}.\n")
-
-    def sample(
-        self,
-        *x,
-        batch_size=None,
-        num_samples=None,
-        get_log_prob=False,
-    ):
-        """
-        Sample from posterior model, conditioned on context x. x is expected to have a
-        batch dimension, i.e., to obtain N samples with additional context requires
-        x = x_.expand(N, *x_.shape).
-
-        This method takes care of the batching, makes sure that self.network is in
-        evaluation mode and disables gradient computation.
-
-        Parameters
-        ----------
-        *x:
-            input context to the neural network; has potentially multiple elements for,
-            e.g., gnpe proxies
-        batch_size: int = None
-            batch size for sampling
-        get_log_prob: bool = False
-            if True, also return log probability along with the samples
-
-        Returns
-        -------
-        samples: torch.Tensor
-            samples from posterior model
-        """
-
-        self.network.eval()
-        with torch.no_grad():
-            if batch_size is None:
-                if get_log_prob:
-                    samples, log_prob = self.sample_and_log_prob_batch(*x)
-                else:
-                    samples = self.sample_batch(*x)
-            else:
-                if num_samples is None:
-                    num_samples = batch_size
-                samples = []
-                if get_log_prob:
-                    log_prob = []
-
-                num_batches = (
-                    math.ceil(len(x[0]) / batch_size)
-                    if x
-                    else math.ceil(num_samples / batch_size)
-                )
-                for idx_batch in range(num_batches):
-                    if x:
-                        lower, upper = (
-                            idx_batch * batch_size,
-                            (idx_batch + 1) * batch_size,
-                        )
-                        x_batch = [xi[lower:upper] for xi in x]
-                        batch_size = None
-                    else:
-                        x_batch = x
-
-                    if get_log_prob:
-                        samples_batch, log_prob_batch = self.sample_and_log_prob_batch(
-                            *x_batch, batch_size=batch_size
-                        )
-                        samples.append(samples_batch)
-                        log_prob.append(log_prob_batch)
-                    else:
-                        samples.append(self.sample_batch(*x_batch))
-                samples = torch.cat(samples, dim=0)
-                if get_log_prob:
-                    log_prob = torch.cat(log_prob, dim=0)
-        if not get_log_prob:
-            return samples
-        else:
-            return samples, log_prob
 
 
 def train_epoch(pm, dataloader):
