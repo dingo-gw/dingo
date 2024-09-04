@@ -91,9 +91,13 @@ def train_condor():
 
             local_settings = train_settings.pop("local")
             with open(os.path.join(args.train_dir, "local_settings.yaml"), "w") as f:
-                if local_settings.get("wandb", False) and "id" not in local_settings["wandb"].keys():
+                if (
+                    local_settings.get("wandb", False)
+                    and "id" not in local_settings["wandb"].keys()
+                ):
                     try:
                         import wandb
+
                         local_settings["wandb"]["id"] = wandb.util.generate_id()
                     except ImportError:
                         print("wandb not installed, cannot generate run id.")
@@ -157,9 +161,14 @@ def train_condor():
     # SUBMIT NEXT CONDOR JOB
     #
 
-    # There was no 'bid' in the sample settings file.
-    bid = condor_settings["bid"]
-    os.system(f"condor_submit_bid {bid} " f"{join(args.train_dir, submission_file)}")
+    if "bid" in condor_settings:
+        # This is a specific setting for the MPI-IS cluster.
+        bid = condor_settings["bid"]
+        os.system(
+            f"condor_submit_bid {bid} " f"{join(args.train_dir, submission_file)}"
+        )
+    else:
+        os.system(f"condor_submit {join(args.train_dir, submission_file)}")
 
 
 if __name__ == "__main__":

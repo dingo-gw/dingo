@@ -2,6 +2,7 @@
 Implementation of the neural spline flow (NSF). Most of this code is adapted
 from the uci.py example from https://github.com/bayesiains/nsf.
 """
+
 import copy
 
 import torch

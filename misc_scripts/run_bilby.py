@@ -16,7 +16,7 @@ import bilby
 from os.path import join
 from gwpy.timeseries import TimeSeries
 import pycbc.psd
-from scipy.signal import tukey
+from scipy.signal.windows import tukey
 import numpy as np
 import yaml
 from shutil import copyfile
@@ -71,7 +71,6 @@ def parse_args():
 
 
 if __name__ == "__main__":
-
     args = parse_args()
     logger = bilby.core.utils.logger
     outdir = args.outdir

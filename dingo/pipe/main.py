@@ -22,10 +22,8 @@ logger.name = "dingo_pipe"
 
 
 def fill_in_arguments_from_model(args):
-    # FIXME: It would be better if we did not have to load an entire model just to
-    #  gain access to the metadata. Store a copy of metadata separately?
     logger.info(f"Loading dingo model from {args.model} in order to access settings.")
-    model = PosteriorModel(args.model, device="cpu", load_training_info=False)
+    model = PosteriorModel(args.model, device="meta", load_training_info=False)
     model_metadata = model.metadata
 
     domain = build_domain_from_model_metadata(model_metadata)

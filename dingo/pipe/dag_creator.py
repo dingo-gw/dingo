@@ -7,6 +7,7 @@ import copy
 from bilby_pipe.job_creation.dag import Dag
 from bilby_pipe.utils import BilbyPipeError, logger
 
+from dingo.pipe.utils import _strip_unwanted_submission_keys
 from dingo.pipe.nodes.generation_node import GenerationNode
 from .nodes.importance_sampling_node import ImportanceSamplingNode
 from .nodes.merge_node import MergeNode
@@ -48,6 +49,8 @@ def generate_dag(inputs, model_args):
     dag = Dag(inputs)
     trigger_times = get_trigger_time_list(inputs)
 
+    if inputs.simple_submission:
+        _strip_unwanted_submission_keys(dag.pycondor_dag)
     #
     # 1. Generate data for inference.
     #

@@ -1,0 +1,52 @@
+kind: configuration
+data:
+  channels:
+    H1: H1:GDS-CALIB_STRAIN_CLEAN
+    L1: L1:GDS-CALIB_STRAIN_CLEAN
+    V1: V1:Hrec_hoft_16384Hz
+  frame types:
+    H1: H1_HOFT_C00
+    L1: L1_HOFT_C00
+    V1: V1Online
+pipelines:
+  gwdata:
+    scheduler:
+      accounting group: ligo.dev.o4.cbc.pe.dingo
+      request cpus: 1
+  dingo:
+    quality:
+      state vector:
+        L1: L1:DCS-CALIB_STATE_VECTOR_C01
+        H1: H1:DCS-CALIB_STATE_VECTOR_C01
+        V1: V1:DQ_ANALYSIS_STATE_VECTOR
+    scheduler:
+      accounting group: ligo.dev.o4.cbc.pe.dingo
+      accounting user: nihar.gupte
+      request cpus: 4
+      request disk: 8 #GB
+      request memory: 32 #GB
+      n parallel: 10
+      request cpus importance sampling: 32 
+      global CUDA memory: 40 # GB
+    sampler:
+      num gnpe iterations: 30
+      num samples: 50000 
+      batch size: 50000
+
+  pesummary:
+    accounting group: ligo.dev.o4.cbc.pe.dingo
+    cosmology: Planck15
+    evolve spins: forwards
+    multiprocess: 4
+    redshift: exact
+    regenerate posteriors:
+    - redshift
+    - radiated_energy
+    skymap samples: 2000
+quality:
+  minimum frequency:
+    H1: 20
+    L1: 20
+    V1: 20
+    G1: 20
+    K1: 20

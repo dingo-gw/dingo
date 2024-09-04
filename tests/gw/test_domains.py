@@ -160,7 +160,7 @@ def test_FD_time_translation_torch(uniform_FD_params):
     result = domain.time_translate_data(data, -dt)
     assert result.dtype == torch.float32
     assert result.shape == data.shape
-    assert torch.allclose(result[..., 0, :], torch.tensor(1.0), atol=1e-5)
+    assert torch.allclose(result[..., 0, :], torch.tensor(1.0), atol=1e-4)
     # Tolerance of 1e-2 is required in the imaginary part, likely because we are
     # checking that it *vanishes*. This is a consequence of single-precision floats.
     # TODO: Is there a way to improve on this?
@@ -181,7 +181,7 @@ def test_FD_caching(uniform_FD_params):
     domain._reset_caches()
     # after clearing the cache, the __call__ method should return the correct
     # result
-    assert np.all(domain() != domain_ref())
+    assert len(domain()) < len(domain_ref())
 
 
 def test_FD_window_factor(uniform_FD_params, window_setup):

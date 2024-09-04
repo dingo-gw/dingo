@@ -40,7 +40,6 @@ dependencies = [
     "pesummary",
     "pycbc",
     "pycondor",
-    "pyseobnr",
     "pyyaml",
     "requests",
     "scikit-learn",
@@ -80,6 +79,10 @@ dev = [
     "sphinxcontrib-mermaid",
     "sphinxcontrib-bibtex",
     "wandb",
+]
+
+pyseobnr = [
+    "pyseobnr",
 ]
 
 
