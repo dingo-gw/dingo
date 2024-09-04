@@ -2,7 +2,9 @@ import torch
 import numpy as np
 from abc import abstractmethod
 
+from glasflow.nflows.utils import merge_leading_dims
 from torchdiffeq import odeint
+from glasflow.nflows.utils.torchutils import repeat_rows, split_leading_dim
 
 from .base_model import BasePosteriorModel
 
@@ -102,7 +104,7 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
 
         Returns
         -------
-        torch.tensor
+        torch.Tensor
             vector field that generates the flow and its divergence (required for
             likelihood evaluation).
         """
@@ -125,41 +127,34 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
             model_kwargs["initial_weights"] = self.initial_weights
         self.network = create_cf(**model_kwargs)
 
-    def sample(self, *context, num_samples: int = None):
+    def sample(self, *context: torch.Tensor, num_samples: int = None):
         """
-        Returns num_sample conditional samples for a batch of contexts by solving an ODE
-        forwards in time.
+        Sample parameters theta from the posterior model,
+
+        theta ~ p(theta | context)
+
+        by solving an ODE forward in time.
 
         Parameters
         ----------
-        *context: list[torch.Tensor]
-            context data (e.g., gravitational-wave data)
-        num_samples: int = None
-            batch_size for sampling. If len(context_data) > 0, we automatically set
-            batch_size = len(context_data[0]), so this option is only used for
-            unconditional sampling.
+        context: torch.Tensor
+            Context information (typically observed data). Should have a batch
+            dimension (even if size B = 1).
+        num_samples: int = 1
+            Number of samples to generate.
 
         Returns
         -------
-        torch.Tensor
-            the generated samples
+        samples: torch.Tensor
+            Shape (B, num_samples, dim(theta))
         """
         self.network.eval()
 
-        if len(context) == 0 and num_samples is None:
-            raise ValueError(
-                "For unconditional sampling, the batch size needs to be set."
-            )
-        elif len(context) > 0:
-            if num_samples is not None:
-                raise ValueError(
-                    "For conditional sampling, the batch_size can not be set manually as "
-                    "it is automatically determined by the context_data."
-                )
-            num_samples = len(context[0])
-
         with torch.no_grad():
-            theta_0 = self.sample_theta_0(num_samples)
+            context_size = context[0].shape[0]
+            theta_0 = self.sample_theta_0(num_samples * context_size)
+            context = [repeat_rows(c, num_reps=num_samples) for c in context]
+
             _, theta_1 = odeint(
                 lambda t, theta_t: self.evaluate_vectorfield(t, theta_t, *context),
                 theta_0,
@@ -169,29 +164,38 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
                 method="dopri5",
             )
 
+            theta_1 = split_leading_dim(theta_1, shape=[context_size, num_samples])
+
         self.network.train()
         return theta_1
 
     # MD: rename log_prob_batch, extract eps from self.epsilon_ode_integration
-    def log_prob(self, theta, *context, hutchinson=False):
+    def log_prob(self, theta: torch.Tensor, *context: torch.Tensor, hutchinson=False):
         """
-        Evaluates log_probs of theta conditional on provided context. For this we solve
-        an ODE backwards in time until we reach the initial pure noise distribution.
+        Evaluate the log posterior density,
+
+        log p(theta | context)
+
+        For this we solve an ODE backwards in time until we reach the initial pure
+        noise distribution.
 
         There are two contributions, the log_prob of theta_0 (which is uniquely
         determined by theta) under the base distribution, and the integrated divergence
         of the vectorfield.
 
-        Parameters.
+        Parameters
         ----------
-        theta: torch.tensor
-            parameters (e.g., binary-black hole parameters)
-        *context_data: list[torch.Tensor]
-            context data (e.g., gravitational-wave data)
+        theta: torch.Tensor
+            Parameter values at which to evaluate the density. Should have a batch
+            dimension (even if size B = 1).
+        context: torch.Tensor
+            Context information (typically observed data). Must have context.shape[0] = B.
+        hutchinson
 
         Returns
         -------
-
+        log_prob: torch.Tensor
+            Shape (B,)
         """
         self.network.eval()
         theta_and_div_init = torch.cat(
@@ -216,29 +220,38 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
         log_prior = compute_log_prior(theta_0)
         return (log_prior - divergence).detach()
 
-    def sample_and_log_prob(self, *context, num_samples: int = None):
+    def sample_and_log_prob(self, *context: torch.Tensor, num_samples: int = None):
         """
-        Returns conditional samples and their likelihoods for a batch of contexts by solving the joint ODE
-        forwards in time. This is more efficient than calling sample_batch and log_prob_batch separately.
+        Sample parameters theta from the posterior model,
 
-        If d/dt [phi(t), f(t)] = rhs joint with initial conditions [theta_0, log p(theta_0)], where theta_0 ~ p_0(theta_0),
-        then [phi(1), f(1)] = [theta_1, log p(theta_0) + log p_1(theta_1) - log p(theta_0)] = [theta_1, log p_1(theta_1)].
+        theta ~ p(theta | context)
+
+        and also return the log_prob. This is more efficient than calling sample_batch
+        and log_prob_batch separately.
+
+        If d/dt [phi(t), f(t)] = rhs joint with initial conditions [theta_0,
+        log p(theta_0)], where theta_0 ~ p_0(theta_0), then [phi(1), f(1)] = [theta_1,
+        log p(theta_0) + log p_1(theta_1) - log p(theta_0)] = [theta_1, log p_1(theta_1)].
+
+        Parameters
+        ----------
+        context: torch.Tensor
+            Context information (typically observed data). Should have a batch
+            dimension (even if size B = 1).
+        num_samples: int = 1
+            Number of samples to generate.
+
+        Returns
+        -------
+        samples, log_prob: torch.Tensor, torch.Tensor
+            Shapes (B, num_samples, dim(theta)), (B, num_samples)
         """
         self.network.eval()
 
-        if len(context) == 0 and num_samples is None:
-            raise ValueError(
-                "For unconditional sampling, the batch size needs to be set."
-            )
-        elif len(context) > 0:
-            if num_samples is not None:
-                raise ValueError(
-                    "For conditional sampling, the batch_size can not be set manually as "
-                    "it is automatically determined by the context_data."
-                )
-            num_samples = len(context[0])
+        context_size = context[0].shape[0]
+        theta_0 = self.sample_theta_0(num_samples * context_size)
+        context = [repeat_rows(c, num_reps=num_samples) for c in context]
 
-        theta_0 = self.sample_theta_0(num_samples)
         log_prior = compute_log_prior(theta_0)
         theta_and_div_init = torch.cat((theta_0, log_prior.unsqueeze(1)), dim=1)
 
@@ -255,6 +268,9 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
         )
 
         theta_1, log_prob_1 = theta_and_div_1[:, :-1], theta_and_div_1[:, -1]
+
+        theta_1 = split_leading_dim(theta_1, shape=[context_size, num_samples])
+        log_prob_1 = split_leading_dim(log_prob_1, shape=[context_size, num_samples])
 
         return theta_1, log_prob_1
 

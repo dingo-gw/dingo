@@ -66,7 +66,7 @@ class ContinuousFlow(nn.Module):
     def use_cache(self, value):
         self._use_cache = value
 
-    def _update_cached_context(self, *context):
+    def _update_cached_context(self, *context: torch.Tensor):
         """
         Update the cache for *context. This sets new values for self._cached_context and
         self._cached_context_embedding if self._cached_context != context.
@@ -82,14 +82,14 @@ class ContinuousFlow(nn.Module):
                 and all([(x == y).all() for x, y in zip(self._cached_context, context)])
             ):
                 return
-        except:
+        except RuntimeError:
             pass
         # if all tensors in batch are the same: do forward pass with batch_size 1
         if all([(x == x[:1]).all() for x in context]):
-            self._cached_context = [x[:1] for x in context]
+            self._cached_context = tuple(x[:1] for x in context)
             self._cached_context_embedding = (
                 torchutils.forward_pass_with_unpacked_tuple(
-                    self.context_embedding_net, *self._cached_context
+                    self.context_embedding_net, self._cached_context
                 ).detach()
             )
         else:

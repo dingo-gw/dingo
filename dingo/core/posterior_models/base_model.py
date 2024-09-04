@@ -92,7 +92,7 @@ class BasePosteriorModel(ABC):
         pass
 
     @abstractmethod
-    def sample(self, *context, num_samples: int = 1):
+    def sample(self, *context: torch.Tensor, num_samples: int = 1):
         """
         Sample parameters theta from the posterior model,
 
@@ -114,7 +114,7 @@ class BasePosteriorModel(ABC):
         pass
 
     @abstractmethod
-    def sample_and_log_prob(self, *context, num_samples: int = 1):
+    def sample_and_log_prob(self, *context: torch.Tensor, num_samples: int = 1):
         """
         Sample parameters theta from the posterior model,
 
@@ -140,7 +140,7 @@ class BasePosteriorModel(ABC):
         pass
 
     @abstractmethod
-    def log_prob(self, theta, *context):
+    def log_prob(self, theta: torch.Tensor, *context: torch.Tensor):
         """
         Evaluate the log posterior density,
 
@@ -162,7 +162,7 @@ class BasePosteriorModel(ABC):
         pass
 
     @abstractmethod
-    def loss(self, theta, context):
+    def loss(self, theta: torch.Tensor, *context: torch.Tensor):
         """
         Compute the loss for a batch of data.
 
