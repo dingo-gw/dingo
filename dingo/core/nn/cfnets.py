@@ -96,7 +96,7 @@ class ContinuousFlow(nn.Module):
             self._cached_context = context
             self._cached_context_embedding = (
                 torchutils.forward_pass_with_unpacked_tuple(
-                    self.context_embedding_net, *self._cached_context
+                    self.context_embedding_net, self._cached_context
                 )
             ).detach()
 
@@ -120,7 +120,7 @@ class ContinuousFlow(nn.Module):
         # embed context (self.context_embedding_net might just be identity)
         if not self.use_cache:
             context_embedding = torchutils.forward_pass_with_unpacked_tuple(
-                self.context_embedding_net, *context
+                self.context_embedding_net, context
             )
         else:
             self._update_cached_context(*context)
