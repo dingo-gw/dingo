@@ -397,4 +397,7 @@ class Injection(GWSignal):
                 asd (if set): amplitude spectral density for each detector
         """
         theta = self.prior.sample()
+        theta = {
+            k: float(v) for k, v in theta.items()
+        }  # Some parameters are np.float64
         return self.injection(theta)

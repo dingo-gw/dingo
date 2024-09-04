@@ -74,12 +74,12 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
         ----------
         t: float
             time (noise level)
-        theta_t: torch.tensor
+        theta_t: torch.Tensor
             noisy parameters, perturbed with noise level t
         *context_data: list[torch.tensor]
             list with context data (GW data)
         """
-        raise NotImplementedError()
+        pass
 
     def rhs_of_joint_ode(self, t, theta_and_div_t, *context_data, hutchinson=False):
         """
@@ -94,7 +94,7 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
         ----------
         t: float
             time (noise level)
-        theta_and_div_t: torch.tensor
+        theta_and_div_t: torch.Tensor
             concatenated tensor of (theta_t, div).
             theta_t: noisy parameters, perturbed with noise level t
         *context_data: list[torch.tensor]
@@ -141,7 +141,7 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
 
         Returns
         -------
-        torch.tensor
+        torch.Tensor
             the generated samples
         """
         self.network.eval()

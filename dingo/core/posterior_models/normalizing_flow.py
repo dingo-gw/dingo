@@ -24,10 +24,10 @@ class NormalizingFlowPosteriorModel(BasePosteriorModel):
         return self.network(theta, *context)
 
     def sample(self, *context, num_samples: int = 1):
-        return self.network.sample(*context, num_samples)
+        return self.network.sample(*context, num_samples=num_samples)
 
     def sample_and_log_prob(self, *context, num_samples: int = 1):
-        return self.network.sample_and_log_prob(*context, num_samples)
+        return self.network.sample_and_log_prob(*context, num_samples=num_samples)
 
     def loss(self, theta, *context):
         return -self.network(theta, *context).mean()
