@@ -31,9 +31,9 @@ data:
 
 # Model architecture
 model:
-  type: nsf+embedding
+  posterior_model_type: normalizing_flow
   # kwargs for neural spline flow
-  nsf_kwargs:
+  posterior_kwargs:
     num_flow_steps: 5
     base_transform_kwargs:
       hidden_dim: 64 
@@ -44,7 +44,7 @@ model:
       num_bins: 8
       base_transform_type: rq-coupling
   # kwargs for embedding net
-  embedding_net_kwargs:
+  embedding_kwargs:
     output_dim: 128
     hidden_dims: [1024, 512, 256, 128]
     activation: elu

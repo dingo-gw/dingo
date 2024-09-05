@@ -38,8 +38,8 @@ data:
   inference_parameters: default
 
 model:
-  type: nsf+embedding
-  nsf_kwargs:
+  posterior_model_type: normalizing_flow
+  posterior_kwargs:
     num_flow_steps: 30
     base_transform_kwargs:
       hidden_dim: 512
@@ -49,7 +49,7 @@ model:
       batch_norm: True
       num_bins: 8
       base_transform_type: rq-coupling
-  embedding_net_kwargs:
+  embedding_kwargs:
     output_dim: 128
     hidden_dims: [1024, 1024, 1024, 1024, 1024, 1024,
                   512, 512, 512, 512, 512, 512,
