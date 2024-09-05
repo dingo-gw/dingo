@@ -122,7 +122,9 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
         return torch.cat((vf, -div_vf), dim=1)
 
     def initialize_network(self):
-        model_kwargs = {k: v for k, v in self.model_kwargs.items() if k != "type"}
+        model_kwargs = {
+            k: v for k, v in self.model_kwargs.items() if k != "posterior_model_type"
+        }
         if self.initial_weights is not None:
             model_kwargs["initial_weights"] = self.initial_weights
         self.network = create_cf(**model_kwargs)

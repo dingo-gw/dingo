@@ -17,6 +17,7 @@ import dingo.core.utils.trainutils
 import json
 from collections import OrderedDict
 
+from dingo.core.utils.backward_compatibility import update_model_config
 from dingo.core.utils.misc import get_version
 from dingo.core.utils.trainutils import EarlyStopping
 
@@ -324,6 +325,7 @@ class BasePosteriorModel(ABC):
         self.version = d.get("version")
 
         self.model_kwargs = d["model_kwargs"]
+        update_model_config(self.model_kwargs)  # For backward compatibility
         self.initialize_network()
 
         self.epoch = d["epoch"]

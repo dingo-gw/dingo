@@ -3,25 +3,33 @@ import torch
 from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
 from dingo.core.posterior_models.flow_matching import FlowMatchingPosteriorModel
 from dingo.core.posterior_models.score_matching import ScoreDiffusionPosteriorModel
+from dingo.core.utils.backward_compatibility import update_model_config
 
 
-def build_model_from_kwargs(filename=None, settings=None, **kwargs):
+def build_model_from_kwargs(filename: str = None, settings: dict = None, **kwargs):
     """
-    Returns the built model (from settings file or rebuild from file). Extracts the relevant arguments (normalizing flow
-    or continuous flow) from setting.
+    Returns a PosteriorModel based on a saved network or settings dict.
+
+    The function is careful to choose the appropriate PosteriorModel class (e.g.,
+    for a normalizing flow, flow matching, or score matching).
 
     Parameters
     ----------
-    filename
-    settings
+    filename: str
+        Path to a saved network (.pt).
+    settings: dict
+        Settings dictionary.
     kwargs
+        Arguments forwarded to the model constructor.
 
     Returns
     -------
-
+    PosteriorModel
     """
-    # either filename or settings must be provided
-    assert filename is not None or settings is not None
+    if (filename is None) == (settings is None):
+        raise ValueError(
+            "Either a filename or a settings dict must be provided, but not both."
+        )
 
     models_dict = {
         "normalizing_flow": NormalizingFlowPosteriorModel,
@@ -30,32 +38,21 @@ def build_model_from_kwargs(filename=None, settings=None, **kwargs):
     }
 
     if filename is not None:
-        d = torch.load(filename, map_location="cpu")
-        type = d["metadata"]["train_settings"]["model"]["type"]
+        d = torch.load(filename, map_location="meta")
+        update_model_config(d["metadata"]["train_settings"]["model"])  # Backward compat
+        posterior_model_type = d["metadata"]["train_settings"]["model"][
+            "posterior_model_type"
+        ]
     else:
-        type = settings["train_settings"]["model"]["type"]
+        update_model_config(settings["train_settings"]["model"])  # Backward compat
+        posterior_model_type = settings["train_settings"]["model"][
+            "posterior_model_type"
+        ]
 
-    if not type.lower() in models_dict:
-        raise ValueError("No valid posterior model specified.")
+    if not posterior_model_type.lower() in models_dict:
+        raise ValueError("No valid posterior model type specified.")
 
-    model = models_dict[type.lower()]
-    if settings is not None:
-        if type.lower() == "normalizing_flow":
-            settings["train_settings"]["model"]["posterior_kwargs"].update(
-                settings["train_settings"]["model"].get("nf_kwargs", {})
-            )
-
-        if type.lower() in ["flow_matching", "score_matching"]:
-            settings["train_settings"]["model"]["posterior_kwargs"].update(
-                settings["train_settings"]["model"].get("cf_kwargs", {})
-            )
-
-        # if type.lower() in ["flow_matching", "score_matching"]:
-        if "nf_kwargs" in settings["train_settings"]["model"].keys():
-            del settings["train_settings"]["model"]["nf_kwargs"]
-        # if type.lower() == "normalizing_flow":
-        if "cf_kwargs" in settings["train_settings"]["model"].keys():
-            del settings["train_settings"]["model"]["cf_kwargs"]
+    model = models_dict[posterior_model_type.lower()]
 
     return model(model_filename=filename, metadata=settings, **kwargs)
 

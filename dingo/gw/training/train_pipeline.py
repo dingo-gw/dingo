@@ -1,5 +1,4 @@
 import os
-from os.path import join
 
 import numpy as np
 import yaml
@@ -74,7 +73,7 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
         # be done outside the transform setup. But for now, this is convenient. The
         # transforms will be reset later by initialize_stage().
 
-        if train_settings["model"]["type"] in [
+        if train_settings["model"]["posterior_model_type"] in [
             "normalizing_flow",
             "flow_matching",
             "score_matching",
