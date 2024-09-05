@@ -16,7 +16,7 @@ def data_setup_pm_1():
     os.makedirs(tmp_dir, exist_ok=True)
     d.model_filename = join(tmp_dir, "model.pt")
 
-    d.nsf_kwargs = {
+    d.posterior_kwargs = {
         "input_dim": 4,
         "context_dim": 10,
         "num_flow_steps": 5,
@@ -30,7 +30,7 @@ def data_setup_pm_1():
             "base_transform_type": "rq-coupling",
         },
     }
-    d.embedding_net_kwargs = {
+    d.embedding_kwargs = {
         "input_dims": (2, 3, 20),
         # 'n_rb': 10,
         "svd": {"size": 10},
@@ -44,9 +44,9 @@ def data_setup_pm_1():
     }
 
     d.model_kwargs = {
-        "type": "nsf+embedding",
-        "nsf_kwargs": d.nsf_kwargs,
-        "embedding_net_kwargs": d.embedding_net_kwargs,
+        "posterior_model_type": "normalizing_flow",
+        "posterior_kwargs": d.posterior_kwargs,
+        "embedding_kwargs": d.embedding_kwargs,
     }
 
     d.metadata = {"train_settings": {"model": d.model_kwargs}}

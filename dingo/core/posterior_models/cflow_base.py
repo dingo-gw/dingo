@@ -2,16 +2,12 @@ import torch
 import numpy as np
 from abc import abstractmethod
 
-from glasflow.nflows.utils import merge_leading_dims
 from torchdiffeq import odeint
 from glasflow.nflows.utils.torchutils import repeat_rows, split_leading_dim
 
 from .base_model import BasePosteriorModel
 
-from dingo.core.nn.cfnets import (
-    # create_cf_with_rb_projection_embedding_net,
-    create_cf,
-)
+from dingo.core.nn.cfnets import create_cf
 
 
 class ContinuousFlowPosteriorModel(BasePosteriorModel):

@@ -23,7 +23,25 @@ class AvgTracker:
 
 
 class EarlyStopping:
-    def __init__(self, patience=5, verbose=False, delta=0):
+    """
+    Implement early stopping during training, once the validation loss stops decreasing
+    for a certain number of epochs (the patience).
+
+    If val_loss > min_val_loss - delta for more than patience epochs, then returns
+    early stopping occurs.
+    """
+
+    def __init__(self, patience: int = 5, verbose: bool = False, delta: float = 0.0):
+        """
+        Parameters
+        ----------
+        patience: int = 5
+            Number of epochs to wait before stopping.
+        verbose: bool = False
+            Whether to print counter increments.
+        delta: float = 0.0
+            Amount by which loss must decrease in patience epochs.
+        """
         self.patience = patience
         self.verbose = verbose
         self.counter = 0
@@ -32,9 +50,18 @@ class EarlyStopping:
         self.val_loss_min = np.Inf
         self.delta = delta
 
-    def __call__(self, val_loss, model):
+    def __call__(self, val_loss: float, model):
         """
-        Returns whether or not the model should be saved as the currently best one
+        Parameters
+        ----------
+        val_loss: float
+            Value of the validation loss.
+        model
+
+        Returns
+        -------
+        bool
+            Whether the current model has the lowest validation loss so-far.
         """
         score = -val_loss
 
@@ -44,7 +71,7 @@ class EarlyStopping:
         elif score < self.best_score + self.delta:
             self.counter += 1
             if self.verbose:
-                print(f'EarlyStopping counter: {self.counter} out of {self.patience}')
+                print(f"EarlyStopping counter: {self.counter} out of {self.patience}")
             if self.counter >= self.patience:
                 self.early_stop = True
             return False
