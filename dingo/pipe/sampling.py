@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 """ Script to sample from a Dingo model. Based on bilby_pipe data analysis script. """
 import sys
-from fileinput import filename
 from pathlib import Path
 
 from bilby_pipe.input import Input
