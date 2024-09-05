@@ -1,14 +1,10 @@
 import copy
-from typing import Optional
 
 import torch
-import yaml
-from os.path import dirname, join
 
 from dingo.core.utils import build_train_and_test_loaders
 from dingo.core.utils.trainutils import RuntimeLimits
 import numpy as np
-import pandas as pd
 import argparse
 
 from dingo.core.posterior_models import NormalizingFlowPosteriorModel
@@ -45,8 +41,8 @@ def train_unconditional_density_estimator(
 
     Parameters
     ----------
-    samples: pd.DataFrame
-        DataFrame containing the samples to train the density estimator on.
+    result: Result
+        Contains the samples on which to train the density estimator.
     settings: dict
         Dictionary containing the settings for the density estimator.
     train_dir: str
@@ -54,7 +50,7 @@ def train_unconditional_density_estimator(
 
     Returns
     -------
-    model: Base
+    model: NormalizingFlowPosteriorModel
         trained density estimator
     """
     samples = result.samples
@@ -77,7 +73,7 @@ def train_unconditional_density_estimator(
     # set up density estimation network
     settings["model"]["input_dim"] = num_params
     settings["model"]["context_dim"] = None
-    # TODO: ultimately, we want to replace this by FlowMatching, I guess
+    # TODO: Allow for other types of density estimators (e.g., flow matching).
     model = NormalizingFlowPosteriorModel(
         metadata={"train_settings": settings, "base": copy.deepcopy(result.metadata)},
         device=settings["training"]["device"],

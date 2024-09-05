@@ -50,9 +50,9 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
     wfd = build_dataset(train_settings["data"])  # No transforms yet
     initial_weights = {}
 
-    # This is the only case that exists so far, but we leave it open to develop new
-    # model types.
-    # if train_settings["model"]["type"] == "nsf+embedding":
+    # The embedding network is assumed to have an SVD projection layer. If other types
+    # of embedding networks are added in the future, update this code.
+
     if train_settings["model"].get("embedding_kwargs", None):
         # First, build the SVD for seeding the embedding network.
         print("\nBuilding SVD for initialization of embedding network.")
@@ -66,37 +66,25 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
             **train_settings["model"]["embedding_kwargs"]["svd"],
         )
 
-        # Now set the transforms for training. We need to do this here so that we can (a)
-        # get the data dimensions to configure the network, and (b) save the
-        # parameter standardization dict in the PosteriorModel. In principle, (a) could
-        # be done without generating data (by careful calculation) and (b) could also
-        # be done outside the transform setup. But for now, this is convenient. The
-        # transforms will be reset later by initialize_stage().
+    # Now set the transforms for training. We need to do this here so that we can (a)
+    # get the data dimensions to configure the network, and (b) save the
+    # parameter standardization dict in the PosteriorModel. In principle, (a) could
+    # be done without generating data (by careful calculation) and (b) could also
+    # be done outside the transform setup. But for now, this is convenient. The
+    # transforms will be reset later by initialize_stage().
 
-        if train_settings["model"]["posterior_model_type"] in [
-            "normalizing_flow",
-            "flow_matching",
-            "score_matching",
-        ]:
-            set_train_transforms(
-                wfd,
-                train_settings["data"],
-                train_settings["training"]["stage_0"]["asd_dataset_path"],
-            )
+    set_train_transforms(
+        wfd,
+        train_settings["data"],
+        train_settings["training"]["stage_0"]["asd_dataset_path"],
+    )
 
-            # This modifies the model settings in-place.
-            autocomplete_model_kwargs(train_settings["model"], wfd[0])
-            full_settings = {
-                "dataset_settings": wfd.settings,
-                "train_settings": train_settings,
-            }
-        else:
-            raise NotImplementedError(
-                "Only normalizing flow, score- and flow-matching is implemented at this time."
-            )
-
-    else:
-        raise ValueError('Embedding network settings not found in "train_settings.yaml')
+    # This modifies the model settings in-place.
+    autocomplete_model_kwargs(train_settings["model"], wfd[0])
+    full_settings = {
+        "dataset_settings": wfd.settings,
+        "train_settings": train_settings,
+    }
 
     print("\nInitializing new posterior model.")
     print("Complete settings:")

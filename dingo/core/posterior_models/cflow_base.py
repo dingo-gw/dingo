@@ -16,22 +16,22 @@ from dingo.core.nn.cfnets import (
 
 class ContinuousFlowPosteriorModel(BasePosteriorModel):
     """
-    Abstract base class for posterior models based on continuous normalizing flows (CNFs).
+    Class for posterior models based on continuous normalizing flows (CNFs).
 
-    CNFs are parameterized with a vector field v(theta_t, t), that transports a simple
+    CNFs are parameterized by a vector field v(theta_t, t), that transports a simple
     base distribution (typically a gaussian N(0,1) with same dimension as theta) at
     time t=0 to the target distribution at time t=1. This vector field defines the flow
     via the ODE
 
                     d/dt f(theta, t) = v(f(theta, t), t).
 
-    The vectorfield v is parameterized with a neural network. It is impractical to train
+    The vector field v is parameterized with a neural network. It is impractical to train
     this neural network (and thereby the CNF) directly with log-likelihood maximization,
     as solving the full ODE for each training iteration, requires thousands of
-    vectorfield evaluations.
+    vector field evaluations.
 
     Several alternative methods have been developed to make training CNFs more
-    efficient. These directly regress on the vectorfield v (or a scaled version of v,
+    efficient. These directly regress on the vector field v (or a scaled version of v,
     such as the score). It has been shown that this can be done on a per-sample basis
     by adding noise to the parameters at various scales t. Specifically, a parameter
     sample theta is transformed as follows.
@@ -41,7 +41,7 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
         theta_1         = theta                                     pure sample
         theta_t         = c1(t) * theta_1 + c0(t) * theta_0         noisy sample
 
-    Within that framework, one can employ different methods to learn the vectorfield v,
+    Within that framework, one can employ different methods to learn the vector field v,
     such as flow matching or score matching. These have slightly different coefficients
     c1(t), c2(t) and training objectives.
     """
@@ -65,9 +65,9 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
         return torch.randn(batch_size, self.theta_dim, device=self.device)
 
     @abstractmethod
-    def evaluate_vectorfield(self, t, theta_t, *context_data):
+    def evaluate_vector_field(self, t, theta_t, *context_data):
         """
-        Evaluate the vectorfield v(t, theta_t, context_data) that generates the flow
+        Evaluate the vector field v(t, theta_t, context_data) that generates the flow
         via the ODE
 
             d/dt f(theta_t, t, context) = v(f(theta_t, t, context), t, context).
@@ -86,7 +86,7 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
     def rhs_of_joint_ode(self, t, theta_and_div_t, *context_data, hutchinson=False):
         """
         Returns the right hand side of the neural ODE that is used to evaluate the
-        log_prob of theta samples. This is a joint ODE over the vectorfield and the
+        log_prob of theta samples. This is a joint ODE over the vector field and the
         divergence. By integrating this ODE, one can simultaneously trace the parameter
         sample theta_t and integrate the divergence contribution to the log_prob,
         see e.g., https://arxiv.org/abs/1806.07366 or Appendix C in
@@ -117,7 +117,7 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
         t = t.detach()
         with torch.enable_grad():
             theta_t.requires_grad_(True)
-            vf = self.evaluate_vectorfield(t, theta_t, *context_data)
+            vf = self.evaluate_vector_field(t, theta_t, *context_data)
             div_vf = divergence_fun(vf, theta_t)
         return torch.cat((vf, -div_vf), dim=1)
 
@@ -158,7 +158,7 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
             context = [repeat_rows(c, num_reps=num_samples) for c in context]
 
             _, theta_1 = odeint(
-                lambda t, theta_t: self.evaluate_vectorfield(t, theta_t, *context),
+                lambda t, theta_t: self.evaluate_vector_field(t, theta_t, *context),
                 theta_0,
                 self.integration_range,
                 atol=1e-7,
@@ -183,7 +183,7 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
 
         There are two contributions, the log_prob of theta_0 (which is uniquely
         determined by theta) under the base distribution, and the integrated divergence
-        of the vectorfield.
+        of the vector field.
 
         Parameters
         ----------

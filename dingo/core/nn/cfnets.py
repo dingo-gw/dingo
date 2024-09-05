@@ -10,41 +10,48 @@ from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resn
 from dingo.core.nn.enets import DenseResidualNet
 
 
-# Autocomplete model kwargs necessary?
-
-
 # TODO make this inherent from an abstract wrapper?
 class ContinuousFlow(nn.Module):
     """
-    This class wraps the continuous flow models. It combines an embedding net and a continuous flow model that
-     learns a vector field (score or flow).
+    A continuous normalizing flow network. It defines a time-dependent vector field on
+    the parameter space (score or flow), which optionally depends on additional context
+    information.
 
-    Methods
-    -------
+    v = v(f(t, theta), g(context))
 
-    set_embedding:
-        infers and caches the embedding of the given context
-    get_embedding:
-        infers the embedding of given context, returns cached context if no context is provided
-    forward:
-        calls model, evaluates first the embedding and then the continuous flow
+    This class combines the network v for the continuous flow itself, as well as embedding
+    networks f, g, for the context and parameters, respectively.
+
+    The parameters and context can optionally be provided as gated linear unit (GLU)
+    context to the main network, rather than as the main input to the network. For a
+    DenseResidualNet, this context is input repeatedly via GLUs, for each residual block.
     """
 
     def __init__(
         self,
-        continuous_flow: nn.Module,
+        continuous_flow_net: nn.Module,
         context_embedding_net: nn.Module = torch.nn.Identity(),
         theta_embedding_net: nn.Module = torch.nn.Identity(),
         context_with_glu: bool = False,
         theta_with_glu: bool = False,
     ):
         """
-        TODO
-        :param  continuous_flow: nn.Module
-        :param embedding_net: nn.Module
+        Parameters
+        ----------
+        continuous_flow_net: nn.Module
+            Main network for the continuous flow.
+        context_embedding_net: nn.Module = torch.nn.Identity()
+            Embedding network for the context information (e.g., observed data).
+        theta_embedding_net: nn.Module = torch.nn.Identity()
+            Embedding network for the parameters.
+        context_with_glu: bool = False
+            Whether to provide context as GLU or main input to the continuous_flow_net.
+        theta_with_glu: bool = False
+            Whether to provide theta (and t) as GLU or main input to the
+            continuous_flow_net.
         """
         super(ContinuousFlow, self).__init__()
-        self.continuous_flow = continuous_flow
+        self.continuous_flow_net = continuous_flow_net
         self.context_embedding_net = context_embedding_net
         self.theta_embedding_net = theta_embedding_net
         self.theta_with_glu = theta_with_glu
@@ -71,8 +78,6 @@ class ContinuousFlow(nn.Module):
         Update the cache for *context. This sets new values for self._cached_context and
         self._cached_context_embedding if self._cached_context != context.
         """
-        # if self._cached_context is None:
-        #     print("TODO: Slightly rewritten context caching to adopt to varying batch_size, pls check")
         try:
             # This may fail when batch size of context and _cached_context is different
             # (but both > 1).
@@ -115,7 +120,7 @@ class ContinuousFlow(nn.Module):
         # for unconditional forward pass
         if len(context) == 0:
             assert not self.theta_with_glu
-            return self.continuous_flow(t_and_theta_embedding)
+            return self.continuous_flow_net(t_and_theta_embedding)
 
         # embed context (self.context_embedding_net might just be identity)
         if not self.use_cache:
@@ -139,47 +144,43 @@ class ContinuousFlow(nn.Module):
         # self.theta_with_glu and self.context_with_glu specify whether we use the
         # first entrypoint (= False) or the second (= True).
         if self.context_with_glu and self.theta_with_glu:
-            input = torch.Tensor([])
+            main_input = torch.Tensor([])
             glu_context = torch.cat((context_embedding, t_and_theta_embedding), dim=1)
         elif not self.context_with_glu and not self.theta_with_glu:
-            input = torch.cat((context_embedding, t_and_theta_embedding), dim=1)
+            main_input = torch.cat((context_embedding, t_and_theta_embedding), dim=1)
             glu_context = None
         elif self.context_with_glu:
-            input = t_and_theta_embedding
+            main_input = t_and_theta_embedding
             glu_context = context_embedding
         else:  # if self.theta_with_glu:
-            input = context_embedding
+            main_input = context_embedding
             glu_context = t_and_theta_embedding
 
         if glu_context is None:
-            return self.continuous_flow(input)
+            return self.continuous_flow_net(main_input)
         else:
-            return self.continuous_flow(input, glu_context)
+            return self.continuous_flow_net(main_input, glu_context)
 
 
 def create_cf(
     posterior_kwargs: dict, embedding_kwargs: dict = None, initial_weights: dict = None
 ):
     """
-    TODO: re-name 'embedding_kwargs' to 'context_embedding_kwargs'.
-    Build CF model. This models the posterior distribution p(y|x).
+    Build a continuous flow based on settings dictionaries.
 
-    The model consists of
-        * an embedding
-        * a continuous flow model
+    Parameters
+    ----------
+    posterior_kwargs: dict
+        Settings for the flow. This includes the settings for the parameter embedding.
+    embedding_kwargs: dict
+        Settings for the context embedding network.
+    initial_weights: dict
+        Initial weights for the embedding network (of SVD projection type).
 
-    :param input_dim: int,
-        dimensionality of theta
-    :param context_dim: int,
-        dimensionality of the (embedded) context
-    :param posterior_kwargs: dict,
-        posterior_kwargs characterizing the cf-net hyperparamters
-    :param embedding_net_builder: Callable=None,
-        build function for embedding network TODO
-    :param embedding_kwargs: dict=None,
-        hyperparameters for embedding network
-    :return: ContinuousFlowModel
-        the cf (posterior model)
+    Returns
+    -------
+    nn.Module
+        Neural network for the continuous flow.
     """
     theta_dim = posterior_kwargs["input_dim"]
     context_dim = posterior_kwargs["context_dim"]
@@ -220,7 +221,7 @@ def create_cf(
     activation_fn = torchutils.get_activation_function_from_string(
         posterior_kwargs["activation"]
     )
-    continuous_flow = DenseResidualNet(
+    continuous_flow_net = DenseResidualNet(
         input_dim=input_dim,
         output_dim=theta_dim,
         hidden_dims=posterior_kwargs["hidden_dims"],
@@ -231,7 +232,7 @@ def create_cf(
     )
 
     model = ContinuousFlow(
-        continuous_flow,
+        continuous_flow_net,
         context_embedding,
         theta_embedding,
         theta_with_glu=posterior_kwargs.get("theta_with_glu", False),
