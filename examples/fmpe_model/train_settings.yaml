@@ -37,7 +37,7 @@ data:
   - psi
 
 model:
-  type: flow_matching
+  posterior_model_type: flow_matching
   posterior_kwargs:
     activation: gelu
     batch_norm: true
