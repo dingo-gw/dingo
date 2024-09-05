@@ -40,6 +40,10 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
     Within that framework, one can employ different methods to learn the vector field v,
     such as flow matching or score matching. These have slightly different coefficients
     c1(t), c2(t) and training objectives.
+
+    This class is intended to construct and hold a neural network for estimating the
+    posterior density, as well as saving / loading, and training. It also has
+    functionality for sampling and density evaluation.
     """
 
     def __init__(self, **kwargs):
