@@ -127,20 +127,13 @@ class DingoDataset:
 
     def from_file(self, file_name, leave_on_disk_keys=None):
         print("Loading dataset from " + str(file_name) + ".")
-        if leave_on_disk_keys is None or leave_on_disk_keys == []:
-            with h5py.File(file_name, "r") as f:
-                # Load only the keys that the class expects
-                loaded_dict = recursive_hdf5_load(f, keys=self._data_keys)
-                for k, v in loaded_dict.items():
-                    assert k in self._data_keys
-                    setattr(self, k, v)
-                try:
-                    self.settings = ast.literal_eval(f.attrs["settings"])
-                except KeyError:
-                    self.settings = None  # Is this necessary?
-        else:
-            # Open hdf5 file
-            f = h5py.File(file_name, "r")
+        # Replace key 'polarizations' with 'h_cross' and 'h_plus'
+        if leave_on_disk_keys is not None and "polarizations" in leave_on_disk_keys:
+            leave_on_disk_keys.remove("polarizations")
+            leave_on_disk_keys.append("h_cross")
+            leave_on_disk_keys.append("h_plus")
+
+        with h5py.File(file_name, "r") as f:
             # Load only the keys that the class expects
             loaded_dict = recursive_hdf5_load(
                 f, keys=self._data_keys, leave_on_disk_keys=leave_on_disk_keys
@@ -152,10 +145,6 @@ class DingoDataset:
                 self.settings = ast.literal_eval(f.attrs["settings"])
             except KeyError:
                 self.settings = None  # Is this necessary?
-            # The hdf5 file is not closed here since the values corresponding to the leave_on_disk_keys are only loaded
-            # by reference at this point. They will be loaded on the fly in WaveformDataset.__getitem__()
-            # The file should be closed when the DataLoader enters the garbage collection. Does this happen
-            # automatically?
 
     def to_dictionary(self):
         dictionary = {

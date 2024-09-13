@@ -58,22 +58,34 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         self.domain = None
         self.transform = transform
         self.decompression_transform = None
+        self.file_handle = None
         self.precision = precision
+        if self.precision is not None:
+            if self.precision == "single":
+                self.complex_type = np.complex64
+                self.real_type = np.float32
+            elif self.precision == "double":
+                self.complex_type = np.complex128
+                self.real_type = np.float64
+            else:
+                raise TypeError(
+                    'precision can only be changed to "single" or "double".'
+                )
+        else:
+            self.real_type, self.complex_type = None, None
         super().__init__(
             file_name=file_name,
             dictionary=dictionary,
             data_keys=["parameters", "polarizations", "svd"],
-            leave_on_disk_keys=leave_on_disk_keys,
+            leave_on_disk_keys=["polarizations"],
         )
         self.file_name = file_name
-        self.file_handle = None
 
         if (
-            self.parameters is not None
-            and self.polarizations is not None
-            and self.settings is not None
+            self.settings is not None
         ):
             self.load_supplemental(domain_update, svd_size_update)
+            self.svd_size_update = svd_size_update
 
     def load_supplemental(self, domain_update=None, svd_size_update=None):
         """Method called immediately after loading a dataset.
@@ -96,32 +108,22 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         self.update_domain(domain_update)
 
         # Update dtypes if necessary
-        if self.precision is not None:
-            if self.precision == "single":
-                complex_type = np.complex64
-                real_type = np.float32
-            elif self.precision == "double":
-                complex_type = np.complex128
-                real_type = np.float64
-            else:
-                raise TypeError(
-                    'precision can only be changed to "single" or "double".'
-                )
+        if self.precision is not None and self.complex_type is not None and self.real_type is not None:
             if self.parameters is not None:
-                self.parameters = self.parameters.astype(real_type, copy=False)
+                self.parameters = self.parameters.astype(self.real_type, copy=False)
             if (
                 self.polarizations["h_cross"] is not None
                     and self.polarizations["h_plus"] is not None
             ):
                 for k, v in self.polarizations.items():
-                    self.polarizations[k] = v.astype(complex_type, copy=False)
+                    self.polarizations[k] = v.astype(self.complex_type, copy=False)
 
             # This should probably be moved to the SVDBasis class.
             if self.svd is not None:
-                self.svd["V"] = self.svd["V"].astype(complex_type, copy=False)
+                self.svd["V"] = self.svd["V"].astype(self.complex_type, copy=False)
                 # For backward compatibility; in future, this will be there.
                 if "s" in self.svd:
-                    self.svd["s"] = self.svd["s"].astype(real_type, copy=False)
+                    self.svd["s"] = self.svd["s"].astype(self.real_type, copy=False)
 
         if self.settings.get("compression", None) is not None:
             self.initialize_decompression(svd_size_update)
@@ -156,7 +158,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             and "svd" in self.settings["compression"]
         ):
             self.svd["V"] = self.domain.update_data(self.svd["V"], axis=0)
-        else:
+        elif self.polarizations["h_cross"] is not None and self.polarizations["h_plus"] is not None:
             for k, v in self.polarizations.items():
                 self.polarizations[k] = self.domain.update_data(v)
 
@@ -175,15 +177,12 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         # These transforms must be in reverse order compared to when dataset was
         # constructed.
 
-        if "svd" in self.settings["compression"]:
-            assert self.svd is not None
+        if "svd" in self.settings["compression"] and self.svd is not None:
 
             # We allow the option to reduce the size of the SVD used for decompression,
             # since decompression is the costliest preprocessing operation. Be careful
             # when using this to not introduce a large mismatch.
-            if (svd_size_update is not None
-                and "svd" not in self.leave_on_disk_keys
-                and "polarizations" not in self.leave_on_disk_keys):
+            if svd_size_update is not None:
                 if svd_size_update > self.svd["V"].shape[-1] or svd_size_update < 0:
                     raise ValueError(
                         f"Cannot truncate SVD from size "
@@ -192,8 +191,10 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                     )
                 self.svd["V"] = self.svd["V"][:, :svd_size_update]
                 self.svd["s"] = self.svd["s"][:svd_size_update]
-                for k, v in self.polarizations.items():
-                    self.polarizations[k] = v[:, :svd_size_update]
+                if self.polarizations is not None:
+                    for k, v in self.polarizations.items():
+                        if self.polarizations[k] is not None:
+                            self.polarizations[k] = v[:, :svd_size_update]
 
             svd_basis = SVDBasis(dictionary=self.svd)
             decompression_transform_list.append(ApplySVD(svd_basis, inverse=True))
@@ -214,7 +215,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         """The number of waveform samples."""
         return len(self.parameters)
 
-    def __getitem__(self, idx) -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
+    def __getitem__(self, idx: Union[int, np.array]) -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
         """
         Return a nested dictionary containing parameters and waveform polarizations
         for sample with index `idx`. If defined, a chain of transformations is applied to
@@ -224,15 +225,23 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             # Open hdf5 file
             self.file_handle = h5py.File(self.file_name, "r")
 
+        # Get parameters and data for idx
         if self.leave_on_disk_keys is None:
+            # All data is in memory
             parameters = self.parameters.iloc[idx].to_dict()
             polarizations = {
                 pol: waveforms[idx] for pol, waveforms in self.polarizations.items()
             }
         else:
+            # Data or parameters are not in memory -> load them
             if "parameters" in self.leave_on_disk_keys and "h_cross" in self.leave_on_disk_keys and "h_plus" in self.leave_on_disk_keys:
                 data = recursive_hdf5_load(self.file_handle, keys=["parameters", "polarizations"], idx=idx)
-                parameters, polarizations = data["parameters"], data["polarizations"]
+                if self.svd is None:
+                    # Apply domain update to set waveform to zero for f < f_min
+                    polarizations = {
+                        pol: self.domain.update_data(waveforms) for pol, waveforms in data["polarizations"].items()
+                    }
+                parameters = data["parameters"]
             elif "parameters" in self.leave_on_disk_keys:
                 parameters = recursive_hdf5_load(self.file_handle, keys=["parameters"], idx=idx)["parameters"]
                 polarizations = {
@@ -240,10 +249,29 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                 }
             elif "h_cross" in self.leave_on_disk_keys or "h_plus" in self.leave_on_disk_keys:
                 polarizations = recursive_hdf5_load(self.file_handle, keys=["polarizations"], idx=idx)["polarizations"]
-                parameters = self.parameters.iloc[idx].to_dict()
+                if self.svd is None:
+                    # Apply domain update to set waveform to zero for f < f_min
+                    polarizations = {
+                        pol: self.domain.update_data(waveforms) for pol, waveforms in polarizations.items()
+                    }
+                parameters = self.parameters.iloc[idx]
             else:
                 raise ValueError(f"Unknown leave_on_disk_keys {self.leave_on_disk_keys}. "
                                  f"Cannot be loaded during __getitem__().")
+            # Update precision
+            if self.precision is not None and self.real_type is not None and self.complex_type is not None:
+                parameters = parameters.astype(self.real_type, copy=False)
+                for k, v in polarizations.items():
+                        polarizations[k] = v.astype(self.complex_type, copy=False)
+            if not isinstance(parameters, dict):
+                parameters = parameters.to_dict()
+            # Perform SVD size update on waveform
+            if self.svd is not None and self.svd_size_update is not None:
+                for k, v in polarizations.items():
+                    if len(v.shape) == 1:
+                        polarizations[k] = v[:self.svd_size_update]
+                    else:
+                        polarizations[k] = v[:, :self.svd_size_update]
 
         # Decompression transforms are assumed to apply only to the waveform,
         # and do not involve parameters.
@@ -253,7 +281,17 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         # Main transforms can depend also on parameters.
         data = {"parameters": parameters, "waveform": polarizations}
         if self.transform is not None:
-            data = self.transform(data)
+            if isinstance(idx, int):
+                data = self.transform(data)
+            else:
+                # TODO: replace by vectorized version of transforms,
+                #  ideally, transforms can handle single data point and batch
+                data = [self.transform(
+                    {"parameters": {k: data["parameters"][k][j] for k in data["parameters"].keys()},
+                     "waveform": {"h_cross": data["waveform"]["h_cross"][i], "h_plus": data["waveform"]["h_plus"][i]}}
+                    ) for i, j in enumerate(idx)
+                ]
+
         return data
 
     def __del__(self):
