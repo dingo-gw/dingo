@@ -323,6 +323,11 @@ def build_train_and_test_loaders(
         dataset, train_fraction
     )
 
+    if num_workers > 0:
+        persistent_workers = True
+    else:
+        persistent_workers = False
+
     # Create dataloaders for multi-GPU training separately, because arguments `shuffle` and `sampler` in DataLoader
     # are mutually exclusive
     if rank is not None and world_size is not None:
@@ -338,7 +343,7 @@ def build_train_and_test_loaders(
             num_workers=num_workers,
             worker_init_fn=fix_random_seeds,
             sampler=train_sampler,
-            persistent_workers=True,
+            persistent_workers=persistent_workers,
         )
         test_loader = DataLoader(
             test_dataset,
@@ -347,7 +352,7 @@ def build_train_and_test_loaders(
             num_workers=num_workers,
             worker_init_fn=fix_random_seeds,
             sampler=test_sampler,
-            persistent_workers=True,
+            persistent_workers=persistent_workers,
         )
     else:
         train_sampler = None
@@ -359,7 +364,7 @@ def build_train_and_test_loaders(
             pin_memory=True,
             num_workers=num_workers,
             worker_init_fn=fix_random_seeds,
-            persistent_workers=True,
+            persistent_workers=persistent_workers,
         )
         test_loader = DataLoader(
             test_dataset,
@@ -368,7 +373,7 @@ def build_train_and_test_loaders(
             pin_memory=True,
             num_workers=num_workers,
             worker_init_fn=fix_random_seeds,
-            persistent_workers=True,
+            persistent_workers=persistent_workers,
         )
 
     return train_loader, test_loader, train_sampler
