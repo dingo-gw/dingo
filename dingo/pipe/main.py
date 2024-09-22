@@ -159,6 +159,7 @@ class MainInput(BilbyMainInput):
         # self.enforce_signal_duration = args.enforce_signal_duration
 
         self.run_local = args.local
+        self.generation_pool = args.generation_pool
         self.local_generation = args.local_generation
         self.local_plot = args.local_plot
 

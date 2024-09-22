@@ -518,6 +518,22 @@ def create_parser(top_level=True):
         ),
     )
     submission_parser.add(
+        "--generation-pool",
+        default="local-pool",
+        choices=["local", "local-pool", "igwn-pool"],
+        help=(
+            "Where to run the data generation job. Options are [local-pool, "
+            "local, igwn-pool]. If local-pool, the data generation job is "
+            "submitted to the local HTCondor pool. If local, the data "
+            "generation job is run on the submit node. If igwn-pool, the "
+            "data generation job is submitted to the IGWN HTCondor pool (osg)"
+            " if the submit node has access to the IGWN pool. In general, "
+            "the igwn-pool should be used when possible, but some large files, "
+            "e.g., ROQ bases may not be available via CVMFS and so the local-pool "
+            "should be used. (default: local-pool)"
+        ),
+    )
+    submission_parser.add(
         "--local-plot", action="store_true", help="Run the plot job locally"
     )
 
