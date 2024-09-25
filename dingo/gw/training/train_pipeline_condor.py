@@ -3,6 +3,8 @@ import sys
 from os.path import join, isfile
 import yaml
 import argparse
+import shutil
+import time
 
 import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -166,6 +168,20 @@ def run_multi_gpu_training(
     epoch: int
         The epoch number where the training finished
     """
+    # Copy waveform dataset to local node to minimize network traffic during training
+    wfd_path = train_settings["data"]["waveform_dataset_path"]
+    file_name = wfd_path.split("/")[-1]
+    wfd_path_tmp = join("/dev/tmp", file_name)
+    print("Copying waveform dataset to {}".format(wfd_path_tmp))
+    start_time = time.time()
+    shutil.copy(wfd_path, wfd_path_tmp)
+    elapsed_time = time.time() - start_time
+    print(
+        "Done. This took {:2.0f}:{:2.0f} min.".format(*divmod(elapsed_time, 60))
+    )
+    # Overwrite waveform_dataset_path
+    train_settings["data"]["waveform_dataset_path"] = wfd_path_tmp
+
     initial_weights, pretrained_emb_net, checkpoint_file = None, None, None
     if not resume:
         wfd, initial_weights, pretrained_emb_net = (
@@ -182,25 +198,9 @@ def run_multi_gpu_training(
     else:
         pretraining = False
 
-    # complete, pm_epoch = mp.spawn(
-    #     run_training_ddp,
-    #     args=(
-    #         world_size,
-    #         train_settings,
-    #         local_settings,
-    #         train_dir,
-    #         wfd,
-    #         initial_weights,
-    #         pretraining,
-    #         pretrained_emb_net,
-    #         checkpoint_file,
-    #         resume,
-    #     ),
-    #     nprocs=world_size,
-    #     join=True,
-    # )
-    # try queue
+    # Setup multi-processing queue
     result_queue = mp.Queue()
+    # Start one process for each gpu
     for rank in range(world_size):
         mp.Process(target=run_training_ddp,
                    args=(
@@ -219,6 +219,7 @@ def run_multi_gpu_training(
                     )
                    ).start()
 
+    # Collect exit results from all processes after training
     complete, pm_epoch = [], []
     for _ in range(world_size):
         temp_result = result_queue.get()
@@ -259,12 +260,20 @@ def run_training_ddp(
         Local settings
     train_dir: str
         Directory to store training output
+    wfd: WaveformDataset
+        Waveform dataset used for training
+    initial_weights: dict
+        Initial weights for embedding network
     pretraining: bool
         Whether to use the pretrained embedding network
+    pretrained_emb_net: Module
+        Pretrained embedding network
     ckpt_file: str
         if resume=True, path to the model checkpoint
     resume: bool
         Whether to resume training from checkpoint
+    result_queue:
+        The queue to which the results of the run will be stored
 
     Returns
     ----------
