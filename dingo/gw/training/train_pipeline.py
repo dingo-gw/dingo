@@ -414,7 +414,8 @@ def initialize_stage(
     if not resume:
         # New optimizer and scheduler. If we are resuming, these should have been
         # loaded from the checkpoint.
-        print("Initializing new optimizer and scheduler.")
+        if rank is not None or rank == 0:
+            print("Initializing new optimizer and scheduler.")
         pm.optimizer_kwargs = stage["optimizer"]
         pm.scheduler_kwargs = stage["scheduler"]
         pm.initialize_optimizer_and_scheduler(
@@ -437,7 +438,8 @@ def initialize_stage(
             )
     n_grad = get_number_of_model_parameters(pm.network, (True,))
     n_nograd = get_number_of_model_parameters(pm.network, (False,))
-    print(f"Fixed parameters: {n_nograd}\nLearnable parameters: {n_grad}\n")
+    if rank is None or rank == 0:
+        print(f"Fixed parameters: {n_nograd}\nLearnable parameters: {n_grad}\n")
 
     return train_loader, test_loader, train_sampler
 
@@ -466,6 +468,7 @@ def train_stages(pm, wfd, train_dir, local_settings):
     runtime_limits = RuntimeLimits(
         epoch_start=pm.epoch, **local_settings["runtime_limits"]
     )
+    rank = local_settings.get("rank", None)
 
     # Extract list of stages from settings dict
     stages = []
@@ -483,27 +486,29 @@ def train_stages(pm, wfd, train_dir, local_settings):
         stage = stages[n]
 
         if pm.epoch == end_epochs[n] - stage["epochs"]:
-            print(f"\nBeginning training stage {n}. Settings:")
-            print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
+            if rank is None or rank == 0:
+                print(f"\nBeginning training stage {n}. Settings:")
+                print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
             train_loader, test_loader, train_sampler = initialize_stage(
                 pm,
                 wfd,
                 stage,
                 local_settings["num_workers"],
                 world_size=local_settings.get("world_size", None),
-                rank=local_settings.get("rank", None),
+                rank=rank,
                 resume=False,
             )
         else:
-            print(f"\nResuming training in stage {n}. Settings:")
-            print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
+            if rank is None or rank == 0:
+                print(f"\nResuming training in stage {n}. Settings:")
+                print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
             train_loader, test_loader, train_sampler = initialize_stage(
                 pm,
                 wfd,
                 stage,
                 local_settings["num_workers"],
                 world_size=local_settings.get("world_size", None),
-                rank=local_settings.get("rank", None),
+                rank=rank,
                 resume=True,
             )
 
@@ -529,7 +534,7 @@ def train_stages(pm, wfd, train_dir, local_settings):
                 save_file = os.path.join(train_dir, f"model_stage_{n}.pt")
                 print(f"Training stage complete. Saving to {save_file}.")
                 pm.save_model(save_file, save_training_info=True)
-        if runtime_limits.local_limits_exceeded(pm.epoch):
+        if runtime_limits.local_limits_exceeded(pm.epoch) and (rank is None or rank == 0):
             print("Local runtime limits reached. Ending program.")
             break
 
