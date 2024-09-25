@@ -75,7 +75,11 @@ class DingoDataset:
     dataset_type = "dingo_dataset"
 
     def __init__(
-        self, file_name=None, dictionary=None, data_keys=None, leave_on_disk_keys=None
+            self,
+            file_name: str | None = None,
+            dictionary: dict | None = None,
+            data_keys: list | None = None,
+            leave_on_disk_keys: list | None = None,
     ):
         """
         For constructing, provide either file_name, or dictionary containing data and
@@ -92,6 +96,10 @@ class DingoDataset:
             Variables that should be saved / loaded. This allows for class to store
             additional variables beyond those that are saved. Typically, this list
             would be provided by any subclass.
+        leave_on_disk_keys: list
+            Variables that should not be loaded from disk to reduce the memory footprint
+            during training. Required for multi-GPU training. Typically, it is sufficient
+            to leave the waveforms on disk with ['polarizations'].
         """
         self._data_keys = list(data_keys)  # Make a copy before modifying.
         self._data_keys.append("version")
@@ -125,7 +133,7 @@ class DingoDataset:
 
                 # Explicit line for loading and closing, only close it if there's nothing left on disk
 
-    def from_file(self, file_name, leave_on_disk_keys=None):
+    def from_file(self, file_name: str, leave_on_disk_keys: list | None = None):
         print("Loading dataset from " + str(file_name) + ".")
         # Replace key 'polarizations' with 'h_cross' and 'h_plus'
         if leave_on_disk_keys is not None and "polarizations" in leave_on_disk_keys:

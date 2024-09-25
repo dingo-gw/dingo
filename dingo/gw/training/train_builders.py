@@ -47,6 +47,7 @@ def build_dataset(data_settings):
         precision="single",
         domain_update=domain_update,
         svd_size_update=data_settings.get("svd_size_update"),
+        leave_on_disk_keys=data_settings.get("leave_on_disk_keys", None)
     )
     return wfd
 

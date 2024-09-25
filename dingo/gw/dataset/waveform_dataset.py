@@ -25,13 +25,13 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
 
     def __init__(
         self,
-        file_name=None,
-        dictionary=None,
+        file_name: str | None = None,
+        dictionary: dict | None = None,
         transform=None,
-        precision=None,
-        domain_update=None,
-        svd_size_update=None,
-        leave_on_disk_keys=None,
+        precision: str | None = None,
+        domain_update: dict | None = None,
+        svd_size_update: int | None = None,
+        leave_on_disk_keys: list | None = None,
     ):
         """
         For constructing, provide either file_name, or dictionary containing data and
@@ -77,7 +77,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             file_name=file_name,
             dictionary=dictionary,
             data_keys=["parameters", "polarizations", "svd"],
-            leave_on_disk_keys=["polarizations"],
+            leave_on_disk_keys=leave_on_disk_keys,
         )
         self.file_name = file_name
 
@@ -235,6 +235,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         else:
             # Data or parameters are not in memory -> load them
             if "parameters" in self.leave_on_disk_keys and "h_cross" in self.leave_on_disk_keys and "h_plus" in self.leave_on_disk_keys:
+                # Not working at the moment because standardization of parameters is calculated at training time
                 data = recursive_hdf5_load(self.file_handle, keys=["parameters", "polarizations"], idx=idx)
                 if self.svd is None:
                     # Apply domain update to set waveform to zero for f < f_min
@@ -243,6 +244,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                     }
                 parameters = data["parameters"]
             elif "parameters" in self.leave_on_disk_keys:
+                # Not working at the moment because standardization of parameters is calculated at training time
                 parameters = recursive_hdf5_load(self.file_handle, keys=["parameters"], idx=idx)["parameters"]
                 polarizations = {
                     pol: waveforms[idx] for pol, waveforms in self.polarizations.items()
