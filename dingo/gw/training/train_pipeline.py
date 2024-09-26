@@ -111,6 +111,7 @@ def prepare_wfd_and_initialization_for_embedding_network(
                 pretraining=False,
                 pretrained_embedding_net=None,
                 device=local_settings["device"],
+                print_output=print_output,
             )
             # Check whether loaded model has same architecture as specified in train_settings
             check_pretraining_model_compatibility(train_settings, pm.metadata)
@@ -183,7 +184,8 @@ def prepare_model_new(
         "dataset_settings": wfd.settings,
         "train_settings": train_settings,
     }
-    if "rank" not in local_settings or local_settings.get("rank", None) == 0:
+    print_output = True if ("rank" not in local_settings or local_settings.get("rank", None) == 0) else False
+    if print_output:
         print("\nInitializing new posterior model.")
         print("Complete settings:")
         print(yaml.dump(full_settings, default_flow_style=False, sort_keys=False))
@@ -194,6 +196,7 @@ def prepare_model_new(
         pretrained_embedding_net=pretrained_embedding_net,
         initial_weights=initial_weights,
         device=local_settings["device"],
+        print_output=print_output,
     )
 
     if local_settings.get("wandb", False) and local_settings.get("rank", 0.0) == 0.0:
@@ -307,12 +310,13 @@ def prepare_model_resume(
     -------
     Base
     """
-
+    print_output = True if ("rank" not in local_settings or local_settings.get("rank", None) == 0) else False
     pm = build_model_from_kwargs(
         filename=checkpoint_name,
         pretraining=pretraining,
         pretrained_embedding_net=None,
         device=local_settings["device"],
+        print_output=print_output,
     )
 
     if local_settings.get("wandb", False):
@@ -405,7 +409,7 @@ def initialize_stage(
 
     # Rebuild transforms based on possibly different noise.
     print_output = True if rank is None or rank == 0 else False
-    set_train_transforms(wfd, train_settings["data"], stage["asd_dataset_path"], print_output)
+    set_train_transforms(wfd, train_settings["data"], stage["asd_dataset_path"], print_output=print_output)
 
     # Allows for changes in batch size between stages.
     train_loader, test_loader, train_sampler = build_train_and_test_loaders(

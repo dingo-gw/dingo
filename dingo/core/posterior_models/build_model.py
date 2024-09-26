@@ -13,6 +13,7 @@ def build_model_from_kwargs(
     settings: dict = None,
     pretraining: bool = False,
     pretrained_embedding_net: torch.nn.Module = None,
+    print_output: bool = True,
     **kwargs,
 ):
     """
@@ -29,6 +30,8 @@ def build_model_from_kwargs(
         whether to use the pretrained embedding network
     pretrained_embedding_net: torch.nn.Module=None
         pretrained embedding network
+    print_output: bool = True
+        Whether to write print messages to the console.
     kwargs
 
     Returns
@@ -115,9 +118,10 @@ def build_model_from_kwargs(
     if allow_tf32:
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
-        print(
-            f"Cuda and cudnn backends running with allow_tf32 = {torch.backends.cuda.matmul.allow_tf32}."
-        )
+        if print_output:
+            print(
+                f"Cuda and cudnn backends running with allow_tf32 = {torch.backends.cuda.matmul.allow_tf32}."
+            )
 
     # Create/Load model
     pm = model(
