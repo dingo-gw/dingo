@@ -171,7 +171,7 @@ def run_multi_gpu_training(
     # Copy waveform dataset to local node to minimize network traffic during training
     wfd_path = train_settings["data"]["waveform_dataset_path"]
     file_name = wfd_path.split("/")[-1]
-    wfd_path_tmp = join("/dev/tmp", file_name)
+    wfd_path_tmp = join("/tmp", file_name)
     print("Copying waveform dataset to {}".format(wfd_path_tmp))
     start_time = time.time()
     shutil.copy(wfd_path, wfd_path_tmp)
