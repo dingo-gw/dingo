@@ -19,7 +19,7 @@ class StrainTokenization(object):
         token_size: int = None,
         normalize_frequency: bool = False,
         single_tokenizer: bool = False,
-        print_bool: bool = True,
+        print_output: bool = True,
     ):
         """
         Parameters
@@ -38,7 +38,7 @@ class StrainTokenization(object):
         single_tokenizer: bool
             Whether to use the StrainTokenization implementation designed for a
             single tokenizer
-        print_bool: bool
+        print_output: bool
             Whether to write print statements to the console.
         """
         if num_tokens is not None and token_size is not None:
@@ -80,7 +80,7 @@ class StrainTokenization(object):
         self.f_max = self.f_max_per_token[-1]
         self.num_tokens = num_tokens
 
-        if print_bool:
+        if print_output:
             print(
                 f"Tokenization:\n"
                 f"  Token width {self.num_bins_per_token} frequency bins; {num_tokens} "

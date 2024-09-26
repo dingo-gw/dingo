@@ -143,10 +143,10 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     # parameters.
     try:
         standardization_dict = data_settings["standardization"]
-        if print_bool:
+        if print_output:
             print("Using previously-calculated parameter standardizations.")
     except KeyError:
-        if print_bool:
+        if print_output:
             print("Calculating new parameter standardizations.")
         standardization_dict = get_standardization_dict(
             extrinsic_prior_dict,
@@ -210,7 +210,7 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
                 token_size=token_size,
                 normalize_frequency=norm_freq,
                 single_tokenizer=single_tokenizer,
-                print_bool=print_bool,
+                print_output=print_output,
             )
         )
         selected_keys.append("position")
