@@ -34,6 +34,7 @@ def prepare_wfd_and_initialization_for_embedding_network(
     train_dir: str,
     local_settings: dict,
     pretraining: bool = False,
+    print_output: bool = True,
 ):
     """
     Based on a settings dictionary, initialize a WaveformDataset and parts of the embedding network.
@@ -72,7 +73,8 @@ def prepare_wfd_and_initialization_for_embedding_network(
             )
         ):
             # Build the SVD for seeding the resnet embedding network.
-            print("\nBuilding SVD for initialization of ResNet embedding network.")
+            if print_output:
+                print("\nBuilding SVD for initialization of ResNet embedding network.")
             initial_weights["V_rb_list"] = build_svd_for_embedding_network(
                 wfd,
                 train_settings["data"],
@@ -84,7 +86,8 @@ def prepare_wfd_and_initialization_for_embedding_network(
             )
         else:
             initial_weights = None
-            print("Building embedding network without SVD initialization.")
+            if print_output:
+                print("Building embedding network without SVD initialization.")
 
         if pretraining:
             train_settings = build_pretraining_model_kwargs(train_settings)
@@ -99,9 +102,10 @@ def prepare_wfd_and_initialization_for_embedding_network(
                     f"No pretrained model found at {pretrained_model_path}. If you want to start pretraining"
                     f"from scratch, delete the pretraining folder in train_dir."
                 )
-            print(
-                f"Loading embedding weights from pretrained model at {pretrained_model_path}."
-            )
+            if print_output:
+                print(
+                    f"Loading embedding weights from pretrained model at {pretrained_model_path}."
+                )
             pm = build_model_from_kwargs(
                 filename=pretrained_model_path,
                 pretraining=False,
@@ -125,6 +129,7 @@ def prepare_wfd_and_initialization_for_embedding_network(
         wfd,
         train_settings["data"],
         train_settings["training"]["stage_0"]["asd_dataset_path"],
+        print_output=print_output,
     )
 
     return wfd, initial_weights, pretrained_embedding_net
@@ -366,7 +371,7 @@ def prepare_training_resume(
 
 
 def initialize_stage(
-    pm, wfd, stage, num_workers, world_size: int = None, rank: int = None, resume=False
+    pm, wfd, stage, num_workers, world_size: int = None, rank: int = None, resume=False,
 ):
     """
     Initializes training based on PosteriorModel metadata and current stage:
@@ -399,7 +404,8 @@ def initialize_stage(
     train_settings = pm.metadata["train_settings"]
 
     # Rebuild transforms based on possibly different noise.
-    set_train_transforms(wfd, train_settings["data"], stage["asd_dataset_path"])
+    print_output = True if rank is None or rank == 0 else False
+    set_train_transforms(wfd, train_settings["data"], stage["asd_dataset_path"], print_output)
 
     # Allows for changes in batch size between stages.
     train_loader, test_loader, train_sampler = build_train_and_test_loaders(
@@ -414,7 +420,7 @@ def initialize_stage(
     if not resume:
         # New optimizer and scheduler. If we are resuming, these should have been
         # loaded from the checkpoint.
-        if rank is not None or rank == 0:
+        if print_output:
             print("Initializing new optimizer and scheduler.")
         pm.optimizer_kwargs = stage["optimizer"]
         pm.scheduler_kwargs = stage["scheduler"]
@@ -438,7 +444,7 @@ def initialize_stage(
             )
     n_grad = get_number_of_model_parameters(pm.network, (True,))
     n_nograd = get_number_of_model_parameters(pm.network, (False,))
-    if rank is None or rank == 0:
+    if print_output:
         print(f"Fixed parameters: {n_nograd}\nLearnable parameters: {n_grad}\n")
 
     return train_loader, test_loader, train_sampler
@@ -469,6 +475,7 @@ def train_stages(pm, wfd, train_dir, local_settings):
         epoch_start=pm.epoch, **local_settings["runtime_limits"]
     )
     rank = local_settings.get("rank", None)
+    print_bool = True if rank is None or rank == 0 else False
 
     # Extract list of stages from settings dict
     stages = []
@@ -486,7 +493,7 @@ def train_stages(pm, wfd, train_dir, local_settings):
         stage = stages[n]
 
         if pm.epoch == end_epochs[n] - stage["epochs"]:
-            if rank is None or rank == 0:
+            if print_bool:
                 print(f"\nBeginning training stage {n}. Settings:")
                 print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
             train_loader, test_loader, train_sampler = initialize_stage(
@@ -499,7 +506,7 @@ def train_stages(pm, wfd, train_dir, local_settings):
                 resume=False,
             )
         else:
-            if rank is None or rank == 0:
+            if print_bool:
                 print(f"\nResuming training in stage {n}. Settings:")
                 print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
             train_loader, test_loader, train_sampler = initialize_stage(
@@ -530,11 +537,11 @@ def train_stages(pm, wfd, train_dir, local_settings):
 
         if pm.epoch == end_epochs[n]:
             # Only save model on one device
-            if local_settings.get("rank", 0.0) == 0.0:
+            if rank is None or rank == 0:
                 save_file = os.path.join(train_dir, f"model_stage_{n}.pt")
                 print(f"Training stage complete. Saving to {save_file}.")
                 pm.save_model(save_file, save_training_info=True)
-        if runtime_limits.local_limits_exceeded(pm.epoch) and (rank is None or rank == 0):
+        if runtime_limits.local_limits_exceeded(pm.epoch) and print_bool:
             print("Local runtime limits reached. Ending program.")
             break
 

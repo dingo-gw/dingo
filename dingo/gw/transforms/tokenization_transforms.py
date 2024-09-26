@@ -18,7 +18,8 @@ class StrainTokenization(object):
         num_tokens: int = None,
         token_size: int = None,
         normalize_frequency: bool = False,
-        single_tokenizer: bool = False
+        single_tokenizer: bool = False,
+        print_bool: bool = True,
     ):
         """
         Parameters
@@ -37,6 +38,8 @@ class StrainTokenization(object):
         single_tokenizer: bool
             Whether to use the StrainTokenization implementation designed for a
             single tokenizer
+        print_bool: bool
+            Whether to write print statements to the console.
         """
         if num_tokens is not None and token_size is not None:
             raise ValueError("Cannot specify both num_tokens and token_size.")
@@ -77,16 +80,17 @@ class StrainTokenization(object):
         self.f_max = self.f_max_per_token[-1]
         self.num_tokens = num_tokens
 
-        print(
-            f"Tokenization:\n"
-            f"  Token width {self.num_bins_per_token} frequency bins; {num_tokens} "
-            f"tokens per detector\n"
-            f"  First token width {self.f_min_per_token[1] - self.f_min_per_token[0]} "
-            f"Hz\n"
-            f"  Last token width {self.f_min_per_token[-1] - self.f_min_per_token[-2]} "
-            f"Hz\n"
-            f"  Extrapolating to maximum frequency of {self.f_max_per_token[-1]} Hz"
-        )
+        if print_bool:
+            print(
+                f"Tokenization:\n"
+                f"  Token width {self.num_bins_per_token} frequency bins; {num_tokens} "
+                f"tokens per detector\n"
+                f"  First token width {self.f_min_per_token[1] - self.f_min_per_token[0]} "
+                f"Hz\n"
+                f"  Last token width {self.f_min_per_token[-1] - self.f_min_per_token[-2]} "
+                f"Hz\n"
+                f"  Extrapolating to maximum frequency of {self.f_max_per_token[-1]} Hz"
+            )
 
     def __call__(self, input_sample):
         """
@@ -129,7 +133,6 @@ class StrainTokenization(object):
             strain = strain.reshape(
                 self.num_tokens, num_blocks, num_channels * self.num_bins_per_token
             )
-
 
         sample["waveform"] = strain
         detector_dict = {"H1": 0, "L1": 1, "V1": 2}

@@ -24,6 +24,7 @@ class ASDDataset(DingoDataset):
         ifos=None,
         precision=None,
         domain_update=None,
+        print_output: bool = True,
     ):
         """
         Parameters
@@ -40,12 +41,15 @@ class ASDDataset(DingoDataset):
             If provided, changes precision of loaded dataset.
         domain_update : dict
             If provided, update domain from existing domain using new settings.
+        print_output: bool
+            Whether to write print statements to the console.
         """
         self.precision = precision
         super().__init__(
             file_name=file_name,
             dictionary=dictionary,
             data_keys=["asds", "gps_times", "asd_parameterizations"],
+            print_output=print_output,
         )
 
         if ifos is not None:
@@ -128,7 +132,8 @@ class ASDDataset(DingoDataset):
             self.domain.domain_dict["type"] == "FrequencyDomain"
             and domain_update["type"] == "MultibandedFrequencyDomain"
         ):
-            print("Updating ASD dataset to MultibandedFrequencyDomain.")
+            if self.print_output:
+                print("Updating ASD dataset to MultibandedFrequencyDomain.")
             asd_dataset_decimated = {}
             mfd = build_domain(domain_update)
             ufd = mfd.base_domain

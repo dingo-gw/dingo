@@ -80,6 +80,7 @@ class DingoDataset:
             dictionary: dict | None = None,
             data_keys: list | None = None,
             leave_on_disk_keys: list | None = None,
+            print_output: bool = True,
     ):
         """
         For constructing, provide either file_name, or dictionary containing data and
@@ -100,6 +101,8 @@ class DingoDataset:
             Variables that should not be loaded from disk to reduce the memory footprint
             during training. Required for multi-GPU training. Typically, it is sufficient
             to leave the waveforms on disk with ['polarizations'].
+        print_output: bool
+            Whether to write print statements to the console.
         """
         self._data_keys = list(data_keys)  # Make a copy before modifying.
         self._data_keys.append("version")
@@ -110,6 +113,7 @@ class DingoDataset:
         self.settings = None
         self.version = None
         self.leave_on_disk_keys = leave_on_disk_keys
+        self.print_output = print_output
 
         # If data provided, load it
         if file_name is not None:
@@ -118,7 +122,8 @@ class DingoDataset:
             self.from_dictionary(dictionary)
 
     def to_file(self, file_name, mode="w"):
-        print("Saving dataset to " + str(file_name))
+        if self.print_output:
+            print("Saving dataset to " + str(file_name))
         save_dict = {
             k: v
             for k, v in vars(self).items()
@@ -134,7 +139,8 @@ class DingoDataset:
                 # Explicit line for loading and closing, only close it if there's nothing left on disk
 
     def from_file(self, file_name: str, leave_on_disk_keys: list | None = None):
-        print("Loading dataset from " + str(file_name) + ".")
+        if self.print_output:
+            print("Loading dataset from " + str(file_name) + ".")
         # Replace key 'polarizations' with 'h_cross' and 'h_plus'
         if leave_on_disk_keys is not None and "polarizations" in leave_on_disk_keys:
             leave_on_disk_keys.remove("polarizations")
