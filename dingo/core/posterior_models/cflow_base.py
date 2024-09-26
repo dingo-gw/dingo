@@ -150,23 +150,20 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
         samples: torch.Tensor
             Shape (B, num_samples, dim(theta))
         """
-        self.network.eval()
+        context_size = context[0].shape[0]
+        theta_0 = self.sample_theta_0(num_samples * context_size)
+        context = [repeat_rows(c, num_reps=num_samples) for c in context]
 
-        with torch.no_grad():
-            context_size = context[0].shape[0]
-            theta_0 = self.sample_theta_0(num_samples * context_size)
-            context = [repeat_rows(c, num_reps=num_samples) for c in context]
+        _, theta_1 = odeint(
+            lambda t, theta_t: self.evaluate_vector_field(t, theta_t, *context),
+            theta_0,
+            self.integration_range,
+            atol=1e-7,
+            rtol=1e-7,
+            method="dopri5",
+        )
 
-            _, theta_1 = odeint(
-                lambda t, theta_t: self.evaluate_vector_field(t, theta_t, *context),
-                theta_0,
-                self.integration_range,
-                atol=1e-7,
-                rtol=1e-7,
-                method="dopri5",
-            )
-
-            theta_1 = split_leading_dim(theta_1, shape=[context_size, num_samples])
+        theta_1 = split_leading_dim(theta_1, shape=[context_size, num_samples])
 
         self.network.train()
         return theta_1
@@ -199,7 +196,6 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
         log_prob: torch.Tensor
             Shape (B,)
         """
-        self.network.eval()
         theta_and_div_init = torch.cat(
             (theta, torch.zeros((theta.shape[0],), device=theta.device).unsqueeze(1)),
             dim=1,
@@ -248,7 +244,6 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
         samples, log_prob: torch.Tensor, torch.Tensor
             Shapes (B, num_samples, dim(theta)), (B, num_samples)
         """
-        self.network.eval()
 
         context_size = context[0].shape[0]
         theta_0 = self.sample_theta_0(num_samples * context_size)

@@ -92,18 +92,11 @@ class ContinuousFlow(nn.Module):
         # if all tensors in batch are the same: do forward pass with batch_size 1
         if all([(x == x[:1]).all() for x in context]):
             self._cached_context = tuple(x[:1] for x in context)
-            self._cached_context_embedding = (
-                torchutils.forward_pass_with_unpacked_tuple(
-                    self.context_embedding_net, self._cached_context
-                ).detach()
-            )
+            self._cached_context_embedding = self.context_embedding_net(*self._cached_context).detach()
+        
         else:
             self._cached_context = context
-            self._cached_context_embedding = (
-                torchutils.forward_pass_with_unpacked_tuple(
-                    self.context_embedding_net, self._cached_context
-                )
-            ).detach()
+            self._cached_context_embedding = self.context_embedding_net(*self._cached_context).detach()
 
     def _get_cached_context_embedding(self, batch_size):
         if self._cached_context_embedding.size(0) == 1:
@@ -124,9 +117,8 @@ class ContinuousFlow(nn.Module):
 
         # embed context (self.context_embedding_net might just be identity)
         if not self.use_cache:
-            context_embedding = torchutils.forward_pass_with_unpacked_tuple(
-                self.context_embedding_net, context
-            )
+            context_embedding =self.context_embedding_net(*self._cached_context)
+
         else:
             self._update_cached_context(*context)
             context_embedding = self._get_cached_context_embedding(

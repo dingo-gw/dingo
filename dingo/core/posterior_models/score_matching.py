@@ -1,4 +1,3 @@
-# implementing Score-based diffusion based on VP SDE. Potential TODO: other SDEs, and in separate file
 import inspect
 import textwrap
 

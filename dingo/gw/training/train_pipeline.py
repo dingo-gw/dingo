@@ -8,21 +8,18 @@ import textwrap
 
 from threadpoolctl import threadpool_limits
 
-from dingo.core.posterior_models.build_model import autocomplete_model_kwargs
+from dingo.core.posterior_models.build_model import autocomplete_model_kwargs, build_model_from_kwargs
 from dingo.gw.training.train_builders import (
     build_dataset,
     set_train_transforms,
     build_svd_for_embedding_network,
 )
-from dingo.core.posterior_models.base_model import BasePosteriorModel
 from dingo.core.utils.trainutils import RuntimeLimits
 from dingo.core.utils import (
     set_requires_grad_flag,
     get_number_of_model_parameters,
     build_train_and_test_loaders,
 )
-from dingo.core.posterior_models.build_model import build_model_from_kwargs
-from dingo.gw.dataset import WaveformDataset
 
 
 def prepare_training_new(train_settings: dict, train_dir: str, local_settings: dict):
