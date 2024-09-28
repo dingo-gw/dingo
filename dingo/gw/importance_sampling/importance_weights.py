@@ -101,7 +101,6 @@ def main():
         )
         if isfile(nde_name):
             print(f"Loading nde at {nde_name} for event {event_name}.")
-            # TODO: Allow for more general models (e.g., flow matching).
             nde = NormalizingFlowPosteriorModel(
                 model_filename=nde_name,
                 device=settings["nde"]["training"]["device"],

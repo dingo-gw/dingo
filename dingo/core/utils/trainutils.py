@@ -3,6 +3,7 @@ import os
 import numpy as np
 from os.path import join, isfile
 import csv
+from typing import Literal
 
 
 class AvgTracker:
@@ -31,7 +32,7 @@ class EarlyStopping:
     early stopping occurs.
     """
 
-    def __init__(self, patience: int = 5, verbose: bool = False, delta: float = 0.0):
+    def __init__(self, patience: int = 5, verbose: bool = False, delta: float = 0.0, metric: Literal["training", "validation"]="validation"):
         """
         Parameters
         ----------
@@ -49,8 +50,11 @@ class EarlyStopping:
         self.early_stop = False
         self.val_loss_min = np.Inf
         self.delta = delta
+        if metric not in ["training", "validation"]:
+            raise ValueError("Early Stopping metric must be 'training' or 'validation'.")
+        self.metric = metric
 
-    def __call__(self, val_loss: float, model):
+    def __call__(self, val_loss: float):
         """
         Parameters
         ----------

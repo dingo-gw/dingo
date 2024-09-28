@@ -16,11 +16,11 @@ from threadpoolctl import threadpool_limits
 import dingo.core.utils.trainutils
 import json
 from collections import OrderedDict
-
+from typing import Optional
 from dingo.core.utils.backward_compatibility import update_model_config
 from dingo.core.utils.misc import get_version
-from dingo.core.utils.trainutils import EarlyStopping
 
+from dingo.core.utils.trainutils import EarlyStopping
 
 class BasePosteriorModel(ABC):
     """
@@ -368,7 +368,7 @@ class BasePosteriorModel(ABC):
         checkpoint_epochs: int = None,
         use_wandb=False,
         test_only=False,
-        early_stopping=False,
+        early_stopping: Optional[EarlyStopping] = None,
     ):
         """
 
@@ -393,8 +393,6 @@ class BasePosteriorModel(ABC):
             print(f"test loss: {test_loss:.3f}")
 
         else:
-            if early_stopping:
-                early_stopping = EarlyStopping(patience=7, verbose=True)
 
             while not runtime_limits.limits_exceeded(self.epoch):
                 self.epoch += 1
@@ -450,9 +448,9 @@ class BasePosteriorModel(ABC):
                     except ImportError:
                         print("wandb not installed. Skipping logging to wandb.")
 
-                if early_stopping:
-                    best_model = early_stopping(test_loss, self)
-                    if best_model:
+                if early_stopping is not None:
+                    is_best_model = early_stopping(test_loss)
+                    if is_best_model:
                         self.save_model(
                             join(train_dir, "best_model.pt"), save_training_info=False
                         )

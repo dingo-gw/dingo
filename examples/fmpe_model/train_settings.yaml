@@ -90,6 +90,10 @@ training:
     scheduler:
       T_max: 400
       type: cosine
+    # early_stopping:
+    #   patience: 10
+    #   delta: 0.0
+    #   metric: validation # one of ['training, validation']
   stage_1:
     asd_dataset_path: training_data/asd_dataset/asds_O1.hdf5
     batch_size: 4096
@@ -101,6 +105,10 @@ training:
     scheduler:
       T_max: 100
       type: cosine
+    # early_stopping:
+    #   patience: 10
+    #   delta: 0.0
+    #   metric: validation # one of ['training, validation']
 
 local:
   checkpoint_epochs: 200

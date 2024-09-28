@@ -74,6 +74,10 @@ training:
       type: cosine
       T_max: 300
     batch_size: 4096
+    # early_stopping:
+    #   patience: 10
+    #   delta: 0.0
+    #   metric: validation # one of ['training, validation']
 
   stage_1:
     epochs: 150
@@ -86,6 +90,10 @@ training:
       type: cosine
       T_max: 150
     batch_size: 4096
+    # early_stopping:
+    #   patience: 10
+    #   delta: 0.0
+    #   metric: validation # one of ['training, validation']
 
 # Local settings for training that have no impact on the final trained network.
 local:

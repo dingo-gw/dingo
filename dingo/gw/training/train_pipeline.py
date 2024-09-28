@@ -20,6 +20,7 @@ from dingo.core.utils import (
     get_number_of_model_parameters,
     build_train_and_test_loaders,
 )
+from dingo.core.utils.trainutils import EarlyStopping
 
 
 def prepare_training_new(train_settings: dict, train_dir: str, local_settings: dict):
@@ -261,6 +262,14 @@ def train_stages(pm, wfd, train_dir, local_settings):
             train_loader, test_loader = initialize_stage(
                 pm, wfd, stage, local_settings["num_workers"], resume=True
             )
+        early_stopping = None
+        if stage.get("early_stopping"):
+            try: 
+                early_stopping = EarlyStopping(**stage["early_stopping"])
+            except Exception:
+                print("Early stopping settings invalid. Please pass 'patience', 'delta', 'metric'")
+                raise
+            
 
         runtime_limits.max_epochs_total = end_epochs[n]
         pm.train(
@@ -271,6 +280,7 @@ def train_stages(pm, wfd, train_dir, local_settings):
             checkpoint_epochs=local_settings["checkpoint_epochs"],
             use_wandb=local_settings.get("wandb", False),
             test_only=local_settings.get("test_only", False),
+            early_stopping=early_stopping,
         )
         # if test_only, model should not be saved, and run is complete
         if local_settings.get("test_only", False):
