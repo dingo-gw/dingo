@@ -214,8 +214,6 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
             )
         )
         selected_keys.append("position")
-        if not single_tokenizer:
-            selected_keys.append("blocks")
     except KeyError:
         print(
             "No tokenization information found, omitting StrainTokenization transform."

@@ -18,8 +18,8 @@ class Tokenizer(nn.Module):
     Methods
     -------
     forward:
-        obtain the token embedding for a Tensor of shape
-        [batch_size, num_blocks, num_channels, num_tokens, num_bins_per_token]
+        obtain the token embedding for a Tensor of shape [batch_size, num_tokens, num_features]
+         = [batch_size, num_blocks * num_tokens_per_block, num_channels * num_bins_per_token]
         where num_blocks = number of interferometers in GW use case, and num_channels = [real, imag, asd]
     """
 
@@ -38,7 +38,7 @@ class Tokenizer(nn.Module):
         Parameters
         --------
         input_dims: List[int]
-            containing [num_tokens, num_blocks, num_features]=[num_tokens, num_blocks, num_channels*num_bins_per_token]
+            containing [num_tokens, num_features]=[num_tokens_per_block * num_blocks, num_channels*num_bins_per_token]
             where num_blocks = number of interferometers in GW use case, and num_channels = [real, imag, asd]
         hidden_dims: Optional[Tuple, int]
             if type List: dimensions of hidden layers for DenseResidualNet
@@ -58,13 +58,10 @@ class Tokenizer(nn.Module):
         """
         super(Tokenizer, self).__init__()
 
-        if len(input_dims) == 2:
-            self.seq_len, self.num_features = input_dims
-        elif len(input_dims) == 3:
-            self.num_tokens, self.num_blocks, self.num_features = input_dims
-        else:
-            raise ValueError(f"Invalid shape of input_dims: {input_dims} in Tokenizer")
-        if individual_token_embedding:
+        assert len(input_dims) == 2, f"Invalid shape in Tokenizer, expected len(input_dims) == 2, got {input_dims})."
+        self.num_tokens, self.num_features = input_dims
+        self.individual_token_embedding = individual_token_embedding
+        if self.individual_token_embedding:
             self.stack_tokenizer_nets = nn.ModuleList([
                 DenseResidualNet(
                     input_dim=self.num_features,
@@ -89,22 +86,19 @@ class Tokenizer(nn.Module):
                 layer_norm=layer_norm,
             )
 
-        self.individual_token_embedding = individual_token_embedding
-
     def forward(self, x: Tensor):
         """
         Parameters
         --------
         x: Tensor
-            shape [batch_size, ..., num_features]
-                 =[batch_size, ..., num_channels * num_bins_per_token]
-            where num_blocks = number of interferometers in GW use case, and num_channels = [real, imag, asd]
-            and ... can either be [num_tokens * num_blocks] or [num_tokens, num_blocks]
+            shape [batch_size, num_tokens, num_features]
+                 =[batch_size, num_blocks * num_tokens_per_block, num_channels * num_bins_per_token]
+            where num_blocks = number of interferometers in GW use case, and num_channels = [real, imag, asd].
 
         Returns
         --------
         x: Tensor
-            shape [batch_size, ..., d_model]
+            shape [batch_size, num_tokens, d_model]
         """
         if x.shape[-1] != self.num_features:
             raise ValueError(
@@ -201,43 +195,47 @@ class PositionalEncoding(nn.Module):
         Parameters
         --------
         x: Tensor
-            shape [batch_size, num_tokens, num_blocks, d_model]
+            shape [batch_size, num_tokens, d_model]
         position: Tensor
-            shape [batch_size, num_tokens, 2], last two dimensions correspond to min and max value of each token
+            shape [batch_size, num_tokens, 3]
+            last three dimensions correspond to [f_min, f_max, detector] of each token
 
         Returns
         --------
         x: Tensor
             same shape as input x
         """
-        batch_size, num_tokens, num_blocks = x.shape[0], x.shape[1], x.shape[2]
-        assert self.d_model == x.shape[3]
+        assert len(x.shape) == 3, (f"Invalid input shape in PositionalEncoding, expected len(input_dims) == 3, "
+                                   f"got shape {x.shape}).")
+        batch_size, num_tokens = x.shape[0], x.shape[1]
+        assert self.d_model == x.shape[2], (f"Invalid input shape in PositionalEncoding, "
+                                            f"expected x.shape[2] == {self.d_model}.")
         device = x.device
         min_vals, max_vals = position[..., 0], position[..., 1]
 
         # Assuming that min_val and max_val are the same for all blocks
         pos_embedding = torch.zeros(
-            (batch_size, num_tokens, num_blocks, self.d_model), device=device
+            (batch_size, num_tokens, self.d_model), device=device
         )
         pos_embedding[..., 0 : self.num_min_vals : 2] = torch.sin(
-            min_vals.unsqueeze(3) * self.factor_min
+            min_vals.unsqueeze(-1) * self.factor_min
         )
         pos_embedding[..., 1 : self.num_min_vals + 1 : 2] = torch.cos(
-            min_vals.unsqueeze(3) * self.factor_min
+            min_vals.unsqueeze(-1) * self.factor_min
         )
         pos_embedding[..., self.num_min_vals : self.d_model : 2] = torch.sin(
-            max_vals.unsqueeze(3) * self.factor_max
+            max_vals.unsqueeze(-1) * self.factor_max
         )
         f_max_cos_dim = pos_embedding[
             ..., self.num_min_vals + 1 : self.d_model : 2
-        ].shape[3]
+        ].shape[-1]
         pos_embedding[..., self.num_min_vals + 1 : self.d_model : 2] = torch.cos(
-            max_vals.unsqueeze(3) * self.factor_max[:f_max_cos_dim]
+            max_vals.unsqueeze(-1) * self.factor_max[:f_max_cos_dim]
         )
         if self.linear:
             pos_embedding = self.linear(pos_embedding)
 
-        x = (x + pos_embedding) / 2
+        x += pos_embedding
 
         return x
 
@@ -284,28 +282,18 @@ class BlockEncoding(nn.Module):
         Parameters
         --------
         x: Tensor
-            shape [batch_size, num_blocks, num_tokens, d_model]
+            shape [batch_size, num_tokens, d_model]
         blocks: Tensor
-            shape [batch_size, num_blocks], specifying the order of blocks in dim num_blocks of x.
+            shape [batch_size, num_tokens], specifying the block for each token.
 
         Returns
         --------
         x: Tensor
-            shape [batch_size, num_blocks*num_tokens, d_model]
+            shape [batch_size, num_tokens, d_model]
         """
-        if blocks.shape[1] != self.num_blocks:
-            raise ValueError(
-                f"Invalid shape for block indices in block encoding layer. "
-                f"Expected {self.num_blocks}, got {blocks.shape}."
-            )
-        if x.shape[2] != self.num_blocks:
-            raise ValueError(
-                f"Invalid input shape in block encoding layer. "
-                f"Expected {self.num_blocks} at index 2, got {x.shape}."
-            )
 
-        x = x + torch.unsqueeze(self.block_encoding(blocks.long()), 1)
-        x = x.reshape(x.shape[0], x.shape[1] * x.shape[2], x.shape[3]) / 2
+        x = x + self.block_encoding(blocks.long())
+        # x = x.reshape(x.shape[0], x.shape[1] * x.shape[2], x.shape[3]) / 2
 
         return x
 
@@ -427,7 +415,6 @@ class TransformerModel(nn.Module):
         self,
         x: Tensor,
         position: Tensor,
-        blocks: Tensor,
         src_key_padding_mask: Tensor = None,
     ) -> Tensor:
         """
@@ -435,12 +422,10 @@ class TransformerModel(nn.Module):
         --------
         x: Tensor
             shape depends on which type of tokenization transform was used
-            either [batch_size, num_tokens, num_blocks, num_channels * num_bins_per_token]
-            or [batch_size, num_tokens * num_blocks, num_channels * num_bins_per_token]
+            [batch_size, num_tokens, num_features] =
+            [batch_size, num_blocks * num_tokens_per_block, num_channels * num_bins_per_token]
         position: Tensor
-            shape [batch_size, num_blocks, 2], where the last dimension corresponds to min and max per token
-        blocks: Tensor
-            blocks determines the ordering of the blocks in BlockEmbedding
+            shape [batch_size, num_blocks, 3], where the last dimension corresponds to [f_mi, f_max, detector] per token
         src_key_padding_mask: Tensor
             shape [batch_size, num_tokens]
 
@@ -452,9 +437,9 @@ class TransformerModel(nn.Module):
         if self.tokenizer is not None:
             x = self.tokenizer(x)
         if self.positional_encoding is not None:
-            x = self.positional_encoding(x, position)
+            x = self.positional_encoding(x, position[..., 0:2])
         if self.block_encoding is not None:
-            x = self.block_encoding(x, blocks)
+            x = self.block_encoding(x, position[..., 2])
 
         x = self.transformer_encoder(x, src_key_padding_mask=src_key_padding_mask)
 
@@ -527,7 +512,6 @@ def create_transformer_enet(
         positional_encoder = None
 
     if block_encoder_kwargs is not None:
-        block_encoder_kwargs["num_blocks"] = tokenizer_kwargs["input_dims"][1]
         block_encoder_kwargs["d_model"] = transformer_kwargs["d_model"]
         block_encoder = BlockEncoding(**block_encoder_kwargs)
     else:

@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 
 from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
@@ -195,6 +196,10 @@ def autocomplete_model_kwargs(
                 model_kwargs["embedding_kwargs"]["tokenizer_kwargs"][
                     "output_dim"
                 ] = model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
+            if "block_encoder_kwargs" in model_kwargs["embedding_kwargs"]:
+                model_kwargs["embedding_kwargs"]["block_encoder_kwargs"][
+                    "num_blocks"
+                ] = len(np.unique(data_sample[2][:, 2]))
             if "final_net_kwargs" in model_kwargs["embedding_kwargs"]:
                 model_kwargs["embedding_kwargs"]["final_net_kwargs"][
                     "input_dim"

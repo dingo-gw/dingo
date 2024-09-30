@@ -107,34 +107,30 @@ class StrainTokenization(object):
         ----------
         sample: Dict
             input_sample with modified value for key
-            - 'waveform', shape [num_tokens, num_blocks, num_channels * num_bins_per_token]
+            - 'waveform', shape [seq_length, num_features] = [num_blocks * num_tokens, num_channels * num_bins_per_token]
             and additional keys
-            - 'position', shape [num_tokens, num_blocks, 2]
-            - 'blocks', shape [num_blocks]
+            - 'position', shape [num_blocks, num_tokens, 3]
+               contains information [f_min, f_max, block]
         """
         sample = input_sample.copy()
 
-        # pad last dimension
+        # Pad last dimension
         strain = np.pad(
             sample["waveform"],
             ((0, 0), (0, 0), (0, self.num_padded_f_bins)),
             "constant",
         )
+        # Reshape strain to shape [seq_length, num_features]
+        # = [num_blocks * num_tokens, num_channels * num_bins_per_token]
         num_blocks, num_channels = strain.shape[0], strain.shape[1]
         strain = strain.reshape(
             num_blocks, num_channels, self.num_tokens, self.num_bins_per_token
         )
-        strain = np.moveaxis(strain, 2, 0)
-        if self.single_tokenizer:
-            strain = strain.reshape(
-                self.num_tokens * num_blocks, num_channels * self.num_bins_per_token
-            )
-        else:
-            strain = strain.reshape(
-                self.num_tokens, num_blocks, num_channels * self.num_bins_per_token
-            )
-
-        sample["waveform"] = strain
+        strain = np.moveaxis(strain, 2, 1)
+        sample["waveform"] = strain.reshape(
+            num_blocks * self.num_tokens, num_channels * self.num_bins_per_token
+        )
+        # Prepare position information for each token
         detector_dict = {"H1": 0, "L1": 1, "V1": 2}
         detectors = np.array([detector_dict[key] for key in input_sample["asds"]])
         if self.normalize_freq:
@@ -148,22 +144,10 @@ class StrainTokenization(object):
             f_min_per_token = self.f_min_per_token
             f_max_per_token = self.f_max_per_token
 
-        if self.single_tokenizer:
-            token_position = np.empty((strain.shape[0], 3))
-            token_position[:, 0] = np.repeat(f_min_per_token, len(detectors))
-            token_position[:, 1] = np.repeat(f_max_per_token, len(detectors))
-            token_position[:, 2] = np.tile(detectors, self.num_tokens)
-            sample["position"] = token_position
-        else:
-            token_position = np.empty((strain.shape[0], len(detectors), 2))
-            token_position[..., 0] = np.repeat(
-                f_min_per_token[..., None], len(detectors), axis=1
-            )
-            token_position[..., 1] = np.repeat(
-                f_max_per_token[..., None], len(detectors), axis=1
-            )
-            # token_position[..., 2] = np.tile(detectors, self.num_tokens)
-            sample["position"] = token_position
-            sample["blocks"] = detectors
+        token_position = np.empty((num_blocks * self.num_tokens, 3))
+        token_position[:, 0] = np.repeat(f_min_per_token, len(detectors))
+        token_position[:, 1] = np.repeat(f_max_per_token, len(detectors))
+        token_position[:, 2] = np.repeat(detectors, self.num_tokens)
+        sample["position"] = token_position
 
         return sample
