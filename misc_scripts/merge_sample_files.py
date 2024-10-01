@@ -3,7 +3,6 @@ from os.path import dirname, basename, join
 import argparse
 import pandas as pd
 import numpy as np
-import pdb
 
 parser = argparse.ArgumentParser(description="Merge dingo smaple files")
 parser.add_argument("--prefix", type=str, required=True,

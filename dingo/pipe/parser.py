@@ -8,10 +8,8 @@ import configargparse
 from bilby_pipe.bilbyargparser import BilbyArgParser
 from bilby_pipe.utils import (
     ENVIRONMENT_DEFAULTS,
-    get_version_information,
     logger,
     nonefloat,
-    noneint,
     nonestr,
 )
 

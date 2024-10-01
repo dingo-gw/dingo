@@ -2,10 +2,8 @@
 TODO: Docstring
 """
 
-from typing import Callable
 import torch
 import dingo.core.utils as utils
-from torch.utils.data import Dataset
 import os
 import time
 import numpy as np

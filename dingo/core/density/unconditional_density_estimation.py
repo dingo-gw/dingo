@@ -5,7 +5,6 @@ import torch
 from dingo.core.utils import build_train_and_test_loaders
 from dingo.core.utils.trainutils import RuntimeLimits
 import numpy as np
-import pandas as pd
 import argparse
 
 from dingo.core.models import PosteriorModel
