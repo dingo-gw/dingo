@@ -23,6 +23,8 @@ from dingo.gw.transforms import (
     SampleExtrinsicParameters,
     GetDetectorTimes,
     StrainTokenization,
+    DropFrequencyValues,
+    DropDetectors
 )
 
 
@@ -206,7 +208,7 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         transforms.append(
             StrainTokenization(
                 domain,
-                num_tokens=num_tokens,
+                num_tokens_per_detector=num_tokens,
                 token_size=token_size,
                 normalize_frequency=norm_freq,
                 single_tokenizer=single_tokenizer,
@@ -214,6 +216,14 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
             )
         )
         selected_keys.append("position")
+        selected_keys.append("drop_token_mask")
+
+        # Randomly drop frequency ranges or detectors during training
+        if data_settings["tokenization"].get("drop_frequency_range", False):
+            transforms.append(DropFrequencyValues(print_output=print_output))
+        if data_settings["tokenization"].get("drop_detectors", False):
+            transforms.append(DropDetectors(print_output=print_output))
+
     except KeyError:
         print(
             "No tokenization information found, omitting StrainTokenization transform."
