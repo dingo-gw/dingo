@@ -69,6 +69,7 @@ class LossInfo:
     ):
         # data for print statements
         self.epoch = epoch
+        self.iteration = 0
         self.len_dataset = len_dataset
         self.batch_size = batch_size
         self.mode = mode
@@ -103,7 +104,9 @@ class LossInfo:
 
     def update(self, loss: torch.tensor, n: torch.tensor):
         self.update_timer(timer_mode="Network")
-        # detach tensors from compute graph
+        # Log number of iteations per epoch
+        self.iteration += 1
+        # Detach tensors from compute graph
         loss = loss.detach()
         n = n.detach()
         if self.multi_gpu:
@@ -124,6 +127,9 @@ class LossInfo:
 
     def get_avg(self):
         return self.loss_tracker.get_avg()
+
+    def get_iteration(self):
+        return self.iteration
 
     def print_info(self, batch_idx):
         if batch_idx % self.print_freq == 0:

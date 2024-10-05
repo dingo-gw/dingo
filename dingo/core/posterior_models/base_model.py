@@ -89,6 +89,7 @@ class Base:
             # separately, and before calling initialize_optimizer_and_scheduler().
 
         self.epoch = 0
+        self.iteration = 0
         self.network = None
         self.optimizer = None
         self.scheduler = None
@@ -417,10 +418,11 @@ class Base:
                     if self.rank is None or self.rank == 0:
                         print(f"\nStart training epoch {self.epoch} with lr {lr}")
                     time_start = time.time()
-                    train_loss = train_epoch(self, train_loader, world_size)
+                    train_loss, iteration = train_epoch(self, train_loader, world_size)
                     train_time = torch.tensor(
                         time.time() - time_start, device=self.device
                     )
+                    self.iteration += iteration
                     if self.rank is not None:
                         # Sync all processes before aggregating value
                         dist.barrier()
@@ -473,10 +475,15 @@ class Base:
                             import wandb
 
                             wandb.define_metric("epoch")
-                            wandb.define_metric("*", step_metric="epoch")
+                            wandb.define_metric("iteration")
+                            if world_size is None or world_size == 1:
+                                wandb.define_metric("*", step_metric="epoch")
+                            else:
+                                wandb.define_metric("*", step_metric="iteration")
                             wandb.log(
                                 {
                                     "epoch": self.epoch,
+                                    "iteration": self.iteration,
                                     "learning_rate": lr[0],
                                     "train_loss": train_loss,
                                     "test_loss": test_loss,
@@ -619,7 +626,7 @@ def train_epoch(pm, dataloader, world_size: int = 1):
         if pm.scheduler_kwargs["update_scheduler_every_batch"]:
             pm.scheduler.step()
 
-    return loss_info.get_avg()
+    return loss_info.get_avg(), loss_info.get_iteration()
 
 
 def test_epoch(pm, dataloader, world_size: int = 1):
