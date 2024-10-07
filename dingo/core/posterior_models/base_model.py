@@ -363,6 +363,7 @@ class Base:
         use_wandb=False,
         test_only=False,
         early_stopping=False,
+        gradient_updates_per_optimizer_step: int = 1,
         world_size: int = 1,
     ):
         """
@@ -386,6 +387,9 @@ class Base:
             if True, training is skipped
         early_stopping: bool=False
             whether to use early stopping
+        gradient_updates_per_optimizer_step: int
+            number of gradient updates to perform for every optimizer step. Useful to simulate multi-GPU training on
+            a single GPU by choosing n gradient updates for n GPUs.
         world_size: int=1
             the number of GPUs used for training, value is used to adjust the batch_size when printing updates.
 
@@ -418,7 +422,12 @@ class Base:
                     if self.rank is None or self.rank == 0:
                         print(f"\nStart training epoch {self.epoch} with lr {lr}")
                     time_start = time.time()
-                    train_loss, iteration = train_epoch(self, train_loader, world_size)
+                    train_loss, iteration = train_epoch(
+                        self,
+                        train_loader,
+                        gradient_updates_per_optimizer_step=gradient_updates_per_optimizer_step,
+                        world_size=world_size,
+                    )
                     train_time = torch.tensor(
                         time.time() - time_start, device=self.device
                     )
@@ -586,7 +595,9 @@ class Base:
             return samples, log_prob
 
 
-def train_epoch(pm, dataloader, world_size: int = 1):
+def train_epoch(
+    pm, dataloader, gradient_updates_per_optimizer_step: int = 1, world_size: int = 1
+):
     pm.network.train()
     if pm.rank is None:
         loss_info = dingo.core.utils.trainutils.LossInfo(
@@ -610,21 +621,24 @@ def train_epoch(pm, dataloader, world_size: int = 1):
 
     for batch_idx, data in enumerate(dataloader):
         loss_info.update_timer("Dataloader")
-        pm.optimizer.zero_grad()
+        if batch_idx % gradient_updates_per_optimizer_step == 0:
+            pm.optimizer.zero_grad()
         # data to device
         data = [d.to(pm.device, non_blocking=True) for d in data]
         # compute loss
         loss = pm.loss(data[0], *data[1:])
-        # backward pass and optimizer step
+        # backward pass
         loss.backward()
-        pm.optimizer.step()
-        # update loss for history and logging
-        num_samples = torch.tensor(len(data[0]), device=pm.device)
-        loss_info.update(loss, num_samples)
-        if pm.rank is None or pm.rank == 0:
-            loss_info.print_info(batch_idx)
-        if pm.scheduler_kwargs["update_scheduler_every_batch"]:
-            pm.scheduler.step()
+        # optimizer step
+        if batch_idx % gradient_updates_per_optimizer_step == 0:
+            pm.optimizer.step()
+            # update loss for history and logging
+            num_samples = torch.tensor(len(data[0]), device=pm.device)
+            loss_info.update(loss, num_samples)
+            if pm.rank is None or pm.rank == 0:
+                loss_info.print_info(batch_idx)
+            if pm.scheduler_kwargs["update_scheduler_every_batch"]:
+                pm.scheduler.step()
 
     return loss_info.get_avg(), loss_info.get_iteration()
 

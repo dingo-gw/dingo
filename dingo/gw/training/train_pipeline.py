@@ -184,7 +184,11 @@ def prepare_model_new(
         "dataset_settings": wfd.settings,
         "train_settings": train_settings,
     }
-    print_output = True if ("rank" not in local_settings or local_settings.get("rank", None) == 0) else False
+    print_output = (
+        True
+        if ("rank" not in local_settings or local_settings.get("rank", None) == 0)
+        else False
+    )
     if print_output:
         print("\nInitializing new posterior model.")
         print("Complete settings:")
@@ -243,13 +247,15 @@ def prepare_training_new(
     (WaveformDataset, Base)
     """
 
-    wfd, initial_weights, pretrained_embedding_net = (
-        prepare_wfd_and_initialization_for_embedding_network(
-            train_settings,
-            train_dir,
-            local_settings,
-            pretraining,
-        )
+    (
+        wfd,
+        initial_weights,
+        pretrained_embedding_net,
+    ) = prepare_wfd_and_initialization_for_embedding_network(
+        train_settings,
+        train_dir,
+        local_settings,
+        pretraining,
     )
     pm = prepare_model_new(
         train_settings,
@@ -310,7 +316,11 @@ def prepare_model_resume(
     -------
     Base
     """
-    print_output = True if ("rank" not in local_settings or local_settings.get("rank", None) == 0) else False
+    print_output = (
+        True
+        if ("rank" not in local_settings or local_settings.get("rank", None) == 0)
+        else False
+    )
     pm = build_model_from_kwargs(
         filename=checkpoint_name,
         pretraining=pretraining,
@@ -375,7 +385,13 @@ def prepare_training_resume(
 
 
 def initialize_stage(
-    pm, wfd, stage, num_workers, world_size: int = None, rank: int = None, resume=False,
+    pm,
+    wfd,
+    stage,
+    num_workers,
+    world_size: int = None,
+    rank: int = None,
+    resume=False,
 ):
     """
     Initializes training based on PosteriorModel metadata and current stage:
@@ -409,7 +425,12 @@ def initialize_stage(
 
     # Rebuild transforms based on possibly different noise.
     print_output = True if rank is None or rank == 0 else False
-    set_train_transforms(wfd, train_settings["data"], stage["asd_dataset_path"], print_output=print_output)
+    set_train_transforms(
+        wfd,
+        train_settings["data"],
+        stage["asd_dataset_path"],
+        print_output=print_output,
+    )
 
     # Allows for changes in batch size between stages.
     train_loader, test_loader, train_sampler = build_train_and_test_loaders(
@@ -533,6 +554,9 @@ def train_stages(pm, wfd, train_dir, local_settings):
             checkpoint_epochs=local_settings["checkpoint_epochs"],
             use_wandb=local_settings.get("wandb", False),
             test_only=local_settings.get("test_only", False),
+            gradient_updates_per_optimizer_step=stage.get(
+                "gradient_updates_per_optimizer_step", 1
+            ),
             world_size=local_settings.get("world_size", 1),
         )
         # if test_only, model should not be saved, and run is complete
