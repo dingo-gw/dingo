@@ -16,6 +16,7 @@ import torch
 from threadpoolctl import threadpool_limits
 from torch.utils.data import Dataset
 import torch.distributed as dist
+from torch.cuda.amp import GradScaler, autocast
 
 import dingo.core.utils as utils
 import dingo.core.utils.trainutils
@@ -364,6 +365,7 @@ class Base:
         test_only=False,
         early_stopping=False,
         gradient_updates_per_optimizer_step: int = 1,
+        automatic_mixed_precision: bool = False,
         world_size: int = 1,
     ):
         """
@@ -390,6 +392,9 @@ class Base:
         gradient_updates_per_optimizer_step: int
             number of gradient updates to perform for every optimizer step. Useful to simulate multi-GPU training on
             a single GPU by choosing n gradient updates for n GPUs.
+        automatic_mixed_precision: bool
+            whether to train with automatic mixed precision. Warning: Implementing gradient clipping requires additional
+            modifications (https://pytorch.org/tutorials/recipes/recipes/amp_recipe.html).
         world_size: int=1
             the number of GPUs used for training, value is used to adjust the batch_size when printing updates.
 
@@ -426,6 +431,7 @@ class Base:
                         self,
                         train_loader,
                         gradient_updates_per_optimizer_step=gradient_updates_per_optimizer_step,
+                        automatic_mixed_precision=automatic_mixed_precision,
                         world_size=world_size,
                     )
                     train_time = torch.tensor(
@@ -596,7 +602,11 @@ class Base:
 
 
 def train_epoch(
-    pm, dataloader, gradient_updates_per_optimizer_step: int = 1, world_size: int = 1
+    pm,
+    dataloader,
+    gradient_updates_per_optimizer_step: int = 1,
+    automatic_mixed_precision: bool = False,
+    world_size: int = 1,
 ):
     pm.network.train()
     if pm.rank is None:
@@ -619,20 +629,40 @@ def train_epoch(
             device=pm.device,
         )
 
+    if automatic_mixed_precision:
+        # Create scaler for automatic mixed precision
+        # Warning: gradient clipping requires special treatment in amp
+        scaler = GradScaler(enabled=automatic_mixed_precision)
+
     for batch_idx, data in enumerate(dataloader):
         loss_info.update_timer("Dataloader")
         if batch_idx % gradient_updates_per_optimizer_step == 0:
-            pm.optimizer.zero_grad()
-        # data to device
+            pm.optimizer.zero_grad(set_to_none=True)
+        # Data to device
         data = [d.to(pm.device, non_blocking=True) for d in data]
-        # compute loss
-        loss = pm.loss(data[0], *data[1:])
-        # backward pass
-        loss.backward()
-        # optimizer step
+        if automatic_mixed_precision:
+            with autocast():
+                # Compute loss
+                loss = pm.loss(data[0], *data[1:])
+            # Backward pass, Note: Backward passes under autocast are not recommended
+            # Scales loss before calling backward()
+            scaler.scale(loss).backward()
+        else:
+            # Compute loss
+            loss = pm.loss(data[0], *data[1:])
+            # Backward pass
+            loss.backward()
+        # Optimizer step
         if batch_idx % gradient_updates_per_optimizer_step == 0:
-            pm.optimizer.step()
-            # update loss for history and logging
+            if automatic_mixed_precision:
+                # Take a step with the optimizer
+                # Warning: Optimizer.step() is skipped if the unscaled gradients of the optimizer parameters contain
+                # inf or Nan
+                scaler.step(pm.optimizer)
+                scaler.update()
+            else:
+                pm.optimizer.step()
+            # Update loss for history and logging
             num_samples = torch.tensor(len(data[0]), device=pm.device)
             loss_info.update(loss, num_samples)
             if pm.rank is None or pm.rank == 0:
