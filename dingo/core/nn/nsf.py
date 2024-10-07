@@ -234,31 +234,43 @@ class FlowWrapper(nn.Module):
     def log_prob(self, y, *x):
         if self.embedding_net is not None:
             x = torchutils.forward_pass_with_unpacked_tuple(self.embedding_net, x)
-        if len(x) > 0:
-            return self.flow.log_prob(y, x)
+        elif len(x) == 1:
+            # Unpack if there's exactly one context argument
+            x = x[0]  
+        elif len(x) > 1:
+            raise ValueError("Only one context argument is supported if no embedding is provided.")
         else:
-            # if there is no context
-            return self.flow.log_prob(y)
+            x = None
+        
+        # Call the log probability method of the flow
+        return self.flow.log_prob(y, x)
 
     def sample(self, *x, num_samples=1):
         if self.embedding_net is not None:
             x = torchutils.forward_pass_with_unpacked_tuple(self.embedding_net, x)
-        if len(x) > 0:
-            return torch.squeeze(self.flow.sample(num_samples, x))
+        elif len(x) == 1:
+            # Unpack if there's exactly one context argument
+            x = x[0]  
+        elif len(x) > 1:
+            raise ValueError("Only one context argument is supported if no embedding is provided.")
         else:
-            # if there is no context, omit the context argument
-            return torch.squeeze(self.flow.sample(num_samples))
+            x = None
+        
+        return torch.squeeze(self.flow.sample(num_samples, x))
 
     def sample_and_log_prob(self, *x, num_samples=1):
         if self.embedding_net is not None:
             x = torchutils.forward_pass_with_unpacked_tuple(self.embedding_net, x)
-        if len(x) > 0:
-            sample, log_prob = self.flow.sample_and_log_prob(num_samples, x)
-            return torch.squeeze(sample), torch.squeeze(log_prob)
+        elif len(x) == 1:
+            # Unpack if there's exactly one context argument
+            x = x[0]
+        elif len(x) > 1:
+            raise ValueError("Only one context argument is supported if no embedding is provided.")
         else:
-            # if there is no context, omit the context argument
-            sample, log_prob = self.flow.sample_and_log_prob(num_samples)
-            return torch.squeeze(sample), torch.squeeze(log_prob)
+            x = None
+
+        sample, log_prob = self.flow.sample_and_log_prob(num_samples, x)
+        return torch.squeeze(sample), torch.squeeze(log_prob)
 
     def forward(self, y, *x):
         if len(x) > 0:
