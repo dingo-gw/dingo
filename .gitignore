@@ -151,9 +151,4 @@ dmypy.json
 # directories with temporary files
 **/tmp_files/*
 
-*.pt
-.vscode/
-tgr_venv/
-tgr_venv_backup/
-tutorials/
-venvs/
+dingo-venv/

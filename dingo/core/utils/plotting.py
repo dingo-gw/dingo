@@ -8,7 +8,11 @@ import pandas as pd
 
 
 def plot_corner_multi(
-    samples, weights=None, labels=None, filename="corner.pdf", colors=None, **kwargs
+    samples,
+    weights=None,
+    labels=None,
+    filename: str = "corner.pdf",
+    **kwargs,
 ):
     """
     Generate a corner plot for multiple posteriors.
@@ -24,10 +28,15 @@ def plot_corner_multi(
         Labels for the posteriors.
     filename : str
         Where to save samples.
-    **kwargs :
-        Forwarded to corner.corner.
+
+    Other Parameters
+    ----------------
+    legend_font_size: int
+        Font size used in legend. Defaults to 50.
+    Also contains additional parameters forwarded to corner.corner.
     """
     # Define plot properties
+    cmap = "Dark2"
     corner_params = {
         "smooth": 1.0,
         "smooth1d": 1.0,
@@ -36,7 +45,6 @@ def plot_corner_multi(
         "plot_contours": True,
         "levels": [0.5, 0.9],
         "bins": 30,
-        "hist_kwargs": {},
     }
     corner_params.update(kwargs)
 
@@ -61,31 +69,21 @@ def plot_corner_multi(
         if p in set.intersection(*(set(s.columns) for s in samples))
     ]
 
+    fig = None
     handles = []
     for i, (s, w, l) in enumerate(zip_longest(samples, weights, labels)):
-        corner_params["hist_kwargs"]["color"] = (
-            colors[i] if colors is not None else None
-        )
-        corner_params["hist_kwargs"]["linestyle"] = (
-            kwargs["linestyles"][i] if "linestyles" in list(kwargs.keys()) else "-"
-        )
+        color = mpl.colors.rgb2hex(plt.get_cmap(cmap)(i))
         fig = corner.corner(
             s[common_parameters].to_numpy(),
             labels=common_parameters,
             weights=w,
+            color=color,
             no_fill_contours=True,
-            color=colors[i] if colors is not None else None,
+            fig=fig,
             **corner_params,
         )
         handles.append(
-            plt.Line2D(
-                [],
-                [],
-                color=colors[i] if colors is not None else None,
-                label=l,
-                linewidth=5,
-                markersize=20,
-            )
+            plt.Line2D([], [], color=color, label=l, linewidth=5, markersize=20)
         )
 
     # Eliminate spacing between the 2D plots
@@ -98,7 +96,7 @@ def plot_corner_multi(
     fig.legend(
         handles=handles,
         loc="upper right",
-        fontsize=70,
+        fontsize=kwargs.get("legend_font_size", 50),
         labelcolor="linecolor",
     )
 

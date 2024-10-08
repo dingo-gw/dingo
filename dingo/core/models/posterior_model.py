@@ -190,7 +190,11 @@ class PosteriorModel:
 
         torch.save(model_dict, model_filename)
 
-    def _load_model_from_hdf5(self, model_filename: str):
+
+    def _load_model_from_hdf5(
+        self,
+        model_filename: str
+    ):
         """
         Helper function to load a trained model that has been
         saved in HDF5 format using `dingo_pt_to_hdf5`.
@@ -208,25 +212,24 @@ class PosteriorModel:
             to save space at inference time.
         """
         d = {}
-        with h5py.File(model_filename, "r") as fp:
+        with h5py.File(model_filename, 'r') as fp:
             model_basename = os.path.basename(model_filename)
-            if fp.attrs["CANONICAL_FILE_BASENAME"] != model_basename:
-                raise ValueError(
-                    "HDF5 attribute CANONICAL_FILE_BASENAME differs from model name",
-                    model_basename,
-                )
+            if fp.attrs['CANONICAL_FILE_BASENAME'] != model_basename:
+                raise ValueError('HDF5 attribute CANONICAL_FILE_BASENAME differs from model name',
+                        model_basename)
 
             # Load small nested dicts from json
-            for k, v in fp["serialized_dicts"].items():
+            for k, v in fp['serialized_dicts'].items():
                 d[k] = json.loads(v[()])
 
             # Load model weights
             model_state_dict = OrderedDict()
-            for k, v in fp["model_weights"].items():
+            for k, v in fp['model_weights'].items():
                 model_state_dict[k] = torch.from_numpy(np.array(v, dtype=np.float32))
-            d["model_state_dict"] = model_state_dict
+            d['model_state_dict'] = model_state_dict
 
         return d
+
 
     def load_model(
         self,
@@ -249,18 +252,17 @@ class PosteriorModel:
         # device indicated in the saved metadata. External routines run on a cpu
         # machine may have moved the model from 'cuda' to 'cpu'.
         ext = os.path.splitext(model_filename)[-1]
-        if ext == ".pt":
+        if ext == '.pt':
             d = torch.load(model_filename, map_location=device)
-        elif ext == ".hdf5":
+        elif ext == '.hdf5':
             d = self._load_model_from_hdf5(model_filename)
         else:
-            raise ValueError("Models should be ether in .pt or .hdf5 format.")
+            raise ValueError('Models should be ether in .pt or .hdf5 format.')
 
         self.version = d.get("version")
 
         self.model_kwargs = d["model_kwargs"]
         self.initialize_model()
-        self.model.load_state_dict(d["model_state_dict"])
 
         self.epoch = d["epoch"]
 
@@ -272,23 +274,26 @@ class PosteriorModel:
         if "event_metadata" in d:
             self.event_metadata = d["event_metadata"]
 
-        self.model_to_device(device)
+        if device != "meta":
+            self.model.load_state_dict(d["model_state_dict"])
 
-        if load_training_info:
-            if "optimizer_kwargs" in d:
-                self.optimizer_kwargs = d["optimizer_kwargs"]
-            if "scheduler_kwargs" in d:
-                self.scheduler_kwargs = d["scheduler_kwargs"]
-            # initialize optimizer and scheduler
-            self.initialize_optimizer_and_scheduler()
-            # load optimizer and scheduler state dict
-            if "optimizer_state_dict" in d:
-                self.optimizer.load_state_dict(d["optimizer_state_dict"])
-            if "scheduler_state_dict" in d:
-                self.scheduler.load_state_dict(d["scheduler_state_dict"])
-        else:
-            # put model in evaluation mode
-            self.model.eval()
+            self.model_to_device(device)
+
+            if load_training_info:
+                if "optimizer_kwargs" in d:
+                    self.optimizer_kwargs = d["optimizer_kwargs"]
+                if "scheduler_kwargs" in d:
+                    self.scheduler_kwargs = d["scheduler_kwargs"]
+                # initialize optimizer and scheduler
+                self.initialize_optimizer_and_scheduler()
+                # load optimizer and scheduler state dict
+                if "optimizer_state_dict" in d:
+                    self.optimizer.load_state_dict(d["optimizer_state_dict"])
+                if "scheduler_state_dict" in d:
+                    self.scheduler.load_state_dict(d["scheduler_state_dict"])
+            else:
+                # put model in evaluation mode
+                self.model.eval()
 
     def train(
         self,
@@ -360,7 +365,6 @@ class PosteriorModel:
                 if use_wandb:
                     try:
                         import wandb
-
                         wandb.define_metric("epoch")
                         wandb.define_metric("*", step_metric="epoch")
                         wandb.log(

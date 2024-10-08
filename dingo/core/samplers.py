@@ -503,6 +503,10 @@ class GNPESampler(Sampler):
                 else:
                     y, log_prob = self.model.model.sample_and_log_prob(x["data"])
 
+            # Squeeze the extra dimension added by sample_and_log_prob(num_samples=1).
+            y = y.squeeze(1)
+            log_prob = log_prob.squeeze(1)
+
             time_sample_end = time.time()
 
             x["parameters"] = y

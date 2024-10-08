@@ -2,7 +2,6 @@
 #  Adapted from bilby_pipe. In particular, uses the bilby_pipe data generation code.
 #
 import os
-import ast
 
 from bilby_pipe.input import Input
 from bilby_pipe.main import MainInput as BilbyMainInput
@@ -23,10 +22,8 @@ logger.name = "dingo_pipe"
 
 
 def fill_in_arguments_from_model(args):
-    # FIXME: It would be better if we did not have to load an entire model just to
-    #  gain access to the metadata. Store a copy of metadata separately?
     logger.info(f"Loading dingo model from {args.model} in order to access settings.")
-    model = PosteriorModel(args.model, device="cpu", load_training_info=False)
+    model = PosteriorModel(args.model, device="meta", load_training_info=False)
     model_metadata = model.metadata
 
     domain = build_domain_from_model_metadata(model_metadata)
@@ -162,6 +159,7 @@ class MainInput(BilbyMainInput):
         # self.enforce_signal_duration = args.enforce_signal_duration
 
         self.run_local = args.local
+        self.generation_pool = args.generation_pool
         self.local_generation = args.local_generation
         self.local_plot = args.local_plot
 
@@ -173,13 +171,19 @@ class MainInput(BilbyMainInput):
         self.gps_tuple = args.gps_tuple
         self.gps_file = args.gps_file
         self.timeslide_file = args.timeslide_file
-        self.gaussian_noise = args.gaussian_noise
-        self.zero_noise = args.zero_noise
-        self.num_noise_realizations = args.num_noise_realizations
+        self.gaussian_noise = False  # DINGO MOD: Cannot use different noise types.
+        self.zero_noise = False  # DINGO MOD: does not support zero noise yet
+        # self.n_simulation = args.n_simulation
+        #
+        # self.injection = args.injection
+        # self.injection_numbers = args.injection_numbers
         self.injection_file = args.injection_file
-        if args.injection_dict is not None:
-            self.injection_numbers = None
-            self.injection_dict = ast.literal_eval(args.injection_dict)
+        # self.injection_dict = args.injection_dict
+        # self.injection_waveform_arguments = args.injection_waveform_arguments
+        # self.injection_waveform_approximant = args.injection_waveform_approximant
+        # self.generation_seed = args.generation_seed
+        # if self.injection:
+        #     self.check_injection()
 
         self.importance_sample = args.importance_sample
 

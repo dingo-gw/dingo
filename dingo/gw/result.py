@@ -340,7 +340,6 @@ class Result(CoreResult):
             phase_marginalization_kwargs=phase_marginalization_kwargs,
             calibration_marginalization_kwargs=calibration_marginalization_kwargs,
             phase_grid=phase_grid,
-            event_metadata=self.event_metadata,
         )
 
     def sample_synthetic_phase(

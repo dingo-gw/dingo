@@ -95,11 +95,7 @@ def main():
 
     if "log_prob" not in samples.columns:
         # Use GPS time as name for now.
-        try:
-            event_name = str(result.event_metadata["time_event"])
-        except TypeError:
-            event_name = "injection"
-
+        event_name = str(result.event_metadata["time_event"])
         nde_name = settings["nde"].get(
             "path", join(args.outdir, f"nde-{event_name}.pt")
         )
@@ -122,7 +118,7 @@ def main():
 
         # Step 1a: Sample from proposal.
         nde_sampler = GWSampler(model=nde)
-        nde_sampler.run_sampler(num_samples=settings["num_samples"], batch_size=settings.get("batch_size", None))
+        nde_sampler.run_sampler(num_samples=settings["num_samples"])
         result = nde_sampler.to_result()
 
     # else:

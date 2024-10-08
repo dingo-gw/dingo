@@ -100,17 +100,10 @@ class SelectStandardizeRepackageParameters(object):
                         )
                     else:
                         standardized = np.empty(len(v), dtype=np.float32)
-
-                    # For if you trained with exact equiv but want to do inference with not exact
-                    if v[0] not in list(self.mean.keys()):
-                        standardized[..., 0] = (
-                            full_parameters[v[0]] - full_parameters[v[0]].mean()
-                        ) / full_parameters[v[0]].std()
-                    else:
-                        for idx, par in enumerate(v):
-                            standardized[..., idx] = (
-                                full_parameters[par] - self.mean[par]
-                            ) / self.std[par]
+                    for idx, par in enumerate(v):
+                        standardized[..., idx] = (
+                            full_parameters[par] - self.mean[par]
+                        ) / self.std[par]
                     sample[k] = standardized
 
         else:
@@ -118,9 +111,6 @@ class SelectStandardizeRepackageParameters(object):
             inference_parameters = self.parameters_dict["inference_parameters"]
 
             parameters = input_sample["parameters"][:]
-            
-            if parameters.ndim == 1:
-                parameters = parameters.reshape(-1, 1)
             assert parameters.shape[-1] == len(inference_parameters), (
                 f"Expected {len(inference_parameters)} parameters "
                 f"({inference_parameters}), but got {parameters.shape[-1]}."

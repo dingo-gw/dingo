@@ -95,14 +95,9 @@ class GetDetectorTimes(object):
     position (ra, dec), the geocent_time and the ref_time.
     """
 
-    def __init__(self, ifo_list, ref_time, trigger_offset=None):
+    def __init__(self, ifo_list, ref_time):
         self.ifo_list = ifo_list
         self.ref_time = ref_time
-        
-        if trigger_offset is None:
-            self.trigger_offset = {ifo.name: 0.0 for ifo in self.ifo_list}
-        else:
-            self.trigger_offset = trigger_offset
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
@@ -117,13 +112,10 @@ class GetDetectorTimes(object):
                 # computation does not work on gpu, so do it on cpu
                 ra = ra.cpu()
                 dec = dec.cpu()
-            # if one wants to be very precise this should be 
-            # dt = time_delay_from_geocenter(ifo, ra, dec, self.ref_time + geocent_time)
-            # but the error in the log likelihood is 1e-3 when not including this
             dt = time_delay_from_geocenter(ifo, ra, dec, self.ref_time)
             if type(dt) == torch.Tensor:
                 dt = dt.to(geocent_time.device)
-            ifo_time = geocent_time + dt - self.trigger_offset[ifo.name]
+            ifo_time = geocent_time + dt
             extrinsic_parameters[f"{ifo.name}_time"] = ifo_time
         sample["extrinsic_parameters"] = extrinsic_parameters
         return sample
@@ -178,8 +170,8 @@ class ProjectOntoDetectors(object):
         strains = {}
         for ifo in self.ifo_list:
             # (2) project strains onto the different detectors
-            fp = ifo.antenna_response(ra, dec, self.ref_time + tc_new, psi, mode="plus")
-            fc = ifo.antenna_response(ra, dec, self.ref_time + tc_new, psi, mode="cross")
+            fp = ifo.antenna_response(ra, dec, self.ref_time, psi, mode="plus")
+            fc = ifo.antenna_response(ra, dec, self.ref_time, psi, mode="cross")
             strain = fp * hp + fc * hc
 
             # (3) time shift the strain. If polarizations are timeshifted by

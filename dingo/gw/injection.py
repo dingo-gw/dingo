@@ -1,9 +1,6 @@
-from functools import partial
 import numpy as np
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
-import pandas as pd
-from bilby.gw.prior import BBHPriorDict
 
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.domains import (
@@ -11,11 +8,7 @@ from dingo.gw.domains import (
     build_domain,
     build_domain_from_model_metadata,
 )
-from dingo.gw.gwutils import (
-    get_extrinsic_prior_dict,
-    get_intrinsic_prior_dict,
-    fill_missing_available_parameters,
-)
+from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.prior import build_prior_with_defaults, split_off_extrinsic_parameters
 from dingo.gw.transforms import (
     GetDetectorTimes,
@@ -27,7 +20,6 @@ from dingo.gw.waveform_generator.waveform_generator import (
     WaveformGenerator,
     NewInterfaceWaveformGenerator,
 )
-from dingo.core.models import PosteriorModel
 
 
 class GWSignal(object):
@@ -80,7 +72,6 @@ class GWSignal(object):
 
         self.t_ref = t_ref
         self.ifo_list = InterferometerList(ifo_list)
-        self.trigger_offset = None
 
         # When we set self.whiten, the projection transforms are automatically prepared.
         self._calibration_envelope = None
@@ -134,7 +125,7 @@ class GWSignal(object):
 
     def _initialize_transform(self):
         transforms = [
-            GetDetectorTimes(self.ifo_list, self.t_ref, self.trigger_offset),
+            GetDetectorTimes(self.ifo_list, self.t_ref),
             ProjectOntoDetectors(self.ifo_list, self.data_domain, self.t_ref),
         ]
         if self.calibration_marginalization_kwargs:
@@ -337,7 +328,7 @@ class Injection(GWSignal):
             t_ref=metadata["train_settings"]["data"]["ref_time"],
         )
 
-    def injection(self, theta, seed=None):
+    def injection(self, theta):
         """
         Generate an injection based on specified parameters.
 
@@ -373,8 +364,6 @@ class Injection(GWSignal):
             print("self.whiten was set to True. Resetting to False.")
             self.whiten = False
 
-        if seed is not None:
-            np.random.seed(seed)
         data = {}
         for ifo, s in signal["waveform"].items():
             noise = (

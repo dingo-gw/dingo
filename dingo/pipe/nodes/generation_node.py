@@ -6,11 +6,9 @@ from dingo.pipe.utils import _strip_unwanted_submission_keys
 
 
 class GenerationNode(BilbyGenerationNode):
+
     def __init__(self, inputs, importance_sampling=False, **kwargs):
         self.importance_sampling = importance_sampling
-        self.zero_noise = inputs.zero_noise
-        self.num_noise_realizations = inputs.num_noise_realizations
-        self.data_directory = inputs.data_directory
         super().__init__(inputs, **kwargs)
 
         if self.inputs.simple_submission:
@@ -31,17 +29,7 @@ class GenerationNode(BilbyGenerationNode):
         return super().job_name + flag
 
     @property
-    def event_data_files(self):
-        if self.zero_noise and not self.importance_sampling:
-            return [
-                os.path.join(
-                    self.data_directory, "_".join([self.label, f"event_data_{i}.hdf5"])
-                )
-                for i in range(self.num_noise_realizations)
-            ]
-        else:
-            return [
-                os.path.join(
-                    self.data_directory, "_".join([self.label, f"event_data.hdf5"])
-                )
-            ]
+    def event_data_file(self):
+        return os.path.join(
+            self.inputs.data_directory, "_".join([self.label, "event_data.hdf5"])
+        )

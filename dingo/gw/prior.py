@@ -5,7 +5,7 @@ from bilby.gw.conversion import (
     fill_from_fixed_priors,
     convert_to_lal_binary_black_hole_parameters,
 )
-from bilby.core.prior import Uniform, Sine, Cosine, Prior
+from bilby.core.prior import Uniform, Sine, Cosine
 
 import numpy as np
 from typing import Dict, Set, Any
@@ -163,23 +163,11 @@ def build_prior_with_defaults(prior_settings: Dict[str, str]):
     Depending on the particular prior choices the dimensionality of a
     parameter sample obtained from the returned GWPriorDict will vary.
     """
-    import bilby.core.prior
-    class ZeroPrior(bilby.core.prior.Prior):
-        def __init__(self):
-            pass 
-
-        def prob(self, val):
-            return (val == 0).astype(int)        
-
-        def sample(self, size=1):
-            return np.zeros(size)
 
     full_prior_settings = deepcopy(prior_settings)
     for k, v in prior_settings.items():
         if v == "default":
             full_prior_settings[k] = default_intrinsic_dict[k]
-        elif v == "ZeroPrior()":
-            full_prior_settings[k] = ZeroPrior()
 
     return BBHPriorDict(full_prior_settings)
 
@@ -213,16 +201,3 @@ def split_off_extrinsic_parameters(theta):
     theta_intrinsic["geocent_time"] = 0
     theta_intrinsic["luminosity_distance"] = 100
     return theta_intrinsic, theta_extrinsic
-
-class ZeroPrior(Prior):
-    def __init__(self, name=None, latex_label=None, unit=None,):
-        super(ZeroPrior, self).__init__(name=name, latex_label=latex_label, unit=unit,
-                                    minimum=0.0, maximum=0.0, check_range_nonzero=False)
-        self.name = "ZeroPrior"
-        pass
-
-    def prob(self, val):
-        return (val == 0).astype(int)
-
-    def sample(self, size=1):
-        return np.zeros(size)
