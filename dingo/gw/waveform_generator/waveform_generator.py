@@ -285,8 +285,8 @@ class WaveformGenerator:
         p, _ = convert_to_lal_binary_black_hole_parameters(parameter_dict)
 
         # Convert to SI units
-        p["mass_1"] *= bilby_utils.solar_mass
-        p["mass_2"] *= bilby_utils.solar_mass
+        p["mass_1"] *= lal.MSUN_SI
+        p["mass_2"] *= lal.MSUN_SI
         p["luminosity_distance"] *= 1e6 * lal.PC_SI
 
         # Transform to lal source frame: iota and Cartesian spin components
@@ -351,8 +351,6 @@ class WaveformGenerator:
             #   longAscNodes, eccentricity, meanPerAno,
             #   deltaF, f_min, f_max, f_ref,
             #   lal_params, approximant
-
-            # If NRSur7dq4
             domain_pars = (delta_f, f_min, f_max, f_ref)
             domain_pars = tuple(float(p) for p in domain_pars)
             lal_parameter_tuple = (
@@ -760,6 +758,12 @@ class WaveformGenerator:
                 assert LS.SimInspiralImplementedTDApproximants(self.approximant)
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: TD)
+                hlm_td, iota = self.generate_TD_modes_L0(parameters)
+
+                # Step 2: Transform modes to target domain.
+                # This requires tapering of TD modes, and FFT to transform to FD.
+
+                # Tapering is different depending on which waveform you use
                 if (
                     self.approximant_str == "SEOBNRv4HM"
                     or self.approximant_str == "NRsur7dq4"
@@ -797,17 +801,6 @@ class WaveformGenerator:
                         self.domain.f_min, m1, m2, s1z, s2z
                     )
                     self.f_start = f_start
-
-                hlm_td, iota = self.generate_TD_modes_L0(parameters)
-
-                # Step 2: Transform modes to target domain.
-                # This requires tapering of TD modes, and FFT to transform to FD.
-
-                # Tapering is different depending on if you use aligned spin or precessing waveforms
-                if (
-                    self.approximant_str == "SEOBNRv4HM"
-                    or self.approximant_str == "NRsur7dq4"
-                ):
                     wfg_utils.taper_stepped_back_waveform_modes(
                         hlm_td,
                         m1,
@@ -912,6 +905,7 @@ class WaveformGenerator:
         #   109: SEOBNRv4EHM_opt
         #   92: NRSur7dq2
         #   93: NRSur7dq4
+        #   94: SEOBNRv4HM
         if self.approximant in [52, 109, 92, 93, 94]:
             # Precessing Spins
             if self.approximant in [52, 92, 93]:
