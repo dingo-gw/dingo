@@ -2,7 +2,6 @@ from os.path import isfile
 
 import numpy as np
 from gwpy.timeseries import TimeSeries
-from astropy.utils import data as astropy_data
 
 from dingo.core.dataset import DingoDataset
 from dingo.core.utils.misc import recursive_check_dicts_are_equal
@@ -119,7 +118,6 @@ def data_to_domain(raw_data, settings_raw_data, domain, **kwargs):
             asd = domain.update_data(asd, low_value=1.0)
             data["asds"][det] = asd
 
-        astropy_data.clear_download_cache()
         return data
 
     else:

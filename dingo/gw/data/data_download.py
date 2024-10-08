@@ -1,6 +1,5 @@
 import numpy as np
 from gwpy.timeseries import TimeSeries
-from astropy.utils import data as astropy_data
 import pycbc.psd
 import math
 
@@ -48,7 +47,7 @@ def download_psd(det, time_start, time_psd, window, f_s):
             f"Shifting strain segment by {dt} seconds."
         )
         psd_strain = TimeSeries.fetch_open_data(
-            det, time_start + dt, time_end + dt, sample_rate=f_s, cache=False
+            det, time_start + dt, time_end + dt, sample_rate=f_s, cache=True
         )
         if np.max(np.isnan(psd_strain)):
             raise ValueError(
@@ -69,7 +68,6 @@ def download_psd(det, time_start, time_psd, window, f_s):
         avg_method="median",
     )
 
-    astropy_data.clear_download_cache()
     return np.array(psd)
 
 
