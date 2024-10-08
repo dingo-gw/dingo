@@ -40,10 +40,12 @@ from dingo.populations.models_training.embedding_sampler import (
 
 #     return wfed
 
-def autocomplete_model_kwargs_nsf_for_embedding(model_kwargs, data_sample):
+def autocomplete_model_kwargs_nsf_for_embedding(model_kwargs, data_sample, single_event_model):
     
+    input_dim = single_event_model.metadata['train_settings']['model']['embedding_net_kwargs']['output_dim']
+
     # TODO: hard-coded for now
-    model_kwargs["input_dim"] = 32
+    model_kwargs["input_dim"] = input_dim
     model_kwargs["context_dim"] = len(data_sample[0])
 
     print('context_dim', model_kwargs["context_dim"])
@@ -98,7 +100,7 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
         )
 
         # This modifies the model settings in-place.
-        autocomplete_model_kwargs_nsf_for_embedding(train_settings["model"], wfd[0])
+        autocomplete_model_kwargs_nsf_for_embedding(train_settings["model"], wfd[0], pm_embeddings)
         # maybe not needed? 
         full_settings = {
             "dataset_settings": wfd.settings,
