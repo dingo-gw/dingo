@@ -81,14 +81,14 @@ As before we generate a fiducial ASD dataset containing a single ASD:
 
 ```
 dingo_generate_asd_dataset --settings_file asd_dataset_settings_fiducial.yaml --data_dir
-training_data/asd_dataset_fiducial -out_name training_data/asd_dataset_fiducial/asds_O1_fiducial.hdf5
+training_data/asd_dataset_fiducial --out_name training_data/asd_dataset_fiducial/asds_O1_fiducial.hdf5
 ```
 
 and a large ASD dataset:
 
 ```
 dingo_generate_asd_dataset --settings_file asd_dataset_settings.yaml --data_dir
-training_data/asd_dataset -out_name training_data/asd_dataset/asds_O1.hdf5
+training_data/asd_dataset --out_name training_data/asd_dataset/asds_O1.hdf5
 ```
 
 
@@ -103,14 +103,14 @@ become significantly easier. To do this we first need to train an initialization
 network which estimates the time of arrival in the detectors:
 
 ```
-dingo_train --settings_file train_settings_init.yaml --train_dir training/init_network
+dingo_train --settings_file train_settings_init.yaml --train_dir training/init_train_dir
 ```
 
 Notice that the inference parameters are only the `H1_time` and `L1_time`. Also notice that the embedding_net 
 is significantly smaller and the number of flow steps, `num_flow_steps` is reduced.
 
 ```
-dingo_train --settings_file train_settings_main.yaml --train_dir training/main_network
+dingo_train --settings_file train_settings.yaml --train_dir training/main_train_dir
 ```
 
 Notice the `data.gnpe_time_shifts` section. The `kernel` describes how much to blur the GNPE proxies and is specified in 
