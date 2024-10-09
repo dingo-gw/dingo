@@ -12,107 +12,15 @@ from scipy.spatial import cKDTree
 
 from dingo.core.dataset import DingoDataset
 from dingo.populations.population_models import build_population_model
+from dingo.populations.models_training.embedding_sampler import EmbeddingSampler
+from dingo.populations.models_training.snr_estimator import SNREstimator
+from dingo.gw.injection import Injection
 
-DATA_KEYS = ["parameters", "embeddings"]
-
-
-class EventEmbeddingsDataset(DingoDataset):
-    """
-    Stores a population of GW events. This consists of a set of parameters and
-    associated single-event embeddings. The population parameters are typically draws
-    from a prior. This is intended to hold a very large population covering the full
-    range of possible event parameters, which will later be sub-sampled for specific
-    population hyperparameters.
-
-    The class contains functionality for nearest-neighbor sub-sampling.
-    """
-
-    dataset_type = "population_dataset"
-
-    def __init__(
-        self,
-        file_name=None,
-        dictionary=None,
-    ):
-        self.parameters = None
-        self.embeddings = None
-        self.prior = None
-        self.search_parameters_std = None
-        self.mean = None
-        self.std = None
-        self.tree = None
-        super().__init__(
-            file_name=file_name, dictionary=dictionary, data_keys=DATA_KEYS
-        )
-
-    def build_prior(self):
-        self.prior = BBHPriorDict(copy.deepcopy(self.settings.get("prior", {})))
-
-    @property
-    def embedding_size(self):
-        if self.embeddings is not None:
-            return self.embeddings.shape[-1]
-
-    def initialize_nearest_neighbors(self, search_parameters):
-        # Extend parameters as necessary, e.g., component masses from chirp mass and
-        # mass ratio.
-        if "mass_1" in search_parameters and "mass_1" not in self.parameters:
-            mass_1, mass_2 = chirp_mass_and_mass_ratio_to_component_masses(
-                self.parameters["chirp_mass"], self.parameters["mass_ratio"]
-            )
-            self.parameters["mass_1"] = mass_1
-            self.parameters["mass_2"] = mass_2
-
-        self.mean = self.parameters.mean().to_dict()
-        self.std = self.parameters.std().to_dict()
-
-        # Standardize the search parameters since Euclidean distance is used for
-        # measuring nearest neighbor proximity.
-        self.search_parameters_std = pd.DataFrame()
-        for p in search_parameters:
-            self.search_parameters_std[p] = (
-                self.parameters[p] - self.mean[p]
-            ) / self.std[p]
-
-        self.tree = cKDTree(self.search_parameters_std)
-
-    def store_log_prior(self):
-        if self.prior is None:
-            self.build_prior()
-        param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
-        theta = self.parameters[param_keys]
-        self.parameters["log_prior"] = self.prior.ln_prob(theta, axis=0)
-
-    def sample_nearest(self, desired_parameters):
-        # The cKDTree is based on standardized parameters.
-        desired_std = np.array(
-            [
-                (desired_parameters[k] - self.mean[k]) / self.std[k]
-                for k in self.search_parameters_std
-            ]
-        )
-        d, i = self.tree.query(desired_std)
-        # TODO: Raise error if d > threshold distance? This would indicate that the
-        #  coverage of the base population is too sparse. Alternatively, generate new
-        #  samples for the base population.
-        return i, self.parameters.iloc[i].to_dict(), self.embeddings[i]
-
-    def restrict_to_subpopulation(self, s):
-        """
-        Restricts to a subpopulation of events, as defined by the slice s. This is
-        useful for defining training and eval sets.
-
-        Parameters
-        ----------
-        s : slice
-            Slicing object to define subpopulation
-        """
-        self.parameters = self.parameters.iloc[s].reset_index(drop=True)
-        self.embeddings = self.embeddings[s].copy()
-        self.settings["size"] = len(self.parameters)
-
-    def __len__(self):
-        return len(self.parameters)
+from bilby.core.prior import Uniform, PriorDict
+from dingo.populations.utilities import (
+    build_bilby_prior_dict,
+    calculate_mean_and_std
+)
 
 
 class PopulationDataset(torch.utils.data.Dataset):
@@ -124,16 +32,17 @@ class PopulationDataset(torch.utils.data.Dataset):
 
     def __init__(
         self,
-        event_embeddings_path,
-        population_model,
-        population_prior,
+        embedding_emulator,
+        snr_model,
+        population_model_name,
+        population_prior_dict,
         snr_threshold,
         minimum_population_size,
         maximum_population_size,
-        size,
-        train_fraction,
         mode=None,
         kwargs_selection_cut={},
+        size=None,
+        train_fraction=0.9,
         **kwargs,  # These are ignored (particularly 'standardization'). Not clean.
     ):
         super().__init__()
@@ -141,7 +50,10 @@ class PopulationDataset(torch.utils.data.Dataset):
         # TODO: Should we build the train transforms from within this class? Might be
         #  better for treating the arguments.
 
-        self.event_embeddings = EventEmbeddingsDataset(file_name=event_embeddings_path)
+        self.embedding_emulator = embedding_emulator
+        self.snr_model = snr_model
+
+        self.population_prior = build_bilby_prior_dict(population_prior_dict)
 
         # if non-empty dictionary, events that do not pass this cut are directly discarded
         self.kwargs_selection_cut = kwargs_selection_cut
@@ -149,52 +61,20 @@ class PopulationDataset(torch.utils.data.Dataset):
         # Depending on whether we are in train or test mode, we take even or odd
         # elements of the base population (half for each).
         if mode == "train":
-            self.event_embeddings.restrict_to_subpopulation(
-                slice(None, len(self.event_embeddings) // 2, None)
-            )
+            # TODO, separate here? 
             self.size = int(size * train_fraction)
         elif mode == "test":
-            self.event_embeddings.restrict_to_subpopulation(
-                slice(len(self.event_embeddings) // 2, None, None)
-            )
             self.size = int(size * (1 - train_fraction))
+        else:
+            raise ValueError(f"Mode {mode} not recognized.")
 
-        self.event_embeddings.build_prior()
+        # TODO, write here checks that the priors of the embedding emulator 
+        # is not smaller than the population prior
 
-        if population_model != self.event_embeddings.settings["population_model"]:
-            print(
-                f"Warning:  Embeddings dataset generated from "
-                f"{self.event_embeddings.settings['population_model']} population "
-                f"model, which differs from requested {population_model}."
-            )
-        if population_prior != self.event_embeddings.settings["population_prior"]:
-            print(
-                "Warning: Embeddings dataset generated using different population "
-                "prior than requested for training."
-            )
-            print("Embeddings prior:")
-            print(
-                yaml.dump(
-                    self.event_embeddings.settings["population_prior"],
-                    default_flow_style=False,
-                    sort_keys=False,
-                )
-            )
-            print("Training prior:")
-            print(
-                yaml.dump(
-                    population_prior,
-                    default_flow_style=False,
-                    sort_keys=False,
-                )
-            )
-
+        # TODO replace here later with better metadata
+        inj = Injection.from_posterior_model_metadata(self.embedding_emulator.pm_single_event.metadata)
         self.population_model = build_population_model(
-            population_model, population_prior, self.event_embeddings.prior
-        )
-
-        self.event_embeddings.initialize_nearest_neighbors(
-            search_parameters=self.population_model.event_parameters
+            population_model_name, self.population_prior, inj.prior
         )
 
         self.snr_threshold = snr_threshold
@@ -202,36 +82,50 @@ class PopulationDataset(torch.utils.data.Dataset):
         self.maximum_population_size = maximum_population_size
 
         self.hyperparameters = None
-        self.sample_hyperparameters()
+
+        self.num_hyperparameters = len(self.population_prior)
 
         self.transform = None
-        self.event_counter = np.zeros(len(self.event_embeddings))
 
     def __getitem__(self, idx):
         size = np.random.randint(
             low=self.minimum_population_size, high=self.maximum_population_size + 1
         )
-        p = self.hyperparameters.iloc[idx]
-        generate_event_func = self.population_model.get_event_generator(p, self.kwargs_selection_cut)
+        hp = self.population_prior.sample()
+        generate_event_func = self.population_model.get_event_generator(hp, self.kwargs_selection_cut)
 
         # Keep generating events until the desired size is reached.
-        embeddings = np.empty((size, self.embedding_size))
+        embeddings = torch.zeros((size, self.embedding_size))
         n = 0
         tries = 0
+
         while n < size:
+
+            # TODO write s.t. generate event function can take a batch_size
             p = generate_event_func()
-            i, p_nearest, emb = self.event_embeddings.sample_nearest(p)
-            if p_nearest["matched_filter_snr"] >= self.snr_threshold:
+            emb = self.embedding_emulator.sample(p, batch_size=1)
+
+            mf_snr = self.snr_model(emb)
+
+            if mf_snr >= self.snr_threshold:
+
                 embeddings[n] = emb
                 n += 1
-                self.event_counter[i] += 1
+            
+            # found = (mf_snr >= self.snr_threshold)
+            # n_found = len(found)
+            
+            # idx = slice(n,n+n_found)
+            # embeddings[idx] = emb[found,:]   
+            
             tries += 1
+            
             if tries / (n + 1) > 10000:
                 raise ValueError("Sampling efficiency < 0.01%")
 
         # Prepare output, consisting of hyperparameters and an array of embeddings.
         sample = {
-            "hyperparameters": self.hyperparameters.iloc[idx].to_dict(),
+            "hyperparameters": hp,
             "embeddings": embeddings,
         }
         if self.transform is not None:
@@ -241,33 +135,41 @@ class PopulationDataset(torch.utils.data.Dataset):
             return sample
 
     def __len__(self):
-        return len(self.hyperparameters)
+        return self.size
 
     @property
     def embedding_size(self):
-        return self.event_embeddings.embedding_size
-
-    @property
-    def num_hyperparameters(self):
-        return self.hyperparameters.shape[-1]
+        return self.embedding_emulator.model_kwargs['input_dim']
 
     @property
     def base_settings(self):
-        return self.event_embeddings.settings
+        return self.embedding_emulator.metadata
 
     def init_epoch(self):
-        self.sample_hyperparameters()
-
-    def sample_hyperparameters(self):
-        print("Generating new set of population hyperparameters for dataset.")
-        self.hyperparameters = pd.DataFrame(
-            self.population_model.prior.sample(self.size)
-        )
+        # TODO: delete?
+        pass
 
     def hyperparameter_mean_std(self):
-        mean = self.hyperparameters.mean().to_dict()
-        std = self.hyperparameters.std().to_dict()
+        mean, std = {}, {}
+
+        print(self.population_prior)
+
+        for k in self.population_prior.keys():
+            mean[k], std[k] = calculate_mean_and_std(self.population_prior[k])
+
         return {"mean": mean, "std": std}
 
-    def save_stats(self, directory):
-        np.save(join(directory, "event_counts.npy"), self.event_counter)
+
+def construct_population_dataset(embedding_emulator_path, snr_model_path, device, **kwargs):
+    
+    embedding_emulator = EmbeddingSampler(embedding_emulator_path, device='cpu')
+    embedding_emulator.add_pm_single_event()
+
+    snr_model = SNREstimator(snr_model_path, device='cpu')
+    snr_model.model.eval()
+
+    return PopulationDataset(
+        embedding_emulator, 
+        snr_model, 
+        **kwargs
+    )
