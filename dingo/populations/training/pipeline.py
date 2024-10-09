@@ -4,6 +4,7 @@ import textwrap
 
 import torch
 import yaml
+import multiprocessing
 from threadpoolctl import threadpool_limits
 from torch.utils.data import DataLoader
 
@@ -13,7 +14,10 @@ from dingo.core.utils import (
     get_number_of_model_parameters,
     RuntimeLimits,
 )
-from dingo.populations.training.population_dataset import PopulationDataset
+from dingo.populations.training.population_dataset import (
+    PopulationDataset,
+    construct_population_dataset,
+)
 from dingo.populations.training.transform_builders import set_train_transforms
 
 
@@ -38,8 +42,16 @@ def train(
 
     # Build population forward models (train and test). These use different halves of
     # the base population events.
-    population_model_train = PopulationDataset(**train_settings["data"], mode="train")
-    population_model_test = PopulationDataset(**train_settings["data"], mode="test")
+    population_model_train = construct_population_dataset(
+        device=local_settings["device"], 
+        mode="train", 
+        **train_settings["data"],
+    )
+    population_model_test = construct_population_dataset(
+        device=local_settings["device"], 
+        mode="test", 
+        **train_settings["data"],
+    )
 
     set_train_transforms(population_model_train, train_settings["data"])
     set_train_transforms(population_model_test, train_settings["data"])
