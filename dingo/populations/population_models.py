@@ -233,6 +233,24 @@ def generate_selection_cut_function(kwargs_selection_cut):
             )
 
             return dL_max > sample['luminosity_distance']
+    elif(kwargs_selection_cut['name']=='linear-chirp-mass'):
+            
+        def pass_selection_cut_func(sample):
+
+            chirp_mass = component_masses_to_chirp_mass(
+                sample['mass_1'],
+                sample['mass_2'],
+            )
+            x = chirp_mass ** (5/6)
+            dL_max = linear_function_through_x_x1_x2_y1_y2(
+                x,
+                kwargs_selection_cut['signal_anchor_min'],
+                kwargs_selection_cut['signal_anchor_max'],
+                kwargs_selection_cut['dL_anchor_min'],
+                kwargs_selection_cut['dL_anchor_max']
+            )
+
+            return dL_max > sample['luminosity_distance']
 
     else:
         raise NotImplementedError
