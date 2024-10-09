@@ -43,17 +43,53 @@ class EmbeddingSampler(PosteriorModel):
         initial_weights: dict = None,
         device: str = "cuda",
         load_training_info: bool = True,
-        event_model = None
+        pm_single_event = None
     ):
-        if(event_model is not None):
-            self.add_event_model(event_model)
+        if(pm_single_event is not None):
+            self.add_pm_single_event(pm_single_event)
 
         super().__init__(model_filename, metadata, initial_weights, device, load_training_info)
 
-    def add_event_model(self, event_model):
-        event_model.set_embedding_only()
-        event_model.model.eval()
-        self.event_model = event_model
+    def get_pm_single_event(self):
+        main_model_path = self.metadata['train_settings']['data']['posterior_model']
+        pm_single_event = PosteriorModel(main_model_path, device=str(self.device))
+
+        return pm_single_event
+
+    def add_pm_single_event(self):
+
+        pm_single_event = self.get_pm_single_event()
+
+        pm_single_event.set_embedding_only()
+        pm_single_event.model.eval()
+
+        self.pm_single_event = pm_single_event
+        self.initialize_transform_pre()
+
+    def initialize_transform_pre(self):
+        self.transform1 = SelectStandardizeRepackageParameters(
+            {"inference_parameters": self.pm_single_event.metadata['train_settings']['data']['inference_parameters']},
+            self.pm_single_event.metadata["train_settings"]["data"]["standardization"],
+            inverse=False,
+            as_type="dict",
+        )
+        self.transform2 = UnpackDict(selected_keys=["inference_parameters"])
+
+        self.transform = torchvision.transforms.Compose([self.transform1, self.transform2])
+
+
+    def sample(self, params, batch_size, device=None):
+
+        x = self.transform(dict(parameters=params))
+        x = torch.tensor(np.array(x)).squeeze()
+
+        if(batch_size != None):
+            x = x.expand(batch_size, *x.shape)
+
+        if(device != None):
+            x = x.to(device)
+        
+        return super().sample(x, batch_size=batch_size)
 
     def train(
         self,
@@ -66,7 +102,7 @@ class EmbeddingSampler(PosteriorModel):
         test_only=False,
     ):
         if test_only:
-            test_loss = test_epoch_embedding(self, test_loader, self.event_model)
+            test_loss = test_epoch_embedding(self, test_loader, self.pm_single_event)
             print(f"test loss: {test_loss:.3f}")
         else:
             while not runtime_limits.limits_exceeded(self.epoch):
@@ -77,7 +113,7 @@ class EmbeddingSampler(PosteriorModel):
                 with threadpool_limits(limits=1, user_api="blas"):
                     print(f"\nStart training epoch {self.epoch} with lr {lr}")
                     time_start = time.time()
-                    train_loss = train_epoch_embedding(self, train_loader, self.event_model)
+                    train_loss = train_epoch_embedding(self, train_loader, self.pm_single_event)
                     train_time = time.time() - time_start
 
                     print(
@@ -89,7 +125,7 @@ class EmbeddingSampler(PosteriorModel):
                     # Testing
                     print(f"Start testing epoch {self.epoch}")
                     time_start = time.time()
-                    test_loss = test_epoch_embedding(self, test_loader, self.event_model)
+                    test_loss = test_epoch_embedding(self, test_loader, self.pm_single_event)
                     test_time = time.time() - time_start
 
                     print(
@@ -125,9 +161,9 @@ class EmbeddingSampler(PosteriorModel):
 
                 print(f"Finished training epoch {self.epoch}.\n")
 
-def train_epoch_embedding(pm, dataloader, event_model):
+def train_epoch_embedding(pm, dataloader, pm_single_event):
     pm.model.train()
-    event_model.model.eval()
+    pm_single_event.model.eval()
     loss_info = dingo.core.utils.trainutils.LossInfo(
         pm.epoch,
         len(dataloader.dataset),
@@ -142,7 +178,7 @@ def train_epoch_embedding(pm, dataloader, event_model):
         # data to device
         data = [d.to(pm.device, non_blocking=True) for d in data]
         
-        context = event_model.model(*data[1:])
+        context = pm_single_event.model(*data[1:])
         # compute loss, remember, we want to determine the embedding, so context and 
         # params switch place
         loss = -pm.model(context, data[0]).mean()
@@ -156,10 +192,10 @@ def train_epoch_embedding(pm, dataloader, event_model):
     return loss_info.get_avg()
 
 
-def test_epoch_embedding(pm, dataloader, event_model):
+def test_epoch_embedding(pm, dataloader, pm_single_event):
     with torch.no_grad():
         pm.model.eval()
-        event_model.model.eval()
+        pm_single_event.model.eval()
         loss_info = dingo.core.utils.trainutils.LossInfo(
             pm.epoch,
             len(dataloader.dataset),
@@ -173,7 +209,7 @@ def test_epoch_embedding(pm, dataloader, event_model):
             # data to device
             data = [d.to(pm.device, non_blocking=True) for d in data]
 
-            context = event_model.model(*data[1:])
+            context = pm_single_event.model(*data[1:])
             # compute loss
             loss = -pm.model(context, data[0]).mean()
             # update loss for history and logging
@@ -183,32 +219,32 @@ def test_epoch_embedding(pm, dataloader, event_model):
         return loss_info.get_avg()
 
 class WaveformEmbeddingDataset(WaveformDataset):
-    def __init__(self, event_model, params_for_embedding, transform_embedding=None):
+    def __init__(self, pm_single_event, params_for_embedding, transform_embedding=None):
         """
         Initialize the WaveformEmbeddingDataset with an event model, parameters for embedding,
         and optional transformations.
         
         Parameters
         ----------
-        event_model : Model
+        pm_single_event : Model
             The model used for generating embeddings (e.g., samplers['NPE']).
         params_for_embedding : list
             List of parameter names for embedding purposes.
         transform : callable, optional
             Transformations to apply to the data (default is None).
         """
-        event_model.set_embedding_only()
-        event_model.model.eval()
+        pm_single_event.set_embedding_only()
+        pm_single_event.model.eval()
         
-        self.event_model = event_model
+        self.pm_single_event = pm_single_event
         self.params_for_embedding = params_for_embedding
         self.transform_embedding = transform_embedding
 
         # not sure that is the best solution? 
-        self.device = event_model.device
+        self.device = pm_single_event.device
 
         # Load metadata from the event model
-        train_settings = event_model.metadata['train_settings']
+        train_settings = pm_single_event.metadata['train_settings']
 
         # for debugging
         train_settings['data']['waveform_dataset_path'] = '/mnt/lustre2/gravitational_waves/kleyde/dingo_population/waveform_datasets/waveform_test.hdf5'
@@ -267,7 +303,7 @@ class WaveformEmbeddingDataset(WaveformDataset):
 
         # Compute the embedding using the event model
         with torch.no_grad():
-            embeddings = self.event_model.model(waveform).squeeze().numpy()
+            embeddings = self.pm_single_event.model(waveform).squeeze().numpy()
 
         # Create the data dictionary
         data = dict(
