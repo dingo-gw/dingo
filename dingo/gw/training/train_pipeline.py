@@ -432,6 +432,13 @@ def initialize_stage(
         print_output=print_output,
     )
 
+    # Convert total batch size into batch size per GPU
+    if world_size is not None and world_size > 1:
+        total_batch_size = stage["batch_size"]
+        if total_batch_size % world_size != 0:
+            raise ValueError(f"Total batch size {total_batch_size} is not divisible by the number of GPUs {world_size}.")
+        stage["batch_size"] = int(total_batch_size/world_size)
+
     # Allows for changes in batch size between stages.
     train_loader, test_loader, train_sampler = build_train_and_test_loaders(
         wfd,
