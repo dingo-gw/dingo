@@ -22,14 +22,10 @@ from dingo.core.utils import (
     build_train_and_test_loaders,
 )
 from dingo.gw.dataset import WaveformDataset
-from dingo.populations.models_training.embedding_sampler import (
-    EmbeddingSampler,
-    set_embedding_transforms
-)
 from dingo.populations.training.pipeline_embedding_emulator import (
     train_stages
 )
-from dingo.populations.models_training.snr_estimator import (
+from dingo.populations.models_training.models import (
     SNREstimator
 )
 
@@ -121,7 +117,7 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
     model = SNREstimator(
         metadata=full_settings,
         device=device,
-        event_model=pm_embeddings
+        pm_single_event=pm_embeddings
     )
 
     if local_settings.get("wandb", False):

@@ -22,23 +22,9 @@ from dingo.core.utils import (
     build_train_and_test_loaders,
 )
 from dingo.gw.dataset import WaveformDataset
-from dingo.populations.models_training.embedding_sampler import (
-    EmbeddingSampler,
-    set_embedding_transforms
+from dingo.populations.models_training.models import (
+    EmbeddingEmulator
 )
-
-# def build_waveform_embedding_dataset_from_model(pm_main, params_for_embedding):
-
-#     wfed = WaveformEmbeddingDataset(
-#         event_model=pm_main, 
-#         params_for_embedding=params_for_embedding
-#     )
-
-#     set_embedding_transforms(
-#         wfed, pm_main.metadata['train_settings']['data']
-#     )
-
-#     return wfed
 
 def autocomplete_model_kwargs_nsf_for_embedding(model_kwargs, data_sample, single_event_model):
     
@@ -78,7 +64,7 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
     pm_embeddings = PosteriorModel(train_settings['data']['posterior_model'], device=device)
 
     # for debug purposes
-    # pm_embeddings.metadata['train_settings']['data']['waveform_dataset_path'] = '/mnt/lustre2/gravitational_waves/kleyde/dingo_population/waveform_datasets/waveform_test.hdf5'
+    pm_embeddings.metadata['train_settings']['data']['waveform_dataset_path'] = '/mnt/lustre2/gravitational_waves/kleyde/dingo_population/waveform_datasets/waveform_test.hdf5'
 
     # read for which parameters we want to fit the embedding emulator
     # if 'params_for_embedding' in train_settings['data']:
@@ -101,10 +87,13 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
 
         # This modifies the model settings in-place.
         autocomplete_model_kwargs_nsf_for_embedding(train_settings["model"], wfd[0], pm_embeddings)
-        # maybe not needed? 
+
         full_settings = {
             "dataset_settings": wfd.settings,
             "train_settings": train_settings,
+            "settings_pm_single_event": {
+                **pm_embeddings.metadata,
+            }
         }
 
     else:
@@ -116,11 +105,12 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
 
     print("full_settings", full_settings["train_settings"]["model"])
     
-    pm = EmbeddingSampler(
+    pm = EmbeddingEmulator(
         metadata=full_settings,
         device=device,
-        event_model=pm_embeddings
     )
+    # load the corresponding event model
+    pm.add_pm_single_event()
 
     if local_settings.get("wandb", False):
         try:
@@ -156,10 +146,10 @@ def prepare_training_resume(checkpoint_name, local_settings, train_dir):
     device = local_settings['device']
 
     # TODO: 
-    pm = EmbeddingSampler(
+    pm = EmbeddingEmulator(
         model_filename=checkpoint_name,
         device=device,
-        event_model=None
+        pm_single_event=None
     )
 
     posterior_model_path = pm.metadata['train_settings']['data']['posterior_model']
@@ -174,7 +164,7 @@ def prepare_training_resume(checkpoint_name, local_settings, train_dir):
         train_settings["training"]["stage_0"]["asd_dataset_path"],
     )
 
-    pm.add_event_model(pm_embeddings)
+    pm.add_pm_single_event(pm_embeddings)
     
     if local_settings.get("wandb", False):
         try:

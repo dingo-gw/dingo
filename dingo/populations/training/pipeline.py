@@ -19,6 +19,11 @@ from dingo.populations.training.population_dataset import (
     construct_population_dataset,
 )
 from dingo.populations.training.transform_builders import set_train_transforms
+from dingo.populations.models_training.models import (
+    PopulationModel,
+    EmbeddingEmulator,
+    SNREstimator
+)
 
 
 # Allow use of TF32 datatype if available. This may speed up training, although
@@ -35,7 +40,7 @@ def train(
     checkpoint=None,
 ):
     if resume:
-        pm = PosteriorModel(model_filename=checkpoint, device=local_settings["device"])
+        pm = PopulationModel(model_filename=checkpoint, device=local_settings["device"])
         train_settings = pm.metadata["train_settings"]
 
     # (1) Prepare training data
@@ -43,18 +48,18 @@ def train(
     # Build population forward models (train and test). These use different halves of
     # the base population events.
     population_model_train = construct_population_dataset(
-        device=local_settings["device"], 
-        mode="train", 
+        device=local_settings["device"],
+        mode="train",
         **train_settings["data"],
     )
     population_model_test = construct_population_dataset(
         device=local_settings["device"], 
-        mode="test", 
+        mode="test",
         **train_settings["data"],
     )
 
-    set_train_transforms(population_model_train, train_settings["data"])
-    set_train_transforms(population_model_test, train_settings["data"])
+    set_train_transforms(population_model_train, train_settings["data"], population_model_train.settings_pm_single_event)
+    set_train_transforms(population_model_test, train_settings["data"], population_model_test.settings_pm_single_event)
 
     train_loader = DataLoader(
         population_model_train,
@@ -90,8 +95,18 @@ def train(
         full_settings = {
             "base_settings": population_model_train.base_settings,
             "train_settings": train_settings,
+            "embedding_emulator_metadata": population_model_train.embedding_emulator_metadata,
         }
-        pm = PosteriorModel(metadata=full_settings, device=local_settings["device"])
+        embedding_emulator = EmbeddingEmulator(train_settings["data"]["embedding_emulator_path"], device=local_settings["device"])
+        embedding_emulator.initialize_transform_pre()
+        snr_estimator = SNREstimator(train_settings["data"]["snr_model_path"], device=local_settings["device"])
+        snr_estimator.set_mf_snr_treshold(train_settings["data"]["mf_snr_treshold"])
+        pm = PopulationModel(
+            metadata=full_settings,
+            device=local_settings["device"],
+            embedding_emulator=embedding_emulator,
+            snr_estimator=snr_estimator,   
+        )
 
         pm.optimizer_kwargs = train_settings["training"]["optimizer"]
         pm.scheduler_kwargs = train_settings["training"]["scheduler"]
