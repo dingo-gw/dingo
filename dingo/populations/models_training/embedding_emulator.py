@@ -27,143 +27,19 @@ from dingo.gw.training.train_builders import (
 from dingo.gw.transforms import (
     AddWhiteNoiseComplex,
     UnpackDict,
-    SampleExtrinsicParameters,
     SelectStandardizeRepackageParameters
 )
 
-import torch
 import time
 from threadpoolctl import threadpool_limits
 
-class EmbeddingSampler(PosteriorModel):
-    def __init__(
-        self,
-        model_filename: str = None,
-        metadata: dict = None,
-        initial_weights: dict = None,
-        device: str = "cuda",
-        load_training_info: bool = True,
-        pm_single_event = None
-    ):
-        if(pm_single_event is not None):
-            self.add_pm_single_event(pm_single_event)
+def train_epoch_embedding(pm, dataloader):
 
-        super().__init__(model_filename, metadata, initial_weights, device, load_training_info)
-
-    def get_pm_single_event(self):
-        main_model_path = self.metadata['train_settings']['data']['posterior_model']
-        pm_single_event = PosteriorModel(main_model_path, device=str(self.device))
-
-        return pm_single_event
-
-    def add_pm_single_event(self):
-
-        pm_single_event = self.get_pm_single_event()
-
-        pm_single_event.set_embedding_only()
-        pm_single_event.model.eval()
-
-        self.pm_single_event = pm_single_event
-        self.initialize_transform_pre()
-
-    def initialize_transform_pre(self):
-        self.transform1 = SelectStandardizeRepackageParameters(
-            {"inference_parameters": self.pm_single_event.metadata['train_settings']['data']['inference_parameters']},
-            self.pm_single_event.metadata["train_settings"]["data"]["standardization"],
-            inverse=False,
-            as_type="dict",
-        )
-        self.transform2 = UnpackDict(selected_keys=["inference_parameters"])
-
-        self.transform = torchvision.transforms.Compose([self.transform1, self.transform2])
-
-
-    def sample(self, params, batch_size, device=None):
-
-        x = self.transform(dict(parameters=params))
-        x = torch.tensor(np.array(x)).squeeze()
-
-        if(batch_size != None):
-            x = x.expand(batch_size, *x.shape)
-
-        if(device != None):
-            x = x.to(device)
-        
-        return super().sample(x, batch_size=batch_size)
-
-    def train(
-        self,
-        train_loader: torch.utils.data.DataLoader,
-        test_loader: torch.utils.data.DataLoader,
-        train_dir: str,
-        runtime_limits: object = None,
-        checkpoint_epochs: int = None,
-        use_wandb=False,
-        test_only=False,
-    ):
-        if test_only:
-            test_loss = test_epoch_embedding(self, test_loader, self.pm_single_event)
-            print(f"test loss: {test_loss:.3f}")
-        else:
-            while not runtime_limits.limits_exceeded(self.epoch):
-                self.epoch += 1
-
-                # Training
-                lr = utils.get_lr(self.optimizer)
-                with threadpool_limits(limits=1, user_api="blas"):
-                    print(f"\nStart training epoch {self.epoch} with lr {lr}")
-                    time_start = time.time()
-                    train_loss = train_epoch_embedding(self, train_loader, self.pm_single_event)
-                    train_time = time.time() - time_start
-
-                    print(
-                        "Done. This took {:2.0f}:{:2.0f} min.".format(
-                            *divmod(train_time, 60)
-                        )
-                    )
-
-                    # Testing
-                    print(f"Start testing epoch {self.epoch}")
-                    time_start = time.time()
-                    test_loss = test_epoch_embedding(self, test_loader, self.pm_single_event)
-                    test_time = time.time() - time_start
-
-                    print(
-                        "Done. This took {:2.0f}:{:2.0f} min.".format(
-                            *divmod(test_time, 60)
-                        )
-                    )
-
-                # scheduler step for learning rate
-                utils.perform_scheduler_step(self.scheduler, test_loss)
-
-                # write history and save model
-                utils.write_history(train_dir, self.epoch, train_loss, test_loss, lr)
-                utils.save_model(self, train_dir, checkpoint_epochs=checkpoint_epochs)
-                
-                if use_wandb:
-                    try:
-                        import wandb
-                        wandb.define_metric("epoch")
-                        wandb.define_metric("*", step_metric="epoch")
-                        wandb.log(
-                            {
-                                "epoch": self.epoch,
-                                "learning_rate": lr[0],
-                                "train_loss": train_loss,
-                                "test_loss": test_loss,
-                                "train_time": train_time,
-                                "test_time": test_time,
-                            }
-                        )
-                    except ImportError:
-                        print("wandb not installed. Skipping logging to wandb.")
-
-                print(f"Finished training epoch {self.epoch}.\n")
-
-def train_epoch_embedding(pm, dataloader, pm_single_event):
-    pm.model.train()
+    pm_single_event = pm.pm_single_event
     pm_single_event.model.eval()
+
+    pm.model.train()
+    
     loss_info = dingo.core.utils.trainutils.LossInfo(
         pm.epoch,
         len(dataloader.dataset),
@@ -192,7 +68,11 @@ def train_epoch_embedding(pm, dataloader, pm_single_event):
     return loss_info.get_avg()
 
 
-def test_epoch_embedding(pm, dataloader, pm_single_event):
+def test_epoch_embedding(pm, dataloader):
+    
+    pm_single_event = pm.pm_single_event
+    pm_single_event.model.eval()
+
     with torch.no_grad():
         pm.model.eval()
         pm_single_event.model.eval()
