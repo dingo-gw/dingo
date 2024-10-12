@@ -36,6 +36,22 @@ class DictToArray:
         sample[self.key] = arr
         return sample
 
+class DictToEventArray:
+    def __init__(self, key):
+        self.key = key
+
+    def __call__(self, input_sample: dict):
+        sample = input_sample.copy()
+
+        d = input_sample[self.key]
+        s = (len(next(iter(d.values()))), len(d),)
+        arr = np.empty(s, dtype=np.float32)
+        for idx, v in enumerate(d.values()):
+            arr[..., idx] = v
+
+        sample[self.key] = arr
+        return sample
+
 
 class PadMask:
     """
