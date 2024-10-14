@@ -1,7 +1,7 @@
 import copy
 
 from astropy.cosmology import FlatLambdaCDM
-from bilby.core.prior import PriorDict, PowerLaw, Constraint
+from bilby.core.prior import PriorDict, PowerLaw, Constraint, ConditionalPriorDict, ConditionalPowerLaw
 from bilby.gw.conversion import (
     generate_mass_parameters,
     component_masses_to_mass_ratio,
@@ -33,14 +33,15 @@ class PowerLawPopulation(object):
 
     def get_event_generator(self, p, kwargs_selection_cut={}):
         cosmology = FlatLambdaCDM(Om0=0.3, H0=p["hubble_constant"])
-        prior_dict = PriorDict(
+        prior_dict = ConditionalPriorDict(
             {
                 "mass_1_source": PowerLaw(
                     alpha=-p["alpha"],
                     minimum=p["minimum_mass"],
                     maximum=p["maximum_mass"],
                 ),
-                "mass_2_source": PowerLaw(
+                "mass_2_source": ConditionalPowerLaw(
+                    secondary_mass_condition_function,
                     alpha=p["beta"],
                     minimum=p["minimum_mass"],
                     maximum=p["maximum_mass"],
@@ -189,7 +190,7 @@ def build_population_model(population_model, population_prior, event_model_prior
             f"Population model {population_model} is not " f"implemented."
         )
 
-class WrapperPrior(PriorDict):
+class WrapperPrior(ConditionalPriorDict):
     
     def __init__(self, prior_dict, N):
         
@@ -259,6 +260,13 @@ def generate_selection_cut_function(kwargs_selection_cut):
 
 def linear_function_through_x_x1_x2_y1_y2(x, x1, x2, y1, y2):
     return y1 + (x - x1) / (x2 - x1) * (y2 - y1)
+
+def secondary_mass_condition_function(reference_params, mass_1_source):
+    """
+    Compute the maximum mass of the secondary component given the primary mass.
+    
+    """
+    return dict(minimum=reference_params['minimum'], maximum=mass_1_source)
 
         
 
