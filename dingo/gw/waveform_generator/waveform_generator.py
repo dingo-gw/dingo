@@ -658,8 +658,8 @@ class WaveformGenerator:
             values.
         iota: float
         """
-        # TD approximants that are implemented in J frame. Currently tested for:
-        #   101: IMRPhenomXPHM
+        #  Currently tested for:
+        #    101: IMRPhenomXPHM, 97: IMRPhenomXHM
         tested_approximants = ["IMRPhenomXPHM","IMRPhenomXHM"]
         if LS.GetStringFromApproximant(self.approximant) in tested_approximants:
             parameters_lal_fd_modes = self._convert_parameters(
