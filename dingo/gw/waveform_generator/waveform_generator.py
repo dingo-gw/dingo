@@ -660,7 +660,8 @@ class WaveformGenerator:
         """
         # TD approximants that are implemented in J frame. Currently tested for:
         #   101: IMRPhenomXPHM
-        if self.approximant in [101]:
+        tested_approximants = ["IMRPhenomXPHM","IMRPhenomXHM"]
+        if LS.GetStringFromApproximant(self.approximant) in tested_approximants:
             parameters_lal_fd_modes = self._convert_parameters(
                 {**parameters, "f_ref": self.f_ref},
                 lal_target_function="SimInspiralChooseFDModes",
@@ -674,13 +675,14 @@ class WaveformGenerator:
             # are returned in the J frame (where the observer is at inclination=theta_JN,
             # azimuth=0). In this frame, the dependence on the reference phase enters
             # via the modes themselves. We need to convert to the L0 frame so that the
-            # dependence on phase enters via the spherical harmonics.
-            hlm_fd = frame_utils.convert_J_to_L0_frame(
-                hlm_fd,
-                parameters,
-                self,
-                spin_conversion_phase=self.spin_conversion_phase,
-            )
+            # dependence on phase enters via the spherical harmonics.  
+            if LS.GetStringFromApproximant(self.approximant) == "IMRPhenomXPHM":
+                hlm_fd = frame_utils.convert_J_to_L0_frame(
+                    hlm_fd,
+                    parameters,
+                    self,
+                    spin_conversion_phase=self.spin_conversion_phase,
+                )
             return hlm_fd, iota
         else:
             raise NotImplementedError(
