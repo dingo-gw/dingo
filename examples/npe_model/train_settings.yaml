@@ -97,7 +97,6 @@ local:
   checkpoint_epochs: 50
   # Local settings related to condor, remove if not used on cluster
   condor:
-    bid: 100
     num_cpus: 16
     memory_cpus: 128000
     num_gpus: 1
