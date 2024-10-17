@@ -22,6 +22,60 @@ from dingo.gw.waveform_generator import (
 )
 from dingo.gw.SVD import SVDBasis, ApplySVD
 
+def generate_parameters_and_polarizations_strict(
+    waveform_generator: WaveformGenerator,
+    prior: BBHPriorDict,
+    num_samples: int,
+    num_processes: int,
+) -> Tuple[pd.DataFrame, Dict[str, np.ndarray]]:
+    """ 
+    Generate a dataset of waveforms based on parameters drawn from the prior.
+    Will iteratively call generate_parameters_and_polarizations until the number of
+    requested waveforms are generate. This is useful in the case where we have
+    waveform failures.
+
+    Parameters
+    ----------
+    waveform_generator : WaveformGenerator
+    prior : Prior
+    num_samples : int
+    num_processes : int
+
+    Returns
+    -------
+    pandas DataFrame of parameters
+    dictionary of numpy arrays corresponding to waveform polarizations
+    """
+    num_samples_total, num_samples_request = 0, num_samples
+    parameters = None
+    while num_samples_total < num_samples:
+        # Generate main dataset
+        parameters_temp, polarizations_temp = generate_parameters_and_polarizations(
+            waveform_generator, prior, num_samples_request, num_processes
+        )
+
+        if parameters is None:
+            parameters = parameters_temp
+            polarizations = polarizations_temp
+            failed_fraction = 1 - len(parameters) / num_samples_request
+        else:
+            parameters = pd.concat(
+                [parameters, parameters_temp]
+            )
+            for key, value in polarizations_temp.items():
+                polarizations[key] = np.vstack(
+                    [polarizations[key], value]
+                )
+
+        # estimate the fraction of failed waveforms
+        num_samples_total += len(parameters)
+        num_waveforms_to_generate = num_samples - num_samples_total
+        # generating extra waveforms given that we know the failing fraction 
+        num_samples_request =  int(num_waveforms_to_generate / failed_fraction)
+
+    parameters = parameters.iloc[:num_samples]
+    polarizations = {k: v[:num_samples] for k, v in polarizations.items()}
+    return parameters, polarizations
 
 def generate_parameters_and_polarizations(
     waveform_generator: WaveformGenerator,
@@ -194,7 +248,7 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
 
                 n_train = svd_settings["num_training_samples"]
                 n_test = svd_settings.get("num_validation_samples", 0)
-                parameters, polarizations = generate_parameters_and_polarizations(
+                parameters, polarizations = generate_parameters_and_polarizations_strict(
                     waveform_generator,
                     prior,
                     n_train + n_test,
@@ -221,25 +275,19 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
                 basis, n_train, n_test = train_svd_basis(
                     svd_dataset, svd_settings["size"], n_train
                 )
-                # Reset the true number of samples, in case this has changed due to
-                # failure to generate some EOB waveforms.
-                svd_settings["num_training_samples"] = n_train
-                svd_settings["num_validation_samples"] = n_test
 
             compression_transforms.append(ApplySVD(basis))
             dataset_dict["svd"] = basis.to_dictionary()
 
         waveform_generator.transform = Compose(compression_transforms)
 
-    # Generate main dataset
-    parameters, polarizations = generate_parameters_and_polarizations(
+    parameters, polarizations = generate_parameters_and_polarizations_strict(
         waveform_generator, prior, settings["num_samples"], num_processes
     )
     dataset_dict["parameters"] = parameters
     dataset_dict["polarizations"] = polarizations
-    # Update to take into account potentially failed configurations
-    dataset_dict[settings["num_samples"]] = len(parameters)
 
+    dataset_dict[settings["num_samples"]] = len(parameters)
     dataset = WaveformDataset(dictionary=dataset_dict)
     return dataset
 
