@@ -22,7 +22,7 @@ import dingo.core.utils as utils
 import dingo.core.utils.trainutils
 from dingo.core.utils.misc import get_version
 from dingo.core.utils.trainutils import EarlyStopping
-from dingo.core.utils.torchutils import perform_scheduler_step
+from dingo.core.utils.scheduler import get_scheduler_from_kwargs, perform_scheduler_step
 
 
 class Base:
@@ -206,7 +206,7 @@ class Base:
             # Number of optimizer steps per epoch required if scheduler updates are performed per optimizer step
             self.scheduler_kwargs["num_optimizer_steps_per_epoch"] = num_optimizer_steps
 
-            self.scheduler = utils.get_scheduler_from_kwargs(
+            self.scheduler = get_scheduler_from_kwargs(
                 self.optimizer, **self.scheduler_kwargs
             )
 
@@ -475,7 +475,7 @@ class Base:
                             )
                         )
                 # Update scheduler if update_every_optimizer_step == False
-                utils.perform_scheduler_step(
+                perform_scheduler_step(
                     self.scheduler,
                     self.scheduler_kwargs,
                     loss=test_loss,
