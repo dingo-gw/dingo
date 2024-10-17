@@ -188,7 +188,7 @@ class SNREstimator(GenericModel):
         pm_single_event: PosteriorModel = None,
     ):  
         type_pm = 'snr_estimator'
-        self.mf_snr_treshold = None
+        self.mf_snr_threshold = None
 
         # only add single event model if provided
         if(pm_single_event is not None):
@@ -196,8 +196,8 @@ class SNREstimator(GenericModel):
 
         super().__init__(model_filename, metadata, initial_weights, device, load_training_info, type_pm)
 
-    def set_mf_snr_treshold(self, mf_snr_treshold):
-        self.mf_snr_treshold = mf_snr_treshold
+    def set_mf_snr_threshold(self, mf_snr_threshold):
+        self.mf_snr_threshold = mf_snr_threshold
 
     def get_pm_single_event(self):
         main_model_path = self.metadata['train_settings']['data']['posterior_model']
@@ -235,7 +235,12 @@ class SNREstimator(GenericModel):
     def apply_selection_to_embeddings(self, emb):
 
         snr = self(emb).squeeze()
-        idx = snr > self.mf_snr_treshold
+        idx = snr > self.mf_snr_threshold
+
+        # make sure the idx shape is always 2d
+        if len(idx.shape) == 1:
+            idx = idx.unsqueeze(0)
+
         return idx
 
 class EmbeddingEmulator(GenericModel):
@@ -286,21 +291,26 @@ class EmbeddingEmulator(GenericModel):
 
         self.transform = torchvision.transforms.Compose([self.transform1, self.transform2])
 
+    def sample_from_params(self, params, device=None, num_samples=None):
+        
+        x = self.transform(dict(parameters=params))
+        x = torch.tensor(np.array(x)).squeeze()
+
+        if(num_samples is not None):
+            x = x.expand(num_samples, *x.shape)
+
+        return self.sample(x, device=device)
+
 
     def sample(self, x=None, params=None, batch_size=None, device=None):
-
-        if(params is not None):
-            x = self.transform(dict(parameters=params))
-            x = torch.tensor(np.array(x)).squeeze()
-
-        # if(other_batch_size is not None):
-        #     x = x.expand(other_batch_size, *x.shape)
-
+        
         if len(x.shape) == 3:
             flattened = True
             batch_shape_pre = x.shape[:-1]
             # flatten along batch dimension
             x = x.reshape(-1, x.shape[-1])
+        else:
+            flattened = False
 
         if(device is not None):
             x = x.to(device)
