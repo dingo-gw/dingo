@@ -58,6 +58,11 @@ def generate_parameters_and_polarizations_strict(
             parameters = parameters_temp
             polarizations = polarizations_temp
             failed_fraction = 1 - len(parameters) / num_samples_request
+            if np.abs(failed_fraction - 1) < 1e-6:
+                raise ValueError(
+                    """A very high fraction of waveforms are failing to generate. Please
+                    check the prior and waveform generator settings."""
+                )
         else:
             parameters = pd.concat(
                 [parameters, parameters_temp]
