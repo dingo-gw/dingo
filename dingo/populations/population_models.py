@@ -23,9 +23,8 @@ class PowerLawPopulation(object):
     """
 
     model_type = "power_law"
-    event_parameters = ["mass_1", "mass_2", "luminosity_distance"]
 
-    def __init__(self, prior, minimum_distance, maximum_distance, batch_prior=5_000):
+    def __init__(self, prior, minimum_distance, maximum_distance, batch_prior=15_000):
         self.prior = PriorDict(copy.deepcopy(prior))
         self.minimum_distance = minimum_distance
         self.maximum_distance = maximum_distance
@@ -56,7 +55,7 @@ class PowerLawPopulation(object):
             },
             conversion_function=lambda x: generate_mass_parameters(x, source=True),
         )
-        prior = WrapperPrior(prior_dict, self.batch_prior)
+        prior = ConditionalPriorDict(prior_dict)
 
         # We use the PyCBC class DistToZ, which is much faster than using the astropy
         # function for z(d_L) directly, since it interpolates.
@@ -71,34 +70,38 @@ class PowerLawPopulation(object):
         # (2) Some of the objects (construction of prior, cosmology, DistToZ) are a bit
         # slow to construct, so we should avoid doing so repeatedly for each set of
         # hyperparameters.
-        def generation_func():
-            # if a condition is given, this is faster, since it discards events 
-            # with low SNR directly
-            cond = False
-            tries = 0
-            while(not cond):
-                s = prior.sample()
-                s['ln_prob'] = prior.ln_prob(s)
+        def generation_func(size, buffer_factor=2, train=False):
 
-                s["redshift"] = dist_to_z.get_redshift(s["luminosity_distance"])
-                for k in ["mass_1", "mass_2"]:
-                    s[k] = s[k + "_source"] * (1 + s["redshift"])
+            s = prior.sample(buffer_factor * size)
 
-                cond = selection_cut_func(s)
-                tries += 1
-                
-                if(tries > 1000):
-                    raise 'Sampling efficiency below 0.1%. '
+            if not train:
+                add_log_prob(prior, s)
+
+            complete_gw_parameters(s, dist_to_z)
+
+            # are these samples observable ? 
+            idx_obs = selection_cut_func(s)
             
-            # IMPORTANT: We want all the mass parameters in order to avoid any problems
-            # combining with parameters sampled from the prior. We are leaving off
-            # things like total mass, symmetric mass ratio, because they don't tend to
-            # occur in our code. But this is something to watch for.
-            s["chirp_mass"] = component_masses_to_chirp_mass(s["mass_1"], s["mass_2"])
-            s["mass_ratio"] = component_masses_to_mass_ratio(s["mass_1"], s["mass_2"])
+            for k in s.keys():
+                s[k] = s[k][idx_obs]
+                s[k] = s[k][:size]
+            
             return s
 
         return generation_func
+
+def add_log_prob(prior, samples):
+
+    samples['ln_prob'] = prior.ln_prob(samples)
+
+def complete_gw_parameters(s, dist_to_z):
+
+    s["redshift"] = dist_to_z.get_redshift(s["luminosity_distance"])
+    for k in ["mass_1", "mass_2"]:
+        s[k] = s[k + "_source"] * (1 + s["redshift"])
+
+    s["chirp_mass"] = component_masses_to_chirp_mass(s["mass_1"], s["mass_2"])
+    s["mass_ratio"] = component_masses_to_mass_ratio(s["mass_1"], s["mass_2"])
 
 class PowerLawPeakPopulation(object):
     """
@@ -189,37 +192,14 @@ def build_population_model(population_model, population_prior, event_model_prior
         raise NotImplementedError(
             f"Population model {population_model} is not " f"implemented."
         )
-
-class WrapperPrior(ConditionalPriorDict):
-    
-    def __init__(self, prior_dict, N):
-        
-        self.prior_dict = prior_dict
-        self.N = N
-        
-        super().__init__(prior_dict)
-        
-        self.precompute_samples()
-                
-    def precompute_samples(self):
-        
-        self.counter = 0
-        self._samples = super().sample(self.N)
-        
-    def sample(self):
-        
-        if(self.counter>=self.N):
-            self.precompute_samples()
-
-        self.counter += 1
-        return {k: v[self.counter - 1] for k, v in self._samples.items()}
     
 def generate_selection_cut_function(kwargs_selection_cut):
 
     if(kwargs_selection_cut=={}):
         # if the dict is empty, we always generate the waveform
         def pass_selection_cut_func(sample):
-            return True
+            k = list(sample.keys())[0]
+            return np.ones_like(sample[k], dtype=bool)
     elif(kwargs_selection_cut['name']=='linear'):
 
         def pass_selection_cut_func(sample):
