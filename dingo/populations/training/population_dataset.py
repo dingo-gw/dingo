@@ -70,6 +70,8 @@ class PopulationDataset(torch.utils.data.Dataset):
         # if non-empty dictionary, events that do not pass this cut are directly discarded
         self.kwargs_selection_cut = kwargs_selection_cut
 
+        self.mode = mode
+
         # Depending on whether we are in train or test mode, we take even or odd
         # elements of the base population (half for each).
         if mode == "train":
@@ -105,14 +107,9 @@ class PopulationDataset(torch.utils.data.Dataset):
         
         generate_event_func = self.population_model.get_event_generator(hp, self.kwargs_selection_cut)
 
-        parameters = {k:v for k, v in generate_event_func().items() if k in self.inference_parameters}
-        for i in range(self.size_all_events-1):
-            new_p = generate_event_func()
-            # note that we only collect the keys in parameters.keys()
-            # which is just self.inference_parameters
-            for k in self.inference_parameters:
-                parameters[k] = np.append(parameters[k], new_p[k])
-            
+        is_training = self.mode in ["train", "test"]
+        parameters = generate_event_func(size=self.size_all_events, buffer_factor=10, train=is_training)
+        
         # Prepare output, consisting of hyperparameters and an array of embeddings.
         sample = {
             "hyperparameters": hp,
