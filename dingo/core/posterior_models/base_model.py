@@ -22,6 +22,7 @@ import dingo.core.utils as utils
 import dingo.core.utils.trainutils
 from dingo.core.utils.misc import get_version
 from dingo.core.utils.trainutils import EarlyStopping
+from dingo.core.utils.torchutils import perform_scheduler_step
 
 
 class Base:
@@ -190,7 +191,9 @@ class Base:
         print(f"Putting posterior model to device {self.device}.")
         self.network.to(self.device)
 
-    def initialize_optimizer_and_scheduler(self, num_batches: Optional[int] = None):
+    def initialize_optimizer_and_scheduler(
+        self, num_optimizer_steps: Optional[int] = None
+    ):
         """
         Initializes the optimizer and scheduler with self.optimizer_kwargs
         and self.scheduler_kwargs, respectively.
@@ -200,10 +203,8 @@ class Base:
                 self.network.parameters(), **self.optimizer_kwargs
             )
         if self.scheduler_kwargs is not None:
-            if "update_scheduler_every_batch" not in self.scheduler_kwargs:
-                self.scheduler_kwargs["update_scheduler_every_batch"] = False
-            elif num_batches is not None:
-                self.scheduler_kwargs["num_batches"] = num_batches
+            # Number of optimizer steps per epoch required if scheduler updates are performed per optimizer step
+            self.scheduler_kwargs["num_optimizer_steps_per_epoch"] = num_optimizer_steps
 
             self.scheduler = utils.get_scheduler_from_kwargs(
                 self.optimizer, **self.scheduler_kwargs
@@ -473,9 +474,13 @@ class Base:
                                 *divmod(test_time.detach().item(), 60)
                             )
                         )
-                if self.scheduler_kwargs["update_scheduler_every_batch"] is False:
-                    # scheduler step for learning rate
-                    utils.perform_scheduler_step(self.scheduler, test_loss)
+                # Update scheduler if update_every_optimizer_step == False
+                utils.perform_scheduler_step(
+                    self.scheduler,
+                    self.scheduler_kwargs,
+                    loss=test_loss,
+                    update_level="epoch",
+                )
 
                 if self.rank is None or self.rank == 0:
                     # write history and save model
@@ -662,13 +667,20 @@ def train_epoch(
                 scaler.update()
             else:
                 pm.optimizer.step()
+
             # Update loss for history and logging
             num_samples = torch.tensor(len(data[0]), device=pm.device)
             loss_info.update(loss, num_samples)
             if pm.rank is None or pm.rank == 0:
                 loss_info.print_info(batch_idx)
-            if pm.scheduler_kwargs["update_scheduler_every_batch"]:
-                pm.scheduler.step()
+
+            # Update currently active scheduler if update_every_optimizer_step == True
+            perform_scheduler_step(
+                pm.scheduler,
+                scheduler_kwargs=pm.scheduler_kwargs,
+                loss=None,
+                update_level="optimizer_step",
+            )
 
     return loss_info.get_avg(), loss_info.get_iteration()
 

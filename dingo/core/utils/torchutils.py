@@ -1,21 +1,27 @@
 import copy
 import os
-from typing import Union, Tuple, Iterable
+from typing import List, Literal, Optional, Union, Tuple, Iterable
 
 import bilby
+from bisect import bisect_right
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from torch.optim.lr_scheduler import (
+    SequentialLR,
+    ReduceLROnPlateau,
+    _check_verbose_deprecated_warning,
+)
 from torch.utils.data import DataLoader, DistributedSampler
 import torch.distributed as dist
 
 
 def fix_random_seeds(_):
     """Utility function to set random seeds when using multiple workers for DataLoader."""
-    np.random.seed(int(torch.initial_seed()) % (2 ** 32 - 1))
+    np.random.seed(int(torch.initial_seed()) % (2**32 - 1))
     try:
-        bilby.core.utils.random.seed(int(torch.initial_seed()) % (2 ** 32 - 1))
+        bilby.core.utils.random.seed(int(torch.initial_seed()) % (2**32 - 1))
     except AttributeError:  # In case using an old version of Bilby.
         pass
 
@@ -124,6 +130,128 @@ def get_optimizer_from_kwargs(
     return optimizer(model_parameters, **optimizer_kwargs)
 
 
+def adapt_scheduler_kwargs_to_update_every_optimizer_step(
+    kwargs: dict, n_steps_per_epoch: int
+) -> dict:
+    """
+    Adjusts scheduler kwargs to updates per optimizer step (instead of updates per epoch).
+
+    Parameters
+    ----------
+    kwargs: dict
+        scheduler kwargs
+    n_steps_per_epoch: int
+        number of optimizer steps per epoch to which the scheduler kwargs should be adapted
+
+    Returns
+    -------
+    kwargs: dict
+        updated scheduler kwargs
+    """
+    if kwargs["type"] == "step":
+        kwargs["step_size"] = kwargs["step_size"] * n_steps_per_epoch
+    elif kwargs["type"] == "cosine":
+        kwargs["T_max"] = kwargs["T_max"] * n_steps_per_epoch
+    elif kwargs["type"] == "reduce_on_plateau":
+        raise ValueError(
+            "The scheduler ReduceOnPlateau cannot be used with update_every_optimizer_step=True,"
+            "because it depends on the validation loss."
+        )
+    elif kwargs["type"] == "linear":
+        kwargs["total_iters"] = kwargs["total_iters"] * n_steps_per_epoch
+    if "last_epoch" in kwargs:
+        kwargs["last_epoch"] = kwargs["last_epoch"] * n_steps_per_epoch
+    return kwargs
+
+
+class CustomSequentialLR(SequentialLR):
+    """
+    Custom Sequential learning rate scheduler.
+    - Overwrite __init__ to remove error message for ReduceLROnPlateau scheduler.
+    - Overwrite step() to allow for a metric value that has to be passed to ReduceLROnPlateau.step(metric).
+    These modifications can be removed once this PR is merged: https://github.com/pytorch/pytorch/issues/125531
+    which will fix this bug https://github.com/pytorch/pytorch/issues/68978.
+    """
+
+    def __init__(
+        self,
+        optimizer: torch.optim.Optimizer,
+        schedulers: List[torch.optim.lr_scheduler.LRScheduler],
+        milestones: List[int],
+        last_epoch=-1,
+        verbose="deprecated",
+    ):
+        if len(schedulers) < 1:
+            raise ValueError(
+                f"{self.__class__.__name__} expects at least one scheduler, but got no scheduler."
+            )
+
+        for scheduler_idx, scheduler in enumerate(schedulers):
+            if not hasattr(scheduler, "optimizer"):
+                raise TypeError(
+                    f"{self.__class__.__name__} at index {scheduler_idx} should have `optimizer` as its attribute."
+                )
+            # Disable error message
+            # if isinstance(scheduler, ReduceLROnPlateau):
+            #     raise ValueError(
+            #         f"{self.__class__.__name__} does not support `ReduceLROnPlateau` scheduler as it "
+            #         "requires additional kwargs to be specified when calling `step`, "
+            #         f"but got one at index {scheduler_idx} in the given schedulers sequence."
+            #     )
+            if optimizer != scheduler.optimizer:
+                raise ValueError(
+                    f"{self.__class__.__name__} expects all schedulers to belong to the same optimizer, but "
+                    f"got scheduler {scheduler.__class__.__name__} at index {scheduler_idx} has {scheduler.optimizer}, "
+                    f"which is different from {optimizer.__class__.__name__}."
+                )
+
+        if len(milestones) != len(schedulers) - 1:
+            raise ValueError(
+                "Sequential Schedulers expects number of schedulers provided to be one more "
+                f"than the number of milestone points, but got number of schedulers {len(schedulers)} and the "
+                f"number of milestones to be equal to {len(milestones)}"
+            )
+        _check_verbose_deprecated_warning(verbose)
+        self._schedulers = schedulers
+        self._milestones = milestones
+        self.last_epoch = last_epoch + 1
+        self.optimizer = optimizer
+
+        # Reset learning rates back to initial values
+        for group in self.optimizer.param_groups:
+            group["lr"] = group["initial_lr"]
+
+        # "Undo" the step performed by other schedulers
+        for scheduler in self._schedulers:
+            scheduler.last_epoch -= 1
+
+        # Perform the initial step for only the first scheduler
+        self._schedulers[0]._initial_step()
+
+        self._last_lr = schedulers[0].get_last_lr()
+
+    def step(self, metrics: Optional[float] = None) -> None:
+        self.last_epoch += 1
+        # Get index of active scheduler with -1 to ensure previous scheduler stopped when it should
+        idx = bisect_right(self._milestones, self.last_epoch - 1)
+        scheduler = self._schedulers[idx]
+        if idx > 0 and self._milestones[idx - 1] == self.last_epoch:
+            if isinstance(scheduler, ReduceLROnPlateau):
+                scheduler.step(metrics)
+            else:
+                scheduler.step(0)
+        else:
+            if isinstance(scheduler, ReduceLROnPlateau):
+                scheduler.step(metrics)
+            else:
+                scheduler.step()
+
+        self._last_lr = scheduler.get_last_lr()
+
+    def get_active_scheduler_index(self):
+        return bisect_right(self._milestones, self.last_epoch)
+
+
 def get_scheduler_from_kwargs(
     optimizer: torch.optim.Optimizer,
     **scheduler_kwargs,
@@ -146,38 +274,23 @@ def get_scheduler_from_kwargs(
     -------
     scheduler
     """
-
-    def adapt_scheduler_kwargs_to_update_every_batch(kwargs, n_batches):
-        if kwargs["type"] == "step":
-            kwargs["step_size"] = kwargs["step_size"] * n_batches
-        elif kwargs["type"] == "cosine":
-            kwargs["T_max"] = kwargs["T_max"] * n_batches
-        elif kwargs["type"] == "reduce_on_plateau":
-            raise ValueError(
-                "The scheduler ReduceOnPlateau cannot be used with update_scheduler_every_batch=True,"
-                "because it depends on the validation loss."
-            )
-        elif kwargs["type"] == "linear":
-            kwargs["total_iters"] = kwargs["total_iters"] * n_batches
-        if "last_epoch" in kwargs:
-            kwargs["last_epoch"] = kwargs["last_epoch"] * n_batches
-
     scheduler_kwargs = copy.deepcopy(scheduler_kwargs)
 
     schedulers_dict = {
         "step": torch.optim.lr_scheduler.StepLR,
         "cosine": torch.optim.lr_scheduler.CosineAnnealingLR,
         "reduce_on_plateau": torch.optim.lr_scheduler.ReduceLROnPlateau,
-        "sequential": torch.optim.lr_scheduler.SequentialLR,
+        "sequential": CustomSequentialLR,  # torch.optim.lr_scheduler.SequentialLR,
         "linear": torch.optim.lr_scheduler.LinearLR,
     }
-    if not "type" in scheduler_kwargs:
+    if "type" not in scheduler_kwargs:
         raise KeyError("Scheduler type needs to be specified.")
-    if not scheduler_kwargs["type"].lower() in schedulers_dict:
+    if scheduler_kwargs["type"].lower() not in schedulers_dict:
         raise ValueError("No valid scheduler specified.")
 
     if scheduler_kwargs["type"] == "sequential":
-        # Load individual schedulers
+        # List of schedulers
+        # Collect scheduler list
         scheduler_keys = []
         num_scheduler = 0
         while True:
@@ -190,48 +303,97 @@ def get_scheduler_from_kwargs(
         if len(scheduler_keys) < 2:
             raise KeyError(
                 "At least two schedulers need to be specified via "
-                "'scheduler_0': {...}, 'scheduler_1: {...}' when using sequential."
+                "'scheduler_0': {...}, 'scheduler_1: {...}' when using type sequential."
             )
-        update_scheduler_every_batch = scheduler_kwargs.pop(
-            "update_scheduler_every_batch"
-        )
-        if update_scheduler_every_batch and scheduler_kwargs["num_batches"] is not None:
-            num_batches = scheduler_kwargs.pop("num_batches")
-            scheduler_kwargs["milestones"] = [
-                milestone * num_batches for milestone in scheduler_kwargs["milestones"]
-            ]
-        else:
-            num_batches = None
+        if scheduler_kwargs["milestones"] != sorted(scheduler_kwargs["milestones"]):
+            raise ValueError(
+                f"Milestones list is not monotonically increasing: {scheduler_kwargs['milestones']}"
+            )
+
+        num_optimizer_steps = scheduler_kwargs.pop("num_optimizer_steps_per_epoch", 1)
+        epochs_per_scheduler = np.concatenate(
+            (
+                [scheduler_kwargs["milestones"][0]],
+                np.diff(np.array(scheduler_kwargs["milestones"])),
+            )
+        ).tolist()
+        if len(scheduler_kwargs["milestones"]) != num_scheduler - 1:
+            raise ValueError(
+                f"Length of milestones list: {scheduler_kwargs['milestones']} is not one less than the "
+                f"number of schedulers: {num_scheduler}."
+            )
+
         schedulers = []
-        for scheduler_key in scheduler_keys:
+        for i, scheduler_key in enumerate(scheduler_keys):
+            # Get scheduler kwargs
             individual_scheduler_kwargs = scheduler_kwargs.pop(scheduler_key)
             if "type" not in individual_scheduler_kwargs:
                 raise KeyError(
                     f"Scheduler type of {scheduler_key} needs to be specified."
                 )
-            if update_scheduler_every_batch and num_batches is not None:
-                adapt_scheduler_kwargs_to_update_every_batch(
-                    individual_scheduler_kwargs, num_batches
+            # Check whether to update scheduler every optimizer step
+            update_ever_optimizer_step = individual_scheduler_kwargs.pop(
+                "update_every_optimizer_step", False
+            )
+            if update_ever_optimizer_step and num_optimizer_steps > 1:
+                # Adapt scheduler kwargs (in place) to update every optimizer step
+                individual_scheduler_kwargs = (
+                    adapt_scheduler_kwargs_to_update_every_optimizer_step(
+                        individual_scheduler_kwargs, num_optimizer_steps
+                    )
                 )
+                # Adapt milestones (except for last scheduler because its milestone is defined by the number of epochs)
+                if i < len(epochs_per_scheduler):
+                    if i == 0:
+                        scheduler_kwargs["milestones"][i] *= num_optimizer_steps
+                    else:
+                        scheduler_updates = (
+                            epochs_per_scheduler[i] * num_optimizer_steps
+                        )
+                        scheduler_kwargs["milestones"][i] = (
+                            scheduler_kwargs["milestones"][i - 1] + scheduler_updates
+                        )
+                    # Shift subsequent milestones
+                    for j in range(i + 1, len(scheduler_kwargs["milestones"])):
+                        scheduler_kwargs["milestones"][j] = (
+                            scheduler_kwargs["milestones"][i] + epochs_per_scheduler[j]
+                        )
+
+            # Get type of scheduler
             individual_scheduler_type = individual_scheduler_kwargs.pop("type").lower()
             if individual_scheduler_type not in schedulers_dict:
                 raise ValueError(f"No valid scheduler specified for {scheduler_key}.")
+            # Initialize scheduler
             individual_scheduler = schedulers_dict[individual_scheduler_type](
                 optimizer, **individual_scheduler_kwargs
             )
             schedulers.append(individual_scheduler)
 
+        if scheduler_kwargs["milestones"] != sorted(scheduler_kwargs["milestones"]):
+            raise ValueError(
+                f"Modified milestones list is not monotonically increasing: {scheduler_kwargs['milestones']}"
+            )
+
         # Create SequentialScheduler
         scheduler_kwargs.pop("type")
         return schedulers_dict["sequential"](optimizer, schedulers, **scheduler_kwargs)
     else:
-        if "num_batches" in scheduler_kwargs:
-            if scheduler_kwargs["num_batches"] is not None and "update_scheduler_every_batch" in scheduler_kwargs:
-                num_batches = scheduler_kwargs.pop("num_batches")
-                if scheduler_kwargs.pop("update_scheduler_every_batch"):
-                    adapt_scheduler_kwargs_to_update_every_batch(scheduler_kwargs, num_batches)
-        else:
-            scheduler_kwargs.pop("update_scheduler_every_batch")
+        # Single scheduler
+
+        # Check whether to update scheduler every optimizer step
+        update_ever_optimizer_step = scheduler_kwargs.pop(
+            "update_every_optimizer_step", False
+        )
+        if (
+            update_ever_optimizer_step
+            and "num_optimizer_steps_per_epoch" in scheduler_kwargs
+        ):
+            num_optimizer_steps = scheduler_kwargs.pop("num_optimizer_steps_per_epoch")
+            # Adapt scheduler kwargs (in place) to update every optimizer step
+            scheduler_kwargs = adapt_scheduler_kwargs_to_update_every_optimizer_step(
+                scheduler_kwargs, num_optimizer_steps
+            )
+        # Create scheduler
         scheduler_type = scheduler_kwargs.pop("type")
         scheduler = schedulers_dict[scheduler_type]
         return scheduler(optimizer, **scheduler_kwargs)
@@ -239,7 +401,9 @@ def get_scheduler_from_kwargs(
 
 def perform_scheduler_step(
     scheduler,
-    loss=None,
+    scheduler_kwargs: dict,
+    loss: float = None,
+    update_level: str = "epoch",
 ):
     """
     Wrapper for scheduler.step(). If scheduler is ReduceLROnPlateau,
@@ -250,13 +414,49 @@ def perform_scheduler_step(
 
     scheduler:
         scheduler for learning rate
-    loss:
+    scheduler_kwargs: dict
+        scheduler arguments for one or multiple schedulers. Each scheduler arguments can contain
+        'update_scheduler_every_optimizer_step' (default=False) which determines whether to do a scheduler step every
+        optimizer step or every epoch.
+    loss: float, optional
         validation loss
+    update_level: str, optional
+        Describes from where this function is called, either on the epoch level or on the level of an 'optimizer_step'.
     """
-    if type(scheduler) == torch.optim.lr_scheduler.ReduceLROnPlateau:
-        scheduler.step(loss)
-    else:
-        scheduler.step()
+
+    def perform_step(sched, metric: float = None):
+        if metric is not None:
+            sched.step(metric)
+        else:
+            sched.step()
+
+    # Standard scheduler
+    if not isinstance(scheduler, CustomSequentialLR):
+        update_per_step = scheduler_kwargs.get("update_every_optimizer_step", False)
+        if (update_level == "epoch" and not update_per_step) or (
+            update_level == "optimizer_step" and update_per_step
+        ):
+            perform_step(scheduler, loss)
+    # Sequential scheduler
+    elif isinstance(scheduler, CustomSequentialLR):
+        # Get currently active scheduler
+        active_scheduler_index = scheduler.get_active_scheduler_index()
+        active_scheduler = f"scheduler_{active_scheduler_index}"
+        update_per_step = scheduler_kwargs[active_scheduler].get(
+            "update_every_optimizer_step", False
+        )
+        if (update_level == "epoch" and not update_per_step) or (
+            update_level == "optimizer_step" and update_per_step
+        ):
+            print(
+                f"{update_level} update --- current:",
+                scheduler.last_epoch,
+                "of",
+                scheduler._milestones,
+                "-> activate scheduler index:",
+                active_scheduler_index,
+            )
+            perform_step(scheduler, loss)
 
 
 def get_lr(optimizer):
@@ -332,8 +532,12 @@ def build_train_and_test_loaders(
     # are mutually exclusive
     if rank is not None and world_size is not None:
         # Create DistributedSampler
-        train_sampler = DistributedSampler(train_dataset, shuffle=True, num_replicas=world_size, rank=rank)
-        test_sampler = DistributedSampler(test_dataset, shuffle=False, num_replicas=world_size, rank=rank)
+        train_sampler = DistributedSampler(
+            train_dataset, shuffle=True, num_replicas=world_size, rank=rank
+        )
+        test_sampler = DistributedSampler(
+            test_dataset, shuffle=False, num_replicas=world_size, rank=rank
+        )
 
         # Build DataLoaders
         train_loader = DataLoader(
@@ -415,7 +619,7 @@ def set_seed_based_on_rank(rank: int):
         torch.backends.cudnn.deterministic = True
 
     # Numpy expect a different seed range
-    reduced_seed = int(initial_torch_seed) % (2 ** 32 - 1)
+    reduced_seed = int(initial_torch_seed) % (2**32 - 1)
     np.random.seed(reduced_seed + rank)
 
 
@@ -427,13 +631,17 @@ def setup_ddp(rank: int, world_size: int):
     if dist.is_nccl_available():
         dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
     else:
-        raise ValueError("Backends nccl not available for multi-GPU training with distributed data parallel."
-                         "Go back to single-GPU training.")
+        raise ValueError(
+            "Backends nccl not available for multi-GPU training with distributed data parallel."
+            "Go back to single-GPU training."
+        )
     # Assign correct device to process
     torch.cuda.set_device(rank)
 
-    print(f"Process group initialized with backend {dist.get_backend()}, rank {dist.get_rank()}, "
-          f"world size {dist.get_world_size()}.")
+    print(
+        f"Process group initialized with backend {dist.get_backend()}, rank {dist.get_rank()}, "
+        f"world size {dist.get_world_size()}."
+    )
 
 
 def replace_BatchNorm_with_SyncBatchNorm(network: nn.Module):
@@ -443,4 +651,3 @@ def replace_BatchNorm_with_SyncBatchNorm(network: nn.Module):
 def cleanup_ddp():
     dist.destroy_process_group()
     print(f"Destroyed process group.")
-

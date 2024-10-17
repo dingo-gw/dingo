@@ -436,8 +436,10 @@ def initialize_stage(
     if world_size is not None and world_size > 1:
         total_batch_size = stage["batch_size"]
         if total_batch_size % world_size != 0:
-            raise ValueError(f"Total batch size {total_batch_size} is not divisible by the number of GPUs {world_size}.")
-        stage["batch_size"] = int(total_batch_size/world_size)
+            raise ValueError(
+                f"Total batch size {total_batch_size} is not divisible by the number of GPUs {world_size}."
+            )
+        stage["batch_size"] = int(total_batch_size / world_size)
 
     # Allows for changes in batch size between stages.
     train_loader, test_loader, train_sampler = build_train_and_test_loaders(
@@ -456,13 +458,23 @@ def initialize_stage(
             print("Initializing new optimizer and scheduler.")
         pm.optimizer_kwargs = stage["optimizer"]
         pm.scheduler_kwargs = stage["scheduler"]
-        pm.initialize_optimizer_and_scheduler(
-            num_batches=np.ceil(
-                wfd.settings["num_samples"]
-                * train_settings["data"]["train_fraction"]
-                / stage["batch_size"]
+        # Precompute number of optimizer steps per epoch in case a scheduler is updated every optimizer step
+        # (instead of every epoch).
+        # Warning: The following computation assumes that ...
+        # ... the full training data set is used for training
+        # ... the batch size is the total batch size (over all GPUs)
+        train_size = int(
+            train_settings["data"]["train_fraction"] * wfd.settings["num_samples"]
+        )
+        grad_updates_per_optimizer_step = stage.get(
+            "gradient_updates_per_optimizer_step", 1
+        )
+        num_optimizer_steps = int(
+            np.ceil(
+                train_size / (stage["batch_size"] * grad_updates_per_optimizer_step)
             )
         )
+        pm.initialize_optimizer_and_scheduler(num_optimizer_steps=num_optimizer_steps)
 
     # Freeze/unfreeze RB layer if necessary
     if "freeze_rb_layer" in stage:
