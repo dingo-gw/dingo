@@ -253,13 +253,8 @@ def generate_base_population(
 def sample_population(size: int, population_model):
     hyperparameters = population_model.prior.sample()
     event_generation_func = population_model.get_event_generator(hyperparameters)
-    population_parameters = []
-    for _ in range(size):
-        population_parameters.append(event_generation_func())
-    return {
-        k: np.array([p[k] for p in population_parameters])
-        for k in population_parameters[0]
-    }
+
+    return event_generation_func(size, buffer=10)
 
 
 def bilby_random_seed():

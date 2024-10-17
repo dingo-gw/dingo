@@ -3,6 +3,8 @@ import numpy as np
 from dingo.gw.injection import Injection as EventInjection
 from dingo.populations.population_models import build_population_model
 
+from dingo.populations.training.population_dataset import build_bilby_prior_dict
+
 
 class Injection(object):
     """
@@ -19,35 +21,41 @@ class Injection(object):
 
     def __init__(
         self,
-        population_model,
-        population_prior,
-        snr_threshold,
+        population_model_name,
+        population_prior_dict,
+        mf_snr_threshold,
         minimum_population_size,
         maximum_population_size,
         event_injection,
     ):
-        self.snr_threshold = snr_threshold
+
+        self.population_prior = build_bilby_prior_dict(population_prior_dict)
+
+        self.mf_snr_threshold = mf_snr_threshold
         self.minimum_population_size = minimum_population_size
         self.maximum_population_size = maximum_population_size
         self.event_injection = event_injection
 
+        # self.population_model = build_population_model(
+        #     population_model=population_model_name,
+        #     population_prior=population_prior,
+        #     event_model_prior=self.event_injection.prior,
+        # )
         self.population_model = build_population_model(
-            population_model=population_model,
-            population_prior=population_prior,
-            event_model_prior=self.event_injection.prior,
+            population_model_name, self.population_prior, event_injection.prior
         )
 
     @classmethod
     def from_posterior_model_metadata(cls, metadata):
         data_settings = metadata["train_settings"]["data"]
-        event_model_metadata = metadata["base_settings"]["full_event_model_metadata"]
+        event_model_metadata = metadata['embedding_emulator_metadata']['settings_pm_single_event']
         event_injection = EventInjection.from_posterior_model_metadata(
             event_model_metadata
         )
         return cls(
-            population_model=data_settings["population_model"],
-            population_prior=data_settings["population_prior"],
-            snr_threshold=data_settings["snr_threshold"],
+            population_model_name=data_settings["population_model_name"],
+            population_prior_dict=data_settings["population_prior_dict"],
+            mf_snr_threshold=data_settings["mf_snr_threshold"],
             maximum_population_size=data_settings["maximum_population_size"],
             minimum_population_size=data_settings["minimum_population_size"],
             event_injection=event_injection,
