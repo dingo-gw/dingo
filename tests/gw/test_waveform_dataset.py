@@ -1,12 +1,15 @@
 import os
 import uuid
+import yaml 
 
 import numpy as np
 import pytest
+import bilby 
 
 from dingo.gw.domains import Domain
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.gw.dataset.generate_dataset_dag import create_args_string
+from dingo.gw.dataset import generate_dataset 
 
 SETTINGS_YAML_SMALL = """\
 # settings for domain of waveforms
@@ -97,7 +100,7 @@ def generate_waveform_dataset_small(venv_dir='venv'):
     return path
 
 @pytest.mark.slow
-def test_load_waveform_dataset(generate_waveform_dataset_small):
+def test_load_waveform_dataset(generate_waveform_dataset_small: str):
     wfd_path = generate_waveform_dataset_small
 
     path = f'{wfd_path}/waveform_dataset.hdf5'
@@ -159,3 +162,35 @@ def test_load_waveform_dataset(generate_waveform_dataset_small):
         assert np.all(wd2[0]['waveform'][pol][:int(f_min_new)] == 0.0)
     assert len(wd2.domain) == f_max_new / delta_f + 1
     assert len(wd2.domain) == len(wd2.domain())
+
+@pytest.fixture
+def wfd_settings():
+  settings = yaml.safe_load(SETTINGS_YAML_SMALL)
+  return settings 
+
+class BinaryPrior(bilby.prior.Prior):
+  def __init__(self):
+      super().__init__(name="failing_prior")
+
+  def sample(self, size):
+      return np.random.choice([30, -1], size=size, p=[0.8, 0.2])
+
+@pytest.fixture
+def binary_prior():
+    return BinaryPrior()
+
+def test_wfd_size(wfd_settings: str, binary_prior: BinaryPrior):
+    """
+    Test that the size requested by the waveform generator settings is the same as the
+    size of the generated dataset. This should be the case even when there are failures.
+    In the waveform generation
+    """
+    # changing the waveform generator settings to create a prior which will create
+    # failing waveforms for a fraction of the prior. Ie can't generate negative 
+    # chirp masses so the waveform generator will fail 
+    wfd_settings["intrinsic_prior"]["chirp_mass"] = binary_prior
+    del wfd_settings["intrinsic_prior"]["mass_1"]
+    del wfd_settings["intrinsic_prior"]["mass_2"]
+    del wfd_settings["compression"]
+    wfd = generate_dataset(wfd_settings, 1)
+    assert len(wfd) == wfd_settings["num_samples"]
