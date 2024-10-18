@@ -3,6 +3,7 @@ import textwrap
 import yaml
 import argparse
 from multiprocessing import Pool
+from functools import partial
 
 import numpy as np
 import pandas as pd
@@ -20,67 +21,8 @@ from dingo.gw.waveform_generator import (
     NewInterfaceWaveformGenerator,
     generate_waveforms_parallel,
 )
+from dingo.core.utils.misc import call_func_strict_output_dim
 from dingo.gw.SVD import SVDBasis, ApplySVD
-
-def generate_parameters_and_polarizations_strict(
-    waveform_generator: WaveformGenerator,
-    prior: BBHPriorDict,
-    num_samples: int,
-    num_processes: int,
-) -> Tuple[pd.DataFrame, Dict[str, np.ndarray]]:
-    """ 
-    Generate a dataset of waveforms based on parameters drawn from the prior.
-    Will iteratively call generate_parameters_and_polarizations until the number of
-    requested waveforms are generate. This is useful in the case where we have
-    waveform failures.
-
-    Parameters
-    ----------
-    waveform_generator : WaveformGenerator
-    prior : Prior
-    num_samples : int
-    num_processes : int
-
-    Returns
-    -------
-    pandas DataFrame of parameters
-    dictionary of numpy arrays corresponding to waveform polarizations
-    """
-    num_samples_total, num_samples_request = 0, num_samples
-    parameters = None
-    while num_samples_total < num_samples:
-        # Generate main dataset
-        parameters_temp, polarizations_temp = generate_parameters_and_polarizations(
-            waveform_generator, prior, num_samples_request, num_processes
-        )
-
-        if parameters is None:
-            parameters = parameters_temp
-            polarizations = polarizations_temp
-            failed_fraction = 1 - len(parameters) / num_samples_request
-            if np.abs(failed_fraction - 1) < 1e-6:
-                raise ValueError(
-                    f"""{round(failed_fraction * 100, 2)}% of waveforms are failing to generate. Please
-                    check the prior and waveform generator settings."""
-                )
-        else:
-            parameters = pd.concat(
-                [parameters, parameters_temp]
-            )
-            for key, value in polarizations_temp.items():
-                polarizations[key] = np.vstack(
-                    [polarizations[key], value]
-                )
-
-        # estimate the fraction of failed waveforms
-        num_samples_total += len(parameters)
-        num_waveforms_to_generate = num_samples - num_samples_total
-        # generating extra waveforms given that we know the failing fraction 
-        num_samples_request =  int(num_waveforms_to_generate / failed_fraction)
-
-    parameters = parameters.iloc[:num_samples]
-    polarizations = {k: v[:num_samples] for k, v in polarizations.items()}
-    return parameters, polarizations
 
 def generate_parameters_and_polarizations(
     waveform_generator: WaveformGenerator,
@@ -253,12 +195,13 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
 
                 n_train = svd_settings["num_training_samples"]
                 n_test = svd_settings.get("num_validation_samples", 0)
-                parameters, polarizations = generate_parameters_and_polarizations_strict(
-                    waveform_generator,
+
+                func = partial(
+                    generate_parameters_and_polarizations, 
+                    waveform_generator, 
                     prior,
-                    n_train + n_test,
-                    num_processes,
-                )
+                    num_processes=num_processes)
+                parameters, polarizations = call_func_strict_output_dim(func, n_train + n_test)
                 svd_dataset_settings = copy.deepcopy(settings)
                 svd_dataset_settings["num_samples"] = len(parameters)
                 del svd_dataset_settings["compression"]["svd"]
@@ -286,9 +229,12 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
 
         waveform_generator.transform = Compose(compression_transforms)
 
-    parameters, polarizations = generate_parameters_and_polarizations_strict(
-        waveform_generator, prior, settings["num_samples"], num_processes
-    )
+    func = partial(
+        generate_parameters_and_polarizations, 
+        waveform_generator, 
+        prior,
+        num_processes=num_processes)
+    parameters, polarizations = call_func_strict_output_dim(func, settings["num_samples"])
     dataset_dict["parameters"] = parameters
     dataset_dict["polarizations"] = polarizations
 
