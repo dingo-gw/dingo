@@ -1,4 +1,3 @@
-import copy
 from typing import Dict, Union
 import numpy as np
 import torch.utils.data

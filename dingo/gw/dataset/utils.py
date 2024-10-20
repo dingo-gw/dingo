@@ -6,7 +6,6 @@ import numpy as np
 import yaml
 from typing import List
 
-from dingo.gw.SVD import SVDBasis
 from dingo.gw.dataset.generate_dataset import train_svd_basis
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
 
