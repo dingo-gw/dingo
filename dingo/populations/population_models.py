@@ -9,6 +9,7 @@ from bilby.gw.conversion import (
 )
 from bilby.gw.prior import UniformSourceFrame
 from pycbc.cosmology import DistToZ
+import numpy as np
 
 
 class PowerLawPopulation(object):
@@ -32,7 +33,7 @@ class PowerLawPopulation(object):
 
     def get_event_generator(self, p, kwargs_selection_cut={}):
         cosmology = FlatLambdaCDM(Om0=0.3, H0=p["hubble_constant"])
-        prior_dict = ConditionalPriorDict(
+        prior = ConditionalPriorDict(
             {
                 "mass_1_source": PowerLaw(
                     alpha=-p["alpha"],
@@ -55,7 +56,6 @@ class PowerLawPopulation(object):
             },
             conversion_function=lambda x: generate_mass_parameters(x, source=True),
         )
-        prior = ConditionalPriorDict(prior_dict)
 
         # We use the PyCBC class DistToZ, which is much faster than using the astropy
         # function for z(d_L) directly, since it interpolates.
