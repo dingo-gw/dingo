@@ -40,8 +40,22 @@ def train(
     checkpoint=None,
 ):
     if resume:
+
         pm = PopulationModel(model_filename=checkpoint, device=local_settings["device"])
         train_settings = pm.metadata["train_settings"]
+
+        embedding_emulator = EmbeddingEmulator(train_settings["data"]["embedding_emulator_path"], device=local_settings["device"])
+        embedding_emulator.initialize_transform_pre()
+        
+        snr_estimator = SNREstimator(train_settings["data"]["snr_model_path"], device=local_settings["device"])
+        snr_estimator.set_mf_snr_threshold(train_settings["data"]["mf_snr_threshold"])
+
+        pm = PopulationModel(
+            model_filename=checkpoint,
+            device=local_settings["device"],
+            embedding_emulator=embedding_emulator,
+            snr_estimator=snr_estimator,   
+        )
 
     # (1) Prepare training data
 
@@ -97,10 +111,13 @@ def train(
             "train_settings": train_settings,
             "embedding_emulator_metadata": population_model_train.embedding_emulator_metadata,
         }
+
         embedding_emulator = EmbeddingEmulator(train_settings["data"]["embedding_emulator_path"], device=local_settings["device"])
         embedding_emulator.initialize_transform_pre()
+        
         snr_estimator = SNREstimator(train_settings["data"]["snr_model_path"], device=local_settings["device"])
-        snr_estimator.set_mf_snr_treshold(train_settings["data"]["mf_snr_treshold"])
+        snr_estimator.set_mf_snr_threshold(train_settings["data"]["mf_snr_threshold"])
+        
         pm = PopulationModel(
             metadata=full_settings,
             device=local_settings["device"],
