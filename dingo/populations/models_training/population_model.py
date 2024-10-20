@@ -164,19 +164,19 @@ def get_detected_embeddings(x, embedding_emulator, selection_model, number_event
     train_time['compute_embeddings'] = time.time() - time_start
 
     # check whether embeddings are detected
-    idx = selection_model.apply_selection_to_embeddings(emb)
+    mask = selection_model.apply_selection_to_embeddings(emb)
 
     train_time['compute_selection'] = time.time() - train_time['compute_embeddings'] - time_start
 
     # cut all detections above the required number of events
-    idx, idx2 = limit_ones_vectorized(idx, number_events, maximum_population_size)
+    mask, idx2 = limit_ones_vectorized(mask, number_events, maximum_population_size)
 
-    train_time['compute_idx'] = time.time() - train_time['compute_selection'] - time_start
+    train_time['compute_mask'] = time.time() - train_time['compute_selection'] - time_start
 
     # mask embeddings
-    emb[~idx] = 0
+    emb[~mask] = 0
 
-    train_time['set_emb_to_zero'] = time.time() - train_time['compute_idx'] - time_start
+    train_time['set_emb_to_zero'] = time.time() - train_time['compute_mask'] - time_start
 
     # for k in train_time.keys():
     #     print(f"{k}: {train_time[k]}")
@@ -214,9 +214,10 @@ def train_epoch_population_model(pm, dataloader):
 
         hp = data[0]
         emb_det = get_detected_embeddings(data[1], pm_embedding_emulator, selection_model, data[2], maximum_population_size)
-        emb_det = emb_det.to(pm.device, non_blocking=True)
+        emb_det.to(pm.device, non_blocking=True)
 
-        loss = -pm.model(hp, emb_det).mean()
+        mask = (emb_det == 0).all(dim=-1)
+        loss = -pm.model(hp, emb_det, mask).mean()
         # backward pass and optimizer step
         loss.backward()
         pm.optimizer.step()
@@ -255,10 +256,11 @@ def test_epoch_population_model(pm, dataloader):
 
             hp = data[0]
             emb_det = get_detected_embeddings(data[1], pm_embedding_emulator, selection_model, data[2], maximum_population_size)
-            emb_det = emb_det.to(pm.device, non_blocking=True)
+            emb_det.to(pm.device, non_blocking=True)
+            mask = (emb_det == 0).all(dim=-1)
 
             # compute loss
-            loss = -pm.model(hp, emb_det).mean()
+            loss = -pm.model(hp, emb_det, mask).mean()
             # update loss for history and logging
             loss_info.update(loss.item(), len(data[0]))
             loss_info.print_info(batch_idx)
