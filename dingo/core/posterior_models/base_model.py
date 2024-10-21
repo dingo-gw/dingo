@@ -204,7 +204,10 @@ class Base:
             )
         if self.scheduler_kwargs is not None:
             # Number of optimizer steps per epoch required if scheduler updates are performed per optimizer step
-            self.scheduler_kwargs["num_optimizer_steps_per_epoch"] = num_optimizer_steps
+            if num_optimizer_steps is not None:
+                self.scheduler_kwargs[
+                    "num_optimizer_steps_per_epoch"
+                ] = num_optimizer_steps
 
             self.scheduler = get_scheduler_from_kwargs(
                 self.optimizer, **self.scheduler_kwargs
@@ -477,8 +480,8 @@ class Base:
                 # Update scheduler if update_every_optimizer_step == False
                 perform_scheduler_step(
                     self.scheduler,
-                    self.scheduler_kwargs,
                     loss=test_loss,
+                    scheduler_kwargs=self.scheduler_kwargs,
                     update_level="epoch",
                 )
 
@@ -678,7 +681,6 @@ def train_epoch(
             perform_scheduler_step(
                 pm.scheduler,
                 scheduler_kwargs=pm.scheduler_kwargs,
-                loss=None,
                 update_level="optimizer_step",
             )
 

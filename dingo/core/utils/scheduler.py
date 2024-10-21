@@ -81,6 +81,9 @@ class CustomSequentialLR(SequentialLR):
 
         self._last_lr = schedulers[0].get_last_lr()
 
+        # Track whether last scheduler step was per optimizer step
+        self.update_level_of_last_step = "epoch"
+
     def step(self, metrics: Optional[float] = None) -> None:
         self.last_epoch += 1
         # Get index of active scheduler with -1 to ensure previous scheduler stopped when it should
@@ -286,8 +289,8 @@ def get_scheduler_from_kwargs(
 
 def perform_scheduler_step(
     scheduler,
-    scheduler_kwargs: dict,
     loss: float = None,
+    scheduler_kwargs: dict = None,
     update_level: str = "epoch",
 ):
     """
@@ -299,19 +302,22 @@ def perform_scheduler_step(
 
     scheduler:
         scheduler for learning rate
+    loss: float, optional
+        validation loss
     scheduler_kwargs: dict
         scheduler arguments for one or multiple schedulers. Each scheduler arguments can contain
         'update_scheduler_every_optimizer_step' (default=False) which determines whether to do a scheduler step every
         optimizer step or every epoch.
-    loss: float, optional
-        validation loss
     update_level: str, optional
         Describes from where this function is called, either on the epoch level or on the level of an 'optimizer_step'.
     """
 
+    if scheduler_kwargs is None:
+        scheduler_kwargs = {}
+
     def perform_step(sched, metric: float = None):
         if metric is not None:
-            sched.step(metric)
+            sched.step(metrics=metric)
         else:
             sched.step()
 
@@ -330,7 +336,30 @@ def perform_scheduler_step(
         update_per_step = scheduler_kwargs[active_scheduler].get(
             "update_every_optimizer_step", False
         )
+        # Check whether we are switching from updates per optimizer step to updates per epoch;
+        # In this case, we have to prevent back-to-back scheduler steps and need to skip the first step.
+        valid_step = True
+        if (
+            scheduler.update_level_of_last_step == "optimizer_step"
+            and active_scheduler_index > 0
+            and update_level == "epoch"
+            and not update_per_step
+        ):
+            # Skip first step
+            valid_step = False
+            print("Skip scheduler step")
+
         if (update_level == "epoch" and not update_per_step) or (
             update_level == "optimizer_step" and update_per_step
         ):
-            perform_step(scheduler, loss)
+            if valid_step:
+                perform_step(scheduler, loss)
+                initial_lr = scheduler.optimizer.state_dict()["param_groups"][0][
+                    "initial_lr"
+                ]
+                print(
+                    f"{update_level} & update_per_step={update_per_step}, {scheduler.last_epoch} of {scheduler._milestones}, "
+                    f"scheduler_index={scheduler.get_active_scheduler_index()}, lr={scheduler.get_last_lr()[0]/initial_lr}"
+                )
+            # Keep track of previous update level
+            scheduler.update_level_of_last_step = update_level
