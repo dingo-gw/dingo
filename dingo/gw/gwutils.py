@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.signal import tukey
+from scipy.signal.windows import tukey
 from scipy.interpolate import interp1d
 from bilby.gw.detector import PowerSpectralDensity
 
@@ -28,7 +28,7 @@ def get_window_factor(window):
     window_kwargs, first build the window."""
     if type(window) == dict:
         window = get_window(window)
-    return np.sum(window ** 2) / len(window)
+    return np.sum(window**2) / len(window)
 
 
 def get_extrinsic_prior_dict(extrinsic_prior):
@@ -70,9 +70,9 @@ def get_mismatch(a, b, domain=None, asd_file=None, min_idx=None, max_idx=None):
         a = a / asd_array
         b = b / asd_array
     min_idx = min_idx if min_idx is not None else domain.min_idx
-    inner_ab = np.sum((a.conj() * b)[...,min_idx:max_idx], axis=-1).real
-    inner_aa = np.sum((a.conj() * a)[...,min_idx:max_idx], axis=-1).real
-    inner_bb = np.sum((b.conj() * b)[...,min_idx:max_idx], axis=-1).real
+    inner_ab = np.sum((a.conj() * b)[..., min_idx:max_idx], axis=-1).real
+    inner_aa = np.sum((a.conj() * a)[..., min_idx:max_idx], axis=-1).real
+    inner_bb = np.sum((b.conj() * b)[..., min_idx:max_idx], axis=-1).real
     overlap = inner_ab / np.sqrt(inner_aa * inner_bb)
     return 1 - overlap
 

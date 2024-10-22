@@ -7,6 +7,7 @@ import copy
 from bilby_pipe.job_creation.dag import Dag
 from bilby_pipe.utils import BilbyPipeError, logger
 
+from dingo.pipe.utils import _strip_unwanted_submission_keys
 from dingo.pipe.nodes.generation_node import GenerationNode
 from .nodes.importance_sampling_node import ImportanceSamplingNode
 from .nodes.merge_node import MergeNode
@@ -48,6 +49,8 @@ def generate_dag(inputs, model_args):
     dag = Dag(inputs)
     trigger_times = get_trigger_time_list(inputs)
 
+    if inputs.simple_submission:
+        _strip_unwanted_submission_keys(dag.pycondor_dag)
     #
     # 1. Generate data for inference.
     #
@@ -95,7 +98,9 @@ def generate_dag(inputs, model_args):
                     # Ensures any cached files (e.g. the distance-marginalization
                     # lookup table) are only built once.
                     kwargs["parent"] = generation_node_list[0]
-                generation_node = GenerationNode(inputs, importance_sampling=True, **kwargs)
+                generation_node = GenerationNode(
+                    inputs, importance_sampling=True, **kwargs
+                )
                 importance_sampling_generation_node_list.append(generation_node)
         else:
             importance_sampling_generation_node_list = generation_node_list
@@ -157,7 +162,9 @@ def generate_dag(inputs, model_args):
     if inputs.create_summary:
         # Add the waveform approximant to inputs, so that it can be fed to PESummary.
         inputs.waveform_approximant = model_args["waveform_approximant"]
-        PESummaryNode(inputs, merged_importance_sampling_node_list, generation_node_list, dag=dag)
+        PESummaryNode(
+            inputs, merged_importance_sampling_node_list, generation_node_list, dag=dag
+        )
 
     dag.build()
     # create_overview(
