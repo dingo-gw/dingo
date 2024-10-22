@@ -463,7 +463,6 @@ class Result(CoreResult):
             # The prior p(phase), and the inner products (h | h), and (d | d) only contribute
             # to the normalization. (We check above that p(phase) is constant.)
             theta["phase"] = 0.0
-            # self.likelihood.log_likelihood(theta.iloc[0].to_dict())
             d_inner_h_complex, rho2opt = self.likelihood.d_inner_h_complex_multi(
                 theta.iloc[within_prior], num_processes, return_rho2opt=True
             )
