@@ -110,6 +110,13 @@ def create_parser(top_level=True):
             "uncertainty"
         ),
     )
+    calibration_parser.add(
+        "--calibration-correction-type",
+        type=str,
+        default="data",
+        help=("Number of calibration curves to use in marginalizing over calibration "
+              "uncertainty"),
+    )
     #
     # calibration_parser.add(
     #     "--spline-calibration-amplitude-uncertainty-dict",
