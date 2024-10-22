@@ -175,7 +175,7 @@ class Result(DingoDataset):
     def effective_sample_size(self):
         if "weights" in self.samples:
             weights = self.samples["weights"]
-            return np.sum(weights) ** 2 / np.sum(weights**2)
+            return np.sum(weights) ** 2 / np.sum(weights ** 2)
         else:
             return None
 
@@ -276,16 +276,20 @@ class Result(DingoDataset):
         valid_samples = (log_prior + delta_log_prob_target) != -np.inf
         theta = theta.iloc[valid_samples]
 
-        print(f"Calculating {len(theta)} likelihoods.")
-        t0 = time.time()
-        log_likelihood = self.likelihood.log_likelihood_multi(
-            theta, num_processes=num_processes
-        )
-        print(f"Done. This took {time.time() - t0:.2f} seconds.")
+        if "_log_likelihood" not in self.samples:
+            print(f"Calculating {len(theta)} likelihoods.")
+            t0 = time.time()
+            log_likelihood = self.likelihood.log_likelihood_multi(
+                theta, num_processes=num_processes
+            )
+            print(f"Done. This took {time.time() - t0:.2f} seconds.")
+            self.samples.loc[valid_samples, "log_likelihood"] = log_likelihood
+        else:
+            print("Likelihood already exists in result.samples, using this.")
+            self.samples["log_likelihood"] = self.samples["_log_likelihood"].copy()
 
         self.log_noise_evidence = self.likelihood.log_Zn
         self.samples["log_prior"] = log_prior
-        self.samples.loc[valid_samples, "log_likelihood"] = log_likelihood
         self._calculate_evidence()
 
     def _calculate_evidence(self):

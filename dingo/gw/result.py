@@ -519,7 +519,7 @@ class Result(CoreResult):
                 log_likelihood = delta_log_prob + log_posterior_offset
                 log_likelihood_array = np.full(len(theta), -np.nan)
                 log_likelihood_array[within_prior] = log_likelihood
-                self.samples["log_likelihood"] = log_likelihood_array
+                self.samples["_log_likelihood"] = log_likelihood_array
 
             phase_array = np.full(len(theta), 0.0)
             phase_array[within_prior] = new_phase
