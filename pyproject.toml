@@ -47,6 +47,7 @@ dependencies = [
     "scipy",
     "threadpoolctl",
     "torch",
+    "torchdiffeq",
     "torchvision",
     "tqdm",
 ]
