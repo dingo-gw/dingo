@@ -407,7 +407,6 @@ def test_pm_sequential_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler
             pm = NormalizingFlow(model_filename=d.model_filename, device="cpu")
         lr = pm.optimizer.state_dict()["param_groups"][0]["lr"]
         factors.append(lr / pm.optimizer.defaults["lr"])
-        print(f"outside lr: {lr}, factor: {factors[-1]}")
         for _ in range(e.optimizer_steps_per_epoch):
             perform_scheduler_step(
                 pm.scheduler,
