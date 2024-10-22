@@ -658,7 +658,7 @@ class WaveformGenerator:
             values.
         iota: float
         """
-        #  Currently tested for:
+        #  FD Waveform approximants that are implemented in either the L0 or J frame.  Currently tested for:
         #    101: IMRPhenomXPHM, 97: IMRPhenomXHM
         tested_approximants = ["IMRPhenomXPHM","IMRPhenomXHM"]
         if LS.GetStringFromApproximant(self.approximant) in tested_approximants:
