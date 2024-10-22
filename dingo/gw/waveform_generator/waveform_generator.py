@@ -659,7 +659,10 @@ class WaveformGenerator:
         iota: float
         """
         #  FD Waveform approximants that are implemented in either the L0 or J frame.  Currently tested for:
-        #    101: IMRPhenomXPHM, 97: IMRPhenomXHM
+        #  IMRPhenomXPHM - Modes returned in J-Frame
+        #  IMRPhenomXHM - Modes returned in L0-Frame
+        
+        
         tested_approximants = ["IMRPhenomXPHM","IMRPhenomXHM"]
         if LS.GetStringFromApproximant(self.approximant) in tested_approximants:
             parameters_lal_fd_modes = self._convert_parameters(
@@ -671,11 +674,11 @@ class WaveformGenerator:
             # unpack linked list, convert lal objects to arrays
             hlm_fd = wfg_utils.linked_list_modes_to_dict_modes(hlm_fd)
             hlm_fd = {k: v.data.data for k, v in hlm_fd.items()}
-            # For the waveform models considered here (e.g., IMRPhenomXPHM), the modes
-            # are returned in the J frame (where the observer is at inclination=theta_JN,
-            # azimuth=0). In this frame, the dependence on the reference phase enters
-            # via the modes themselves. We need to convert to the L0 frame so that the
-            # dependence on phase enters via the spherical harmonics.  
+
+            # For waveform models where the modes are returned in the J frame (where the observer is
+            # at an inclination=theta_JN, azimuth=0), the dependence on the reference phase enters
+            # via the modes themselves.  We need to convert to the L0 frame so that the
+            # dependence on phase enters via the spherical harmonics. 
             if LS.GetStringFromApproximant(self.approximant) == "IMRPhenomXPHM":
                 hlm_fd = frame_utils.convert_J_to_L0_frame(
                     hlm_fd,
