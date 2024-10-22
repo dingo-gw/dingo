@@ -463,30 +463,37 @@ class Result(CoreResult):
             # The prior p(phase), and the inner products (h | h), and (d | d) only contribute
             # to the normalization. (We check above that p(phase) is constant.)
             theta["phase"] = 0.0
-            d_inner_h_complex = self.likelihood.d_inner_h_complex_multi(
-                theta.iloc[within_prior],
-                num_processes,
+            # self.likelihood.log_likelihood(theta.iloc[0].to_dict())
+            d_inner_h_complex, rho2opt = self.likelihood.d_inner_h_complex_multi(
+                theta.iloc[within_prior], num_processes, return_rho2opt=True
             )
 
             # Evaluate the log posterior over the phase across the grid.
             phasor = np.exp(2j * phases)
-            phase_log_posterior = np.outer(d_inner_h_complex, phasor).real
+            phase_log_likelihood = np.outer(d_inner_h_complex, phasor).real
+            phase_log_likelihood += (self.likelihood.log_Zn - 1 / 2.0 * rho2opt)[
+                :, None
+            ]
         else:
             self.likelihood.phase_grid = phases
 
-            phase_log_posterior = apply_func_with_multiprocessing(
+            phase_log_likelihood = apply_func_with_multiprocessing(
                 self.likelihood.log_likelihood_phase_grid,
                 theta.iloc[within_prior],
                 num_processes=num_processes,
             )
 
-        phase_posterior = np.exp(
-            phase_log_posterior - np.amax(phase_log_posterior, axis=1, keepdims=True)
-        )
+        log_posterior_offset = np.amax(phase_log_likelihood, axis=1)
+        phase_posterior = np.exp(phase_log_likelihood - log_posterior_offset[:, None])
+        # normalize the phase posterior
+        normalization = np.mean(phase_posterior, axis=-1) * (2 * np.pi)
+        phase_posterior /= normalization[:, None]
+        log_posterior_offset += np.log(normalization)
+
         # Include a floor value to maintain mass coverage.
-        phase_posterior += phase_posterior.mean(
-            axis=-1, keepdims=True
-        ) * self.synthetic_phase_kwargs.get("uniform_weight", 0.01)
+        floor_weight = self.synthetic_phase_kwargs.get("uniform_weight", 0.01)
+        floor = phase_posterior.mean(axis=-1) * floor_weight
+        phase_posterior = (1 - floor_weight) * phase_posterior + floor[:, None]
 
         if not inverse:
             # Forward direction:
@@ -498,6 +505,21 @@ class Result(CoreResult):
                 phase_posterior,
                 num_processes,
             )
+
+            theta_within = theta.iloc[within_prior]
+            theta_within["phase"] = new_phase
+
+            if self.synthetic_phase_kwargs.get("compute_likelihood", False):
+                if floor_weight != -0:
+                    raise ValueError(
+                        f"uniform_weight must be 0 when computing likelihood in "
+                        f"synthetic phase sampling, but got {floor_weight}."
+                    )
+                print("Adding _log_likelihood from synthetic phase sampling to samples.")
+                log_likelihood = delta_log_prob + log_posterior_offset
+                log_likelihood_array = np.full(len(theta), -np.nan)
+                log_likelihood_array[within_prior] = log_likelihood
+                self.samples["log_likelihood"] = log_likelihood_array
 
             phase_array = np.full(len(theta), 0.0)
             phase_array[within_prior] = new_phase

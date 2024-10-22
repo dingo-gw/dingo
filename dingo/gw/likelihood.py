@@ -7,6 +7,8 @@ from scipy.fft import fft
 from scipy.special import logsumexp
 from bilby.gw.utils import ln_i0
 from threadpoolctl import threadpool_limits
+import functools
+from typing import Union, Tuple
 
 from dingo.core.likelihood import Likelihood
 from dingo.gw.injection import GWSignal
@@ -690,8 +692,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         return logsumexp(likelihoods) - np.log(len(likelihoods))
 
     def d_inner_h_complex_multi(
-        self, theta: pd.DataFrame, num_processes: int = 1
-    ) -> np.ndarray:
+        self, theta: pd.DataFrame, num_processes: int = 1, return_rho2opt=False
+    ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
         """
         Calculate the complex inner product (d | h(theta)) between the stored data d
         and a simulated waveform with given parameters theta. Works with multiprocessing.
@@ -700,12 +702,15 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         ----------
         theta : pd.DataFrame
             Parameters at which to evaluate h.
+        return_rho2opt: bool = False
+            If True, also return rho2opt
         num_processes : int
             Number of parallel processes to use.
 
         Returns
         -------
-        complex : Inner product
+        kappa2_complex
+        rho2opt [optional]
         """
         with threadpool_limits(limits=1, user_api="blas"):
             # Generator object for theta rows. For idx this yields row idx of
@@ -713,17 +718,25 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             # self.log_likelihood.
             theta_generator = (d[1].to_dict() for d in theta.iterrows())
 
+            func = functools.partial(
+                self.d_inner_h_complex, return_rho2opt=return_rho2opt
+            )
             if num_processes > 1:
                 with Pool(processes=num_processes) as pool:
-                    d_inner_h_complex = pool.map(
-                        self.d_inner_h_complex, theta_generator
-                    )
+                    d_inner_h_complex = pool.map(func, theta_generator)
             else:
-                d_inner_h_complex = list(map(self.d_inner_h_complex, theta_generator))
+                d_inner_h_complex = list(map(func, theta_generator))
 
-        return np.array(d_inner_h_complex)
+        d_inner_h_complex = np.array(d_inner_h_complex)
+        if return_rho2opt:
+            kappa2_complex = d_inner_h_complex[:, 0]
+            rho2opt = d_inner_h_complex[:, 1].real
+            return kappa2_complex, rho2opt
+        else:
+            kappa2_complex = d_inner_h_complex
+            return kappa2_complex
 
-    def d_inner_h_complex(self, theta):
+    def d_inner_h_complex(self, theta, return_rho2opt=False):
         """
         Calculate the complex inner product (d | h(theta)) between the stored data d
         and a simulated waveform with given parameters theta.
@@ -735,20 +748,28 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
         Returns
         -------
-        complex : Inner product
+        kappa2_complex
+        rho2opt [optional]
         """
         # TODO: Implement for time marginalization.
-        return self._d_inner_h_complex(theta)
+        return self._d_inner_h_complex(theta, return_rho2opt=return_rho2opt)
 
-    def _d_inner_h_complex(self, theta):
+    def _d_inner_h_complex(self, theta, return_rho2opt=False):
         mu = self.signal(theta)["waveform"]
         d = self.whitened_strains
-        return sum(
+
+        kappa2_complex = sum(
             [
                 inner_product_complex(d_ifo, mu_ifo)
                 for d_ifo, mu_ifo in zip(d.values(), mu.values())
             ]
         )
+
+        if not return_rho2opt:
+            return kappa2_complex
+        else:
+            rho2opt = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
+            return kappa2_complex, rho2opt
 
 
 def inner_product(a, b, min_idx=0, delta_f=None, psd=None):
