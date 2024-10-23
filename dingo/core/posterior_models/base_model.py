@@ -649,7 +649,7 @@ def train_epoch(
         # Data to device
         data = [d.to(pm.device, non_blocking=True) for d in data]
         if automatic_mixed_precision:
-            with autocast(device_type="cuda"):
+            with autocast("cuda"):
                 # Compute loss
                 loss = pm.loss(data[0], *data[1:])
             # Backward pass, Note: Backward passes under autocast are not recommended
