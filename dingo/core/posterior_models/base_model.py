@@ -640,7 +640,7 @@ def train_epoch(
     if automatic_mixed_precision:
         # Create scaler for automatic mixed precision
         # Warning: gradient clipping requires special treatment in amp
-        scaler = GradScaler(device_type="cuda", enabled=automatic_mixed_precision)
+        scaler = GradScaler("cuda", enabled=automatic_mixed_precision)
 
     for batch_idx, data in enumerate(dataloader):
         loss_info.update_timer("Dataloader")
