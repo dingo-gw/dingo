@@ -640,7 +640,7 @@ def train_epoch(
     if automatic_mixed_precision:
         # Create scaler for automatic mixed precision
         # Warning: gradient clipping requires special treatment in amp
-        scaler = GradScaler("cuda", enabled=automatic_mixed_precision)
+        scaler = GradScaler("cuda", enabled=True)
 
     for batch_idx, data in enumerate(dataloader):
         loss_info.update_timer("Dataloader")
@@ -649,7 +649,7 @@ def train_epoch(
         # Data to device
         data = [d.to(pm.device, non_blocking=True) for d in data]
         if automatic_mixed_precision:
-            with autocast("cuda"):
+            with autocast("cuda", enabled=True):
                 # Compute loss
                 loss = pm.loss(data[0], *data[1:])
             # Backward pass, Note: Backward passes under autocast are not recommended
