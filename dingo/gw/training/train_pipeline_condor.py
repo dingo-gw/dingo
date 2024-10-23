@@ -200,31 +200,61 @@ def run_multi_gpu_training(
 
     # Setup multi-processing queue
     result_queue = mp.Queue()
+    processes = []
     # Start one process for each gpu
     for rank in range(world_size):
-        mp.Process(target=run_training_ddp,
-                   args=(
-                        rank,
-                        world_size,
-                        train_settings,
-                        local_settings,
-                        train_dir,
-                        wfd,
-                        initial_weights,
-                        pretraining,
-                        pretrained_emb_net,
-                        checkpoint_file,
-                        resume,
-                        result_queue,
-                    )
-                   ).start()
+        p = (mp.Process(target=run_training_ddp,
+                        args=(
+                            rank,
+                            world_size,
+                            train_settings,
+                            local_settings,
+                            train_dir,
+                            wfd,
+                            initial_weights,
+                            pretraining,
+                            pretrained_emb_net,
+                            checkpoint_file,
+                            resume,
+                            result_queue,
+                            )
+                        )
+             )
+        p.start()
+        processes.append(p)
+
+    # Monitor the processes
+    error_occurred = False
+    for p in processes:
+        # Force parent process to wait for the subprocess to complete/exit with error
+        p.join()
+        # Check whether process p failed
+        if p.exitcode != 0:
+            error_occurred = True
+            print(f"Process {p.pid} failed with exit code {p.exitcode}. Aborting all processes.")
+            # Terminate all other processes
+            for proc in processes:
+                if proc.is_alive():
+                    proc.terminate()
+            break
+
+    # Handle the result queue to see what the specific error was
+    while not result_queue.empty():
+        temp_result = result_queue.get()
+        if temp_result[1] is False:
+            print(f"Rank {temp_result[0]} failed with error: {temp_result[3]}")
+        else:
+            print(f"Rank {temp_result[0]} completed successfully.")
+
+    if error_occurred:
+        raise RuntimeError("One or more processes failed, check logs for details.")
 
     # Collect exit results from all processes after training
     complete, pm_epoch = [], []
     for _ in range(world_size):
         temp_result = result_queue.get()
-        complete.append(temp_result[0])
-        pm_epoch.append(temp_result[1])
+        complete.append(temp_result[1])
+        pm_epoch.append(temp_result[2])
     assert all(complete) is True, f"Not all processes exited successfully: {complete}."
     assert len(set(pm_epoch)) == 1, f"Processes do not return the same epochs: {pm_epoch}."
 
@@ -282,51 +312,59 @@ def run_training_ddp(
     epoch: int
         The epoch number where the training finished
     """
-    # Initialize process group
-    setup_ddp(rank, world_size)
-    # Set seeds for each GPU to different value
-    set_seed_based_on_rank(rank)
+    try:
+        # Initialize process group
+        setup_ddp(rank, world_size)
+        # Set seeds for each GPU to different value
+        set_seed_based_on_rank(rank)
 
-    local_settings["device"] = f"cuda:{rank}"
-    local_settings["rank"] = rank
-    local_settings["world_size"] = world_size
+        local_settings["device"] = f"cuda:{rank}"
+        local_settings["rank"] = rank
+        local_settings["world_size"] = world_size
 
-    if not resume:
-        pm = prepare_model_new(
-            train_settings,
-            train_dir,
-            local_settings,
-            wfd=wfd,
-            initial_weights=initial_weights,
-            pretraining=pretraining,
-            pretrained_embedding_net=pretrained_emb_net,
-        )
-    else:
-        pm = prepare_model_resume(
-            checkpoint_name=ckpt_file,
-            local_settings=local_settings,
-            train_dir=train_dir,
-        )
+        if not resume:
+            pm = prepare_model_new(
+                train_settings,
+                train_dir,
+                local_settings,
+                wfd=wfd,
+                initial_weights=initial_weights,
+                pretraining=pretraining,
+                pretrained_embedding_net=pretrained_emb_net,
+            )
+        else:
+            pm = prepare_model_resume(
+                checkpoint_name=ckpt_file,
+                local_settings=local_settings,
+                train_dir=train_dir,
+            )
 
-    # Replace BatchNorm layers with SyncBatchNorm
-    pm.network = replace_BatchNorm_with_SyncBatchNorm(pm.network)
-    # Wrap the model with DDP
-    pm.network = DDP(pm.network, device_ids=[rank])
+        # Replace BatchNorm layers with SyncBatchNorm
+        pm.network = replace_BatchNorm_with_SyncBatchNorm(pm.network)
+        # Wrap the model with DDP
+        pm.network = DDP(pm.network, device_ids=[rank])
 
-    complete = train_stages(pm, wfd, train_dir, local_settings)
+        complete = train_stages(pm, wfd, train_dir, local_settings)
 
-    if complete and local_settings.get("wandb", False) and rank == 0.0:
-        try:
-            import wandb
+        if complete and local_settings.get("wandb", False) and rank == 0.0:
+            try:
+                import wandb
 
-            wandb.finish()
-        except ImportError:
-            print("wandb not installed. Skipping logging to wandb.")
+                wandb.finish()
+            except ImportError:
+                print("wandb not installed. Skipping logging to wandb.")
+        # Delete process group
+        cleanup_ddp()
+
+    except Exception as e:
+        # In case of an error, put the exception in the result queue
+        result_queue.put((rank, False, 0, str(e)))
+        sys.exit(1)  # Exit with a non-zero code to indicate failure
 
     # Put return info on queue
-    result_queue.put((complete, pm.epoch))
-    # Delete process group
-    cleanup_ddp()
+    result_queue.put((rank, complete, pm.epoch, None))
+    sys.exit(0)  # Exit with zero to indicate success
+
 
 
 def train_condor():
