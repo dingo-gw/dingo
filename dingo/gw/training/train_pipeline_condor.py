@@ -251,7 +251,7 @@ def run_multi_gpu_training(
             print(f"Rank {temp_result[0]} completed successfully.")
 
     if error_occurred:
-        raise RuntimeError("One or more processes failed, check logs for details.")
+        raise RuntimeError("One or more processes failed, check info.out for details.")
 
     # Collect exit results from all processes after training
     complete, pm_epoch = [], []
