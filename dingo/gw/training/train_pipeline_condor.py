@@ -324,6 +324,10 @@ def run_training_ddp(
         # Set seeds for each GPU to different value
         set_seed_based_on_rank(rank)
 
+        # Document GPUs
+        if rank == 0:
+            document_gpus(train_dir)
+
         local_settings["device"] = f"cuda:{rank}"
         local_settings["rank"] = rank
         local_settings["world_size"] = world_size
@@ -406,7 +410,7 @@ def train_condor():
 
         # Document setup
         document_environment(args.train_dir)
-        document_gpus(args.train_dir)
+        # Cannot document GPU info here because this results in problems with mp.Process
 
         if not isfile(join(args.train_dir, args.checkpoint)):
             print("Beginning new training run.")
@@ -459,6 +463,7 @@ def train_condor():
                 args.pretraining,
             )
         else:
+            document_gpus(args.train_dir)
             complete, pm_epoch = run_training(
                 train_settings,
                 local_settings,

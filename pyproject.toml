@@ -46,7 +46,7 @@ dependencies = [
     "scikit-learn",
     "scipy",
     "threadpoolctl",
-    "torch",
+    "torch<=2.4.1", # 2.5.0 does not work for transformer https://github.com/huggingface/diffusers/issues/9704
     "torchdiffeq",
     "torchvision",
     "tqdm",
