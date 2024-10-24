@@ -21,7 +21,9 @@ from dingo.gw.training import (
 )
 from dingo.gw.training.train_builders import build_dataset
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
+from dingo.core.utils.environment import document_environment
 from dingo.core.utils.torchutils import (
+    document_gpus,
     setup_ddp,
     cleanup_ddp,
     replace_BatchNorm_with_SyncBatchNorm,
@@ -29,7 +31,9 @@ from dingo.core.utils.torchutils import (
 )
 
 
-def create_submission_file(train_dir: str, condor_settings: dict, filename: str ="submission_file.sub"):
+def create_submission_file(
+    train_dir: str, condor_settings: dict, filename: str = "submission_file.sub"
+):
     """
     Creates submission file and writes it to filename.
 
@@ -53,7 +57,7 @@ def create_submission_file(train_dir: str, condor_settings: dict, filename: str 
     )
     if condor_settings["num_gpus"] == 8:
         # Request full node
-        lines.append('use template : FullNode\n')
+        lines.append("use template : FullNode\n")
     elif condor_settings["num_gpus"] >= 6:
         # Still request full nodes because wait times are long
         lines.append(f'use template : FullNode({condor_settings["num_gpus"]})\n')
@@ -89,7 +93,7 @@ def run_training(
     train_dir: str,
     ckpt_file: str,
     resume: bool,
-    pretraining: bool = False
+    pretraining: bool = False,
 ) -> (bool, int):
     """
     Starts a training run for single-GPU training.
@@ -117,9 +121,7 @@ def run_training(
         The epoch number where the training finished
     """
     if not resume:
-        pm, wfd = prepare_training_new(
-            train_settings, train_dir, local_settings
-        )
+        pm, wfd = prepare_training_new(train_settings, train_dir, local_settings)
     else:
         pm, wfd = prepare_training_resume(
             checkpoint_name=ckpt_file,
@@ -176,18 +178,18 @@ def run_multi_gpu_training(
     start_time = time.time()
     shutil.copy(wfd_path, wfd_path_tmp)
     elapsed_time = time.time() - start_time
-    print(
-        "Done. This took {:2.0f}:{:2.0f} min.".format(*divmod(elapsed_time, 60))
-    )
+    print("Done. This took {:2.0f}:{:2.0f} min.".format(*divmod(elapsed_time, 60)))
     # Overwrite waveform_dataset_path
     train_settings["data"]["waveform_dataset_path"] = wfd_path_tmp
 
     initial_weights, pretrained_emb_net, checkpoint_file = None, None, None
     if not resume:
-        wfd, initial_weights, pretrained_emb_net = (
-            prepare_wfd_and_initialization_for_embedding_network(
-                train_settings, train_dir, local_settings
-            )
+        (
+            wfd,
+            initial_weights,
+            pretrained_emb_net,
+        ) = prepare_wfd_and_initialization_for_embedding_network(
+            train_settings, train_dir, local_settings
         )
     else:
         checkpoint_file = os.path.join(train_dir, ckpt_file)
@@ -203,23 +205,23 @@ def run_multi_gpu_training(
     processes = []
     # Start one process for each gpu
     for rank in range(world_size):
-        p = (mp.Process(target=run_training_ddp,
-                        args=(
-                            rank,
-                            world_size,
-                            train_settings,
-                            local_settings,
-                            train_dir,
-                            wfd,
-                            initial_weights,
-                            pretraining,
-                            pretrained_emb_net,
-                            checkpoint_file,
-                            resume,
-                            result_queue,
-                            )
-                        )
-             )
+        p = mp.Process(
+            target=run_training_ddp,
+            args=(
+                rank,
+                world_size,
+                train_settings,
+                local_settings,
+                train_dir,
+                wfd,
+                initial_weights,
+                pretraining,
+                pretrained_emb_net,
+                checkpoint_file,
+                resume,
+                result_queue,
+            ),
+        )
         p.start()
         processes.append(p)
 
@@ -231,7 +233,9 @@ def run_multi_gpu_training(
         # Check whether process p failed
         if p.exitcode != 0:
             error_occurred = True
-            print(f"Process {p.pid} failed with exit code {p.exitcode}. Aborting all processes.")
+            print(
+                f"Process {p.pid} failed with exit code {p.exitcode}. Aborting all processes."
+            )
             # Terminate all other processes
             for proc in processes:
                 if proc.is_alive():
@@ -256,7 +260,9 @@ def run_multi_gpu_training(
         complete.append(temp_result[1])
         pm_epoch.append(temp_result[2])
     assert all(complete) is True, f"Not all processes exited successfully: {complete}."
-    assert len(set(pm_epoch)) == 1, f"Processes do not return the same epochs: {pm_epoch}."
+    assert (
+        len(set(pm_epoch)) == 1
+    ), f"Processes do not return the same epochs: {pm_epoch}."
 
     return complete[0], pm_epoch[0]
 
@@ -366,7 +372,6 @@ def run_training_ddp(
     sys.exit(0)  # Exit with zero to indicate success
 
 
-
 def train_condor():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -395,10 +400,13 @@ def train_condor():
     # else:
 
     if not args.start_submission:
-
         #
         # TRAIN
         #
+
+        # Document setup
+        document_environment(args.train_dir)
+        document_gpus(args.train_dir)
 
         if not isfile(join(args.train_dir, args.checkpoint)):
             print("Beginning new training run.")
@@ -452,7 +460,12 @@ def train_condor():
             )
         else:
             complete, pm_epoch = run_training(
-                train_settings, local_settings, args.train_dir, args.checkpoint, resume, args.pretraining,
+                train_settings,
+                local_settings,
+                args.train_dir,
+                args.checkpoint,
+                resume,
+                args.pretraining,
             )
 
         print("Copying log files")
@@ -474,7 +487,6 @@ def train_condor():
             condor_arguments = f"--train_dir {args.train_dir}"
 
     else:
-
         #
         # PREPARE FIRST SUBMISSION
         #

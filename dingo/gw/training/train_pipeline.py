@@ -21,6 +21,8 @@ from dingo.core.utils import (
     build_train_and_test_loaders,
 )
 from dingo.core.utils.trainutils import RuntimeLimits
+from dingo.core.utils.environment import document_environment
+from dingo.core.utils.torchutils import document_gpus
 from dingo.gw.dataset import WaveformDataset
 from dingo.gw.training.train_builders import (
     build_dataset,
@@ -655,6 +657,10 @@ def train_local():
     if args.pretraining:
         args.train_dir = os.path.join(args.train_dir, "pretraining")
         os.makedirs(args.train_dir, exist_ok=True)
+
+    # Document setup
+    document_environment(args.train_dir)
+    document_gpus(args.train_dir)
 
     if args.settings_file is not None:
         print("Beginning new training run.")

@@ -1,5 +1,6 @@
 import os
-from typing import Iterable, Tuple, Union
+from typing import Any, Iterable, Tuple, Union
+from pathlib import Path
 
 import bilby
 import numpy as np
@@ -8,6 +9,38 @@ import torch.nn as nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, DistributedSampler
 import torch.distributed as dist
+
+
+def get_cuda_info() -> dict[str, Any]:
+    """Get information about the CUDA devices available in the system."""
+
+    # No CUDA devices available
+    if not torch.cuda.is_available():
+        return {}
+
+    # CUDA devices are available
+    return {
+        "cuDNN version": torch.backends.cudnn.version(),  # type: ignore
+        "CUDA version": torch.version.cuda,
+        "device count": torch.cuda.device_count(),
+        "device name": torch.cuda.get_device_name(0),
+        "memory (GB)": round(
+            torch.cuda.get_device_properties(0).total_memory / 1024**3, 1
+        ),
+    }
+
+
+def document_gpus(target_dir: Path) -> None:
+    """
+    Document the current GPU resources to a `requirements.txt` file
+    inside the given `target_dir`.
+    """
+    cuda_info = get_cuda_info()
+    # Write the environment to a requirements file
+    with open(target_dir / "info_gpus.txt", "w") as file:
+        file.write(f"# CUDA information:\n")
+        for c_info in cuda_info:
+            file.write(f"{c_info}\n")
 
 
 def fix_random_seeds(_):
