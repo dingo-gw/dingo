@@ -38,8 +38,8 @@ def document_gpus(target_dir: str) -> None:
     # Write the environment to a requirements file
     with open(os.path.join(target_dir, "info_gpus.txt"), "w") as file:
         file.write(f"# CUDA information:\n")
-        for c_info in cuda_info:
-            file.write(f"{c_info}\n")
+        for k, v in cuda_info.items():
+            file.write(f"{k}: {v}\n")
 
 
 def fix_random_seeds(_):
