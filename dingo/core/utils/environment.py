@@ -6,7 +6,6 @@ import os
 import sys
 from datetime import datetime
 from importlib import metadata
-from pathlib import Path
 
 
 def get_packages() -> list[str]:
@@ -49,7 +48,7 @@ def get_virtual_environment() -> str:
         return "No virtual environment detected"
 
 
-def document_environment(target_dir: Path) -> None:
+def document_environment(target_dir: str) -> None:
     """
     Document the current environment to a `info_env.txt` file
     inside the given `target_dir`.
@@ -65,7 +64,7 @@ def document_environment(target_dir: Path) -> None:
     virtual_environment = get_virtual_environment()
 
     # Write the environment to a requirements file
-    with open(target_dir / "info_env.txt", "w") as file:
+    with open(os.path.join(target_dir, "info_env.txt"), "w") as file:
         file.write(f"# Date: {datetime.now().isoformat()}\n")
         file.write(f"# Python version: {python_version}\n")
         file.write(f"# Virtual environment: {virtual_environment}\n")

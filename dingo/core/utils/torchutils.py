@@ -1,6 +1,5 @@
 import os
 from typing import Any, Iterable, Tuple, Union
-from pathlib import Path
 
 import bilby
 import numpy as np
@@ -30,14 +29,14 @@ def get_cuda_info() -> dict[str, Any]:
     }
 
 
-def document_gpus(target_dir: Path) -> None:
+def document_gpus(target_dir: str) -> None:
     """
     Document the current GPU resources to a `requirements.txt` file
     inside the given `target_dir`.
     """
     cuda_info = get_cuda_info()
     # Write the environment to a requirements file
-    with open(target_dir / "info_gpus.txt", "w") as file:
+    with open(os.path.join(target_dir, "info_gpus.txt"), "w") as file:
         file.write(f"# CUDA information:\n")
         for c_info in cuda_info:
             file.write(f"{c_info}\n")
