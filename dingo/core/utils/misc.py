@@ -86,6 +86,8 @@ def call_func_strict_output_dim(
         # estimate the fraction of failures
         num_total += len(output[0])
         num_func_to_generate = num_request - num_total
+        if failed_fraction == 0:
+            break
         # generating extra calls given that we know the failing fraction 
         num_request = int((num_func_to_generate / failed_fraction) * (1 + buffer_fraction))
 
