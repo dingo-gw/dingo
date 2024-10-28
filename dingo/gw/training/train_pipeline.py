@@ -464,16 +464,18 @@ def initialize_stage(
         # (instead of every epoch).
         # Warning: The following computation assumes that ...
         # ... the full training data set is used for training
-        # ... the batch size is the total batch size (over all GPUs)
+        # ... the batch size is the batch size per GPU
         train_size = int(
             train_settings["data"]["train_fraction"] * wfd.settings["num_samples"]
         )
         grad_updates_per_optimizer_step = stage.get(
             "gradient_updates_per_optimizer_step", 1
         )
+        num_gpus = world_size if world_size is not None else 1
         num_optimizer_steps = int(
             np.ceil(
-                train_size / (stage["batch_size"] * grad_updates_per_optimizer_step)
+                train_size
+                / (stage["batch_size"] * num_gpus * grad_updates_per_optimizer_step)
             )
         )
         pm.initialize_optimizer_and_scheduler(num_optimizer_steps=num_optimizer_steps)
