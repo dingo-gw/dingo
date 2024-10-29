@@ -3,8 +3,6 @@ import sys
 from os.path import join, isfile
 import yaml
 import argparse
-import shutil
-import time
 
 import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -172,17 +170,6 @@ def run_multi_gpu_training(
     epoch: int
         The epoch number where the training finished
     """
-    # Copy waveform dataset to local node to minimize network traffic during training
-    wfd_path = train_settings["data"]["waveform_dataset_path"]
-    file_name = wfd_path.split("/")[-1]
-    wfd_path_tmp = join("/tmp", file_name)
-    print("Copying waveform dataset to {}".format(wfd_path_tmp))
-    start_time = time.time()
-    shutil.copy(wfd_path, wfd_path_tmp)
-    elapsed_time = time.time() - start_time
-    print("Done. This took {:2.0f}:{:2.0f} min.".format(*divmod(elapsed_time, 60)))
-    # Overwrite waveform_dataset_path
-    train_settings["data"]["waveform_dataset_path"] = wfd_path_tmp
 
     initial_weights, pretrained_emb_net, checkpoint_file = None, None, None
     if not resume:
@@ -196,7 +183,10 @@ def run_multi_gpu_training(
     else:
         checkpoint_file = os.path.join(train_dir, ckpt_file)
         train_settings = load_settings_from_ckpt(ckpt_file)
-        wfd = build_dataset(train_settings["data"])
+        wfd = build_dataset(
+            train_settings["data"],
+            copy_to_tmp=local_settings["copy_waveform_dataset_to_tmp"],
+        )
     if pretrained_emb_net is not None:
         pretraining = True
     else:

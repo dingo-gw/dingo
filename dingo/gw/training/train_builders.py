@@ -2,6 +2,9 @@ import pandas as pd
 import torch.multiprocessing
 import torchvision
 from bilby.gw.detector import InterferometerList
+import shutil
+import time
+import os
 from threadpoolctl import threadpool_limits
 
 from dingo.core.utils import *
@@ -24,11 +27,11 @@ from dingo.gw.transforms import (
     GetDetectorTimes,
     StrainTokenization,
     DropFrequencyValues,
-    DropDetectors
+    DropDetectors,
 )
 
 
-def build_dataset(data_settings):
+def build_dataset(data_settings, copy_to_tmp: bool = False):
     """Build a dataset based on a settings dictionary. This should contain the path of
     a saved waveform dataset.
 
@@ -37,24 +40,50 @@ def build_dataset(data_settings):
     Parameters
     ----------
     data_settings : dict
+    copy_to_tmp: bool = False
+        Whether to copy the waveform dataset to the local node to minimize network traffic during training
 
     Returns
     -------
     WaveformDataset
     """
+
+    # Copy waveform dataset to local node to minimize network traffic during training
+    if copy_to_tmp:
+        # Set tmp path
+        wfd_path = data_settings["waveform_dataset_path"]
+        file_name = wfd_path.split("/")[-1]
+        wfd_path_tmp = os.path.join("/tmp", file_name)
+        print("Copying waveform dataset to {}".format(wfd_path_tmp))
+        # Copy waveform dataset
+        start_time = time.time()
+        shutil.copy(wfd_path, wfd_path_tmp)
+        elapsed_time = time.time() - start_time
+        print("Done. This took {:2.0f}:{:2.0f} min.".format(*divmod(elapsed_time, 60)))
+        # Replace waveform dataset path
+        wfd_path = wfd_path_tmp
+    else:
+        wfd_path = data_settings["waveform_dataset_path"]
+
     # Build and truncate datasets
     domain_update = data_settings.get("domain_update", None)
     wfd = WaveformDataset(
-        file_name=data_settings["waveform_dataset_path"],
+        file_name=wfd_path,
         precision="single",
         domain_update=domain_update,
         svd_size_update=data_settings.get("svd_size_update"),
-        leave_on_disk_keys=data_settings.get("leave_on_disk_keys", None)
+        leave_on_disk_keys=data_settings.get("leave_on_disk_keys", None),
     )
     return wfd
 
 
-def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=None, print_output: bool = True):
+def set_train_transforms(
+    wfd,
+    data_settings,
+    asd_dataset_path,
+    omit_transforms=None,
+    print_output: bool = True,
+):
     """
     Set the transform attribute of a waveform dataset based on a settings dictionary.
     The transform takes waveform polarizations, samples random extrinsic parameters,
@@ -87,7 +116,7 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         ifos=data_settings["detectors"],
         precision="single",
         domain_update=wfd.domain.domain_dict,
-        print_output=print_output
+        print_output=print_output,
     )
     assert wfd.domain == asd_dataset.domain
 

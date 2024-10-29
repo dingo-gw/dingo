@@ -61,7 +61,11 @@ def prepare_wfd_and_initialization_for_embedding_network(
     (WaveformDataset, dict, torch.nn.module)
     """
 
-    wfd = build_dataset(train_settings["data"])  # No transforms yet
+    # No transforms yet
+    wfd = build_dataset(
+        train_settings["data"],
+        copy_to_tmp=local_settings.get("copy_waveform_dataset_to_tmp", False),
+    )
     initial_weights = {}
     pretrained_embedding_net = None
 
@@ -374,7 +378,10 @@ def prepare_training_resume(
     """
 
     train_settings = load_settings_from_ckpt(checkpoint_name)
-    wfd = build_dataset(train_settings["data"])
+    wfd = build_dataset(
+        train_settings["data"],
+        copy_to_tmp=local_settings.get("copy_waveform_dataset_to_tmp", False),
+    )
 
     pm = prepare_model_resume(
         checkpoint_name,
