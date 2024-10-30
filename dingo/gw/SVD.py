@@ -3,6 +3,7 @@ import pandas as pd
 import scipy
 from sklearn.utils.extmath import randomized_svd
 from dingo.core.dataset import DingoDataset
+from numba import jit
 
 
 class SVDBasis(DingoDataset):
@@ -138,6 +139,8 @@ class SVDBasis(DingoDataset):
                     print("    99.9  -> {}".format(np.percentile(mismatches, 99.9)))
                     print("    99.99 -> {}".format(np.percentile(mismatches, 99.99)))
 
+    # NOTE need to check how this works for multi-processing processes
+    # @jit(nopython=True)
     def decompress(self, coefficients: np.ndarray):
         """
         Convert from basis coefficients back to raw data representation.

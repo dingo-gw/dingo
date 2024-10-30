@@ -207,9 +207,23 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         for sample with index `idx`. If defined, a chain of transformations is applied to
         the waveform data.
         """
-        parameters = self.parameters.iloc[idx].to_dict()
+        return self.__getitems__(idx)
+
+    def __getitems__(
+        self, possibly_batched_idx
+    ) -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
+        """
+        Return a nested dictionary containing parameters and waveform polarizations
+        for sample with index `idx`. If defined, a chain of transformations is applied to
+        the waveform data.
+        """
+        parameters = {
+            k: v if isinstance(v, float) else v.to_numpy()
+            for k, v in self.parameters.iloc[possibly_batched_idx].items()
+        }
         polarizations = {
-            pol: waveforms[idx] for pol, waveforms in self.polarizations.items()
+            pol: waveforms[possibly_batched_idx]
+            for pol, waveforms in self.polarizations.items()
         }
 
         # Decompression transforms are assumed to apply only to the waveform,
