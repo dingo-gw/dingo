@@ -235,7 +235,12 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         data = {"parameters": parameters, "waveform": polarizations}
         if self.transform is not None:
             data = self.transform(data)
-        return data
+        
+        # currently the data is of form [arr1[batch_size, ...], arr2[batch_size, ...], ...]
+        # repackage it to [[arr1[0, ...], arr2[0, ...], ] ..., [arr1[batch_size, ...], arr2[batch_size, ...], ]]
+        # this is useful for collation
+        repackaged_data = [[data[i][j] for i in range(len(data))] for j in range(len(possibly_batched_idx))]
+        return repackaged_data
 
     def parameter_mean_std(self):
         mean = self.parameters.mean().to_dict()
