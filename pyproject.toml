@@ -86,6 +86,7 @@ dev = [
 [project.scripts]
 dingo_append_training_stage = "dingo.gw.training:append_stage"
 dingo_analyze_event = "dingo.gw.inference:analyze_event"
+dingo_autocomplete_wfd_settings = "dingo.gw.dataset.generate_dataset:autocomplete_wfd_settings_cli"
 dingo_build_svd = "dingo.gw.dataset.utils:build_svd_cli"
 dingo_estimate_psds = "dingo.gw.noise.asd_estimation:download_and_estimate_cli"
 dingo_generate_asd_dataset = "dingo.gw.noise.generate_dataset:generate_dataset"
