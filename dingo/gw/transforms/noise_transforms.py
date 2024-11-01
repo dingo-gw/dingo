@@ -4,7 +4,7 @@ from bilby.gw.detector import PowerSpectralDensity
 from scipy.interpolate import interp1d
 
 from dingo.gw.domains import FrequencyDomain
-from dingo.gw.training.utils import get_batch_size_of_input_sample
+from .utils import get_batch_size_of_input_sample
 
 
 class SampleNoiseASD(object):

@@ -163,7 +163,7 @@ class ProjectOntoDetectors(object):
             raise ValueError("Missing parameters.")
 
         # (1) rescale polarizations and set distance parameter to sampled value
-        if isinstance(d_ref, float) and isinstance(d_new, float):
+        if isinstance(d_ref, float) or isinstance(d_new, float):
             d_ratio = d_ref / d_new
         elif isinstance(d_ref, np.ndarray) and isinstance(d_new, np.ndarray):
             d_ratio = (d_ref / d_new)[:, np.newaxis]
@@ -190,9 +190,9 @@ class ProjectOntoDetectors(object):
                     for ra, dec, psi in zip(ra, dec, psi)
                 ]
             )
-            if len(fc) > 1:
-                fp = fp[:, np.newaxis]
-                fc = fc[:, np.newaxis]
+            if len(fp) > 1:
+                fp = fp[..., np.newaxis]
+                fc = fc[..., np.newaxis]
             strain = fp * hp + fc * hc
 
             # (3) time shift the strain. If polarizations are timeshifted by

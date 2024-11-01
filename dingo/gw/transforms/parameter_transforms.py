@@ -2,8 +2,7 @@ import numpy as np
 import torch
 import pandas as pd
 from dingo.gw.prior import BBHExtrinsicPriorDict
-from dingo.gw.training.utils import get_batch_size_of_input_sample
-
+from .utils import get_batch_size_of_input_sample
 
 class SampleExtrinsicParameters(object):
     """
@@ -17,11 +16,7 @@ class SampleExtrinsicParameters(object):
     def __call__(self, input_sample):
         sample = input_sample.copy()
         batched, batch_size = get_batch_size_of_input_sample(input_sample)
-        if batched:
-            extrinsic_parameters = self.prior.sample(batch_size)
-        else:
-            extrinsic_parameters = self.prior.sample()
-            extrinsic_parameters = {k: float(v) for k, v in extrinsic_parameters.items()}
+        extrinsic_parameters = self.prior.sample(batch_size)
         sample["extrinsic_parameters"] = extrinsic_parameters
         return sample
 

@@ -223,7 +223,7 @@ class FrequencyDomain(Domain):
         Array-like of the same form as data.
         """
         f = self.get_sample_frequencies_astype(data)
-        if isinstance(dt, float):
+        if isinstance(dt, float) or f.ndim == 1:
             # unbatched case
             phase_shift = 2 * np.pi * dt * f
         elif isinstance(data, np.ndarray):

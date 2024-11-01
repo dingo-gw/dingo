@@ -207,7 +207,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         for sample with index `idx`. If defined, a chain of transformations is applied to
         the waveform data.
         """
-        return self.__getitems__(idx)
+        return self.__getitems__(idx)[0]
 
     def __getitems__(
         self, possibly_batched_idx

@@ -61,8 +61,3 @@ def append_stage():
     )
 
     torch.save(d, args.out_file)
-
-def get_batch_size_of_input_sample(input_sample):
-    if "waveform" in input_sample:
-        wf = next(iter(input_sample["waveform"].values()))
-        return wf.ndim > 1, wf.shape[0]

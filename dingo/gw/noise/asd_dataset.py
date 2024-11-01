@@ -134,6 +134,9 @@ class ASDDataset(DingoDataset):
         n : int
             Number of asds to sample 
         """
-        return {k: v[np.random.choice(len(v), n)] for k, v in self.asds.items()}
+        if n == 1:
+            return {k: v[np.random.choice(len(v), 1)[0]] for k, v in self.asds.items()} 
+        else:
+            return {k: v[np.random.choice(len(v), n)] for k, v in self.asds.items()}
 
     
