@@ -245,10 +245,15 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                 for j in range(len(possibly_batched_idx))
             ]
         elif isinstance(data, list):
-            repackaged_data = [
-                [data[i][j] for i in range(len(data))]
-                for j in range(len(possibly_batched_idx))
-            ]
+            # if there is no batching, then the leading dimension is not the 
+            # batch dimension. Handle this case seperately
+            if len(possibly_batched_idx) == 1:
+                repackaged_data = [data]
+            else:
+                repackaged_data = [
+                    [data[i][j] for i in range(len(data))]
+                    for j in range(len(possibly_batched_idx))
+                ]
         return repackaged_data
 
     def parameter_mean_std(self):
