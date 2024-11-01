@@ -19,6 +19,9 @@ class SampleNoiseASD(object):
         sample = input_sample.copy()
         batched, batch_size = get_batch_size_of_input_sample(input_sample)
         sample["asds"] = self.asd_dataset.sample_random_asds(n=batch_size)
+        if not batched:
+            sample["asds"] = {k:v[0] for k,v in sample["asds"].items()}
+
         return sample
 
 

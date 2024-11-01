@@ -210,7 +210,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         return self.__getitems__([idx])[0]
 
     def __getitems__(
-        self, possibly_batched_idx
+        self, batched_idx
     ) -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
         """
         Return a nested dictionary containing parameters and waveform polarizations
@@ -219,10 +219,10 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         """
         parameters = {
             k: v if isinstance(v, float) else v.to_numpy()
-            for k, v in self.parameters.iloc[possibly_batched_idx].items()
+            for k, v in self.parameters.iloc[batched_idx].items()
         }
         polarizations = {
-            pol: waveforms[possibly_batched_idx]
+            pol: waveforms[batched_idx]
             for pol, waveforms in self.polarizations.items()
         }
 
@@ -242,18 +242,13 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         if isinstance(data, dict):
             repackaged_data = [
                 {k1: {k2: v2[j] for k2, v2 in v1.items()} for k1, v1 in data.items()}
-                for j in range(len(possibly_batched_idx))
+                for j in range(len(batched_idx))
             ]
         elif isinstance(data, list):
-            # if there is no batching, then the leading dimension is not the 
-            # batch dimension. Handle this case seperately
-            if len(possibly_batched_idx) == 1:
-                repackaged_data = [data]
-            else:
-                repackaged_data = [
-                    [data[i][j] for i in range(len(data))]
-                    for j in range(len(possibly_batched_idx))
-                ]
+            repackaged_data = [
+                [data[i][j] for i in range(len(data))]
+                for j in range(len(batched_idx))
+            ]
         return repackaged_data
 
     def parameter_mean_std(self):
