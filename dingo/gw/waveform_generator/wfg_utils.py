@@ -141,7 +141,7 @@ def td_modes_to_fd_modes(hlm_td, domain):
     return hlm_fd
 
 
-def get_polarizations_from_fd_modes_m(hlm_fd, iota, phase):
+def get_polarizations_from_fd_modes_m(hlm_fd, iota, phase, approximant_str = None):
     pol_m = {}
     polarizations = ["h_plus", "h_cross"]
 
@@ -152,7 +152,13 @@ def get_polarizations_from_fd_modes_m(hlm_fd, iota, phase):
 
         # In the L0 frame, we compute the polarizations from the modes using the
         # spherical harmonics below.
-        ylm = lal.SpinWeightedSphericalHarmonic(iota, np.pi / 2 - phase, -2, l, m)
+        #Some aligned spin models use phase internally to generate hlm so np.pi/2 - phase may give wrong result.
+        # It is important to understand what convention is used for a given waveform model before adding it.
+        
+        if approximant_str == "IMRPhenomXHM":
+            ylm = lal.SpinWeightedSphericalHarmonic(iota, np.pi / 2, -2, l, m)
+        else:
+            ylm = lal.SpinWeightedSphericalHarmonic(iota, np.pi / 2 - phase, -2, l, m)
         ylmstar = ylm.conjugate()
 
         # Modes (l,m) are defined on domain -f_max,...,-f_min,...0,...,f_min,...,f_max.

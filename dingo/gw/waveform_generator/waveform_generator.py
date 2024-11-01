@@ -630,8 +630,9 @@ class WaveformGenerator:
             # Step 3: Separate negative and positive frequency parts of the modes,
             # and add contributions according to their transformation behavior under
             # phase shifts.
+            
             pol_m = wfg_utils.get_polarizations_from_fd_modes_m(
-                hlm_fd, iota, parameters["phase"]
+                hlm_fd, iota, parameters["phase"], self.approximant_str
             )
 
         else:
