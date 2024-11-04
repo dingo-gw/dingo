@@ -116,9 +116,7 @@ def train_svd_basis(dataset: WaveformDataset, size: int, n_train: int):
     basis = SVDBasis()
     basis.generate_basis(train_data, size)
 
-    # NOTE TEMP
-    # assert np.allclose(basis.V[: dataset.domain.min_idx], 0)
-    # NOTE TEMP 
+    assert np.allclose(basis.V[: dataset.domain.min_idx], 0)
 
     # Since there is a possibility that the size of the dataset returned by
     # generate_parameters_and_polarizations is smaller than requested, we don't assume
