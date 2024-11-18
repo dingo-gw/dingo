@@ -534,6 +534,21 @@ def create_parser(top_level=True):
         ),
     )
     submission_parser.add(
+        "--scitoken-issuer",
+        default=None,
+        type=nonestr,
+        choices=[None, "None", "igwn", "local"],
+        help=(
+            "The issuer of the scitoken to use for accessing IGWN proprietary "
+            "data/services. If not given, this is automatically set based on "
+            "the machine being used. This should only be set if you are planning "
+            "to submit from a different machine to the one you are running on. "
+            "The allowed options are :code:`igwn` and :code:`local`. "
+            "For more details see "
+            "https://computing.docs.ligo.org/guide/htcondor/credentials."
+        ),
+    )
+    submission_parser.add(
         "--local-plot", action="store_true", help="Run the plot job locally"
     )
 
