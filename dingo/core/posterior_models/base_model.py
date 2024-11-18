@@ -22,6 +22,7 @@ from dingo.core.utils.misc import get_version
 
 from dingo.core.utils.trainutils import EarlyStopping
 
+
 class BasePosteriorModel(ABC):
     """
     Abstract base class for PosteriorModels. This is intended to construct and hold a
@@ -395,7 +396,6 @@ class BasePosteriorModel(ABC):
             print(f"test loss: {test_loss:.3f}")
 
         else:
-
             while not runtime_limits.limits_exceeded(self.epoch):
                 self.epoch += 1
 
