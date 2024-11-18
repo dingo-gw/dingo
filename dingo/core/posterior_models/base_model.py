@@ -382,6 +382,8 @@ class BasePosteriorModel(ABC):
         use_wandb
         test_only: bool = False
             if True, training is skipped
+        early_stopping: EarlyStopping
+            Optional EarlyStopping instance.
 
         Returns
         -------
