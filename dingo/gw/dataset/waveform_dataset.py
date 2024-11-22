@@ -207,9 +207,23 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         for sample with index `idx`. If defined, a chain of transformations is applied to
         the waveform data.
         """
-        parameters = self.parameters.iloc[idx].to_dict()
+        return self.__getitems__([idx])[0]
+
+    def __getitems__(
+        self, batched_idx
+    ) -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
+        """
+        Return a nested dictionary containing parameters and waveform polarizations
+        for sample with index `idx`. If defined, a chain of transformations is applied to
+        the waveform data.
+        """
+        parameters = {
+            k: v if isinstance(v, float) else v.to_numpy()
+            for k, v in self.parameters.iloc[batched_idx].items()
+        }
         polarizations = {
-            pol: waveforms[idx] for pol, waveforms in self.polarizations.items()
+            pol: waveforms[batched_idx]
+            for pol, waveforms in self.polarizations.items()
         }
 
         # Decompression transforms are assumed to apply only to the waveform,
@@ -221,7 +235,21 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         data = {"parameters": parameters, "waveform": polarizations}
         if self.transform is not None:
             data = self.transform(data)
-        return data
+
+        # currently the data is of form [arr1[batch_size, ...], arr2[batch_size, ...], ...]
+        # repackage it to [[arr1[0, ...], arr2[0, ...], ] ..., [arr1[batch_size, ...], arr2[batch_size, ...], ]]
+        # this is useful for collation
+        if isinstance(data, dict):
+            repackaged_data = [
+                {k1: {k2: v2[j] for k2, v2 in v1.items()} for k1, v1 in data.items()}
+                for j in range(len(batched_idx))
+            ]
+        elif isinstance(data, list):
+            repackaged_data = [
+                [data[i][j] for i in range(len(data))]
+                for j in range(len(batched_idx))
+            ]
+        return repackaged_data
 
     def parameter_mean_std(self):
         mean = self.parameters.mean().to_dict()

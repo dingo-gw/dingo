@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import pandas as pd
 from dingo.gw.prior import BBHExtrinsicPriorDict
-
+from .utils import get_batch_size_of_input_sample
 
 class SampleExtrinsicParameters(object):
     """
@@ -15,8 +15,8 @@ class SampleExtrinsicParameters(object):
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
-        extrinsic_parameters = self.prior.sample()
-        extrinsic_parameters = {k: float(v) for k, v in extrinsic_parameters.items()}
+        batched, batch_size = get_batch_size_of_input_sample(input_sample)
+        extrinsic_parameters = self.prior.sample(batch_size)
         sample["extrinsic_parameters"] = extrinsic_parameters
         return sample
 
@@ -97,6 +97,10 @@ class SelectStandardizeRepackageParameters(object):
                             (*full_parameters[v[0]].shape, len(v)),
                             dtype=torch.float32,
                             device=self.device,
+                        )
+                    elif isinstance(full_parameters[v[0]], np.ndarray):
+                        standardized = np.empty(
+                            (*full_parameters[v[0]].shape, len(v)), dtype=np.float32
                         )
                     else:
                         standardized = np.empty(len(v), dtype=np.float32)
