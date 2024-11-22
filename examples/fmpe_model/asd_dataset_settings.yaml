@@ -1,0 +1,23 @@
+dataset_settings:
+#  f_min: 0         # defaults to 0
+#  f_max: 2048      # defaults to f_s/2
+  f_s: 4096
+  time_psd: 1024
+  T: 8.0
+  window:
+    roll_off: 0.4
+    type: tukey
+  time_gap: 0          # specifies the time skipped between to consecutive PSD estimates. If set < 0, the time segments overlap
+  num_psds_max: 0   # if set > 0, only a subset of all available PSDs will be used
+#  channels:
+#    H1: H1:DCS-CALIB_STRAIN_C02
+#    L1: L1:DCS-CALIB_STRAIN_C02
+  detectors:
+    - H1
+    - L1
+  observing_run: O1
+# condor:
+#   env_path: /path/to/environment
+#   num_jobs: 2 # per detector
+#   num_cpus: 16
+#   memory_cpus: 16000

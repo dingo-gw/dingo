@@ -17,16 +17,17 @@ nde:
     parameters: null # need all parameters for likelihood
   # nde architecture
   model:
-    type: nsf
-    num_flow_steps: 10
-    base_transform_kwargs:
-      hidden_dim: 128
-      num_transform_blocks: 2
-      activation: elu
-      dropout_probability: 0.1
-      batch_norm: true
-      num_bins: 8
-      base_transform_type: rq-coupling
+    posterior_model_type: normalizing_flow
+    posterior_kwargs:
+      num_flow_steps: 10
+      base_transform_kwargs:
+        hidden_dim: 128
+        num_transform_blocks: 2
+        activation: elu
+        dropout_probability: 0.1
+        batch_norm: true
+        num_bins: 8
+        base_transform_type: rq-coupling
   # nde training
   training:
     device: cpu
