@@ -25,11 +25,10 @@ class PowerLawPopulation(object):
 
     model_type = "power_law"
 
-    def __init__(self, prior, minimum_distance, maximum_distance, batch_prior=15_000):
+    def __init__(self, prior, minimum_distance, maximum_distance):
         self.prior = PriorDict(copy.deepcopy(prior))
         self.minimum_distance = minimum_distance
         self.maximum_distance = maximum_distance
-        self.batch_prior = batch_prior
 
     def get_event_generator(self, p, kwargs_selection_cut={}):
         cosmology = FlatLambdaCDM(Om0=0.3, H0=p["hubble_constant"])
@@ -84,6 +83,11 @@ class PowerLawPopulation(object):
             
             for k in s.keys():
                 s[k] = s[k][idx_obs]
+
+                if s[k].size < size:
+                    raise 'Required size above size of produce array, due to\
+                        selection cut. Increase buffer_factor.'
+
                 s[k] = s[k][:size]
             
             return s
