@@ -1,4 +1,5 @@
 import os
+import queue
 import sys
 from os.path import join, isfile
 import yaml
@@ -235,22 +236,29 @@ def run_multi_gpu_training(
             break
 
     # Handle the result queue to see what the specific error was
-    while not result_queue.empty():
-        temp_result = result_queue.get()
-        if temp_result[1] is False:
-            print(f"Rank {temp_result[0]} failed with error: {temp_result[3]}")
-        else:
-            print(f"Rank {temp_result[0]} completed successfully.")
+    results = []
+    try:
+        while True:
+            temp_result = result_queue.get_nowait()  # Avoid blocking
+            results.append(temp_result)
+            if temp_result[1] is False:
+                print(f"Rank {temp_result[0]} failed with error: {temp_result[3]}")
+            else:
+                print(f"Rank {temp_result[0]} completed successfully.")
+    except queue.Empty:
+        pass
 
-    if error_occurred:
-        raise RuntimeError("One or more processes failed, check info.out for details.")
+    if error_occurred or len(results) != world_size:
+        raise RuntimeError(
+            f"One or more processes failed or number of results={len(results)} does not match "
+            f"world_size={world_size}, check info.out for details."
+        )
 
     # Collect exit results from all processes after training
     complete, pm_epoch = [], []
-    for _ in range(world_size):
-        temp_result = result_queue.get()
-        complete.append(temp_result[1])
-        pm_epoch.append(temp_result[2])
+    for result in results:
+        complete.append(result[1])
+        pm_epoch.append(result[2])
     assert all(complete) is True, f"Not all processes exited successfully: {complete}."
     assert (
         len(set(pm_epoch)) == 1
