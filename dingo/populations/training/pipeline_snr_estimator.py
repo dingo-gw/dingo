@@ -77,7 +77,7 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
     pm_embeddings = PosteriorModel(train_settings['data']['posterior_model'], device=device)
 
     # for debug purposes
-    pm_embeddings.metadata['train_settings']['data']['waveform_dataset_path'] = '/mnt/lustre2/gravitational_waves/kleyde/dingo_population/waveform_datasets/waveform_test.hdf5'
+    # pm_embeddings.metadata['train_settings']['data']['waveform_dataset_path'] = '/mnt/lustre2/gravitational_waves/kleyde/dingo_population/waveform_datasets/waveform_test.hdf5'
 
     # important! Overwrite inference parameters with SNR here
     pm_embeddings.metadata['train_settings']["data"]['inference_parameters'] = ['matched_filter_snr']
@@ -157,26 +157,21 @@ def prepare_training_resume(checkpoint_name, local_settings, train_dir):
     pm = SNREstimator(
         model_filename=checkpoint_name,
         device=device,
-        event_model=None
+        pm_single_event=None
     )
 
-    posterior_model_path = pm.metadata['train_settings']['data']['posterior_model']
+    pm.add_pm_single_event()
 
-    # put either model on cpu, or move all tensors to cuda
-    pm_embeddings = PosteriorModel(posterior_model_path, device=device)
-    train_settings = pm_embeddings.metadata['train_settings']
-    wfd = build_dataset(train_settings["data"])
+    wfd = build_dataset(pm.pm_single_event.metadata['train_settings']['data'])
     set_train_transforms(
         wfd,
-        train_settings["data"],
-        train_settings["training"]["stage_0"]["asd_dataset_path"],
+        pm.pm_single_event.metadata['train_settings']['data'],
+        pm.pm_single_event.metadata['train_settings']['training']["stage_0"]["asd_dataset_path"],
     )
     set_train_transforms_snr_estimate(
         wfd,
         pm.metadata['train_settings']
     )
-
-    pm.add_event_model(pm_embeddings)
     
     if local_settings.get("wandb", False):
         try:
