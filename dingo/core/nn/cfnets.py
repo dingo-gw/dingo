@@ -271,8 +271,47 @@ def get_dim_positional_embedding(encoding: dict, input_dim: int):
         return (1 + 2 * encoding["frequencies"]) * input_dim
     return 2 * encoding["frequencies"] + input_dim
 
-
 class PositionalEncoding(nn.Module):
+    """
+    Implements positional encoding as commonly used in transformer architectures.
+    
+    Positional encoding introduces a way to inject information about the order of 
+    the input data (e.g., sequence positions) into a neural network that otherwise 
+    lacks a sense of position due to its permutation-invariant nature. This class 
+    computes sinusoidal encodings based on the position of each element in the input 
+    and concatenates them with the original input features.
+
+    Attributes
+    ----------
+    frequencies : torch.Tensor
+        A tensor containing the frequencies used to calculate the sinusoidal components.
+        The frequencies are powers of 2, scaled by the base frequency.
+    encode_all : bool
+        Determines whether the positional encoding is applied to all features of the input
+        or only the first feature (e.g., time component).
+    base_freq : float
+        The base frequency used to scale the sinusoidal components, defaulting to `2 * pi`.
+
+    Parameters
+    ----------
+    nr_frequencies : int
+        The number of sinusoidal frequencies to compute. This determines the dimensionality
+        of the positional encoding for each input feature.
+    encode_all : bool, optional (default=True)
+        If True, the positional encoding is computed for all features in the input. 
+        Otherwise, it is computed only for the first feature (e.g., the time dimension).
+    base_freq : float, optional (default=2 * np.pi)
+        The base frequency used for sinusoidal encoding.
+
+    Methods
+    -------
+    forward(t_theta)
+        Computes the positional encoding for the input tensor `t_theta` and concatenates 
+        it with the original input features.
+        - If `encode_all` is True, the positional encoding is computed for all features.
+        - If `encode_all` is False, the positional encoding is applied only to the first
+          feature, such as time, while other features remain unchanged.
+    """
     def __init__(self, nr_frequencies, encode_all=True, base_freq=2 * np.pi):
         super(PositionalEncoding, self).__init__()
         frequencies = base_freq * torch.pow(
@@ -282,6 +321,24 @@ class PositionalEncoding(nn.Module):
         self.encode_all = encode_all
 
     def forward(self, t_theta):
+        """
+        Computes and concatenates positional encodings with the input tensor.
+
+        Parameters
+        ----------
+        t_theta : torch.Tensor
+            Input tensor of shape (batch_size, input_dim), where `input_dim` is the
+            dimensionality of the input features.
+
+        Returns
+        -------
+        torch.Tensor
+            A tensor containing the input features concatenated with the positional
+            encodings. The output shape will be:
+            - (batch_size, input_dim + 2 * nr_frequencies) if `encode_all` is True.
+            - (batch_size, input_dim + 2 * nr_frequencies) if `encode_all` is False,
+              but positional encodings are computed only for the first input feature.
+        """
         batch_size = t_theta.size(0)
         if self.encode_all:
             x = t_theta.view(batch_size, -1, 1) * self.frequencies
