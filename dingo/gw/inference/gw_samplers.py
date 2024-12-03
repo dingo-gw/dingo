@@ -4,14 +4,15 @@ import copy
 import numpy as np
 import pandas as pd
 from astropy.time import Time
-from bilby.core.prior import PriorDict
+from bilby.core.prior import PriorDict, DeltaFunction
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 
 from dingo.core.samplers import Sampler, GNPESampler
 from dingo.core.transforms import RenameKey
 from dingo.gw.domains import build_domain, MultibandedFrequencyDomain
-from dingo.gw.gwutils import get_window_factor
+from dingo.gw.gwutils import get_window_factor, get_extrinsic_prior_dict
+from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.result import Result
 from dingo.gw.transforms import (
     WhitenAndScaleStrain,
@@ -121,6 +122,19 @@ class GWSamplerMixin(object):
             Whether to apply instead the inverse transformation. This is used prior to
             calculating the log_prob.
         """
+        # Add fixed parameters from prior
+        intrinsic_prior = self.metadata["dataset_settings"]["intrinsic_prior"]
+        extrinsic_prior = get_extrinsic_prior_dict(
+            self.metadata["train_settings"]["data"]["extrinsic_prior"]
+        )
+        prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
+        num_samples = len(samples[list(samples.keys())[0]])
+        for k, p in prior.items():
+            if isinstance(p, DeltaFunction) and k not in samples:
+                v = p.peak
+                print(f"Adding fixed parameter {k} = {v} from prior.")
+                samples[k] = p.peak * np.ones(num_samples)
+
         if not self.unconditional_model:
             self._correct_reference_time(samples, inverse)
         # if not inverse:
@@ -185,8 +199,8 @@ class GWSampler(GWSamplerMixin, Sampler):
         try:
             data_settings = self.model.metadata["train_settings"]["data"]
             if (
-                    "normalize_frequency_for_positional_encoding"
-                    in data_settings["tokenization"]
+                "normalize_frequency_for_positional_encoding"
+                in data_settings["tokenization"]
             ):
                 norm_freq = data_settings["tokenization"][
                     "normalize_frequency_for_positional_encoding"
@@ -215,8 +229,11 @@ class GWSampler(GWSamplerMixin, Sampler):
                 )
             )
             selected_keys.append("position")
-            if not single_tokenizer:
-                selected_keys.append("blocks")
+            selected_keys.append("drop_token_mask")
+
+            # TODO: Append transforms for ...
+            # * Drop detectors according to detectors available in the event
+            # * Drop frequency range (probably based on specifications in settings file?)
         except KeyError:
             print(
                 "No tokenization information found, omitting StrainTokenization transform."

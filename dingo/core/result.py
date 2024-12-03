@@ -259,15 +259,23 @@ class Result(DingoDataset):
         else:
             delta_log_prob_target = 0.0
 
+        # Calculate the (un-normalized) target density as prior times likelihood,
+        # evaluated at the same sample points. The prior must be evaluated only for the
+        # non-fixed (delta) parameters.
+        param_keys_non_fixed = [
+            k
+            for k, v in self.prior.items()
+            if not isinstance(v, (Constraint, DeltaFunction))
+        ]
+        theta_non_fixed = self.samples[param_keys_non_fixed]
+        log_prior = self.prior.ln_prob(theta_non_fixed, axis=0)
+
         # select parameters in self.samples (required as log_prob and potentially gnpe
         # proxies are also stored in self.samples, but are not needed for the likelihood.
+        # For evaluating the likelihood, we want to keep the fixed parameters.
         # TODO: replace by self.metadata["train_settings"]["data"]["inference_parameters"]
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
         theta = self.samples[param_keys]
-
-        # Calculate the (un-normalized) target density as prior times likelihood,
-        # evaluated at the same sample points.
-        log_prior = self.prior.ln_prob(theta, axis=0)
 
         # The prior or delta_log_prob_target may be -inf for certain samples.
         # For these, we do not want to evaluate the likelihood, in particular because
@@ -584,7 +592,14 @@ class Result(DingoDataset):
 
         return self.samples.replace(-np.inf, np.nan).dropna(axis=0)
 
-    def plot_corner(self, parameters: list = None, filename: str = "corner.pdf", truths: dict = None):
+    def plot_corner(
+        self,
+        parameters: list = None,
+        filename: str = "corner.pdf",
+        truths: dict = None,
+        include_fixed_parameters: bool = False,
+        **kwargs,
+    ):
         """
         Generate a corner plot of the samples.
 
@@ -597,10 +612,19 @@ class Result(DingoDataset):
             Where to save samples.
         truths:
             Dict of truth values to include.
+        include_fixed_parameters : bool
+            Whether to plot parameters that have delta-function priors. (Default: False)
+
+        Other Parameters
+        ----------------
+        **kwargs for corner.corner()
         """
         theta = self._cleaned_samples()
         # delta_log_prob_target is not interesting so never plot it.
         theta = theta.drop(columns="delta_log_prob_target", errors="ignore")
+
+        if not include_fixed_parameters:
+            theta = theta.drop(columns=self.fixed_parameter_keys, errors="ignore")
 
         # User option to plot specific parameters.
         if parameters:
@@ -616,12 +640,15 @@ class Result(DingoDataset):
                 labels=["Dingo", "Dingo-IS"],
                 filename=filename,
                 truths=truths,
+                **kwargs,
             )
         else:
             plot_corner_multi(
                 theta,
-                labels="Dingo",
+                labels=["Dingo"],
                 filename=filename,
+                truths=truths,
+                **kwargs,
             )
 
     def plot_log_probs(self, filename="log_probs.png"):
