@@ -159,6 +159,7 @@ class MainInput(BilbyMainInput):
         self.default_prior = "PriorDict"
         self.minimum_frequency = args.minimum_frequency
         # self.enforce_signal_duration = args.enforce_signal_duration
+        self.generation_pool = args.generation_pool
 
         self.run_local = args.local
         self.local_generation = args.local_generation
