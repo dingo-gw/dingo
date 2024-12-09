@@ -237,8 +237,16 @@ class Base:
             "version": self.version,
         }
 
+        # Remove DDP wrapper
+        if "module." in self.network.state_dict():
+            # Remove "module." prefix from the state_dict keys
+            model_state_dict = {k.replace("module.", ""): v for k, v in self.network.state_dict().items()}
+            model_dict["metadata"] = model_state_dict
+        else:
+            model_dict["metadata"] = self.network.state_dict()
+
         if self.metadata is not None:
-            model_dict["metadata"] = self.metadata
+            model_dict["model_state_dict"] = self.metadata
 
         if self.context is not None:
             model_dict["context"] = self.context
