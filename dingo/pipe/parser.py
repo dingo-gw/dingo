@@ -110,14 +110,6 @@ def create_parser(top_level=True):
             "uncertainty"
         ),
     )
-    calibration_parser.add(
-        "--calibration-correction-type",
-        type=nonestr,
-        default="data",
-        help=("Type of calibration correction: can be either `data` or `template`."
-        " See https://bilby-dev.github.io/bilby/api/bilby.gw.detector.calibration.html "
-        "for more information.")
-    )
     #
     # calibration_parser.add(
     #     "--spline-calibration-amplitude-uncertainty-dict",
