@@ -101,10 +101,11 @@ def create_parser(top_level=True):
     )
     calibration_parser.add(
         "--calibration-correction-type",
-        type=str,
+        type=nonestr,
         default="data",
-        help=("Number of calibration curves to use in marginalizing over calibration "
-              "uncertainty"),
+        help=("Type of calibration correction: can be either `data` or `template`."
+        " See https://bilby-dev.github.io/bilby/api/bilby.gw.detector.calibration.html "
+        "for more information.")
     )
     #
     # calibration_parser.add(
