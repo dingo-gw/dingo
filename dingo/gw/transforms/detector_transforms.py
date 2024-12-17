@@ -254,7 +254,7 @@ class ApplyCalibrationUncertainty(object):
     is not perfectly calibrated, the observed waveform is not identical to the true
     waveform $h(f)$. Rather, it is assumed to have corrections of the form
 
-    $$h_{obs}(f) = h(f) * (1 + \delta A(f)) * \exp(i \delta \phi(f)),$$
+    $$h_{obs}(f) = h(f) * (1 + \delta A(f)) * \exp(i \delta \phi(f)) = h(f) * \alpha(f),$$
 
     where $\delta A(f)$ and $\delta \phi(f)$ are frequency-dependent amplitude and
     phase errors. Under the calibration model, these are parametrized with cubic
@@ -275,6 +275,7 @@ class ApplyCalibrationUncertainty(object):
     calibration envelope, and applies them to generate $N$ observed waveforms $\{h^n_{
     obs}(f)\}$. This is intended to be used for marginalizing over the calibration
     uncertainty when evaluating the likelihood for importance sampling.
+
     """
 
     def __init__(
@@ -284,6 +285,7 @@ class ApplyCalibrationUncertainty(object):
         calibration_envelope,
         num_calibration_curves,
         num_calibration_nodes,
+        correction_type="data",
     ):
         r"""
         Parameters
@@ -306,6 +308,20 @@ class ApplyCalibrationUncertainty(object):
             Monte Carlo estimate of the marginalized likelihood integral.
         num_calibration_nodes : int
             Number of log-spaced frequency nodes $f_i$ to use in defining the spline.
+        correction_type : str = "data"
+            It was discovered in Oct. 2024 that the calibration envelopes specified by
+            the detchar group were not being used correctly by PE codes. According to
+            the detchar group, envelopes are over $\eta$ which is defined as:
+            
+            $$
+            h_{obs}(f) = \frac{1}{\eta} * h(f).
+            $$
+            
+            Of course, $\frac{1}{\eta} = \alpha$. Previously, the envelopes were
+            being used as if $\eta = \alpha$ which is wrong. Therefore, there is
+            now an additional option where one can specify correction_type = "data"
+            if the calibration envelopes are over $\eta$ and correction_type = "template"
+            if the calibration envelopes are over $\alpha$.
         """
 
         self.ifo_list = ifo_list
@@ -340,6 +356,7 @@ class ApplyCalibrationUncertainty(object):
                     self.data_domain.f_max,
                     num_calibration_nodes,
                     ifo.name,
+                    correction_type=correction_type,
                 )
 
         else:
