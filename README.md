@@ -1,3 +1,7 @@
+[![Python package](https://github.com/dingo-gw/dingo/actions/workflows/pytest.yml/badge.svg)](https://github.com/dingo-gw/dingo/actions/workflows/pytest.yml)
+[![PyPI version](https://img.shields.io/pypi/v/dingo-gw.svg)](https://pypi.org/project/dingo-gw/)
+
+
 # Dingo
 
 **Dingo (Deep Inference for Gravitational-wave Observations)** is a Python program for analyzing gravitational wave data using neural posterior
