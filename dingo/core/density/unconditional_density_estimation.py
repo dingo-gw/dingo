@@ -71,8 +71,8 @@ def train_unconditional_density_estimator(
     samples_torch = torch.from_numpy((samples - mean) / std).float()
 
     # set up density estimation network
-    settings["model"]["input_dim"] = num_params
-    settings["model"]["context_dim"] = None
+    settings["model"]["posterior_kwargs"]["input_dim"] = num_params
+    settings["model"]["posterior_kwargs"]["context_dim"] = None
     # TODO: Allow for other types of density estimators (e.g., flow matching).
     model = NormalizingFlowPosteriorModel(
         metadata={"train_settings": settings, "base": copy.deepcopy(result.metadata)},

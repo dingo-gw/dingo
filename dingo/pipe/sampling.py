@@ -156,7 +156,9 @@ class SamplingInput(Input):
         if len(self.detectors) == 1:
             model_settings = self._density_recovery_settings["nde_settings"]["model"]
             if model_settings["posterior_model_type"] == "normalizing_flow":
-                base_transform_kwargs = model_settings["base_transform_kwargs"]
+                base_transform_kwargs = model_settings["posterior_kwargs"][
+                    "base_transform_kwargs"
+                ]
                 if base_transform_kwargs["base_transform_type"] == "rq-coupling":
                     logger.info(
                         "Using autoregressive transform for density estimator since there is only one GNPE proxy "
