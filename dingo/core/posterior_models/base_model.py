@@ -1,6 +1,7 @@
 """
 TODO: Docstring
 """
+
 import json
 import math
 import os
@@ -205,9 +206,9 @@ class Base:
         if self.scheduler_kwargs is not None:
             # Number of optimizer steps per epoch required if scheduler updates are performed per optimizer step
             if num_optimizer_steps is not None:
-                self.scheduler_kwargs[
-                    "num_optimizer_steps_per_epoch"
-                ] = num_optimizer_steps
+                self.scheduler_kwargs["num_optimizer_steps_per_epoch"] = (
+                    num_optimizer_steps
+                )
 
             self.scheduler = get_scheduler_from_kwargs(
                 self.optimizer, **self.scheduler_kwargs
@@ -232,7 +233,6 @@ class Base:
         """
         model_dict = {
             "model_kwargs": self.model_kwargs,
-            "model_state_dict": self.network.state_dict(),
             "epoch": self.epoch,
             "version": self.version,
         }
@@ -240,10 +240,13 @@ class Base:
         # Remove DDP wrapper
         if "module." in self.network.state_dict():
             # Remove "module." prefix from the state_dict keys
-            model_state_dict = {k.replace("module.", ""): v for k, v in self.network.state_dict().items()}
-            model_dict["metadata"] = model_state_dict
+            model_state_dict = {
+                k.replace("module.", ""): v
+                for k, v in self.network.state_dict().items()
+            }
+            model_dict["model_state_dict"] = model_state_dict
         else:
-            model_dict["metadata"] = self.network.state_dict()
+            model_dict["model_state_dict"] = self.network.state_dict()
 
         if self.metadata is not None:
             model_dict["model_state_dict"] = self.metadata
