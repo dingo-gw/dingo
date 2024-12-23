@@ -249,7 +249,7 @@ class Base:
             model_dict["model_state_dict"] = self.network.state_dict()
 
         if self.metadata is not None:
-            model_dict["model_state_dict"] = self.metadata
+            model_dict["metadata"] = self.metadata
 
         if self.context is not None:
             model_dict["context"] = self.context
