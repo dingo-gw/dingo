@@ -222,8 +222,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             for k, v in self.parameters.iloc[batched_idx].items()
         }
         polarizations = {
-            pol: waveforms[batched_idx]
-            for pol, waveforms in self.polarizations.items()
+            pol: waveforms[batched_idx] for pol, waveforms in self.polarizations.items()
         }
 
         # Decompression transforms are assumed to apply only to the waveform,
@@ -241,19 +240,24 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         # array is repackaged to group different indices of `M` into one sample,
         # resulting in data of shape [N, M, ...].  That is, data is of the form
         #
-        # [arr1, ... arrM] 
-        # 
-        # where each arr is shape (N, ...).  Whereas the repackaged data is of form 
+        # [arr1, ... arrM]
         #
-        # [[arr1[0, ...], ... arrM[0, ...]], ..., [arr1[N, ...], ... arrM[N, ...]]] 
-        # 
-        # which is a list of length N, where each element is an arr of shape (M, ...).  
+        # where each arr is shape (N, ...).  Whereas the repackaged data is of form
+        #
+        # [[arr1[0, ...], ... arrM[0, ...]], ..., [arr1[N, ...], ... arrM[N, ...]]]
+        #
+        # which is a list of length N, where each element is an arr of shape (M, ...).
         # this is useful for collation
-        if isinstance(data, dict): repackaged_data = [ {k1: {k2: v2[j] for k2,
-        v2 in v1.items()} for k1, v1 in data.items()} for j in
-        range(len(batched_idx)) ] elif isinstance(data, list): repackaged_data =
-        [ [data[i][j] for i in range(len(data))] for j in
-        range(len(batched_idx)) ] return repackaged_data
+        if isinstance(data, dict):
+            repackaged_data = [
+                {k1: {k2: v2[j] for k2, v2 in v1.items()} for k1, v1 in data.items()}
+                for j in range(len(batched_idx))
+            ]
+        elif isinstance(data, list):
+            repackaged_data = [
+                [data[i][j] for i in range(len(data))] for j in range(len(batched_idx))
+            ]
+        return repackaged_data
 
     def parameter_mean_std(self):
         mean = self.parameters.mean().to_dict()
