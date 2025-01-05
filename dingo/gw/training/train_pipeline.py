@@ -20,7 +20,7 @@ from dingo.core.utils import (
     get_number_of_model_parameters,
     build_train_and_test_loaders,
 )
-from dingo.core.utils.trainutils import RuntimeLimits
+from dingo.core.utils.trainutils import EarlyStopping, RuntimeLimits
 from dingo.core.utils.environment import document_environment
 from dingo.core.utils.torchutils import document_gpus
 from dingo.gw.dataset import WaveformDataset
@@ -574,6 +574,16 @@ def train_stages(pm, wfd, train_dir, local_settings):
                 resume=True,
             )
 
+        early_stopping = None
+        if stage.get("early_stopping"):
+            try:
+                early_stopping = EarlyStopping(**stage["early_stopping"])
+            except Exception:
+                print(
+                    "Early stopping settings invalid. Please pass 'patience', 'delta', 'metric'"
+                )
+                raise
+
         runtime_limits.max_epochs_total = end_epochs[n]
         pm.train(
             train_loader,
@@ -584,6 +594,7 @@ def train_stages(pm, wfd, train_dir, local_settings):
             checkpoint_epochs=local_settings["checkpoint_epochs"],
             use_wandb=local_settings.get("wandb", False),
             test_only=local_settings.get("test_only", False),
+            early_stopping=early_stopping,
             gradient_updates_per_optimizer_step=stage.get(
                 "gradient_updates_per_optimizer_step", 1
             ),

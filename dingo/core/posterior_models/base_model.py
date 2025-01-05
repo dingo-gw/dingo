@@ -378,7 +378,7 @@ class Base:
         checkpoint_epochs: int = None,
         use_wandb=False,
         test_only=False,
-        early_stopping=False,
+        early_stopping: Optional[EarlyStopping] = None,
         gradient_updates_per_optimizer_step: int = 1,
         automatic_mixed_precision: bool = False,
         world_size: int = 1,
@@ -402,8 +402,8 @@ class Base:
             whether to use wand
         test_only: bool = False
             if True, training is skipped
-        early_stopping: bool=False
-            whether to use early stopping
+        early_stopping: EarlyStopping
+            Optional EarlyStopping instance.
         gradient_updates_per_optimizer_step: int
             number of gradient updates to perform for every optimizer step. Useful to simulate multi-GPU training on
             a single GPU by choosing n gradient updates for n GPUs.
@@ -528,9 +528,9 @@ class Base:
                         except ImportError:
                             print("wandb not installed. Skipping logging to wandb.")
 
-                if early_stopping:
-                    best_model = early_stopping(test_loss, self)
-                    if best_model and (self.rank is None or self.rank == 0):
+                if early_stopping is not None:
+                    is_best_model = early_stopping(test_loss, self)
+                    if is_best_model and (self.rank is None or self.rank == 0):
                         self.save_model(
                             join(train_dir, "best_model.pt"), save_training_info=False
                         )
