@@ -46,7 +46,7 @@ def create_submission_file(
         Filename of submission file
     """
     lines = []
-    # getenv required for multi-GPU training because wandb needs $HOME to be defined
+    # getenv required for GPU training because wandb needs $HOME to be defined
     lines.append(f"getenv = True\n")
     lines.append(f'executable = {condor_settings["executable"]}\n')
     lines.append(f'request_cpus = {condor_settings["num_cpus"]}\n')
