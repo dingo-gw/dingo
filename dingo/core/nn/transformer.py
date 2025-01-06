@@ -58,22 +58,26 @@ class Tokenizer(nn.Module):
         """
         super(Tokenizer, self).__init__()
 
-        assert len(input_dims) == 2, f"Invalid shape in Tokenizer, expected len(input_dims) == 2, got {input_dims})."
+        assert (
+            len(input_dims) == 2
+        ), f"Invalid shape in Tokenizer, expected len(input_dims) == 2, got {input_dims})."
         self.num_tokens, self.num_features = input_dims
         self.individual_token_embedding = individual_token_embedding
         if self.individual_token_embedding:
-            self.stack_tokenizer_nets = nn.ModuleList([
-                DenseResidualNet(
-                    input_dim=self.num_features,
-                    output_dim=output_dim,
-                    hidden_dims=tuple(hidden_dims),
-                    activation=activation,
-                    dropout=dropout,
-                    batch_norm=batch_norm,
-                    layer_norm=layer_norm,
-                )
-                for _ in range(self.num_tokens)
-            ])
+            self.stack_tokenizer_nets = nn.ModuleList(
+                [
+                    DenseResidualNet(
+                        input_dim=self.num_features,
+                        output_dim=output_dim,
+                        hidden_dims=tuple(hidden_dims),
+                        activation=activation,
+                        dropout=dropout,
+                        batch_norm=batch_norm,
+                        layer_norm=layer_norm,
+                    )
+                    for _ in range(self.num_tokens)
+                ]
+            )
 
         else:
             self.tokenizer_net = DenseResidualNet(
@@ -106,7 +110,13 @@ class Tokenizer(nn.Module):
                 f"Expected last dimension to be {self.num_features}, got {tuple(x.shape[-1])}."
             )
         if self.individual_token_embedding:
-            x = torch.stack([self.stack_tokenizer_nets[i](x[:, i, ...]) for i in range(self.num_tokens)], dim=1)
+            x = torch.stack(
+                [
+                    self.stack_tokenizer_nets[i](x[:, i, ...])
+                    for i in range(self.num_tokens)
+                ],
+                dim=1,
+            )
         else:
             x = self.tokenizer_net(x)
 
@@ -205,11 +215,15 @@ class PositionalEncoding(nn.Module):
         x: Tensor
             same shape as input x
         """
-        assert len(x.shape) == 3, (f"Invalid input shape in PositionalEncoding, expected len(input_dims) == 3, "
-                                   f"got shape {x.shape}).")
+        assert len(x.shape) == 3, (
+            f"Invalid input shape in PositionalEncoding, expected len(input_dims) == 3, "
+            f"got shape {x.shape})."
+        )
         batch_size, num_tokens = x.shape[0], x.shape[1]
-        assert self.d_model == x.shape[2], (f"Invalid input shape in PositionalEncoding, "
-                                            f"expected x.shape[2] == {self.d_model}.")
+        assert self.d_model == x.shape[2], (
+            f"Invalid input shape in PositionalEncoding, "
+            f"expected x.shape[2] == {self.d_model}."
+        )
         device = x.device
         min_vals, max_vals = position[..., 0], position[..., 1]
 
@@ -543,18 +557,12 @@ class PoolingTransformer(nn.Module):
         positional_encoder,
         transformer_encoder,
         final_net=None,
-        extra_skip=False,
-        extra_skip_2=False,
-        extra_skip_3=False,
     ):
         super().__init__()
         self.tokenizer = tokenizer
         self.positional_encoder = positional_encoder
         self.transformer_encoder = transformer_encoder
         self.final_net = final_net
-        self.extra_skip = extra_skip
-        self.extra_skip_2 = extra_skip_2
-        self.extra_skip_3 = extra_skip_3
 
         self.init_weights()
 
@@ -575,18 +583,8 @@ class PoolingTransformer(nn.Module):
         position: torch.Tensor = None,
         src_key_padding_mask: torch.Tensor = None,
     ) -> torch.Tensor:
-        x = self.tokenizer(src)
 
-        if self.extra_skip or self.extra_skip_2:
-            # Skip is mean (across tokens) of x right after the tokenizer.
-            if src_key_padding_mask is not None:
-                denominator = torch.sum(~src_key_padding_mask, -1, keepdim=True)
-                skip = (
-                    torch.sum(x * ~src_key_padding_mask.unsqueeze(-1), dim=-2)
-                    / denominator
-                )
-            else:
-                skip = torch.mean(x, dim=-2)
+        x = self.tokenizer(src)
 
         if position is not None:
             # TODO: Update positional encoder to accept src_key_padding_mask.
@@ -600,45 +598,20 @@ class PoolingTransformer(nn.Module):
         else:
             x = torch.mean(x, dim=-2)
 
-        if self.extra_skip:
-            x = x + skip
-        if self.extra_skip_2:
-            x = torch.cat((x, skip), dim=-1)
-
         if self.final_net is not None:
             x = self.final_net(x)
-
-        if self.extra_skip_3:
-            # Skip is mean (across tokens) of initial input.
-            if src_key_padding_mask is not None:
-                denominator = torch.sum(~src_key_padding_mask, -1, keepdim=True)
-                skip = (
-                    torch.sum(src * ~src_key_padding_mask.unsqueeze(-1), dim=-2)
-                    / denominator
-                )
-            else:
-                skip = torch.mean(src, dim=-2)
-            x = torch.cat((x, skip), dim=-1)
 
         return x
 
 
 def create_pooling_transformer(
-        transformer_kwargs: dict,
-        tokenizer_kwargs: dict = None,
-        positional_encoder_kwargs: dict = None,
-        final_net_kwargs: dict = None,
-        added_context: bool = False,
+    transformer_kwargs: dict,
+    tokenizer_kwargs: dict = None,
+    positional_encoder_kwargs: dict = None,
+    final_net_kwargs: dict = None,
+    added_context: bool = False,
 ):
     """Builder function for a transformer based multi-event encoder."""
-
-    # Experiment with extra skip connections for boosting performance and avoiding
-    # local minima.
-    extra_skip = transformer_kwargs.get("extra_skip", False)
-    extra_skip_2 = transformer_kwargs.get("extra_skip_2", False)
-    extra_skip_3 = transformer_kwargs.get("extra_skip_3", False)
-    if extra_skip_2:
-        final_net_kwargs["input_dim"] *= 2
 
     # build individual modules
     tokenizer_kwargs["activation"] = torchutils.get_activation_function_from_string(
@@ -666,8 +639,5 @@ def create_pooling_transformer(
         positional_encoder,
         transformer,
         final_net,
-        extra_skip,
-        extra_skip_2,
-        extra_skip_3,
     )
     return encoder
