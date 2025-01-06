@@ -2,6 +2,7 @@ import csv
 import os
 import time
 from os.path import join, isfile
+from typing import Literal
 
 import numpy as np
 import torch
@@ -26,7 +27,25 @@ class AvgTracker:
 
 
 class EarlyStopping:
-    def __init__(self, patience=5, verbose=False, delta=0):
+    def __init__(
+        self,
+        patience: int = 5,
+        verbose: bool = False,
+        delta: float = 0.0,
+        metric: Literal["training", "validation"] = "validation",
+    ):
+        """
+        Parameters
+        ----------
+        patience: int = 5
+            Number of epochs to wait before stopping.
+        verbose: bool = False
+            Whether to print counter increments.
+        delta: float = 0.0
+            Amount by which loss must decrease in patience epochs.
+        metric: Literal["training", "validation"]
+            Whether to use the training loss to determine early stopping ("training") or the test loss ("validation")
+        """
         self.patience = patience
         self.verbose = verbose
         self.counter = 0
@@ -34,10 +53,23 @@ class EarlyStopping:
         self.early_stop = False
         self.val_loss_min = np.Inf
         self.delta = delta
+        if metric not in ["training", "validation"]:
+            raise ValueError(
+                "Early Stopping metric must be 'training' or 'validation'."
+            )
+        self.metric = metric
 
-    def __call__(self, val_loss, model):
+    def __call__(self, val_loss: float) -> bool:
         """
-        Returns whether the model should be saved as the currently best one
+        Parameters
+        ----------
+        val_loss: float
+            Value of the validation loss.
+
+        Returns
+        -------
+        bool
+            Whether the current model has the lowest validation loss so-far.
         """
         score = -val_loss
 
@@ -151,7 +183,10 @@ class LossInfo:
             print(f"Time Dataloader: {td:.3f} ({td_avg:.3f})", end="\t\t")
             if self.multi_gpu:
                 print(f"Time Network: {tn:.3f} ({tn_avg:.3f})", end="\t\t")
-                ta, ta_avg = self.times["Aggregation"].x, self.times["Aggregation"].get_avg()
+                ta, ta_avg = (
+                    self.times["Aggregation"].x,
+                    self.times["Aggregation"].get_avg(),
+                )
                 print(f"Time Loss Aggregation: {ta:.3f} ({ta_avg:.3f})")
             else:
                 print(f"Time Network: {tn:.3f} ({tn_avg:.3f})")

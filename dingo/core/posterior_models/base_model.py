@@ -425,8 +425,6 @@ class Base:
                 print(f"test loss: {test_loss:.3f}")
 
         else:
-            if early_stopping:
-                early_stopping = EarlyStopping(patience=7, verbose=True)
 
             while not runtime_limits.limits_exceeded(self.epoch):
                 self.epoch += 1
@@ -529,7 +527,12 @@ class Base:
                             print("wandb not installed. Skipping logging to wandb.")
 
                 if early_stopping is not None:
-                    is_best_model = early_stopping(test_loss, self)
+                    stopping_loss = (
+                        test_loss
+                        if early_stopping.metric == "validation"
+                        else train_loss
+                    )
+                    is_best_model = early_stopping(stopping_loss)
                     if is_best_model and (self.rank is None or self.rank == 0):
                         self.save_model(
                             join(train_dir, "best_model.pt"), save_training_info=False
@@ -537,7 +540,7 @@ class Base:
                     if early_stopping.early_stop:
                         print("Early stopping")
                         break
-                if self.rank is None or self.rank == 0.0:
+                if self.rank is None or self.rank == 0:
                     print(f"Finished training epoch {self.epoch}.\n")
 
     def sample(
