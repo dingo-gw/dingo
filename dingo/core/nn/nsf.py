@@ -253,7 +253,7 @@ class FlowWrapper(nn.Module):
 
     def log_prob(self, y, *x):
         if self.embedding_net is not None:
-            x = torchutils.forward_pass_with_unpacked_tuple(self.embedding_net, x)
+            x = self.embedding_net(*x)
         if len(x) > 0:
             return self.flow.log_prob(y, x)
         else:
@@ -262,7 +262,7 @@ class FlowWrapper(nn.Module):
 
     def sample(self, *x, num_samples=1):
         if self.embedding_net is not None:
-            x = torchutils.forward_pass_with_unpacked_tuple(self.embedding_net, x)
+            x = self.embedding_net(*x)
         if len(x) > 0:
             return self.flow.sample(num_samples, x)
         else:
@@ -271,7 +271,7 @@ class FlowWrapper(nn.Module):
 
     def sample_and_log_prob(self, *x, num_samples=1):
         if self.embedding_net is not None:
-            x = torchutils.forward_pass_with_unpacked_tuple(self.embedding_net, x)
+            x = self.embedding_net(*x)
         if len(x) > 0:
             return self.flow.sample_and_log_prob(num_samples, x)
         else:
@@ -312,7 +312,7 @@ def create_nsf_model(
     base_transform_kwargs: dict,
         hyperparameters for transform steps
     embedding_net_builder: Callable=None,
-        build function for embedding network
+        build function for embedding network TODO
     embedding_kwargs: dict=None,
         hyperparameters for embedding network
 

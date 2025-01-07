@@ -3,10 +3,11 @@ import torch
 
 from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
 from dingo.core.nn.transformer import create_transformer_enet, create_pooling_transformer
-from dingo.core.posterior_models.flow_matching import FlowMatching
-from dingo.core.posterior_models.normalizing_flow import NormalizingFlow
+from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
+from dingo.core.posterior_models.flow_matching import FlowMatchingPosteriorModel
+from dingo.core.posterior_models.score_matching import ScoreDiffusionPosteriorModel
 from dingo.core.posterior_models.pretraining_model import PretrainingModel
-from dingo.core.posterior_models.score_matching import ScoreDiffusion
+from dingo.core.utils.backward_compatibility import update_model_config
 
 
 def build_model_from_kwargs(
@@ -18,15 +19,19 @@ def build_model_from_kwargs(
     **kwargs,
 ):
     """
-    Returns the built model (from settings file or rebuild from file). Extracts the relevant arguments (normalizing flow
+    Returns a PosteriorModel (from settings file or rebuild from file). Extracts the relevant arguments (normalizing flow
     or continuous flow) from setting.
+    Returns a PosteriorModel based on a saved network or settings dict.
+
+    The function is careful to choose the appropriate PosteriorModel class (e.g.,
+    for a normalizing flow, flow matching, or score matching).
 
     Parameters
     ----------
-    filename: str=None
-        filename of the model to load
-    settings: dict=None
-        settings file for building a new model
+    filename: str
+        Path to a saved network (.pt).
+    settings: dict
+        Settings dictionary.
     pretraining: bool=False
         whether to use the pretrained embedding network
     pretrained_embedding_net: torch.nn.Module=None
@@ -34,18 +39,21 @@ def build_model_from_kwargs(
     print_output: bool = True
         Whether to write print messages to the console.
     kwargs
+        Arguments forwarded to the model constructor.
 
     Returns
     -------
     PosteriorModel
     """
-    # either filename or settings must be provided
-    assert filename is not None or settings is not None
+    if (filename is None) == (settings is None):
+        raise ValueError(
+            "Either a filename or a settings dict must be provided, but not both."
+        )
 
     models_dict = {
-        "normalizing_flow": NormalizingFlow,
-        "flow_matching": FlowMatching,
-        "score_matching": ScoreDiffusion,
+        "normalizing_flow": NormalizingFlowPosteriorModel,
+        "flow_matching": FlowMatchingPosteriorModel,
+        "score_matching": ScoreDiffusionPosteriorModel,
         "pretraining": PretrainingModel,
     }
     embedding_net_builder_dict = {
@@ -59,6 +67,7 @@ def build_model_from_kwargs(
     if filename is not None:
         # Load model to extract settings
         d = torch.load(filename, map_location="meta")
+        update_model_config(d["metadata"]["train_settings"]["model"])  # Backward compat
         posterior_model_type = d["metadata"]["train_settings"]["model"][
             "posterior_model_type"
         ]
@@ -70,6 +79,7 @@ def build_model_from_kwargs(
         else:
             embedding_network_type = "no_embedding"
     else:
+        update_model_config(settings["train_settings"]["model"])  # Backward compat
         posterior_model_type = settings["train_settings"]["model"][
             "posterior_model_type"
         ]
@@ -158,11 +168,11 @@ def autocomplete_model_kwargs(
     Parameters
     ----------
     model_kwargs: dict
-        keyword arguments of model
-    data_sample: list=None
+        Model settings, which are modified in-place.
+    data_sample: list
         Sample from dataloader (e.g., wfd[0]) used for autocompletion.
         Should be of format [parameters, GW data, gnpe_proxies], where the
-        last element is only there is gnpe proxies are required.
+        last element is only there is GNPE proxies are required.
     input_dim: int=None
         dimension of input
     context_dim: int=None

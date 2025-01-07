@@ -10,9 +10,9 @@ import pandas as pd
 import torch
 from torchvision.transforms import Compose
 
-from dingo.core.posterior_models import Base
-from dingo.core.result import DATA_KEYS as RESULT_DATA_KEYS
+from dingo.core.posterior_models import BasePosteriorModel
 from dingo.core.result import Result
+from dingo.core.result import DATA_KEYS as RESULT_DATA_KEYS
 from dingo.core.utils import torch_detach_to_cpu, IterationTracker
 # FIXME: transform below should be in core
 from dingo.gw.transforms import SelectStandardizeRepackageParameters
@@ -42,7 +42,7 @@ class Sampler(object):
 
     Attributes
     ----------
-    model : Base
+    model : BasePosteriorModel
     inference_parameters : list
     samples : DataFrame
         Samples produced from the model by run_sampler().
@@ -59,12 +59,12 @@ class Sampler(object):
 
     def __init__(
         self,
-        model: Base,
+        model: BasePosteriorModel,
     ):
         """
         Parameters
         ----------
-        model : Base
+        model : BasePosteriorModel
         """
         self.model = model
 
@@ -168,12 +168,7 @@ class Sampler(object):
         # have a flag for whether to calculate the log_prob.
         self.model.network.eval()
         with torch.no_grad():
-            # FIXME: ContinuousFlowBase.sample requires the argument batch_size for an unconditional model,
-            #  but NormalizingFlow.sample does not have this argument.
-            # For a conditional model, the number of samples is determined from the batch_size of the context.
-            y, log_prob = self.model.sample(
-                *x, get_log_prob=True, num_samples=num_samples
-            )
+            y, log_prob = self.model.sample_and_log_prob(*x, num_samples=num_samples)
 
         if not self.unconditional_model:
             # Squeeze the batch dimension added earlier (and potential num_samples=1 in NormalizingFlow).
@@ -285,7 +280,7 @@ class Sampler(object):
 
         self.model.network.eval()
         with torch.no_grad():
-            log_prob = self.model.log_prob_batch(y, *x)
+            log_prob = self.model.log_prob(y, *x)
 
         log_prob = log_prob.cpu().numpy()
         log_prob -= np.sum(np.log(std))
@@ -379,14 +374,14 @@ class GNPESampler(Sampler):
 
     def __init__(
         self,
-        model: Base,
+        model: BasePosteriorModel,
         init_sampler: Sampler,
         num_iterations: int = 1,
     ):
         """
         Parameters
         ----------
-        model : Base
+        model : BasePosteriorModel
         init_sampler : Sampler
             Used for generating initial samples
         num_iterations : int
@@ -505,14 +500,13 @@ class GNPESampler(Sampler):
 
             time_sample_start = time.time()
             self.model.network.eval()
-
             with torch.no_grad():
                 if "context_parameters" in x:
-                    y, log_prob = self.model.sample(
-                        x["data"], x["context_parameters"], get_log_prob=True
+                    y, log_prob = self.model.sample_and_log_prob(
+                        x["data"], x["context_parameters"]
                     )
                 else:
-                    y, log_prob = self.model.sample(x["data"], get_log_prob=True)
+                    y, log_prob = self.model.sample_and_log_prob(x["data"])
 
             # Squeeze the extra dimension added by sample_and_log_prob(num_samples=1).
             y = y.squeeze(1)

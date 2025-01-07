@@ -1,12 +1,13 @@
-import argparse
 import os
-import textwrap
-
 import numpy as np
 import yaml
+import argparse
+import textwrap
+
+
 from threadpoolctl import threadpool_limits
 
-from dingo.core.posterior_models.base_model import Base
+from dingo.core.posterior_models.base_model import BasePosteriorModel
 from dingo.core.posterior_models.build_model import (
     autocomplete_model_kwargs,
     build_model_from_kwargs,
@@ -58,7 +59,7 @@ def prepare_wfd_and_initialization_for_embedding_network(
 
     Returns
     -------
-    (WaveformDataset, dict, torch.nn.module)
+    (WaveformDataset, BasePosteriorModel)
     """
 
     # No transforms yet
@@ -320,7 +321,7 @@ def prepare_model_resume(
 
     Returns
     -------
-    Base
+    (BasePosteriorModel, WaveformDataset)
     """
     print_output = (
         True
@@ -412,7 +413,7 @@ def initialize_stage(
 
     Parameters
     ----------
-    pm : Base
+    pm : BasePosteriorModel
     wfd : WaveformDataset
     stage : dict
         Settings specific to current stage of training
@@ -512,7 +513,7 @@ def train_stages(pm, wfd, train_dir, local_settings):
 
     Parameters
     ----------
-    pm : Base
+    pm : BasePosteriorModel
     wfd : WaveformDataset
     train_dir : str
         Directory for saving checkpoints and train history.
@@ -573,16 +574,14 @@ def train_stages(pm, wfd, train_dir, local_settings):
                 rank=rank,
                 resume=True,
             )
-
         early_stopping = None
         if stage.get("early_stopping"):
             try:
                 early_stopping = EarlyStopping(**stage["early_stopping"])
             except Exception:
-                print(
-                    "Early stopping settings invalid. Please pass 'patience', 'delta', 'metric'"
-                )
+                print("Early stopping settings invalid. Please pass 'patience', 'delta', 'metric'")
                 raise
+
 
         runtime_limits.max_epochs_total = end_epochs[n]
         pm.train(

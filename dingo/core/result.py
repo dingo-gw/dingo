@@ -622,24 +622,26 @@ class Result(DingoDataset):
         theta = self._cleaned_samples()
         # delta_log_prob_target is not interesting so never plot it.
         theta = theta.drop(columns="delta_log_prob_target", errors="ignore")
+        # corner cannot handle fixed parameters
 
         if not include_fixed_parameters:
             theta = theta.drop(columns=self.fixed_parameter_keys, errors="ignore")
-
+        if "weights" in theta:
+            weights = theta["weights"]
+        else:
+            weights = None
         # User option to plot specific parameters.
         if parameters:
             theta = theta[parameters]
+        if truths is not None:
+            kwargs["truths"] = [truths.get(k) for k in theta.columns]
 
-        if truths:
-            truths = [truths.get(k) for k in theta.columns]
-
-        if "weights" in theta:
+        if weights is not None:
             plot_corner_multi(
                 [theta, theta],
-                weights=[None, theta["weights"].to_numpy()],
+                weights=[None, weights.to_numpy()],
                 labels=["Dingo", "Dingo-IS"],
                 filename=filename,
-                truths=truths,
                 **kwargs,
             )
         else:
@@ -647,8 +649,7 @@ class Result(DingoDataset):
                 theta,
                 labels=["Dingo"],
                 filename=filename,
-                truths=truths,
-                **kwargs,
+                **kwargs
             )
 
     def plot_log_probs(self, filename="log_probs.png"):

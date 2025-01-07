@@ -1,33 +1,33 @@
+import torch
+import numpy as np
 from abc import abstractmethod
 
-import numpy as np
-import torch
 from torchdiffeq import odeint
+from glasflow.nflows.utils.torchutils import repeat_rows, split_leading_dim
 
-from dingo.core.nn.cfnets import (
-    create_cf_model,
-)
-from .base_model import Base
+from .base_model import BasePosteriorModel
+
+from dingo.core.nn.cfnets import create_cf
 
 
-class ContinuousFlowsBase(Base):
+class ContinuousFlowPosteriorModel(BasePosteriorModel):
     """
-    Base class for continuous normalizing flows (CNF).
+    Class for posterior models based on continuous normalizing flows (CNFs).
 
-    CNFs are parameterized with a vector field v(theta_t, t), that transports a simple
+    CNFs are parameterized by a vector field v(theta_t, t), that transports a simple
     base distribution (typically a gaussian N(0,1) with same dimension as theta) at
     time t=0 to the target distribution at time t=1. This vector field defines the flow
     via the ODE
 
                     d/dt f(theta, t) = v(f(theta, t), t).
 
-    The vectorfield v is parameterized with a neural network. It is impractical to train
+    The vector field v is parameterized with a neural network. It is impractical to train
     this neural network (and thereby the CNF) directly with log-likelihood maximization,
     as solving the full ODE for each training iteration, requires thousands of
-    vectorfield evaluations.
+    vector field evaluations.
 
     Several alternative methods have been developed to make training CNFs more
-    efficient. These directly regress on the vectorfield v (or a scaled version of v,
+    efficient. These directly regress on the vector field v (or a scaled version of v,
     such as the score). It has been shown that this can be done on a per-sample basis
     by adding noise to the parameters at various scales t. Specifically, a parameter
     sample theta is transformed as follows.
@@ -37,9 +37,13 @@ class ContinuousFlowsBase(Base):
         theta_1         = theta                                     pure sample
         theta_t         = c1(t) * theta_1 + c0(t) * theta_0         noisy sample
 
-    Within that framework, one can employ different methods to learn the vectorfield v,
+    Within that framework, one can employ different methods to learn the vector field v,
     such as flow matching or score matching. These have slightly different coefficients
     c1(t), c2(t) and training objectives.
+
+    This class is intended to construct and hold a neural network for estimating the
+    posterior density, as well as saving / loading, and training. It also has
+    functionality for sampling and density evaluation.
     """
 
     def __init__(self, **kwargs):
@@ -61,9 +65,9 @@ class ContinuousFlowsBase(Base):
         return torch.randn(batch_size, self.theta_dim, device=self.device)
 
     @abstractmethod
-    def evaluate_vectorfield(self, t, theta_t, *context_data):
+    def evaluate_vector_field(self, t, theta_t, *context_data):
         """
-        Evaluate the vectorfield v(t, theta_t, context_data) that generates the flow
+        Evaluate the vector field v(t, theta_t, context_data) that generates the flow
         via the ODE
 
             d/dt f(theta_t, t, context) = v(f(theta_t, t, context), t, context).
@@ -72,17 +76,17 @@ class ContinuousFlowsBase(Base):
         ----------
         t: float
             time (noise level)
-        theta_t: torch.tensor
+        theta_t: torch.Tensor
             noisy parameters, perturbed with noise level t
         *context_data: list[torch.tensor]
             list with context data (GW data)
         """
-        raise NotImplementedError()
+        pass
 
     def rhs_of_joint_ode(self, t, theta_and_div_t, *context_data, hutchinson=False):
         """
         Returns the right hand side of the neural ODE that is used to evaluate the
-        log_prob of theta samples. This is a joint ODE over the vectorfield and the
+        log_prob of theta samples. This is a joint ODE over the vector field and the
         divergence. By integrating this ODE, one can simultaneously trace the parameter
         sample theta_t and integrate the divergence contribution to the log_prob,
         see e.g., https://arxiv.org/abs/1806.07366 or Appendix C in
@@ -92,7 +96,7 @@ class ContinuousFlowsBase(Base):
         ----------
         t: float
             time (noise level)
-        theta_and_div_t: torch.tensor
+        theta_and_div_t: torch.Tensor
             concatenated tensor of (theta_t, div).
             theta_t: noisy parameters, perturbed with noise level t
         *context_data: list[torch.tensor]
@@ -100,7 +104,7 @@ class ContinuousFlowsBase(Base):
 
         Returns
         -------
-        torch.tensor
+        torch.Tensor
             vector field that generates the flow and its divergence (required for
             likelihood evaluation).
         """
@@ -113,101 +117,97 @@ class ContinuousFlowsBase(Base):
         t = t.detach()
         with torch.enable_grad():
             theta_t.requires_grad_(True)
-            vf = self.evaluate_vectorfield(t, theta_t, *context_data)
+            vf = self.evaluate_vector_field(t, theta_t, *context_data)
             div_vf = divergence_fun(vf, theta_t)
         return torch.cat((vf, -div_vf), dim=1)
 
     def initialize_network(self):
         model_kwargs = {
-            k: v
-            for k, v in self.model_kwargs.items()
-            if k != "posterior_model_type" and k != "embedding_type"
+            k: v for k, v in self.model_kwargs.items() if k != "posterior_model_type"
         }
         if self.initial_weights is not None:
             model_kwargs["initial_weights"] = self.initial_weights
         if self.embedding_net_builder is not None:
-            # TODO: move allow_tf32 one level up in settings file and exclude it similar to embedding_type
+            # TODO: move allow_tf32 one level up in settings file and exclude it
             if "allow_tf32" in model_kwargs["embedding_kwargs"]:
                 model_kwargs["embedding_kwargs"].pop("allow_tf32")
             model_kwargs["embedding_net_builder"] = self.embedding_net_builder
-        self.network = create_cf_model(**model_kwargs)
+        self.network = create_cf(**model_kwargs)
 
-    def sample_batch(self, *context_data, batch_size: int = None):
+    def sample(self, *context: torch.Tensor, num_samples: int = None):
         """
-        Returns num_sample conditional samples for a batch of contexts by solving an ODE
-        forwards in time.
+        Sample parameters theta from the posterior model,
+
+        theta ~ p(theta | context)
+
+        by solving an ODE forward in time.
 
         Parameters
         ----------
-        *context_data: list[torch.Tensor]
-            context data (e.g., gravitational-wave data)
-        batch_size: int = None
-            batch_size for sampling. If len(context_data) > 0, we automatically set
-            batch_size = len(context_data[0]), so this option is only used for
-            unconditional sampling.
+        context: torch.Tensor
+            Context information (typically observed data). Should have a batch
+            dimension (even if size B = 1).
+        num_samples: int = 1
+            Number of samples to generate.
 
         Returns
         -------
-        torch.tensor
-            the generated samples
+        samples: torch.Tensor
+            Shape (B, num_samples, dim(theta))
         """
-        self.network.eval()
+        context_size = context[0].shape[0]
+        theta_0 = self.sample_theta_0(num_samples * context_size)
+        context = [repeat_rows(c, num_reps=num_samples) for c in context]
 
-        if len(context_data) == 0 and batch_size is None:
-            raise ValueError(
-                "For unconditional sampling, the batch size needs to be set."
-            )
-        elif len(context_data) > 0:
-            if batch_size is not None:
-                raise ValueError(
-                    "For conditional sampling, the batch_size can not be set manually as "
-                    "it is automatically determined by the context_data."
-                )
-            batch_size = len(context_data[0])
+        _, theta_1 = odeint(
+            lambda t, theta_t: self.evaluate_vector_field(t, theta_t, *context),
+            theta_0,
+            self.integration_range,
+            atol=1e-7,
+            rtol=1e-7,
+            method="dopri5",
+        )
 
-        with torch.no_grad():
-            theta_0 = self.sample_theta_0(batch_size)
-            _, theta_1 = odeint(
-                lambda t, theta_t: self.evaluate_vectorfield(t, theta_t, *context_data),
-                theta_0,
-                self.integration_range,
-                atol=1e-7,
-                rtol=1e-7,
-                method="dopri5",
-            )
+        theta_1 = split_leading_dim(theta_1, shape=[context_size, num_samples])
 
         self.network.train()
         return theta_1
 
     # MD: rename log_prob_batch, extract eps from self.epsilon_ode_integration
-    def log_prob_batch(self, theta, *context_data, hutchinson=False):
+    def log_prob(self, theta: torch.Tensor, *context: torch.Tensor, hutchinson=False):
         """
-        Evaluates log_probs of theta conditional on provided context. For this we solve
-        an ODE backwards in time until we reach the initial pure noise distribution.
+        Evaluate the log posterior density,
+
+        log p(theta | context)
+
+        For this we solve an ODE backwards in time until we reach the initial pure
+        noise distribution.
 
         There are two contributions, the log_prob of theta_0 (which is uniquely
         determined by theta) under the base distribution, and the integrated divergence
-        of the vectorfield.
+        of the vector field.
 
-        Parameters.
+        Parameters
         ----------
-        theta: torch.tensor
-            parameters (e.g., binary-black hole parameters)
-        *context_data: list[torch.Tensor]
-            context data (e.g., gravitational-wave data)
+        theta: torch.Tensor
+            Parameter values at which to evaluate the density. Should have a batch
+            dimension (even if size B = 1).
+        context: torch.Tensor
+            Context information (typically observed data). Must have context.shape[0] = B.
+        hutchinson
 
         Returns
         -------
-
+        log_prob: torch.Tensor
+            Shape (B,)
         """
-        self.network.eval()
         theta_and_div_init = torch.cat(
             (theta, torch.zeros((theta.shape[0],), device=theta.device).unsqueeze(1)),
             dim=1,
         )
         _, theta_and_div_0 = odeint(
             lambda t, theta_and_div_t: self.rhs_of_joint_ode(
-                t, theta_and_div_t, *context_data, hutchinson=hutchinson
+                t, theta_and_div_t, *context, hutchinson=hutchinson
             ),
             theta_and_div_init,
             torch.flip(
@@ -223,35 +223,43 @@ class ContinuousFlowsBase(Base):
         log_prior = compute_log_prior(theta_0)
         return (log_prior - divergence).detach()
 
-    def sample_and_log_prob_batch(self, *context_data, batch_size: int = None):
+    def sample_and_log_prob(self, *context: torch.Tensor, num_samples: int = None):
         """
-        Returns conditional samples and their likelihoods for a batch of contexts by solving the joint ODE
-        forwards in time. This is more efficient than calling sample_batch and log_prob_batch separately.
+        Sample parameters theta from the posterior model,
 
-        If d/dt [phi(t), f(t)] = rhs joint with initial conditions [theta_0, log p(theta_0)], where theta_0 ~ p_0(theta_0),
-        then [phi(1), f(1)] = [theta_1, log p(theta_0) + log p_1(theta_1) - log p(theta_0)] = [theta_1, log p_1(theta_1)].
+        theta ~ p(theta | context)
+
+        and also return the log_prob. This is more efficient than calling sample_batch
+        and log_prob_batch separately.
+
+        If d/dt [phi(t), f(t)] = rhs joint with initial conditions [theta_0,
+        log p(theta_0)], where theta_0 ~ p_0(theta_0), then [phi(1), f(1)] = [theta_1,
+        log p(theta_0) + log p_1(theta_1) - log p(theta_0)] = [theta_1, log p_1(theta_1)].
+
+        Parameters
+        ----------
+        context: torch.Tensor
+            Context information (typically observed data). Should have a batch
+            dimension (even if size B = 1).
+        num_samples: int = 1
+            Number of samples to generate.
+
+        Returns
+        -------
+        samples, log_prob: torch.Tensor, torch.Tensor
+            Shapes (B, num_samples, dim(theta)), (B, num_samples)
         """
-        self.network.eval()
 
-        if len(context_data) == 0 and batch_size is None:
-            raise ValueError(
-                "For unconditional sampling, the batch size needs to be set."
-            )
-        elif len(context_data) > 0:
-            if batch_size is not None:
-                raise ValueError(
-                    "For conditional sampling, the batch_size can not be set manually as "
-                    "it is automatically determined by the context_data."
-                )
-            batch_size = len(context_data[0])
+        context_size = context[0].shape[0]
+        theta_0 = self.sample_theta_0(num_samples * context_size)
+        context = [repeat_rows(c, num_reps=num_samples) for c in context]
 
-        theta_0 = self.sample_theta_0(batch_size)
         log_prior = compute_log_prior(theta_0)
         theta_and_div_init = torch.cat((theta_0, log_prior.unsqueeze(1)), dim=1)
 
         _, theta_and_div_1 = odeint(
             lambda t, theta_and_div_t: self.rhs_of_joint_ode(
-                t, theta_and_div_t, *context_data
+                t, theta_and_div_t, *context
             ),
             theta_and_div_init,
             self.integration_range,  # integrate forwards in time, [0, 1-eps]
@@ -262,6 +270,9 @@ class ContinuousFlowsBase(Base):
         )
 
         theta_1, log_prob_1 = theta_and_div_1[:, :-1], theta_and_div_1[:, -1]
+
+        theta_1 = split_leading_dim(theta_1, shape=[context_size, num_samples])
+        log_prob_1 = split_leading_dim(log_prob_1, shape=[context_size, num_samples])
 
         return theta_1, log_prob_1
 

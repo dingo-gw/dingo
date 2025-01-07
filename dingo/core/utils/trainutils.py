@@ -1,12 +1,12 @@
 import csv
 import os
-import time
-from os.path import join, isfile
-from typing import Literal
-
 import numpy as np
+import time
 import torch
 import torch.distributed as dist
+
+from os.path import join, isfile
+from typing import Literal
 
 
 class AvgTracker:
@@ -27,6 +27,13 @@ class AvgTracker:
 
 
 class EarlyStopping:
+    """
+    Implement early stopping during training, once the validation loss stops decreasing
+    for a certain number of epochs (the patience).
+
+    If val_loss > min_val_loss - delta for more than patience epochs, then returns
+    early stopping occurs.
+    """
     def __init__(
         self,
         patience: int = 5,

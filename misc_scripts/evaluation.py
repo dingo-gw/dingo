@@ -114,6 +114,7 @@ def get_injection(pm, injection_dir):
 
 
 if __name__ == "__main__":
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--save_dir", required=True, help="Base save directory for the evaluation"

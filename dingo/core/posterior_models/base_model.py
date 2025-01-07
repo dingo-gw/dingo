@@ -1,52 +1,43 @@
 """
-TODO: Docstring
+This module contains the abstract base class for representing posterior models,
+as well as functions for training and testing across an epoch.
 """
 
+import h5py
 import json
-import math
+import numpy as np
 import os
 import time
-from abc import abstractmethod
+
+from abc import abstractmethod, ABC
 from collections import OrderedDict
 from os.path import join
+from threadpoolctl import threadpool_limits
 from typing import Callable, Optional
 
-import h5py
-import numpy as np
 import torch
-from threadpoolctl import threadpool_limits
 from torch.utils.data import Dataset
 import torch.distributed as dist
 from torch.cuda.amp import GradScaler, autocast
 
-import dingo.core.utils as utils
 import dingo.core.utils.trainutils
+import dingo.core.utils as utils
+
+from dingo.core.utils.backward_compatibility import update_model_config
 from dingo.core.utils.misc import get_version
-from dingo.core.utils.trainutils import EarlyStopping
+
 from dingo.core.utils.scheduler import get_scheduler_from_kwargs, perform_scheduler_step
+from dingo.core.utils.trainutils import EarlyStopping
 
 
-class Base:
+class BasePosteriorModel(ABC):
     """
-    TODO: Docstring
+    Abstract base class for PosteriorModels. This is intended to construct and hold a
+    neural network for estimating the posterior density, as well as saving / loading,
+    and training.
 
-    Methods
-    -------
-
-    initialize_model:
-        initialize the NDE (including embedding net) as posterior model
-    initialize_training:
-        initialize for training, that includes storing the epoch, building
-        an optimizer and a learning rate scheduler
-    save_model:
-        save the model, including all information required to rebuild it,
-        except for the builder function
-    load_model:
-        load and build a model from a file
-    train_model:
-        train the model
-    inference:
-        perform inference
+    Subclasses must implement methods for constructing the specific network, sampling,
+    density evaluation, and computing the loss during training.
     """
 
     def __init__(
@@ -111,72 +102,98 @@ class Base:
     @abstractmethod
     def initialize_network(self):
         """
-        Initialize the network backbone for the posterior model
-
+        Initialize the network backbone for the posterior model.
         """
         pass
 
     @abstractmethod
-    def sample_batch(self, *context_data):
+    def sample(self, *context: torch.Tensor, num_samples: int = 1):
         """
-        Sample a batch of data from the posterior model.
+        Sample parameters theta from the posterior model,
+
+        theta ~ p(theta | context)
 
         Parameters
         ----------
-        context: Tensor
+        context: torch.Tensor
+            Context information (typically observed data). Should have a batch
+            dimension (even if size B = 1).
+        num_samples: int = 1
+            Number of samples to generate.
+
         Returns
         -------
-        batch: dict
-            dictionary with batch data
+        samples: torch.Tensor
+            Shape (B, num_samples, dim(theta))
         """
         pass
 
     @abstractmethod
-    def sample_and_log_prob_batch(self, *context_data):
+    def sample_and_log_prob(self, *context: torch.Tensor, num_samples: int = 1):
         """
-        Sample a batch of data and log probs from the posterior model.
+        Sample parameters theta from the posterior model,
+
+        theta ~ p(theta | context)
+
+        and also return the log_prob. For models such as normalizing flows, it is more
+        economical to calculate the log_prob at the same time as sampling, rather than
+        as a separate step.
 
         Parameters
         ----------
-        context: Tensor
+        context: torch.Tensor
+            Context information (typically observed data). Should have a batch
+            dimension (even if size B = 1).
+        num_samples: int = 1
+            Number of samples to generate.
+
         Returns
         -------
-        batch: dict
-            dictionary with batch data
+        samples, log_prob: torch.Tensor, torch.Tensor
+            Shapes (B, num_samples, dim(theta)), (B, num_samples)
         """
         pass
 
     @abstractmethod
-    def log_prob_batch(self, data, *context_data):
+    def log_prob(self, theta: torch.Tensor, *context: torch.Tensor):
         """
-        Sample a batch of data from the posterior model.
+        Evaluate the log posterior density,
+
+        log p(theta | context)
 
         Parameters
         ----------
-        data: Tensor
-        context: Tensor
+        theta: torch.Tensor
+            Parameter values at which to evaluate the density. Should have a batch
+            dimension (even if size B = 1).
+        context: torch.Tensor
+            Context information (typically observed data). Must have context.shape[0] = B.
 
         Returns
         -------
-        batch: Tensor
-            containing batch data
+        log_prob: torch.Tensor
+            Shape (B,)
         """
         pass
 
     @abstractmethod
-    def loss(self, data, context):
+    def loss(self, theta: torch.Tensor, *context: torch.Tensor):
         """
         Compute the loss for a batch of data.
 
         Parameters
         ----------
-        data: Tensor
-        context: Tensor
+        theta: torch.Tensor
+            Parameter values at which to evaluate the density. Should have a batch
+            dimension (even if size B = 1).
+        context: torch.Tensor
+            Context information (typically observed data). Must have the same leading
+            (batch) dimension as theta.
 
         Returns
         -------
-        loss: Tensor
-            loss for the batch
+        loss: torch.Tensor
+            Mean loss across the batch (a scalar).
         """
         pass
 
@@ -335,6 +352,9 @@ class Base:
 
         self.version = d.get("version")
 
+        self.model_kwargs = d["model_kwargs"]
+        update_model_config(self.model_kwargs)  # For backward compatibility
+
         self.epoch = d["epoch"]
 
         self.metadata = d["metadata"]
@@ -345,7 +365,6 @@ class Base:
         if "event_metadata" in d:
             self.event_metadata = d["event_metadata"]
 
-        self.model_kwargs = d["model_kwargs"]
         if device != "meta":
             self.initialize_network()
             self.network.load_state_dict(d["model_state_dict"])

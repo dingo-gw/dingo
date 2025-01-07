@@ -133,7 +133,12 @@ def tolerances(approximant):
 
 
 # Uncomment to test only one approximant.
-# @pytest.mark.parametrize("approximant", ["IMRPhenomXPHM"])
+try:
+    import pyseobnr
+    approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM"]
+except ImportError:
+    approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM"]
+@pytest.mark.parametrize("approximant", approximant_list)
 def test_generate_hplus_hcross_m(intrinsic_prior, wfg, num_evaluations, tolerances):
     mismatches = []
     for idx in range(num_evaluations):

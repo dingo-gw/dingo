@@ -4,7 +4,7 @@ import os
 from os.path import join
 import numpy as np
 import torch
-from dingo.core.posterior_models.normalizing_flow import NormalizingFlow
+from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
 from dingo.core.utils import torchutils
 from dingo.core.utils.scheduler import perform_scheduler_step
 
@@ -17,7 +17,7 @@ def data_setup_pm_1():
     os.makedirs(tmp_dir, exist_ok=True)
     d.model_filename = join(tmp_dir, "model.pt")
 
-    d.nsf_kwargs = {
+    d.posterior_kwargs = {
         "input_dim": 4,
         "context_dim": 10,
         "num_flow_steps": 5,
@@ -45,7 +45,7 @@ def data_setup_pm_1():
 
     d.model_kwargs = {
         "posterior_model_type": "normalizing_flow",
-        "posterior_kwargs": d.nsf_kwargs,
+        "posterior_kwargs": d.posterior_kwargs,
         "embedding_type": "DenseResidualNet",
         "embedding_kwargs": d.embedding_kwargs,
     }
@@ -238,14 +238,14 @@ def test_pm_saving_and_loading_basic(data_setup_pm_1):
     d = data_setup_pm_1
 
     # initialize model and save it
-    pm_0 = NormalizingFlow(metadata=d.metadata, device="cpu")
+    pm_0 = NormalizingFlowPosteriorModel(metadata=d.metadata, device="cpu")
     pm_0.save_model(d.model_filename)
 
     # load saved model
-    pm_1 = NormalizingFlow(model_filename=d.model_filename, device="cpu")
+    pm_1 = NormalizingFlowPosteriorModel(model_filename=d.model_filename, device="cpu")
 
     # build a model with identical kwargs
-    pm_2 = NormalizingFlow(metadata=d.metadata, device="cpu")
+    pm_2 = NormalizingFlowPosteriorModel(metadata=d.metadata, device="cpu")
 
     # check that module names are identical in saved and loaded model
     module_names_0 = [name for name, param in pm_0.network.named_parameters()]
@@ -294,7 +294,7 @@ def test_pm_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler):
     # Test step scheduler
     optimizer_kwargs = e.adam_kwargs
     scheduler_kwargs = e.step_kwargs
-    pm = NormalizingFlow(metadata=d.metadata, device="cpu")
+    pm = NormalizingFlowPosteriorModel(metadata=d.metadata, device="cpu")
     pm.optimizer_kwargs = optimizer_kwargs
     pm.scheduler_kwargs = scheduler_kwargs
     pm.initialize_optimizer_and_scheduler()
@@ -303,7 +303,9 @@ def test_pm_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler):
     for epoch, loss in zip(e.epochs, e.losses):
         if epoch == 5:
             pm.save_model(d.model_filename, save_training_info=True)
-            pm = NormalizingFlow(model_filename=d.model_filename, device="cpu")
+            pm = NormalizingFlowPosteriorModel(
+                model_filename=d.model_filename, device="cpu"
+            )
         lr = pm.optimizer.state_dict()["param_groups"][0]["lr"]
         factors.append(lr / pm.optimizer.defaults["lr"])
         perform_scheduler_step(pm.scheduler)
@@ -314,7 +316,7 @@ def test_pm_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler):
     # Test reduce_on_plateau scheduler
     optimizer_kwargs = e.sgd_kwargs
     scheduler_kwargs = e.rop_kwargs
-    pm = NormalizingFlow(metadata=d.metadata, device="cpu")
+    pm = NormalizingFlowPosteriorModel(metadata=d.metadata, device="cpu")
     pm.optimizer_kwargs = optimizer_kwargs
     pm.scheduler_kwargs = scheduler_kwargs
     pm.initialize_optimizer_and_scheduler()
@@ -323,7 +325,9 @@ def test_pm_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler):
     for epoch, loss in zip(e.epochs, e.losses):
         if epoch == 5:
             pm.save_model(d.model_filename, save_training_info=True)
-            pm = NormalizingFlow(model_filename=d.model_filename, device="cpu")
+            pm = NormalizingFlowPosteriorModel(
+                model_filename=d.model_filename, device="cpu"
+            )
         lr = pm.optimizer.state_dict()["param_groups"][0]["lr"]
         factors.append(lr / pm.optimizer.defaults["lr"])
         perform_scheduler_step(pm.scheduler, loss=loss)
@@ -334,7 +338,7 @@ def test_pm_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler):
     # Test cosine scheduler
     optimizer_kwargs = e.sgd_kwargs
     scheduler_kwargs = e.cosine_kwargs
-    pm = NormalizingFlow(metadata=d.metadata, device="cpu")
+    pm = NormalizingFlowPosteriorModel(metadata=d.metadata, device="cpu")
     pm.optimizer_kwargs = optimizer_kwargs
     pm.scheduler_kwargs = scheduler_kwargs
     pm.initialize_optimizer_and_scheduler()
@@ -343,7 +347,10 @@ def test_pm_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler):
     for epoch, loss in zip(e.epochs, e.losses):
         if epoch == 5:
             pm.save_model(d.model_filename, save_training_info=True)
-            pm = NormalizingFlow(model_filename=d.model_filename, device="cpu")
+            pm = NormalizingFlowPosteriorModel(
+                model_filename=d.model_filename,
+                device="cpu"
+            )
         lr = pm.optimizer.state_dict()["param_groups"][0]["lr"]
         factors.append(lr / pm.optimizer.defaults["lr"])
         perform_scheduler_step(pm.scheduler)
@@ -354,7 +361,7 @@ def test_pm_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler):
     # Test cosine scheduler with update_every_optimizer_step
     optimizer_kwargs = e.sgd_kwargs
     scheduler_kwargs = e.cosine_kwargs_opt_step
-    pm = NormalizingFlow(metadata=d.metadata, device="cpu")
+    pm = NormalizingFlowPosteriorModel(metadata=d.metadata, device="cpu")
     pm.optimizer_kwargs = optimizer_kwargs
     pm.scheduler_kwargs = scheduler_kwargs
     pm.initialize_optimizer_and_scheduler(
@@ -365,7 +372,10 @@ def test_pm_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler):
     for epoch, loss in zip(e.epochs, e.losses):
         if epoch == 5:
             pm.save_model(d.model_filename, save_training_info=True)
-            pm = NormalizingFlow(model_filename=d.model_filename, device="cpu")
+            pm = NormalizingFlowPosteriorModel(
+                model_filename=d.model_filename,
+                device="cpu"
+            )
         lr = pm.optimizer.state_dict()["param_groups"][0]["lr"]
         factors.append(lr / pm.optimizer.defaults["lr"])
         for _ in range(e.optimizer_steps_per_epoch):
@@ -393,7 +403,7 @@ def test_pm_sequential_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler
     # Test sequential scheduler
     optimizer_kwargs = e.adam_kwargs
     scheduler_kwargs = e.sequential_kwargs
-    pm = NormalizingFlow(metadata=d.metadata, device="cpu")
+    pm = NormalizingFlowPosteriorModel(metadata=d.metadata, device="cpu")
     pm.optimizer_kwargs = optimizer_kwargs
     pm.scheduler_kwargs = scheduler_kwargs
     pm.initialize_optimizer_and_scheduler(
@@ -404,7 +414,10 @@ def test_pm_sequential_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler
     for epoch, loss in zip(e.epochs, e.losses):
         if epoch == 5:
             pm.save_model(d.model_filename, save_training_info=True)
-            pm = NormalizingFlow(model_filename=d.model_filename, device="cpu")
+            pm = NormalizingFlowPosteriorModel(
+                model_filename=d.model_filename,
+                device="cpu"
+            )
         lr = pm.optimizer.state_dict()["param_groups"][0]["lr"]
         factors.append(lr / pm.optimizer.defaults["lr"])
         for _ in range(e.optimizer_steps_per_epoch):
@@ -426,7 +439,7 @@ def test_pm_sequential_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler
     # Test sequential scheduler but with changed updates_every_optimizer_step
     optimizer_kwargs = e.adam_kwargs
     scheduler_kwargs = e.sequential_v2_kwargs
-    pm = NormalizingFlow(metadata=d.metadata, device="cpu")
+    pm = NormalizingFlowPosteriorModel(metadata=d.metadata, device="cpu")
     pm.optimizer_kwargs = optimizer_kwargs
     pm.scheduler_kwargs = scheduler_kwargs
     pm.initialize_optimizer_and_scheduler(
@@ -437,7 +450,10 @@ def test_pm_sequential_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler
     for epoch, loss in zip(e.epochs, e.losses):
         if epoch == 5:
             pm.save_model(d.model_filename, save_training_info=True)
-            pm = NormalizingFlow(model_filename=d.model_filename, device="cpu")
+            pm = NormalizingFlowPosteriorModel(
+                model_filename=d.model_filename,
+                device="cpu"
+            )
         lr = pm.optimizer.state_dict()["param_groups"][0]["lr"]
         factors.append(lr / pm.optimizer.defaults["lr"])
         for _ in range(e.optimizer_steps_per_epoch):
@@ -459,7 +475,7 @@ def test_pm_sequential_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler
     # Test sequential scheduler but with changed milestone values
     optimizer_kwargs = e.adam_kwargs
     scheduler_kwargs = e.sequential_v3_kwargs
-    pm = NormalizingFlow(metadata=d.metadata, device="cpu")
+    pm = NormalizingFlowPosteriorModel(metadata=d.metadata, device="cpu")
     pm.optimizer_kwargs = optimizer_kwargs
     pm.scheduler_kwargs = scheduler_kwargs
     pm.initialize_optimizer_and_scheduler(
@@ -470,7 +486,7 @@ def test_pm_sequential_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler
     for epoch, loss in zip(e.epochs, e.losses):
         if epoch == 5:
             pm.save_model(d.model_filename, save_training_info=True)
-            pm = NormalizingFlow(model_filename=d.model_filename, device="cpu")
+            pm = NormalizingFlowPosteriorModel(model_filename=d.model_filename, device="cpu")
         lr = pm.optimizer.state_dict()["param_groups"][0]["lr"]
         factors.append(lr / pm.optimizer.defaults["lr"])
         for _ in range(e.optimizer_steps_per_epoch):

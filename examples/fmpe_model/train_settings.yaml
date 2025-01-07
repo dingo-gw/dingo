@@ -1,0 +1,119 @@
+data:
+  waveform_dataset_path: training_data/waveform_dataset.hdf5
+  train_fraction: 0.95
+  window:
+    type: tukey
+    f_s: 4096
+    T: 8.0
+    roll_off: 0.4
+  domain_update:
+    f_min: 20.0
+    f_max: 512.0
+  svd_size_update: 150
+  ref_time: 1126259462.391
+  detectors:
+  - H1
+  - L1
+  extrinsic_prior:
+    dec: default
+    geocent_time: bilby.core.prior.Uniform(minimum=-0.03, maximum=0.03)
+    luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0)
+    psi: default
+    ra: default
+  inference_parameters:
+  - chirp_mass
+  - mass_ratio
+  - a_1
+  - a_2
+  - tilt_1
+  - tilt_2
+  - phi_12
+  - phi_jl
+  - theta_jn
+  - luminosity_distance
+  - geocent_time
+  - ra
+  - dec
+  - psi
+
+model:
+  posterior_model_type: flow_matching
+  posterior_kwargs:
+    activation: gelu
+    batch_norm: true
+    context_with_glu: false
+    dropout: 0.0
+    hidden_dims: [4096, 4096, 4096,
+                  2048, 2048, 2048,
+                  1024, 1024, 1024, 1024, 1024, 1024,
+                  512, 512, 512, 512, 512, 512, 512, 512,
+                  256, 256, 256, 256, 256, 256, 256, 256, 256, 256,
+                  128, 128, 128, 128, 128,
+                  64, 64, 64,
+                  32, 32, 32,
+                  16, 16, 16]
+    sigma_min: 0.001
+    theta_embedding_kwargs:
+      embedding_net:
+        activation: gelu
+        hidden_dims: [16, 32, 64, 128, 256]
+        output_dim: 256
+        type: DenseResidualNet
+      encoding:
+        encode_all: false
+        frequencies: 0
+    theta_with_glu: true
+    time_prior_exponent: 1
+    type: DenseResidualNet
+  embedding_kwargs:
+    activation: gelu
+    batch_norm: true
+    dropout: 0.0
+    hidden_dims:
+    - 2048
+    output_dim: 2048
+    svd:
+      num_training_samples: 50000
+      num_validation_samples: 10000
+      size: 150
+
+training:
+  evaluate: true
+  stage_0:
+    asd_dataset_path: training_data/asd_dataset_fiducial/asds_O1_fiducial.hdf5
+    batch_size: 4096
+    epochs: 400
+    freeze_rb_layer: true
+    optimizer:
+      lr: 0.0005
+      type: adam
+    scheduler:
+      T_max: 400
+      type: cosine
+    # early_stopping:
+    #   patience: 10
+    #   delta: 0.0
+    #   metric: validation # one of ['training, validation']
+  stage_1:
+    asd_dataset_path: training_data/asd_dataset/asds_O1.hdf5
+    batch_size: 4096
+    epochs: 100
+    freeze_rb_layer: true
+    optimizer:
+      lr: 1.0e-05
+      type: adam
+    scheduler:
+      T_max: 100
+      type: cosine
+    # early_stopping:
+    #   patience: 10
+    #   delta: 0.0
+    #   metric: validation # one of ['training, validation']
+
+local:
+  checkpoint_epochs: 200
+  device: cuda
+  num_workers: 31
+  runtime_limits:
+    max_epochs_per_run: 500
+    max_time_per_run: 360000

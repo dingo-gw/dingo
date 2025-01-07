@@ -1,38 +1,40 @@
-# implementing Score-based diffusion based on VP SDE. Potential TODO: other SDEs, and in in separate file
+import inspect
+import textwrap
+
 import torch
 
-from .cflow_base import ContinuousFlowsBase
+from .cflow_base import ContinuousFlowPosteriorModel
 
 
-class ScoreDiffusion(ContinuousFlowsBase):
-    """
-    Class for continuous normalizing flows trained with score matching.
-
-        t               ~ U[0, 1-eps)                               noise level
-        theta_0         ~ N(0, 1)                                   sampled noise
-        theta_1         = theta                                     pure sample
-        theta_t         = c1(t) * theta_1 + c0(t) * theta_0         noisy sample
-
-        eps             > 0
-        c0              = sigma(t)
-        c1              = alpha(1-t)
-
-        score_target    = theta_0 / sigma_t
-        weight          = 1/2 * {score-matching: sigma(t)^2, score-flow: beta(1-t), ...}
-        loss            = || score_target - network(theta_t, t) ||
-    """
+class ScoreDiffusionPosteriorModel(ContinuousFlowPosteriorModel):
+    __doc__ = (
+        inspect.getdoc(ContinuousFlowPosteriorModel)
+        + "\n\n"
+        + textwrap.dedent(
+            """\
+                Training with score matching:
+            
+                    t               ~ U[0, 1-eps)                               noise level
+                    theta_0         ~ N(0, 1)                                   sampled noise
+                    theta_1         = theta                                     pure sample
+                    theta_t         = c1(t) * theta_1 + c0(t) * theta_0         noisy sample
+            
+                    eps             > 0
+                    c0              = sigma(t)
+                    c1              = alpha(1-t)
+            
+                    score_target    = theta_0 / sigma_t
+                    weight          = 1/2 * {score-matching: sigma(t)^2, score-flow: beta(1-t), ...}
+                    loss            = || score_target - network(theta_t, t) ||
+                    
+                To specify the score matching model, "posterior_kwargs" should 
+                additionally specify the noise properties used for the diffusion (
+                beta_min, beta_max, epsilon).
+                """
+        )
+    )
 
     def __init__(self, **kwargs):
-        """
-
-        Parameters
-        ----------
-        kwargs: dict
-            parameters to build the model and the training objective,
-            "embedding_kwargs" specify the embedding net used,
-            "posterior_kwargs" specifies arguments for the posterior model network and
-            the noise properties used for the diffusion (beta_min, beta_max, epsilon).
-        """
         super().__init__(**kwargs)
         self.eps = self.model_kwargs["posterior_kwargs"]["epsilon"]
         self.beta_min = self.model_kwargs["posterior_kwargs"]["beta_min"]
@@ -71,11 +73,24 @@ class ScoreDiffusion(ContinuousFlowsBase):
         loss = torch.mean(losses)
         return loss
 
-    def evaluate_vectorfield(self, t, theta_t, *context_data):
+    def evaluate_vector_field(self, t, theta_t, *context_data):
         """
-        Vectorfield that generates the flow, see Docstring in ContinuousFlowsBase for
-        details. For score matching, the vectorfield (or drift function) is computed
+        Evaluate the vector field v(t, theta_t, context_data) that generates the flow
+        via the ODE
+
+            d/dt f(theta_t, t, context) = v(f(theta_t, t, context), t, context).
+
+        For score matching, the vector field (or drift function) is computed
         from the predicted score.
+
+        Parameters
+        ----------
+        t: float
+            time (noise level)
+        theta_t: torch.Tensor
+            noisy parameters, perturbed with noise level t
+        *context_data: list[torch.tensor]
+            list with context data (GW data)
         """
         # If t is a number (and thus the same for each element in this batch),
         # expand it as a tensor. This is required for the odeint solver.

@@ -51,7 +51,6 @@ def generate_dag(inputs, model_args):
 
     if inputs.simple_submission:
         _strip_unwanted_submission_keys(dag.pycondor_dag)
-
     #
     # 1. Generate data for inference.
     #

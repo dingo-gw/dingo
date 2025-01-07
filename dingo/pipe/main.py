@@ -22,10 +22,10 @@ logger.name = "dingo_pipe"
 
 
 def fill_in_arguments_from_model(args):
-    # FIXME: It would be better if we did not have to load an entire model just to
-    #  gain access to the metadata. Store a copy of metadata separately?
     logger.info(f"Loading dingo model from {args.model} in order to access settings.")
-    model = build_model_from_kwargs(filename=args.model, device="meta", load_training_info=False)
+    model = build_model_from_kwargs(
+        filename=args.model, device="meta", load_training_info=False
+    )
     model_metadata = model.metadata
 
     domain = build_domain_from_model_metadata(model_metadata, base=True)
@@ -104,6 +104,7 @@ class MainInput(BilbyMainInput):
         self.submit = args.submit
         self.condor_job_priority = args.condor_job_priority
         self.create_summary = args.create_summary
+        self.scitoken_issuer = args.scitoken_issuer
 
         self.outdir = args.outdir
         self.label = args.label
@@ -159,9 +160,9 @@ class MainInput(BilbyMainInput):
         self.default_prior = "PriorDict"
         self.minimum_frequency = args.minimum_frequency
         # self.enforce_signal_duration = args.enforce_signal_duration
-        self.generation_pool = args.generation_pool
 
         self.run_local = args.local
+        self.generation_pool = args.generation_pool
         self.local_generation = args.local_generation
         self.local_plot = args.local_plot
 
