@@ -526,22 +526,22 @@ class Base:
                         except ImportError:
                             print("wandb not installed. Skipping logging to wandb.")
 
-                if early_stopping is not None:
-                    # Whether to use train or test loss
-                    early_stopping_loss = (
-                        test_loss
-                        if early_stopping.metric == "validation"
-                        else train_loss
-                    )
-                    is_best_model = early_stopping(early_stopping_loss)
-                    if is_best_model and (self.rank is None or self.rank == 0):
-                        self.save_model(
-                            join(train_dir, "best_model.pt"), save_training_info=False
+                    if early_stopping is not None:
+                        # Whether to use train or test loss
+                        early_stopping_loss = (
+                            test_loss
+                            if early_stopping.metric == "validation"
+                            else train_loss
                         )
-                    if early_stopping.early_stop:
-                        print("Early stopping")
-                        break
-                if self.rank is None or self.rank == 0:
+                        is_best_model = early_stopping(early_stopping_loss)
+                        if is_best_model and (self.rank is None or self.rank == 0):
+                            self.save_model(
+                                join(train_dir, "best_model.pt"), save_training_info=False
+                            )
+                        if early_stopping.early_stop:
+                            print("Early stopping")
+                            break
+
                     print(f"Finished training epoch {self.epoch}.\n")
 
     def sample(
