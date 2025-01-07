@@ -527,12 +527,13 @@ class Base:
                             print("wandb not installed. Skipping logging to wandb.")
 
                 if early_stopping is not None:
-                    stopping_loss = (
+                    # Whether to use train or test loss
+                    early_stopping_loss = (
                         test_loss
                         if early_stopping.metric == "validation"
                         else train_loss
                     )
-                    is_best_model = early_stopping(stopping_loss)
+                    is_best_model = early_stopping(early_stopping_loss)
                     if is_best_model and (self.rank is None or self.rank == 0):
                         self.save_model(
                             join(train_dir, "best_model.pt"), save_training_info=False
