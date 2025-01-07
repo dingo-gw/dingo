@@ -19,6 +19,8 @@ def create_submission_file(train_dir, condor_settings, filename="submission_file
     :return:
     """
     lines = []
+    # getenv required for GPU training because wandb needs $HOME to be defined
+    lines.append(f"getenv = True\n")
     lines.append(f'executable = {condor_settings["executable"]}\n')
     lines.append(f'request_cpus = {condor_settings["num_cpus"]}\n')
     lines.append(f'request_memory = {condor_settings["memory_cpus"]}\n')
@@ -27,7 +29,7 @@ def create_submission_file(train_dir, condor_settings, filename="submission_file
         f"requirements = TARGET.CUDAGlobalMemoryMb > "
         f'{condor_settings["memory_gpus"]}\n\n'
     )
-    lines.append(f'arguments = \"{condor_settings["arguments"]}\"\n')
+    lines.append(f'arguments = "{condor_settings["arguments"]}"\n')
     lines.append(f'error = {join(train_dir, "info.err")}\n')
     lines.append(f'output = {join(train_dir, "info.out")}\n')
     lines.append(f'log = {join(train_dir, "info.log")}\n')
@@ -127,7 +129,9 @@ def train_condor():
         #
 
         if complete:
-            print(f"Training complete, job will not be resubmitted. Executing exit command: {args.exit_command}.")
+            print(
+                f"Training complete, job will not be resubmitted. Executing exit command: {args.exit_command}."
+            )
             if args.exit_command:
                 os.system(args.exit_command)
             sys.exit()
