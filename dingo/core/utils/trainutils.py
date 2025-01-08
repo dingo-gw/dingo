@@ -34,6 +34,7 @@ class EarlyStopping:
     If val_loss > min_val_loss - delta for more than patience epochs, then returns
     early stopping occurs.
     """
+
     def __init__(
         self,
         patience: int = 5,
