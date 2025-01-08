@@ -2,7 +2,10 @@ import numpy as np
 import torch
 
 from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
-from dingo.core.nn.transformer import create_transformer_enet, create_pooling_transformer
+from dingo.core.nn.transformer import (
+    create_transformer_enet,
+    create_pooling_transformer,
+)
 from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
 from dingo.core.posterior_models.flow_matching import FlowMatchingPosteriorModel
 from dingo.core.posterior_models.score_matching import ScoreDiffusionPosteriorModel
@@ -75,7 +78,9 @@ def build_model_from_kwargs(
             embedding_network_type = d["metadata"]["train_settings"]["model"][
                 "embedding_type"
             ]
-            allow_tf32 = d["metadata"]["train_settings"]["model"]["embedding_kwargs"].get("allow_tf32", False)
+            allow_tf32 = d["metadata"]["train_settings"]["model"][
+                "embedding_kwargs"
+            ].get("allow_tf32", False)
         else:
             embedding_network_type = "no_embedding"
     else:
@@ -87,7 +92,9 @@ def build_model_from_kwargs(
             embedding_network_type = settings["train_settings"]["model"][
                 "embedding_type"
             ]
-            allow_tf32 = settings["train_settings"]["model"]["embedding_kwargs"].get("allow_tf32", False)
+            allow_tf32 = settings["train_settings"]["model"]["embedding_kwargs"].get(
+                "allow_tf32", False
+            )
         else:
             embedding_network_type = "no_embedding"
 
@@ -112,18 +119,6 @@ def build_model_from_kwargs(
             settings["train_settings"]["model"]["posterior_kwargs"].update(
                 settings["train_settings"]["model"].get("nf_kwargs", {})
             )
-
-        if posterior_model_type.lower() in ["flow_matching", "score_matching"]:
-            settings["train_settings"]["model"]["posterior_kwargs"].update(
-                settings["train_settings"]["model"].get("cf_kwargs", {})
-            )
-
-        # if posterior_model_type.lower() in ["flow_matching", "score_matching"]:
-        if "nf_kwargs" in settings["train_settings"]["model"].keys():
-            del settings["train_settings"]["model"]["nf_kwargs"]
-        # if posterior_model_type.lower() == "normalizing_flow":
-        if "cf_kwargs" in settings["train_settings"]["model"].keys():
-            del settings["train_settings"]["model"]["cf_kwargs"]
 
     # Set precision
     if allow_tf32:
@@ -200,44 +195,50 @@ def autocomplete_model_kwargs(
             context_dim = model_kwargs["embedding_kwargs"]["output_dim"]
         elif model_kwargs["embedding_type"].lower() == "transformer":
             if "tokenizer_kwargs" in model_kwargs["embedding_kwargs"]:
-                model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]["input_dims"] = list(
-                    data_sample[1].shape
+                model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]["input_dims"] = (
+                    list(data_sample[1].shape)
                 )
-                model_kwargs["embedding_kwargs"]["tokenizer_kwargs"][
-                    "output_dim"
-                ] = model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
+                model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]["output_dim"] = (
+                    model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
+                )
             if "block_encoder_kwargs" in model_kwargs["embedding_kwargs"]:
                 model_kwargs["embedding_kwargs"]["block_encoder_kwargs"][
                     "num_blocks"
                 ] = len(np.unique(data_sample[2][:, 2]))
             if "final_net_kwargs" in model_kwargs["embedding_kwargs"]:
-                model_kwargs["embedding_kwargs"]["final_net_kwargs"][
-                    "input_dim"
-                ] = model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
+                model_kwargs["embedding_kwargs"]["final_net_kwargs"]["input_dim"] = (
+                    model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
+                )
                 context_dim = model_kwargs["embedding_kwargs"]["final_net_kwargs"][
                     "output_dim"
                 ]
             else:
-                context_dim = model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
+                context_dim = model_kwargs["embedding_kwargs"]["transformer_kwargs"][
+                    "d_model"
+                ]
         elif model_kwargs["embedding_type"].lower() == "pooling_transformer":
             if "tokenizer_kwargs" in model_kwargs["embedding_kwargs"]:
-                model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]["input_dim"] = data_sample[1].shape[-1]
-                model_kwargs["embedding_kwargs"]["tokenizer_kwargs"][
-                    "output_dim"
-                ] = model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
+                model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]["input_dim"] = (
+                    data_sample[1].shape[-1]
+                )
+                model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]["output_dim"] = (
+                    model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
+                )
             if "positional_encoder_kwargs" in model_kwargs["embedding_kwargs"]:
                 model_kwargs["embedding_kwargs"]["positional_encoder_kwargs"][
                     "d_model"
                 ] = model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
             if "final_net_kwargs" in model_kwargs["embedding_kwargs"]:
-                model_kwargs["embedding_kwargs"]["final_net_kwargs"][
-                    "input_dim"
-                ] = model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
+                model_kwargs["embedding_kwargs"]["final_net_kwargs"]["input_dim"] = (
+                    model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
+                )
                 context_dim = model_kwargs["embedding_kwargs"]["final_net_kwargs"][
                     "output_dim"
                 ]
             else:
-                context_dim = model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
+                context_dim = model_kwargs["embedding_kwargs"]["transformer_kwargs"][
+                    "d_model"
+                ]
         elif model_kwargs["embedding_type"] == "no_embedding":
             context_dim = None
             print("No embedding network specified.")
