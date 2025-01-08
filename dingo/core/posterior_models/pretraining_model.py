@@ -3,10 +3,10 @@ import copy
 import torch
 
 from dingo.core.nn.enets_pretraining import create_embedding_with_resnet
-from .base_model import Base
+from .base_model import BasePosteriorModel
 
 
-class PretrainingModel(Base):
+class PretrainingModel(BasePosteriorModel):
     """
     Pretraining model for transformer embedding network.
     """

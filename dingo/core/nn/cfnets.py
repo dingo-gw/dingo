@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from dingo.core.nn.enets import DenseResidualNet
+from dingo.core.nn.resnet import DenseResidualNet
 from dingo.core.utils import torchutils
 
 
@@ -119,7 +119,7 @@ class ContinuousFlow(nn.Module):
 
         # embed context (self.context_embedding_net might just be identity)
         if not self.use_cache:
-            context_embedding = self.context_embedding_net(*self._cached_context)
+            context_embedding = self.context_embedding_net(*context)
 
         else:
             self._update_cached_context(*context)
@@ -157,10 +157,10 @@ class ContinuousFlow(nn.Module):
 
 
 def create_cf(
-        posterior_kwargs: dict,
-        embedding_net_builder: Callable = None,
-        embedding_kwargs: dict = None,
-        initial_weights: dict = None
+    posterior_kwargs: dict,
+    embedding_net_builder: Callable = None,
+    embedding_kwargs: dict = None,
+    initial_weights: dict = None,
 ):
     """
     Build a continuous flow based on settings dictionaries.

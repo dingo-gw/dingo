@@ -439,7 +439,7 @@ class TransformerModel(nn.Module):
             [batch_size, num_tokens, num_features] =
             [batch_size, num_blocks * num_tokens_per_block, num_channels * num_bins_per_token]
         position: Tensor
-            shape [batch_size, num_blocks, 3], where the last dimension corresponds to [f_mi, f_max, detector] per token
+            shape [batch_size, num_blocks, 3], where the last dimension corresponds to [f_min, f_max, detector] per token
         src_key_padding_mask: Tensor
             shape [batch_size, num_tokens]
 

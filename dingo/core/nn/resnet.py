@@ -142,9 +142,11 @@ class DenseResidualNet(nn.Module):
         )
         self.resize_layers = nn.ModuleList(
             [
-                nn.Linear(self.hidden_dims[n - 1], self.hidden_dims[n])
-                if self.hidden_dims[n - 1] != self.hidden_dims[n]
-                else nn.Identity()
+                (
+                    nn.Linear(self.hidden_dims[n - 1], self.hidden_dims[n])
+                    if self.hidden_dims[n - 1] != self.hidden_dims[n]
+                    else nn.Identity()
+                )
                 for n in range(1, self.num_res_blocks)
             ]
             + [nn.Linear(self.hidden_dims[-1], self.output_dim)]
