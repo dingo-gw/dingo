@@ -6,25 +6,24 @@ import torch
 from .base import Domain
 from .frequency_domain import FrequencyDomain
 
+
 class IrregularFrequencyDomain(Domain):
-    """ 
-    Defines the physical domain of the data of interest. 
+    """
+    Defines the physical domain of the data of interest.
 
     The frequency bins do not have to follow an specific spacing.
-    but should be montonically increasing. 
+    but should be montonically increasing.
     The data below a frequency of f_min is set to 0.
 
     TODO change the current FrequencyDomain class into a class
-    "UniformFrequencyDomain". Then IrregularFrequencyDomain, 
+    "UniformFrequencyDomain". Then IrregularFrequencyDomain,
     MultiBandedFrequencyDomain and UniformFrequency domain should
     all inherit from this
-    
+
     """
 
     def __init__(
-        self,
-        sample_frequencies: Iterable[float],
-        window_factor: float = None
+        self, sample_frequencies: Iterable[float], window_factor: float = None
     ):
         """
         Parameters
@@ -35,7 +34,7 @@ class IrregularFrequencyDomain(Domain):
         window_factor: float = None
             Window factor for this domain. Required when using self.noise_std.
         """
-        
+
         if not np.all(np.diff(sample_frequencies) > 0):
             raise ValueError("sample_frequencies should be monotonicall increasing")
 
@@ -43,7 +42,6 @@ class IrregularFrequencyDomain(Domain):
         self.f_min = sample_frequencies[0]
         self.f_max = sample_frequencies[-1]
         self.window_factor = window_factor
-
 
     def update(self, new_settings: dict):
         """
@@ -134,16 +132,24 @@ class IrregularFrequencyDomain(Domain):
             self
         )
 
-    def update_data(self, data: np.ndarray, old_sample_frequencies: np.ndarray = None, low_value: float = 0, axis: int = -1):
+    def update_data(
+        self,
+        data: np.ndarray,
+        old_sample_frequencies: np.ndarray = None,
+        low_value: float = 0,
+        axis: int = -1,
+    ):
         """
-        Adjusts the data to be compatible with the domain. Given a previous set of sample 
+        Adjusts the data to be compatible with the domain. Given a previous set of sample
         frequencies corresponding to data, will return a new array corresponding to self.sample_frequencies.
-        Will raise an error of self.sample_frequencies are not in the old_sample_frequencies 
+        Will raise an error of self.sample_frequencies are not in the old_sample_frequencies
         """
         if old_sample_frequencies is None or data.shape[axis] == len(self):
             return data
         elif not np.all(np.isin(self.sample_frequencies, old_sample_frequencies)):
-            raise ValueError("sample_frequencies is not a subset of old_sample_frequencies")
+            raise ValueError(
+                "sample_frequencies is not a subset of old_sample_frequencies"
+            )
         else:
             sl = np.where(np.isin(old_sample_frequencies, self.sample_frequencies))[0]
             data = data[sl]
@@ -157,7 +163,7 @@ class IrregularFrequencyDomain(Domain):
         frequency domain) to multiplication by
 
         .. math::
-            \exp(-2 \pi i \, f \, dt).
+            \\exp(-2 \\pi i \\, f \\, dt).
 
         This method allows for multiple batch dimensions. For torch.Tensor data,
         allow for either a complex or a (real, imag) representation.
@@ -292,7 +298,7 @@ class IrregularFrequencyDomain(Domain):
     @property
     def sample_frequencies(self):
         return self._sample_frequencies
-    
+
     @sample_frequencies.setter
     def sample_frequencies(self, value):
         self._sample_frequencies = value

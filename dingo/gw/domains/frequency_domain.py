@@ -122,7 +122,7 @@ class FrequencyDomain(Domain):
         frequency domain) to multiplication by
 
         .. math::
-            \exp(-2 \pi i \, f \, dt).
+            \\exp(-2 \\pi i \\, f \\, dt).
 
         This method allows for multiple batch dimensions. For torch.Tensor data,
         allow for either a complex or a (real, imag) representation.
