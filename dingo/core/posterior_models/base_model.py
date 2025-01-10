@@ -255,7 +255,7 @@ class BasePosteriorModel(ABC):
         }
 
         # Remove DDP wrapper
-        if "module." in self.network.state_dict():
+        if any("module." in key for key in self.network.state_dict()):
             # Remove "module." prefix from the state_dict keys
             model_state_dict = {
                 k.replace("module.", ""): v
