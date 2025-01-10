@@ -86,17 +86,6 @@ def train_condor():
         action="store_true",
         help="Whether to pretrain embedding network.",
     )
-    parser.add_argument(
-        "--exit_command",
-        type=str,
-        default="",
-        help="Optional command to execute after completion of training.",
-    )
-    parser.add_argument(
-        "--pretraining",
-        action="store_true",
-        help="Whether to pretrain embedding network.",
-    )
     args = parser.parse_args()
 
     # For condor settings, first try looking for a local settings file. Otherwise,
