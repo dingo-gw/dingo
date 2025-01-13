@@ -11,6 +11,7 @@ from bilby.gw.prior import UniformSourceFrame
 from pycbc.cosmology import DistToZ
 import numpy as np
 
+from .power_law_peak_class import PowerLawPeak
 
 class PowerLawPopulation(object):
     """
@@ -51,7 +52,7 @@ class PowerLawPopulation(object):
                     cosmology=cosmology,
                     name="luminosity_distance",
                 ),
-                "mass_ratio": Constraint(minimum=0.125, maximum=1.0),
+                "mass_ratio": Constraint(minimum=0.1, maximum=1.0),
             },
             conversion_function=lambda x: generate_mass_parameters(x, source=True),
         )
@@ -81,22 +82,24 @@ class PowerLawPopulation(object):
             # are these samples observable ? 
             idx_obs = selection_cut_func(s)
             
-            for k in s.keys():
-                s[k] = s[k][idx_obs]
+            apply_idx_to_dict(s, idx_obs, size)
 
-                if s[k].size < size:
-                    raise 'Required size above size of produce array, due to\
-                        selection cut. Increase buffer_factor.'
-
-                s[k] = s[k][:size]
-            
             return s
 
         return generation_func
 
-def add_log_prob(prior, samples):
+def add_log_prob(prior, samples, axis=0):
+    samples['ln_prob'] = prior.ln_prob(samples, axis=axis)
 
-    samples['ln_prob'] = prior.ln_prob(samples)
+def apply_idx_to_dict(d, idx, size):
+    for k in d.keys():
+        d[k] = d[k][idx]
+
+        if d[k].size < size:
+            raise 'Required size above size of produce array, due to\
+                selection cut. Increase buffer_factor.'
+
+        d[k] = d[k][:size]
 
 def complete_gw_parameters(s, dist_to_z):
 
@@ -121,7 +124,7 @@ class PowerLawPeakPopulation(object):
         self.minimum_distance = minimum_distance
         self.maximum_distance = maximum_distance
 
-    def get_event_generator(self, p):
+    def get_event_generator(self, p, kwargs_selection_cut={}):
         cosmology = FlatLambdaCDM(Om0=0.3, H0=p["hubble_constant"])
         prior = PriorDict(
             {
@@ -149,14 +152,17 @@ class PowerLawPeakPopulation(object):
         # function for z(d_L) directly, since it interpolates.
         dist_to_z = DistToZ(cosmology=cosmology)
 
+        # Compute simple selection function, so far away events are discarded directly
+        selection_cut_func = generate_selection_cut_function(kwargs_selection_cut)
+
         # We return the generating function for event parameters for two reasons:
         # (1) Because of selection effects, we don't know a priori how many events we
         # have to generate.
         # (2) Some of the objects (construction of prior, cosmology, DistToZ) are a bit
         # slow to construct, so we should avoid doing so repeatedly for each set of
         # hyperparameters.
-        def generation_func():
-            s0 = prior.sample()
+        def generation_func(size, buffer_factor=2):
+            s0 = prior.sample(buffer_factor * size)
             s={}
             s["mass_1_source"]=s0["mass_1_source_q"][0]
             s["mass_2_source"]=s0["mass_1_source_q"][1]*s0["mass_1_source_q"][0]
@@ -170,6 +176,11 @@ class PowerLawPeakPopulation(object):
             # occur in our code. But this is something to watch for.
             s["chirp_mass"] = component_masses_to_chirp_mass(s["mass_1"], s["mass_2"])
             s["mass_ratio"] = component_masses_to_mass_ratio(s["mass_1"], s["mass_2"])
+
+            idx_obs = selection_cut_func(s)
+
+            apply_idx_to_dict(s, idx_obs, size)
+
             return s
 
         return generation_func
