@@ -7,12 +7,12 @@ from dingo.core.nn.enets import DenseResidualNet
 
 
 class PopulationTransformer(nn.Module):
-    def __init__(self, tokenizer, transformer_encoder, final_net=None, use_variance=False):
+    def __init__(self, tokenizer, transformer_encoder, final_net=None, use_moments=None):
         super().__init__()
         self.tokenizer = tokenizer
         self.transformer_encoder = transformer_encoder
         self.final_net = final_net
-        self.use_variance = use_variance
+        self.use_moments = use_moments
 
         self.init_weights()
 
@@ -36,23 +36,49 @@ class PopulationTransformer(nn.Module):
         # Average over non-masked components.
         if src_key_padding_mask is not None:
             denominator = torch.sum(~src_key_padding_mask, -1, keepdim=True)
-            
-            if self.use_variance:
-                x1 = torch.sum(x * ~src_key_padding_mask.unsqueeze(-1), dim=-2) / denominator
-                # Compute variance
-                x2 = torch.sum((x ** 2) * ~src_key_padding_mask.unsqueeze(-1), dim=-2) / denominator
-                # Concatenate mean and variance
-                x = torch.cat([x1, x2], axis=-1)
+
+            if self.use_moments is not None:
+                moments = []
+                if 'mean' in self.use_moments:
+                    mean = torch.sum(x * ~src_key_padding_mask.unsqueeze(-1), dim=-2) / denominator
+                    moments.append(mean)
+                if 'variance' in self.use_moments:
+                    variance = torch.sum((x ** 2) * ~src_key_padding_mask.unsqueeze(-1), dim=-2) / denominator
+                    moments.append(variance)
+                if 'skewness' in self.use_moments:
+                    skewness = torch.sum((x ** 3) * ~src_key_padding_mask.unsqueeze(-1), dim=-2) / denominator
+                    moments.append(skewness)
+                if 'kurtosis' in self.use_moments:
+                    kurtosis = torch.sum((x ** 4) * ~src_key_padding_mask.unsqueeze(-1), dim=-2) / denominator
+                    moments.append(kurtosis)
+                
+                x = torch.cat(moments, axis=-1)
             else:
                 x = torch.sum(x * ~src_key_padding_mask.unsqueeze(-1), dim=-2) / denominator
 
         else:
-            if self.use_variance:
-                x1 = torch.mean(x, dim=-2)
-                # Compute variance
-                x2 = torch.mean(x ** 2, dim=-2)
-                # Concatenate mean and variance
-                x = torch.cat([x1, x2], axis=-1)
+            # TODO: write this up properly
+            src_key_padding_mask = (src == 0).all(dim=-1)
+
+            return self.forward(src, src_key_padding_mask)
+        
+            raise NotImplementedError("PopulationTransformer does not support without padding mask.")
+            if self.use_moments is not None:
+                moments = []
+                if 'mean' in self.use_moments:
+                    mean = torch.mean(x, dim=-2)
+                    moments.append(mean)
+                if 'variance' in self.use_moments:
+                    variance = torch.mean((x ** 2), dim=-2)
+                    moments.append(variance)
+                if 'skewness' in self.use_moments:
+                    skewness = torch.mean((x ** 3), dim=-2)
+                    moments.append(skewness)
+                if 'kurtosis' in self.use_moments:
+                    kurtosis = torch.mean((x ** 4), dim=-2)
+                    moments.append(kurtosis)
+                            
+                x = torch.cat(moments, axis=-1)
             else:
                 x = torch.mean(x, dim=-2)
 
@@ -69,10 +95,18 @@ def create_population_transformer(config):
     config.tokenizer["input_dim"] = config.d_dingo_encoding
     config.tokenizer["output_dim"] = config.transformer["d_model"]
 
+    # TODO, tempoary fix for old versions
     use_variance = config.transformer.get("use_variance", False)
+    if use_variance:
+        use_moments = ['mean', 'variance']
+    else:
+        use_moments = ['mean']
 
-    if(use_variance):
-        config.final_net["input_dim"] = 2*config.transformer["d_model"]
+    use_moments = config.transformer.get("use_moments", use_moments)
+
+    if(use_moments is not None):
+        n = len(use_moments)
+        config.final_net["input_dim"] = n * config.transformer["d_model"]
     else:
         config.final_net["input_dim"] = config.transformer["d_model"]
 
@@ -90,5 +124,5 @@ def create_population_transformer(config):
     )
     final_net = DenseResidualNet(**config.final_net)
 
-    encoder = PopulationTransformer(tokenizer, transformer, final_net, use_variance=use_variance)
+    encoder = PopulationTransformer(tokenizer, transformer, final_net, use_moments=use_moments)
     return encoder
