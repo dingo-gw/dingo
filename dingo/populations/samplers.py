@@ -1,3 +1,4 @@
+import copy
 import pandas as pd
 import torch
 import torchvision.transforms
@@ -49,14 +50,12 @@ class PopulationSampler(object):
             inverse=True,
             as_type="dict",
         )
+        self.transform_post_inv = copy.deepcopy(self.transform_post)
+        self.transform_post_inv.inverse = False
 
-    def run_sampler(self, num_samples):
-        if self.population is None:
-            raise ValueError("Set self.population before running sampler.")
+    def pass_embeddings_through_transformer(self, embeddings):
 
-        embeddings = self.get_embeddings()
-
-        # Pass through the transformer to get the population embedding.
+         # Pass through the transformer to get the population embedding.
         x = self.transform_pre([embeddings])
 
         model = self.population_posterior_model.model
@@ -64,6 +63,28 @@ class PopulationSampler(object):
         with torch.no_grad():
             x = [y.unsqueeze(0) for y in x]  # Unsqueeze a batch dimension.
             x = model.embedding_net(*x)
+
+        return x
+
+    def run_sampler(self, num_samples):
+        if self.population is None:
+            raise ValueError("Set self.population before running sampler.")
+
+        embeddings = self.get_embeddings()
+
+        model = self.population_posterior_model.model
+        model.eval()
+    
+        # TODO: write more general
+        emb_dim = self.metadata['embedding_emulator_metadata']['train_settings']['model']['input_dim']
+        max_events = self.metadata['train_settings']['data']['maximum_population_size']
+        embeddings_full = torch.zeros((max_events,emb_dim))
+        n_events = embeddings.shape[0]
+
+        embeddings_full[:n_events] = embeddings
+
+        with torch.no_grad():
+            x = self.pass_embeddings_through_transformer(embeddings_full)
 
             # TODO: batch this
             y, log_prob = model.flow.sample_and_log_prob(num_samples, context=x)
@@ -75,12 +96,36 @@ class PopulationSampler(object):
 
         return pd.DataFrame(result)
 
-    def get_embeddings(self):
-        # TODO: Add batch_size option
-        data = self.event_sampler.transform_pre(self.population)
-        self.event_model.model.eval()
+    def get_log_prob(self, parameters):
+
+        y = self.transform_post_inv({"parameters": parameters})['inference_parameters']
+        y = torch.tensor(y).unsqueeze(0)
+
+        if self.population is None:
+            raise ValueError("Set self.population before running sampler.")
+
+        embeddings = self.get_embeddings()
+
+        model = self.population_posterior_model.model
+        model.eval()
+
         with torch.no_grad():
-            embeddings = self.event_model.model(data)
+            x = self.pass_embeddings_through_transformer(embeddings)
+            log_prob = model.flow.log_prob(y, context=x)
+
+        return log_prob
+
+    def get_embeddings(self):
+
+        if "embeddings" in self.population:
+            embeddings = self.population["embeddings"]
+        else:
+            # TODO: Add batch_size option
+            data = self.event_sampler.transform_pre(self.population)
+            self.event_model.model.eval()
+            with torch.no_grad():
+                embeddings = self.event_model.model(data)
+
         return embeddings
 
     def to_result(self):
