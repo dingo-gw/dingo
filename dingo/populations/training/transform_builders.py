@@ -46,6 +46,7 @@ def set_train_transforms(population_model, data_settings, settings_pm_single_eve
     
     # The transformer requires sequences to be padded up to the maximum length. This
     # does so, and produces a corresponding mask (True = mask out token).
+    # Commented this out, since the embedding and mask generation is done now in training loop. 
     # transforms.append(PadMask(1, 0, population_model.maximum_population_size))
 
     population_model.transform = torchvision.transforms.Compose(transforms)
