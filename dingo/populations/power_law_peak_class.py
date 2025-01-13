@@ -1,4 +1,4 @@
-import pdfs
+from . import pdfs
 
 import bilby.core.prior
 
