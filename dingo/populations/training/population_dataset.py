@@ -108,7 +108,7 @@ class PopulationDataset(torch.utils.data.Dataset):
         generate_event_func = self.population_model.get_event_generator(hp, self.kwargs_selection_cut)
 
         is_training = self.mode in ["train", "test"]
-        parameters = generate_event_func(size=self.size_all_events, buffer_factor=10, train=is_training)
+        parameters = generate_event_func(size=self.size_all_events, buffer_factor=23, train=is_training)
         
         # Prepare output, consisting of hyperparameters and an array of embeddings.
         sample = {
