@@ -391,15 +391,15 @@ def prepare_training_resume(
 
     train_settings = load_settings_from_ckpt(checkpoint_name)
     wfd = build_dataset(
-        train_settings["data"],
+        data_settings=train_settings["data"],
         copy_to_tmp=local_settings.get("copy_waveform_dataset_to_tmp", False),
     )
 
     pm = prepare_model_resume(
-        checkpoint_name,
-        local_settings,
-        train_dir,
-        pretraining,
+        checkpoint_name=checkpoint_name,
+        local_settings=local_settings,
+        train_dir=train_dir,
+        pretraining=pretraining,
     )
 
     return pm, wfd
@@ -1008,6 +1008,7 @@ def train_local():
 
     else:
         print("Resuming training run.")
+        train_settings = None
         with open(os.path.join(args.train_dir, "local_settings.yaml"), "r") as f:
             local_settings = yaml.safe_load(f)
 
@@ -1022,24 +1023,24 @@ def train_local():
         world_size = local_settings["condor"]["num_gpus"]
 
         complete, pm_epoch = run_multi_gpu_training(
-            world_size,
-            train_settings,
-            local_settings,
-            args.train_dir,
-            args.checkpoint,
-            resume,
-            args.pretraining,
+            world_size=world_size,
+            train_settings=train_settings,
+            local_settings=local_settings,
+            train_dir=args.train_dir,
+            ckpt_file=args.checkpoint,
+            resume=resume,
+            pretraining=args.pretraining,
         )
     else:
         if local_settings["device"] == "cuda":
             document_gpus(args.train_dir)
         complete, pm_epoch = run_training(
-            train_settings,
-            local_settings,
-            args.train_dir,
-            args.checkpoint,
-            resume,
-            args.pretraining,
+            train_settings=train_settings,
+            local_settings=local_settings,
+            train_dir=args.train_dir,
+            ckpt_file=args.checkpoint,
+            resume=resume,
+            pretraining=args.pretraining,
         )
 
     if complete:
