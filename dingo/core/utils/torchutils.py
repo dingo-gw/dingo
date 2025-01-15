@@ -3,6 +3,7 @@ from typing import Any, Iterable, Tuple, Union
 
 import bilby
 import numpy as np
+from socket import gethostname
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -31,12 +32,13 @@ def get_cuda_info() -> dict[str, Any]:
 
 def document_gpus(target_dir: str) -> None:
     """
-    Document the current GPU resources to a `requirements.txt` file
+    Document the current GPU resources to a `info_gpus.txt` file
     inside the given `target_dir`.
     """
     cuda_info = get_cuda_info()
     # Write the environment to a requirements file
     with open(os.path.join(target_dir, "info_gpus.txt"), "w") as file:
+        file.write(f"# Running on host: \n{gethostname()}\n")
         file.write(f"# CUDA information:\n")
         for k, v in cuda_info.items():
             file.write(f"{k}: {v}\n")
