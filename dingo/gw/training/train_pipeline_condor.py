@@ -32,7 +32,8 @@ def create_submission_file(
     lines.append(f'request_cpus = {condor_settings["num_cpus"]}\n')
     lines.append(f'request_memory = {condor_settings["memory_cpus"]}\n')
     lines.append(f'request_gpus = {condor_settings["num_gpus"]}\n')
-    lines.append(f'request_disk = {condor_settings["request_disk"]}\n')
+    if "request_disk" in condor_settings:
+        lines.append(f'request_disk = {condor_settings["request_disk"]}\n')
     lines.append(
         f"requirements = TARGET.CUDAGlobalMemoryMb > "
         f'{condor_settings["memory_gpus"]}\n\n'
