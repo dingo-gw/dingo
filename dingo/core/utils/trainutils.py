@@ -144,7 +144,7 @@ class LossInfo:
 
     def update(self, loss: torch.tensor, n: torch.tensor):
         self.update_timer(timer_mode="Network")
-        # Log number of iteations per epoch
+        # Log number of iterations per epoch
         self.iteration += 1
         # Detach tensors from compute graph
         loss = loss.detach()

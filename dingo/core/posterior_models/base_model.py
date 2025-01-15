@@ -5,6 +5,7 @@ as well as functions for training and testing across an epoch.
 
 import h5py
 import json
+import math
 import numpy as np
 import os
 import time
@@ -251,6 +252,7 @@ class BasePosteriorModel(ABC):
         model_dict = {
             "model_kwargs": self.model_kwargs,
             "epoch": self.epoch,
+            "iteration": self.iteration,
             "version": self.version,
         }
 
@@ -356,6 +358,7 @@ class BasePosteriorModel(ABC):
         update_model_config(self.model_kwargs)  # For backward compatibility
 
         self.epoch = d["epoch"]
+        self.iteration = d["iteration"]
 
         self.metadata = d["metadata"]
 
@@ -555,7 +558,8 @@ class BasePosteriorModel(ABC):
                         is_best_model = early_stopping(early_stopping_loss)
                         if is_best_model and (self.rank is None or self.rank == 0):
                             self.save_model(
-                                join(train_dir, "best_model.pt"), save_training_info=False
+                                join(train_dir, "best_model.pt"),
+                                save_training_info=False,
                             )
                         if early_stopping.early_stop:
                             print("Early stopping")
