@@ -169,6 +169,13 @@ class LossInfo:
         return self.loss_tracker.get_avg()
 
     def get_iteration(self):
+        # Aggregate number of iterations
+        # Sync all processes before aggregating values
+        dist.barrier()
+        # We need to use MAX here because if the dataset cannot be equally distributed among GPUs, some
+        # GPUs have more batches and thus need to perform more iterations than other GPUs.
+        # We want to track the number of optimizer steps, which counts these iterations with not a full batch as well.
+        dist.reduce(self.iteration, dst=0, op=dist.ReduceOp.MAX)
         return self.iteration
 
     def print_info(self, batch_idx):
