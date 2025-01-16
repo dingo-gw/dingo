@@ -175,8 +175,9 @@ class LossInfo:
         # We need to use MAX here because if the dataset cannot be equally distributed among GPUs, some
         # GPUs have more batches and thus need to perform more iterations than other GPUs.
         # We want to track the number of optimizer steps, which counts these iterations with not a full batch as well.
-        dist.reduce(self.iteration, dst=0, op=dist.ReduceOp.MAX)
-        return self.iteration
+        iteration = torch.tensor(self.iteration, device=self.device)
+        dist.reduce(iteration, dst=0, op=dist.ReduceOp.MAX)
+        return iteration
 
     def print_info(self, batch_idx):
         if batch_idx % self.print_freq == 0:
