@@ -190,7 +190,7 @@ def prepare_model_new(
 
     Returns
     -------
-    (WaveformDataset, dict, torch.nn.module)
+    (BasePosteriorModel)
     """
 
     # This modifies the model settings in-place.
@@ -262,7 +262,7 @@ def prepare_training_new(
 
     Returns
     -------
-    (WaveformDataset, Base)
+    (BasePosteriorModel, WaveformDataset)
     """
 
     (
@@ -332,7 +332,7 @@ def prepare_model_resume(
 
     Returns
     -------
-    (BasePosteriorModel, WaveformDataset)
+    (BasePosteriorModel)
     """
     print_output = (
         True
@@ -517,7 +517,7 @@ def initialize_stage(
     return train_loader, test_loader, train_sampler
 
 
-def train_stages(pm, wfd, train_dir, local_settings):
+def train_stages(pm, wfd, train_dir: str, local_settings: dict):
     """
     Train the network, iterating through the sequence of stages. Stages can change
     certain settings such as the noise characteristics, optimizer, and scheduler settings.
@@ -533,7 +533,7 @@ def train_stages(pm, wfd, train_dir, local_settings):
     Returns
     -------
     bool
-        True if all stages are complete
+        True if last epoch finished or if time limit reached and training should resume
         False otherwise
     """
 
@@ -555,6 +555,7 @@ def train_stages(pm, wfd, train_dir, local_settings):
             break
     end_epochs = list(np.cumsum([stage["epochs"] for stage in stages]))
 
+    training_successful_or_resume = False
     num_starting_stage = np.searchsorted(end_epochs, pm.epoch + 1)
     for n in range(num_starting_stage, num_stages):
         stage = stages[n]
@@ -624,12 +625,13 @@ def train_stages(pm, wfd, train_dir, local_settings):
                 pm.save_model(save_file, save_training_info=True)
         if runtime_limits.local_limits_exceeded(pm.epoch) and print_bool:
             print("Local runtime limits reached. Ending program.")
+            training_successful_or_resume = True
             break
 
     if pm.epoch == end_epochs[-1]:
-        return True
-    else:
-        return False
+        training_successful_or_resume = True
+
+    return training_successful_or_resume
 
 
 def run_training(
@@ -891,6 +893,10 @@ def run_training_ddp(
                 checkpoint_name=ckpt_file,
                 local_settings=local_settings,
                 train_dir=train_dir,
+            )
+            print(
+                "Warning: If batch norm is used in the model, you have to make sure that the batch norm statistics "
+                "are loaded correctly for mult-GPU training. This has not been tested yet."
             )
 
         # Replace BatchNorm layers with SyncBatchNorm
