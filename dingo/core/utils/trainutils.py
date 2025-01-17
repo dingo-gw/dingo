@@ -121,6 +121,7 @@ class LossInfo:
         # track computation times
         self.times = {"Dataloader": AvgTracker(), "Network": AvgTracker()}
         if torch.cuda.device_count() > 1:
+            self.num_gpus = torch.cuda.device_count()
             self.multi_gpu = True
             self.times["Aggregation"] = AvgTracker()
         else:
@@ -169,14 +170,28 @@ class LossInfo:
         return self.loss_tracker.get_avg()
 
     def get_iteration(self):
-        # Aggregate number of iterations
-        # Sync all processes before aggregating values
-        dist.barrier()
-        # We need to use MAX here because if the dataset cannot be equally distributed among GPUs, some
-        # GPUs have more batches and thus need to perform more iterations than other GPUs.
-        # We want to track the number of optimizer steps, which counts these iterations with not a full batch as well.
-        iteration = torch.tensor(self.iteration, device=self.device)
-        dist.reduce(iteration, dst=0, op=dist.ReduceOp.MAX)
+        if self.multi_gpu:
+            # Aggregate number of iterations
+            # Sync all processes before aggregating values
+            dist.barrier()
+            # We need to use MAX here because if the dataset cannot be equally distributed among GPUs, some
+            # GPUs have more batches and thus need to perform more iterations than other GPUs.
+            # We want to track the number of optimizer steps, which counts these iterations with not a full batch as well.
+            iteration = torch.tensor(self.iteration, device=self.device)
+            iterations = [
+                torch.zeros([1], device=self.device) for _ in range(self.num_gpus)
+            ]
+            dist.all_gather(iterations, iteration)
+            # Check if all tensors are the same
+            all_equal = all(torch.equal(iterations[0], t) for t in iterations)
+            if not all_equal:
+                raise ValueError(
+                    "Not all GPUs executed the same number of iterations in this epoch, but:",
+                    [i.item() for i in iterations],
+                )
+            iteration = iteration.item()
+        else:
+            iteration = self.iteration
         return iteration
 
     def print_info(self, batch_idx):
