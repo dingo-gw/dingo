@@ -185,6 +185,7 @@ def build_train_and_test_loaders(
         Fraction of dataset to use for training. The remainder is used for testing.
         Should lie between 0 and 1.
     batch_size : int
+        Batch size per GPU
     num_workers : int
     world_size: int = None
         total number of devices required for distributed data parallel training

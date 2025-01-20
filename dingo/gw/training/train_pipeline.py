@@ -460,14 +460,16 @@ def initialize_stage(
             raise ValueError(
                 f"Total batch size {total_batch_size} is not divisible by the number of GPUs {world_size}."
             )
-        stage["batch_size"] = int(total_batch_size / world_size)
+        batch_size_per_gpu = int(total_batch_size / world_size)
+    else:
+        batch_size_per_gpu = stage["batch_size"]
 
     # Allows for changes in batch size between stages.
     train_loader, test_loader, train_sampler = build_train_and_test_loaders(
-        wfd,
-        train_settings["data"]["train_fraction"],
-        stage["batch_size"],
-        num_workers,
+        dataset=wfd,
+        train_fraction=train_settings["data"]["train_fraction"],
+        batch_size=batch_size_per_gpu,
+        num_workers=num_workers,
         world_size=world_size,
         rank=rank,
     )
@@ -483,7 +485,7 @@ def initialize_stage(
         # (instead of every epoch).
         # Warning: The following computation assumes that ...
         # ... the full training data set is used for training
-        # ... the batch size is the batch size per GPU
+        # ... we use drop_last = False in both the DistributedSampler and in the train Dataloader
         train_size = int(
             train_settings["data"]["train_fraction"] * wfd.settings["num_samples"]
         )
@@ -491,12 +493,21 @@ def initialize_stage(
             "gradient_updates_per_optimizer_step", 1
         )
         num_gpus = world_size if world_size is not None else 1
-        num_optimizer_steps = int(
-            np.ceil(
-                train_size
-                / (stage["batch_size"] * num_gpus * grad_updates_per_optimizer_step)
-            )
+        # (1) When using drop_last = False (default) in the DistributedSampler, some data points are repeatedly sampled
+        # such that each GPU processes the same amount of data in multi-GPU training. The effective size of the dataset
+        # has to be a multiple of the number of GPUs and the batch size per GPU:
+        effective_samples_per_gpu = int(np.ceil(train_size / num_gpus))
+        # (2) When using drop_last = False (default) in the Dataloader, the last batch can be incomplete:
+        effective_batches_per_gpu = int(
+            np.ceil(effective_samples_per_gpu / batch_size_per_gpu)
         )
+        # (3) If we perform multiple gradient updates per optimizer step, this results in fewer optimizer steps than
+        # batches per GPU where the gradient update is just not performed before the next epoch starts:
+        # TODO: Test whether option "multiple gradient updates per optimizer step" works as intended
+        num_optimizer_steps = (
+            effective_batches_per_gpu // grad_updates_per_optimizer_step
+        )
+
         pm.initialize_optimizer_and_scheduler(num_optimizer_steps=num_optimizer_steps)
 
     # Freeze/unfreeze RB layer if necessary
@@ -894,10 +905,11 @@ def run_training_ddp(
                 local_settings=local_settings,
                 train_dir=train_dir,
             )
-            print(
-                "Warning: If batch norm is used in the model, you have to make sure that the batch norm statistics "
-                "are loaded correctly for mult-GPU training. This has not been tested yet."
-            )
+            if rank == 0:
+                print(
+                    "Warning: If batch norm is used in the model, you have to make sure that the batch norm statistics "
+                    "are loaded correctly for mult-GPU training. This has not been tested yet."
+                )
 
         # Replace BatchNorm layers with SyncBatchNorm
         pm.network = replace_BatchNorm_with_SyncBatchNorm(pm.network)

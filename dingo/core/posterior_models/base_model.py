@@ -657,9 +657,9 @@ def train_epoch(
     pm.network.train()
     if pm.rank is None:
         loss_info = dingo.core.utils.trainutils.LossInfo(
-            pm.epoch,
-            len(dataloader.dataset),
-            dataloader.batch_size,
+            epoch=pm.epoch,
+            len_dataset=len(dataloader.dataset),
+            batch_size=dataloader.batch_size,
             mode="Train",
             print_freq=1,
             device=pm.device,
@@ -667,9 +667,9 @@ def train_epoch(
     else:
         # Multiply batch size used for printing with rank=num_gpus
         loss_info = dingo.core.utils.trainutils.LossInfo(
-            pm.epoch,
-            len(dataloader.dataset),
-            dataloader.batch_size * world_size,
+            epoch=pm.epoch,
+            len_dataset=len(dataloader.dataset),
+            batch_size=dataloader.batch_size * world_size,
             mode="Train",
             print_freq=1,
             device=pm.device,
@@ -730,9 +730,9 @@ def test_epoch(pm, dataloader, world_size: int = 1):
         pm.network.eval()
         if pm.rank is None:
             loss_info = dingo.core.utils.trainutils.LossInfo(
-                pm.epoch,
-                len(dataloader.dataset),
-                dataloader.batch_size,
+                epoch=pm.epoch,
+                len_dataset=len(dataloader.dataset),
+                batch_size=dataloader.batch_size,
                 mode="Test",
                 print_freq=1,
                 device=pm.device,
@@ -740,9 +740,9 @@ def test_epoch(pm, dataloader, world_size: int = 1):
         else:
             # Multiply batch size used for printing with rank=num_gpus
             loss_info = dingo.core.utils.trainutils.LossInfo(
-                pm.epoch,
-                len(dataloader.dataset),
-                dataloader.batch_size * world_size,
+                epoch=pm.epoch,
+                len_dataset=len(dataloader.dataset),
+                batch_size=dataloader.batch_size * world_size,
                 mode="Test",
                 print_freq=1,
                 device=pm.device,
