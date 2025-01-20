@@ -204,7 +204,11 @@ def set_train_transforms(
         )
     )
     transforms.append(
-        RepackageStrainsAndASDS(data_settings["detectors"], first_index=domain.min_idx)
+        RepackageStrainsAndASDS(
+            ifos=data_settings["detectors"],
+            first_index=domain.min_idx,
+            drop_asd_channel=data_settings.get("drop_asd_channel", False),
+        )
     )
 
     if data_settings["context_parameters"]:

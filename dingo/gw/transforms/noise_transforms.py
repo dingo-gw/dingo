@@ -190,20 +190,42 @@ class RepackageStrainsAndASDS(object):
         i = 2: 1 / (asd * 1e23)
     """
 
-    def __init__(self, ifos, first_index=0):
+    def __init__(
+        self,
+        ifos: list,
+        first_index: int = 0,
+        drop_asd_channel: bool = False,
+    ):
+        """
+        Parameters
+        ----------
+        ifos: list
+        first_index: int
+        drop_asd_channel: bool
+            Option to drop the ASD channel. Only for testing the influence of ASD conditioning on training.
+        """
         self.ifos = ifos
         self.first_index = first_index
+        self.drop_asd_channel = drop_asd_channel
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
+        num_channels = 2 if self.drop_asd_channel else 3
         strains = np.empty(
-            (len(self.ifos), 3, len(sample["asds"][self.ifos[0]]) - self.first_index),
+            (
+                len(self.ifos),
+                num_channels,
+                len(sample["asds"][self.ifos[0]]) - self.first_index,
+            ),
             dtype=np.float32,
         )
         for idx_ifo, ifo in enumerate(self.ifos):
             strains[idx_ifo, 0] = sample["waveform"][ifo][self.first_index :].real
             strains[idx_ifo, 1] = sample["waveform"][ifo][self.first_index :].imag
-            strains[idx_ifo, 2] = 1 / (sample["asds"][ifo][self.first_index :] * 1e23)
+            if not self.drop_asd_channel:
+                strains[idx_ifo, 2] = 1 / (
+                    sample["asds"][ifo][self.first_index :] * 1e23
+                )
         sample["waveform"] = strains
         return sample
 
