@@ -16,16 +16,14 @@ from .dag_creator import generate_dag
 from .parser import create_parser
 
 from dingo.gw.domains import build_domain_from_model_metadata
-from dingo.core.posterior_models.build_model import build_model_from_kwargs
+from dingo.core.models import PosteriorModel
 
 logger.name = "dingo_pipe"
 
 
 def fill_in_arguments_from_model(args):
     logger.info(f"Loading dingo model from {args.model} in order to access settings.")
-    model = build_model_from_kwargs(
-        filename=args.model, device="meta", load_training_info=False
-    )
+    model = PosteriorModel(args.model, device="meta", load_training_info=False)
     model_metadata = model.metadata
 
     domain = build_domain_from_model_metadata(model_metadata)
@@ -235,6 +233,7 @@ class MainInput(BilbyMainInput):
         self.psd_fractional_overlap = args.psd_fractional_overlap
         self.psd_start_time = args.psd_start_time
         self.spline_calibration_envelope_dict = args.spline_calibration_envelope_dict
+        self.calibration_correction_type = args.calibration_correction_type
 
         # self.check_source_model(args)
 
@@ -278,7 +277,7 @@ def write_complete_config_file(parser, args, inputs, input_cls=MainInput):
         if key == "label":
             continue
         if isinstance(val, str):
-            if os.path.isfile(val) or os.path.isdir(val):
+            if (os.path.isfile(val) or os.path.isdir(val)) and not val == "data":
                 setattr(args, key, os.path.abspath(val))
         if isinstance(val, list):
             if isinstance(val[0], str):
