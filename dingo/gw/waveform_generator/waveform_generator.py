@@ -719,7 +719,8 @@ class WaveformGenerator:
         """
         # TD approximants that are implemented in L0 frame. Currently tested for:
         #   52: SEOBNRv4PHM
-        if self.approximant in [52]:
+        tested_approximants = ["SEOBNRv4PHM"]
+        if LS.GetStringFromApproximant(self.approximant) in tested_approximants:
             parameters_lal_td_modes, iota = self._convert_parameters(
                 {**parameters, "f_ref": self.f_ref},
                 lal_target_function="SimInspiralChooseTDModes",
