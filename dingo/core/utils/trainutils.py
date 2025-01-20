@@ -174,20 +174,22 @@ class LossInfo:
             # Aggregate number of iterations
             # Sync all processes before aggregating values
             dist.barrier()
-            # We need to use MAX here because if the dataset cannot be equally distributed among GPUs, some
-            # GPUs have more batches and thus need to perform more iterations than other GPUs.
-            # We want to track the number of optimizer steps, which counts these iterations with not a full batch as well.
-            iteration = torch.tensor(self.iteration, device=self.device)
+            # Check whether all GPUs performed the same number of iterations. Since we want to track the number of
+            # optimizer steps, iterations with an incomplete batch are counted as well.
+            iteration = torch.tensor(
+                self.iteration, device=self.device, dtype=torch.int64
+            )
             iterations = [
-                torch.zeros([1], device=self.device) for _ in range(self.num_gpus)
+                torch.zeros([1], device=self.device, dtype=torch.int64)
+                for _ in range(self.num_gpus)
             ]
             dist.all_gather(iterations, iteration)
             # Check if all tensors are the same
             all_equal = all(torch.equal(iterations[0], t) for t in iterations)
             if not all_equal:
                 raise ValueError(
-                    "Not all GPUs executed the same number of iterations in this epoch, but:",
-                    [i.item() for i in iterations],
+                    f"Not all GPUs executed the same number of iterations in this epoch, "
+                    f"but: {[i.item() for i in iterations]}",
                 )
             iteration = iteration.item()
         else:
