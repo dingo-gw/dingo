@@ -79,6 +79,15 @@ def create_parser(top_level=True):
     )
 
     calibration_parser.add(
+        "--calibration-correction-type",
+        type=nonestr,
+        default="data",
+        help=("Type of calibration correction: can be either `data` or `template`."
+        " See https://bilby-dev.github.io/bilby/api/bilby.gw.detector.calibration.html "
+        "for more information.")
+    )
+
+    calibration_parser.add(
         "--spline-calibration-envelope-dict",
         type=nonestr,
         default=None,
@@ -571,6 +580,22 @@ def create_parser(top_level=True):
         ),
     )
     submission_parser.add(
+        "--generation-pool",
+        default="local-pool",
+        choices=["local", "local-pool", "igwn-pool"],
+        help=(
+            "Where to run the data generation job. Options are [local-pool, "
+            "local, igwn-pool]. If local-pool, the data generation job is "
+            "submitted to the local HTCondor pool. If local, the data "
+            "generation job is run on the submit node. If igwn-pool, the "
+            "data generation job is submitted to the IGWN HTCondor pool (osg)"
+            " if the submit node has access to the IGWN pool. In general, "
+            "the igwn-pool should be used when possible, but some large files, "
+            "e.g., ROQ bases may not be available via CVMFS and so the local-pool "
+            "should be used. (default: local-pool)"
+        ),
+    )
+    submission_parser.add(
         "--local-plot", action="store_true", help="Run the plot job locally"
     )
 
@@ -803,6 +828,21 @@ def create_parser(top_level=True):
             " with analysis-executable. Note, if this is not provided any"
             " new arguments to analysis-executable will raise a warning, but"
             " they will be passed to the executable directly."
+        ),
+    )
+    submission_parser.add(
+        "--scitoken-issuer",
+        default=None,
+        type=nonestr,
+        choices=[None, "None", "igwn", "local"],
+        help=(
+            "The issuer of the scitoken to use for accessing IGWN proprietary "
+            "data/services. If not given, this is automatically set based on "
+            "the machine being used. This should only be set if you are planning "
+            "to submit from a different machine to the one you are running on. "
+            "The allowed options are :code:`igwn` and :code:`local`. "
+            "For more details see "
+            "https://computing.docs.ligo.org/guide/htcondor/credentials."
         ),
     )
 

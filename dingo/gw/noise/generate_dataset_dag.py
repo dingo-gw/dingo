@@ -117,7 +117,7 @@ def create_dag(data_dir, settings_file, time_segments, out_name):
         job_list.append(psd_job)
 
     # --- (b) Consolidate dataset
-    executable = os.path.join(env_path, "dingo_merge_ASD_datasets")
+    executable = os.path.join(env_path, "dingo_merge_asd_datasets")
     args_dict = {
         "data_dir": data_dir,
         "settings_file": settings_file,

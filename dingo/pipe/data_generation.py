@@ -10,6 +10,7 @@ from bilby_pipe.data_generation import DataGenerationInput as BilbyDataGeneratio
 import numpy as np
 import lalsimulation as LS
 from bilby.gw.detector.psd import PowerSpectralDensity
+import numpy as np
 
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import FrequencyDomain
@@ -441,7 +442,12 @@ class DataGenerationInput(BilbyDataGenerationInput):
                     raise
 
     def save_hdf5(self):
-        """Save frequency-domain strain and ASDs as DingoDataset HDF5 format."""
+        """
+        Save frequency-domain strain and ASDs as DingoDataset HDF5 format.
+
+        This method will also save the PSDs as .txt files in the data directory
+        for easy reading by pesummary and Bilby.
+        """
 
         # if the data is created via an injection, we don't need to convert anything
         # from the Bilby format
@@ -529,6 +535,14 @@ class DataGenerationInput(BilbyDataGenerationInput):
             )
 
             dataset.to_file(self.event_data_files[0])
+
+        # also saving the psd as a .dat file which can be read in
+        # easily by pesummary or bilby
+        for ifo in self.interferometers:
+            np.savetxt(
+                os.path.join(self.data_directory, f"{ifo.name}_psd.txt"),
+                np.vstack([domain(), data["asds"][ifo.name] ** 2]).T,
+            )
 
     @property
     def event_data_files(self):

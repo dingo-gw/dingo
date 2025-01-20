@@ -1,22 +1,13 @@
 # Inference
 
-With a trained network, inference can be performed on real data by executing following on the command line:
-
-```bash
-dingo_analyze_event
-  --model model.pt
-  --gps_time_event gps_time_event
-  --num_samples num_samples
-  --batch_size batch_size
-```
- 
-This will download data from GWOSC at the specified time, apply the data conditioning consistent with the trained Dingo model and transform to frequency domain, and generate the requested number of posterior samples. It will save them in a file `dingo_samples-gps_time_event.hdf5`, along with *all* settings used in upstream components of Dingo (the waveform dataset, noise dataset, and model training) and the data analyzed.
-
-The `dingo_analyze_event` script can also be used to analyze an [injection](#injections).
+With a trained network, inference can be performed on injections or real data. For 
+injections, see the [discussion in the examples](example_injection.md). For real data, we 
+recommend to use [dingo_pipe](dingo_pipe.md).
 
 ## The `Sampler` class
 
-Under the hood, the inference script uses the `Sampler` class, or more specifically, the `GWSampler` class, which inherits from it.
+Inference uses the `Sampler` class, or more specifically, the `GWSampler` class,
+which inherits from it.
 
 ```{eval-rst}
 .. autoclass:: dingo.gw.inference.gw_samplers.GWSampler
