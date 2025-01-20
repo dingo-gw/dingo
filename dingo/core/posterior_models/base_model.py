@@ -2,6 +2,7 @@
 This module contains the abstract base class for representing posterior models,
 as well as functions for training and testing across an epoch.
 """
+
 from abc import abstractmethod, ABC
 import os
 from os.path import join
@@ -451,7 +452,13 @@ class BasePosteriorModel(ABC):
                         print("wandb not installed. Skipping logging to wandb.")
 
                 if early_stopping is not None:
-                    is_best_model = early_stopping(test_loss)
+                    # Whether to use train or test loss
+                    early_stopping_loss = (
+                        test_loss
+                        if early_stopping.metric == "validation"
+                        else train_loss
+                    )
+                    is_best_model = early_stopping(early_stopping_loss)
                     if is_best_model:
                         self.save_model(
                             join(train_dir, "best_model.pt"), save_training_info=False
