@@ -34,7 +34,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # Run index arguments
         self.idx = args.idx
         # self.generation_seed = args.generation_seed
-        self.trigger_time = args.trigger_time
+        self.trigger_time = float(args.trigger_time)
 
         # Naming arguments
         self.outdir = args.outdir
@@ -173,7 +173,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # PSD and strain data.
         data = {"waveform": {}, "asds": {}}  # TODO: Rename these keys.
         for ifo in self.interferometers:
-
             strain = ifo.strain_data.frequency_domain_strain
             frequency_array = ifo.strain_data.frequency_array
             asd = ifo.power_spectral_density.get_amplitude_spectral_density_array(
@@ -214,6 +213,11 @@ class DataGenerationInput(BilbyDataGenerationInput):
             "f_max": self.maximum_frequency,
             "window_type": "tukey",
             "roll_off": self.tukey_roll_off,
+            "trigger_offset": {
+                ifo.name: ifo.strain_data.start_time
+                - (self.trigger_time - self.duration + self.post_trigger_duration)
+                for ifo in self.interferometers
+            },
         }
 
         for k in [
