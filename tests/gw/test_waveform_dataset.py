@@ -182,11 +182,11 @@ def binary_prior():
 def test_wfd_size(wfd_settings: str, binary_prior: BinaryPrior):
     """
     Test that the size requested by the waveform generator settings is the same as the
-    size of the generated dataset. This should be the case even when there are failures.
-    In the waveform generation
+    size of the generated dataset. This should be the case even when there are failures
+    in the waveform generation
     """
     # changing the waveform generator settings to create a prior which will create
-    # failing waveforms for a fraction of the prior. Ie can't generate negative 
+    # failing waveforms for a fraction of the prior. I.e. can't generate negative 
     # chirp masses so the waveform generator will fail 
     wfd_settings["intrinsic_prior"]["chirp_mass"] = binary_prior
     del wfd_settings["intrinsic_prior"]["mass_1"]
