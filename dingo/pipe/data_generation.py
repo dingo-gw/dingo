@@ -16,7 +16,7 @@ from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import FrequencyDomain
 from dingo.pipe.parser import create_parser
 from dingo.gw.injection import Injection
-from dingo.core.models import PosteriorModel
+from dingo.core.posterior_models import NormalizingFlowPosteriorModel
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.data.data_preparation import (
     load_raw_data,
@@ -198,7 +198,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
     def generate_injection(self, args):
         """Generate injection consistent with trained dingo model"""
         # loading posterior model for which we want to generate injections
-        pm = PosteriorModel(model_filename=args.model, device="cpu")
+        pm = NormalizingFlowPosteriorModel(model_filename=args.model, device="cpu")
         injection_generator = Injection.from_posterior_model_metadata(pm.metadata)
         injection_generator.t_ref = self.trigger_time
         injection_generator._initialize_transform()
@@ -207,11 +207,10 @@ class DataGenerationInput(BilbyDataGenerationInput):
             if args.reference_frequency is not None
             else injection_generator.waveform_generator.f_ref
         )
-        # NOTE FIXME this is a hack to get around the fact that the f_start is set to f_ref in the waveform generator
-        # for most approximants
-        injection_generator.waveform_generator.f_start = (
-            injection_generator.waveform_generator.f_ref
-        )
+        if "f_start" in pm.metadata["dataset_settings"]["waveform_generator"]:
+            injection_generator.waveform_generator.f_start = (
+                pm.metadata["dataset_settings"]["waveform_generator"]["f_start"]
+            )
 
         # selecting PSD
         if args.use_psd_of_trigger:
@@ -302,28 +301,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
         )
         logger.info(f"Network optimal SNR of injection: {rho_opt}")
         logger.info(f"Detector optimal SNRs of injection: {rho_opt_ifos}")
-
-    def compute_optimal_snr(self, strain_data, data_domain):
-        """Compute network optimal signal-to-noise ratio for the first injected strain"""
-        mu = strain_data["waveform"]
-        asds = strain_data["asds"]
-        delta_f = data_domain.delta_f
-        noise_std = data_domain.noise_std
-
-        # In the inner products below explicitly divide by the window factor
-        window_factor = 4 * delta_f * noise_std**2
-
-        # optimal network SNR
-        kappa2_list = [
-            inner_product(
-                mu_ifo, mu_ifo, delta_f=delta_f, psd=window_factor * asd_ifo**2
-            )
-            for mu_ifo, asd_ifo in zip(mu.values(), asds.values())
-        ]
-        rho_opt = np.sqrt(sum(kappa2_list))
-        rho_opt_ifos = np.sqrt(kappa2_list)
-
-        return rho_opt_ifos, rho_opt
 
     def create_data(self, args):
         super().create_data(args)
@@ -463,13 +440,22 @@ class DataGenerationInput(BilbyDataGenerationInput):
             "window_type": "tukey",
             "roll_off": self.tukey_roll_off,
         }
+
+        # These arrays extend up to self.sampling_frequency. Truncate them to
+        # self.maximum_frequency, and also set the asd to 1.0 below
+        # self.minimum_frequency.
+        domain = FrequencyDomain(
+            f_min=self.minimum_frequency,
+            f_max=self.maximum_frequency,
+            delta_f=1 / self.duration,
+        )
         if hasattr(self, "strain_data_list"):
-            for strain_data, event_data_file in zip(
+            for data, event_data_file in zip(
                 self.strain_data_list, self.event_data_files
             ):
                 dataset = EventDataset(
                     dictionary={
-                        "data": strain_data,
+                        "data": data,
                         "injection_waveform_approximant": self.injection_waveform_approximant,
                         "injection_dict": self.injection_dict,
                         "settings": settings,
@@ -487,14 +473,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
                     frequency_array
                 )
 
-                # These arrays extend up to self.sampling_frequency. Truncate them to
-                # self.maximum_frequency, and also set the asd to 1.0 below
-                # self.minimum_frequency.
-                domain = FrequencyDomain(
-                    f_min=self.minimum_frequency,
-                    f_max=self.maximum_frequency,
-                    delta_f=1 / self.duration,
-                )
                 strain = domain.update_data(strain)
                 asd = domain.update_data(asd, low_value=1.0)
 
@@ -538,10 +516,10 @@ class DataGenerationInput(BilbyDataGenerationInput):
 
         # also saving the psd as a .dat file which can be read in
         # easily by pesummary or bilby
-        for ifo in self.interferometers:
+        for ifo_name in self.detectors:
             np.savetxt(
-                os.path.join(self.data_directory, f"{ifo.name}_psd.txt"),
-                np.vstack([domain(), data["asds"][ifo.name] ** 2]).T,
+                os.path.join(self.data_directory, f"{ifo_name}_psd.txt"),
+                np.vstack([domain(), data["asds"][ifo_name] ** 2]).T,
             )
 
     @property

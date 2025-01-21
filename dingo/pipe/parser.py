@@ -194,27 +194,27 @@ def create_parser(top_level=True):
             "a segement which contains no Nans."
         ),
     )
-    #
-    # data_gen_pars.add(
-    #     "--gps-tuple",
-    #     type=nonestr,
-    #     help=(
-    #         "Tuple of the (start, step, number) of GPS start times. For"
-    #         " example, (10, 1, 3) produces the gps start times [10, 11, 12]."
-    #         " If given, gps-file is ignored."
-    #     ),
-    #     default=None,
-    # )
-    # data_gen_pars.add(
-    #     "--gps-file",
-    #     type=nonestr,
-    #     help=(
-    #         "File containing segment GPS start times. This can be a multi-"
-    #         "column file if (a) it is comma-separated and (b) the zeroth "
-    #         "column contains the gps-times to use"
-    #     ),
-    #     default=None,
-    # )
+    
+    data_gen_pars.add(
+        "--gps-tuple",
+        type=nonestr,
+        help=(
+            "Tuple of the (start, step, number) of GPS start times. For"
+            " example, (10, 1, 3) produces the gps start times [10, 11, 12]."
+            " If given, gps-file is ignored."
+        ),
+        default=None,
+    )
+    data_gen_pars.add(
+        "--gps-file",
+        type=nonestr,
+        help=(
+            "File containing segment GPS start times. This can be a multi-"
+            "column file if (a) it is comma-separated and (b) the zeroth "
+            "column contains the gps-times to use"
+        ),
+        default=None,
+    )
     data_gen_pars.add(
         "--timeslide-file",
         type=nonestr,
@@ -310,17 +310,17 @@ def create_parser(top_level=True):
         default="osdf",
         help="URL type to use for datafind, default is osdf",
     )
-    # data_type_pars = data_gen_pars.add_mutually_exclusive_group()
-    # data_type_pars.add(
-    #     "--gaussian-noise",
-    #     action="store_true",
-    #     help="If true, use simulated Gaussian noise",
-    # )
-    # data_gen_pars.add(
-    # "--zero-noise",
-    # action="store_true",
-    # help="Use a zero noise realisation",
-    # )
+    data_type_pars = data_gen_pars.add_mutually_exclusive_group()
+    data_type_pars.add(
+        "--gaussian-noise",
+        action="store_true",
+        help="If true, use simulated Gaussian noise for injections",
+    )
+    data_gen_pars.add(
+    "--zero-noise",
+    action="store_true",
+    help="Use a zero noise realisation",
+    )
 
     det_parser = parser.add_argument_group(
         title="Detector arguments",
@@ -524,11 +524,6 @@ def create_parser(top_level=True):
         "If none is specified, then the waveform consistent with the network"
         "training will be used. Allowed waveform approximants are those implemented"
         "in lalsimulation",
-    )
-    injection_parser.add(
-        "--zero-noise",
-        action="store_true",
-        help="Use a zero noise realisation",
     )
     injection_parser.add(
         "--num-noise-realizations",

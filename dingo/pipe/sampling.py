@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """ Script to sample from a Dingo model. Based on bilby_pipe data analysis script. """
 import sys
+import os
 from pathlib import Path
 
 from bilby_pipe.input import Input
@@ -165,7 +166,7 @@ class SamplingInput(Input):
         if len(self.detectors) == 1:
             model_settings = self._density_recovery_settings["nde_settings"]["model"]
             if model_settings["posterior_model_type"] == "normalizing_flow":
-                base_transform_kwargs = model_settings["base_transform_kwargs"]
+                base_transform_kwargs = model_settings["posterior_kwargs"]["base_transform_kwargs"]
                 if base_transform_kwargs["base_transform_type"] == "rq-coupling":
                     logger.info(
                         "Using autoregressive transform for density estimator since there is only one GNPE proxy "
@@ -214,7 +215,7 @@ class SamplingInput(Input):
                 )
                 training_result = self.dingo_sampler.to_result()
                 outdir = Path(self.result_directory)
-                training_result.to_file(outdir / "training_samples.hdf5")
+                training_result.to_file(os.path.join(outdir, "training_samples.hdf5"))
                 inference_parameters = list(self.dingo_sampler.samples.columns)
                 # removing proxies since this makes training the unconditional flow easier
                 inference_parameters = [
@@ -226,6 +227,7 @@ class SamplingInput(Input):
                 )
 
                 nde_sampler = GWSampler(model=unconditional_flow)
+                nde_sampler.metadata = self.dingo_sampler.metadata
                 nde_sampler.run_sampler(
                     num_samples=self.num_samples, batch_size=self.batch_size
                 )
