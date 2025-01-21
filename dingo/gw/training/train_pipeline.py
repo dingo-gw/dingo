@@ -1,3 +1,4 @@
+from typing import Tuple
 import argparse
 import numpy as np
 import os
@@ -528,7 +529,9 @@ def initialize_stage(
     return train_loader, test_loader, train_sampler
 
 
-def train_stages(pm, wfd, train_dir: str, local_settings: dict):
+def train_stages(
+    pm: BasePosteriorModel, wfd: WaveformDataset, train_dir: str, local_settings: dict
+) -> Tuple[bool, bool]:
     """
     Train the network, iterating through the sequence of stages. Stages can change
     certain settings such as the noise characteristics, optimizer, and scheduler settings.
@@ -543,8 +546,10 @@ def train_stages(pm, wfd, train_dir: str, local_settings: dict):
 
     Returns
     -------
-    bool
-        True if last epoch finished or if time limit reached and training should resume
+    training_finished: bool
+        True if last epoch finished
+    resume_training: bool
+        True if time limit reached and training should resume
         False otherwise
     """
 
@@ -566,7 +571,7 @@ def train_stages(pm, wfd, train_dir: str, local_settings: dict):
             break
     end_epochs = list(np.cumsum([stage["epochs"] for stage in stages]))
 
-    training_successful_or_resume = False
+    resume_training = False
     num_starting_stage = np.searchsorted(end_epochs, pm.epoch + 1)
     for n in range(num_starting_stage, num_stages):
         stage = stages[n]
@@ -626,7 +631,7 @@ def train_stages(pm, wfd, train_dir: str, local_settings: dict):
         )
         # if test_only, model should not be saved, and run is complete
         if local_settings.get("test_only", False):
-            return True
+            return True, False
 
         if pm.epoch == end_epochs[n]:
             # Only save model on one device
@@ -636,13 +641,15 @@ def train_stages(pm, wfd, train_dir: str, local_settings: dict):
                 pm.save_model(save_file, save_training_info=True)
         if runtime_limits.local_limits_exceeded(pm.epoch) and print_bool:
             print("Local runtime limits reached. Ending program.")
-            training_successful_or_resume = True
+            resume_training = True
             break
 
+    training_finished = False
     if pm.epoch == end_epochs[-1]:
-        training_successful_or_resume = True
+        resume_training = False
+        training_finished = True
 
-    return training_successful_or_resume
+    return training_finished, resume_training
 
 
 def run_training(
@@ -652,7 +659,7 @@ def run_training(
     ckpt_file: str,
     resume: bool,
     pretraining: bool = False,
-) -> (bool, int):
+) -> (bool, bool, int):
     """
     Starts a training run for single-GPU training.
 
@@ -674,7 +681,9 @@ def run_training(
     Returns
     ----------
     complete: bool
-        Whether the training run was successful
+        Whether the training run was completed
+    resume: bool
+        Whether the training should resume in a new job
     epoch: int
         The epoch number where the training finished
     """
@@ -687,9 +696,11 @@ def run_training(
             train_dir=train_dir,
         )
     with threadpool_limits(limits=1, user_api="blas"):
-        complete = train_stages(pm, wfd, train_dir, local_settings)
+        complete, resume = train_stages(
+            pm=pm, wfd=wfd, train_dir=train_dir, local_settings=local_settings
+        )
 
-    return complete, pm.epoch
+    return complete, resume, pm.epoch
 
 
 def run_multi_gpu_training(
@@ -700,7 +711,7 @@ def run_multi_gpu_training(
     ckpt_file: str,
     resume: bool,
     pretraining: bool = False,
-) -> (bool, int):
+) -> (bool, bool, int):
     """
     Starts a training run for multi-GPU distributed data parallel (DDP) training.
 
@@ -724,7 +735,9 @@ def run_multi_gpu_training(
     Returns
     ----------
     complete: bool
-        Whether the training run was successful
+        Whether the training is finished
+    resume: bool
+        Whether the training should be resumed
     epoch: int
         The epoch number where the training finished
     """
@@ -797,11 +810,12 @@ def run_multi_gpu_training(
     try:
         while True:
             temp_result = result_queue.get_nowait()  # Avoid blocking
+            # contains (rank, complete, resume, epoch, error_message)
             results.append(temp_result)
-            if temp_result[1] is False:
-                print(f"Rank {temp_result[0]} failed with error: {temp_result[3]}")
+            if temp_result[-1] is not None:
+                print(f"Rank {temp_result[0]} failed with error: {temp_result[-1]}")
             else:
-                print(f"Rank {temp_result[0]} completed successfully.")
+                print(f"Rank {temp_result[0]} finished successfully.")
     except queue.Empty:
         pass
 
@@ -812,16 +826,22 @@ def run_multi_gpu_training(
         )
 
     # Collect exit results from all processes after training
-    complete, pm_epoch = [], []
+    complete, resume, pm_epoch = [], [], []
     for result in results:
         complete.append(result[1])
-        pm_epoch.append(result[2])
-    assert all(complete) is True, f"Not all processes exited successfully: {complete}."
+        resume.append(result[2])
+        pm_epoch.append(result[3])
+    assert (
+        len(set(complete)) == 1
+    ), f"Processes do not return the same for whether the training is completed or not: {complete}."
+    assert (
+        len(set(resume)) == 1
+    ), f"Processes do not return the same for whether to resume training: {resume}."
     assert (
         len(set(pm_epoch)) == 1
     ), f"Processes do not return the same epochs: {pm_epoch}."
 
-    return complete[0], pm_epoch[0]
+    return complete[0], resume[0], pm_epoch[0]
 
 
 def run_training_ddp(
@@ -916,7 +936,7 @@ def run_training_ddp(
         # Wrap the model with DDP
         pm.network = DDP(pm.network, device_ids=[rank])
 
-        complete = train_stages(pm, wfd, train_dir, local_settings)
+        complete, resume = train_stages(pm, wfd, train_dir, local_settings)
 
         if complete and local_settings.get("wandb", False) and rank == 0.0:
             try:
@@ -930,11 +950,11 @@ def run_training_ddp(
 
     except Exception as e:
         # In case of an error, put the exception in the result queue
-        result_queue.put((rank, False, 0, str(e)))
+        result_queue.put((rank, False, False, 0, str(e)))
         sys.exit(1)  # Exit with a non-zero code to indicate failure
 
     # Put return info on queue
-    result_queue.put((rank, complete, pm.epoch, None))
+    result_queue.put((rank, complete, resume, pm.epoch, None))
     sys.exit(0)  # Exit with zero to indicate success
 
 
@@ -1040,7 +1060,7 @@ def train_local():
         # Specify the number of processes (typically the number of GPUs available)
         world_size = local_settings["condor"]["num_gpus"]
 
-        complete, pm_epoch = run_multi_gpu_training(
+        complete, resume, pm_epoch = run_multi_gpu_training(
             world_size=world_size,
             train_settings=train_settings,
             local_settings=local_settings,
@@ -1052,7 +1072,7 @@ def train_local():
     else:
         if local_settings["device"] == "cuda":
             document_gpus(args.train_dir)
-        complete, pm_epoch = run_training(
+        complete, resume, pm_epoch = run_training(
             train_settings=train_settings,
             local_settings=local_settings,
             train_dir=args.train_dir,
