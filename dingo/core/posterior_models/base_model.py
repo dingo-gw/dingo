@@ -28,7 +28,7 @@ from dingo.core.utils.backward_compatibility import update_model_config
 from dingo.core.utils.misc import get_version
 
 from dingo.core.utils.scheduler import get_scheduler_from_kwargs, perform_scheduler_step
-from dingo.core.utils.trainutils import EarlyStopping
+from dingo.core.utils.trainutils import EarlyStopping, RuntimeLimits
 
 
 class BasePosteriorModel(ABC):
@@ -396,7 +396,7 @@ class BasePosteriorModel(ABC):
         test_loader: torch.utils.data.DataLoader,
         train_sampler: torch.utils.data.DistributedSampler,
         train_dir: str,
-        runtime_limits: object = None,
+        runtime_limits: RuntimeLimits = None,
         checkpoint_epochs: int = None,
         use_wandb=False,
         test_only=False,
@@ -417,7 +417,8 @@ class BasePosteriorModel(ABC):
             torch distributed sampler for training data
         train_dir: str
             directory for saving models and history
-        runtime_limits: object=None
+        runtime_limits: RuntimeLimits = None
+            allows to check whether the runtime limit is exceeded
         checkpoint_epochs: int=None
             number of epochs between checkpoints
         use_wandb: bool=False

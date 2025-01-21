@@ -550,7 +550,7 @@ def train_stages(pm, wfd, train_dir: str, local_settings: dict):
 
     train_settings = pm.metadata["train_settings"]
     runtime_limits = RuntimeLimits(
-        epoch_start=pm.epoch, **local_settings["runtime_limits"]
+        epoch_start=pm.epoch, device=pm.device, **local_settings["runtime_limits"]
     )
     rank = local_settings.get("rank", None)
     print_bool = True if rank is None or rank == 0 else False

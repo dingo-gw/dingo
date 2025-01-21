@@ -233,6 +233,7 @@ class RuntimeLimits:
 
     def __init__(
         self,
+        device: torch.device = torch.device("cuda"),
         max_time_per_run: float = None,
         max_epochs_per_run: int = None,
         max_epochs_total: int = None,
@@ -251,6 +252,8 @@ class RuntimeLimits:
             maximum total number of epochs for model
         epoch_start: int = None
             start epoch of run
+        device: torch.device = torch.device("cude")
+            required for multi-GPU training
         """
         self.max_time_per_run = max_time_per_run
         self.max_epochs_per_run = max_epochs_per_run
@@ -259,6 +262,11 @@ class RuntimeLimits:
         self.time_start = time.time()
         if max_epochs_per_run is not None and epoch_start is None:
             raise ValueError("epoch_start required to check " "max_epochs_per_run.")
+        self.device = device
+        if torch.cuda.device_count() > 1:
+            self.multi_gpu = True
+        else:
+            self.multi_gpu = False
 
     def limits_exceeded(self, epoch: int = None):
         """
@@ -274,13 +282,15 @@ class RuntimeLimits:
             flag whether runtime limits are exceeded and run should be stopped;
             if limits_exceeded = True, this prints a message for the reason
         """
+        # return False if none of the limits is exceeded
+        limits_exceeded = False
         # check time limit for run
         if self.max_time_per_run is not None:
             if time.time() - self.time_start >= self.max_time_per_run:
                 print(
                     f"Stop run: Time limit of {self.max_time_per_run} s " f"exceeded."
                 )
-                return True
+                limits_exceeded = True
         # check epoch limit for run
         if self.max_epochs_per_run is not None:
             if epoch is None:
@@ -289,16 +299,27 @@ class RuntimeLimits:
                 print(
                     f"Stop run: Epoch limit of {self.max_epochs_per_run} per run reached."
                 )
-                return True
+                limits_exceeded = True
         # check total epoch limit
         if self.max_epochs_total is not None:
             if epoch >= self.max_epochs_total:
                 print(
                     f"Stop run: Total epoch limit of {self.max_epochs_total} reached."
                 )
-                return True
-        # return False if none of the limits is exceeded
-        return False
+                limits_exceeded = True
+
+        # Broadcast across GPUs to check whether one of the GPUs reached the time limit.
+        if self.multi_gpu:
+            # Sync all processes before aggregating value
+            dist.barrier()
+            # limits_exceeded contains True on all processes if one of the processes reached the time limit.
+            limits_exceeded = torch.tensor(
+                limits_exceeded, device=self.device, dtype=torch.bool
+            )
+            dist.all_gather(limits_exceeded, op=dist.ReduceOp.MAX)
+            limits_exceeded = limits_exceeded.item()
+
+        return limits_exceeded
 
     def local_limits_exceeded(self, epoch: int = None):
         """
