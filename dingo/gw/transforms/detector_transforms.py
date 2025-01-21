@@ -153,7 +153,7 @@ class ProjectOntoDetectors(object):
             dec = extrinsic_parameters.pop("dec")
             psi = extrinsic_parameters.pop("psi")
             tc_ref = parameters["geocent_time"]
-            assert tc_ref == 0, (
+            assert np.allclose(tc_ref, parameters["geocent_time"]), (
                 "This should always be 0. If for some reason "
                 "you want to save time shifted polarizations,"
                 " then remove this assert statement."
@@ -163,15 +163,36 @@ class ProjectOntoDetectors(object):
             raise ValueError("Missing parameters.")
 
         # (1) rescale polarizations and set distance parameter to sampled value
-        hc = sample["waveform"]["h_cross"] * d_ref / d_new
-        hp = sample["waveform"]["h_plus"] * d_ref / d_new
+        if isinstance(d_ref, float) or isinstance(d_new, float):
+            d_ratio = d_ref / d_new
+        elif isinstance(d_ref, np.ndarray) and isinstance(d_new, np.ndarray):
+            d_ratio = (d_ref / d_new)[:, np.newaxis]
+        hc = sample["waveform"]["h_cross"] * d_ratio
+        hp = sample["waveform"]["h_plus"] * d_ratio
         parameters["luminosity_distance"] = d_new
 
         strains = {}
         for ifo in self.ifo_list:
             # (2) project strains onto the different detectors
-            fp = ifo.antenna_response(ra, dec, self.ref_time, psi, mode="plus")
-            fc = ifo.antenna_response(ra, dec, self.ref_time, psi, mode="cross")
+            # TODO the Bilby cython functions are not vectorized, so for now
+            # we just loop over the extrinsic parameters. This is not ideal
+            # and eventually one should also vectorize these functions to
+            # achieve optimal batching capabilities.
+            fp = np.array(
+                [
+                    ifo.antenna_response(ra, dec, self.ref_time, psi, mode="plus")
+                    for ra, dec, psi in zip(ra, dec, psi)
+                ]
+            )
+            fc = np.array(
+                [
+                    ifo.antenna_response(ra, dec, self.ref_time, psi, mode="cross")
+                    for ra, dec, psi in zip(ra, dec, psi)
+                ]
+            )
+            if len(fp) > 1:
+                fp = fp[..., np.newaxis]
+                fc = fc[..., np.newaxis]
             strain = fp * hp + fc * hc
 
             # (3) time shift the strain. If polarizations are timeshifted by
@@ -379,14 +400,14 @@ class ApplyCalibrationUncertainty(object):
             )
 
             for i in range(self.num_calibration_curves):
-                calibration_draws[ifo.name][
-                    i, self.data_domain.frequency_mask
-                ] = ifo.calibration_model.get_calibration_factor(
-                    self.data_domain.sample_frequencies[
-                        self.data_domain.frequency_mask
-                    ],
-                    prefix="recalib_{}_".format(ifo.name),
-                    **calibration_parameter_draws[ifo.name].iloc[i],
+                calibration_draws[ifo.name][i, self.data_domain.frequency_mask] = (
+                    ifo.calibration_model.get_calibration_factor(
+                        self.data_domain.sample_frequencies[
+                            self.data_domain.frequency_mask
+                        ],
+                        prefix="recalib_{}_".format(ifo.name),
+                        **calibration_parameter_draws[ifo.name].iloc[i],
+                    )
                 )
 
             # Multiplying the sample waveform in the interferometer according to
