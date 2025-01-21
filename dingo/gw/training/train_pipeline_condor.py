@@ -148,24 +148,24 @@ def train_condor():
             # Specify the number of processes (typically the number of GPUs available)
             world_size = local_settings["condor"]["num_gpus"]
 
-            complete, pm_epoch = run_multi_gpu_training(
-                world_size,
-                train_settings,
-                local_settings,
-                args.train_dir,
-                args.checkpoint,
-                resume,
-                args.pretraining,
+            complete, resume, pm_epoch = run_multi_gpu_training(
+                world_size=world_size,
+                train_settings=train_settings,
+                local_settings=local_settings,
+                train_dir=args.train_dir,
+                ckpt_file=args.checkpoint,
+                resume=resume,
+                pretraining=args.pretraining,
             )
         else:
             document_gpus(args.train_dir)
-            complete, pm_epoch = run_training(
-                train_settings,
-                local_settings,
-                args.train_dir,
-                args.checkpoint,
-                resume,
-                args.pretraining,
+            complete, resume, pm_epoch = run_training(
+                train_settings=train_settings,
+                local_settings=local_settings,
+                train_dir=args.train_dir,
+                ckpt_file=args.checkpoint,
+                resume=resume,
+                pretraining=args.pretraining,
             )
 
         print("Copying log files")
@@ -175,7 +175,7 @@ def train_condor():
         # PREPARE NEXT SUBMISSION
         #
 
-        if complete:
+        if complete and not resume:
             print(
                 f"Training complete, job will not be resubmitted. Executing exit command: {args.exit_command}."
             )
@@ -183,7 +183,7 @@ def train_condor():
                 os.system(args.exit_command)
             sys.exit()
 
-        else:
+        elif resume:
             condor_arguments = f"--train_dir {args.train_dir}"
 
     else:
