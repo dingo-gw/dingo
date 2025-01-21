@@ -31,28 +31,10 @@ def get_activation_function_from_string(activation_name: str):
         return F.relu
     elif activation_name.lower() == "leaky_relu":
         return F.leaky_relu
+    elif activation_name.lower() == "gelu":
+        return F.gelu
     else:
         raise ValueError("Invalid activation function.")
-
-
-def forward_pass_with_unpacked_tuple(
-    model: nn.Module,
-    x: Union[Tuple, torch.Tensor],
-):
-    """
-    Performs forward pass of model with input x. If x is a tuple, it return
-    y = model(*x), else it returns y = model(x).
-    :param model: nn.Module
-        model for forward pass
-    :param x: Union[Tuple, torch.Tensor]
-        input for forward pass
-    :return: torch.Tensor
-        output of the forward pass, either model(*x) or model(x)
-    """
-    if isinstance(x, Tuple):
-        return model(*x)
-    else:
-        return model(x)
 
 
 def get_number_of_model_parameters(
