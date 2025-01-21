@@ -163,10 +163,12 @@ class ProjectOntoDetectors(object):
             raise ValueError("Missing parameters.")
 
         # (1) rescale polarizations and set distance parameter to sampled value
-        if isinstance(d_ref, float) or isinstance(d_new, float):
+        if np.isscalar(d_ref) or np.isscalar(d_new):
             d_ratio = d_ref / d_new
         elif isinstance(d_ref, np.ndarray) and isinstance(d_new, np.ndarray):
             d_ratio = (d_ref / d_new)[:, np.newaxis]
+        else:
+            raise ValueError("luminosity_distance should be a float or a numpy array.")
         hc = sample["waveform"]["h_cross"] * d_ratio
         hp = sample["waveform"]["h_plus"] * d_ratio
         parameters["luminosity_distance"] = d_new
@@ -178,19 +180,22 @@ class ProjectOntoDetectors(object):
             # we just loop over the extrinsic parameters. This is not ideal
             # and eventually one should also vectorize these functions to
             # achieve optimal batching capabilities.
-            fp = np.array(
-                [
-                    ifo.antenna_response(ra, dec, self.ref_time, psi, mode="plus")
-                    for ra, dec, psi in zip(ra, dec, psi)
-                ]
-            )
-            fc = np.array(
-                [
-                    ifo.antenna_response(ra, dec, self.ref_time, psi, mode="cross")
-                    for ra, dec, psi in zip(ra, dec, psi)
-                ]
-            )
-            if len(fp) > 1:
+            if any(np.isscalar(x) for x in [ra, dec, psi]):
+                fp = ifo.antenna_response(ra, dec, self.ref_time, psi, mode="plus")
+                fc = ifo.antenna_response(ra, dec, self.ref_time, psi, mode="cross")
+            else:
+                fp = np.array(
+                    [
+                        ifo.antenna_response(ra, dec, self.ref_time, psi, mode="plus")
+                        for ra, dec, psi in zip(ra, dec, psi)
+                    ]
+                )
+                fc = np.array(
+                    [
+                        ifo.antenna_response(ra, dec, self.ref_time, psi, mode="cross")
+                        for ra, dec, psi in zip(ra, dec, psi)
+                    ]
+                )
                 fp = fp[..., np.newaxis]
                 fc = fc[..., np.newaxis]
             strain = fp * hp + fc * hc
@@ -333,11 +338,11 @@ class ApplyCalibrationUncertainty(object):
             It was discovered in Oct. 2024 that the calibration envelopes specified by
             the detchar group were not being used correctly by PE codes. According to
             the detchar group, envelopes are over $\eta$ which is defined as:
-            
+
             $$
             h_{obs}(f) = \frac{1}{\eta} * h(f).
             $$
-            
+
             Of course, $\frac{1}{\eta} = \alpha$. Previously, the envelopes were
             being used as if $\eta = \alpha$ which is wrong. Therefore, there is
             now an additional option where one can specify correction_type = "data"
@@ -369,15 +374,15 @@ class ApplyCalibrationUncertainty(object):
                 # frequency points, $f_i$.  Then for each node point f_i, it
                 # will create a gaussian prior according to the spline of the
                 # median and sigma found earlier
-                self.calibration_prior[
-                    ifo.name
-                ] = CalibrationPriorDict.from_envelope_file(
-                    self.calibration_envelope[ifo.name],
-                    self.data_domain.f_min,
-                    self.data_domain.f_max,
-                    num_calibration_nodes,
-                    ifo.name,
-                    correction_type=correction_type,
+                self.calibration_prior[ifo.name] = (
+                    CalibrationPriorDict.from_envelope_file(
+                        self.calibration_envelope[ifo.name],
+                        self.data_domain.f_min,
+                        self.data_domain.f_max,
+                        num_calibration_nodes,
+                        ifo.name,
+                        correction_type=correction_type,
+                    )
                 )
 
         else:

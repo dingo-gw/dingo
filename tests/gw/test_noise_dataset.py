@@ -48,6 +48,7 @@ def test_noise_dataset_load(noise_dataset):
         assert asd_dataset.asds[ifo].shape == (n, len(asd_dataset.domain))
     # check that sampling work correctly
     asd_samples = asd_dataset.sample_random_asds()
+    asd_samples = {ifo: asd[0] for ifo, asd in asd_samples.items()}
     assert asd_samples.keys() == ifos_num_asds.keys()
     for _, asd in asd_samples.items():
         assert len(asd) == len(asd_dataset.domain)
@@ -66,6 +67,7 @@ def test_noise_dataset_load(noise_dataset):
         )
     # check that sampling work correctly
     asd_samples = asd_dataset.sample_random_asds()
+    asd_samples = {ifo: asd[0] for ifo, asd in asd_samples.items()}
     assert set(asd_samples.keys()) == set(ifos)
     for _, asd in asd_samples.items():
         assert len(asd) == len(asd_dataset.domain)
@@ -76,6 +78,7 @@ def test_noise_dataset_update_domain(noise_dataset):
 
     asd_dataset = ASDDataset(dataset_path)
     asd_samples = asd_dataset.sample_random_asds()
+    asd_samples = {ifo: asd[0] for ifo, asd in asd_samples.items()}
 
     delta_f = asd_dataset.domain.delta_f
     f_min = asd_dataset.domain.f_min
@@ -85,6 +88,7 @@ def test_noise_dataset_update_domain(noise_dataset):
     domain_update = {"f_min": f_min_new, "f_max": f_max_new}
     asd_dataset_truncated = ASDDataset(dataset_path, domain_update=domain_update)
     asd_samples_truncated = asd_dataset_truncated.sample_random_asds()
+    asd_samples_truncated = {ifo: asd[0] for ifo, asd in asd_samples_truncated.items()}
 
     domain_ref = build_domain(domain_dict)
     domain_ref.update(domain_update)
