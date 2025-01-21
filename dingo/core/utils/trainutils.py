@@ -316,7 +316,7 @@ class RuntimeLimits:
             limits_exceeded = torch.tensor(
                 limits_exceeded, device=self.device, dtype=torch.bool
             )
-            dist.all_gather(limits_exceeded, op=dist.ReduceOp.MAX)
+            dist.all_reduce(limits_exceeded, op=dist.ReduceOp.MAX)
             limits_exceeded = limits_exceeded.item()
 
         return limits_exceeded
