@@ -60,6 +60,10 @@ namespaces = false
 [tool.setuptools_scm]
 write_to = "dingo/_version.py"
 
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow",
+]
 
 [project.urls]
 homepage = "https://github.com/dingo-gw/dingo"
