@@ -43,7 +43,7 @@ dependencies = [
     "pyyaml",
     "requests",
     "scikit-learn",
-    "scipy",
+    "scipy==1.13.1",
     "threadpoolctl",
     "torch",
     "torchdiffeq",
