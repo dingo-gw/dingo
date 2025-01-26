@@ -633,14 +633,15 @@ def train_stages(
         if local_settings.get("test_only", False):
             return True, False
 
-        if pm.epoch == end_epochs[n]:
-            # Only save model on one device
-            if rank is None or rank == 0:
-                save_file = os.path.join(train_dir, f"model_stage_{n}.pt")
-                print(f"Training stage complete. Saving to {save_file}.")
-                pm.save_model(save_file, save_training_info=True)
-        if runtime_limits.local_limits_exceeded(pm.epoch) and print_bool:
-            print("Local runtime limits reached. Ending program.")
+        # Only save model for one device
+        if pm.epoch == end_epochs[n] and print_bool:
+            save_file = os.path.join(train_dir, f"model_stage_{n}.pt")
+            print(f"Training stage complete. Saving to {save_file}.")
+            pm.save_model(save_file, save_training_info=True)
+
+        if runtime_limits.local_limits_exceeded(pm.epoch):
+            if print_bool:
+                print("Local runtime limits reached. Ending program.")
             resume_training = True
             break
 
