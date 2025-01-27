@@ -185,6 +185,8 @@ def train_condor():
 
         elif resume:
             condor_arguments = f"--train_dir {args.train_dir}"
+            ckpt_file = os.path.join(args.train_dir, "model_latest.pt")
+            condor_arguments += f" --checkpoint {ckpt_file}"
 
     else:
 
