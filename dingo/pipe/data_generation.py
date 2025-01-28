@@ -5,6 +5,7 @@ from bilby_pipe.input import Input
 from bilby_pipe.main import parse_args
 from bilby_pipe.utils import logger, convert_string_to_dict
 from bilby_pipe.data_generation import DataGenerationInput as BilbyDataGenerationInput
+import numpy as np
 
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import FrequencyDomain
@@ -68,13 +69,13 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.zero_noise = False  # dingo mod
         self.resampling_method = args.resampling_method
 
-        # if args.timeslide_dict is not None:
-        #     self.timeslide_dict = convert_string_to_dict(args.timeslide_dict)
-        #     logger.info(f"Read-in timeslide dict directly: {self.timeslide_dict}")
-        # elif args.timeslide_file is not None:
-        #     self.gps_file = args.gps_file
-        #     self.timeslide_file = args.timeslide_file
-        #     self.timeslide_dict = self.get_timeslide_dict(self.idx)
+        if args.timeslide_dict is not None:
+            self.timeslide_dict = convert_string_to_dict(args.timeslide_dict)
+            logger.info(f"Read-in timeslide dict directly: {self.timeslide_dict}")
+        elif args.timeslide_file is not None:
+            self.gps_file = args.gps_file
+            self.timeslide_file = args.timeslide_file
+            self.timeslide_dict = self.get_timeslide_dict(self.idx)
 
         # Data duration arguments
         self.duration = args.duration
@@ -154,13 +155,20 @@ class DataGenerationInput(BilbyDataGenerationInput):
             args.injection_numbers = None
             args.injection_file = None
             args.injection_dict = None
-            args.gaussian_noise = False
             args.injection_waveform_arguments = None
+            args.injection_frequency_domain_source_model = None
+            self.frequency_domain_source_model = None
+            self.gaussian_noise = False
 
             self.create_data(args)
 
     def save_hdf5(self):
-        """Save frequency-domain strain and ASDs as DingoDataset HDF5 format."""
+        """
+        Save frequency-domain strain and ASDs as DingoDataset HDF5 format.
+
+        This method will also save the PSDs as .txt files in the data directory
+        for easy reading by pesummary and Bilby.
+        """
 
         # PSD and strain data.
         data = {"waveform": {}, "asds": {}}  # TODO: Rename these keys.
@@ -232,6 +240,14 @@ class DataGenerationInput(BilbyDataGenerationInput):
             }
         )
         dataset.to_file(self.event_data_file)
+
+        # also saving the psd as a .dat file which can be read in
+        # easily by pesummary or bilby
+        for ifo in self.interferometers:
+            np.savetxt(
+                os.path.join(self.data_directory, f"{ifo.name}_psd.txt"),
+                np.vstack([domain(), data["asds"][ifo.name] ** 2]).T,
+            )
 
     @property
     def event_data_file(self):

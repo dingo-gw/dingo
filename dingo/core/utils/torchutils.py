@@ -4,6 +4,16 @@ import torch.nn as nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from typing import Union, Tuple, Iterable
+import bilby
+
+
+def fix_random_seeds(_):
+    """Utility function to set random seeds when using multiple workers for DataLoader."""
+    np.random.seed(int(torch.initial_seed()) % (2 ** 32 - 1))
+    try:
+        bilby.core.utils.random.seed(int(torch.initial_seed()) % (2 ** 32 - 1))
+    except AttributeError:  # In case using an old version of Bilby.
+        pass
 
 
 def get_activation_function_from_string(activation_name: str):
@@ -21,28 +31,10 @@ def get_activation_function_from_string(activation_name: str):
         return F.relu
     elif activation_name.lower() == "leaky_relu":
         return F.leaky_relu
+    elif activation_name.lower() == "gelu":
+        return F.gelu
     else:
         raise ValueError("Invalid activation function.")
-
-
-def forward_pass_with_unpacked_tuple(
-    model: nn.Module,
-    x: Union[Tuple, torch.Tensor],
-):
-    """
-    Performs forward pass of model with input x. If x is a tuple, it return
-    y = model(*x), else it returns y = model(x).
-    :param model: nn.Module
-        model for forward pass
-    :param x: Union[Tuple, torch.Tensor]
-        input for forward pass
-    :return: torch.Tensor
-        output of the forward pass, either model(*x) or model(x)
-    """
-    if isinstance(x, Tuple):
-        return model(*x)
-    else:
-        return model(x)
 
 
 def get_number_of_model_parameters(
@@ -230,9 +222,7 @@ def build_train_and_test_loaders(
         shuffle=True,
         pin_memory=True,
         num_workers=num_workers,
-        worker_init_fn=lambda _: np.random.seed(
-            int(torch.initial_seed()) % (2 ** 32 - 1)
-        ),
+        worker_init_fn=fix_random_seeds,
     )
     test_loader = DataLoader(
         test_dataset,
@@ -240,9 +230,7 @@ def build_train_and_test_loaders(
         shuffle=False,
         pin_memory=True,
         num_workers=num_workers,
-        worker_init_fn=lambda _: np.random.seed(
-            int(torch.initial_seed()) % (2 ** 32 - 1)
-        ),
+        worker_init_fn=fix_random_seeds,
     )
 
     return train_loader, test_loader

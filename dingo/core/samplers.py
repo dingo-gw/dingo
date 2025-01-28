@@ -10,7 +10,7 @@ import pandas as pd
 import torch
 from torchvision.transforms import Compose
 
-from dingo.core.models import PosteriorModel
+from dingo.core.posterior_models import BasePosteriorModel
 from dingo.core.result import Result
 from dingo.core.result import DATA_KEYS as RESULT_DATA_KEYS
 from dingo.core.utils import torch_detach_to_cpu, IterationTracker
@@ -42,7 +42,7 @@ class Sampler(object):
 
     Attributes
     ----------
-    model : PosteriorModel
+    model : BasePosteriorModel
     inference_parameters : list
     samples : DataFrame
         Samples produced from the model by run_sampler().
@@ -59,12 +59,12 @@ class Sampler(object):
 
     def __init__(
         self,
-        model: PosteriorModel,
+        model: BasePosteriorModel,
     ):
         """
         Parameters
         ----------
-        model : PosteriorModel
+        model : BasePosteriorModel
         """
         self.model = model
 
@@ -145,14 +145,11 @@ class Sampler(object):
             x["extrinsic_parameters"] = {}
 
             # transforms_pre are expected to transform the data in the same way for each
-            # requested sample. We therefore expand it across the batch *after*
-            # pre-processing.
+            # requested sample. We therefore apply pre-processing only once.
             x = self.transform_pre(context)
-            x = x.expand(num_samples, *x.shape)
+            # Require a batch dimension for the embedding network.
+            x = x.unsqueeze(0)
             x = [x]
-            # The number of samples is expressed via the first dimension of x,
-            # so we must pass num_samples = 1 to sample_and_log_prob().
-            num_samples = 1
         else:
             if context is not None:
                 print("Unconditional model. Ignoring context.")
@@ -161,11 +158,14 @@ class Sampler(object):
         # For a normalizing flow, we get the log_prob for "free" when sampling,
         # so we always include this. For other architectures, it may make sense to
         # have a flag for whether to calculate the log_prob.
-        self.model.model.eval()
+        self.model.network.eval()
         with torch.no_grad():
-            y, log_prob = self.model.model.sample_and_log_prob(
-                *x, num_samples=num_samples
-            )
+            y, log_prob = self.model.sample_and_log_prob(*x, num_samples=num_samples)
+
+        if not self.unconditional_model:
+            # Squeeze the batch dimension added earlier.
+            y = y.squeeze(0)
+            log_prob = log_prob.squeeze(0)
 
         samples = self.transform_post({"parameters": y, "log_prob": log_prob})
         result = samples["parameters"]
@@ -270,9 +270,9 @@ class Sampler(object):
         else:
             x = []
 
-        self.model.model.eval()
+        self.model.network.eval()
         with torch.no_grad():
-            log_prob = self.model.model.log_prob(y, *x)
+            log_prob = self.model.log_prob(y, *x)
 
         log_prob = log_prob.cpu().numpy()
         log_prob -= np.sum(np.log(std))
@@ -366,14 +366,14 @@ class GNPESampler(Sampler):
 
     def __init__(
         self,
-        model: PosteriorModel,
+        model: BasePosteriorModel,
         init_sampler: Sampler,
         num_iterations: int = 1,
     ):
         """
         Parameters
         ----------
-        model : PosteriorModel
+        model : BasePosteriorModel
         init_sampler : Sampler
             Used for generating initial samples
         num_iterations : int
@@ -491,11 +491,19 @@ class GNPESampler(Sampler):
             x = self.transform_pre(x)
 
             time_sample_start = time.time()
-            self.model.model.eval()
+            self.model.network.eval()
             with torch.no_grad():
-                y, log_prob = self.model.model.sample_and_log_prob(
-                    x["data"], x["context_parameters"]
-                )
+                if "context_parameters" in x:
+                    y, log_prob = self.model.sample_and_log_prob(
+                        x["data"], x["context_parameters"]
+                    )
+                else:
+                    y, log_prob = self.model.sample_and_log_prob(x["data"])
+
+            # Squeeze the extra dimension added by sample_and_log_prob(num_samples=1).
+            y = y.squeeze(1)
+            log_prob = log_prob.squeeze(1)
+
             time_sample_end = time.time()
 
             x["parameters"] = y

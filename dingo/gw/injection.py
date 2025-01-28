@@ -259,6 +259,7 @@ class GWSignal(object):
             asd = self._asd
         elif isinstance(self._asd, ASDDataset):
             asd = self._asd.sample_random_asds()
+            asd = {ifo: asd[0] for ifo, asd in asd.items()}
         elif self._asd is None:
             return None
         else:
@@ -397,4 +398,7 @@ class Injection(GWSignal):
                 asd (if set): amplitude spectral density for each detector
         """
         theta = self.prior.sample()
+        theta = {
+            k: float(v) for k, v in theta.items()
+        }  # Some parameters are np.float64
         return self.injection(theta)

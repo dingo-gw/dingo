@@ -7,17 +7,10 @@ import astropy.units as u
 from typing import Dict, List, Tuple, Union
 from numbers import Number
 import warnings
-import lal
-import lalsimulation as LS
 import pandas as pd
 
-try:
-    from lalsimulation.gwsignal.core import waveform as gws_wfm
-    from lalsimulation.gwsignal.models import (
-        gwsignal_get_waveform_generator as new_interface_get_waveform_generator,
-    )
-except ImportError:
-    pass
+import lal
+import lalsimulation as LS
 
 from bilby.gw.conversion import (
     convert_to_lal_binary_black_hole_parameters,
@@ -83,12 +76,11 @@ class WaveformGenerator:
         else:
             self.approximant_str = approximant
             self.lal_params = None
-            try:
+            if "SEOBNRv5" not in approximant:
+                # This LAL function does not work with waveforms using the new interface. TODO: Improve the check.
                 self.approximant = LS.GetApproximantFromString(approximant)
                 if mode_list is not None:
                     self.lal_params = self.setup_mode_array(mode_list)
-            except:
-                pass
 
         if not issubclass(type(domain), Domain):
             raise ValueError(
@@ -202,7 +194,7 @@ class WaveformGenerator:
                         f"Evaluating the waveform failed with error: {e}\n"
                         f"The parameters were {parameters_generator}\n"
                     )
-                    pol_nan = np.ones(len(self.domain)) * np.nan
+                    pol_nan = np.ones(len(self.domain), dtype=complex) * np.nan
                     wf_dict = {"h_plus": pol_nan, "h_cross": pol_nan}
                 else:
                     raise
@@ -692,7 +684,7 @@ class WaveformGenerator:
             return hlm_fd, iota
         else:
             raise NotImplementedError(
-                f"Approximant {LS.GetApproximantFromString(self.approximant)} not "
+                f"Approximant {self.approximant_str} not "
                 f"implemented. When adding this approximant to this method, make sure "
                 f"the the output dict hlm_td contains the TD modes in the *L0 frame*. "
                 f"In particular, adding an approximant that is implemented in the same "
@@ -781,6 +773,21 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
     def __init__(self, **kwargs):
         WaveformGenerator.__init__(self, **kwargs)
 
+        # we want to import the new interface, but we don't want to import it
+        # for all users because just importing the module causes unintended side effects
+        # for example, you cannot pass the debugger through the import statement.
+        # Thus we only import it when the class is instantiated.
+        # However, we don't want to reimport the module every time we need to
+        # use the function as this is costly. Therefore, we import it once
+        # when the class is instantiated and store it in the global namespace
+        from lalsimulation.gwsignal.core import waveform
+        from lalsimulation.gwsignal.models import gwsignal_get_waveform_generator
+
+        globals()["gws_wfm"] = waveform
+        globals()[
+            "new_interface_get_waveform_generator"
+        ] = gwsignal_get_waveform_generator
+
         self.mode_list = kwargs.get("mode_list", None)
 
     def _convert_parameters(
@@ -791,10 +798,6 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         # Transform mass, spin, and distance parameters
         p, _ = convert_to_lal_binary_black_hole_parameters(parameter_dict)
 
-        # Convert to SI units
-        p["mass_1"] *= lal.MSUN_SI
-        p["mass_2"] *= lal.MSUN_SI
-    
         # Transform to lal source frame: iota and Cartesian spin components
         param_keys_in = (
             "theta_jn",
@@ -810,6 +813,13 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             "phase",
         )
         param_values_in = [p[k] for k in param_keys_in]
+
+        # Masses for spin conversion must be in SI units. However, for waveform generation, they must remain in solar
+        # masses due to sensitive dependence of SEOBNRv5 waveforms to small changes in the mass. Hence, we only convert
+        # units here.
+        param_values_in[7] *= lal.MSUN_SI
+        param_values_in[8] *= lal.MSUN_SI
+
         # if spin_conversion_phase is set, use this as fixed phiRef when computing the
         # cartesian spins instead of using the phase parameter
         if self.spin_conversion_phase is not None:
@@ -830,8 +840,8 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         delta_t = 0.5 / self.domain.f_max
 
         params_gwsignal = {
-            "mass1": p["mass_1"] * u.kg,
-            "mass2": p["mass_2"] * u.kg,
+            "mass1": p["mass_1"] * u.solMass,
+            "mass2": p["mass_2"] * u.solMass,
             "spin1x": s1x * u.dimensionless_unscaled,
             "spin1y": s1y * u.dimensionless_unscaled,
             "spin1z": s1z * u.dimensionless_unscaled,
@@ -1022,6 +1032,18 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 # Step 2: Transform modes to target domain.
                 # Not required here, as approximant domain and target domain are both FD.
 
+            elif (
+                self.approximant_str == "SEOBNRv5PHM"
+                or self.approximant_str == "SEOBNRv5HM"
+            ):
+                # Step 1: generate waveform modes in L0 frame in native domain of
+                # approximant (here: TD), applying standard conditioning
+                hlm_td, iota = self.generate_TD_modes_L0_conditioned_extra_time(
+                    parameters
+                )
+
+                # Step 2: Transform modes to target domain.
+                hlm_fd = wfg_utils.td_modes_to_fd_modes(hlm_td, self.domain)
             else:
                 # assert LS.SimInspiralImplementedTDApproximants(self.approximant)
                 # Step 1: generate waveform modes in L0 frame in native domain of
@@ -1154,6 +1176,61 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                     len(value),
                 )
                 hlm_lal.data.data = value.value
+                hlms_lal[key] = hlm_lal
+
+        return hlms_lal, parameters_gwsignal["inclination"].value
+
+    def generate_TD_modes_L0_conditioned_extra_time(self, parameters):
+        """
+        Generate TD modes in the L0 frame applying a conditioning routine which mimics the behaviour of the standard
+        LALSimulation conditioning
+        (https://lscsoft.docs.ligo.org/lalsuite/lalsimulation/_l_a_l_sim_inspiral_generator_conditioning_8c.html#ac78b5fcdabf8922a3ac479da20185c85)
+
+        Essentially, a new starting frequency is computed to have some extra cycles that will be tapered. Some extra
+        buffer time is also added to ensure that the waveform at the requested starting frequency is not modified,
+        while still having a tapered timeseries suited for clean FFT.
+
+        Parameters
+        ----------
+        parameters: dict
+            Dictionary of parameters for the waveform.
+            For details see self.generate_hplus_hcross.
+
+        Returns
+        -------
+        hlm_td: dict
+            Dictionary with (l,m) as keys and the corresponding TD modes in lal format as
+            values.
+        iota: float
+        """
+        # TD approximants that are implemented in L0 frame. Currently tested for:
+        # SEOBNRv5HM and SEOBNRv5PHM
+
+        parameters_gwsignal = self._convert_parameters(
+            {**parameters, "f_ref": self.f_ref}
+        )
+
+        (
+            f_min,
+            new_f_start,
+            t_extra,
+            original_f_min,
+            f_isco,
+        ) = wfg_utils.get_starting_frequency_for_SEOBRNRv5_conditioning(
+            parameters_gwsignal
+        )
+        params = parameters_gwsignal.copy()
+        params["f22_start"] = new_f_start * u.Hz
+
+        generator = new_interface_get_waveform_generator(self.approximant_str)
+        hlm_td = gws_wfm.GenerateTDModes(params, generator)
+        hlms_lal = {}
+
+        for key, value in hlm_td.items():
+            if type(key) != str:
+                hlm_lal = wfg_utils.taper_td_modes_for_SEOBRNRv5_extra_time(
+                    value, t_extra, f_min, original_f_min, f_isco
+                )
                 hlms_lal[key] = hlm_lal
 
         return hlms_lal, parameters_gwsignal["inclination"].value

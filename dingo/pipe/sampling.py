@@ -6,10 +6,10 @@ from pathlib import Path
 from bilby_pipe.input import Input
 from bilby_pipe.utils import parse_args, logger, convert_string_to_dict
 
-from dingo.core.models import PosteriorModel
+from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
-from dingo.gw.inference.inference_pipeline import prepare_log_prob
+from dingo.gw.inference.inference_utils import prepare_log_prob
 from dingo.pipe.default_settings import DENSITY_RECOVERY_SETTINGS
 from dingo.pipe.parser import create_parser
 
@@ -106,12 +106,14 @@ class SamplingInput(Input):
 
     def _load_sampler(self):
         """Load the sampler and set its context based on event data."""
-        model = PosteriorModel(self.model, device=self.device, load_training_info=False)
+        model = build_model_from_kwargs(
+            filename=self.model, device=self.device, load_training_info=False
+        )
 
         if self.model_init is not None:
             self.gnpe = True
-            init_model = PosteriorModel(
-                self.model_init, device=self.device, load_training_info=False
+            init_model = build_model_from_kwargs(
+                filename=self.model_init, device=self.device, load_training_info=False
             )
             init_sampler = GWSampler(model=init_model)
             self.dingo_sampler = GWSamplerGNPE(
@@ -148,13 +150,26 @@ class SamplingInput(Input):
             else:
                 self._density_recovery_settings.update(convert_string_to_dict(settings))
 
+        # If there is only one detector, and no context, we cannot use a coupling transform. In this case, we use an
+        # autoregressive transform for the density estimator.
+        # FIXME: If there are proxies other than time, the condition needs to be updated.
+        if len(self.detectors) == 1:
+            model_settings = self._density_recovery_settings["nde_settings"]["model"]
+            if model_settings["posterior_model_type"] == "normalizing_flow":
+                base_transform_kwargs = model_settings["base_transform_kwargs"]
+                if base_transform_kwargs["base_transform_type"] == "rq-coupling":
+                    logger.info(
+                        "Using autoregressive transform for density estimator since there is only one GNPE proxy "
+                        "parameter because there is only one detector."
+                    )
+                    base_transform_kwargs["base_transform_type"] = "rq-autoregressive"
+
     # @property
     # def result_directory(self):
     #     result_dir = os.path.join(self.outdir, "result")
     #     return os.path.relpath(result_dir)
 
     def run_sampler(self):
-
         if self.gnpe and self.recover_log_prob:
             logger.info(
                 "GNPE network does not provide log probability. Generating "

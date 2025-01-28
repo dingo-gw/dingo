@@ -9,7 +9,7 @@ one can take the fiducial asd dataset the network was trained on.
 ```
 from dingo.core.models import PosteriorModel
 import dingo.gw.injection as injection
-from dingo.gw.ASD_dataset.noise_dataset import ASDDataset
+from dingo.gw.noise.asd_dataset import ASDDataset
 
 main_pm = PosteriorModel(
     device="cuda",

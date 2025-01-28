@@ -1,3 +1,4 @@
+import os 
 from bilby_pipe.job_creation.nodes import PESummaryNode as BilbyPESummaryNode
 from bilby_pipe.utils import BilbyPipeError, logger
 
@@ -29,6 +30,11 @@ class PESummaryNode(BilbyPESummaryNode):
         # Using append here as summary pages doesn't take a full name for approximant
         self.arguments.append("-a")
         self.arguments.append(" ".join([self.inputs.waveform_approximant] * n_results))
+
+        # adding the psds which were output as part of the data generation
+        self.arguments.append("--psd")
+        psd_str = " ".join([f"{det}:{os.path.join(self.inputs.outdir, 'data', f'{det}_psd.txt')}" for det in self.inputs.detectors])
+        self.arguments.append(psd_str)
 
         # if len(generation_node_list) == 1:
         #     self.arguments.add("gwdata", generation_node_list[0].data_dump_file)

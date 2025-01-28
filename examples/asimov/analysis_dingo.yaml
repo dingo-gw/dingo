@@ -1,0 +1,6 @@
+kind: analysis
+name: Exp0
+pipeline: dingo
+networks:
+  model: /path/to/main_model.pt
+  model init: /path/to/init_model.pt
