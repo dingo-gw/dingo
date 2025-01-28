@@ -38,12 +38,28 @@ def create_submission_file(
         f"requirements = TARGET.CUDAGlobalMemoryMb > "
         f'{condor_settings["memory_gpus"]}\n\n'
     )
+    # TODO: Special settings of MPI-IS cluster => make optional
     if condor_settings["num_gpus"] == 8:
         # Request full node
         lines.append("use template : FullNode\n")
     elif condor_settings["num_gpus"] >= 6:
         # Still request full nodes because wait times are long
         lines.append(f'use template : FullNode({condor_settings["num_gpus"]})\n')
+
+    # TODO: Move responsibility to resume job from this file to htcondor job
+    # * add args in submission file:
+    # lines.append('on_exit_hold = (ExitCode =?= 3)\n')
+    # lines.append('on_exit_hold_reason = "Checkpointed, will resume"\n')
+    # lines.append('on_exit_hold_subcode = 1')
+    # lines.append('periodic_release = ((JobStatus =?= 5) & & (HoldReasonCode =?= 3) & & (HoldReasonSubCode =?= 1))\n')
+    # * modify condor submission script such that it doesn't need the --checkpoint arg to resume, but checks whether
+    #   some model_latest.pt is in train_dir to decide whether to start or continue a training run
+    # * terminate script with:
+    #   exit(3) # for checkpointed and to be continued run
+    #   exit(0) # for final run
+    #   exit(1) # for error
+    # info from MPI-IS IT team:
+    # https://atlas.is.localnet/confluence/display/IT/How+to+automatically+restart+jobs+according+to+the+exit+code
 
     lines.append(f'arguments = "{condor_settings["arguments"]}"\n')
     lines.append(f'error = {join(train_dir, "info.err")}\n')
