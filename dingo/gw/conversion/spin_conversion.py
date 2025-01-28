@@ -8,7 +8,6 @@ import lal
 import lalsimulation as LS
 from threadpoolctl import threadpool_limits
 
-from dingo.core.multiprocessing import apply_func_with_multiprocessing
 
 DINGO_PE_SPIN_PARAMETERS = (
     "theta_jn",
