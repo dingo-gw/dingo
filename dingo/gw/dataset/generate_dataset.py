@@ -4,6 +4,7 @@ import textwrap
 from multiprocessing import Pool
 from pathlib import Path
 from typing import Dict, Tuple
+from functools import partial
 
 import numpy as np
 import pandas as pd
@@ -22,7 +23,7 @@ from dingo.gw.waveform_generator import (
     WaveformGenerator,
     generate_waveforms_parallel,
 )
-
+from dingo.core.utils.misc import call_func_strict_output_dim
 
 def generate_parameters_and_polarizations(
     waveform_generator: WaveformGenerator,
@@ -195,12 +196,13 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
 
                 n_train = svd_settings["num_training_samples"]
                 n_test = svd_settings.get("num_validation_samples", 0)
-                parameters, polarizations = generate_parameters_and_polarizations(
-                    waveform_generator,
+
+                func = partial(
+                    generate_parameters_and_polarizations, 
+                    waveform_generator, 
                     prior,
-                    n_train + n_test,
-                    num_processes,
-                )
+                    num_processes=num_processes)
+                parameters, polarizations = call_func_strict_output_dim(func, n_train + n_test)
                 svd_dataset_settings = copy.deepcopy(settings)
                 svd_dataset_settings["num_samples"] = len(parameters)
                 del svd_dataset_settings["compression"]["svd"]
@@ -222,25 +224,22 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
                 basis, n_train, n_test = train_svd_basis(
                     svd_dataset, svd_settings["size"], n_train
                 )
-                # Reset the true number of samples, in case this has changed due to
-                # failure to generate some EOB waveforms.
-                svd_settings["num_training_samples"] = n_train
-                svd_settings["num_validation_samples"] = n_test
 
             compression_transforms.append(ApplySVD(basis))
             dataset_dict["svd"] = basis.to_dictionary()
 
         waveform_generator.transform = Compose(compression_transforms)
 
-    # Generate main dataset
-    parameters, polarizations = generate_parameters_and_polarizations(
-        waveform_generator, prior, settings["num_samples"], num_processes
-    )
+    func = partial(
+        generate_parameters_and_polarizations, 
+        waveform_generator, 
+        prior,
+        num_processes=num_processes)
+    parameters, polarizations = call_func_strict_output_dim(func, settings["num_samples"])
     dataset_dict["parameters"] = parameters
     dataset_dict["polarizations"] = polarizations
-    # Update to take into account potentially failed configurations
-    dataset_dict[settings["num_samples"]] = len(parameters)
 
+    dataset_dict[settings["num_samples"]] = len(parameters)
     dataset = WaveformDataset(dictionary=dataset_dict)
     return dataset
 
