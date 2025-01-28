@@ -208,7 +208,7 @@ class FlowWrapper(nn.Module):
 
     def log_prob(self, y, *x):
         if self.embedding_net is not None:
-            x = torchutils.forward_pass_with_unpacked_tuple(self.embedding_net, x)
+            x = self.embedding_net(*x)
         if len(x) > 0:
             return self.flow.log_prob(y, x)
         else:
@@ -217,7 +217,7 @@ class FlowWrapper(nn.Module):
 
     def sample(self, *x, num_samples=1):
         if self.embedding_net is not None:
-            x = torchutils.forward_pass_with_unpacked_tuple(self.embedding_net, x)
+            x = self.embedding_net(*x)
         if len(x) > 0:
             return self.flow.sample(num_samples, x)
         else:
@@ -226,7 +226,7 @@ class FlowWrapper(nn.Module):
 
     def sample_and_log_prob(self, *x, num_samples=1):
         if self.embedding_net is not None:
-            x = torchutils.forward_pass_with_unpacked_tuple(self.embedding_net, x)
+            x = self.embedding_net(*x)
         if len(x) > 0:
             return self.flow.sample_and_log_prob(num_samples, x)
         else:
@@ -247,7 +247,7 @@ def create_nsf_model(
     num_flow_steps: int,
     base_transform_kwargs: dict,
     embedding_net_builder: Union[Callable, str] = None,
-    embedding_net_kwargs: dict = None,
+    embedding_kwargs: dict = None,
 ):
     """
     Build NSF model. This models the posterior distribution p(y|x).
@@ -266,14 +266,14 @@ def create_nsf_model(
         hyperparameters for transform steps
     :param embedding_net_builder: Callable=None,
         build function for embedding network TODO
-    :param embedding_net_kwargs: dict=None,
+    :param embedding_kwargs: dict=None,
         hyperparameters for embedding network
     :return: Flow
         the NSF (posterior model)
     """
 
     if embedding_net_builder is not None:
-        embedding_net = embedding_net_builder(**embedding_net_kwargs)
+        embedding_net = embedding_net_builder(**embedding_kwargs)
     else:
         embedding_net = None
 
@@ -293,7 +293,7 @@ def create_nsf_model(
         "num_flow_steps": num_flow_steps,
         "context_dim": context_dim,
         "base_transform_kwargs": base_transform_kwargs,
-        "embedding_net_kwargs": embedding_net_kwargs,
+        "embedding_kwargs": embedding_kwargs,
     }
 
     return flow
@@ -305,12 +305,12 @@ def create_nsf_wrapped(**kwargs):
     training, and wraps the log_prob method as a forward method.
     """
     flow = create_nsf_model(**kwargs)
-    return FlowWrapper(flow)
+    return FlowWrapper(flow, nn.Identity())
 
 
 def create_nsf_with_rb_projection_embedding_net(
-    nsf_kwargs: dict,
-    embedding_net_kwargs: dict,
+    posterior_kwargs: dict,
+    embedding_kwargs: dict,
     initial_weights: dict = None,
 ):
     """Builds a neural spline flow with an embedding network that consists of a
@@ -319,9 +319,9 @@ def create_nsf_with_rb_projection_embedding_net(
 
     Parameters
     ----------
-    nsf_kwargs : dict
+    posterior_kwargs : dict
         kwargs for neural spline flow
-    embedding_net_kwargs : dict
+    embedding_kwargs : dict
         kwargs for emebedding network
     initial_weights : dict
         Dictionary containing the initial weights for the SVD projection. This should
@@ -333,61 +333,23 @@ def create_nsf_with_rb_projection_embedding_net(
     nn.Module
         Neural spline flow model
     """
-    # We copy the embedding_net_kwargs to allow an insert of V_rb_list without
-    # affecting the original embedding_net_kwargs. This is because we don't want to
-    # save the embedding_net_kwargs with the huge V_rb_list included. This is a bit of
+    # We copy the embedding_kwargs to allow an insert of V_rb_list without
+    # affecting the original embedding_kwargs. This is because we don't want to
+    # save the embedding_kwargs with the huge V_rb_list included. This is a bit of
     # a hack; improve setting of initial weights later.
 
-    embedding_net_kwargs = copy.deepcopy(embedding_net_kwargs)
+    embedding_kwargs = copy.deepcopy(embedding_kwargs)
     if initial_weights is not None:
-        embedding_net_kwargs["V_rb_list"] = initial_weights["V_rb_list"]
-    elif "V_rb_list" not in embedding_net_kwargs:
-        embedding_net_kwargs["V_rb_list"] = None
+        embedding_kwargs["V_rb_list"] = initial_weights["V_rb_list"]
+    elif "V_rb_list" not in embedding_kwargs:
+        embedding_kwargs["V_rb_list"] = None
 
     embedding_net = create_enet_with_projection_layer_and_dense_resnet(
-        **embedding_net_kwargs
+        **embedding_kwargs
     )
-    flow = create_nsf_model(**nsf_kwargs)
+    flow = create_nsf_model(**posterior_kwargs)
     model = FlowWrapper(flow, embedding_net)
     return model
-
-
-def autocomplete_model_kwargs_nsf(model_kwargs, data_sample):
-    """
-    Autocomplete the model kwargs from train_settings and data_sample from
-    the dataloader:
-    (*) set input dimension of embedding net to shape of data_sample[1]
-    (*) set dimension of nsf parameter space to len(data_sample[0])
-    (*) set added_context flag of embedding net if required for gnpe proxies
-    (*) set context dim of nsf to output dim of embedding net + gnpe proxy dim
-
-    :param train_settings: dict
-        train settings as loaded from .yaml file
-    :param data_sample: list
-        Sample from dataloader (e.g., wfd[0]) used for autocomplection.
-        Should be of format [parameters, GW data, gnpe_proxies], where the
-        last element is only there is gnpe proxies are required.
-    :return: model_kwargs: dict
-        updated, autocompleted model_kwargs
-    """
-    # set input dims from ifo_list and domain information
-    model_kwargs["embedding_net_kwargs"]["input_dims"] = list(data_sample[1].shape)
-    # set dimension of parameter space of nsf
-    model_kwargs["nsf_kwargs"]["input_dim"] = len(data_sample[0])
-    # set added_context flag of embedding net if gnpe proxies are required
-    # set context dim of nsf to output dim of embedding net + gnpe proxy dim
-    try:
-        gnpe_proxy_dim = len(data_sample[2])
-        model_kwargs["embedding_net_kwargs"]["added_context"] = True
-        model_kwargs["nsf_kwargs"]["context_dim"] = (
-            model_kwargs["embedding_net_kwargs"]["output_dim"] + gnpe_proxy_dim
-        )
-    except IndexError:
-        model_kwargs["embedding_net_kwargs"]["added_context"] = False
-        model_kwargs["nsf_kwargs"]["context_dim"] = model_kwargs[
-            "embedding_net_kwargs"
-        ]["output_dim"]
-    # return model_kwargs
 
 
 if __name__ == "__main__":

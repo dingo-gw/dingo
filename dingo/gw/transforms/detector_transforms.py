@@ -153,7 +153,7 @@ class ProjectOntoDetectors(object):
             dec = extrinsic_parameters.pop("dec")
             psi = extrinsic_parameters.pop("psi")
             tc_ref = parameters["geocent_time"]
-            assert tc_ref == 0, (
+            assert np.allclose(tc_ref, parameters["geocent_time"]), (
                 "This should always be 0. If for some reason "
                 "you want to save time shifted polarizations,"
                 " then remove this assert statement."
@@ -163,15 +163,41 @@ class ProjectOntoDetectors(object):
             raise ValueError("Missing parameters.")
 
         # (1) rescale polarizations and set distance parameter to sampled value
-        hc = sample["waveform"]["h_cross"] * d_ref / d_new
-        hp = sample["waveform"]["h_plus"] * d_ref / d_new
+        if np.isscalar(d_ref) or np.isscalar(d_new):
+            d_ratio = d_ref / d_new
+        elif isinstance(d_ref, np.ndarray) and isinstance(d_new, np.ndarray):
+            d_ratio = (d_ref / d_new)[:, np.newaxis]
+        else:
+            raise ValueError("luminosity_distance should be a float or a numpy array.")
+        hc = sample["waveform"]["h_cross"] * d_ratio
+        hp = sample["waveform"]["h_plus"] * d_ratio
         parameters["luminosity_distance"] = d_new
 
         strains = {}
         for ifo in self.ifo_list:
             # (2) project strains onto the different detectors
-            fp = ifo.antenna_response(ra, dec, self.ref_time, psi, mode="plus")
-            fc = ifo.antenna_response(ra, dec, self.ref_time, psi, mode="cross")
+            # TODO the Bilby cython functions are not vectorized, so for now
+            # we just loop over the extrinsic parameters. This is not ideal
+            # and eventually one should also vectorize these functions to
+            # achieve optimal batching capabilities.
+            if any(np.isscalar(x) for x in [ra, dec, psi]):
+                fp = ifo.antenna_response(ra, dec, self.ref_time, psi, mode="plus")
+                fc = ifo.antenna_response(ra, dec, self.ref_time, psi, mode="cross")
+            else:
+                fp = np.array(
+                    [
+                        ifo.antenna_response(ra, dec, self.ref_time, psi, mode="plus")
+                        for ra, dec, psi in zip(ra, dec, psi)
+                    ]
+                )
+                fc = np.array(
+                    [
+                        ifo.antenna_response(ra, dec, self.ref_time, psi, mode="cross")
+                        for ra, dec, psi in zip(ra, dec, psi)
+                    ]
+                )
+                fp = fp[..., np.newaxis]
+                fc = fc[..., np.newaxis]
             strain = fp * hp + fc * hc
 
             # (3) time shift the strain. If polarizations are timeshifted by
@@ -254,7 +280,7 @@ class ApplyCalibrationUncertainty(object):
     is not perfectly calibrated, the observed waveform is not identical to the true
     waveform $h(f)$. Rather, it is assumed to have corrections of the form
 
-    $$h_{obs}(f) = h(f) * (1 + \delta A(f)) * \exp(i \delta \phi(f)),$$
+    $$h_{obs}(f) = h(f) * (1 + \delta A(f)) * \exp(i \delta \phi(f)) = h(f) * \alpha(f),$$
 
     where $\delta A(f)$ and $\delta \phi(f)$ are frequency-dependent amplitude and
     phase errors. Under the calibration model, these are parametrized with cubic
@@ -275,6 +301,7 @@ class ApplyCalibrationUncertainty(object):
     calibration envelope, and applies them to generate $N$ observed waveforms $\{h^n_{
     obs}(f)\}$. This is intended to be used for marginalizing over the calibration
     uncertainty when evaluating the likelihood for importance sampling.
+
     """
 
     def __init__(
@@ -284,6 +311,7 @@ class ApplyCalibrationUncertainty(object):
         calibration_envelope,
         num_calibration_curves,
         num_calibration_nodes,
+        correction_type="data",
     ):
         r"""
         Parameters
@@ -306,6 +334,20 @@ class ApplyCalibrationUncertainty(object):
             Monte Carlo estimate of the marginalized likelihood integral.
         num_calibration_nodes : int
             Number of log-spaced frequency nodes $f_i$ to use in defining the spline.
+        correction_type : str = "data"
+            It was discovered in Oct. 2024 that the calibration envelopes specified by
+            the detchar group were not being used correctly by PE codes. According to
+            the detchar group, envelopes are over $\eta$ which is defined as:
+
+            $$
+            h_{obs}(f) = \frac{1}{\eta} * h(f).
+            $$
+
+            Of course, $\frac{1}{\eta} = \alpha$. Previously, the envelopes were
+            being used as if $\eta = \alpha$ which is wrong. Therefore, there is
+            now an additional option where one can specify correction_type = "data"
+            if the calibration envelopes are over $\eta$ and correction_type = "template"
+            if the calibration envelopes are over $\alpha$.
         """
 
         self.ifo_list = ifo_list
@@ -332,14 +374,15 @@ class ApplyCalibrationUncertainty(object):
                 # frequency points, $f_i$.  Then for each node point f_i, it
                 # will create a gaussian prior according to the spline of the
                 # median and sigma found earlier
-                self.calibration_prior[
-                    ifo.name
-                ] = CalibrationPriorDict.from_envelope_file(
-                    self.calibration_envelope[ifo.name],
-                    self.data_domain.f_min,
-                    self.data_domain.f_max,
-                    num_calibration_nodes,
-                    ifo.name,
+                self.calibration_prior[ifo.name] = (
+                    CalibrationPriorDict.from_envelope_file(
+                        self.calibration_envelope[ifo.name],
+                        self.data_domain.f_min,
+                        self.data_domain.f_max,
+                        num_calibration_nodes,
+                        ifo.name,
+                        correction_type=correction_type,
+                    )
                 )
 
         else:
@@ -362,14 +405,14 @@ class ApplyCalibrationUncertainty(object):
             )
 
             for i in range(self.num_calibration_curves):
-                calibration_draws[ifo.name][
-                    i, self.data_domain.frequency_mask
-                ] = ifo.calibration_model.get_calibration_factor(
-                    self.data_domain.sample_frequencies[
-                        self.data_domain.frequency_mask
-                    ],
-                    prefix="recalib_{}_".format(ifo.name),
-                    **calibration_parameter_draws[ifo.name].iloc[i],
+                calibration_draws[ifo.name][i, self.data_domain.frequency_mask] = (
+                    ifo.calibration_model.get_calibration_factor(
+                        self.data_domain.sample_frequencies[
+                            self.data_domain.frequency_mask
+                        ],
+                        prefix="recalib_{}_".format(ifo.name),
+                        **calibration_parameter_draws[ifo.name].iloc[i],
+                    )
                 )
 
             # Multiplying the sample waveform in the interferometer according to

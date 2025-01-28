@@ -70,29 +70,29 @@ here is the waveform dataset file
 
 ```yaml
 domain:
-type: FrequencyDomain
-f_min: 20.0
-f_max: 1024.0
-delta_f: 0.25  # Expressions like 1.0/8.0 would require eval and are not supported
+  type: FrequencyDomain
+  f_min: 20.0
+  f_max: 1024.0
+  delta_f: 0.25  # Expressions like 1.0/8.0 would require eval and are not supported
 
 waveform_generator:
-approximant: IMRPhenomD
-f_ref: 20.0
-# f_start: 15.0  # Optional setting useful for EOB waveforms. Overrides f_min when generating waveforms.
+  approximant: IMRPhenomD
+  f_ref: 20.0
+  # f_start: 15.0  # Optional setting useful for EOB waveforms. Overrides f_min when generating waveforms.
 
 # Dataset only samples over intrinsic parameters. Extrinsic parameters are chosen at train time.
 intrinsic_prior:
-mass_1: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)
-mass_2: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)
-chirp_mass: bilby.gw.prior.UniformInComponentsChirpMass(minimum=15.0, maximum=100.0)
-mass_ratio: bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.125, maximum=1.0)
-phase: default
-chi_1: bilby.gw.prior.AlignedSpin(name='chi_1', a_prior=Uniform(minimum=0, maximum=0.9))
-chi_2: bilby.gw.prior.AlignedSpin(name='chi_2', a_prior=Uniform(minimum=0, maximum=0.9))
-theta_jn: default
-# Reference values for fixed (extrinsic) parameters. These are needed to generate a waveform.
-luminosity_distance: 100.0  # Mpc
-geocent_time: 0.0  # s
+  mass_1: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)
+  mass_2: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)
+  chirp_mass: bilby.gw.prior.UniformInComponentsChirpMass(minimum=15.0, maximum=100.0)
+  mass_ratio: bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.125, maximum=1.0)
+  phase: default
+  chi_1: bilby.gw.prior.AlignedSpin(name='chi_1', a_prior=Uniform(minimum=0, maximum=0.9))
+  chi_2: bilby.gw.prior.AlignedSpin(name='chi_2', a_prior=Uniform(minimum=0, maximum=0.9))
+  theta_jn: default
+  # Reference values for fixed (extrinsic) parameters. These are needed to generate a waveform.
+  luminosity_distance: 100.0  # Mpc
+  geocent_time: 0.0  # s
 
 # Dataset size
 num_samples: 10000
@@ -207,9 +207,9 @@ data:
 
 # Model architecture
 model:
-  type: nsf+embedding
+  posterior_model_type: normalizing_flow
   # kwargs for neural spline flow
-  nsf_kwargs:
+  posterior_kwargs:
     num_flow_steps: 5
     base_transform_kwargs:
       hidden_dim: 64 
@@ -220,7 +220,7 @@ model:
       num_bins: 8
       base_transform_type: rq-coupling
   # kwargs for embedding net
-  embedding_net_kwargs:
+  embedding_kwargs:
     output_dim: 128
     hidden_dims: [1024, 512, 256, 128]
     activation: elu
