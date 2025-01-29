@@ -137,10 +137,9 @@ def create_parser(top_level=True):
             help="Filename for the data dump: only used internally by data_analysis",
         )
         parser.add(
-            "--event-data-files",
+            "--event-data-file",
             type=nonestr,
             default=None,
-            nargs="+",
             help="Filename for the event: only used internally by sampling and "
             "importance_sampling",
         )

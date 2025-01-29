@@ -8,7 +8,7 @@ from bilby_pipe.utils import parse_args, logger, convert_string_to_dict
 import pandas as pd
 
 from dingo.core.models import PosteriorModel
-from dingo.gw.data.event_dataset import EventDataset
+from dingo.gw.data.event_dataset import EventDataset, EventDatasetList
 from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
 from dingo.gw.inference.inference_pipeline import prepare_log_prob
 from dingo.pipe.default_settings import DENSITY_RECOVERY_SETTINGS
@@ -38,7 +38,7 @@ class SamplingInput(Input):
         self.result_format = args.result_format
 
         # Event files to run on
-        self.event_data_files = args.event_data_files[0].split()
+        self.event_data_file = args.event_data_file
 
         # Choices for running
         self.detectors = args.detectors
@@ -107,14 +107,11 @@ class SamplingInput(Input):
         self._load_sampler()
 
     def _load_event(self):
-        # iterating through event data which will be used for noise averaging
-        self.contexts, self.event_metadatas = [], []
-        for event_data_file in self.event_data_files:
-            event_dataset = EventDataset(file_name=event_data_file)
-            self.contexts.append(event_dataset.data)
-
-        # event metadata is the same
-        self.event_metadata = event_dataset.settings
+        if self.zero_noise:
+            self.context = EventDatasetList(file_name=self.event_data_file)
+        else:
+            self.context = EventDataset(file_name=self.event_data_file)
+        self.event_metadata = self.context.settings
 
     def _load_sampler(self):
         """Load the sampler and set its context based on event data."""
@@ -178,56 +175,54 @@ class SamplingInput(Input):
 
     def run_sampler(self):
 
-        # Iterating through all event data files, you will
-        # only have more than one if you are noise averaging
         self.dingo_sampler.event_metadata = self.event_metadata
-        samples_list = []
-        for context in self.contexts:
-            self.dingo_sampler.context = context
+        if self.gnpe and self.recover_log_prob and not self.zero_noise:
+            self.dingo_sampler.context = self.context.data
+            logger.info(
+                "GNPE network does not provide log probability. Generating "
+                "samples and training a new network to recover it."
+            )
 
-            if self.gnpe and self.recover_log_prob and not self.zero_noise:
-                logger.info(
-                    "GNPE network does not provide log probability. Generating "
-                    "samples and training a new network to recover it."
-                )
+            # Note that this will not save any low latency samples at present.
+            prepare_log_prob(
+                self.dingo_sampler,
+                batch_size=self.batch_size,
+                **self.density_recovery_settings,
+            )
 
-                # Note that this will not save any low latency samples at present.
-                prepare_log_prob(
-                    self.dingo_sampler,
-                    batch_size=self.batch_size,
-                    **self.density_recovery_settings,
-                )
-
-            # Training unconditional density estimator if zero noise
-            elif self.zero_noise:
-                n_training_samples = 1_000_000
+        # Training unconditional density estimator if zero noise
+        elif self.zero_noise:
+            n_training_samples = 1_000_000
+            samples_list = []
+            for i in range(self.num_noise_realizations):
+                self.dingo_sampler.context = self.context.event_dataset_dict_list[f"strain_data_{i}"]
                 self.dingo_sampler.run_sampler(
                     int(n_training_samples / self.num_noise_realizations),
                     batch_size=self.batch_size,
                 )
                 samples_list.append(self.dingo_sampler.samples)
 
-                logger.info(
-                    "Training unconditional density estimator on pool of noise realizations"
-                )
-                training_result = self.dingo_sampler.to_result()
-                outdir = Path(self.result_directory)
-                training_result.to_file(outdir / "training_samples.hdf5")
-                inference_parameters = list(self.dingo_sampler.samples.columns)
-                # removing proxies since this makes training the unconditional flow easier
-                inference_parameters = [
-                    x for x in inference_parameters if "proxy" not in x
-                ]
-                unconditional_flow = training_result.train_unconditional_flow(
-                    inference_parameters,
-                    nde_settings=self.density_recovery_settings["nde_settings"],
-                )
+            logger.info(
+                "Training unconditional density estimator on pool of noise realizations"
+            )
+            training_result = self.dingo_sampler.to_result()
+            outdir = Path(self.result_directory)
+            training_result.to_file(outdir / "training_samples.hdf5")
+            inference_parameters = list(self.dingo_sampler.samples.columns)
+            # removing proxies since this makes training the unconditional flow easier
+            inference_parameters = [
+                x for x in inference_parameters if "proxy" not in x
+            ]
+            unconditional_flow = training_result.train_unconditional_flow(
+                inference_parameters,
+                nde_settings=self.density_recovery_settings["nde_settings"],
+            )
 
-                nde_sampler = GWSampler(model=unconditional_flow)
-                nde_sampler.run_sampler(
-                    num_samples=self.num_samples, batch_size=self.batch_size
-                )
-                self.dingo_sampler = nde_sampler
+            nde_sampler = GWSampler(model=unconditional_flow)
+            nde_sampler.run_sampler(
+                num_samples=self.num_samples, batch_size=self.batch_size
+            )
+            self.dingo_sampler = nde_sampler
 
         # run the sampler
         self.dingo_sampler.run_sampler(
