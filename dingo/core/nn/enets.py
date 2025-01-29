@@ -142,7 +142,8 @@ class LinearProjectionRB(nn.Module):
             layer.weight.data[:n, k : 2 * k] = -torch.transpose(V_imag, 1, 0)
             layer.weight.data[n:, k : 2 * k] = torch.transpose(V_real, 1, 0)
 
-    def forward(self, x):
+    def forward(self, x, **_):
+        """RB projection. Additional kwargs (like context) are ignored."""
         if x.shape[1:] != (self.num_blocks, self.num_channels, self.num_bins):
             raise ValueError(
                 f"Invalid shape for projection layer. "
@@ -177,6 +178,7 @@ class DenseResidualNet(nn.Module):
         activation: Callable = F.elu,
         dropout: float = 0.0,
         batch_norm: bool = True,
+        context_features: int = None,
     ):
         """
         Parameters
@@ -193,6 +195,9 @@ class DenseResidualNet(nn.Module):
             dropout probability for residual blocks used for reqularization
         batch_norm: bool
             flag that specifies whether to use batch normalization
+        context_features: int
+            Number of additional context features, which are provided to the residual
+            blocks via gated linear units. If None, no additional context expected.
         """
 
         super(DenseResidualNet, self).__init__()
@@ -206,7 +211,7 @@ class DenseResidualNet(nn.Module):
             [
                 ResidualBlock(
                     features=self.hidden_dims[n],
-                    context_features=None,
+                    context_features=context_features,
                     activation=activation,
                     dropout_probability=dropout,
                     use_batch_norm=batch_norm,
@@ -224,10 +229,10 @@ class DenseResidualNet(nn.Module):
             + [nn.Linear(self.hidden_dims[-1], self.output_dim)]
         )
 
-    def forward(self, x):
+    def forward(self, x, context=None):
         x = self.initial_layer(x)
         for block, resize_layer in zip(self.blocks, self.resize_layers):
-            x = block(x, context=None)
+            x = block(x, context=context)
             x = resize_layer(x)
         return x
 

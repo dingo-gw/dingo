@@ -351,7 +351,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
 
     def create_data(self, args):
         super().create_data(args)
-
         # check if there are nan's in the asd, if there are shift the detector segment used to generate the psd to an earlier time
         for ifo in self.interferometers:
             frequency_array = ifo.strain_data.frequency_array
@@ -386,7 +385,12 @@ class DataGenerationInput(BilbyDataGenerationInput):
                     raise
 
     def save_hdf5(self):
-        """Save frequency-domain strain and ASDs as DingoDataset HDF5 format."""
+        """
+        Save frequency-domain strain and ASDs as DingoDataset HDF5 format.
+
+        This method will also save the PSDs as .txt files in the data directory
+        for easy reading by pesummary and Bilby.
+        """
 
         # if the data is created via an injection, we don't need to convert anything
         # from the Bilby format
@@ -478,6 +482,14 @@ class DataGenerationInput(BilbyDataGenerationInput):
             )
 
         dataset.to_file(self.event_data_file)
+
+        # also saving the psd as a .dat file which can be read in
+        # easily by pesummary or bilby
+        for ifo in self.interferometers:
+            np.savetxt(
+                os.path.join(self.data_directory, f"{ifo.name}_psd.txt"),
+                np.vstack([domain(), data["asds"][ifo.name] ** 2]).T,
+            )
 
     @property
     def event_data_file(self):

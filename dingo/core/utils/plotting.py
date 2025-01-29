@@ -8,7 +8,11 @@ import pandas as pd
 
 
 def plot_corner_multi(
-    samples, weights=None, labels=None, filename="corner.pdf", truth=None, **kwargs
+    samples,
+    weights=None,
+    labels=None,
+    filename: str = "corner.pdf",
+    **kwargs,
 ):
     """
     Generate a corner plot for multiple posteriors.
@@ -24,10 +28,12 @@ def plot_corner_multi(
         Labels for the posteriors.
     filename : str
         Where to save samples.
-    truth : dict
-        Optional truth values. Usually used when doing an injection recovery
-    **kwargs :
-        Forwarded to corner.corner.
+
+    Other Parameters
+    ----------------
+    legend_font_size: int
+        Font size used in legend. Defaults to 50.
+    Also contains additional parameters forwarded to corner.corner.
     """
     # Define plot properties
     cmap = "Dark2"
@@ -74,7 +80,7 @@ def plot_corner_multi(
             color=color,
             no_fill_contours=True,
             fig=fig,
-            **corner_params
+            **corner_params,
         )
         if truth is not None:
             truth_list = np.array([truth[c] if c in truth else None for c in common_parameters])
@@ -94,7 +100,7 @@ def plot_corner_multi(
     fig.legend(
         handles=handles,
         loc="upper right",
-        fontsize=50,
+        fontsize=kwargs.get("legend_font_size", 50),
         labelcolor="linecolor",
     )
 

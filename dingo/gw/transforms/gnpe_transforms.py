@@ -73,14 +73,13 @@ class GNPEBase(ABC):
         """
         # First we sample from the kernel, ensuring the correct data type,
         # and accounting for possible batching.
-        #
-        # Batching is implemented only for torch Tensors (expected at inference time),
-        # whereas un-batched data in float form is expected during training.
         if type(g) == torch.Tensor:
             epsilon = self.kernel[k].sample(len(g))
             epsilon = torch.tensor(epsilon, dtype=g.dtype, device=g.device)
         elif type(g) == np.float64 or type(g) == float:
             epsilon = self.kernel[k].sample()
+        elif type(g) == np.ndarray:
+            epsilon = self.kernel[k].sample(len(g))
         else:
             raise NotImplementedError(f"Unsupported data type {type(g)}.")
 
