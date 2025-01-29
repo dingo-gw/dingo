@@ -170,10 +170,10 @@ class MainInput(BilbyMainInput):
         # self.ignore_gwpy_data_quality_check = args.ignore_gwpy_data_quality_check
         self.trigger_time = args.trigger_time
         # self.deltaT = args.deltaT
-        self.gps_tuple = args.gps_tuple
-        self.gps_file = args.gps_file
+        self.gps_tuple = None # args.gps_tuple
+        self.gps_file = None #  args.gps_file
         self.timeslide_file = args.timeslide_file
-        # self.gaussian_noise = args.gaussian_noise
+        self.gaussian_noise = args.gaussian_noise
         self.zero_noise = args.zero_noise
         self.num_noise_realizations = args.num_noise_realizations
         self.injection_file = args.injection_file

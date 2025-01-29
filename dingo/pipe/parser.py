@@ -303,9 +303,9 @@ def create_parser(top_level=True):
     )
     # data_type_pars = data_gen_pars.add_mutually_exclusive_group()
     # data_type_pars.add(
-    #     "--gaussian-noise",
-    #     action="store_true",
-    #     help="If true, use simulated Gaussian noise",
+        # "--gaussian-noise",
+        # action="store_true",
+        # help="If true, use simulated Gaussian noise",
     # )
     # data_gen_pars.add(
     # "--zero-noise",
@@ -516,10 +516,17 @@ def create_parser(top_level=True):
         "training will be used. Allowed waveform approximants are those implemented"
         "in lalsimulation",
     )
-    injection_parser.add(
+
+    injection_parser_noise_input = injection_parser.add_mutually_exclusive_group()
+    injection_parser_noise_input.add(
         "--zero-noise",
         action="store_true",
-        help="Use a zero noise realisation",
+        help="Use a zero noise realisation for the injection",
+    )
+    injection_parser_noise_input.add(
+        "--gaussian-noise",
+        action="store_true",
+        help="Use a gaussian noise realisation for the injection",
     )
     injection_parser.add(
         "--num-noise-realizations",
