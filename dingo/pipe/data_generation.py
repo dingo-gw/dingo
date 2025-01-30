@@ -15,7 +15,7 @@ from dingo.gw.data.event_dataset import EventDataset, EventDatasetList
 from dingo.gw.domains import FrequencyDomain
 from dingo.pipe.parser import create_parser
 from dingo.gw.injection import Injection
-from dingo.core.models import PosteriorModel
+from dingo.core.posterior_models import NormalizingFlowPosteriorModel
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.data.data_preparation import (
     load_raw_data,
@@ -197,7 +197,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
     def generate_injection(self, args):
         """Generate injection consistent with trained dingo model"""
         # loading posterior model for which we want to generate injections
-        pm = PosteriorModel(model_filename=args.model, device="cpu")
+        pm = NormalizingFlowPosteriorModel(model_filename=args.model, device="cpu")
         injection_generator = Injection.from_posterior_model_metadata(pm.metadata)
         injection_generator.t_ref = self.trigger_time
         injection_generator._initialize_transform()
