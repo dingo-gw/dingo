@@ -38,6 +38,9 @@ docker build -t dingo_toy_npe_model:latest .
 
 
 ```
+# -it allows for user prompt, i.e. the user will be asked
+# if each step should be performed or skipped. 
+
 # 16g is the amount of shared memory the container will
 # be allowed to use. You can change this value.
 # Note that failing to use this option may result in a torch error
@@ -46,6 +49,11 @@ docker build -t dingo_toy_npe_model:latest .
 # -v /tmp:/tmp will bind the container /tmp folder to the local /tmp
 # folder, where all the output files will be created.
 
-docker run --shm-size=16g -v /tmp:/tmp dingo_toy_npe_model:latest
+docker run -it --shm-size=16g -v /tmp:/tmp dingo_toy_npe_model:latest
+
+# to avoid being prompted (i.e. all steps will be run):
+
+docker run --shm-size=16g -v /tmp:/tmp dingo_toy_npe_model:latest -y
+
 ```
 

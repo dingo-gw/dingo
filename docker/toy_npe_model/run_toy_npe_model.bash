@@ -5,14 +5,12 @@
 
 source /opt/dingo/docker/dingo.bash
 
-
 # we run toy_npe_model, i.e. dingo/examples/toy_npe_model
 dingo_example_folder="toy_npe_model"
 
 
 # copying the example files to /tmp 
 setup_directory ${dingo_example_folder}
-
 
 # running steps
 

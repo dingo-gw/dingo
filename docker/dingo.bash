@@ -8,7 +8,7 @@
 #   - error_handler: exiting with error after printing to stderr
 #   - print_output: run a command and print its output to the terminal
 
-echo "setting up '-y' global option (running all steps withour confirmation)"
+echo "setting up '-y' global option (running all steps without confirmation)"
 FORCE_YES=false
 while getopts "y" opt; do
   case $opt in
