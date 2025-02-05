@@ -8,7 +8,7 @@ from bilby_pipe.utils import parse_args, logger, convert_string_to_dict
 import pandas as pd
 
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
-from dingo.gw.data.event_dataset import EventDataset, EventDatasetList
+from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
 from dingo.gw.inference.inference_utils import prepare_log_prob
 from dingo.pipe.default_settings import DENSITY_RECOVERY_SETTINGS
@@ -45,12 +45,11 @@ class SamplingInput(Input):
         self.model = args.model
         self.model_init = args.model_init
         self.zero_noise = args.zero_noise
+        self.injection = args.injection_dict is not None
+        self.recover_log_prob = args.recover_log_prob
         if self.zero_noise:
             self.num_noise_realizations = args.num_noise_realizations
             self.recover_log_prob = False
-        else:
-            self.num_noise_realizations = 1
-            self.recover_log_prob = args.recover_log_prob
         self.device = args.device
         self.num_gnpe_iterations = args.num_gnpe_iterations
         self.num_samples = args.num_samples
@@ -107,10 +106,7 @@ class SamplingInput(Input):
         self._load_sampler()
 
     def _load_event(self):
-        if self.zero_noise:
-            self.context = EventDatasetList(file_name=self.event_data_file)
-        else:
-            self.context = EventDataset(file_name=self.event_data_file)
+        self.context = EventDataset(file_name=self.event_data_file)
         self.event_metadata = self.context.settings
 
     def _load_sampler(self):
@@ -176,7 +172,6 @@ class SamplingInput(Input):
     #     return os.path.relpath(result_dir)
 
     def run_sampler(self):
-
         self.dingo_sampler.event_metadata = self.event_metadata
         if self.gnpe and self.recover_log_prob and not self.zero_noise:
             self.dingo_sampler.context = self.context.data
@@ -197,7 +192,11 @@ class SamplingInput(Input):
             n_training_samples = 1_000_000
             samples_list = []
             for i in range(self.num_noise_realizations):
-                self.dingo_sampler.context = self.context.event_dataset_dict_list[f"strain_data_{i}"]
+                context = {
+                    "waveform": self.context.data[f"waveform_{i}"],
+                    "asds": self.context.data["asds"]
+                }
+                self.dingo_sampler.context = context
                 self.dingo_sampler.run_sampler(
                     int(n_training_samples / self.num_noise_realizations),
                     batch_size=self.batch_size,

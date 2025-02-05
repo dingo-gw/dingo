@@ -11,7 +11,7 @@ import numpy as np
 import lalsimulation as LS
 from bilby.gw.detector.psd import PowerSpectralDensity
 
-from dingo.gw.data.event_dataset import EventDataset, EventDatasetList
+from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import FrequencyDomain
 from dingo.pipe.parser import create_parser
 from dingo.gw.injection import Injection
@@ -292,12 +292,15 @@ class DataGenerationInput(BilbyDataGenerationInput):
                         seed=seed,
                     )
                 )
+            # useful for computing optimal SNR
+            strain_data = self.strain_data_list[0]
         else:
-            self.strain_data = injection_generator.injection(self.injection_dict)
+            strain_data = injection_generator.injection(self.injection_dict)
+            self.strain_data = strain_data
 
         # Compute optimal SNR
         rho_opt_ifos, rho_opt = self.compute_optimal_snr(
-            self.strain_data, injection_generator.data_domain
+            strain_data, injection_generator.data_domain
         )
         logger.info(f"Network optimal SNR of injection: {rho_opt}")
         logger.info(f"Detector optimal SNRs of injection: {rho_opt_ifos}")
@@ -392,24 +395,31 @@ class DataGenerationInput(BilbyDataGenerationInput):
         )
         if self.injection_dict:
             if self.zero_noise and not self.importance_sampling:
-                data = {"event_dataset_dict_list": {f"strain_data_{i}":v for i, v in enumerate(self.strain_data_list)}}
-                cls = EventDatasetList
-            else:
-                data = {"data": self.strain_data}
-                cls = EventDataset
-
-            dataset = cls(
-                dictionary={
-                    **{
-                        "injection_waveform_approximant": self.injection_waveform_approximant,
-                        "injection_dict": self.injection_dict,
-                        "settings": settings,
-                    },
-                    **data,
+                tmp_strain_data = self.strain_data_list[0]
+                asds = {
+                    ifo_name: domain.update_data(
+                        tmp_strain_data["asds"][ifo_name], low_value=1.0
+                    )
+                    for ifo_name in self.detectors
                 }
-            )
-            for ifo_name in self.detectors:
-                data["data"]["asds"][ifo_name] = domain.update_data(data["data"]["asds"][ifo_name], low_value=1.0)
+
+                # NOTE should we save the asd for each realization? This is convenient for 
+                # analysis but not for storage. For now I didn't save it
+                data = {
+                        **{f"waveform_{i}":self.strain_data_list[i]["waveform"] for i in range(self.num_noise_realizations)},
+                        "asds": asds,
+                }
+
+            else:
+                data = self.strain_data
+                for ifo_name in self.detectors:
+                    data["asds"][ifo_name] = domain.update_data(
+                        data["asds"][ifo_name], low_value=1.0
+                    )
+
+            settings["num_injections"] = self.num_noise_realizations
+            settings["injection_waveform_approximant"] = self.injection_waveform_approximant
+            settings["injection_dict"] = self.injection_dict
         else:
             # PSD and strain data.
             data = {"waveform": {}, "asds": {}}  # TODO: Rename these keys.
@@ -454,27 +464,29 @@ class DataGenerationInput(BilbyDataGenerationInput):
                 if v is not None:
                     settings[k] = v
 
-            dataset = EventDataset(
-                dictionary={
-                    "data": data,
-                    # "event_metadata": event_metadata,
-                    "settings": settings,
-                }
-            )
+        dataset = EventDataset(
+            dictionary={
+                "data": data,
+                # "event_metadata": event_metadata,
+                "settings": settings,
+            }
+        )
 
         dataset.to_file(self.event_data_file)
 
         # also saving the psd as a .dat file which can be read in
         # easily by pesummary or bilby
-        for ifo_name, asd in data["data"]["asds"].items():
+        for ifo_name, asd in dataset.data["asds"].items():
             np.savetxt(
                 os.path.join(self.data_directory, f"{ifo_name}_psd.txt"),
-                np.vstack([domain(), asd ** 2]).T,
+                np.vstack([domain(), asd**2]).T,
             )
 
     @property
     def event_data_file(self):
-        return os.path.join(self.data_directory, "_".join([self.label, f"event_data.hdf5"]))
+        return os.path.join(
+            self.data_directory, "_".join([self.label, f"event_data.hdf5"])
+        )
 
     @property
     def importance_sampling_updates(self):

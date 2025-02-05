@@ -14,12 +14,3 @@ class EventDataset(DingoDataset):
             dictionary=dictionary,
             data_keys=["data"],
         )
-
-class EventDatasetList(DingoDataset):
-    
-    def __init__(self, file_name=None, dictionary=None):
-        super().__init__(
-            file_name=file_name,
-            dictionary=dictionary,
-            data_keys=["event_dataset_dict_list"],
-        )
