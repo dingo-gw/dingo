@@ -1,5 +1,4 @@
 import os
-import queue
 import sys
 from os.path import join, isfile
 import yaml
@@ -38,6 +37,7 @@ def create_submission_file(
         f"requirements = TARGET.CUDAGlobalMemoryMb > "
         f'{condor_settings["memory_gpus"]}\n\n'
     )
+    lines.append(f'arguments = "{condor_settings["arguments"]}"\n')
     # TODO: Special settings of MPI-IS cluster => make optional
     if condor_settings["num_gpus"] == 8:
         # Request full node

@@ -549,103 +549,22 @@ class BasePosteriorModel(ABC):
                         except ImportError:
                             print("wandb not installed. Skipping logging to wandb.")
 
-                    if early_stopping is not None:
-                        # Whether to use train or test loss
-                        early_stopping_loss = (
-                            test_loss
-                            if early_stopping.metric == "validation"
-                            else train_loss
+                if early_stopping is not None:
+                    # Whether to use train or test loss
+                    early_stopping_loss = (
+                        test_loss
+                        if early_stopping.metric == "validation"
+                        else train_loss
+                    )
+                    is_best_model = early_stopping(early_stopping_loss)
+                    if is_best_model and (self.rank is None or self.rank == 0):
+                        self.save_model(
+                            join(train_dir, "best_model.pt"), save_training_info=False
                         )
-                        is_best_model = early_stopping(early_stopping_loss)
-                        if is_best_model and (self.rank is None or self.rank == 0):
-                            self.save_model(
-                                join(train_dir, "best_model.pt"),
-                                save_training_info=False,
-                            )
-                        if early_stopping.early_stop:
-                            print("Early stopping")
-                            break
-
-                    print(f"Finished training epoch {self.epoch}.\n")
-
-    def sample(
-        self,
-        *x,
-        batch_size=None,
-        num_samples=None,
-        get_log_prob=False,
-    ):
-        """
-        Sample from posterior model, conditioned on context x. x is expected to have a
-        batch dimension, i.e., to obtain N samples with additional context requires
-        x = x_.expand(N, *x_.shape).
-
-        This method takes care of the batching, makes sure that self.network is in
-        evaluation mode and disables gradient computation.
-
-        Parameters
-        ----------
-        *x:
-            input context to the neural network; has potentially multiple elements for,
-            e.g., gnpe proxies
-        batch_size: int = None
-            batch size for sampling
-        num_samples: int = None
-            number of samples to draw from the posterior model
-        get_log_prob: bool = False
-            if True, also return log probability along with the samples
-
-        Returns
-        -------
-        samples: torch.Tensor
-            samples from posterior model
-        """
-
-        self.network.eval()
-        with torch.no_grad():
-            if batch_size is None:
-                if get_log_prob:
-                    samples, log_prob = self.sample_and_log_prob_batch(*x)
-                else:
-                    samples = self.sample_batch(*x)
-            else:
-                if num_samples is None:
-                    num_samples = batch_size
-                samples = []
-                if get_log_prob:
-                    log_prob = []
-
-                num_batches = (
-                    math.ceil(len(x[0]) / batch_size)
-                    if x
-                    else math.ceil(num_samples / batch_size)
-                )
-                for idx_batch in range(num_batches):
-                    if x:
-                        lower, upper = (
-                            idx_batch * batch_size,
-                            (idx_batch + 1) * batch_size,
-                        )
-                        x_batch = [xi[lower:upper] for xi in x]
-                        batch_size = None
-                    else:
-                        x_batch = x
-
-                    if get_log_prob:
-                        samples_batch, log_prob_batch = self.sample_and_log_prob_batch(
-                            *x_batch, batch_size=batch_size
-                        )
-                        samples.append(samples_batch)
-                        log_prob.append(log_prob_batch)
-                    else:
-                        samples.append(self.sample_batch(*x_batch))
-                samples = torch.cat(samples, dim=0)
-                if get_log_prob:
-                    log_prob = torch.cat(log_prob, dim=0)
-        if not get_log_prob:
-            return samples
-        else:
-            return samples, log_prob
+                    if early_stopping.early_stop:
+                        print("Early stopping")
+                        break
+                print(f"Finished training epoch {self.epoch}.\n")
 
 
 def train_epoch(
@@ -675,7 +594,7 @@ def train_epoch(
             print_freq=1,
             device=pm.device,
         )
-
+    scaler = None
     if automatic_mixed_precision:
         # Create scaler for automatic mixed precision
         # Warning: gradient clipping requires special treatment in amp

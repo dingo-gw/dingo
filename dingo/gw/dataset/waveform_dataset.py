@@ -215,7 +215,17 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         """The number of waveform samples."""
         return len(self.parameters)
 
-    def __getitem__(self, idx: Union[int, np.array]) -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
+    def __getitem__(self, idx: int) -> Dict[str, Dict[str, float]]:
+        """
+        Return a nested dictionary containing parameters and waveform polarizations
+        for sample with index `idx`. If defined, a chain of transformations is applied to
+        the waveform data.
+        """
+        return self.__getitems__([idx])[0]
+
+    def __getitems__(
+            self, batched_idx: np.array,
+    ) -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
         """
         Return a nested dictionary containing parameters and waveform polarizations
         for sample with index `idx`. If defined, a chain of transformations is applied to
@@ -228,15 +238,18 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         # Get parameters and data for idx
         if self.leave_on_disk_keys is None:
             # All data is in memory
-            parameters = self.parameters.iloc[idx].to_dict()
+            parameters = {
+                k: v if isinstance(v, float) else v.to_numpy()
+                for k, v in self.parameters.iloc[batched_idx].items()
+            }
             polarizations = {
-                pol: waveforms[idx] for pol, waveforms in self.polarizations.items()
+                pol: waveforms[batched_idx] for pol, waveforms in self.polarizations.items()
             }
         else:
             # Data or parameters are not in memory -> load them
             if "parameters" in self.leave_on_disk_keys and "h_cross" in self.leave_on_disk_keys and "h_plus" in self.leave_on_disk_keys:
                 # Not working at the moment because standardization of parameters is calculated at training time
-                data = recursive_hdf5_load(self.file_handle, keys=["parameters", "polarizations"], idx=idx)
+                data = recursive_hdf5_load(self.file_handle, keys=["parameters", "polarizations"], idx=batched_idx)
                 if self.svd is None:
                     # Apply domain update to set waveform to zero for f < f_min
                     polarizations = {
@@ -245,18 +258,21 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                 parameters = data["parameters"]
             elif "parameters" in self.leave_on_disk_keys:
                 # Not working at the moment because standardization of parameters is calculated at training time
-                parameters = recursive_hdf5_load(self.file_handle, keys=["parameters"], idx=idx)["parameters"]
+                parameters = recursive_hdf5_load(self.file_handle, keys=["parameters"], idx=batched_idx)["parameters"]
                 polarizations = {
-                    pol: waveforms[idx] for pol, waveforms in self.polarizations.items()
+                    pol: waveforms[batched_idx] for pol, waveforms in self.polarizations.items()
                 }
             elif "h_cross" in self.leave_on_disk_keys or "h_plus" in self.leave_on_disk_keys:
-                polarizations = recursive_hdf5_load(self.file_handle, keys=["polarizations"], idx=idx)["polarizations"]
+                polarizations = recursive_hdf5_load(self.file_handle, keys=["polarizations"], idx=batched_idx)["polarizations"]
                 if self.svd is None:
                     # Apply domain update to set waveform to zero for f < f_min
                     polarizations = {
                         pol: self.domain.update_data(waveforms) for pol, waveforms in polarizations.items()
                     }
-                parameters = self.parameters.iloc[idx]
+                parameters = {
+                    k: v if isinstance(v, float) else v.to_numpy()
+                    for k, v in self.parameters.iloc[batched_idx].items()
+                }
             else:
                 raise ValueError(f"Unknown leave_on_disk_keys {self.leave_on_disk_keys}. "
                                  f"Cannot be loaded during __getitem__().")
@@ -283,18 +299,31 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         # Main transforms can depend also on parameters.
         data = {"parameters": parameters, "waveform": polarizations}
         if self.transform is not None:
-            if isinstance(idx, int):
-                data = self.transform(data)
-            else:
-                # TODO: replace by vectorized version of transforms,
-                #  ideally, transforms can handle single data point and batch
-                data = [self.transform(
-                    {"parameters": {k: data["parameters"][k][j] for k in data["parameters"].keys()},
-                     "waveform": {"h_cross": data["waveform"]["h_cross"][i], "h_plus": data["waveform"]["h_plus"][i]}}
-                    ) for i, j in enumerate(idx)
-                ]
+            data = self.transform(data)
 
-        return data
+        # Currently, the data is of shape [M, N, ...] with where M is the number
+        # of arrays returned by the transform and N is the batch_size.  This
+        # array is repackaged to group different indices of `M` into one sample,
+        # resulting in data of shape [N, M, ...].  That is, data is of the form
+        #
+        # [arr1, ... arrM]
+        #
+        # where each arr is shape (N, ...).  Whereas the repackaged data is of form
+        #
+        # [[arr1[0, ...], ... arrM[0, ...]], ..., [arr1[N, ...], ... arrM[N, ...]]]
+        #
+        # which is a list of length N, where each element is an arr of shape (M, ...).
+        # this is useful for collation
+        if isinstance(data, dict):
+            repackaged_data = [
+                {k1: {k2: v2[j] for k2, v2 in v1.items()} for k1, v1 in data.items()}
+                for j in range(len(batched_idx))
+            ]
+        elif isinstance(data, list):
+            repackaged_data = [
+                [data[i][j] for i in range(len(data))] for j in range(len(batched_idx))
+            ]
+        return repackaged_data
 
     def __del__(self):
         if self.file_handle is not None:
