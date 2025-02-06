@@ -260,6 +260,7 @@ class EmbeddingEmulator(GenericModel):
             self.add_pm_single_event(pm_single_event)
 
         super().__init__(model_filename, metadata, initial_weights, device, load_training_info, type_pm)
+        self.initialize_transform_pre()
 
     def get_pm_single_event(self):
         main_model_path = self.metadata['train_settings']['data']['posterior_model']
@@ -293,7 +294,7 @@ class EmbeddingEmulator(GenericModel):
 
     def sample_from_params(self, params, device=None, num_samples=None):
         
-        x = self.transform(dict(parameters=params))
+        x = self.transform(dict(parameters=params))[0]
         x = torch.tensor(np.array(x)).squeeze()
 
         if(num_samples is not None):
@@ -301,8 +302,7 @@ class EmbeddingEmulator(GenericModel):
 
         return self.sample(x, device=device)
 
-
-    def sample(self, x=None, params=None, batch_size=None, device=None):
+    def sample(self, x=None, batch_size=None, device=None):
         
         if len(x.shape) == 3:
             flattened = True
