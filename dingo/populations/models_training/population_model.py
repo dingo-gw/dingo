@@ -1,59 +1,9 @@
-import pickle
-import copy
-
-import numpy as np
-import torch, torchvision
-from typing import Dict, Union
+import torch
 
 import dingo
-from dingo.pipe.default_settings import DENSITY_RECOVERY_SETTINGS
-from dingo.core.models.posterior_model import PosteriorModel
-from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
-from dingo.gw.injection import Injection
-from dingo.gw.noise.asd_dataset import ASDDataset
-from dingo.gw.inference.inference_pipeline import prepare_log_prob
-from dingo.gw.dataset import WaveformDataset
-from dingo.gw.gwutils import (
-    get_standardization_dict,
-    get_extrinsic_prior_dict,
-)
-import dingo.core.utils as utils
-
-from dingo.gw.training.train_builders import (
-    build_dataset,
-    set_train_transforms,
-)
-
-from dingo.gw.transforms import (
-    AddWhiteNoiseComplex,
-    UnpackDict,
-    SelectStandardizeRepackageParameters
-)
 
 import time
 from threadpoolctl import threadpool_limits
-
-def check_below_required_event_numbers(n_lim_eff, n_lim):
-
-    """
-    Check whether there are enough detected events. Takes as input a 
-    one-dimension tensor n_lim_eff of shape (batch size)
-    
-    Parameters
-    ----------
-    n_lim_eff : torch.Tensor
-        Two-dimension tensor of shape (batch size, number of events).
-    n_lim : int
-        Required number of events.
-    
-    Returns
-    -------
-    bool
-        True if there are enough detected events, False otherwise.
-
-    """
-
-    return torch.any(n_lim_eff != n_lim)
 
 def limit_ones_vectorized(tensor, n_lim, maximum_population_size):
 
@@ -92,15 +42,12 @@ def limit_ones_vectorized(tensor, n_lim, maximum_population_size):
         raise 'Cannot produce more event than the maximum number of events. '
 
     device = tensor.device
-
-    start_time = time.time()
-    times = {}
     
     # Get the shape of the input tensor
     num_batch, num_events = tensor.size()
 
     tensor_int = (~tensor).int()
-    
+
     # Get the indices where the True values are located, sorted along the rows
     sorted_indices = torch.argsort(tensor_int, dim=1, descending=False)
 
@@ -114,7 +61,7 @@ def limit_ones_vectorized(tensor, n_lim, maximum_population_size):
     # make sure there are enough detected embeddings
     if check_below_required_event_numbers(n_lim_eff, n_lim):
         print("Not enough detected embeddings.")
-    
+
     # Create an index mask that selects the first n_lim ones for each row
     mask = (torch.arange(num_events).expand(num_batch, num_events).to(device) < n_lim_eff[:,None])
     mask2 = (torch.arange(num_events).expand(num_batch, num_events).to(device) < maximum_population_size)
@@ -153,33 +100,19 @@ def get_detected_embeddings(x, embedding_emulator, selection_model, number_event
     
     """
 
-    time_start = time.time()
-    train_time = {}
-
     # sample from embedding emulator
-    emb = embedding_emulator.sample(x=x)
+    emb = embedding_emulator.sample(x=x, batch_size=None)
 
     num_batch, num_events, _ = emb.size()
-
-    train_time['compute_embeddings'] = time.time() - time_start
 
     # check whether embeddings are detected
     mask = selection_model.apply_selection_to_embeddings(emb)
 
-    train_time['compute_selection'] = time.time() - train_time['compute_embeddings'] - time_start
-
     # cut all detections above the required number of events
     mask, idx2 = limit_ones_vectorized(mask, number_events, maximum_population_size)
 
-    train_time['compute_mask'] = time.time() - train_time['compute_selection'] - time_start
-
     # mask embeddings
     emb[~mask] = 0
-
-    train_time['set_emb_to_zero'] = time.time() - train_time['compute_mask'] - time_start
-
-    # for k in train_time.keys():
-    #     print(f"{k}: {train_time[k]}")
 
     # only return detected embeddings
     emb_det = emb[idx2].view(num_batch, maximum_population_size, -1)
@@ -214,10 +147,13 @@ def train_epoch_population_model(pm, dataloader):
 
         hp = data[0]
         emb_det = get_detected_embeddings(data[1], pm_embedding_emulator, selection_model, data[2], maximum_population_size)
-        emb_det.to(pm.device, non_blocking=True)
+        
+        # assert emb_det.device == pm.device
+        # emb_det.to(pm.device, non_blocking=True)
 
         mask = (emb_det == 0).all(dim=-1)
         loss = -pm.model(hp, emb_det, mask).mean()
+        
         # backward pass and optimizer step
         loss.backward()
         pm.optimizer.step()
