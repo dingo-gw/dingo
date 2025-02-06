@@ -31,6 +31,8 @@ from dingo.populations.models_training.models import (
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
+from torch.profiler import profile, record_function, ProfilerActivity
+
 
 def train(
     train_dir: str,
@@ -38,6 +40,7 @@ def train(
     resume=False,
     train_settings: dict = None,
     checkpoint=None,
+    profiling=False
 ):
     if resume:
 
@@ -142,15 +145,39 @@ def train(
         epoch_start=pm.epoch, **local_settings["runtime_limits"]
     )
     runtime_limits.max_epochs_total = train_settings["training"]["epochs"]
-    pm.train(
-        train_loader,
-        test_loader,
-        train_dir=train_dir,
-        runtime_limits=runtime_limits,
-        checkpoint_epochs=local_settings["checkpoint_epochs"],
-        use_wandb=local_settings.get("wandb", False),
-        test_only=local_settings.get("test_only", False),
-    )
+    # Set up PyTorch Profiler if profiling is enabled
+    if profiling:
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            record_shapes=True,
+            profile_memory=True,
+            with_stack=True,
+        ) as prof:
+            with record_function("model_training"):
+                pm.train(
+                    train_loader,
+                    test_loader,
+                    train_dir=train_dir,
+                    runtime_limits=runtime_limits,
+                    checkpoint_epochs=local_settings["checkpoint_epochs"],
+                    use_wandb=local_settings.get("wandb", False),
+                    test_only=local_settings.get("test_only", False),
+                )
+
+        # Save the profiler results to a file
+        prof.export_chrome_trace(os.path.join(train_dir, "training_trace.json"))
+        print("Profiling data saved to {}".format(os.path.join(train_dir, "training_trace.json")))
+
+    else:
+        pm.train(
+            train_loader,
+            test_loader,
+            train_dir=train_dir,
+            runtime_limits=runtime_limits,
+            checkpoint_epochs=local_settings["checkpoint_epochs"],
+            use_wandb=local_settings.get("wandb", False),
+            test_only=local_settings.get("test_only", False),
+        )
 
     population_model_train.save_stats(train_dir)
 
