@@ -162,12 +162,15 @@ class StrainTokenization(object):
         )
         # Prepare position information for each token
         detector_dict = {"H1": 0, "L1": 1, "V1": 2}
-        detectors = np.array(
-            [
-                [detector_dict[k] for _ in range(len(v))]
-                for k, v in input_sample["asds"].items()
-            ]
-        ).T
+        if strain.shape[:-4] == ():
+            detectors = np.array([detector_dict[k] for k, v in input_sample["asds"].items()])
+        else:
+            detectors = np.array(
+                [
+                    [detector_dict[k] for _ in range(len(v))]
+                    for k, v in input_sample["asds"].items()
+                ]
+            ).T
         if self.normalize_freq:
             f_min_per_token = (self.f_min_per_token - self.f_min) / (
                 self.f_max - self.f_min
