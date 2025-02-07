@@ -241,7 +241,7 @@ def set_train_transforms(
         transforms.append(
             StrainTokenization(
                 domain,
-                num_tokens_per_detector=num_tokens,
+                num_tokens_per_block=num_tokens,
                 token_size=token_size,
                 normalize_frequency=norm_freq,
                 single_tokenizer=single_tokenizer,
@@ -252,10 +252,29 @@ def set_train_transforms(
         selected_keys.append("drop_token_mask")
 
         # Randomly drop frequency ranges or detectors during training
-        if data_settings["tokenization"].get("drop_frequency_range", False):
-            transforms.append(DropFrequencyValues(print_output=print_output))
-        if data_settings["tokenization"].get("drop_detectors", False):
-            transforms.append(DropDetectors(print_output=print_output))
+        if "drop_frequency_range" in data_settings["tokenization"]:
+            transforms.append(
+                DropFrequencyValues(
+                    domain,
+                    drop_f_settings=data_settings["tokenization"][
+                        "drop_frequency_range"
+                    ],
+                    print_output=print_output,
+                )
+            )
+        if "drop_detectors" in data_settings["tokenization"]:
+            transforms.append(
+                DropDetectors(
+                    num_blocks=len(data_settings["detectors"]),
+                    p_drop_012_detectors=data_settings["tokenization"][
+                        "drop_detectors"
+                    ].get("p_drop_012_detectors", None),
+                    p_drop_hlv=data_settings["tokenization"]["drop_detectors"].get(
+                        "p_drop_hlv", None
+                    ),
+                    print_output=print_output,
+                )
+            )
 
     except KeyError:
         print(

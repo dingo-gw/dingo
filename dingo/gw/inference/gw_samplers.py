@@ -222,7 +222,7 @@ class GWSampler(GWSamplerMixin, Sampler):
             transforms.append(
                 StrainTokenization(
                     self.domain,
-                    num_tokens_per_detector=num_tokens,
+                    num_tokens_per_block=num_tokens,
                     token_size=token_size,
                     normalize_frequency=norm_freq,
                     single_tokenizer=single_tokenizer,
