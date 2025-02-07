@@ -286,9 +286,11 @@ class MultibandedFrequencyDomain(Domain):
         Array-like of the same form as data.
         """
         f = self.get_sample_frequencies_astype(data)
-        if isinstance(data, np.ndarray):
-            # Assume numpy arrays un-batched, since they are only used at train time.
+        if isinstance(dt, float) or data.ndim == 1:
+            # unbatched case
             phase_shift = 2 * np.pi * dt * f
+        elif isinstance(data, np.ndarray):
+            phase_shift = 2 * np.pi * np.einsum("...,i", dt, f)
         elif isinstance(data, torch.Tensor):
             # Allow for possible multiple "batch" dimensions (e.g., batch + detector,
             # which might have independent time shifts).
@@ -350,7 +352,6 @@ class MultibandedFrequencyDomain(Domain):
         New array or tensor of the same shape as data.
         """
         if isinstance(data, np.ndarray) and np.iscomplexobj(data):
-            # This case is assumed to only occur during inference, with un-batched data.
             return data * np.exp(-1j * phase)
 
         elif isinstance(data, torch.Tensor):
@@ -381,7 +382,9 @@ class MultibandedFrequencyDomain(Domain):
                 return result
 
         else:
-            raise TypeError(f"Invalid data type {type(data)}.")
+            raise TypeError(
+                f"Invalid data type {type(data)} or data is not complex valued {np.iscomplexobj(data)}."
+            )
 
     def __len__(self):
         """Number of frequency bins in the domain"""
@@ -418,7 +421,7 @@ class MultibandedFrequencyDomain(Domain):
 
     @property
     def frequency_mask(self) -> np.ndarray:
-        return np.ones_like(self.sample_frequencies)
+        return np.ones_like(self.sample_frequencies, dtype=bool)
 
     def _reset_caches(self):
         raise NotImplementedError()
