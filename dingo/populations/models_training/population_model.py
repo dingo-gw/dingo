@@ -75,7 +75,7 @@ def limit_ones_vectorized(tensor, n_lim, maximum_population_size):
 
     return limited_tensor, limited_tensor2
 
-def get_detected_embeddings(x, embedding_emulator, selection_model, number_events, maximum_population_size):
+def get_detected_embeddings(x, embedding_emulator, selection_model, number_events_per_batch, maximum_population_size):
 
     """ 
     Produce detected embeddings from a tensor x of the shape 
@@ -90,7 +90,7 @@ def get_detected_embeddings(x, embedding_emulator, selection_model, number_event
         Embedding emulator. 
     selection_model : SNREstimator
         Selection model.
-    number_events : int
+    number_events_per_batch : int
         Number of events to detect.
 
     Returns
@@ -108,14 +108,18 @@ def get_detected_embeddings(x, embedding_emulator, selection_model, number_event
     # check whether embeddings are detected
     mask = selection_model.apply_selection_to_embeddings(emb)
 
-    # cut all detections above the required number of events
-    mask, idx2 = limit_ones_vectorized(mask, number_events, maximum_population_size)
+    # cut all detections above the required number of events in mask1
+    # Fill up mask2 with ones so that each population contains exactly maximum_population_size events
+    # The unused events are set to zero via mask1
+    mask1, mask2 = limit_ones_vectorized(mask, number_events_per_batch, maximum_population_size)
 
-    # mask embeddings
-    emb[~mask] = 0
+    # mask all non-detected embeddings
+    emb[~mask1] = 0
 
     # only return detected embeddings
-    emb_det = emb[idx2].view(num_batch, maximum_population_size, -1)
+    # shape is cut-down from (num_batch, num_events, emb_dim) to 
+    # (num_batch, maximum_population_size, emb_dim)
+    emb_det = emb[mask2].view(num_batch, maximum_population_size, -1)
 
     return emb_det
 
