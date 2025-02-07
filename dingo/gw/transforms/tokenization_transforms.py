@@ -163,7 +163,7 @@ class StrainTokenization(object):
         # Prepare position information for each token
         detector_dict = {"H1": 0, "L1": 1, "V1": 2}
         if strain.shape[:-4] == ():
-            detectors = np.array([detector_dict[k] for k, v in input_sample["asds"].items()])
+            detectors = np.array([[detector_dict[k] for k, v in input_sample["asds"].items()]])
         else:
             detectors = np.array(
                 [
