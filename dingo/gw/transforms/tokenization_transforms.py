@@ -181,16 +181,21 @@ class StrainTokenization(object):
 
         num_tokens = num_blocks * self.num_tokens_per_detector
         token_position = np.empty((*strain.shape[:-4], num_tokens, 3))
-        token_position[..., 0] = np.repeat(
-            np.expand_dims(np.repeat(f_min_per_token, num_blocks), axis=0),
-            *strain.shape[:-4],
-            axis=0,
-        )
-        token_position[..., 1] = np.repeat(
-            np.expand_dims(np.repeat(f_max_per_token, num_blocks), axis=0),
-            *strain.shape[:-4],
-            axis=0,
-        )
+        # Treat sample without batch dimension separately because repeat with repeats=() throws error
+        if strain.shape[:-4] == ():
+            token_position[..., 0] = np.repeat(f_min_per_token, num_blocks)
+            token_position[..., 1] = np.repeat(f_max_per_token, num_blocks)
+        else:
+            token_position[..., 0] = np.repeat(
+                np.expand_dims(np.repeat(f_min_per_token, num_blocks), axis=0),
+                *strain.shape[:-4],
+                axis=0,
+            )
+            token_position[..., 1] = np.repeat(
+                np.expand_dims(np.repeat(f_max_per_token, num_blocks), axis=0),
+                *strain.shape[:-4],
+                axis=0,
+            )
         token_position[..., 2] = np.repeat(
             detectors, self.num_tokens_per_detector, axis=1
         )
