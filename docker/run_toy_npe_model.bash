@@ -3,215 +3,426 @@
 # This executable runs all the steps of the dingo toy npe model as described here:
 # https://dingo-gw.readthedocs.io/en/latest/example_toy_npe_model.html
 
+# Configuration
+DINGO_REPO="https://github.com/dingo-gw/dingo.git"
+DEFAULT_BASE_DIR="/tmp/dingo"
 
-# (github) clone dingo, create a python venv
-# and (pip) install dingo in the folder
-# $DINGO_INSTALL (/tmp/dingo/install, will be first deleted if already exists !),
-install_dingo() {
-    local dingo_repo=$1
-    local dingo_install=$2
-    local dingo_venv=$3
-    if [ -d "$dingo_venv" ]; then
-	echo "using virtual environment: ${dingo_venv}. (python: $(python --version))"
-    else
-	echo "creating virtual environment: ${dingo_venv}"
-	python3 -m venv "$dingo_venv"
+parse_arguments() {
+    local base_dir="$DEFAULT_BASE_DIR"
+    local email_config=""
+    local test_email="false"
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --base-dir)
+                if [[ $# -lt 2 ]]; then
+                    echo "Error: --base-dir requires a directory path" >&2
+                    return 1
+                fi
+                base_dir="$2"
+                shift 2
+                ;;
+            --email-config)
+                if [[ $# -lt 2 ]]; then
+                    echo "Error: --email-config requires a JSON file name" >&2
+                    return 1
+                fi
+                if [[ ! -f "$2" ]]; then
+                    echo "Error: Email configuration file '$2' not found" >&2
+                    return 1
+                fi
+                email_config=$(jq '.' "$2")
+                if [[ $? -ne 0 ]]; then
+                    echo "Error: Invalid JSON format in configuration file '$2'" >&2
+                    return 1
+                fi
+                shift 2
+                ;;
+            --test-email)
+                test_email="true"
+                shift
+                ;;
+            *)
+                echo "Error: Unknown option: $1" >&2
+                return 1
+                ;;
+        esac
+    done
+
+    # Validate base directory
+    if [[ ! "$base_dir" =~ ^/ ]]; then
+        echo "Error: Base directory must be an absolute path" >&2
+        return 1
     fi
-    mkdir -p ${dingo_install}
-    echo "cloning ${dingo_repo} to ${dingo_install}"
-    git clone ${dingo_repo} ${dingo_install}
-    echo "python: $(python3 --version)"
-    echo "installing dingo in ${dingo_install}/venv"
-    python3 -m venv ${dingo_venv} && \
-	. ${dingo_venv}/bin/activate && \
-	cd ${dingo_install} && \
-	pip install .
+
+    # Output variables in a safe format
+    echo "BASE_DIR=\"$base_dir\""
+    echo "EMAIL_CONFIG='$(echo "$email_config" | jq -c .)'"
+    echo "TEST_EMAIL=\"$test_email\""
 }
 
-# check that pytorch (as install in $DINGO_VENV)
-# detects the GPU(s)
-check_gpus_detection(){
-    local venv_dir=$1
-    source ${venv_dir}/bin/activate && \
-    python - <<END
+
+# Parse arguments
+parsed_args=$(parse_arguments "$@")
+if [[ $? -ne 0 ]]; then
+    exit 1
+fi
+
+# Set variables from parsed arguments
+# $BASE_DIR and
+# $EMAIL_CONFIG
+# $TEST_EMAIL
+while IFS= read -r line; do
+    eval "$line"
+done <<< "$parsed_args"
+
+# The virtual env. Will be reused accross jobs
+VENV_DIR="${BASE_DIR}/venv"
+
+# Create base directory if it doesn't exist
+mkdir -p "$BASE_DIR"
+
+# Get current timestamp for unique run directory
+CURRENT_DATETIME="$(date +"%Y-%m-%d_%H-%M-%S")"
+RUN_DIR="${BASE_DIR}/${CURRENT_DATETIME}"
+mkdir -p "$RUN_DIR"
+
+# Directory structure
+INSTALL_DIR="${RUN_DIR}/install"
+OUTPUT_DIR="${RUN_DIR}/output"
+
+# Log file paths
+LOG_FILE="${RUN_DIR}/log.txt"
+ERROR_FILE="${RUN_DIR}/error.txt"
+SUMMARY_FILE="${RUN_DIR}/summary.txt"
+
+# Initialize logging with separate streams
+exec > >(tee -a "$LOG_FILE") 2> >(tee -a "$ERROR_FILE")
+
+log_message() {
+    local message="$1"
+    echo -e "[$(date +"%Y-%m-%d %H:%M:%S")] $message"
+}
+
+error_handler() {
+    local cmd_name="$1"
+    local error_message="$2"
+    local error="Error: ${cmd_name} failed with message: ${error_message}"
+    log_message "$error"
+    echo -e "$error" >&2  # Send to stderr
+    exit 1
+}
+
+install_dingo() {
+    local dingo_repo="$1"
+    local dingo_install="$2"
+    local dingo_venv="$3"
+
+    log_message "Starting DINGO installation..."
+
+    # Handle virtual environment
+    if [ -d "$dingo_venv" ]; then
+        log_message "Using existing virtual environment: $dingo_venv"
+        log_message "Python version: $(source "$dingo_venv/bin/activate" && python --version)"
+    else
+        log_message "Creating new virtual environment: $dingo_venv"
+        python3 -m venv "$dingo_venv"
+        local exit_code=$?
+        if [ $exit_code -ne 0 ]; then
+            error_handler "create_venv" "Failed to create virtual environment"
+        fi
+    fi
+
+    # Clone repository
+    rm -rf "$dingo_install"
+    mkdir -p "$dingo_install"
+    log_message "Cloning repository from $dingo_repo to $dingo_install"
+    git clone "$dingo_repo" "$dingo_install"
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        error_handler "git_clone" "Failed to clone repository"
+    fi
+
+    # Install DINGO
+    (
+        source "$dingo_venv/bin/activate"
+        cd "$dingo_install"
+        log_message "Installing DINGO dependencies..."
+        pip install .
+        local exit_code=$?
+        if [ $exit_code -ne 0 ]; then
+            error_handler "pip_install" "Failed to install DINGO"
+        fi
+    )
+}
+
+check_gpu_detection() {
+    local venv_dir="$1"
+    log_message "Checking GPU availability..."
+    
+    source "$venv_dir/bin/activate"
+    python - <<EOF
 import torch
 
 def check_gpus():
     if torch.cuda.is_available():
-        print("CUDA is available.")
+        print("CUDA is available")
         num_gpus = torch.cuda.device_count()
-        print(f"Number of GPUs detected: {num_gpus}")
+        print(f"Found {num_gpus} GPU(s)")
         for i in range(num_gpus):
-            print(f"GPU {i}: {torch.cuda.get_device_name(i)}")
+            print(f"\nGPU {i}:")
+            print(f"  Device Name: {torch.cuda.get_device_name(i)}")
             props = torch.cuda.get_device_properties(i)
-            print(f"  Total Memory: {props.total_memory / 1e9:.2f} GB")
-            print(f"  CUDA Capability: {props.major}.{props.minor}")
+            print(f"  Memory: {props.total_memory / 1e9:.2f} GB")
+            print(f"  Compute Capability: {props.major}.{props.minor}")
     else:
-        print("No GPU detected. CUDA is not available.")
+        print("No CUDA-capable devices found")
 
 check_gpus()
-END
+EOF
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        error_handler "check_gpus" "Failed to check GPU availability"
+    fi
 }
 
-
-# Function to set up the directory:
-# moving data from dingo repo (examples folder) to /tmp
 setup_directory() {
-    local src_dir=$1
-    local target_dir=$2
-    echo "Copying the content of ${src_dir} to ${target_dir}"
+    local src_dir="$1"
+    local target_dir="$2"
+    
+    log_message "Setting up directory structure..."
     mkdir -p "$target_dir"
-    cp -r "$src_dir"/* "$target_dir" 
-    cd "$target_dir" && \
-    mkdir -p training_data && \
-    mkdir -p training 
+    
+    if [ -d "$src_dir" ]; then
+        log_message "Copying files from $src_dir to $target_dir"
+        cp -r "$src_dir"/* "$target_dir/"
+        local exit_code=$?
+        if [ $exit_code -ne 0 ]; then
+            error_handler "copy_files" "Failed to copy files"
+        fi
+        
+        log_message "Creating required subdirectories..."
+        mkdir -p "$target_dir/training_data"
+        mkdir -p "$target_dir/training"
+        local exit_code=$?
+        if [ $exit_code -ne 0 ]; then
+            error_handler "create_dirs" "Failed to create directories"
+        fi
+    else
+        error_handler "setup_directory" "Source directory not found: $src_dir"
+    fi
+}
+
+generate_job_summary() {
+    local example="$1"
+    local install_dir="$2"
+    local run_dir="$3"
+    local venv_dir="$4"
+
+    log_message "Generating job summary..."
+    
+    # Collect information
+    local branch=$(cd "$install_dir" && git branch --show-current)
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        error_handler "get_branch" "Failed to get git branch"
+    fi
+
+    local commit=$(cd "$install_dir" && git rev-parse HEAD)
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        error_handler "get_commit" "Failed to get git commit"
+    fi
+
+    local python_version=$(source "$venv_dir/bin/activate" && python --version)
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        error_handler "get_python_version" "Failed to get Python version"
+    fi
+
+    local end_time=$(date +"%Y-%m-%d_%H-%M-%S")
+
+    # Write summary
+    cat > "$SUMMARY_FILE" <<EOF
+Job Summary
+===========
+Example: $example
+Branch: $branch
+Commit: $commit
+Python Version: $python_version
+End Time: $end_time
+EOF
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        error_handler "write_summary" "Failed to write summary file"
+    fi
 }
 
 
-job_summary() {
-    example=$1
-    install_dir=$2
-    run_dir=$3
-    venv_dir=$4
+send_email_report() {
+    local success="$1"
+    local email_config="$2"
+    
+    # Extract email configuration
+    local smtp_server=$(jq -r '.smtp_server' <<< "$email_config")
+    local from_addr=$(jq -r '.from' <<< "$email_config")
+    local to_addr=$(jq -r '.to' <<< "$email_config")
+    local smtp_user=$(jq -r '.username' <<< "$email_config")
+    local smtp_pass=$(jq -r '.password' <<< "$email_config")
+    
+    # Set email subject based on success/failure
+    local subject="DINGO Workflow $(if [ "$success" = "true" ]; then echo "SUCCEEDED"; else echo "FAILED"; fi)"
+    
+    # Create email body
+    local body=$(cat <<EOF
+DINGO Workflow Report
+====================
+Run Directory: $RUN_DIR
+Start Time: $(head -n 1 "$LOG_FILE" | cut -d']' -f1 | cut -c2-)
+End Time: $(date +"%Y-%m-%d %H:%M:%S")
+Status: $(if [ "$success" = "true" ]; then echo "SUCCESS"; else echo "FAILURE"; fi)
+EOF
+)
 
-    # git related
-    branch=$(cd ${install_dir} && git branch --show-current)
-    commit=$(cd ${install_dir} && git rev-parse HEAD)
+    # Prepare email content
+    local email_content=$(cat <<EOF
+To: $to_addr
+From: $from_addr
+Subject: $subject
 
-    # python related
-    python_version=$(source ${venv_dir}/bin/activate && python --version)
+$body
+EOF
+)
 
-    # date and time
-    datetime=$(date +"%Y-%m-%d_%H-%M-%S")
+    # Send email using ssmtp
+    echo "$email_content" | ssmtp "$to_addr"
 
-    echo "${example} ran with success"
-    echo "branch: ${branch}"
-    echo "commit: ${commit}"
-    echo "python: ${python_version}"
-    echo "job finished: ${datetime}"
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        log_message "Warning: Failed to send email report"
+    else
+        log_message "Email report sent successfully"
+    fi
 }
 
 
-
-
-function run_job() {
-
-    local dingo_repo=$1
-    local venv_dir=$1
-    local run_dir=$3
+run_job() {
+    local dingo_repo="$1"
+    local venv_dir="$2"
+    local install_dir="$3"
+    local output_dir="$4"
     
-    set -e
-    error_handler() {
-	local cmd_name=$1
-	local error_message=$2
-	local error="Error: ${cmd_name} failed with message: ${error_message}"
-	echo ${error}>&2
-	echo ${error} > ${run_dir}/error.txt
-	exit 1
-    }
-    
-    # where the code will be cloned and installed
-    local install_dir=${run_dir}/install
-    
-    # where the output files will be created
-    local output_dir=${run_dir}/output
-    
-    # where the job summary will be printed
-    local job_summary=${run_dir}/summary.txt
-    
-    # we run toy_npe_model, i.e. dingo/examples/toy_npe_model
-    local dingo_example_folder="toy_npe_model"
-    
-    # summary
-    echo ""
-    echo "----------------- DIRECTORIES -----------------"
-    echo "virtual environment: ${VENV_DIR}"
-    echo "run directory: ${run_dir}"
-    echo "dingo example: ${dingo_example_folder}"
-    echo "-----------------------------------------------"
-    echo ""
+    log_message "Starting job execution..."
 
-    # clone and pip install dingo
-    echo "----------------- installing dingo ----------------- "
-    install_dingo $DINGO_REPO $install_dir $VENV_DIR || error_handler "cloning and installing dingo"
-    echo "-----------------------------------------------------"
-    echo ""
+    # Step 1: Install DINGO
+    log_message "\n================= Installing DINGO ================="
+    install_dingo "$dingo_repo" "$install_dir" "$venv_dir"
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        error_handler "install_dingo" "DINGO installation failed"
+    fi
+    log_message "==================================================\n"
 
-    # checking the GPUs are detected
-    # by pytorch.
-    # (this just print related info, it does not exit with
-    # error if no GPU is detected)
-    echo "----------------- GPU/CUDA ----------------- "
-    check_gpus_detection $VENV_DIR || error_handler "checking pytorch GPU access"
-    echo "---------------------------------------------"
-    echo ""
+    # Step 2: Check GPU Detection
+    log_message "================= Checking GPU Availability ================="
+    check_gpu_detection "$venv_dir"
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        error_handler "check_gpu" "GPU detection failed"
+    fi
+    log_message "==========================================================\n"
 
-    # copy the example files tp $output_dir
-    # and create the training_data and training directories
-    echo "----------------- setting up output directory -----------------"
-    setup_directory ${INSTALL_DIR}/examples/${dingo_example_folder} ${output_dir} || error_handler "setup directory"
-    echo "---------------------------------------------------------------"
-    echo ""
+    # Step 3: Setup Directory Structure
+    log_message "================= Setting Up Directories ================="
+    setup_directory "$install_dir/examples/toy_npe_model" "$output_dir"
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        error_handler "setup_directories" "Directory setup failed"
+    fi
+    log_message "=========================================================\n"
 
-    # running steps.
-    # If the user passed the '-y' argument, all steps are run in a row.
-    # Otherwise, before each step, the script pause and prompt the user
+    # Activate virtual environment for remaining steps
+    source "$venv_dir/bin/activate"
 
-    # Note: if any step fail, the script exits with error code; and prints
-    # an error message to stderr.
-
-    echo "-----------------  Generating waveform dataset ----------------- "
-    dingo_generate_dataset dingo_generate_dataset \
-			   --settings waveform_dataset_settings.yaml \
-			   --out_file training_data/waveform_dataset.hdf5 || error_handler "dingo_generate_dataset"
-    echo "-----------------------------------------------------------------"
-    echo ""
+    # cd to the output folder
+    cd $output_dir
     
-    echo "-----------------  Generating ASD dataset ----------------- "
-    dingo_generate_asd_dataset dingo_generate_asd_dataset \
-			       --settings_file asd_dataset_settings.yaml \
-			       --data_dir training_data/asd_dataset || error_handler "dingo_generate_asd_dataset"
-    echo "------------------------------------------------------------"
-    echo ""
-    
-    echo "-----------------  Training ----------------- "
-    dingo_train dingo_train \
-		--settings_file train_settings.yaml \
-		--train_dir training || error_handler "dingo_train"
-    echo "----------------------------------------------"
-    echo ""
-    
-    echo "-----------------  Performing inference ----------------- "
-    dingo_pipe dingo_pipe GW150914.ini || error_handler "dingo_pipe"
-    echo "----------------------------------------------------------"
-    echo ""
+    # Step 4: Generate Waveform Dataset
+    log_message "================= Generating Waveform Dataset ================="
+    dingo_generate_dataset --settings waveform_dataset_settings.yaml --out_file training_data/waveform_dataset.hdf5
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        error_handler "generate_dataset" "Failed to generate waveform dataset"
+    fi
+    log_message "================================================================\n"
 
-    echo "----------------- job summary -----------------"
+    # Step 5: Generate ASD Dataset
+    log_message "================= Generating ASD Dataset ================="
+    dingo_generate_asd_dataset --settings_file asd_dataset_settings.yaml --data_dir training_data/asd_dataset
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        error_handler "generate_asd" "Failed to generate ASD dataset"
+    fi
+    log_message "============================================================\n"
+
+    # Step 6: Train Model
+    log_message "================= Training Model ================="
+    dingo_train --settings_file train_settings.yaml --train_dir training
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        error_handler "train_model" "Failed to train model"
+    fi
+    log_message "==============================================\n"
+
+    # Step 7: Run Inference
+    log_message "================= Running Inference ================="
+    dingo_pipe GW150914.ini
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        error_handler "run_inference" "Failed to run inference"
+    fi
+    log_message "===================================================\n"
+
+    # Final Step: Generate Summary
+    generate_job_summary "toy_npe_model" "$INSTALL_DIR" "$run_dir" "$venv_dir"
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        error_handler "generate_summary" "Failed to generate summary"
+    fi
+    log_message "Job completed successfully!"
 }
 
+main() {
+    log_message "Starting DINGO workflow..."
+    log_message "Base directory: $BASE_DIR"
+    log_message "Run directory: $RUN_DIR"
+    log_message "Virtual environment: $VENV_DIR\n"
 
-# from which git repo dingo will be cloned
-DINGO_REPO="https://github.com/dingo-gw/dingo.git"
+    if [[ "$TEST_EMAIL" = "true" ]]; then
+        # Test email functionality
+        log_message "Running in test email mode..."
+        
+        # Create test files
+        echo "Test error message" > "$ERROR_FILE"
+        echo "Test output message" > "$LOG_FILE"
+        echo "Test summary information" > "$SUMMARY_FILE"
+        
+        # Send test email
+        send_email_report "true" "$EMAIL_CONFIG"
+        exit 0
+    fi
+    
+    # Run the job and capture success/failure
+    if run_job "$DINGO_REPO" "$VENV_DIR" "$INSTALL_DIR" "$OUTPUT_DIR"; then
+        success="true"
+    else
+        success="false"
+    fi
 
-# where all the files will be located (cloned source code, python venv,
-# output files of the script, etc)
-# Note: if this is running in docker, it is assumed /data is shared with
-# the host machine.
-if [ -n "$1" ]; then
-  BASE_DIR="$1"
-else
-  BASE_DIR="/tmp/dingo"
-fi
+    # Send email report if configured
+    if [[ -n "$EMAIL_CONFIG" ]]; then
+        send_email_report "$success" "$EMAIL_CONFIG"
+    fi
+}
 
-# we reuse the same venv over all the run
-VENV_DIR="${BASE_DIR}/venv"
-
-current_datetime=$(date +"%Y-%m-%d_%H-%M-%S")
-RUN_DIR="${base_dir}/$current_datetime"
-mkdir -p "${RUN_DIR}"
-
-res=$(run_job $DINGO_REPO $VENV_DIR $RUN_DIR > $RUN_DIR/output.txt)
-
-
-# Exit with success
-exit 0
+main "$@"
