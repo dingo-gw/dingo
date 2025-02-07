@@ -81,9 +81,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         )
         self.file_name = file_name
 
-        if (
-            self.settings is not None
-        ):
+        if self.settings is not None:
             self.load_supplemental(domain_update, svd_size_update)
             self.svd_size_update = svd_size_update
 
@@ -108,12 +106,16 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         self.update_domain(domain_update)
 
         # Update dtypes if necessary
-        if self.precision is not None and self.complex_type is not None and self.real_type is not None:
+        if (
+            self.precision is not None
+            and self.complex_type is not None
+            and self.real_type is not None
+        ):
             if self.parameters is not None:
                 self.parameters = self.parameters.astype(self.real_type, copy=False)
             if (
                 self.polarizations["h_cross"] is not None
-                    and self.polarizations["h_plus"] is not None
+                and self.polarizations["h_plus"] is not None
             ):
                 for k, v in self.polarizations.items():
                     self.polarizations[k] = v.astype(self.complex_type, copy=False)
@@ -158,7 +160,10 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             and "svd" in self.settings["compression"]
         ):
             self.svd["V"] = self.domain.update_data(self.svd["V"], axis=0)
-        elif self.polarizations["h_cross"] is not None and self.polarizations["h_plus"] is not None:
+        elif (
+            self.polarizations["h_cross"] is not None
+            and self.polarizations["h_plus"] is not None
+        ):
             for k, v in self.polarizations.items():
                 self.polarizations[k] = self.domain.update_data(v)
 
@@ -221,11 +226,16 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         for sample with index `idx`. If defined, a chain of transformations is applied to
         the waveform data.
         """
+        # TODO: To adapt the transformer code to batched transforms the following changes have to be made:
+        # * replace distributed sampler by distributed batch sampler (maybe not necessary)
+        # * check that loading a batch of indices from disk works as expected
+        # * modify transforms: StrainTokenization, DropDetectors and DropFrequencyRange
         return self.__getitems__([idx])[0]
 
     def __getitems__(
-            self, batched_idx: np.array,
-    ) -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
+        self,
+        batched_idx: list,
+    ) -> list[list | Dict[str, Dict[str, Union[float, np.ndarray]]]]:
         """
         Return a nested dictionary containing parameters and waveform polarizations
         for sample with index `idx`. If defined, a chain of transformations is applied to
@@ -243,53 +253,83 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                 for k, v in self.parameters.iloc[batched_idx].items()
             }
             polarizations = {
-                pol: waveforms[batched_idx] for pol, waveforms in self.polarizations.items()
+                pol: waveforms[batched_idx]
+                for pol, waveforms in self.polarizations.items()
             }
         else:
             # Data or parameters are not in memory -> load them
-            if "parameters" in self.leave_on_disk_keys and "h_cross" in self.leave_on_disk_keys and "h_plus" in self.leave_on_disk_keys:
-                # Not working at the moment because standardization of parameters is calculated at training time
-                data = recursive_hdf5_load(self.file_handle, keys=["parameters", "polarizations"], idx=batched_idx)
-                if self.svd is None:
-                    # Apply domain update to set waveform to zero for f < f_min
-                    polarizations = {
-                        pol: self.domain.update_data(waveforms) for pol, waveforms in data["polarizations"].items()
-                    }
-                parameters = data["parameters"]
+            if (
+                "parameters" in self.leave_on_disk_keys
+                and "h_cross" in self.leave_on_disk_keys
+                and "h_plus" in self.leave_on_disk_keys
+            ):
+                raise ValueError(
+                    "Loading parameters from disk is not implemented at the moment because parameter"
+                    "standardization over the full dataset happens at the beginning of training."
+                    "The standardization dict could be saved when generating the waveform dataset."
+                )
+                # data = recursive_hdf5_load(self.file_handle, keys=["parameters", "polarizations"], idx=batched_idx)
+                # if self.svd is None:
+                #     # Apply domain update to set waveform to zero for f < f_min
+                #     polarizations = {
+                #         pol: self.domain.update_data(waveforms) for pol, waveforms in data["polarizations"].items()
+                #     }
+                # parameters = data["parameters"]
             elif "parameters" in self.leave_on_disk_keys:
-                # Not working at the moment because standardization of parameters is calculated at training time
-                parameters = recursive_hdf5_load(self.file_handle, keys=["parameters"], idx=batched_idx)["parameters"]
-                polarizations = {
-                    pol: waveforms[batched_idx] for pol, waveforms in self.polarizations.items()
-                }
-            elif "h_cross" in self.leave_on_disk_keys or "h_plus" in self.leave_on_disk_keys:
-                polarizations = recursive_hdf5_load(self.file_handle, keys=["polarizations"], idx=batched_idx)["polarizations"]
+                raise ValueError(
+                    "Loading parameters from disk is not implemented at the moment because parameter"
+                    "standardization over the full dataset happens at the beginning of training."
+                    "The standardization dict could be saved when generating the waveform dataset."
+                )
+                # parameters = recursive_hdf5_load(self.file_handle, keys=["parameters"], idx=batched_idx)["parameters"]
+                # polarizations = {
+                #     pol: waveforms[batched_idx] for pol, waveforms in self.polarizations.items()
+                # }
+            elif (
+                "h_cross" in self.leave_on_disk_keys
+                or "h_plus" in self.leave_on_disk_keys
+            ):
+                polarizations = recursive_hdf5_load(
+                    self.file_handle, keys=["polarizations"], idx=batched_idx
+                )["polarizations"]
                 if self.svd is None:
                     # Apply domain update to set waveform to zero for f < f_min
                     polarizations = {
-                        pol: self.domain.update_data(waveforms) for pol, waveforms in polarizations.items()
+                        pol: self.domain.update_data(waveforms)
+                        for pol, waveforms in polarizations.items()
                     }
                 parameters = {
                     k: v if isinstance(v, float) else v.to_numpy()
                     for k, v in self.parameters.iloc[batched_idx].items()
                 }
             else:
-                raise ValueError(f"Unknown leave_on_disk_keys {self.leave_on_disk_keys}. "
-                                 f"Cannot be loaded during __getitem__().")
-            # Update precision
-            if self.precision is not None and self.real_type is not None and self.complex_type is not None:
-                parameters = parameters.astype(self.real_type, copy=False)
-                for k, v in polarizations.items():
-                        polarizations[k] = v.astype(self.complex_type, copy=False)
+                raise ValueError(
+                    f"Unknown leave_on_disk_keys {self.leave_on_disk_keys}. "
+                    f"Cannot be loaded during __getitem__()."
+                )
             if not isinstance(parameters, dict):
                 parameters = parameters.to_dict()
+            # Update precision
+            if (
+                self.precision is not None
+                and self.real_type is not None
+                and self.complex_type is not None
+            ):
+                parameters = {
+                    k: v.astype(self.real_type, copy=False)
+                    for k, v in parameters.items()
+                }
+                polarizations = {
+                    k: v.astype(self.complex_type, copy=False)
+                    for k, v in polarizations.items()
+                }
             # Perform SVD size update on waveform
             if self.svd is not None and self.svd_size_update is not None:
                 for k, v in polarizations.items():
                     if len(v.shape) == 1:
-                        polarizations[k] = v[:self.svd_size_update]
+                        polarizations[k] = v[: self.svd_size_update]
                     else:
-                        polarizations[k] = v[:, :self.svd_size_update]
+                        polarizations[k] = v[:, : self.svd_size_update]
 
         # Decompression transforms are assumed to apply only to the waveform,
         # and do not involve parameters.
@@ -314,6 +354,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         #
         # which is a list of length N, where each element is an arr of shape (M, ...).
         # this is useful for collation
+        # Check first whether idx is int (temporary workaround until transformer code adapted to batched idx)
         if isinstance(data, dict):
             repackaged_data = [
                 {k1: {k2: v2[j] for k2, v2 in v1.items()} for k1, v1 in data.items()}
@@ -323,6 +364,12 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             repackaged_data = [
                 [data[i][j] for i in range(len(data))] for j in range(len(batched_idx))
             ]
+        else:
+            raise ValueError(
+                f"Repackaging data output from transforms failed due to incorrect type of data."
+                f"Expected dict or list, but got {type(data)}."
+            )
+
         return repackaged_data
 
     def __del__(self):

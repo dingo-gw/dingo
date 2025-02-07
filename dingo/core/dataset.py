@@ -25,20 +25,39 @@ def recursive_hdf5_save(group, d):
             raise TypeError(f"Cannot save datatype {type(v)} as hdf5 dataset.")
 
 
-def recursive_hdf5_load(group, keys=None, leave_on_disk_keys=None, idx: Tuple[int|bool,...] = None):
+def recursive_hdf5_load(
+    group,
+    keys: list[str] | None = None,
+    leave_on_disk_keys: list[str] | None = None,
+    idx: int | list[int] | None = None,
+):
     d = {}
     for k, v in group.items():
         if keys is None or k in keys:
             if isinstance(v, h5py.Group):
-                d[k] = recursive_hdf5_load(v, leave_on_disk_keys=leave_on_disk_keys, idx=idx)
+                d[k] = recursive_hdf5_load(
+                    v, leave_on_disk_keys=leave_on_disk_keys, idx=idx
+                )
             else:
                 if leave_on_disk_keys is not None and k in leave_on_disk_keys:
                     # Insert dummy value into dict
                     d[k] = None
                 else:
                     # Load complete array or only specific idx
-                    if idx is None or v.shape == () or k == "V" or k == "mismatches" or k == "s":
+                    if (
+                        idx is None
+                        or v.shape == ()
+                        or k == "V"
+                        or k == "mismatches"
+                        or k == "s"
+                    ):
                         d[k] = v[...]
+                    elif isinstance(idx, list):
+                        # hdf5 load requires sorted index list
+                        sorted_idx = np.sort(idx)
+                        reverse_sorting = np.argsort(idx)
+                        sorted_data = v[sorted_idx]
+                        d[k] = sorted_data[reverse_sorting]
                     else:
                         d[k] = v[idx]
                     # If the array has column names, convert it to a pandas DataFrame
@@ -75,12 +94,12 @@ class DingoDataset:
     dataset_type = "dingo_dataset"
 
     def __init__(
-            self,
-            file_name: str | None = None,
-            dictionary: dict | None = None,
-            data_keys: list | None = None,
-            leave_on_disk_keys: list | None = None,
-            print_output: bool = True,
+        self,
+        file_name: str | None = None,
+        dictionary: dict | None = None,
+        data_keys: list | None = None,
+        leave_on_disk_keys: list | None = None,
+        print_output: bool = True,
     ):
         """
         For constructing, provide either file_name, or dictionary containing data and
