@@ -17,15 +17,19 @@ if [[ -z "${RUN_DIR}" ]]; then
     die "Error: RUN_DIR is not set"
 fi
 
+# Git repo
+DINGO_REPO="https://github.com/dingo-gw/dingo.git"
+
 # Define directories based on RUN_DIR
 VENV_DIR="${RUN_DIR}/../venv"
 INSTALL_DIR="${RUN_DIR}/install"
+EXAMPLE_DIR="${INSTALL_DIR}/examples/toy_npe_model"
 OUTPUT_DIR="${RUN_DIR}/output"
 
 # Log file paths
 LOG_FILE="${RUN_DIR}/log.txt"
 ERROR_FILE="${RUN_DIR}/error.txt"
-SUMMARY_FILE="${RUN_DIR}/summary.txt"
+REPORT_FILE="${RUN_DIR}/report.txt"
 
 # Initialize logging with separate streams
 exec > >(tee -a "$LOG_FILE") 2> >(tee -a "$ERROR_FILE")

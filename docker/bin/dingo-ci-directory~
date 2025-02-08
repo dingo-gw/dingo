@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# creates and prints the path to a new directory in the base directory, which is
+# /tmp/dingo by default or the argument pass to this script (if any)
+# The name of the created directory is based on the current date and time.
+
+
 # Configuration
 DEFAULT_BASE_DIR="/tmp/dingo"
 

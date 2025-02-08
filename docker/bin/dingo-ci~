@@ -19,7 +19,10 @@ while getopts ":b:" opt; do
   esac
 done
 
-RUN_DIR=$(setup_run_directory ${BASE_DIR})
+# $BASE_DIR is the path to the directory where all run will be performed.
+# $RUN_DIR is a subdirectory of $BASE_DIR for this specific run.
+# It is created here
+RUN_DIR=$(dingo-ci-directory ${BASE_DIR})
 
 send_email() {
     # Save the exit status immediately
@@ -40,31 +43,28 @@ send_email() {
 # Enable error handling
 set -e
 
-# Set up the trap
+# A report email will be sent at exit,
+# no matter if an error occured or not.
 trap send_email EXIT
 
-setup_dingo "${RUN_DIR}"
-check_gpu "${RUN_DIR}"
-run_toy_npe_model "${RUN_DIR}"
+# creating the virtual env if necessary.
+# cloning and installing dingo,
+# copying content of examples/toy-npe-model,
+# creating training and training_data folders
+dingo-ci-setup "${RUN_DIR}"
 
-#!/bin/bash
+# printing in the terminal if GPU are detected
+# by pytorch
+dingo-ci-check-gpu "${RUN_DIR}"
 
-RUN_DIR=$(setup_run_directory)
+# running toy-npe mode
+dingo-ci-toy-npe-model "${RUN_DIR}"
 
-send_email() {
-    local status=$?
-    if [ -n "${EMAIL_CONFIG_PATH}" ]; then
-        if ! report_email "${RUN_DIR}" "${status}" "${EMAIL_CONFIG_PATH}"; then
-            echo "Error: Failed to send report email" >&2
-        fi
-    fi
-    exit ${status}
-}
 
-set -e
-trap send_email EXIT
 
-setup_dingo ${RUN_DIR}
-check_gpu ${RUN_DIR}
-run_toy_npe_model ${RUN_DIR}
+# generating a summary report
+# by parsing the content of $RUN_DIR.
+# This is the content of this report
+# that will be sent by email.
+dingo-ci-report "${RUN_DIR}"
 

@@ -1,21 +1,5 @@
 #!/bin/bash
 
-# Function to display usage message
-usage() {
-    echo "Usage: $0 <run_directory> <success_flag> <email_config_path>"
-    echo "Parameters:"
-    echo "  run_directory    Path to the run directory"
-    echo "  success_flag     Success status flag"
-    echo "  email_config_path Path to email configuration YAML file"
-    exit 1
-}
-
-# Check if exactly 3 arguments are provided
-if [ $# -ne 3 ]; then
-    echo "Error: Exactly 3 arguments required"
-    usage
-fi
-
 # Assign arguments to variables
 RUN_DIR="$1"
 SUCCESS="$2"

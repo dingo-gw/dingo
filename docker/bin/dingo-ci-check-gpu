@@ -1,6 +1,15 @@
 #!/bin/bash
 
-source ./setup_variables.bash
+# use pytorch to write in the stdout if
+# any GPU is detected. 
+
+RUN_DIR=$1
+
+# - defines all variables used in this script
+# - redirect stdout and stderr to files in $RUN_DIR
+# - defines the function "die" for clean exit upon error
+# - defines the function "log_message"
+source ./dingo_variables.bash
 
 log_message "Checking GPU availability..."
 

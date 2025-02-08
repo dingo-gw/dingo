@@ -1,11 +1,26 @@
 #!/bin/bash
 
+# RUN_DIR is the path to a directory.
+# This script:
+# - create (or activate if it already exists) a virtual env in RUN_DIR/../venv
+#   (venv is meant to be reused accross several "run", hence not located in RUN_DIR)
+# - dingo in cloned in $RUN_DIR/install
+# - content of $RUN_DIR/install/examples/toy_npe_model is copied to
+#   $RUN_DIR/output
+# - The folders $RUN_DIR/output/training and $RUN_DIR/output/training_data
+#   are created
+
+
 # Check if RUN_DIR is provided as a positional argument
 if [ $# -ne 1 ]; then
     die "Usage: $0 <RUN_DIR>" 1
 fi
 
-source ./setup_variables.bash
+# - defines all variables used in this script
+# - redirect stdout and stderr to files in $RUN_DIR
+# - defines the function "die" for clean exit upon error
+# - defines the function "log_message"
+source ./dingo_variables.bash
 
 log_message "Starting DINGO installation..."
 
