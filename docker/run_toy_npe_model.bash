@@ -259,58 +259,14 @@ EOF
 }
 
 
-send_email_report() {
-    local success="$1"
-    local email_config="$2"
-    
-    # Extract email configuration
-    local smtp_server=$(jq -r '.smtp_server' <<< "$email_config")
-    local from_addr=$(jq -r '.from' <<< "$email_config")
-    local to_addr=$(jq -r '.to' <<< "$email_config")
-    local smtp_user=$(jq -r '.username' <<< "$email_config")
-    local smtp_pass=$(jq -r '.password' <<< "$email_config")
-    
-    # Set email subject based on success/failure
-    local subject="DINGO Workflow $(if [ "$success" = "true" ]; then echo "SUCCEEDED"; else echo "FAILED"; fi)"
-    
-    # Create email body
-    local body=$(cat <<EOF
-DINGO Workflow Report
-====================
-Run Directory: $RUN_DIR
-Start Time: $(head -n 1 "$LOG_FILE" | cut -d']' -f1 | cut -c2-)
-End Time: $(date +"%Y-%m-%d %H:%M:%S")
-Status: $(if [ "$success" = "true" ]; then echo "SUCCESS"; else echo "FAILURE"; fi)
-EOF
-)
-
-    # Prepare email content
-    local email_content=$(cat <<EOF
-To: $to_addr
-From: $from_addr
-Subject: $subject
-
-$body
-EOF
-)
-
-    # Send email using ssmtp
-    echo "$email_content" | ssmtp "$to_addr"
-
-    local exit_code=$?
-    if [ $exit_code -ne 0 ]; then
-        log_message "Warning: Failed to send email report"
-    else
-        log_message "Email report sent successfully"
-    fi
-}
-
-
 run_job() {
     local dingo_repo="$1"
     local venv_dir="$2"
     local install_dir="$3"
     local output_dir="$4"
+
+    echo -e "\n\nRAVIOLI BANZAI !\n\n"
+    ravioli !
     
     log_message "Starting job execution..."
 
@@ -392,6 +348,63 @@ run_job() {
     log_message "Job completed successfully!"
 }
 
+
+send_email_report() {
+    local success="$1"
+    local email_config="$2"
+    local run_dir="$3"
+    local install_dir="$4"
+    local log_file="$5"
+    local error_file="$6"
+
+    # Extract email configuration
+    local smtp_server=$(jq -r '.mailhub' <<< "$email_config")
+    local port=$(jq -r '.port' <<< "$email_config")
+    local from_addr=$(jq -r '.root' <<< "$email_config")
+    local auth_user=$(jq -r '.authUser' <<< "$email_config")
+    local auth_pass=$(jq -r '.authPass' <<< "$email_config")
+    local recipients=$(jq -r '.recipients[]' <<< "$email_config")
+
+    # Set email subject based on success/failure
+    local subject="dingo toy-npe-model example: $(if [ "$success" = "true" ]; then echo "SUCCEEDED"; else echo "FAILED"; fi)"
+
+    # Create email body
+    local body=$(cat <<EOF
+DINGO Workflow Report
+====================
+Start Time: $(if [[ -f "$log_file" ]]; then head -n 1 "$log_file" | cut -d']' -f1 | cut -c2-; else echo "N/A"; fi)
+End Time: $(date +"%Y-%m-%d %H:%M:%S")
+Status: $(if [ "$success" = "true" ]; then echo "SUCCESS"; else echo "FAILURE"; fi)
+Branch: $(if [[ -d "$install_dir" ]]; then cd "$install_dir" && git branch --show-current; else echo "N/A"; fi)
+Commit: $(if [[ -d "$install_dir" ]]; then cd "$install_dir" && git rev-parse HEAD; else echo "N/A"; fi)
+EOF
+)
+
+    # Prepare attachments
+    local attachments=()
+    if [[ -f "$log_file" ]]; then
+        attachments+=("-a" "$log_file")
+    fi
+    if [[ -f "$error_file" ]]; then
+        attachments+=("-a" "$error_file")
+    fi
+
+    # URI the mail will be set to
+    smpt_url="smtps://${auth_user}@${smtp_server}:${port}"
+
+    # sending the email
+    echo "$body" | mutt -e "set smtp_url=${smpt_url}" -e "set smtp_pass=${auth_pass}" -e "set smtp_authenticators='login'" -s "${subject}" ${attachments[@]} -- ${recipients}
+ 
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        log_message "Warning: Failed to send email to $recipients"
+    else
+        log_message "Email sent successfully to $recipients"
+    fi
+}
+
+
+
 main() {
     log_message "Starting DINGO workflow..."
     log_message "Base directory: $BASE_DIR"
@@ -402,27 +415,35 @@ main() {
         # Test email functionality
         log_message "Running in test email mode..."
         
-        # Create test files
+        # Create test files if they don't exist
         echo "Test error message" > "$ERROR_FILE"
         echo "Test output message" > "$LOG_FILE"
         echo "Test summary information" > "$SUMMARY_FILE"
         
         # Send test email
-        send_email_report "true" "$EMAIL_CONFIG"
+        send_email_report "true" "$EMAIL_CONFIG" "$RUN_DIR" "$INSTALL_DIR" "$LOG_FILE" "$ERROR_FILE"
         exit 0
     fi
     
     # Run the job and capture success/failure
     if run_job "$DINGO_REPO" "$VENV_DIR" "$INSTALL_DIR" "$OUTPUT_DIR"; then
+	echo -e "\n\nSUCCESS\n\n"
         success="true"
     else
+	echo -e "\n\nFAILED\n\n"
         success="false"
     fi
 
+    echo ""
+    echo "$EMAIL_CONFIG"
+    echo ""
+    
     # Send email report if configured
     if [[ -n "$EMAIL_CONFIG" ]]; then
-        send_email_report "$success" "$EMAIL_CONFIG"
+	echo -e "\n\nsending email\n\n"
+        send_email_report "$success" "$EMAIL_CONFIG" "$RUN_DIR" "$INSTALL_DIR" "$LOG_FILE" "$ERROR_FILE"
     fi
 }
 
 main "$@"
+
