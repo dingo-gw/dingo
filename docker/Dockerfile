@@ -1,15 +1,17 @@
 FROM ubuntu:24.04
 
+# Install necessary packages
 RUN apt-get update && apt-get install -y \
     git \
+    bash \
+    jq \
     python3 \
-    python3-pip \
-    python3-venv
+    python3-venv \
+    mailutils 
 
-RUN git clone https://github.com/dingo-gw/dingo.git /opt/dingo && \
-    cd /opt/dingo && \
-    python3 -m venv ./venv && \
-    . ./venv/bin/activate && \
-    pip install .
+# Copy the script into the container
+COPY run_toy_npe_model.bash /usr/local/bin/run_toy_npe_model.bash
+RUN chmod +x /usr/local/bin/run_toy_npe_model.bash
 
-COPY dingo.bash /opt/dingo/docker/
+# Command to run the script
+CMD ["/usr/local/bin/run_toy_npe_model.bash"]

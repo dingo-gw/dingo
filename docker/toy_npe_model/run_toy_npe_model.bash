@@ -3,16 +3,59 @@
 # This executable runs all the steps of the dingo toy npe model as described here:
 # https://dingo-gw.readthedocs.io/en/latest/example_toy_npe_model.html
 
-source /opt/dingo/docker/dingo.bash
+# all functions used in this script are imported from dingo.bash
+source /opt/dingo/dingo.bash
+
+# from which git repo dingo will be cloned
+DINGO_REPO="https://github.com/dingo-gw/dingo.git"
+
+# where all the files will be located (cloned source code, python venv,
+# output files of the script, etc)
+# Note: if this is running in docker, it is assumed /data is shared with
+# the host machine.
+BASE_DIR="/data/dingo"
+
+# we reuse the same venv over all the run
+VENV_DIR="${BASE_DIR}/venv"
+
+# for this specific run, we will use a folder based on the current date and time
+RUN_DIR=$(create_date_folder ${BASE_DIR})
+
+# where the code will be cloned and installed
+INSTALL_DIR=${RUN_DIR}/install
+
+# where the output files will be created
+OUTPUT_DIR=${RUN_DIR}/output
 
 # we run toy_npe_model, i.e. dingo/examples/toy_npe_model
-dingo_example_folder="toy_npe_model"
+DINGO_EXAMPLE_FOLDER="toy_npe_model"
 
 
-# copying the example files to /tmp 
-setup_directory ${dingo_example_folder}
+# summary
+echo "base directory: ${BASE_DIR}"
+echo "virtual environment: ${VENV_DIR}"
+echo "run directory: ${RUN_DIR}"
+echo "dingo example: ${DINGO_EXAMPLE_FOLDER}"
 
-# running steps
+# checking the GPUs are detected
+# by pytorch.
+# (this just print related info, it does not exit with
+# error if no GPU is detected)
+check_gpus_detection
+
+# clone and pip install dingo 
+install_dingo $DINGO_REPO $INSTALL_DIR $VENV_DIR
+
+# copy the example files tp $OUTPUT_DIR
+# and create the training_data and training directories
+setup_directory ${INSTALL_DIR}/examples/${DINGO_EXAMPLE_FOLDER} ${OUTPUT_DIR}
+
+# running steps.
+# If the user passed the '-y' argument, all steps are run in a row.
+# Otherwise, before each step, the script pause and prompt the user
+
+# Note: if any step fail, the script exits with error code; and prints
+# an error message to stderr.
 
 if confirm_step "generating waveform dataset"; then
     echo "-- Generating waveform dataset --"

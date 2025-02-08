@@ -1,0 +1,9 @@
+{
+    "root": "ei-agent@tuebingen.mpg.de",
+    "mailhub": "mailhost.tuebingen.mpg.de",
+    "port": 465,
+    "authUser": "ei-agent",
+    "authPass": "StarView12!",
+    "recipients": ["vberenz@tue.mpg.de"]
+}
+

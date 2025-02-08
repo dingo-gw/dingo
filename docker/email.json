@@ -1,0 +1,8 @@
+{
+    "root": "your-email@example.eu",
+    "mailhub": "example.eu",
+    "port": 465,
+    "authUser": "my-user@example.eu",
+    "authPass": "my-password",
+    "recipients": ["recipient@address.eu"]
+}

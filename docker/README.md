@@ -18,7 +18,17 @@ See [docker website](https://docs.docker.com/engine/install/)
 docker build -t dingo:latest .
 ```
 
-## run the examples
+## run
+
+```bash
+docker run --shm-size=16g -v /data:/data /opt/dingo/run_toy_npe_model.bash -y /data/dingo
+``` 
+
+## send email
+
+```bash
+docker run -v /data:/data /opt/dingo/mail_report.bash /data/dingo mail.toml
+```
 
 ### visit the desired subfolder
 
