@@ -49,7 +49,7 @@ See [docker website](https://docs.docker.com/engine/install/)
 Build the docker image
 
 ```bash
-docker build -t dingo:latest .
+docker build -t dingo:toy_npe_model .
 ```
 
 For running the script, for example:
@@ -60,8 +60,8 @@ docker run --shm-size=16g -v /data/dingo:/data/dingo dingo:toy_npe_model --base-
 
 Note:
 
-- If you would like to check the files created/used by the script, share the base directory (here `/data/dingo`)
-- The `email.json` file must be accessible to the docker container (here `/data/dingo` is shared)
+- If you would like to check the files created/used by the script, mount the base directory (here `/data/dingo`)
+- The `email.json` file must be accessible to the docker container (here `/data/dingo` is mounted)
 
 ## Set a continous integration server
 

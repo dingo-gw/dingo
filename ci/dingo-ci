@@ -66,6 +66,69 @@ fi
 # making sure that upon error, the script exit early.
 # making sure email are sent upon exit (if $EMAIL_CONFIG_PATH is set)
 
+dingo_ci_email() {
+
+# Assign arguments to variables
+    INSTALL_DIR="$1"
+    LOG_FILE="$2"
+    ERROR_FILE="$3"
+    SUCCESS="$2"
+    EMAIL_CONFIG_PATH="$3"
+
+    # parsing the email config
+    EMAIL_CONFIG=$(jq '.' "$EMAIL_CONFIG_PATH")
+    smtp_server=$(jq -r '.mailhub' <<< "$EMAIL_CONFIG")
+    port=$(jq -r '.port' <<< "$EMAIL_CONFIG")
+    from_addr=$(jq -r '.root' <<< "$EMAIL_CONFIG")
+    auth_user=$(jq -r '.authUser' <<< "$EMAIL_CONFIG")
+    auth_pass=$(jq -r '.authPass' <<< "$EMAIL_CONFIG")
+    recipients=$(jq -r '.recipients[]' <<< "$EMAIL_CONFIG")
+    
+    echo ""
+    echo "sending ${SUCCESS} email:"
+    echo "server: ${smtp_server}:${port}"
+    echo "to: ${recipients}"
+    echo "based on:"
+    echo "    ${INSTALL_DIR}"
+    echo "    ${LOG_FILE}"
+    echo "    ${ERROR_FILE}"
+    echo ""
+    
+    # Set email subject based on success/failure
+    subject="dingo toy-npe-model example: $(if [ "$SUCCESS" -eq 0 ]; then echo "SUCCEEDED"; else echo "FAILED"; fi)"
+    
+    # Create email body
+    body=$(cat <<EOF
+DINGO Workflow Report
+====================
+Start Time: $(if [[ -f "$LOG_FILE" ]]; then head -n 1 "$LOG_FILE" | cut -d']' -f1 | cut -c2-; else echo "N/A"; fi)
+End Time: $(date +"%Y-%m-%d %H:%M:%S")
+Status: $(if [ "$SUCCESS" = "true" ]; then echo "SUCCESS"; else echo "FAILURE"; fi)
+Branch: $(if [[ -d "$INSTALL_DIR" ]]; then cd "$INSTALL_DIR" && git branch --show-current; else echo "N/A"; fi)
+Commit: $(if [[ -d "$INSTALL_DIR" ]]; then cd "$INSTALL_DIR" && git rev-parse HEAD; else echo "N/A"; fi)
+
+See attached files.
+EOF
+	)
+
+    # Prepare attachments
+    attachments=()
+    if [[ -f "$LOG_FILE" ]]; then
+	attachments+=("-a" "$LOG_FILE")
+    fi
+    if [[ -f "$ERROR_FILE" ]]; then
+	attachments+=("-a" "$ERROR_FILE")
+    fi
+    
+    # URI the mail will be set to
+    smpt_url="smtps://${auth_user}@${smtp_server}:${port}"
+    
+    # sending the email
+    echo "$body" | mutt -e "set smtp_url=${smpt_url}" -e "set smtp_pass=${auth_pass}" -e "set smtp_authenticators='login'" -s "${subject}" ${attachments[@]} -- ${recipients}
+
+}
+
+
 send_email() {
     # Save the exit status immediately
     local status=$?
@@ -73,7 +136,7 @@ send_email() {
     # Check if EMAIL_CONFIG_PATH is provided
     if [ -n "${EMAIL_CONFIG_PATH}" ]; then
 	# Attempt to send the report email
-	if ! dingo-ci-email "${RUN_DIR}" "${status}" "${EMAIL_CONFIG_PATH}"; then
+	if ! dingo_ci_email "${INSTALL_DIR}" "${LOG_FILE}" "$ERROR_FILE" "${status}" "${EMAIL_CONFIG_PATH}"; then
 	    echo "Error: Failed to send report email" >&2
 	fi
     fi

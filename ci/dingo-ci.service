@@ -5,7 +5,7 @@ Requires=docker.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/dingo-check.sh
+ExecStart=/usr/local/bin/dingo-ci-trigger
 Restart=always
 
 [Install]
