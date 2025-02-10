@@ -1,0 +1,25 @@
+#!/bin/bash
+
+DINGO_REPO="https://github.com/dingo-gw/dingo.git"
+BRANCH="main"
+CLONE_PATH="/data/dingo/repo-checker/"
+
+# Check if the local repository exists, clone if not
+if [ ! -d "$CLONE_PATH" ]; then
+    git clone "$DINGO_REPO" "$CLONE_PATH" || { echo "Error cloning repository"; exit 1; }
+fi
+
+# Get the latest commit hash from the remote repository
+latest_remote_commit=$(git ls-remote "$DINGO_REPO" "$BRANCH" | cut -f1)
+
+# Get the current commit hash from the local repository
+current_local_commit=$(git -C "$CLONE_PATH" rev-parse "$BRANCH" 2>/dev/null)
+
+# If the local repository is not up to date, fetch the latest changes
+if [ -z "$current_local_commit" ] || [ "$current_local_commit" != "$latest_remote_commit" ]; then
+    git -C "$CLONE_PATH" fetch origin || { echo "Error fetching origin"; exit 1; }
+    git -C "$CLONE_PATH" checkout "$BRANCH" || { echo "Error checking out branch"; exit 1; }
+    git -C "$CLONE_PATH" reset --hard origin/"$BRANCH" || { echo "Error resetting to latest commit"; exit 1; }
+    echo "New commit detected on $BRANCH. Executing command..."
+    docker run --rm --shm-size=16g -v /data/dingo:/data/dingo dingo:toy_npe_model --base-dir /data/dingo --email /data/dingo/mpi-email.json
+fi

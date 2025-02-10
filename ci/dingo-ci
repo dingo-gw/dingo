@@ -1,0 +1,224 @@
+#!/bin/bash
+
+##################
+# reading config #
+##################
+
+# arguments are
+# --base-dir: where all run will be executed and
+#   the virtual env (reused accross runs set). Default: /tmp/dingo
+# --email: an optional email server config for sending report
+#   emails (upon success and failure)
+# This section defines the related variable $BIN_DIR and $EMAIL_CONFIG_PATH
+
+DINGO_REPO="https://github.com/dingo-gw/dingo.git"
+DEFAULT_BASE_DIR="/tmp/dingo"
+
+# Parse optional arguments
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --base-dir)
+      BASE_DIR="$2"
+      shift 2
+      ;;
+    --email)
+      EMAIL_CONFIG_PATH="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+BASE_DIR=${BASE_DIR:-$DEFAULT_BASE_DIR}
+if ! mkdir -p "$BASE_DIR"; then
+    echo "Failed to create base directory '$BASE_DIR'" >&2
+    exit 1
+fi
+if [ ! -w "$BASE_DIR" ]; then
+    echo "Base directory '$BASE_DIR' is not writable" >&2
+    exit 1
+fi
+
+
+echo -e "\nUsing BASE_DIR: ${BASE_DIR}\n"
+
+###########
+# RUN_DIR #
+###########
+
+# $RUN_DIR is the subfolder of $BASE_DIR
+# specific to this specific run
+
+CURRENT_DATETIME="$(date +"%Y-%m-%d_%H-%M-%S")"
+RUN_DIR="${BASE_DIR}/${CURRENT_DATETIME}"
+# Create and verify run directory
+if ! mkdir -p "$RUN_DIR"; then
+    echo "Failed to create run directory '$RUN_DIR'" >&2
+    exit 1
+fi
+
+########################
+# Early exit and email #
+########################
+
+# making sure that upon error, the script exit early.
+# making sure email are sent upon exit (if $EMAIL_CONFIG_PATH is set)
+
+send_email() {
+    # Save the exit status immediately
+    local status=$?
+    
+    # Check if EMAIL_CONFIG_PATH is provided
+    if [ -n "${EMAIL_CONFIG_PATH}" ]; then
+	# Attempt to send the report email
+	if ! dingo-ci-email "${RUN_DIR}" "${status}" "${EMAIL_CONFIG_PATH}"; then
+	    echo "Error: Failed to send report email" >&2
+	fi
+    fi
+    
+    # Exit with the original status
+    exit ${status}
+}
+
+set -e
+trap send_email EXIT
+
+#####################
+# Variables and log #
+#####################
+
+# setting up variables related to path to folders
+# and files.
+# setting outputs: both stdout and stderr are both
+# printed to the terminal, but also directed to output.txt
+# and error.txt (in $RUN_DIR)
+
+# Define directories based on RUN_DIR
+VENV_DIR="${RUN_DIR}/../venv"
+INSTALL_DIR="${RUN_DIR}/install"
+EXAMPLE_DIR="${INSTALL_DIR}/examples/toy_npe_model"
+OUTPUT_DIR="${RUN_DIR}/output"
+
+# Log file paths
+LOG_FILE="${RUN_DIR}/log.txt"
+ERROR_FILE="${RUN_DIR}/error.txt"
+
+# Initialize logging with separate streams
+exec > >(tee -a "$LOG_FILE") 2> >(tee -a "$ERROR_FILE")
+
+echo ""
+echo "dingo_variables:"
+echo "  repo:    ${DINGO_REPO}"
+echo "  venv:    ${VENV_DIR}"
+echo "  install: ${INSTALL_DIR}"
+echo "  example: ${EXAMPLE_DIR}"
+echo "  output:  ${OUTPUT_DIR}"
+echo "  log:     ${LOG_FILE}"
+echo "  error:   ${ERROR_FILE}"
+echo ""
+
+#########
+# Setup #
+#########
+
+# clone, pip installing and creating
+# folders required to run toy_npe_model
+# example
+
+echo -e "\nStarting DINGO installation..."
+
+# Check if virtual environment directory exists
+if [ -d "$VENV_DIR" ]; then
+    echo -e "Using existing virtual environment: $VENV_DIR"
+    echo -e "Python version: $(source "$VENV_DIR/bin/activate" && python --version)"
+else
+    echo -e "Creating new virtual environment: $VENV_DIR"
+    python3 -m venv "$VENV_DIR"
+fi
+
+echo -e "Creating ${INSTALL_DIR}"
+mkdir -p "$INSTALL_DIR"
+
+echo -e "Cloning repository from $dingo_repo to $INSTALL_DIR"
+git clone "$DINGO_REPO" "$INSTALL_DIR"
+
+echo -e "Activating VENV ${VENV_DIR}"
+source "$VENV_DIR/bin/activate" 
+
+echo -e "Installing Dingo (pip)"
+cd "$INSTALL_DIR" && pip install .
+
+echo -e "Listing pip packages"
+pip list
+
+echo -e "Setting up ${OUTPUT_DIR}"
+mkdir -p "$OUTPUT_DIR"
+
+echo -e "Copying files from $INSTALL_DIR to $OUTPUT_DIR"
+cp -r "$EXAMPLE_DIR"/* "$OUTPUT_DIR/"
+mkdir -p "$OUTPUT_DIR/training_data" || ! mkdir -p "$OUTPUT_DIR/training"
+
+
+#############
+# GPU check #
+#############
+
+# prints in terminal info if pytorch detected any GPU
+
+echo -e "\nChecking GPU availability..."
+source "$VENV_DIR/bin/activate"
+python - <<EOF
+import torch
+
+def check_gpus():
+    if torch.cuda.is_available():
+        print("CUDA is available")
+        num_gpus = torch.cuda.device_count()
+        print(f"Found {num_gpus} GPU(s)")
+        for i in range(num_gpus):
+            print(f"\nGPU {i}:")
+            print(f"  Device Name: {torch.cuda.get_device_name(i)}")
+            props = torch.cuda.get_device_properties(i)
+            print(f"  Memory: {props.total_memory / 1e9:.2f} GB")
+            print(f"  Compute Capability: {props.major}.{props.minor}")
+    else:
+        print("No CUDA-capable devices found")
+
+check_gpus()
+EOF
+
+
+#######################
+# Dingo Toy NPE model #
+#######################
+
+# running dingo/examples/toy_npe_model
+
+# Change directory to the output folder
+cd "$OUTPUT_DIR"
+
+echo -e "\n================= Generating Waveform Dataset ================="
+dingo_generate_dataset --settings waveform_dataset_settings.yaml --out_file training_data/waveform_dataset.hdf5
+echo -e "================================================================\n"
+
+echo -e "================= Generating ASD Dataset ================="
+dingo_generate_asd_dataset --settings_file asd_dataset_settings.yaml --data_dir training_data/asd_dataset
+echo -e "============================================================\n"
+
+echo -e "================= Training Model ================="
+dingo_train --settings_file train_settings.yaml --train_dir training
+echo -e "==============================================\n"
+
+echo -e "================= Running Inference ================="
+dingo_pipe GW150914.ini
+echo -e "===================================================\n"
+
+
+########
+# EXIT #
+########
+
+echo "\nfinished with success\n"
+exit 0
