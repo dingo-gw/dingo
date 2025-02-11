@@ -4,6 +4,18 @@
 # reading config #
 ##################
 
+# optional for GPU support: uncomment and edit
+# to get the version of torch suitable for your hardware
+# Note: if running in docker, you may need to edit the Dockerfile
+#   to install the required python version. 
+PYTHON_VERSION="python3.9"
+TORCH_INSTALL_COMMAND="pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu113 --upgrade"
+
+# if no python version specified, using default system python3
+if [[ ! -v PYTHON_VERSION ]]; then
+     PYTHON_VERSION="python3"
+fi
+
 # arguments are
 # --base-dir: where all run will be executed and
 #   the virtual env (reused accross runs set). Default: /tmp/dingo
@@ -11,26 +23,34 @@
 #   emails (upon success and failure)
 # This section defines the related variable $BIN_DIR and $EMAIL_CONFIG_PATH
 
-DINGO_REPO="https://github.com/dingo-gw/dingo.git"
+#DINGO_REPO="https://github.com/dingo-gw/dingo.git"
+DINGO_REPO="https://github.com/vincentberenz/dingo.git"
+
 DEFAULT_BASE_DIR="/tmp/dingo"
+
 
 # Parse optional arguments
 while [ $# -gt 0 ]; do
-  case "$1" in
-    --base-dir)
-      BASE_DIR="$2"
-      shift 2
-      ;;
-    --email)
-      EMAIL_CONFIG_PATH="$2"
-      shift 2
-      ;;
-    *)
-      echo "Unknown option: $1" >&2
-      exit 1
-      ;;
-  esac
+    case "$1" in
+	--base-dir)
+	    BASE_DIR="$2"
+	    shift 2
+	    ;;
+	--email)
+	    EMAIL_CONFIG_PATH="$2"
+	    shift 2
+	    ;;
+	--checkout)
+	    CHECKOUT="$2"
+	    shift 2
+	    ;;
+	*)
+	    echo "Unknown option: $1" >&2
+	    exit 1
+	    ;;
+    esac
 done
+
 BASE_DIR=${BASE_DIR:-$DEFAULT_BASE_DIR}
 if ! mkdir -p "$BASE_DIR"; then
     echo "Failed to create base directory '$BASE_DIR'" >&2
@@ -51,8 +71,19 @@ echo -e "\nUsing BASE_DIR: ${BASE_DIR}\n"
 # $RUN_DIR is the subfolder of $BASE_DIR
 # specific to this specific run
 
-CURRENT_DATETIME="$(date +"%Y-%m-%d_%H-%M-%S")"
-RUN_DIR="${BASE_DIR}/${CURRENT_DATETIME}"
+# if checkout has been passed as argument
+# (branch, or commit, or tag), then
+# the name of the checkout as folder name.
+
+# otherwise, current date is used
+
+if [[ -v CHECKOUT ]]; then
+    RUN_DIR="${BASE_DIR}/${CHECKOUT}"
+else
+    CURRENT_DATETIME="$(date +"%Y-%m-%d_%H-%M-%S")"
+    RUN_DIR="${BASE_DIR}/${CURRENT_DATETIME}"
+fi
+rm -rf "$RUN_DIR"
 # Create and verify run directory
 if ! mkdir -p "$RUN_DIR"; then
     echo "Failed to create run directory '$RUN_DIR'" >&2
@@ -72,8 +103,8 @@ dingo_ci_email() {
     INSTALL_DIR="$1"
     LOG_FILE="$2"
     ERROR_FILE="$3"
-    SUCCESS="$2"
-    EMAIL_CONFIG_PATH="$3"
+    SUCCESS="$4"
+    EMAIL_CONFIG_PATH="$5"
 
     # parsing the email config
     EMAIL_CONFIG=$(jq '.' "$EMAIL_CONFIG_PATH")
@@ -85,10 +116,12 @@ dingo_ci_email() {
     recipients=$(jq -r '.recipients[]' <<< "$EMAIL_CONFIG")
     
     echo ""
-    echo "sending ${SUCCESS} email:"
-    echo "server: ${smtp_server}:${port}"
-    echo "to: ${recipients}"
-    echo "based on:"
+    echo "sending email:"
+    echo "  config: ${EMAIL_CONFIG_PATH}"
+    echo "  status: ${SUCCESS}"
+    echo "  server: ${smtp_server}:${port}"
+    echo "  to: ${recipients}"
+    echo "  based on:"
     echo "    ${INSTALL_DIR}"
     echo "    ${LOG_FILE}"
     echo "    ${ERROR_FILE}"
@@ -136,7 +169,7 @@ send_email() {
     # Check if EMAIL_CONFIG_PATH is provided
     if [ -n "${EMAIL_CONFIG_PATH}" ]; then
 	# Attempt to send the report email
-	if ! dingo_ci_email "${INSTALL_DIR}" "${LOG_FILE}" "$ERROR_FILE" "${status}" "${EMAIL_CONFIG_PATH}"; then
+	if ! dingo_ci_email "${INSTALL_DIR}" "${LOG_FILE}" "${ERROR_FILE}" "${status}" "${EMAIL_CONFIG_PATH}"; then
 	    echo "Error: Failed to send report email" >&2
 	fi
     fi
@@ -173,13 +206,17 @@ exec > >(tee -a "$LOG_FILE") 2> >(tee -a "$ERROR_FILE")
 
 echo ""
 echo "dingo_variables:"
-echo "  repo:    ${DINGO_REPO}"
-echo "  venv:    ${VENV_DIR}"
-echo "  install: ${INSTALL_DIR}"
-echo "  example: ${EXAMPLE_DIR}"
-echo "  output:  ${OUTPUT_DIR}"
-echo "  log:     ${LOG_FILE}"
-echo "  error:   ${ERROR_FILE}"
+echo "  repo:     ${DINGO_REPO}"
+if [[ -v CHECKOUT ]]; then
+    echo "  checkout: ${CHECKOUT}"
+fi
+echo "  python:   ${PYTHON_VERSION}"
+echo "  venv:     ${VENV_DIR}"
+echo "  install:  ${INSTALL_DIR}"
+echo "  example:  ${EXAMPLE_DIR}"
+echo "  output:   ${OUTPUT_DIR}"
+echo "  log:      ${LOG_FILE}"
+echo "  error:    ${ERROR_FILE}"
 echo ""
 
 #########
@@ -194,32 +231,46 @@ echo -e "\nStarting DINGO installation..."
 
 # Check if virtual environment directory exists
 if [ -d "$VENV_DIR" ]; then
-    echo -e "Using existing virtual environment: $VENV_DIR"
-    echo -e "Python version: $(source "$VENV_DIR/bin/activate" && python --version)"
+    echo -e "\nUsing existing virtual environment: $VENV_DIR"
 else
-    echo -e "Creating new virtual environment: $VENV_DIR"
-    python3 -m venv "$VENV_DIR"
+    echo -e "\nCreating new virtual environment: $VENV_DIR"
+    eval "${PYTHON_VERSION} -m venv ${VENV_DIR}"
 fi
+echo -e "Python version: $(source "$VENV_DIR/bin/activate" && python --version)"
 
-echo -e "Creating ${INSTALL_DIR}"
+echo -e "\nCreating ${INSTALL_DIR}"
 mkdir -p "$INSTALL_DIR"
 
-echo -e "Cloning repository from $dingo_repo to $INSTALL_DIR"
+echo -e "\nCloning repository from $dingo_repo to $INSTALL_DIR"
 git clone "$DINGO_REPO" "$INSTALL_DIR"
 
-echo -e "Activating VENV ${VENV_DIR}"
+if [[ -v CHECKOUT ]]; then
+    echo -e "\nChecking out ${CHECKOUT}"
+    cd "$INSTALL_DIR"
+    git checkout "$CHECKOUT"
+fi
+
+echo -e "\nActivating VENV ${VENV_DIR}"
 source "$VENV_DIR/bin/activate" 
 
-echo -e "Installing Dingo (pip)"
+echo -e "\nUpdating pip"
+pip install pip --upgrade
+
+if [[ -v TORCH_INSTALL_COMMAND ]]; then
+    echo -e "\nCustom install of torch"
+    eval "$TORCH_INSTALL_COMMAND"
+fi
+
+echo -e "\nInstalling Dingo (pip)"
 cd "$INSTALL_DIR" && pip install .
 
-echo -e "Listing pip packages"
+echo -e "\nListing pip packages"
 pip list
 
-echo -e "Setting up ${OUTPUT_DIR}"
+echo -e "\nSetting up ${OUTPUT_DIR}"
 mkdir -p "$OUTPUT_DIR"
 
-echo -e "Copying files from $INSTALL_DIR to $OUTPUT_DIR"
+echo -e "\nCopying files from $INSTALL_DIR to $OUTPUT_DIR"
 cp -r "$EXAMPLE_DIR"/* "$OUTPUT_DIR/"
 mkdir -p "$OUTPUT_DIR/training_data" || ! mkdir -p "$OUTPUT_DIR/training"
 
@@ -229,8 +280,8 @@ mkdir -p "$OUTPUT_DIR/training_data" || ! mkdir -p "$OUTPUT_DIR/training"
 #############
 
 # prints in terminal info if pytorch detected any GPU
-
-echo -e "\nChecking GPU availability..."
+        
+echo -e "\n----- Checking GPU availability -----"
 source "$VENV_DIR/bin/activate"
 python - <<EOF
 import torch
@@ -251,7 +302,7 @@ def check_gpus():
 
 check_gpus()
 EOF
-
+echo -e "-------------------------------------\n"
 
 #######################
 # Dingo Toy NPE model #
@@ -283,5 +334,5 @@ echo -e "===================================================\n"
 # EXIT #
 ########
 
-echo "\nfinished with success\n"
+echo -e "\nfinished with success\n"
 exit 0
