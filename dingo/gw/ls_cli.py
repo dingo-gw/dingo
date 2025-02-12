@@ -12,6 +12,7 @@ from dingo.gw.SVD import SVDBasis
 from dingo.core.result import Result
 from dingo.gw.dataset import WaveformDataset
 from dingo.gw.noise.asd_dataset import ASDDataset
+from dingo.core.backward_compatibility import torch_load_with_fallback
 
 
 def ls():
@@ -22,7 +23,7 @@ def ls():
     path = Path(args.file_name)
     if path.suffix == ".pt":
         print("Extracting information about torch model.\n")
-        d = torch.load(path, map_location="meta")
+        d = torch_load_with_fallback(path)
         print(f"Version: {d.get('version')}\n")
         print(f"Model epoch: {d['epoch']}\n")
         print("Model metadata:")

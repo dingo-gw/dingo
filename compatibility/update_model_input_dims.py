@@ -1,6 +1,7 @@
 import torch
 import argparse
 from dingo.gw.result import Result
+from dingo.core.utils.backward_compatibility import torch_load_with_fallback
 
 """
 2. March 2023: Previously, we stored the input_dim of the embedding net as a tuple, 
@@ -52,13 +53,7 @@ def main():
 
     if args.checkpoint is not None:
         print(f"Updating model {args.checkpoint}.")
-        # Typically training is done on the GPU, so the model could be saved on a GPU
-        # device. Since this routine may be run on a CPU machine, allow for a remap of the
-        # torch tensors.
-        if torch.cuda.is_available():
-            d = torch.load(args.checkpoint)
-        else:
-            d = torch.load(args.checkpoint, map_location=torch.device("cpu"))
+        d = torch_load_with_fallback(args.checkpoint)
 
         d["model_kwargs"]["embedding_net_kwargs"]["input_dims"] = list(
             d["model_kwargs"]["embedding_net_kwargs"]["input_dims"]

@@ -18,7 +18,7 @@ import dingo.core.utils.trainutils
 import json
 from collections import OrderedDict
 from typing import Optional
-from dingo.core.utils.backward_compatibility import update_model_config
+from dingo.core.utils.backward_compatibility import update_model_config, torch_load_with_fallback
 from dingo.core.utils.misc import get_version
 
 from dingo.core.utils.trainutils import EarlyStopping
@@ -318,7 +318,7 @@ class BasePosteriorModel(ABC):
         # machine may have moved the model from 'cuda' to 'cpu'.
         ext = os.path.splitext(model_filename)[-1]
         if ext == ".pt":
-            d = torch.load(model_filename, map_location=device)
+            d = torch_load_with_fallback(model_filename, preferred_map_location=device)
         elif ext == ".hdf5":
             d = self._load_model_from_hdf5(model_filename)
         else:

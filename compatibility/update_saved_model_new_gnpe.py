@@ -3,6 +3,8 @@ import argparse
 
 import yaml
 
+from dingo.core.utils.backward_compatibility import torch_load_with_fallback
+
 
 def parse_args():
 
@@ -15,13 +17,7 @@ def parse_args():
 def main():
     args = parse_args()
 
-    # Typically training is done on the GPU, so the model could be saved on a GPU
-    # device. Since this routine may be run on a CPU machine, allow for a remap of the
-    # torch tensors.
-    if torch.cuda.is_available():
-        d = torch.load(args.checkpoint)
-    else:
-        d = torch.load(args.checkpoint, map_location=torch.device("cpu"))
+    d = torch_load_with_fallback(args.checkpoint)
 
     data_settings = d["metadata"]["train_settings"]["data"]
 
