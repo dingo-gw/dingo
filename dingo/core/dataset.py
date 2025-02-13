@@ -158,7 +158,9 @@ class DingoDataset:
                 # Explicit line for loading and closing, only close it if there's nothing left on disk
 
     def from_file(self, file_name: str, leave_on_disk_keys: list | None = None):
-        if self.print_output:
+        if self.print_output and leave_on_disk_keys is not None:
+            print(f"Loading dataset with leave_on_disk_keys {leave_on_disk_keys} from " + str(file_name) + ".")
+        elif self.print_output:
             print("Loading dataset from " + str(file_name) + ".")
         # Replace key 'polarizations' with 'h_cross' and 'h_plus'
         if leave_on_disk_keys is not None and "polarizations" in leave_on_disk_keys:
