@@ -358,7 +358,7 @@ class BasePosteriorModel(ABC):
         update_model_config(self.model_kwargs)  # For backward compatibility
 
         self.epoch = d["epoch"]
-        self.iteration = d["iteration"]
+        self.iteration = d.get(["iteration"], 0)
 
         self.metadata = d["metadata"]
 
