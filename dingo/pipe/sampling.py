@@ -5,6 +5,7 @@ from pathlib import Path
 
 from bilby_pipe.input import Input
 from bilby_pipe.utils import parse_args, logger, convert_string_to_dict
+import pandas as pd
 
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset
@@ -36,14 +37,19 @@ class SamplingInput(Input):
         self.label = args.label
         self.result_format = args.result_format
 
-        # Event file to run on
+        # Event files to run on
         self.event_data_file = args.event_data_file
 
         # Choices for running
         self.detectors = args.detectors
         self.model = args.model
         self.model_init = args.model_init
+        self.zero_noise = args.zero_noise
+        self.injection = args.injection_dict is not None
         self.recover_log_prob = args.recover_log_prob
+        if self.zero_noise:
+            self.num_noise_realizations = args.num_noise_realizations
+            self.recover_log_prob = False
         self.device = args.device
         self.num_gnpe_iterations = args.num_gnpe_iterations
         self.num_samples = args.num_samples
@@ -100,9 +106,8 @@ class SamplingInput(Input):
         self._load_sampler()
 
     def _load_event(self):
-        event_dataset = EventDataset(file_name=self.event_data_file)
-        self.context = event_dataset.data
-        self.event_metadata = event_dataset.settings
+        self.context = EventDataset(file_name=self.event_data_file)
+        self.event_metadata = self.context.settings
 
     def _load_sampler(self):
         """Load the sampler and set its context based on event data."""
@@ -125,9 +130,6 @@ class SamplingInput(Input):
         else:
             self.gnpe = False
             self.dingo_sampler = GWSampler(model=model)
-
-        self.dingo_sampler.context = self.context
-        self.dingo_sampler.event_metadata = self.event_metadata
 
     @property
     def density_recovery_settings(self):
@@ -172,7 +174,9 @@ class SamplingInput(Input):
     #     return os.path.relpath(result_dir)
 
     def run_sampler(self):
-        if self.gnpe and self.recover_log_prob:
+        self.dingo_sampler.event_metadata = self.event_metadata
+        if self.gnpe and self.recover_log_prob and not self.zero_noise:
+            self.dingo_sampler.context = self.context.data
             logger.info(
                 "GNPE network does not provide log probability. Generating "
                 "samples and training a new network to recover it."
@@ -185,9 +189,50 @@ class SamplingInput(Input):
                 **self.density_recovery_settings,
             )
 
-        self.dingo_sampler.run_sampler(self.num_samples, batch_size=self.batch_size)
-        self.dingo_sampler.to_hdf5(label=self.label, outdir=self.result_directory)
+        # Training unconditional density estimator if zero noise
+        elif self.zero_noise:
+            n_training_samples = 1_000_000
+            samples_list = []
+            for i in range(self.num_noise_realizations):
+                context = {
+                    "waveform": self.context.data[f"waveform_{i}"],
+                    "asds": self.context.data["asds"]
+                }
+                self.dingo_sampler.context = context
+                self.dingo_sampler.run_sampler(
+                    int(n_training_samples / self.num_noise_realizations),
+                    batch_size=self.batch_size,
+                )
+                samples_list.append(self.dingo_sampler.samples)
 
+            logger.info(
+                "Training unconditional density estimator on pool of noise realizations"
+            )
+            training_result = self.dingo_sampler.to_result()
+            outdir = Path(self.result_directory)
+            training_result.to_file(outdir / "training_samples.hdf5")
+            inference_parameters = list(self.dingo_sampler.samples.columns)
+            # removing proxies since this makes training the unconditional flow easier
+            inference_parameters = [
+                x for x in inference_parameters if "proxy" not in x
+            ]
+            unconditional_flow = training_result.train_unconditional_flow(
+                inference_parameters,
+                nde_settings=self.density_recovery_settings["nde_settings"],
+            )
+
+            nde_sampler = GWSampler(model=unconditional_flow)
+            nde_sampler.run_sampler(
+                num_samples=self.num_samples, batch_size=self.batch_size
+            )
+            self.dingo_sampler = nde_sampler
+
+        # run the sampler
+        self.dingo_sampler.run_sampler(
+            num_samples=self.num_samples, batch_size=self.batch_size
+        )
+
+        self.dingo_sampler.to_hdf5(label=self.label, outdir=self.result_directory)
         if self.n_parallel > 1:
             logger.info(f"Splitting Result into {self.n_parallel} parts.")
             result = self.dingo_sampler.to_result()
