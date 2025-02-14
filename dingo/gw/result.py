@@ -362,9 +362,12 @@ class Result(CoreResult):
                 wfg_domain_dict["delta_f"] = delta_f_new
         wfg_domain = build_domain(wfg_domain_dict)
 
-        event_domain, event_data = get_updated_event_domain_and_data(
-            self.domain, self.context, self.event_metadata
-        )
+        if self.event_metadata is not None:
+            event_domain, event_data = get_updated_event_domain_and_data(
+                self.domain, self.context, self.event_metadata
+            )
+        else:
+            event_domain, event_data = self.domain, self.context
 
         self.likelihood = StationaryGaussianGWLikelihood(
             wfg_kwargs=self.base_metadata["dataset_settings"]["waveform_generator"],
