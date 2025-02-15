@@ -1,18 +1,18 @@
 import argparse
+import json
 from pathlib import Path
+from pprint import pprint
 
 import h5py
 import torch
 import yaml
-import json
-from pprint import pprint
 
+from dingo.core.backward_compatibility import torch_load_with_fallback
 from dingo.core.dataset import DingoDataset
-from dingo.gw.SVD import SVDBasis
 from dingo.core.result import Result
 from dingo.gw.dataset import WaveformDataset
 from dingo.gw.noise.asd_dataset import ASDDataset
-from dingo.core.backward_compatibility import torch_load_with_fallback
+from dingo.gw.SVD import SVDBasis
 
 
 def ls():
@@ -23,7 +23,7 @@ def ls():
     path = Path(args.file_name)
     if path.suffix == ".pt":
         print("Extracting information about torch model.\n")
-        d = torch_load_with_fallback(path)
+        d, _ = torch_load_with_fallback(path)
         print(f"Version: {d.get('version')}\n")
         print(f"Model epoch: {d['epoch']}\n")
         print("Model metadata:")
@@ -133,9 +133,9 @@ def ls():
                 print(f"Model epoch: {f.attrs['epoch']}")
                 print("Model metadata:")
 
-                for d in ['model_kwargs', 'metadata']:
-                    json_data = json.loads(f['serialized_dicts'][d][()])
-                    print(f"\n{d}:\n" + "-"*(len(d)+1))
+                for d in ["model_kwargs", "metadata"]:
+                    json_data = json.loads(f["serialized_dicts"][d][()])
+                    print(f"\n{d}:\n" + "-" * (len(d) + 1))
                     pprint(json_data)
 
         else:

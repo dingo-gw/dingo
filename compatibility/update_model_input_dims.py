@@ -1,7 +1,9 @@
-import torch
 import argparse
-from dingo.gw.result import Result
+
+import torch
+
 from dingo.core.utils.backward_compatibility import torch_load_with_fallback
+from dingo.gw.result import Result
 
 """
 2. March 2023: Previously, we stored the input_dim of the embedding net as a tuple, 
@@ -53,7 +55,7 @@ def main():
 
     if args.checkpoint is not None:
         print(f"Updating model {args.checkpoint}.")
-        d = torch_load_with_fallback(args.checkpoint)
+        d, _ = torch_load_with_fallback(args.checkpoint)
 
         d["model_kwargs"]["embedding_net_kwargs"]["input_dims"] = list(
             d["model_kwargs"]["embedding_net_kwargs"]["input_dims"]

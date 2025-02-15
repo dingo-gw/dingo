@@ -3,24 +3,27 @@ This module contains the abstract base class for representing posterior models,
 as well as functions for training and testing across an epoch.
 """
 
-from abc import abstractmethod, ABC
-import os
-from os.path import join
-import h5py
-
-import torch
-import dingo.core.utils as utils
-from torch.utils.data import Dataset
-import time
-import numpy as np
-from threadpoolctl import threadpool_limits
-import dingo.core.utils.trainutils
 import json
+import os
+import time
+from abc import ABC, abstractmethod
 from collections import OrderedDict
+from os.path import join
 from typing import Optional
-from dingo.core.utils.backward_compatibility import update_model_config, torch_load_with_fallback
-from dingo.core.utils.misc import get_version
 
+import h5py
+import numpy as np
+import torch
+from threadpoolctl import threadpool_limits
+from torch.utils.data import Dataset
+
+import dingo.core.utils as utils
+import dingo.core.utils.trainutils
+from dingo.core.utils.backward_compatibility import (
+    torch_load_with_fallback,
+    update_model_config,
+)
+from dingo.core.utils.misc import get_version
 from dingo.core.utils.trainutils import EarlyStopping
 
 
@@ -318,7 +321,9 @@ class BasePosteriorModel(ABC):
         # machine may have moved the model from 'cuda' to 'cpu'.
         ext = os.path.splitext(model_filename)[-1]
         if ext == ".pt":
-            d = torch_load_with_fallback(model_filename, preferred_map_location=device)
+            d, _ = torch_load_with_fallback(
+                model_filename, preferred_map_location=device
+            )
         elif ext == ".hdf5":
             d = self._load_model_from_hdf5(model_filename)
         else:

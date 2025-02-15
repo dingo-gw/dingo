@@ -1,43 +1,48 @@
+from typing import Dict, List, Literal, Tuple
+
 import torch
-from typing import List
+
+Device = Literal["meta", "cuda", "mps", "hip", "cpu"]
 
 
-def torch_available_devices() -> List[str]:
+def torch_available_devices() -> List[Device]:
     """
     Returns a list of all available PyTorch devices,
     ordered: meta, cuda, mps, hip, cpu
-    
+
     Returns
     -------
     List of available device identifiers
     """
-    devices = ["meta"]
-    
+    devices: List[Device] = ["meta"]
+
     # cuda
     if torch.cuda.is_available():
-        devices.extend("cuda")
-    
+        devices.append("cuda")
+
     # mps
     try:
         if torch.backends.mps.is_available():
-            devices.append('mps')
+            devices.append("mps")
     except AttributeError:
-        pass      
+        pass
 
     # hip
     try:
-        if hasattr(torch, 'hip') and torch.hip.is_available():
-            devices.append('hip')
+        if hasattr(torch, "hip") and torch.hip.is_available():
+            devices.append("hip")
     except AttributeError:
-        pass  
-    
+        pass
+
     # cpu
-    devices.append('cpu')
-    
+    devices.append("cpu")
+
     return devices
 
 
-def torch_load_with_fallback(filename: str, preferred_map_location: str="cuda"):
+def torch_load_with_fallback(
+    filename: str, preferred_map_location: Device = "cuda"
+) -> Tuple[Dict, Device]:
     """
     Loads a PyTorch file with fallback behavior:
     1. Tries preferred_map_location (default: cuda)
@@ -50,21 +55,23 @@ def torch_load_with_fallback(filename: str, preferred_map_location: str="cuda"):
     """
 
     try:
-        return torch.load(filename, map_location=preferred_map_location)
+        return (
+            torch.load(filename, map_location=preferred_map_location),
+            preferred_map_location,
+        )
     except RuntimeError:
         pass
-    
+
     devices = torch_available_devices()
-    
-    for location in [d for d in devices if d!=preferred_map_location]:
+
+    for location in [d for d in devices if d != preferred_map_location]:
         try:
-            return torch.load(filename, map_location=location)
+            return torch.load(filename, map_location=location), location
         except RuntimeError:
             pass
 
     raise RuntimeError(
-        f"failed to load model {filename} on any device, "
-        "tried: {', '.join(devices)}"
+        f"failed to load model {filename} on any device, " "tried: {', '.join(devices)}"
     )
 
 

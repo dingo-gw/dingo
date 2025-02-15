@@ -2,10 +2,12 @@ import argparse
 import ast
 import textwrap
 from pathlib import Path
+
 import h5py
 import torch
 
 from dingo.core.utils.backward_compatibility import torch_load_with_fallback
+
 
 def main():
 
@@ -35,7 +37,7 @@ def main():
                 print("Dataset is already in correct format.")
 
     elif path.suffix == ".pt":
-        d = torch_load_with_fallback(args.checkpoint)
+        d, _ = torch_load_with_fallback(args.checkpoint)
 
         try:
             del d["metadata"]["dataset_settings"]["domain"]["window_factor"]

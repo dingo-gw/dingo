@@ -1,9 +1,11 @@
+import argparse
+
 import numpy as np
 import torch
-import argparse
 import yaml
 
 from dingo.core.utils.backward_compatibility import torch_load_with_fallback
+
 
 def append_stage():
 
@@ -15,7 +17,7 @@ def append_stage():
     args = parser.parse_args()
 
     # trying to load on CUDA, MPS, HIP or CPU
-    d = torch_load_with_fallback(args.checkpoint)
+    d, _ = torch_load_with_fallback(args.checkpoint)
 
     stages = [
         v
@@ -30,8 +32,10 @@ def append_stage():
 
     if args.replace is not None:
         if args.replace < 0 or args.replace >= num_stages:
-            raise ValueError(f"Invalid argument replace={args.replace}. Valid values "
-                             f"are {list(range(num_stages))}.")
+            raise ValueError(
+                f"Invalid argument replace={args.replace}. Valid values "
+                f"are {list(range(num_stages))}."
+            )
         current_epoch = d["epoch"]
         stage_epoch = np.sum([s["epochs"] for s in stages[: args.replace]])
         if current_epoch > stage_epoch:

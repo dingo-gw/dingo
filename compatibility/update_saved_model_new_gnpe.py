@@ -1,6 +1,6 @@
-import torch
 import argparse
 
+import torch
 import yaml
 
 from dingo.core.utils.backward_compatibility import torch_load_with_fallback
@@ -17,7 +17,7 @@ def parse_args():
 def main():
     args = parse_args()
 
-    d = torch_load_with_fallback(args.checkpoint)
+    d, _ = torch_load_with_fallback(args.checkpoint)
 
     data_settings = d["metadata"]["train_settings"]["data"]
 
