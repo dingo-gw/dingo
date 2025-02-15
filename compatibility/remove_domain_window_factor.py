@@ -2,8 +2,11 @@ import argparse
 import ast
 import textwrap
 from pathlib import Path
+
 import h5py
 import torch
+
+from dingo.core.utils.backward_compatibility import torch_load_with_fallback
 
 
 def main():
@@ -34,10 +37,7 @@ def main():
                 print("Dataset is already in correct format.")
 
     elif path.suffix == ".pt":
-        if torch.cuda.is_available():
-            d = torch.load(path)
-        else:
-            d = torch.load(path, map_location=torch.device("cpu"))
+        d, _ = torch_load_with_fallback(args.checkpoint)
 
         try:
             del d["metadata"]["dataset_settings"]["domain"]["window_factor"]
