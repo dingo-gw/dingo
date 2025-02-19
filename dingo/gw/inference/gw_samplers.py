@@ -258,6 +258,10 @@ class GWSampler(GWSamplerMixin, Sampler):
         super(GWSampler, type(self)).context.fset(self, value)
         if isinstance(self.domain, MultibandedFrequencyDomain):
             d = list(self._context["waveform"].values())[0]
+            # FIXME: Ideally, one would separately check whether the data amd/or the ASD has to be decimated
+            # FIXME: Ideally, we would not re-implement the decimation, but rely on functions such as
+            #  ASDDataset.update_domain() that include the decimation code and are used during training to
+            #  minimize mistakes arising from multiple implementations.
             if d.shape[-1] == len(self.domain.base_domain):
                 print("Decimating data to multi-banded frequency domain.")
                 base_context = copy.deepcopy(self._context)
