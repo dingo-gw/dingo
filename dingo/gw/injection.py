@@ -306,12 +306,6 @@ class GWSignal(object):
                 if "window_factor" in domain_dict:
                     print("Dropping window factor for update.")
                     del domain_dict["window_factor"]
-                if "base_domain" in domain_dict:
-                    if "window_factor" in domain_dict["base_domain"]:
-                        print(
-                            "Setting window factor of base_domain to None for update."
-                        )
-                        domain_dict["base_domain"]["window_factor"] = None
                 asd.update_domain(domain_dict)
         elif isinstance(asd, dict):
             if set(asd.keys()) != set(ifo_names):
