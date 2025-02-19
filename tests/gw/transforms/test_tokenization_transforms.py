@@ -5,6 +5,7 @@ from dingo.gw.transforms import StrainTokenization
 
 
 def test_StrainTokenization():
+    # TODO: Update transform to refactored code
     num_tokens = 20
     f_min = 20.0
     f_max = 1024.0
@@ -33,4 +34,7 @@ def test_StrainTokenization():
     assert out["position"].max() >= f_max
     # Check that block information has expected shape
     assert out["blocks"].shape == (num_blocks,)
+
+    # TODO: test that transform works for one sample as well as some batch size
+    # TODO: write tests for DropFrequencyRange and DropDetectors
 
