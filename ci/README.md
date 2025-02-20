@@ -102,7 +102,7 @@ To set it up:
 
 - build the dingo:toy_npe_model docker image
 - copy the `dingo-ci-trigger` script to `/usr/local/bin`.
-- copy the dingo-ci.service file to /etc/systemd/system
+- copy the `dingo-ci.service` file to `/etc/systemd/system`
 - reload systemctl:
 
 ```bash
@@ -118,7 +118,7 @@ systemctl enable docker-ci
 - start the service
 
 ```
-systemctl status docker-ci
+systemctl start docker-ci
 ```
 
 - check the status of the service
