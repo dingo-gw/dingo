@@ -8,8 +8,8 @@
 # to get the version of torch suitable for your hardware
 # Note: if running in docker, you may need to edit the Dockerfile
 #   to install the required python version. 
-PYTHON_VERSION="python3.9"
-TORCH_INSTALL_COMMAND="pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu113 --upgrade"
+#PYTHON_VERSION="python3.9"
+#TORCH_INSTALL_COMMAND="pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu113 --upgrade"
 
 # if no python version specified, using default system python3
 if [[ ! -v PYTHON_VERSION ]]; then
@@ -22,6 +22,7 @@ fi
 # --email: an optional email server config for sending report
 #   emails (upon success and failure)
 # This section defines the related variable $BIN_DIR and $EMAIL_CONFIG_PATH
+# --checkout: an optional (git) checkout to perform, e.g. a commit id
 
 #DINGO_REPO="https://github.com/dingo-gw/dingo.git"
 DINGO_REPO="https://github.com/vincentberenz/dingo.git"
@@ -103,7 +104,7 @@ dingo_ci_email() {
     INSTALL_DIR="$1"
     LOG_FILE="$2"
     ERROR_FILE="$3"
-    SUCCESS="$4"
+    STATUS="$4"
     EMAIL_CONFIG_PATH="$5"
 
     # parsing the email config
@@ -118,7 +119,7 @@ dingo_ci_email() {
     echo ""
     echo "sending email:"
     echo "  config: ${EMAIL_CONFIG_PATH}"
-    echo "  status: ${SUCCESS}"
+    echo "  status: ${STATUS}"
     echo "  server: ${smtp_server}:${port}"
     echo "  to: ${recipients}"
     echo "  based on:"
@@ -128,7 +129,7 @@ dingo_ci_email() {
     echo ""
     
     # Set email subject based on success/failure
-    subject="dingo toy-npe-model example: $(if [ "$SUCCESS" -eq 0 ]; then echo "SUCCEEDED"; else echo "FAILED"; fi)"
+    subject="dingo toy-npe-model example: $(if [ "$STATUS" -eq 0 ]; then echo "SUCCEEDED"; else echo "FAILED"; fi)"
     
     # Create email body
     body=$(cat <<EOF
@@ -136,7 +137,7 @@ DINGO Workflow Report
 ====================
 Start Time: $(if [[ -f "$LOG_FILE" ]]; then head -n 1 "$LOG_FILE" | cut -d']' -f1 | cut -c2-; else echo "N/A"; fi)
 End Time: $(date +"%Y-%m-%d %H:%M:%S")
-Status: $(if [ "$SUCCESS" = "true" ]; then echo "SUCCESS"; else echo "FAILURE"; fi)
+Status: $(if [ "$STATUS" -eq 0 ]; then echo "SUCCESS"; else echo "FAILURE"; fi) (${STATUS})
 Branch: $(if [[ -d "$INSTALL_DIR" ]]; then cd "$INSTALL_DIR" && git branch --show-current; else echo "N/A"; fi)
 Commit: $(if [[ -d "$INSTALL_DIR" ]]; then cd "$INSTALL_DIR" && git rev-parse HEAD; else echo "N/A"; fi)
 
@@ -157,7 +158,12 @@ EOF
     smpt_url="smtps://${auth_user}@${smtp_server}:${port}"
     
     # sending the email
-    echo "$body" | mutt -e "set smtp_url=${smpt_url}" -e "set smtp_pass=${auth_pass}" -e "set smtp_authenticators='login'" -s "${subject}" ${attachments[@]} -- ${recipients}
+    echo "$body" | mutt \
+		       -e "set from=${from_addr}" \
+		       -e "set smtp_url=${smpt_url}" \
+		       -e "set smtp_pass=${auth_pass}" \
+		       -e "set smtp_authenticators='login'" \
+		       -s "${subject}" ${attachments[@]} -- ${recipients}
 
 }
 
@@ -180,6 +186,7 @@ send_email() {
 
 set -e
 trap send_email EXIT
+
 
 #####################
 # Variables and log #
@@ -334,5 +341,5 @@ echo -e "===================================================\n"
 # EXIT #
 ########
 
-echo -e "\nfinished with success\n"
+echo -e "\nfinished with success"
 exit 0

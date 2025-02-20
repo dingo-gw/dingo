@@ -6,7 +6,7 @@ Requires=docker.service
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/dingo-ci-trigger
-Restart=always
+Restart=on-failure
 
 [Install]
 WantedBy=multi-user.target

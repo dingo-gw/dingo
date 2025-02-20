@@ -1,7 +1,9 @@
 #!/bin/bash
 
 # Configuration
-DINGO_REPO="https://github.com/dingo-gw/dingo.git"
+#DINGO_REPO="https://github.com/dingo-gw/dingo.git"
+DINGO_REPO="https://github.com/vincentberenz/dingo.git"
+
 BRANCH="main"
 CLONE_PATH="/data/dingo/repo-checker/"
 JOBS_PATH="/data/dingo"
@@ -30,43 +32,36 @@ check_job_exists() {
 execute_docker() {
     local reference="$1"
     echo "Executing docker command for ${reference}"
-    docker run --rm --shm-size=16g -v /data/dingo:/data/dingo dingo:toy_npe_model --base-dir ${JOBS_PATH} --checkout ${reference} --email ${EMAIL_CONFIG}
+    docker run --rm --shm-size=16g --runtime=nvidia --gpus all -v /data/dingo:/data/dingo dingo:toy_npe_model --base-dir ${JOBS_PATH} --checkout ${reference} --email ${EMAIL_CONFIG}
 }
 
 # Ensure jobs directory exists
 mkdir -p "${JOBS_PATH}"
 
-# Clone or update repository
-if [ ! -d "${CLONE_PATH}" ]; then
-    echo "Cloning repository..."
-    git clone "${DINGO_REPO}" "${CLONE_PATH}" || { 
-        echo "Error cloning repository"; 
-        exit 1; 
-    }
-else
-    echo "Repository already exists, updating..."
-    git -C "${CLONE_PATH}" fetch origin || { 
-        echo "Error fetching origin"; 
-        exit 1; 
-    }
-    git -C "${CLONE_PATH}" checkout "${BRANCH}" || { 
-        echo "Error checking out branch"; 
-        exit 1; 
-    }
-    git -C "${CLONE_PATH}" reset --hard origin/"${BRANCH}" || { 
-        echo "Error resetting to latest commit"; 
-        exit 1; 
-    }
-fi
+echo -e "\n-- cloning ${DINGO_REPO} (${BRANCH}) - ${CLONE_PATH}\n"
+
+rm -rf $CLONE_PATH
+echo "Cloning repository..."
+git clone "${DINGO_REPO}" "${CLONE_PATH}" || { 
+    echo "Error cloning repository"; 
+    exit 1; 
+}
+git -C "${CLONE_PATH}" checkout "${BRANCH}" || { 
+    echo "Error checking out branch"; 
+    exit 1; 
+}
+
 
 # Get latest commit and check if job exists
 latest_commit=$(git -C "${CLONE_PATH}" rev-parse --short HEAD)
+echo -e "\n- latest commit: ${latest_commit}\n"
 if ! check_job_exists "${latest_commit}"; then
     execute_docker "${latest_commit}"
 fi
 
 # Get latest tag and check if job exists
-latest_tag=$(git -C "${CLONE_PATH}" describe --tags --abbrev=0 2>/dev/null)
+latest_tag=$(git -C "${CLONE_PATH}" tag | tail -n 1 2>/dev/null)
+echo -e "\n- latest tag: ${latest_tag}\n"
 if [ -n "${latest_tag}" ] && ! check_job_exists "${latest_tag}"; then
     execute_docker "${latest_tag}"
 fi
