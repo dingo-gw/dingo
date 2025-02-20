@@ -406,7 +406,8 @@ class MultibandedFrequencyDomain(Domain):
             self._sample_frequencies_torch = torch.linspace(
                 0.0, self.f_max, steps=num_bins, dtype=torch.float32
             )
-        return self._sample_frequencies_torch
+        raise NotImplementedError()
+        # return self._sample_frequencies_torch
 
     @property
     def sample_frequencies_torch_cuda(self):
@@ -414,7 +415,8 @@ class MultibandedFrequencyDomain(Domain):
             self._sample_frequencies_torch_cuda = self.sample_frequencies_torch.to(
                 "cuda"
             )
-        return self._sample_frequencies_torch_cuda
+        # return self._sample_frequencies_torch_cuda
+        raise NotImplementedError()
 
     @property
     def frequency_mask(self) -> np.ndarray:
