@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.signal import tukey
+from scipy.signal.windows import tukey
 from scipy.interpolate import interp1d
 from bilby.gw.detector import PowerSpectralDensity
 
