@@ -272,11 +272,8 @@ def get_scheduler_from_kwargs(
         update_ever_optimizer_step = scheduler_kwargs.pop(
             "update_every_optimizer_step", False
         )
-        if (
-            update_ever_optimizer_step
-            and "num_optimizer_steps_per_epoch" in scheduler_kwargs
-        ):
-            num_optimizer_steps = scheduler_kwargs.pop("num_optimizer_steps_per_epoch")
+        num_optimizer_steps = scheduler_kwargs.pop("num_optimizer_steps_per_epoch", 1)
+        if update_ever_optimizer_step and num_optimizer_steps > 1:
             # Adapt scheduler kwargs (in place) to update every optimizer step
             scheduler_kwargs = adapt_scheduler_kwargs_to_update_every_optimizer_step(
                 scheduler_kwargs, num_optimizer_steps
