@@ -63,24 +63,6 @@ class CropMaskStrainRandom(object):
         else:
             self._idx_bound_f_min = 0
 
-        # # initialize functions to sample the
-        # if f_max_lower is not None:
-        #     idx_bound_f_max = np.argmin(np.abs(f_max_lower - frequencies))
-        #     self.sample_idx_upper = lambda s: np.random.randint(
-        #         idx_bound_f_max, self.len_domain, s
-        #     )
-        #     if deterministic:
-        #         self.sample_idx_upper = lambda s: np.ones(s) * idx_bound_f_max
-        # else:
-        #     self.sample_idx_upper = lambda s: np.ones(s) * self.len_domain
-        # if f_min_upper is not None:
-        #     idx_bound_f_min = np.argmin(np.abs(f_min_upper - frequencies))
-        #     self.sample_idx_lower = lambda s: np.random.randint(0, idx_bound_f_min, s)
-        #     if deterministic:
-        #         self.sample_idx_lower = lambda s: np.ones(s) * idx_bound_f_min
-        # else:
-        #     self.sample_idx_lower = lambda s: np.zeros(s)
-
     def sample_upper_bound_indices(self, shape):
         """Sample indices for upper crop boundaries."""
         if self._deterministic:
@@ -151,21 +133,6 @@ class CropMaskStrainRandom(object):
                 f"Expected waveform input of shape [..., {self.len_domain}], "
                 f"got {strain.shape}."
             )
-
-        # The strain has shape (B, D, C, N) or (D, C, N) for non-batched data.
-        #   B: batch_size
-        #   D: num_detectors
-        #   C: num_channels, typically 3 for (strain.real, strain.imag, asd)
-        #   N: frequency bins, self.len_domain
-        #
-        # We crop the strain by masking: strain[..., :lower] = 0, strain[..., upper:] = 0.
-        # - Cropping/masking always uses the same boundary indices (lower, upper) along
-        #   the channel dimension.
-        # - If self.independent_detectors = True, (lower, upper) is sampled
-        #   independently for the different detectors.
-        # - Cropping is only applied to a fraction of the data, specified by
-        #   self.cropping_probability.
-        # - If self.independent_lower_upper = True,
 
         # Sample boundary indices for crops
         constant_ax = 3 - self.independent_detectors
