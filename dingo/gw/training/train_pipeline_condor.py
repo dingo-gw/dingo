@@ -61,7 +61,6 @@ def create_submission_file(
     # info from MPI-IS IT team:
     # https://atlas.is.localnet/confluence/display/IT/How+to+automatically+restart+jobs+according+to+the+exit+code
 
-    lines.append(f'arguments = "{condor_settings["arguments"]}"\n')
     lines.append(f'error = {join(train_dir, "info.err")}\n')
     lines.append(f'output = {join(train_dir, "info.out")}\n')
     lines.append(f'log = {join(train_dir, "info.log")}\n')
