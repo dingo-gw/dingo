@@ -238,7 +238,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             Nested dictionary containing parameters and waveform polarizations.
         """
         parameters = {
-            k: v if isinstance(v, float) else v.to_numpy()
+            k: v if isinstance(v, float) else v
             for k, v in self.parameters.iloc[batched_idx].items()
         }
         polarizations = {
