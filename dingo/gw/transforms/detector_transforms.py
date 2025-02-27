@@ -153,11 +153,6 @@ class ProjectOntoDetectors(object):
             dec = extrinsic_parameters.pop("dec")
             psi = extrinsic_parameters.pop("psi")
             tc_ref = parameters["geocent_time"]
-            assert np.allclose(tc_ref, parameters["geocent_time"]), (
-                "This should always be 0. If for some reason "
-                "you want to save time shifted polarizations,"
-                " then remove this assert statement."
-            )
             tc_new = extrinsic_parameters.pop("geocent_time")
         except:
             raise ValueError("Missing parameters.")
