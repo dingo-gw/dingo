@@ -172,8 +172,6 @@ class ASDDataset(DingoDataset):
         Dict with a random asd from the dataset for each detector.
 
         n : int
-            Number of asds to sample 
+            Number of asds to sample
         """
         return {k: v[np.random.choice(len(v), n)] for k, v in self.asds.items()}
-
-    
