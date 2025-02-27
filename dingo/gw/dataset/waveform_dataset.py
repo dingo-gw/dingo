@@ -238,7 +238,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             Nested dictionary containing parameters and waveform polarizations.
         """
         parameters = {
-            k: v if isinstance(v, float) else v
+            k: v if isinstance(v, float) else v.to_numpy()
             for k, v in self.parameters.iloc[batched_idx].items()
         }
         polarizations = {
@@ -255,10 +255,27 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         if self.transform is not None:
             data = self.transform(data)
 
-        # Currently, the data is of shape [M, N, ...] with where M is the number
-        # of arrays returned by the transform and N is the batch_size.  This
-        # array is repackaged to group different indices of `M` into one sample,
-        # resulting in data of shape [N, M, ...].  That is, data is of the form
+        # If not using SelectStandardizeRepackageParameters, the data is a dictionary
+        # with keys 'parameters' and 'waveform'. Each dict consists of subdicts whose 
+        # values are arrays of shape (N, ...). Here, N is the batch_size. We repackage
+        # the data to return a list of length N, where each element is a dict with subdicts
+        # that have keys 'parameters' and 'waveform'. The values of these subdicts are arrays 
+        # of shape 1.
+        if isinstance(data, dict):
+            repackaged_data = [
+                {k1: {k2: v2[j] for k2, v2 in v1.items()} for k1, v1 in data.items()}
+                for j in range(len(batched_idx))
+            ]
+
+        # Some sets of transforms, such as SelectStandardizeRepackageParameters return a list
+        # In particular, the data is a list of length M of arrays with leading dimension
+        # N. Here, M is the number of arrays returned by the transform and N is the batch_size. 
+        # Schematically, it is of shape [M, N, ...]. However,
+        # Pytorch expects a list with length N with sublists of length M. Therefore
+        # we repackage to group different indices of `M` into one sample,
+        # resulting in data of shape [N, M, ...].
+        #
+        # as an example, the data starts in the form
         #
         # [arr1, ... arrM]
         #
@@ -268,11 +285,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         #
         # which is a list of length N, where each element is an arr of shape (M, ...).
         # this is useful for collation
-        if isinstance(data, dict):
-            repackaged_data = [
-                {k1: {k2: v2[j] for k2, v2 in v1.items()} for k1, v1 in data.items()}
-                for j in range(len(batched_idx))
-            ]
+
         elif isinstance(data, list):
             repackaged_data = [
                 [data[i][j] for i in range(len(data))] for j in range(len(batched_idx))
