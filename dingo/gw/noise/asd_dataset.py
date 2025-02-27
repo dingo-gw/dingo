@@ -106,6 +106,8 @@ class ASDDataset(DingoDataset):
             Settings dictionary. Must contain a subset of the keys contained in
             domain_dict.
         """
+        # Note that we require domain_update to have a type specified, even if
+        # unchanged from the original domain. This reduces risks of errors.
         if self.domain.domain_dict["type"] == domain_update["type"]:
             len_domain_original = len(self.domain)
             self.domain.update(domain_update)
