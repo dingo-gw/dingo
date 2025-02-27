@@ -15,8 +15,10 @@ class SampleExtrinsicParameters(object):
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
-        _, batch_size = get_batch_size_of_input_sample(input_sample)
+        batched, batch_size = get_batch_size_of_input_sample(input_sample)
         extrinsic_parameters = self.prior.sample(batch_size)
+        extrinsic_parameters = {k:v.astype(np.float32) if batched else float(v) for k,v in extrinsic_parameters.items()}
+        
         sample["extrinsic_parameters"] = extrinsic_parameters
         return sample
 
