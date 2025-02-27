@@ -201,21 +201,41 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         """The number of waveform samples."""
         return len(self.parameters)
 
-    def __getitem__(self, idx) -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
+    def __getitem__(self, idx: int) -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
         """
         Return a nested dictionary containing parameters and waveform polarizations
         for sample with index `idx`. If defined, a chain of transformations is applied to
         the waveform data.
+
+        Parameters
+        ----------
+        idx : int
+            Index of the sample in the WaveformDataset to return.
+
+        Returns
+        -------
+        Dict[str, Dict[str, Union[float, np.ndarray]]]
+            Nested dictionary containing parameters and waveform polarizations.
         """
         return self.__getitems__([idx])[0]
 
     def __getitems__(
-        self, batched_idx
-    ) -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
+        self, batched_idx: list[int]
+    ) -> list[Dict[str, Dict[str, Union[float, np.ndarray]]]]:
         """
         Return a nested dictionary containing parameters and waveform polarizations
         for sample with index `idx`. If defined, a chain of transformations is applied to
         the waveform data.
+
+        Parameters
+        ----------
+        batched_idx : list[int]
+            List of indices to return.
+
+        Returns
+        -------
+        repackaged_data : list[Dict[str, Dict[str, Union[float, np.ndarray]]]]
+            Nested dictionary containing parameters and waveform polarizations.
         """
         parameters = {
             k: v if isinstance(v, float) else v.to_numpy()
