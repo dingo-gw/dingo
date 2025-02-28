@@ -26,6 +26,7 @@ from dingo.gw.transforms import (
     CopyToExtrinsicParameters,
     GetDetectorTimes,
 )
+from dingo.gw.transforms.waveform_transforms import DecimateWaveformsAndASDS
 
 
 class GWSamplerMixin(object):
@@ -214,15 +215,8 @@ class GWSampler(GWSamplerMixin, Sampler):
             if d.shape[-1] == len(self.domain.base_domain):
                 print("Decimating data to multi-banded frequency domain.")
                 base_context = copy.deepcopy(self._context)
-                self._context = {}
-                self._context["waveform"] = {
-                    k: self.domain.decimate(v)
-                    for k, v in base_context["waveform"].items()
-                }
-                self._context["asds"] = {
-                    k: 1 / self.domain.decimate(1 / v)
-                    for k, v in base_context["asds"].items()
-                }
+                decimator = DecimateWaveformsAndASDS(self.domain, "whitened")
+                self._context = decimator(self._context)
                 self._context["base_data"] = base_context
 
 
