@@ -158,6 +158,7 @@ class GWSampler(GWSamplerMixin, Sampler):
     data for the inference network.
 
     transform_pre :
+        * Decimates data (if necessary and using MultibandedFrequencyDomain).
         * Whitens strain.
         * Repackages strain data and the inverse ASDs (suitably scaled) into a torch
           tensor.
@@ -178,25 +179,32 @@ class GWSampler(GWSamplerMixin, Sampler):
 
     def _initialize_transforms(self):
         # preprocessing transforms:
+        transform_pre = []
+        #   * in case of MultibandedFrequencyDomain, decimate data from base domain
+        if isinstance(self.domain, MultibandedFrequencyDomain):
+            transform_pre.append(
+                DecimateWaveformsAndASDS(self.domain, decimation_mode="whitened")
+            )
+
         #   * whiten and scale strain (since the inference network expects standardized
         #   data)
         #   * repackage strains and asds from dicts to an array
         #   * convert array to torch tensor on the correct device
         #   * extract only strain/waveform from the sample
-        self.transform_pre = Compose(
-            [
-                WhitenAndScaleStrain(self.domain.noise_std),
-                # Use base metadata so that unconditional samplers still know how to
-                # transform data, since this transform is used by the GNPE sampler as
-                # well.
-                RepackageStrainsAndASDS(
-                    self.base_model_metadata["train_settings"]["data"]["detectors"],
-                    first_index=self.domain.min_idx,
-                ),
-                ToTorch(device=self.model.device),
-                GetItem("waveform"),
-            ]
-        )
+        transform_pre += [
+            WhitenAndScaleStrain(self.domain.noise_std),
+            # Use base metadata so that unconditional samplers still know how to
+            # transform data, since this transform is used by the GNPE sampler as
+            # well.
+            RepackageStrainsAndASDS(
+                self.base_model_metadata["train_settings"]["data"]["detectors"],
+                first_index=self.domain.min_idx,
+            ),
+            ToTorch(device=self.model.device),
+            GetItem("waveform"),
+        ]
+
+        self.transform_pre = Compose(transform_pre)
 
         # postprocessing transforms:
         #   * de-standardize data and extract inference parameters
@@ -206,18 +214,6 @@ class GWSampler(GWSamplerMixin, Sampler):
             inverse=True,
             as_type="dict",
         )
-
-    @Sampler.context.setter
-    def context(self, value):
-        super(GWSampler, type(self)).context.fset(self, value)
-        if isinstance(self.domain, MultibandedFrequencyDomain):
-            d = list(self._context["waveform"].values())[0]
-            if d.shape[-1] == len(self.domain.base_domain):
-                print("Decimating data to multi-banded frequency domain.")
-                base_context = copy.deepcopy(self._context)
-                decimator = DecimateWaveformsAndASDS(self.domain, "whitened")
-                self._context = decimator(self._context)
-                self._context["base_data"] = base_context
 
 
 class GWSamplerGNPE(GWSamplerMixin, GNPESampler):

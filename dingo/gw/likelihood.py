@@ -10,6 +10,7 @@ from threadpoolctl import threadpool_limits
 
 from dingo.core.likelihood import Likelihood
 from dingo.gw.injection import GWSignal
+from dingo.gw.transforms.waveform_transforms import DecimateWaveformsAndASDS
 from dingo.gw.waveform_generator import WaveformGenerator
 from dingo.gw.domains import build_domain, FrequencyDomain, MultibandedFrequencyDomain
 from dingo.gw.data.data_preparation import get_event_data_and_domain
@@ -31,6 +32,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         phase_marginalization_kwargs=None,
         calibration_marginalization_kwargs=None,
         phase_grid=None,
+        use_base_domain=False,
     ):
         # TODO: Does the phase_grid argument ever get used?
         """
@@ -63,13 +65,20 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             t_ref=t_ref,
         )
 
+        if isinstance(data_domain, MultibandedFrequencyDomain) and not use_base_domain:
+            decimator = DecimateWaveformsAndASDS(
+                data_domain, decimation_mode="whitened"
+            )
+            event_data = decimator(event_data)
+        self.use_base_domain = use_base_domain  # Set up appropriate domain objects.
+
         self.asd = event_data["asds"]
 
         self.whitened_strains = {
             k: v / self.asd[k] / self.data_domain.noise_std
             for k, v in event_data["waveform"].items()
         }
-        if len(list(self.whitened_strains.values())[0]) != data_domain.max_idx + 1:
+        if len(list(self.whitened_strains.values())[0]) != len(self.data_domain):
             raise ValueError("Strain data does not match domain.")
         # log noise evidence, independent of theta and waveform model
         self.log_Zn = sum(

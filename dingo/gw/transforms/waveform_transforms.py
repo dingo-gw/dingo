@@ -142,36 +142,53 @@ class DecimateWaveformsAndASDS(object):
         """
         sample = input_sample.copy()
 
-        if self.decimation_mode == "whitened":
-            whitened_waveforms = {
-                k: v / sample["asds"][k] for k, v in sample["waveform"].items()
-            }
-            whitened_waveforms_dec = {
-                k: self.multibanded_frequency_domain.decimate(v)
-                for k, v in whitened_waveforms.items()
-            }
-            asds_dec = {
-                k: 1 / self.multibanded_frequency_domain.decimate(1 / v)
-                for k, v in sample["asds"].items()
-            }
-            # color the whitened waveforms with the effective asd
-            waveform_dec = {
-                k: v * asds_dec[k] for k, v in whitened_waveforms_dec.items()
-            }
-            sample["waveform"] = waveform_dec
-            sample["asds"] = asds_dec
+        # Only decimate the data if it is in the base domain. If it has already been
+        # decimated, do not change it.
 
-        elif self.decimation_mode == "unwhitened":
-            sample["waveform"] = {
-                k: self.multibanded_frequency_domain.decimate(v)
-                for k, v in sample["waveform"].items()
-            }
-            sample["asds"] = {
-                k: self.multibanded_frequency_domain.decimate(v**2) ** 0.5
-                for k, v in sample["asds"].items()
-            }
+        if check_sample_in_domain(
+            sample, self.multibanded_frequency_domain.base_domain
+        ):
+            if self.decimation_mode == "whitened":
+                whitened_waveforms = {
+                    k: v / sample["asds"][k] for k, v in sample["waveform"].items()
+                }
+                whitened_waveforms_dec = {
+                    k: self.multibanded_frequency_domain.decimate(v)
+                    for k, v in whitened_waveforms.items()
+                }
+                asds_dec = {
+                    k: 1 / self.multibanded_frequency_domain.decimate(1 / v)
+                    for k, v in sample["asds"].items()
+                }
+                # color the whitened waveforms with the effective asd
+                waveform_dec = {
+                    k: v * asds_dec[k] for k, v in whitened_waveforms_dec.items()
+                }
+                sample["waveform"] = waveform_dec
+                sample["asds"] = asds_dec
 
-        else:
-            raise NotImplementedError()
+            elif self.decimation_mode == "unwhitened":
+                sample["waveform"] = {
+                    k: self.multibanded_frequency_domain.decimate(v)
+                    for k, v in sample["waveform"].items()
+                }
+                sample["asds"] = {
+                    k: self.multibanded_frequency_domain.decimate(v**2) ** 0.5
+                    for k, v in sample["asds"].items()
+                }
+
+            else:
+                raise NotImplementedError()
 
         return sample
+
+
+def check_sample_in_domain(sample, domain):
+    lengths = []
+    base_domain_length = len(domain)
+    for k in ["waveform", "asds"]:
+        lengths += [d.shape[-1] for d in sample[k].values()]
+    if all(l == base_domain_length for l in lengths):
+        return True
+    else:
+        return False
