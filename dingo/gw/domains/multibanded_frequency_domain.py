@@ -49,7 +49,7 @@ class MultibandedFrequencyDomain(Domain):
 
             base_domain = build_domain(base_domain)
 
-        self.nodes = np.array(nodes)
+        self.nodes = np.array(nodes, dtype=np.float32)
         self.base_domain = base_domain
         self.initialize_bands(delta_f_initial)
         if not isinstance(self.base_domain, FrequencyDomain):
@@ -70,7 +70,9 @@ class MultibandedFrequencyDomain(Domain):
         self.num_bands = len(self.nodes) - 1
         self.nodes_indices = (self.nodes / self.base_domain.delta_f).astype(int)
 
-        self._delta_f_bands = delta_f_initial * (2 ** np.arange(self.num_bands))
+        self._delta_f_bands = (
+            delta_f_initial * (2 ** np.arange(self.num_bands))
+        ).astype(np.float32)
         self._decimation_factors_bands = (
             self._delta_f_bands / self.base_domain.delta_f
         ).astype(int)
@@ -404,12 +406,10 @@ class MultibandedFrequencyDomain(Domain):
     @property
     def sample_frequencies_torch(self):
         if self._sample_frequencies_torch is None:
-            num_bins = len(self)
-            self._sample_frequencies_torch = torch.linspace(
-                0.0, self.f_max, steps=num_bins, dtype=torch.float32
+            self._sample_frequencies_torch = torch.tensor(
+                self.sample_frequencies, dtype=torch.float32
             )
-        raise NotImplementedError()
-        # return self._sample_frequencies_torch
+        return self._sample_frequencies_torch
 
     @property
     def sample_frequencies_torch_cuda(self):
@@ -417,8 +417,7 @@ class MultibandedFrequencyDomain(Domain):
             self._sample_frequencies_torch_cuda = self.sample_frequencies_torch.to(
                 "cuda"
             )
-        # return self._sample_frequencies_torch_cuda
-        raise NotImplementedError()
+        return self._sample_frequencies_torch_cuda
 
     @property
     def frequency_mask(self) -> np.ndarray:
