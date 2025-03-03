@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from dingo.gw.domains import FrequencyDomain, MultibandedFrequencyDomain
-from dingo.gw.transforms import StrainTokenization
+from dingo.gw.transforms import StrainTokenization, DropDetectors
 
 
 @pytest.fixture
@@ -85,9 +85,10 @@ def strain_tokenization_setup_mfd():
 
 @pytest.mark.parametrize(
     "setup",
-    [  #'strain_tokenization_setup',
+    [
+        "strain_tokenization_setup",
         "strain_tokenization_setup_no_batch",
-        #'strain_tokenization_setup_mfd'
+        "strain_tokenization_setup_mfd",
     ],
 )
 def test_StrainTokenization(request, setup):
@@ -102,7 +103,6 @@ def test_StrainTokenization(request, setup):
     )
 
     # Evaluate StrainTokenization transform
-
     out = token_transformation(sample)
 
     # -------------- Checks regarding the waveform --------------
@@ -191,7 +191,6 @@ def test_StrainTokenization_token_size(request, setup):
     )
 
     # Evaluate StrainTokenization transform
-
     out = token_transformation(sample)
 
     # -------------- Checks regarding the waveform --------------
@@ -261,4 +260,41 @@ def test_StrainTokenization_token_size(request, setup):
     assert out["drop_token_mask"].all() == False
 
 
-# TODO: write tests for DropFrequencyRange and DropDetectors
+@pytest.mark.parametrize(
+    "setup",
+    [
+        "strain_tokenization_setup",
+        "strain_tokenization_setup_no_batch",
+        "strain_tokenization_setup_mfd",
+    ],
+)
+def test_DroDetectors(request, setup):
+    domain, num_tokens_per_block, num_blocks, sample = request.getfixturevalue(setup)
+
+    # Initialize StrainTokenization transform
+    token_transformation = StrainTokenization(
+        domain,
+        num_tokens_per_block=num_tokens_per_block,
+        normalize_frequency=False,
+        single_tokenizer=True,
+    )
+    # Initialize DropDetectors transform
+    drop_transformation = DropDetectors(
+        num_blocks=num_blocks,
+        p_drop_012_detectors=[0.0, 1.0],
+        p_drop_hlv={"H1": 1.0, "L1": 0.0},
+    )
+
+    # Evaluate StrainTokenization transform
+    out = token_transformation(sample)
+
+    # Evaluate DropDetectors transform
+    out = drop_transformation(out)
+
+    # Check that mask has expected shape
+    assert out["drop_token_mask"].shape[-1] == num_tokens_per_block * num_blocks
+    # Check that mask only contains True for tokens of one detector
+    assert np.all(np.sum(out["drop_token_mask"], axis=1) == num_tokens_per_block)
+
+
+# TODO: write tests for DropFrequencyRange
