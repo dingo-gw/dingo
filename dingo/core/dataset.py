@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import List, Optional, Union
 import ast
 import h5py
 import numpy as np
@@ -27,10 +27,11 @@ def recursive_hdf5_save(group, d):
 
 def recursive_hdf5_load(
     group,
-    keys: list[str] | None = None,
-    wfd_keys_to_leave_on_disk: list[str] | None = None,
-    idx: int | list[int] | None = None,
+    keys: Optional[List[str]] = None,
+    wfd_keys_to_leave_on_disk: Optional[List[str]] = None,
+    idx: Optional[Union[int, List[int]]] = None,
 ):
+    non_idx_keys = ["V", "mismatches", "s"]
     d = {}
     for k, v in group.items():
         if keys is None or k in keys:
@@ -47,19 +48,12 @@ def recursive_hdf5_load(
                     d[k] = None
                 else:
                     # Load complete array or only specific idx
-                    if (
-                        idx is None
-                        or v.shape == ()
-                        or k == "V"
-                        or k == "mismatches"
-                        or k == "s"
-                    ):
+                    if idx is None or v.shape == () or k in non_idx_keys:
                         d[k] = v[...]
-                    elif isinstance(idx, list):
+                    elif isinstance(idx, list) and len(idx) > 1:
                         # hdf5 load requires sorted index list
-                        # sorted_idx = np.sort(idx)
+                        sorted_idx = np.sort(idx)
                         reverse_sorting = np.argsort(idx)
-                        sorted_idx = idx[reverse_sorting]
                         sorted_data = v[sorted_idx]
                         d[k] = sorted_data[reverse_sorting]
                     else:
