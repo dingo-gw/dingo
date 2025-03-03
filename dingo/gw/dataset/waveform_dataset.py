@@ -248,12 +248,12 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         for sample with index `idx`. If defined, a chain of transformations is applied to
         the waveform data.
         """
-        if self.leave_on_disk_keys is not None and self.file_handle is None:
+        if self.wfd_keys_to_leave_on_disk is not None and self.file_handle is None:
             # Open hdf5 file
             self.file_handle = h5py.File(self.file_name, "r")
 
         # Get parameters and data for idx
-        if self.leave_on_disk_keys is None:
+        if self.wfd_keys_to_leave_on_disk is None:
             parameters = {
                 k: v if isinstance(v, float) else v.to_numpy()
                 for k, v in self.parameters.iloc[batched_idx].items()
@@ -265,21 +265,21 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         else:
             # Data and/or parameters are not in memory -> load them
             if (
-                "parameters" in self.leave_on_disk_keys
-                and "h_cross" in self.leave_on_disk_keys
-                and "h_plus" in self.leave_on_disk_keys
+                "parameters" in self.wfd_keys_to_leave_on_disk
+                and "h_cross" in self.wfd_keys_to_leave_on_disk
+                and "h_plus" in self.wfd_keys_to_leave_on_disk
             ):
                 raise ValueError(
                     "Loading parameters from disk is not implemented at the moment because parameter "
                     "standardization over the full dataset happens at the beginning of training. "
-                    "Disable loading from disk or change leave_on_disk_keys to ['polarizations']."
+                    "Disable loading from disk or change wfd_keys_to_leave_on_disk to ['polarizations']."
                 )
                 # TODO: Adapt code to also load parameters from disk
                 # * Compute parameter standardization when generating waveform dataset and save standardization_dict
                 #   in dataset
                 # * Load standardization dict at the beginning of training
                 # * Adapt code to allow loading parameters from disk
-            elif "parameters" in self.leave_on_disk_keys:
+            elif "parameters" in self.wfd_keys_to_leave_on_disk:
                 raise ValueError(
                     "Loading parameters from disk is not implemented at the moment because parameter"
                     "standardization over the full dataset happens at the beginning of training."
@@ -287,8 +287,8 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                 )
                 # TODO: Adapt code to also load parameters from disk (see comment above)
             elif (
-                "h_cross" in self.leave_on_disk_keys
-                or "h_plus" in self.leave_on_disk_keys
+                "h_cross" in self.wfd_keys_to_leave_on_disk
+                or "h_plus" in self.wfd_keys_to_leave_on_disk
             ):
                 polarizations = recursive_hdf5_load(
                     self.file_handle, keys=["polarizations"], idx=batched_idx
@@ -305,7 +305,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                 }
             else:
                 raise ValueError(
-                    f"Unknown leave_on_disk_keys {self.leave_on_disk_keys}. "
+                    f"Unknown wfd_keys_to_leave_on_disk {self.wfd_keys_to_leave_on_disk}. "
                     f"Cannot be loaded during __getitem__()."
                 )
 
@@ -368,6 +368,11 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                 [data[i][j] for i in range(len(data))] for j in range(len(batched_idx))
             ]
         return repackaged_data
+
+    def __del__(self):
+        # Close hdf5 file when wfd is deleted
+        if self.file_handle is not None:
+            self.file_handle.close()
 
     def parameter_mean_std(self):
         mean = self.parameters.mean().to_dict()
