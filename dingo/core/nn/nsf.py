@@ -207,27 +207,27 @@ class FlowWrapper(nn.Module):
         self.flow = flow
 
     def log_prob(self, y, *x):
-        if self.embedding_net is not None:
-            x = self.embedding_net(*x)
         if len(x) > 0:
+            if self.embedding_net is not None:
+                x = self.embedding_net(*x)
             return self.flow.log_prob(y, x)
         else:
             # if there is no context
             return self.flow.log_prob(y)
 
     def sample(self, *x, num_samples=1):
-        if self.embedding_net is not None:
-            x = self.embedding_net(*x)
         if len(x) > 0:
+            if self.embedding_net is not None:
+                x = self.embedding_net(*x)
             return self.flow.sample(num_samples, x)
         else:
             # if there is no context, omit the context argument
             return self.flow.sample(num_samples)
 
     def sample_and_log_prob(self, *x, num_samples=1):
-        if self.embedding_net is not None:
-            x = self.embedding_net(*x)
         if len(x) > 0:
+            if self.embedding_net is not None:
+                x = self.embedding_net(*x)
             return self.flow.sample_and_log_prob(num_samples, x)
         else:
             # if there is no context, omit the context argument
@@ -285,17 +285,6 @@ def create_nsf_model(
     )
     flow = flows.Flow(transform, distribution, embedding_net)
 
-    # Store hyperparameters. This is for reconstructing model when loading from
-    # saved file.
-
-    flow.model_hyperparams = {
-        "input_dim": input_dim,
-        "num_flow_steps": num_flow_steps,
-        "context_dim": context_dim,
-        "base_transform_kwargs": base_transform_kwargs,
-        "embedding_kwargs": embedding_kwargs,
-    }
-
     return flow
 
 
@@ -305,7 +294,7 @@ def create_nsf_wrapped(**kwargs):
     training, and wraps the log_prob method as a forward method.
     """
     flow = create_nsf_model(**kwargs)
-    return FlowWrapper(flow, nn.Identity())
+    return FlowWrapper(flow)
 
 
 def create_nsf_with_rb_projection_embedding_net(
