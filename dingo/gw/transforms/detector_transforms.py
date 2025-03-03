@@ -153,6 +153,11 @@ class ProjectOntoDetectors(object):
             dec = extrinsic_parameters.pop("dec")
             psi = extrinsic_parameters.pop("psi")
             tc_ref = parameters["geocent_time"]
+            assert np.allclose(tc_ref, 0.0), (
+                "This should always be 0. If for some reason "
+                "you want to save time shifted polarizations,"
+                " then remove this assert statement."
+            )
             tc_new = extrinsic_parameters.pop("geocent_time")
         except:
             raise ValueError("Missing parameters.")
@@ -369,15 +374,15 @@ class ApplyCalibrationUncertainty(object):
                 # frequency points, $f_i$.  Then for each node point f_i, it
                 # will create a gaussian prior according to the spline of the
                 # median and sigma found earlier
-                self.calibration_prior[ifo.name] = (
-                    CalibrationPriorDict.from_envelope_file(
-                        self.calibration_envelope[ifo.name],
-                        self.data_domain.f_min,
-                        self.data_domain.f_max,
-                        num_calibration_nodes,
-                        ifo.name,
-                        correction_type=correction_type,
-                    )
+                self.calibration_prior[
+                    ifo.name
+                ] = CalibrationPriorDict.from_envelope_file(
+                    self.calibration_envelope[ifo.name],
+                    self.data_domain.f_min,
+                    self.data_domain.f_max,
+                    num_calibration_nodes,
+                    ifo.name,
+                    correction_type=correction_type,
                 )
 
         else:
@@ -400,14 +405,14 @@ class ApplyCalibrationUncertainty(object):
             )
 
             for i in range(self.num_calibration_curves):
-                calibration_draws[ifo.name][i, self.data_domain.frequency_mask] = (
-                    ifo.calibration_model.get_calibration_factor(
-                        self.data_domain.sample_frequencies[
-                            self.data_domain.frequency_mask
-                        ],
-                        prefix="recalib_{}_".format(ifo.name),
-                        **calibration_parameter_draws[ifo.name].iloc[i],
-                    )
+                calibration_draws[ifo.name][
+                    i, self.data_domain.frequency_mask
+                ] = ifo.calibration_model.get_calibration_factor(
+                    self.data_domain.sample_frequencies[
+                        self.data_domain.frequency_mask
+                    ],
+                    prefix="recalib_{}_".format(ifo.name),
+                    **calibration_parameter_draws[ifo.name].iloc[i],
                 )
 
             # Multiplying the sample waveform in the interferometer according to
