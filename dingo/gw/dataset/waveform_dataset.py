@@ -237,12 +237,12 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         for sample with index `idx`. If defined, a chain of transformations is applied to
         the waveform data.
         """
-        if self.leave_on_disk_keys is not None and self.file_handle is None:
+        if self.wfd_keys_to_leave_on_disk is not None and self.file_handle is None:
             # Open hdf5 file
             self.file_handle = h5py.File(self.file_name, "r")
 
         # Get parameters and data for idx
-        if self.leave_on_disk_keys is None:
+        if self.wfd_keys_to_leave_on_disk is None:
             # All data is in memory
             parameters = {
                 k: v if isinstance(v, float) else v.to_numpy()
@@ -255,9 +255,9 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         else:
             # Data or parameters are not in memory -> load them
             if (
-                "parameters" in self.leave_on_disk_keys
-                and "h_cross" in self.leave_on_disk_keys
-                and "h_plus" in self.leave_on_disk_keys
+                "parameters" in self.wfd_keys_to_leave_on_disk
+                and "h_cross" in self.wfd_keys_to_leave_on_disk
+                and "h_plus" in self.wfd_keys_to_leave_on_disk
             ):
                 raise ValueError(
                     "Loading parameters from disk is not implemented at the moment because parameter"
@@ -271,7 +271,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                 #         pol: self.domain.update_data(waveforms) for pol, waveforms in data["polarizations"].items()
                 #     }
                 # parameters = data["parameters"]
-            elif "parameters" in self.leave_on_disk_keys:
+            elif "parameters" in self.wfd_keys_to_leave_on_disk:
                 raise ValueError(
                     "Loading parameters from disk is not implemented at the moment because parameter"
                     "standardization over the full dataset happens at the beginning of training."
@@ -282,8 +282,8 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                 #     pol: waveforms[batched_idx] for pol, waveforms in self.polarizations.items()
                 # }
             elif (
-                "h_cross" in self.leave_on_disk_keys
-                or "h_plus" in self.leave_on_disk_keys
+                "h_cross" in self.wfd_keys_to_leave_on_disk
+                or "h_plus" in self.wfd_keys_to_leave_on_disk
             ):
                 polarizations = recursive_hdf5_load(
                     self.file_handle, keys=["polarizations"], idx=batched_idx
@@ -300,7 +300,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                 }
             else:
                 raise ValueError(
-                    f"Unknown leave_on_disk_keys {self.leave_on_disk_keys}. "
+                    f"Unknown wfd_keys_to_leave_on_disk {self.wfd_keys_to_leave_on_disk}. "
                     f"Cannot be loaded during __getitem__()."
                 )
             if not isinstance(parameters, dict):
@@ -369,6 +369,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         return repackaged_data
 
     def __del__(self):
+        # Close hdf5 file when wfd is deleted
         if self.file_handle is not None:
             self.file_handle.close()
 
