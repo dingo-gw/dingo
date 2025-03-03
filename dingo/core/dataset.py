@@ -28,7 +28,7 @@ def recursive_hdf5_save(group, d):
 def recursive_hdf5_load(
     group,
     keys: Optional[List[str]] = None,
-    leave_on_disk_keys: Optional[List[str]] = None,
+    wfd_keys_to_leave_on_disk: Optional[List[str]] = None,
     idx: Optional[Union[int, List[int]]] = None,
 ):
     """This is a generic helper function to recursively load data from an HDF5 file.
@@ -39,7 +39,7 @@ def recursive_hdf5_load(
         Group from which to recursively load data.
     keys: list[str] or None
         List of keys to load. If None, load all keys.
-    leave_on_disk_keys: list[str] or None
+    wfd_keys_to_leave_on_disk: list[str] or None
         Keys that should not be loaded into RAM when initializing the dataset. If None, all keys are loaded.
     idx: int or list[int] or None
         If idx is provided, only the datapoints corresponding to the given indices are loaded.
@@ -52,10 +52,13 @@ def recursive_hdf5_load(
         if keys is None or k in keys:
             if isinstance(v, h5py.Group):
                 d[k] = recursive_hdf5_load(
-                    v, leave_on_disk_keys=leave_on_disk_keys, idx=idx
+                    v, wfd_keys_to_leave_on_disk=wfd_keys_to_leave_on_disk, idx=idx
                 )
             else:
-                if leave_on_disk_keys is not None and k in leave_on_disk_keys:
+                if (
+                    wfd_keys_to_leave_on_disk is not None
+                    and k in wfd_keys_to_leave_on_disk
+                ):
                     # Insert dummy value into dict
                     d[k] = None
                 else:
@@ -111,7 +114,7 @@ class DingoDataset:
         file_name: Optional[str] = None,
         dictionary: Optional[dict] = None,
         data_keys: Optional[List] = None,
-        leave_on_disk_keys: Optional[List] = None,
+        wfd_keys_to_leave_on_disk: Optional[List] = None,
     ):
         """
         For constructing, provide either file_name, or dictionary containing data and
@@ -128,7 +131,7 @@ class DingoDataset:
             Variables that should be saved / loaded. This allows for class to store
             additional variables beyond those that are saved. Typically, this list
             would be provided by any subclass.
-        leave_on_disk_keys: list
+        wfd_keys_to_leave_on_disk: list
             Variables that should not be loaded into RAM when initializing the dataset
             to reduce the memory footprint during training. Instead, the values associated
             with these keys are loaded from the HDF5 file during training.
@@ -141,11 +144,13 @@ class DingoDataset:
             vars(self)[key] = None
         self.settings = None
         self.version = None
-        self.leave_on_disk_keys = leave_on_disk_keys
+        self.wfd_keys_to_leave_on_disk = wfd_keys_to_leave_on_disk
 
         # If data provided, load it
         if file_name is not None:
-            self.from_file(file_name, leave_on_disk_keys=leave_on_disk_keys)
+            self.from_file(
+                file_name, wfd_keys_to_leave_on_disk=wfd_keys_to_leave_on_disk
+            )
         elif dictionary is not None:
             self.from_dictionary(dictionary)
 
@@ -163,23 +168,30 @@ class DingoDataset:
             if self.dataset_type:
                 f.attrs["dataset_type"] = self.dataset_type
 
-    def from_file(self, file_name: str, leave_on_disk_keys: Optional[List] = None):
-        if leave_on_disk_keys is not None:
+    def from_file(
+        self, file_name: str, wfd_keys_to_leave_on_disk: Optional[List] = None
+    ):
+        if wfd_keys_to_leave_on_disk is not None:
             print(
-                f"Loading dataset with leave_on_disk_keys {leave_on_disk_keys} from {str(file_name)}."
+                f"Loading dataset with wfd_keys_to_leave_on_disk {wfd_keys_to_leave_on_disk} from {str(file_name)}."
             )
         else:
             print(f"Loading dataset from {str(file_name)}.")
         # Replace key 'polarizations' with 'h_cross' and 'h_plus'
-        if leave_on_disk_keys is not None and "polarizations" in leave_on_disk_keys:
-            leave_on_disk_keys.remove("polarizations")
-            leave_on_disk_keys.append("h_cross")
-            leave_on_disk_keys.append("h_plus")
+        if (
+            wfd_keys_to_leave_on_disk is not None
+            and "polarizations" in wfd_keys_to_leave_on_disk
+        ):
+            wfd_keys_to_leave_on_disk.remove("polarizations")
+            wfd_keys_to_leave_on_disk.append("h_cross")
+            wfd_keys_to_leave_on_disk.append("h_plus")
 
         with h5py.File(file_name, "r") as f:
             # Load only the keys that the class expects
             loaded_dict = recursive_hdf5_load(
-                f, keys=self._data_keys, leave_on_disk_keys=leave_on_disk_keys
+                f,
+                keys=self._data_keys,
+                wfd_keys_to_leave_on_disk=wfd_keys_to_leave_on_disk,
             )
             for k, v in loaded_dict.items():
                 assert k in self._data_keys

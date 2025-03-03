@@ -30,7 +30,9 @@ from dingo.core.utils import *
 
 
 def build_dataset(
-    data_settings: dict, path_copy_wfd_to_local: Optional[str] = None
+    data_settings: dict,
+    path_copy_wfd_to_local: Optional[str] = None,
+    wfd_keys_to_leave_on_disk: Optional[List[str]] = None,
 ) -> WaveformDataset:
     """Build a dataset based on a settings dictionary. This should contain the path of
     a saved waveform dataset.
@@ -42,6 +44,10 @@ def build_dataset(
     data_settings : dict
     path_copy_wfd_to_local: str | None
         If provided, the waveform dataset is copied to the local node to minimize network traffic during training
+    wfd_keys_to_leave_on_disk: list[str] | None
+        If provided, the values associated with these keys will not be loaded into memory during initialization.
+        Instead, they will be loaded from disk when the dataset is accessed. This is useful for reducing the memory
+        load of large datasets, but can slow down data preprocessing.
 
     Returns
     -------
@@ -71,7 +77,7 @@ def build_dataset(
         precision="single",
         domain_update=domain_update,
         svd_size_update=data_settings.get("svd_size_update"),
-        leave_on_disk_keys=data_settings.get("leave_on_disk_keys", None),
+        wfd_keys_to_leave_on_disk=wfd_keys_to_leave_on_disk,
     )
     return wfd
 

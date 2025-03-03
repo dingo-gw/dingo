@@ -55,6 +55,7 @@ def prepare_training_new(
     wfd = build_dataset(
         data_settings=train_settings["data"],
         path_copy_wfd_to_local=local_settings.get("path_copy_wfd_to_local", None),
+        wfd_keys_to_leave_on_disk=local_settings.get("wfd_keys_to_leave_on_disk", None),
     )  # No transforms yet
     initial_weights = {}
 
@@ -147,6 +148,7 @@ def prepare_training_resume(
     wfd = build_dataset(
         data_settings=pm.metadata["train_settings"]["data"],
         path_copy_wfd_to_local=local_settings.get("path_copy_wfd_to_local", None),
+        wfd_keys_to_leave_on_disk=local_settings.get("wfd_keys_to_leave_on_disk", None),
     )
 
     if local_settings.get("wandb", False):

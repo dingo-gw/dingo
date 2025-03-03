@@ -38,7 +38,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         precision: Optional[str] = None,
         domain_update: Optional[dict] = None,
         svd_size_update: Optional[int] = None,
-        leave_on_disk_keys: Optional[list] = None,
+        wfd_keys_to_leave_on_disk: Optional[List] = None,
     ):
         """
         For constructing, provide either file_name, or dictionary containing data and
@@ -59,7 +59,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             If provided, update domain from existing domain using new settings.
         svd_size_update : int
             If provided, reduces the SVD size when decompressing (for speed).
-        leave_on_disk_keys : list
+        wfd_keys_to_leave_on_disk : list
             If provided, the values for these keys are not loaded into RAM when initializing the
             waveform dataset. Instead, the values for these keys are loaded lazily in __getitem__().
         """
@@ -85,7 +85,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             file_name=file_name,
             dictionary=dictionary,
             data_keys=["parameters", "polarizations", "svd"],
-            leave_on_disk_keys=leave_on_disk_keys,
+            wfd_keys_to_leave_on_disk=wfd_keys_to_leave_on_disk,
         )
         self.file_name = file_name
 
