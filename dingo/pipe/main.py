@@ -235,6 +235,7 @@ class MainInput(BilbyMainInput):
         self.psd_fractional_overlap = args.psd_fractional_overlap
         self.psd_start_time = args.psd_start_time
         self.spline_calibration_envelope_dict = args.spline_calibration_envelope_dict
+        self.calibration_correction_type = args.calibration_correction_type
 
         # self.check_source_model(args)
 
@@ -278,7 +279,7 @@ def write_complete_config_file(parser, args, inputs, input_cls=MainInput):
         if key == "label":
             continue
         if isinstance(val, str):
-            if os.path.isfile(val) or os.path.isdir(val):
+            if (os.path.isfile(val) or os.path.isdir(val)) and not val == "data":
                 setattr(args, key, os.path.abspath(val))
         if isinstance(val, list):
             if isinstance(val[0], str):
