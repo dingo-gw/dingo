@@ -54,16 +54,20 @@ class StrainTokenization(object):
             raise ValueError(
                 "It is necessary to specify either num_tokens or token_size."
             )
-        # We assume that we have the same f_min and f_max for all the non-masked samples
-        if type(domain.delta_f) is float:
+        # We assume that we have the same f_min, f_max, and delta_f for all data points in the batch
+        if isinstance(domain, FrequencyDomain):
+            assert isinstance(domain.delta_f, float), (
+                "Expected domain.delta_f of FrequencyDomain to be float, but "
+                "received {domain.delta_f}"
+            )
             delta_fs = np.array([domain.delta_f] * num_tokens_per_block)
-        elif type(domain.delta_f) is np.ndarray:
+        elif isinstance(domain, MultibandedFrequencyDomain):
             delta_fs = domain.delta_f
         else:
             raise ValueError(
                 f"domain.delta_f must be either float or np.ndarray, but is {type(domain.delta_f)}."
             )
-
+        # Construct f_min_per_token and f_max_per_token
         self.f_min_per_token = domain.sample_frequencies[
             domain.min_idx :: self.num_bins_per_token
         ][:num_tokens_per_block]
@@ -80,13 +84,15 @@ class StrainTokenization(object):
             )
         else:
             self.num_padded_f_bins = 0
-        assert (
+        if not (
             num_tokens_per_block
             == len(self.f_min_per_token)
             == len(self.f_max_per_token)
-        )
+        ):
+            raise ValueError(
+                "f_min_per_token and f_max_per_token are not of length num_tokens_per_block."
+            )
         self.normalize_freq = normalize_frequency
-        self.single_tokenizer = single_tokenizer
         self.f_min = domain.f_min
         self.f_max = self.f_max_per_token[-1]
         self.num_tokens_per_detector = num_tokens_per_block
@@ -109,20 +115,23 @@ class StrainTokenization(object):
         ----------
         input_sample: Dict
             Value for key 'waveform':
-            Sample of shape [batch_size, num_blocks, num_channels, num_bins]
-            where num_blocks = number of detectors in GW use case,
-            num_channels>=3 (real, imag, auxiliary channels, e.g. asd),
-            and num_bins=number of frequency bins.
+                Sample of shape [batch_size, num_blocks, num_channels, num_bins]
+                where num_blocks = number of detectors in GW use case,
+                num_channels>=3 (real, imag, auxiliary channels, e.g. asd),
+                and num_bins=number of frequency bins.
+            Value for key 'asds':
+                Dictionary containing asd for each detector. This transform only accesses the asds keys to determine
+                which detectors are involved and does not modify the asds.
 
         Returns
         ----------
         sample: Dict
             input_sample with modified value for key
             - 'waveform', shape [batch_size, num_tokens, num_features] =
-            [batch_size, num_blocks * num_tokens_per_block, num_channels * num_bins_per_token]
-            and additional keys
+               [batch_size, num_blocks * num_tokens_per_block, num_channels * num_bins_per_token]
+               and additional keys
             - 'position', shape [batch_size, num_blocks, num_tokens, 3]
-               contains information [batch_size, f_min, f_max, block]
+               where last dimension contains information [f_min, f_max, block]
             - 'drop_token_mask', shape [batch_size, num_tokens]
                contains information about which tokens to drop. Defined as False = keep token, True = drop token,
                due torch transformer convention ("positions with a True value are not allowed to participate in the
@@ -146,6 +155,11 @@ class StrainTokenization(object):
         # = [num_blocks * num_tokens_per_detector, num_channels * num_bins_per_token]
         num_blocks, num_channels = strain.shape[-3], strain.shape[-2]
         # (1) Reshape strain from [..., num_bins] to [..., num_tokens_per_detector, num_bins_per_token]
+        # This step divides the frequency range into equal segments of num_bins_per_token and stacks these segments,
+        # resulting in: [[waveform(f_min_token1), ..., waveform(f_max_token1)],
+        #                [waveform(f_min_token2), ..., waveform(f_max_token2)],
+        #                ...,
+        #                [waveform(f_min_tokenN), ..., waveform(f_max_tokenN)]]
         strain = strain.reshape(
             *strain.shape[:-1], self.num_tokens_per_detector, self.num_bins_per_token
         )
@@ -155,6 +169,12 @@ class StrainTokenization(object):
         # (3) Reshape strain from [..., num_blocks, num_tokens_per_detector, num_channels, num_bins_per_token]
         # to [..., num_blocks*num_tokens_per_detector, num_channels*num_bins_per_token]
         # = [..., num_tokens, num_features]
+        # The ordering of the tokens is relevant for the frequency and detector embedding: We want
+        # [H1_token1, H1_token2,..., H1_tokenN, L1_token1,..., L1_tokenN, V1_token1,..., V1_tokenN]
+        # The ordering of the elements in the last dimension is irrelevant since these values get jointly mapped to the
+        # embedding dimension of the transformer. However, for completeness: In each token, the three channels are
+        # stacked: [real, imag, asd]. To plot the real part, you can loop over the tokens of the first detector
+        # and collect the first num_features/3 values.
         sample["waveform"] = strain.reshape(
             *strain.shape[:-4],
             num_blocks * self.num_tokens_per_detector,
@@ -163,7 +183,9 @@ class StrainTokenization(object):
         # Prepare position information for each token
         detector_dict = {"H1": 0, "L1": 1, "V1": 2}
         if strain.shape[:-4] == ():
-            detectors = np.array([[detector_dict[k] for k, v in input_sample["asds"].items()]])
+            detectors = np.array(
+                [[detector_dict[k] for k, v in input_sample["asds"].items()]]
+            )
         else:
             detectors = np.array(
                 [
@@ -186,16 +208,16 @@ class StrainTokenization(object):
         token_position = np.empty((*strain.shape[:-4], num_tokens, 3))
         # Treat sample without batch dimension separately because repeat with repeats=() throws error
         if strain.shape[:-4] == ():
-            token_position[..., 0] = np.repeat(f_min_per_token, num_blocks)
-            token_position[..., 1] = np.repeat(f_max_per_token, num_blocks)
+            token_position[..., 0] = np.tile(f_min_per_token, num_blocks)
+            token_position[..., 1] = np.tile(f_max_per_token, num_blocks)
         else:
             token_position[..., 0] = np.repeat(
-                np.expand_dims(np.repeat(f_min_per_token, num_blocks), axis=0),
+                np.expand_dims(np.tile(f_min_per_token, num_blocks), axis=0),
                 *strain.shape[:-4],
                 axis=0,
             )
             token_position[..., 1] = np.repeat(
-                np.expand_dims(np.repeat(f_max_per_token, num_blocks), axis=0),
+                np.expand_dims(np.tile(f_max_per_token, num_blocks), axis=0),
                 *strain.shape[:-4],
                 axis=0,
             )
