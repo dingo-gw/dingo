@@ -1,4 +1,5 @@
 import os
+
 import numpy as np
 import yaml
 import argparse
@@ -7,21 +8,19 @@ import textwrap
 
 from threadpoolctl import threadpool_limits
 
-from dingo.core.nn.nsf import autocomplete_model_kwargs_nsf
+from dingo.core.posterior_models.build_model import autocomplete_model_kwargs, build_model_from_kwargs
 from dingo.gw.training.train_builders import (
     build_dataset,
-    build_train_and_test_loaders,
     set_train_transforms,
     build_svd_for_embedding_network,
 )
-from dingo.core.models.posterior_model import PosteriorModel
 from dingo.core.utils.trainutils import RuntimeLimits
 from dingo.core.utils import (
     set_requires_grad_flag,
     get_number_of_model_parameters,
     build_train_and_test_loaders,
 )
-from dingo.gw.dataset import WaveformDataset
+from dingo.core.utils.trainutils import EarlyStopping
 
 
 def prepare_training_new(train_settings: dict, train_dir: str, local_settings: dict):
@@ -43,16 +42,16 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
 
     Returns
     -------
-    (WaveformDataset, PosteriorModel)
+    (WaveformDataset, BasePosteriorModel)
     """
 
     wfd = build_dataset(train_settings["data"])  # No transforms yet
     initial_weights = {}
 
-    # This is the only case that exists so far, but we leave it open to develop new
-    # model types.
-    if train_settings["model"]["type"] == "nsf+embedding":
+    # The embedding network is assumed to have an SVD projection layer. If other types
+    # of embedding networks are added in the future, update this code.
 
+    if train_settings["model"].get("embedding_kwargs", None):
         # First, build the SVD for seeding the embedding network.
         print("\nBuilding SVD for initialization of embedding network.")
         initial_weights["V_rb_list"] = build_svd_for_embedding_network(
@@ -62,38 +61,35 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
             num_workers=local_settings["num_workers"],
             batch_size=train_settings["training"]["stage_0"]["batch_size"],
             out_dir=train_dir,
-            **train_settings["model"]["embedding_net_kwargs"]["svd"],
+            **train_settings["model"]["embedding_kwargs"]["svd"],
         )
 
-        # Now set the transforms for training. We need to do this here so that we can (a)
-        # get the data dimensions to configure the network, and (b) save the
-        # parameter standardization dict in the PosteriorModel. In principle, (a) could
-        # be done without generating data (by careful calculation) and (b) could also
-        # be done outside the transform setup. But for now, this is convenient. The
-        # transforms will be reset later by initialize_stage().
+    # Now set the transforms for training. We need to do this here so that we can (a)
+    # get the data dimensions to configure the network, and (b) save the
+    # parameter standardization dict in the PosteriorModel. In principle, (a) could
+    # be done without generating data (by careful calculation) and (b) could also
+    # be done outside the transform setup. But for now, this is convenient. The
+    # transforms will be reset later by initialize_stage().
 
-        set_train_transforms(
-            wfd,
-            train_settings["data"],
-            train_settings["training"]["stage_0"]["asd_dataset_path"],
-        )
+    set_train_transforms(
+        wfd,
+        train_settings["data"],
+        train_settings["training"]["stage_0"]["asd_dataset_path"],
+    )
 
-        # This modifies the model settings in-place.
-        autocomplete_model_kwargs_nsf(train_settings["model"], wfd[0])
-        full_settings = {
-            "dataset_settings": wfd.settings,
-            "train_settings": train_settings,
-        }
-
-    else:
-        raise ValueError('Model type must be "nsf+embedding".')
+    # This modifies the model settings in-place.
+    autocomplete_model_kwargs(train_settings["model"], wfd[0])
+    full_settings = {
+        "dataset_settings": wfd.settings,
+        "train_settings": train_settings,
+    }
 
     print("\nInitializing new posterior model.")
     print("Complete settings:")
     print(yaml.dump(full_settings, default_flow_style=False, sort_keys=False))
 
-    pm = PosteriorModel(
-        metadata=full_settings,
+    pm = build_model_from_kwargs(
+        settings=full_settings,
         initial_weights=initial_weights,
         device=local_settings["device"],
     )
@@ -101,6 +97,7 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
     if local_settings.get("wandb", False):
         try:
             import wandb
+
             wandb.init(
                 config=full_settings,
                 dir=train_dir,
@@ -127,15 +124,18 @@ def prepare_training_resume(checkpoint_name, local_settings, train_dir):
 
     Returns
     -------
-    (PosteriorModel, WaveformDataset)
+    (BasePosteriorModel, WaveformDataset)
     """
 
-    pm = PosteriorModel(model_filename=checkpoint_name, device=local_settings["device"])
+    pm = build_model_from_kwargs(
+        filename=checkpoint_name, device=local_settings["device"]
+    )
     wfd = build_dataset(pm.metadata["train_settings"]["data"])
 
     if local_settings.get("wandb", False):
         try:
             import wandb
+
             wandb.init(
                 resume="must",
                 dir=train_dir,
@@ -158,7 +158,7 @@ def initialize_stage(pm, wfd, stage, num_workers, resume=False):
 
     Parameters
     ----------
-    pm : PosteriorModel
+    pm : BasePosteriorModel
     wfd : WaveformDataset
     stage : dict
         Settings specific to current stage of training
@@ -197,14 +197,14 @@ def initialize_stage(pm, wfd, stage, num_workers, resume=False):
     if "freeze_rb_layer" in stage:
         if stage["freeze_rb_layer"]:
             set_requires_grad_flag(
-                pm.model, name_contains="layers_rb", requires_grad=False
+                pm.network, name_contains="layers_rb", requires_grad=False
             )
         else:
             set_requires_grad_flag(
-                pm.model, name_contains="layers_rb", requires_grad=True
+                pm.network, name_contains="layers_rb", requires_grad=True
             )
-    n_grad = get_number_of_model_parameters(pm.model, (True,))
-    n_nograd = get_number_of_model_parameters(pm.model, (False,))
+    n_grad = get_number_of_model_parameters(pm.network, (True,))
+    n_nograd = get_number_of_model_parameters(pm.network, (False,))
     print(f"Fixed parameters: {n_nograd}\nLearnable parameters: {n_grad}\n")
 
     return train_loader, test_loader
@@ -217,7 +217,7 @@ def train_stages(pm, wfd, train_dir, local_settings):
 
     Parameters
     ----------
-    pm : PosteriorModel
+    pm : BasePosteriorModel
     wfd : WaveformDataset
     train_dir : str
         Directory for saving checkpoints and train history.
@@ -262,6 +262,14 @@ def train_stages(pm, wfd, train_dir, local_settings):
             train_loader, test_loader = initialize_stage(
                 pm, wfd, stage, local_settings["num_workers"], resume=True
             )
+        early_stopping = None
+        if stage.get("early_stopping"):
+            try: 
+                early_stopping = EarlyStopping(**stage["early_stopping"])
+            except Exception:
+                print("Early stopping settings invalid. Please pass 'patience', 'delta', 'metric'")
+                raise
+            
 
         runtime_limits.max_epochs_total = end_epochs[n]
         pm.train(
@@ -272,6 +280,7 @@ def train_stages(pm, wfd, train_dir, local_settings):
             checkpoint_epochs=local_settings["checkpoint_epochs"],
             use_wandb=local_settings.get("wandb", False),
             test_only=local_settings.get("test_only", False),
+            early_stopping=early_stopping,
         )
         # if test_only, model should not be saved, and run is complete
         if local_settings.get("test_only", False):
@@ -318,6 +327,12 @@ def parse_args():
         type=str,
         help="Checkpoint file from which to resume training.",
     )
+    parser.add_argument(
+        "--exit_command",
+        type=str,
+        default="",
+        help="Optional command to execute after completion of training.",
+    )
     args = parser.parse_args()
 
     # The settings file and checkpoint are mutually exclusive.
@@ -330,7 +345,6 @@ def parse_args():
 
 
 def train_local():
-
     args = parse_args()
 
     os.makedirs(args.train_dir, exist_ok=True)
@@ -346,9 +360,13 @@ def train_local():
 
         local_settings = train_settings.pop("local")
         with open(os.path.join(args.train_dir, "local_settings.yaml"), "w") as f:
-            if local_settings.get("wandb", False) and "id" not in local_settings["wandb"].keys():
+            if (
+                local_settings.get("wandb", False)
+                and "id" not in local_settings["wandb"].keys()
+            ):
                 try:
                     import wandb
+
                     local_settings["wandb"]["id"] = wandb.util.generate_id()
                 except ImportError:
                     print("wandb not installed, cannot generate run id.")
@@ -368,6 +386,12 @@ def train_local():
         complete = train_stages(pm, wfd, args.train_dir, local_settings)
 
     if complete:
-        print("All training stages complete.")
+        if args.exit_command:
+            print(
+                f"All training stages complete. Executing exit command: {args.exit_command}."
+            )
+            os.system(args.exit_command)
+        else:
+            print("All training stages complete.")
     else:
         print("Program terminated due to runtime limit.")

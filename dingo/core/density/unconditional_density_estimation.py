@@ -5,16 +5,15 @@ import torch
 from dingo.core.utils import build_train_and_test_loaders
 from dingo.core.utils.trainutils import RuntimeLimits
 import numpy as np
-import pandas as pd
 import argparse
 
-from dingo.core.models import PosteriorModel
+from dingo.core.posterior_models import NormalizingFlowPosteriorModel
 
 
 class SampleDataset(torch.utils.data.Dataset):
     """
     Dataset class for unconditional density estimation.
-    This is required, since the training method of dingo.core.models.PosteriorModel
+    This is required, since the training method of dingo.core.posterior_models.Base
     expects a tuple of (theta, *context) as output of the DataLoader, but here we have
     no context, so len(context) = 0. This SampleDataset therefore returns a tuple
     (theta, ) instead of just theta.
@@ -42,8 +41,8 @@ def train_unconditional_density_estimator(
 
     Parameters
     ----------
-    samples: pd.DataFrame
-        DataFrame containing the samples to train the density estimator on.
+    result: Result
+        Contains the samples on which to train the density estimator.
     settings: dict
         Dictionary containing the settings for the density estimator.
     train_dir: str
@@ -51,7 +50,7 @@ def train_unconditional_density_estimator(
 
     Returns
     -------
-    model: PosteriorModel
+    model: NormalizingFlowPosteriorModel
         trained density estimator
     """
     samples = result.samples
@@ -72,9 +71,10 @@ def train_unconditional_density_estimator(
     samples_torch = torch.from_numpy((samples - mean) / std).float()
 
     # set up density estimation network
-    settings["model"]["input_dim"] = num_params
-    settings["model"]["context_dim"] = None
-    model = PosteriorModel(
+    settings["model"]["posterior_kwargs"]["input_dim"] = num_params
+    settings["model"]["posterior_kwargs"]["context_dim"] = None
+    # TODO: Allow for other types of density estimators (e.g., flow matching).
+    model = NormalizingFlowPosteriorModel(
         metadata={"train_settings": settings, "base": copy.deepcopy(result.metadata)},
         device=settings["training"]["device"],
     )

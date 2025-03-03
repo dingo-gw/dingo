@@ -776,21 +776,24 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
     """Generate polarizations using GWSignal routines in the specified domain for a
     single GW coalescence given a set of waveform parameters.
     """
+
     def __init__(self, **kwargs):
         WaveformGenerator.__init__(self, **kwargs)
 
-        # we want to import the new interface, but we don't want to import it 
+        # we want to import the new interface, but we don't want to import it
         # for all users because just importing the module causes unintended side effects
         # for example, you cannot pass the debugger through the import statement.
         # Thus we only import it when the class is instantiated.
-        # However, we don't want to reimport the module every time we need to 
-        # use the function as this is costly. Therefore, we import it once 
+        # However, we don't want to reimport the module every time we need to
+        # use the function as this is costly. Therefore, we import it once
         # when the class is instantiated and store it in the global namespace
         from lalsimulation.gwsignal.core import waveform
         from lalsimulation.gwsignal.models import gwsignal_get_waveform_generator
-        globals()['gws_wfm'] = waveform
-        globals()["new_interface_get_waveform_generator"] = gwsignal_get_waveform_generator 
 
+        globals()["gws_wfm"] = waveform
+        globals()[
+            "new_interface_get_waveform_generator"
+        ] = gwsignal_get_waveform_generator
 
         self.mode_list = kwargs.get("mode_list", None)
 

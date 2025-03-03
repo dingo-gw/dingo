@@ -1,49 +1,37 @@
 """
-TODO: Docstring
+This module contains the abstract base class for representing posterior models,
+as well as functions for training and testing across an epoch.
 """
 
-from typing import Callable
+from abc import abstractmethod, ABC
+import os
+from os.path import join
+import h5py
+
 import torch
 import dingo.core.utils as utils
 from torch.utils.data import Dataset
-import os
 import time
 import numpy as np
 from threadpoolctl import threadpool_limits
 import dingo.core.utils.trainutils
-import math
-import h5py
 import json
 from collections import OrderedDict
-
-from dingo.core.nn.nsf import (
-    create_nsf_with_rb_projection_embedding_net,
-    create_nsf_wrapped,
-)
+from typing import Optional
+from dingo.core.utils.backward_compatibility import update_model_config
 from dingo.core.utils.misc import get_version
 
+from dingo.core.utils.trainutils import EarlyStopping
 
-class PosteriorModel:
+
+class BasePosteriorModel(ABC):
     """
-    TODO: Docstring
+    Abstract base class for PosteriorModels. This is intended to construct and hold a
+    neural network for estimating the posterior density, as well as saving / loading,
+    and training.
 
-    Methods
-    -------
-
-    initialize_model:
-        initialize the NDE (including embedding net) as posterior model
-    initialize_training:
-        initialize for training, that includes storing the epoch, building
-        an optimizer and a learning rate scheduler
-    save_model:
-        save the model, including all information required to rebuild it,
-        except for the builder function
-    load_model:
-        load and build a model from a file
-    train_model:
-        train the model
-    inference:
-        perform inference
+    Subclasses must implement methods for constructing the specific network, sampling,
+    density evaluation, and computing the loss during training.
     """
 
     def __init__(
@@ -55,31 +43,25 @@ class PosteriorModel:
         load_training_info: bool = True,
     ):
         """
+        Initialize a model for the posterior distribution.
 
         Parameters
         ----------
-
-        model_builder: Callable
-            builder function for the model,
-            self.model = model_builder(**model_kwargs)
-        model_kwargs: dict = None
-            kwargs for for the model,
-            self.model = model_builder(**model_kwargs)
-        model_filename: str = None
-            path to filename of loaded model
-        optimizer_kwargs: dict = None
-            kwargs for optimizer
-        scheduler_kwargs: dict = None
-            kwargs for scheduler
-        init_for_training: bool = False
-            flag whether initialization for training (e.g., optimizer) required
-        metadata: dict = None
-            dict with metadata, used to save dataset_settings and train_settings
+        model_filename: str
+            If given, loads data from the given file.
+        metadata: dict
+            If given, initializes the model from these settings
+        initial_weights: dict
+            Initial weights for the model
+        device: str
+        load_training_info: bool
         """
+
         self.version = f"dingo={get_version()}"  # dingo version
 
+        self.device = None
         self.optimizer_kwargs = None
-        self.model_kwargs = None
+        self.network_kwargs = None
         self.scheduler_kwargs = None
         self.initial_weights = initial_weights
 
@@ -90,6 +72,7 @@ class PosteriorModel:
             # separately, and before calling initialize_optimizer_and_scheduler().
 
         self.epoch = 0
+        self.network = None
         self.optimizer = None
         self.scheduler = None
         self.context = None
@@ -101,10 +84,108 @@ class PosteriorModel:
                 model_filename, load_training_info=load_training_info, device=device
             )
         else:
-            self.initialize_model()
-            self.model_to_device(device)
+            self.initialize_network()
+            self.network_to_device(device)
 
-    def model_to_device(self, device):
+    @abstractmethod
+    def initialize_network(self):
+        """
+        Initialize the network backbone for the posterior model.
+        """
+        pass
+
+    @abstractmethod
+    def sample(self, *context: torch.Tensor, num_samples: int = 1):
+        """
+        Sample parameters theta from the posterior model,
+
+        theta ~ p(theta | context)
+
+        Parameters
+        ----------
+        context: torch.Tensor
+            Context information (typically observed data). Should have a batch
+            dimension (even if size B = 1).
+        num_samples: int = 1
+            Number of samples to generate.
+
+        Returns
+        -------
+        samples: torch.Tensor
+            Shape (B, num_samples, dim(theta))
+        """
+        pass
+
+    @abstractmethod
+    def sample_and_log_prob(self, *context: torch.Tensor, num_samples: int = 1):
+        """
+        Sample parameters theta from the posterior model,
+
+        theta ~ p(theta | context)
+
+        and also return the log_prob. For models such as normalizing flows, it is more
+        economical to calculate the log_prob at the same time as sampling, rather than
+        as a separate step.
+
+        Parameters
+        ----------
+        context: torch.Tensor
+            Context information (typically observed data). Should have a batch
+            dimension (even if size B = 1).
+        num_samples: int = 1
+            Number of samples to generate.
+
+        Returns
+        -------
+        samples, log_prob: torch.Tensor, torch.Tensor
+            Shapes (B, num_samples, dim(theta)), (B, num_samples)
+        """
+        pass
+
+    @abstractmethod
+    def log_prob(self, theta: torch.Tensor, *context: torch.Tensor):
+        """
+        Evaluate the log posterior density,
+
+        log p(theta | context)
+
+        Parameters
+        ----------
+        theta: torch.Tensor
+            Parameter values at which to evaluate the density. Should have a batch
+            dimension (even if size B = 1).
+        context: torch.Tensor
+            Context information (typically observed data). Must have context.shape[0] = B.
+
+        Returns
+        -------
+        log_prob: torch.Tensor
+            Shape (B,)
+        """
+        pass
+
+    @abstractmethod
+    def loss(self, theta: torch.Tensor, *context: torch.Tensor):
+        """
+        Compute the loss for a batch of data.
+
+        Parameters
+        ----------
+        theta: torch.Tensor
+            Parameter values at which to evaluate the density. Should have a batch
+            dimension (even if size B = 1).
+        context: torch.Tensor
+            Context information (typically observed data). Must have the same leading
+            (batch) dimension as theta.
+
+        Returns
+        -------
+        loss: torch.Tensor
+            Mean loss across the batch (a scalar).
+        """
+        pass
+
+    def network_to_device(self, device):
         """
         Put model to device, and set self.device accordingly.
         """
@@ -116,21 +197,9 @@ class PosteriorModel:
         #     print("Using", torch.cuda.device_count(), "GPUs.")
         #     raise NotImplementedError('This needs testing!')
         #     # dim = 0 [512, ...] -> [256, ...], [256, ...] on 2 GPUs
-        #     self.model = torch.nn.DataParallel(self.model)
+        #     self.network = torch.nn.DataParallel(self.network)
         print(f"Putting posterior model to device {self.device}.")
-        self.model.to(self.device)
-
-    def initialize_model(self):
-        """
-        Initialize a model for the posterior by calling the
-        self.model_builder with self.model_kwargs.
-
-        """
-        model_builder = get_model_callable(self.model_kwargs["type"])
-        model_kwargs = {k: v for k, v in self.model_kwargs.items() if k != "type"}
-        if self.initial_weights is not None:
-            model_kwargs["initial_weights"] = self.initial_weights
-        self.model = model_builder(**model_kwargs)
+        self.network.to(self.device)
 
     def initialize_optimizer_and_scheduler(self):
         """
@@ -139,7 +208,7 @@ class PosteriorModel:
         """
         if self.optimizer_kwargs is not None:
             self.optimizer = utils.get_optimizer_from_kwargs(
-                self.model.parameters(), **self.optimizer_kwargs
+                self.network.parameters(), **self.optimizer_kwargs
             )
         if self.scheduler_kwargs is not None:
             self.scheduler = utils.get_scheduler_from_kwargs(
@@ -165,7 +234,7 @@ class PosteriorModel:
         """
         model_dict = {
             "model_kwargs": self.model_kwargs,
-            "model_state_dict": self.model.state_dict(),
+            "model_state_dict": self.network.state_dict(),
             "epoch": self.epoch,
             "version": self.version,
         }
@@ -186,24 +255,17 @@ class PosteriorModel:
                 model_dict["optimizer_state_dict"] = self.optimizer.state_dict()
             if self.scheduler is not None:
                 model_dict["scheduler_state_dict"] = self.scheduler.state_dict()
-            # TODO
 
         torch.save(model_dict, model_filename)
 
-
-    def _load_model_from_hdf5(
-        self,
-        model_filename: str
-    ):
+    def _load_model_from_hdf5(self, model_filename: str):
         """
         Helper function to load a trained model that has been
         saved in HDF5 format using `dingo_pt_to_hdf5`.
-
         Parameters
         ----------
         model_filename: str
             path to saved model; must have extension '.hdf5'
-
         Returns
         -------
         d: dict
@@ -212,24 +274,25 @@ class PosteriorModel:
             to save space at inference time.
         """
         d = {}
-        with h5py.File(model_filename, 'r') as fp:
+        with h5py.File(model_filename, "r") as fp:
             model_basename = os.path.basename(model_filename)
-            if fp.attrs['CANONICAL_FILE_BASENAME'] != model_basename:
-                raise ValueError('HDF5 attribute CANONICAL_FILE_BASENAME differs from model name',
-                        model_basename)
+            if fp.attrs["CANONICAL_FILE_BASENAME"] != model_basename:
+                raise ValueError(
+                    "HDF5 attribute CANONICAL_FILE_BASENAME differs from model name",
+                    model_basename,
+                )
 
             # Load small nested dicts from json
-            for k, v in fp['serialized_dicts'].items():
+            for k, v in fp["serialized_dicts"].items():
                 d[k] = json.loads(v[()])
 
             # Load model weights
             model_state_dict = OrderedDict()
-            for k, v in fp['model_weights'].items():
+            for k, v in fp["model_weights"].items():
                 model_state_dict[k] = torch.from_numpy(np.array(v, dtype=np.float32))
-            d['model_state_dict'] = model_state_dict
+            d["model_state_dict"] = model_state_dict
 
         return d
-
 
     def load_model(
         self,
@@ -247,22 +310,25 @@ class PosteriorModel:
         load_training_info: bool #TODO: load information for training
             specifies whether information required to proceed with training is
             loaded, e.g. optimizer state dict
+        device: str
         """
+
         # Make sure that when the model is loaded, the torch tensors are put on the
         # device indicated in the saved metadata. External routines run on a cpu
         # machine may have moved the model from 'cuda' to 'cpu'.
         ext = os.path.splitext(model_filename)[-1]
-        if ext == '.pt':
+        if ext == ".pt":
             d = torch.load(model_filename, map_location=device)
-        elif ext == '.hdf5':
+        elif ext == ".hdf5":
             d = self._load_model_from_hdf5(model_filename)
         else:
-            raise ValueError('Models should be ether in .pt or .hdf5 format.')
+            raise ValueError("Models should be ether in .pt or .hdf5 format.")
 
         self.version = d.get("version")
 
         self.model_kwargs = d["model_kwargs"]
-        self.initialize_model()
+        update_model_config(self.model_kwargs)  # For backward compatibility
+        self.initialize_network()
 
         self.epoch = d["epoch"]
 
@@ -275,9 +341,9 @@ class PosteriorModel:
             self.event_metadata = d["event_metadata"]
 
         if device != "meta":
-            self.model.load_state_dict(d["model_state_dict"])
+            self.network.load_state_dict(d["model_state_dict"])
 
-            self.model_to_device(device)
+            self.network_to_device(device)
 
             if load_training_info:
                 if "optimizer_kwargs" in d:
@@ -293,7 +359,7 @@ class PosteriorModel:
                     self.scheduler.load_state_dict(d["scheduler_state_dict"])
             else:
                 # put model in evaluation mode
-                self.model.eval()
+                self.network.eval()
 
     def train(
         self,
@@ -304,6 +370,7 @@ class PosteriorModel:
         checkpoint_epochs: int = None,
         use_wandb=False,
         test_only=False,
+        early_stopping: Optional[EarlyStopping] = None,
     ):
         """
 
@@ -317,11 +384,14 @@ class PosteriorModel:
         use_wandb
         test_only: bool = False
             if True, training is skipped
+        early_stopping: EarlyStopping
+            Optional EarlyStopping instance.
 
         Returns
         -------
 
         """
+
         if test_only:
             test_loss = test_epoch(self, test_loader)
             print(f"test loss: {test_loss:.3f}")
@@ -365,6 +435,7 @@ class PosteriorModel:
                 if use_wandb:
                     try:
                         import wandb
+
                         wandb.define_metric("epoch")
                         wandb.define_metric("*", step_metric="epoch")
                         wandb.log(
@@ -380,74 +451,26 @@ class PosteriorModel:
                     except ImportError:
                         print("wandb not installed. Skipping logging to wandb.")
 
+                if early_stopping is not None:
+                    # Whether to use train or test loss
+                    early_stopping_loss = (
+                        test_loss
+                        if early_stopping.metric == "validation"
+                        else train_loss
+                    )
+                    is_best_model = early_stopping(early_stopping_loss)
+                    if is_best_model:
+                        self.save_model(
+                            join(train_dir, "best_model.pt"), save_training_info=False
+                        )
+                    if early_stopping.early_stop:
+                        print("Early stopping")
+                        break
                 print(f"Finished training epoch {self.epoch}.\n")
-
-    def sample(
-        self,
-        *x,
-        batch_size=None,
-        get_log_prob=False,
-    ):
-        """
-        Sample from posterior model, conditioned on context x. x is expected to have a
-        batch dimension, i.e., to obtain N samples with additional context requires
-        x = x_.expand(N, *x_.shape).
-
-        This method takes care of the batching, makes sure that self.model is in
-        evaluation mode and disables gradient computation.
-
-        Parameters
-        ----------
-        *x:
-            input context to the neural network; has potentially multiple elements for,
-            e.g., gnpe proxies
-        batch_size: int = None
-            batch size for sampling
-        get_log_prob: bool = False
-            if True, also return log probability along with the samples
-
-        Returns
-        -------
-        samples: torch.Tensor
-            samples from posterior model
-        """
-        self.model.eval()
-        with torch.no_grad():
-            if batch_size is None:
-                samples = self.model.sample(*x)
-                if get_log_prob:
-                    log_prob = self.model.log_prob(samples, *x)
-            else:
-                samples = []
-                if get_log_prob:
-                    log_prob = []
-                num_batches = math.ceil(len(x[0]) / batch_size)
-                for idx_batch in range(num_batches):
-                    lower, upper = idx_batch * batch_size, (idx_batch + 1) * batch_size
-                    x_batch = [xi[lower:upper] for xi in x]
-                    samples.append(self.model.sample(*x_batch, num_samples=1))
-                    if get_log_prob:
-                        log_prob.append(self.model.log_prob(samples[-1], *x_batch))
-                samples = torch.cat(samples, dim=0)
-                if get_log_prob:
-                    log_prob = torch.cat(log_prob, dim=0)
-        if not get_log_prob:
-            return samples
-        else:
-            return samples, log_prob
-
-
-def get_model_callable(model_type: str):
-    if model_type == "nsf+embedding":
-        return create_nsf_with_rb_projection_embedding_net
-    elif model_type == "nsf":
-        return create_nsf_wrapped
-    else:
-        raise KeyError("Invalid model type.")
 
 
 def train_epoch(pm, dataloader):
-    pm.model.train()
+    pm.network.train()
     loss_info = dingo.core.utils.trainutils.LossInfo(
         pm.epoch,
         len(dataloader.dataset),
@@ -462,7 +485,7 @@ def train_epoch(pm, dataloader):
         # data to device
         data = [d.to(pm.device, non_blocking=True) for d in data]
         # compute loss
-        loss = -pm.model(data[0], *data[1:]).mean()
+        loss = pm.loss(data[0], *data[1:])
         # backward pass and optimizer step
         loss.backward()
         pm.optimizer.step()
@@ -475,7 +498,7 @@ def train_epoch(pm, dataloader):
 
 def test_epoch(pm, dataloader):
     with torch.no_grad():
-        pm.model.eval()
+        pm.network.eval()
         loss_info = dingo.core.utils.trainutils.LossInfo(
             pm.epoch,
             len(dataloader.dataset),
@@ -489,7 +512,7 @@ def test_epoch(pm, dataloader):
             # data to device
             data = [d.to(pm.device, non_blocking=True) for d in data]
             # compute loss
-            loss = -pm.model(data[0], *data[1:]).mean()
+            loss = pm.loss(data[0], *data[1:])
             # update loss for history and logging
             loss_info.update(loss.item(), len(data[0]))
             loss_info.print_info(batch_idx)

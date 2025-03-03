@@ -27,7 +27,7 @@ classifiers = [
 dependencies = [
     "astropy",
     "bilby",
-    "bilby_pipe==1.4",
+    "bilby_pipe==1.4.2",
     "configargparse",
     "corner",
     "glasflow",
@@ -43,9 +43,10 @@ dependencies = [
     "pyyaml",
     "requests",
     "scikit-learn",
-    "scipy",
+    "scipy==1.13.1",
     "threadpoolctl",
     "torch",
+    "torchdiffeq",
     "torchvision",
     "tqdm",
 ]
@@ -59,6 +60,10 @@ namespaces = false
 [tool.setuptools_scm]
 write_to = "dingo/_version.py"
 
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow",
+]
 
 [project.urls]
 homepage = "https://github.com/dingo-gw/dingo"
@@ -87,7 +92,6 @@ pyseobnr = [
 
 [project.scripts]
 dingo_append_training_stage = "dingo.gw.training:append_stage"
-dingo_analyze_event = "dingo.gw.inference:analyze_event"
 dingo_build_svd = "dingo.gw.dataset.utils:build_svd_cli"
 dingo_estimate_psds = "dingo.gw.noise.asd_estimation:download_and_estimate_cli"
 dingo_generate_asd_dataset = "dingo.gw.noise.generate_dataset:generate_dataset"

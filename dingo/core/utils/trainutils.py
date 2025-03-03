@@ -1,7 +1,9 @@
 import time
 import os
+import numpy as np
 from os.path import join, isfile
 import csv
+from typing import Literal
 
 
 class AvgTracker:
@@ -19,6 +21,78 @@ class AvgTracker:
         if self.N == 0:
             return float("nan")
         return self.sum / self.N
+
+
+class EarlyStopping:
+    """
+    Implement early stopping during training, once the validation loss stops decreasing
+    for a certain number of epochs (the patience).
+
+    If val_loss > min_val_loss - delta for more than patience epochs, then returns
+    early stopping occurs.
+    """
+
+    def __init__(
+        self,
+        patience: int = 5,
+        verbose: bool = False,
+        delta: float = 0.0,
+        metric: Literal["training", "validation"] = "validation",
+    ):
+        """
+        Parameters
+        ----------
+        patience: int = 5
+            Number of epochs to wait before stopping.
+        verbose: bool = False
+            Whether to print counter increments.
+        delta: float = 0.0
+            Amount by which loss must decrease in patience epochs.
+        metric: Literal["training", "validation"]
+            Whether to use the training loss to determine early stopping ("training") or the test loss ("validation")
+        """
+        self.patience = patience
+        self.verbose = verbose
+        self.counter = 0
+        self.best_score = None
+        self.early_stop = False
+        self.val_loss_min = np.Inf
+        self.delta = delta
+        if metric not in ["training", "validation"]:
+            raise ValueError(
+                "Early Stopping metric must be 'training' or 'validation'."
+            )
+        self.metric = metric
+
+    def __call__(self, val_loss: float):
+        """
+        Parameters
+        ----------
+        val_loss: float
+            Value of the validation loss.
+        model
+
+        Returns
+        -------
+        bool
+            Whether the current model has the lowest validation loss so-far.
+        """
+        score = -val_loss
+
+        if self.best_score is None:
+            self.best_score = score
+            return True
+        elif score < self.best_score + self.delta:
+            self.counter += 1
+            if self.verbose:
+                print(f"EarlyStopping counter: {self.counter} out of {self.patience}")
+            if self.counter >= self.patience:
+                self.early_stop = True
+            return False
+        else:
+            self.best_score = score
+            self.counter = 0
+            return True
 
 
 class LossInfo:

@@ -1,27 +1,29 @@
+import argparse
 import copy
 import textwrap
-import yaml
-import argparse
 from multiprocessing import Pool
+from pathlib import Path
+from typing import Dict, Tuple
+from functools import partial
 
 import numpy as np
 import pandas as pd
-from typing import Tuple, Dict
+import yaml
+from bilby.gw.prior import BBHPriorDict
 from threadpoolctl import threadpool_limits
 from torchvision.transforms import Compose
-from bilby.gw.prior import BBHPriorDict
 
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
-from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.domains import build_domain
+from dingo.gw.prior import build_prior_with_defaults
+from dingo.gw.SVD import ApplySVD, SVDBasis
 from dingo.gw.transforms import WhitenFixedASD
 from dingo.gw.waveform_generator import (
-    WaveformGenerator,
     NewInterfaceWaveformGenerator,
+    WaveformGenerator,
     generate_waveforms_parallel,
 )
-from dingo.gw.SVD import SVDBasis, ApplySVD
-
+from dingo.core.utils.misc import call_func_strict_output_dim
 
 def generate_parameters_and_polarizations(
     waveform_generator: WaveformGenerator,
@@ -194,12 +196,13 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
 
                 n_train = svd_settings["num_training_samples"]
                 n_test = svd_settings.get("num_validation_samples", 0)
-                parameters, polarizations = generate_parameters_and_polarizations(
-                    waveform_generator,
+
+                func = partial(
+                    generate_parameters_and_polarizations, 
+                    waveform_generator, 
                     prior,
-                    n_train + n_test,
-                    num_processes,
-                )
+                    num_processes=num_processes)
+                parameters, polarizations = call_func_strict_output_dim(func, n_train + n_test)
                 svd_dataset_settings = copy.deepcopy(settings)
                 svd_dataset_settings["num_samples"] = len(parameters)
                 del svd_dataset_settings["compression"]["svd"]
@@ -221,25 +224,22 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
                 basis, n_train, n_test = train_svd_basis(
                     svd_dataset, svd_settings["size"], n_train
                 )
-                # Reset the true number of samples, in case this has changed due to
-                # failure to generate some EOB waveforms.
-                svd_settings["num_training_samples"] = n_train
-                svd_settings["num_validation_samples"] = n_test
 
             compression_transforms.append(ApplySVD(basis))
             dataset_dict["svd"] = basis.to_dictionary()
 
         waveform_generator.transform = Compose(compression_transforms)
 
-    # Generate main dataset
-    parameters, polarizations = generate_parameters_and_polarizations(
-        waveform_generator, prior, settings["num_samples"], num_processes
-    )
+    func = partial(
+        generate_parameters_and_polarizations, 
+        waveform_generator, 
+        prior,
+        num_processes=num_processes)
+    parameters, polarizations = call_func_strict_output_dim(func, settings["num_samples"])
     dataset_dict["parameters"] = parameters
     dataset_dict["polarizations"] = polarizations
-    # Update to take into account potentially failed configurations
-    dataset_dict[settings["num_samples"]] = len(parameters)
 
+    dataset_dict[settings["num_samples"]] = len(parameters)
     dataset = WaveformDataset(dictionary=dataset_dict)
     return dataset
 
@@ -274,15 +274,28 @@ def parse_args():
     return parser.parse_args()
 
 
-def main():
-    args = parse_args()
+def _generate_dataset_main(
+    settings_file: str, out_file: str, num_processes: int
+) -> None:
 
+    if not Path(settings_file).is_file():
+        raise FileNotFoundError(f"dataset generation, failed to find {settings_file}")
+    if not Path(out_file).parent.is_dir():
+        raise FileNotFoundError(
+            f"dataset generation: can not create {out_file}: "
+            f"{Path(out_file).parent} does not exist"
+        )
     # Load settings
-    with open(args.settings_file, "r") as f:
+    with open(settings_file, "r") as f:
         settings = yaml.safe_load(f)
 
-    dataset = generate_dataset(settings, args.num_processes)
-    dataset.to_file(args.out_file)
+    dataset = generate_dataset(settings, num_processes)
+    dataset.to_file(str(out_file))
+
+
+def main() -> None:
+    args = parse_args()
+    _generate_dataset_main(args.settings_file, args.out_file, args.num_processes)
 
 
 if __name__ == "__main__":
