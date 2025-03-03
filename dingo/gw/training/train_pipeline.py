@@ -76,8 +76,11 @@ def prepare_wfd_and_initialization_for_embedding_network(
 
     # No transforms yet
     wfd = build_dataset(
-        train_settings["data"],
-        copy_to_tmp=local_settings.get("copy_waveform_dataset_to_tmp", False),
+        data_settings=train_settings["data"],
+        path_copy_wfd_to_local=local_settings.get(
+            "path_copy_waveform_dataset_to_local", None
+        ),
+        wfd_keys_to_leave_on_disk=local_settings.get("wfd_keys_to_leave_on_disk", None),
     )
     initial_weights = {}
     pretrained_embedding_net = None
@@ -393,7 +396,8 @@ def prepare_training_resume(
     train_settings = load_settings_from_ckpt(checkpoint_name)
     wfd = build_dataset(
         data_settings=train_settings["data"],
-        copy_to_tmp=local_settings.get("copy_waveform_dataset_to_tmp", False),
+        path_copy_wfd_to_local=local_settings.get("path_copy_wfd_to_local", None),
+        wfd_keys_to_leave_on_disk=local_settings.get("wfd_keys_to_leave_on_disk", None),
     )
 
     pm = prepare_model_resume(
@@ -756,8 +760,11 @@ def run_multi_gpu_training(
         checkpoint_file = os.path.join(train_dir, ckpt_file)
         train_settings = load_settings_from_ckpt(ckpt_file)
         wfd = build_dataset(
-            train_settings["data"],
-            copy_to_tmp=local_settings["copy_waveform_dataset_to_tmp"],
+            data_settings=train_settings["data"],
+            path_copy_wfd_to_local=local_settings.get("path_copy_wfd_to_local", None),
+            wfd_keys_to_leave_on_disk=local_settings.get(
+                "wfd_keys_to_leave_on_disk", None
+            ),
         )
     if pretrained_emb_net is not None:
         pretraining = True

@@ -1,5 +1,5 @@
 import h5py
-from typing import Dict, Union
+from typing import Dict, List, Optional, Union
 import numpy as np
 import torch.utils.data
 from torchvision.transforms import Compose
@@ -25,13 +25,13 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
 
     def __init__(
         self,
-        file_name: str | None = None,
-        dictionary: dict | None = None,
+        file_name: Optional[str] = None,
+        dictionary: Optional[dict] = None,
         transform=None,
-        precision: str | None = None,
-        domain_update: dict | None = None,
-        svd_size_update: int | None = None,
-        leave_on_disk_keys: list | None = None,
+        precision: Optional[str] = None,
+        domain_update: Optional[dict] = None,
+        svd_size_update: Optional[int] = None,
+        wfd_keys_to_leave_on_disk: Optional[List] = None,
     ):
         """
         For constructing, provide either file_name, or dictionary containing data and
@@ -52,7 +52,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             If provided, update domain from existing domain using new settings.
         svd_size_update : int
             If provided, reduces the SVD size when decompressing (for speed).
-        leave_on_disk_keys : dict
+        wfd_keys_to_leave_on_disk : dict
             If provided, not load the values for these keys into RAM. They are loaded lazily in __getitem__().
         """
         self.domain = None
@@ -77,7 +77,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             file_name=file_name,
             dictionary=dictionary,
             data_keys=["parameters", "polarizations", "svd"],
-            leave_on_disk_keys=leave_on_disk_keys,
+            wfd_keys_to_leave_on_disk=wfd_keys_to_leave_on_disk,
         )
         self.file_name = file_name
 
@@ -154,7 +154,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
 
         # Determine where any domain adjustment must be applied. If the dataset is SVD
         # compressed, then adjust the SVD matrices. Otherwise, adjust the dataset
-        # itself.
+        # itself (if it already has been loaded).
         if (
             self.settings.get("compression", None) is not None
             and "svd" in self.settings["compression"]
@@ -220,16 +220,12 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         """The number of waveform samples."""
         return len(self.parameters)
 
-    def __getitem__(self, idx: int) -> Dict[str, Dict[str, float]]:
+    def __getitem__(self, idx: int) -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
         """
         Return a nested dictionary containing parameters and waveform polarizations
         for sample with index `idx`. If defined, a chain of transformations is applied to
         the waveform data.
         """
-        # TODO: To adapt the transformer code to batched transforms the following changes have to be made:
-        # * replace distributed sampler by distributed batch sampler (maybe not necessary)
-        # * check that loading a batch of indices from disk works as expected
-        # * modify transforms: StrainTokenization, DropDetectors and DropFrequencyRange
         return self.__getitems__([idx])[0]
 
     def __getitems__(
@@ -241,7 +237,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         for sample with index `idx`. If defined, a chain of transformations is applied to
         the waveform data.
         """
-        if self.file_handle is None and self.leave_on_disk_keys is not None:
+        if self.leave_on_disk_keys is not None and self.file_handle is None:
             # Open hdf5 file
             self.file_handle = h5py.File(self.file_name, "r")
 
