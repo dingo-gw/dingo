@@ -1,10 +1,10 @@
+from typing import List, Optional
 import copy
+import shutil
 
-import pandas as pd
 import torch.multiprocessing
 import torchvision
 from threadpoolctl import threadpool_limits
-from torch.utils.data import DataLoader
 from bilby.gw.detector import InterferometerList
 
 from dingo.gw.SVD import SVDBasis
@@ -29,7 +29,9 @@ from dingo.gw.gwutils import *
 from dingo.core.utils import *
 
 
-def build_dataset(data_settings):
+def build_dataset(
+    data_settings: dict, path_copy_wfd_to_local: Optional[str] = None
+) -> WaveformDataset:
     """Build a dataset based on a settings dictionary. This should contain the path of
     a saved waveform dataset.
 
@@ -38,18 +40,38 @@ def build_dataset(data_settings):
     Parameters
     ----------
     data_settings : dict
+    path_copy_wfd_to_local: str | None
+        If provided, the waveform dataset is copied to the local node to minimize network traffic during training
 
     Returns
     -------
     WaveformDataset
     """
+    # Copy waveform dataset to local node to minimize network traffic during training
+    if path_copy_wfd_to_local is not None:
+        # Set tmp path
+        wfd_path = data_settings["waveform_dataset_path"]
+        file_name = wfd_path.split("/")[-1]
+        wfd_path_local = os.path.join(path_copy_wfd_to_local, file_name)
+        print(f"Copying waveform dataset to {wfd_path_local}")
+        # Copy waveform dataset
+        start_time = time.time()
+        shutil.copy(wfd_path, wfd_path_local)
+        elapsed_time = time.time() - start_time
+        print("Done. This took {:2.0f}:{:2.0f} min.".format(*divmod(elapsed_time, 60)))
+        # Replace waveform dataset path
+        wfd_path = wfd_path_local
+    else:
+        wfd_path = data_settings["waveform_dataset_path"]
+
     # Build and truncate datasets
     domain_update = data_settings.get("domain_update", None)
     wfd = WaveformDataset(
-        file_name=data_settings["waveform_dataset_path"],
+        file_name=wfd_path,
         precision="single",
         domain_update=domain_update,
         svd_size_update=data_settings.get("svd_size_update"),
+        leave_on_disk_keys=data_settings.get("leave_on_disk_keys", None),
     )
     return wfd
 
@@ -107,8 +129,10 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     ifo_list = InterferometerList(data_settings["detectors"])
 
     # Build transforms.
-    transforms = [SampleExtrinsicParameters(extrinsic_prior_dict),
-                  GetDetectorTimes(ifo_list, ref_time)]
+    transforms = [
+        SampleExtrinsicParameters(extrinsic_prior_dict),
+        GetDetectorTimes(ifo_list, ref_time),
+    ]
 
     extra_context_parameters = []
     if "gnpe_time_shifts" in data_settings:
@@ -194,8 +218,8 @@ def build_svd_for_embedding_network(
     num_validation_samples: int,
     num_workers: int = 0,
     batch_size: int = 1000,
-    out_dir=None,
-):
+    out_dir: Optional[str] = None,
+) -> List:
     """
     Construct SVD matrices V based on clean waveforms in each interferometer. These
     will be used to seed the weights of the initial projection part of the embedding
