@@ -67,10 +67,10 @@ def recursive_hdf5_load(
                     ):  # or v.shape == (): # TODO: test if we need last or
                         # Load all values
                         d[k] = v[...]
-                    elif isinstance(idx, list):
+                    elif isinstance(idx, list) and len(idx) > 1:
                         # Load batch of indices: hdf5 load requires index list to be sorted
+                        sorted_idx = np.sort(idx)
                         reverse_sorting = np.argsort(idx)
-                        sorted_idx = idx[reverse_sorting]
                         sorted_data = v[sorted_idx]
                         d[k] = sorted_data[reverse_sorting]
                     else:

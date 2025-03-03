@@ -344,7 +344,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         if self.transform is not None:
             data = self.transform(data)
 
-        # Currently, the data is of shape [M, N, ...] with where M is the number
+        # Currently, the data is of shape [M, N, ...] where M is the number
         # of arrays returned by the transform and N is the batch_size.  This
         # array is repackaged to group different indices of `M` into one sample,
         # resulting in data of shape [N, M, ...].  That is, data is of the form
