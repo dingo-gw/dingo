@@ -153,7 +153,7 @@ class ProjectOntoDetectors(object):
             dec = extrinsic_parameters.pop("dec")
             psi = extrinsic_parameters.pop("psi")
             tc_ref = parameters["geocent_time"]
-            assert np.allclose(tc_ref, parameters["geocent_time"]), (
+            assert np.allclose(tc_ref, 0.0), (
                 "This should always be 0. If for some reason "
                 "you want to save time shifted polarizations,"
                 " then remove this assert statement."
@@ -405,14 +405,14 @@ class ApplyCalibrationUncertainty(object):
             )
 
             for i in range(self.num_calibration_curves):
-                calibration_draws[ifo.name][i, self.data_domain.frequency_mask] = (
-                    ifo.calibration_model.get_calibration_factor(
-                        self.data_domain.sample_frequencies[
-                            self.data_domain.frequency_mask
-                        ],
-                        prefix="recalib_{}_".format(ifo.name),
-                        **calibration_parameter_draws[ifo.name].iloc[i],
-                    )
+                calibration_draws[ifo.name][
+                    i, self.data_domain.frequency_mask
+                ] = ifo.calibration_model.get_calibration_factor(
+                    self.data_domain.sample_frequencies[
+                        self.data_domain.frequency_mask
+                    ],
+                    prefix="recalib_{}_".format(ifo.name),
+                    **calibration_parameter_draws[ifo.name].iloc[i],
                 )
 
             # Multiplying the sample waveform in the interferometer according to

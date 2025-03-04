@@ -9,7 +9,7 @@ from .utils import get_batch_size_of_input_sample
 
 class SampleNoiseASD(object):
     """
-    Sample a random asds for each detector and add them to sample['asds'].
+    Sample a batch of random ASDs for each detector and place them in sample['asds'].
     """
 
     def __init__(self, asd_dataset):
@@ -20,7 +20,7 @@ class SampleNoiseASD(object):
         batched, batch_size = get_batch_size_of_input_sample(input_sample)
         sample["asds"] = self.asd_dataset.sample_random_asds(n=batch_size)
         if not batched:
-            sample["asds"] = {k:v[0] for k,v in sample["asds"].items()}
+            sample["asds"] = {k: v[0] for k, v in sample["asds"].items()}
 
         return sample
 

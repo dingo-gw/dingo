@@ -223,10 +223,7 @@ class FrequencyDomain(Domain):
         Array-like of the same form as data.
         """
         f = self.get_sample_frequencies_astype(data)
-        if isinstance(dt, float) or data.ndim == 1:
-            # unbatched case
-            phase_shift = 2 * np.pi * dt * f
-        elif isinstance(data, np.ndarray):
+        if isinstance(data, np.ndarray):
             phase_shift = 2 * np.pi * np.einsum("...,i", dt, f)
         elif isinstance(data, torch.Tensor):
             # Allow for possible multiple "batch" dimensions (e.g., batch + detector,
@@ -295,7 +292,6 @@ class FrequencyDomain(Domain):
         New array or tensor of the same shape as data.
         """
         if isinstance(data, np.ndarray) and np.iscomplexobj(data):
-            # This case is assumed to only occur during inference, with un-batched data.
             return data * np.exp(-1j * phase)
 
         elif isinstance(data, torch.Tensor):
