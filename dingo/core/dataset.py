@@ -28,7 +28,6 @@ def recursive_hdf5_save(group, d):
 def recursive_hdf5_load(
     group,
     keys: Optional[List[str]] = None,
-    wfd_keys_to_leave_on_disk: Optional[List[str]] = None,
     idx: Optional[Union[int, List[int]]] = None,
 ):
     """This is a generic helper function to recursively load data from an HDF5 file.
@@ -39,60 +38,41 @@ def recursive_hdf5_load(
         Group from which to recursively load data.
     keys: list[str] or None
         List of keys to load. If None, load all keys.
-    wfd_keys_to_leave_on_disk: list[str] or None
-        Keys that should not be loaded into RAM when initializing the dataset. If None, all keys are loaded.
-    idx: int or list[int] or None
         If idx is provided, only the datapoints corresponding to the given indices are loaded.
         This functionality is needed at train time when the data corresponding to the leave_on_disk_keys
         has to be loaded for each idx/batch.
     """
-    non_idx_keys = ["V", "mismatches", "s"]
     d = {}
     for k, v in group.items():
         if keys is None or k in keys:
             if isinstance(v, h5py.Group):
-                d[k] = recursive_hdf5_load(
-                    v, wfd_keys_to_leave_on_disk=wfd_keys_to_leave_on_disk, idx=idx
-                )
+                d[k] = recursive_hdf5_load(v, idx=idx)
             else:
-                if (
-                    wfd_keys_to_leave_on_disk is not None
-                    and k in wfd_keys_to_leave_on_disk
-                ):
-                    # Insert dummy value into dict
-                    d[k] = None
+                if idx is None:
+                    # Load all values
+                    d[k] = v[...]
+                elif isinstance(idx, list) and len(idx) > 1:
+                    # Load batch of indices: hdf5 load requires index list to be sorted
+                    sorted_idx = np.sort(idx)
+                    reverse_sorting = np.argsort(idx)
+                    sorted_data = v[sorted_idx]
+                    d[k] = sorted_data[reverse_sorting]
                 else:
-                    if (
-                        idx is None or k in non_idx_keys
-                    ):  # or v.shape == (): # TODO: test if we need last or
-                        # Load all values
-                        d[k] = v[...]
-                    elif isinstance(idx, list) and len(idx) > 1:
-                        # Load batch of indices: hdf5 load requires index list to be sorted
-                        sorted_idx = np.sort(idx)
-                        reverse_sorting = np.argsort(idx)
-                        sorted_data = v[sorted_idx]
-                        d[k] = sorted_data[reverse_sorting]
-                    else:
-                        # Load specific idx
-                        d[k] = v[idx]
-                    # If the array has column names, load it as a pandas DataFrame
-                    if d[k].dtype.names is not None:
-                        # Convert row v[idx] into list for pd
-                        if type(d[k]) == np.void:
-                            d[k] = pd.DataFrame([list(d[k])], columns=d[k].dtype.names)
-                        else:
-                            d[k] = pd.DataFrame(d[k])
-                    # Convert arrays of size 1 to scalars
-                    elif d[k].size == 1:
-                        d[k] = d[k].item()
-                        if isinstance(d[k], bytes):
-                            # Assume this is a string.
-                            d[k] = d[k].decode()
-                    # If an array is 1D and of type object, assume it originated as a list
-                    # of strings.
-                    elif d[k].ndim == 1 and d[k].dtype == "O":
-                        d[k] = [x.decode() for x in d[k]]
+                    # Load specific idx
+                    d[k] = v[idx]
+                # If the array has column names, load it as a pandas DataFrame
+                if d[k].dtype.names is not None:
+                    d[k] = pd.DataFrame(d[k])
+                # Convert arrays of size 1 to scalars
+                elif d[k].size == 1:
+                    d[k] = d[k].item()
+                    if isinstance(d[k], bytes):
+                        # Assume this is a string.
+                        d[k] = d[k].decode()
+                # If an array is 1D and of type object, assume it originated as a list
+                # of strings.
+                elif d[k].ndim == 1 and d[k].dtype == "O":
+                    d[k] = [x.decode() for x in d[k]]
     return d
 
 
@@ -171,28 +151,21 @@ class DingoDataset:
     def from_file(
         self, file_name: str, wfd_keys_to_leave_on_disk: Optional[List] = None
     ):
+        keys_to_load = self._data_keys
         if wfd_keys_to_leave_on_disk is not None:
             print(
                 f"Loading dataset with wfd_keys_to_leave_on_disk {wfd_keys_to_leave_on_disk} from {str(file_name)}."
             )
+            # Remove wfd_keys_to_leave_on_disk from keys_to_load
+            keys_to_load = [
+                k for k in keys_to_load if k not in wfd_keys_to_leave_on_disk
+            ]
         else:
             print(f"Loading dataset from {str(file_name)}.")
-        # Replace key 'polarizations' with 'h_cross' and 'h_plus'
-        if (
-            wfd_keys_to_leave_on_disk is not None
-            and "polarizations" in wfd_keys_to_leave_on_disk
-        ):
-            wfd_keys_to_leave_on_disk.remove("polarizations")
-            wfd_keys_to_leave_on_disk.append("h_cross")
-            wfd_keys_to_leave_on_disk.append("h_plus")
 
         with h5py.File(file_name, "r") as f:
-            # Load only the keys that the class expects
-            loaded_dict = recursive_hdf5_load(
-                f,
-                keys=self._data_keys,
-                wfd_keys_to_leave_on_disk=wfd_keys_to_leave_on_disk,
-            )
+            loaded_dict = recursive_hdf5_load(f, keys=keys_to_load)
+            # Set the keys that the class expects
             for k, v in loaded_dict.items():
                 assert k in self._data_keys
                 vars(self)[k] = v

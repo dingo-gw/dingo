@@ -126,7 +126,8 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             if self.parameters is not None:
                 self.parameters = self.parameters.astype(self.real_type, copy=False)
             if (
-                self.polarizations["h_cross"] is not None
+                self.polarizations is not None
+                and self.polarizations["h_cross"] is not None
                 and self.polarizations["h_plus"] is not None
             ):
                 for k, v in self.polarizations.items():
@@ -287,7 +288,8 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                 )
                 # TODO: Adapt code to also load parameters from disk (see comment above)
             elif (
-                "h_cross" in self.wfd_keys_to_leave_on_disk
+                "polarizations" in self.wfd_keys_to_leave_on_disk
+                or "h_cross" in self.wfd_keys_to_leave_on_disk
                 or "h_plus" in self.wfd_keys_to_leave_on_disk
             ):
                 polarizations = recursive_hdf5_load(
