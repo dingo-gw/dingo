@@ -48,6 +48,7 @@ def recursive_hdf5_load(
             if isinstance(v, h5py.Group):
                 d[k] = recursive_hdf5_load(v, idx=idx)
             else:
+                # Load values from hdf5 file as np.ndarray
                 if idx is None:
                     # Load all values
                     d[k] = v[...]
@@ -60,6 +61,7 @@ def recursive_hdf5_load(
                 else:
                     # Load specific idx
                     d[k] = v[idx]
+                # Update data types
                 # If the array has column names, load it as a pandas DataFrame
                 if d[k].dtype.names is not None:
                     d[k] = pd.DataFrame(d[k])
