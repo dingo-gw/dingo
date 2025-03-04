@@ -1,14 +1,20 @@
+from typing import Tuple
 import os
 
 import numpy as np
 import yaml
 import argparse
+import shutil
 import textwrap
-
+import time
+from copy import deepcopy
 
 from threadpoolctl import threadpool_limits
 
-from dingo.core.posterior_models.build_model import autocomplete_model_kwargs, build_model_from_kwargs
+from dingo.core.posterior_models.build_model import (
+    autocomplete_model_kwargs,
+    build_model_from_kwargs,
+)
 from dingo.gw.training.train_builders import (
     build_dataset,
     set_train_transforms,
@@ -21,9 +27,35 @@ from dingo.core.utils import (
     build_train_and_test_loaders,
 )
 from dingo.core.utils.trainutils import EarlyStopping
+from gw.dataset import WaveformDataset
+from core.posterior_models import BasePosteriorModel
 
 
-def prepare_training_new(train_settings: dict, train_dir: str, local_settings: dict):
+def copy_files_to_local(file_path: str, local_dir: str) -> str:
+    """
+    Copy files to local node to minimize network traffic during training.
+
+    Parameters
+    ----------
+    file_path: str
+        Path to file that should be copied.
+    local_dir: str
+        Directory where file should be copied.
+    """
+    file_name = file_path.split("/")[-1]
+    local_file_path = os.path.join(local_dir, file_name)
+    print(f"Copying file to {local_file_path}")
+    # Copy file
+    start_time = time.time()
+    shutil.copy(file_path, local_file_path)
+    elapsed_time = time.time() - start_time
+    print("Done. This took {:2.0f}:{:2.0f} min.".format(*divmod(elapsed_time, 60)))
+    return local_file_path
+
+
+def prepare_training_new(
+    train_settings: dict, train_dir: str, local_settings: dict
+) -> Tuple[BasePosteriorModel, WaveformDataset]:
     """
     Based on a settings dictionary, initialize a WaveformDataset and PosteriorModel.
 
@@ -42,10 +74,20 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
 
     Returns
     -------
-    (WaveformDataset, BasePosteriorModel)
+    (BasePosteriorModel, WaveformDataset)
     """
-
-    wfd = build_dataset(train_settings["data"])  # No transforms yet
+    data_settings = deepcopy(train_settings["data"])
+    if "path_copy_wfd_to_local" in local_settings:
+        data_settings["waveform_dataset_path"] = copy_files_to_local(
+            file_path=data_settings["waveform_dataset_path"],
+            local_dir=local_settings["path_copy_wfd_to_local"],
+        )
+    wfd = build_dataset(
+        data_settings=data_settings,
+        leave_polarizations_on_disk=local_settings.get(
+            "leave_polarizations_on_disk", None
+        ),
+    )  # No transforms yet
     initial_weights = {}
 
     # The embedding network is assumed to have an SVD projection layer. If other types
@@ -109,7 +151,9 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
     return pm, wfd
 
 
-def prepare_training_resume(checkpoint_name, local_settings, train_dir):
+def prepare_training_resume(
+    checkpoint_name: str, local_settings: dict, train_dir: str
+) -> Tuple[BasePosteriorModel, WaveformDataset]:
     """
     Loads a PosteriorModel from a checkpoint, as well as the corresponding
     WaveformDataset, in order to continue training. It initializes the saved optimizer
@@ -119,8 +163,10 @@ def prepare_training_resume(checkpoint_name, local_settings, train_dir):
     ----------
     checkpoint_name : str
         File name containing the checkpoint (.pt format).
-    device : str
-        'cuda' or 'cpu'
+    local_settings : dict
+        Local settings (e.g., num_workers, device)
+    train_dir: str
+        Path to training directory where the wandb info is saved.
 
     Returns
     -------
@@ -130,7 +176,18 @@ def prepare_training_resume(checkpoint_name, local_settings, train_dir):
     pm = build_model_from_kwargs(
         filename=checkpoint_name, device=local_settings["device"]
     )
-    wfd = build_dataset(pm.metadata["train_settings"]["data"])
+    data_settings = deepcopy(pm.metadata["train_settings"]["data"])
+    if "path_copy_wfd_to_local" in local_settings:
+        data_settings["waveform_dataset_path"] = copy_files_to_local(
+            file_path=data_settings["waveform_dataset_path"],
+            local_dir=local_settings["path_copy_wfd_to_local"],
+        )
+    wfd = build_dataset(
+        data_settings=data_settings,
+        leave_polarizations_on_disk=local_settings.get(
+            "leave_polarizations_on_disk", None
+        ),
+    )
 
     if local_settings.get("wandb", False):
         try:
@@ -147,7 +204,13 @@ def prepare_training_resume(checkpoint_name, local_settings, train_dir):
     return pm, wfd
 
 
-def initialize_stage(pm, wfd, stage, num_workers, resume=False):
+def initialize_stage(
+    pm: BasePosteriorModel,
+    wfd: WaveformDataset,
+    stage: dict,
+    num_workers: int,
+    resume: bool = False,
+):
     """
     Initializes training based on PosteriorModel metadata and current stage:
         * Builds transforms (based on noise settings for current stage);
@@ -210,7 +273,9 @@ def initialize_stage(pm, wfd, stage, num_workers, resume=False):
     return train_loader, test_loader
 
 
-def train_stages(pm, wfd, train_dir, local_settings):
+def train_stages(
+    pm: BasePosteriorModel, wfd: WaveformDataset, train_dir: str, local_settings: dict
+) -> bool:
     """
     Train the network, iterating through the sequence of stages. Stages can change
     certain settings such as the noise characteristics, optimizer, and scheduler settings.
@@ -264,12 +329,13 @@ def train_stages(pm, wfd, train_dir, local_settings):
             )
         early_stopping = None
         if stage.get("early_stopping"):
-            try: 
+            try:
                 early_stopping = EarlyStopping(**stage["early_stopping"])
             except Exception:
-                print("Early stopping settings invalid. Please pass 'patience', 'delta', 'metric'")
+                print(
+                    "Early stopping settings invalid. Please pass 'patience', 'delta', 'metric'"
+                )
                 raise
-            
 
         runtime_limits.max_epochs_total = end_epochs[n]
         pm.train(

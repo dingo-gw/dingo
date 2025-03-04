@@ -1,3 +1,4 @@
+from typing import List, Optional, Union
 import ast
 import h5py
 import numpy as np
@@ -24,14 +25,42 @@ def recursive_hdf5_save(group, d):
             raise TypeError(f"Cannot save datatype {type(v)} as hdf5 dataset.")
 
 
-def recursive_hdf5_load(group, keys=None):
+def recursive_hdf5_load(
+    group,
+    keys: Optional[List[str]] = None,
+    idx: Optional[Union[int, List[int]]] = None,
+):
+    """This is a generic helper function to recursively load data from an HDF5 file.
+
+    Parameters
+    ----------
+    group: h5py.Group
+        Group from which to recursively load data.
+    keys: list[str] or None
+        List of keys to load. If None, load all keys.
+    idx: int or list[int] or None
+        If idx is provided, only the datapoints corresponding to the given indices are loaded.
+    """
     d = {}
     for k, v in group.items():
         if keys is None or k in keys:
             if isinstance(v, h5py.Group):
-                d[k] = recursive_hdf5_load(v)
+                d[k] = recursive_hdf5_load(v, idx=idx)
             else:
-                d[k] = v[...]
+                # Load values from hdf5 file as np.ndarray
+                if idx is None:
+                    # Load all values
+                    d[k] = v[...]
+                elif isinstance(idx, list) and len(idx) > 1:
+                    # Load batch of indices: hdf5 load requires index list to be sorted
+                    sorted_idx = np.sort(idx)
+                    reverse_sorting = np.argsort(idx)
+                    sorted_data = v[sorted_idx]
+                    d[k] = sorted_data[reverse_sorting]
+                else:
+                    # Load specific idx
+                    d[k] = v[idx]
+                # Update data types
                 # If the array has column names, load it as a pandas DataFrame
                 if d[k].dtype.names is not None:
                     d[k] = pd.DataFrame(d[k])
@@ -61,7 +90,13 @@ class DingoDataset:
 
     dataset_type = "dingo_dataset"
 
-    def __init__(self, file_name=None, dictionary=None, data_keys=None):
+    def __init__(
+        self,
+        file_name: Optional[str] = None,
+        dictionary: Optional[dict] = None,
+        data_keys: Optional[List] = None,
+        leave_polarizations_on_disk: Optional[bool] = False,
+    ):
         """
         For constructing, provide either file_name, or dictionary containing data and
         settings entries, or neither.
@@ -77,6 +112,10 @@ class DingoDataset:
             Variables that should be saved / loaded. This allows for class to store
             additional variables beyond those that are saved. Typically, this list
             would be provided by any subclass.
+        leave_polarizations_on_disk: bool
+            If true, the polarizations are not loaded into RAM when initializing the dataset
+            to reduce the memory footprint during training. Instead, the polarizations are
+            loaded from the HDF5 file during training.
         """
         self._data_keys = list(data_keys)  # Make a copy before modifying.
         self._data_keys.append("version")
@@ -85,7 +124,7 @@ class DingoDataset:
         for key in self._data_keys:
             vars(self)[key] = None
         self.settings = None
-        self.version = None
+        self.leave_polarizations_on_disk = leave_polarizations_on_disk
 
         # If data provided, load it
         if file_name is not None:
@@ -93,7 +132,7 @@ class DingoDataset:
         elif dictionary is not None:
             self.from_dictionary(dictionary)
 
-    def to_file(self, file_name, mode="w"):
+    def to_file(self, file_name: str, mode: str = "w"):
         print("Saving dataset to " + str(file_name))
         save_dict = {
             k: v
@@ -107,11 +146,20 @@ class DingoDataset:
             if self.dataset_type:
                 f.attrs["dataset_type"] = self.dataset_type
 
-    def from_file(self, file_name):
-        print("Loading dataset from " + str(file_name) + ".")
+    def from_file(self, file_name: str):
+        keys_to_load = self._data_keys
+        if self.leave_polarizations_on_disk:
+            print(
+                f"Loading dataset without loading the polarizations from {str(file_name)}."
+            )
+            # Remove polarizations from keys_to_load
+            keys_to_load = [k for k in keys_to_load if k != "polarizations"]
+        else:
+            print(f"Loading dataset from {str(file_name)}.")
+
         with h5py.File(file_name, "r") as f:
-            # Load only the keys that the class expects
-            loaded_dict = recursive_hdf5_load(f, keys=self._data_keys)
+            loaded_dict = recursive_hdf5_load(f, keys=keys_to_load)
+            # Set the keys that the class expects
             for k, v in loaded_dict.items():
                 assert k in self._data_keys
                 vars(self)[k] = v
