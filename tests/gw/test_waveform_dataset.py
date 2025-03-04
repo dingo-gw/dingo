@@ -206,6 +206,24 @@ def test_load_waveform_dataset_with_keys_to_leave_on_disk(
     assert isinstance(el_list[0]["waveform"]["h_plus"], np.ndarray)
     assert isinstance(el_list[0]["waveform"]["h_cross"], np.ndarray)
 
+    """Check that using a randomly ordered list of indices provides the expected ordering."""
+    ind_list_rand = np.random.permutation(ind_list).tolist()
+    el_list_rand = wfd.__getitems__(ind_list_rand)
+    assert np.all(
+        [
+            el_list_rand[ind_list_rand[i]]["waveform"]["h_plus"]
+            == el_list[i]["waveform"]["h_plus"]
+            for i in range(len(ind_list))
+        ]
+    )
+    assert np.all(
+        [
+            el_list_rand[ind_list_rand[i]]["waveform"]["h_cross"]
+            == el_list[i]["waveform"]["h_cross"]
+            for i in range(len(ind_list))
+        ]
+    )
+
     """Check truncation of wfd. Ideally, this should be an individual test, 
     but since the setup takes so long it is added here."""
 
