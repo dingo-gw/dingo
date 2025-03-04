@@ -4,7 +4,10 @@ import os
 import numpy as np
 import yaml
 import argparse
+import shutil
 import textwrap
+import time
+from copy import deepcopy
 
 from threadpoolctl import threadpool_limits
 
@@ -26,6 +29,28 @@ from dingo.core.utils import (
 from dingo.core.utils.trainutils import EarlyStopping
 from gw.dataset import WaveformDataset
 from core.posterior_models import BasePosteriorModel
+
+
+def copy_files_to_local(file_path: str, local_dir: str) -> str:
+    """
+    Copy files to local node to minimize network traffic during training.
+
+    Parameters
+    ----------
+    file_path: str
+        Path to file that should be copied.
+    local_dir: str
+        Directory where file should be copied.
+    """
+    file_name = file_path.split("/")[-1]
+    local_file_path = os.path.join(local_dir, file_name)
+    print(f"Copying file to {local_file_path}")
+    # Copy file
+    start_time = time.time()
+    shutil.copy(file_path, local_file_path)
+    elapsed_time = time.time() - start_time
+    print("Done. This took {:2.0f}:{:2.0f} min.".format(*divmod(elapsed_time, 60)))
+    return local_file_path
 
 
 def prepare_training_new(
@@ -51,10 +76,14 @@ def prepare_training_new(
     -------
     (BasePosteriorModel, WaveformDataset)
     """
-
+    data_settings = deepcopy(train_settings["data"])
+    if "path_copy_wfd_to_local" in local_settings:
+        data_settings["waveform_dataset_path"] = copy_files_to_local(
+            file_path=data_settings["waveform_dataset_path"],
+            local_dir=local_settings["path_copy_wfd_to_local"],
+        )
     wfd = build_dataset(
-        data_settings=train_settings["data"],
-        path_copy_wfd_to_local=local_settings.get("path_copy_wfd_to_local", None),
+        data_settings=data_settings,
         wfd_keys_to_leave_on_disk=local_settings.get("wfd_keys_to_leave_on_disk", None),
     )  # No transforms yet
     initial_weights = {}
@@ -145,9 +174,14 @@ def prepare_training_resume(
     pm = build_model_from_kwargs(
         filename=checkpoint_name, device=local_settings["device"]
     )
+    data_settings = deepcopy(pm.metadata["train_settings"]["data"])
+    if "path_copy_wfd_to_local" in local_settings:
+        data_settings["waveform_dataset_path"] = copy_files_to_local(
+            file_path=data_settings["waveform_dataset_path"],
+            local_dir=local_settings["path_copy_wfd_to_local"],
+        )
     wfd = build_dataset(
-        data_settings=pm.metadata["train_settings"]["data"],
-        path_copy_wfd_to_local=local_settings.get("path_copy_wfd_to_local", None),
+        data_settings=data_settings,
         wfd_keys_to_leave_on_disk=local_settings.get("wfd_keys_to_leave_on_disk", None),
     )
 

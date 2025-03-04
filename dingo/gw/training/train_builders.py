@@ -1,6 +1,5 @@
 from typing import List, Optional
 import copy
-import shutil
 
 import torch.multiprocessing
 import torchvision
@@ -31,7 +30,6 @@ from dingo.core.utils import *
 
 def build_dataset(
     data_settings: dict,
-    path_copy_wfd_to_local: Optional[str] = None,
     wfd_keys_to_leave_on_disk: Optional[List[str]] = None,
 ) -> WaveformDataset:
     """Build a dataset based on a settings dictionary. This should contain the path of
@@ -42,8 +40,6 @@ def build_dataset(
     Parameters
     ----------
     data_settings : dict
-    path_copy_wfd_to_local: str | None
-        If provided, the waveform dataset is copied to the local node to minimize network traffic during training
     wfd_keys_to_leave_on_disk: list[str] | None
         If provided, the values associated with these keys will not be loaded into memory during initialization.
         Instead, they will be loaded from disk when the dataset is accessed. This is useful for reducing the memory
@@ -53,27 +49,11 @@ def build_dataset(
     -------
     WaveformDataset
     """
-    # Copy waveform dataset to local node to minimize network traffic during training
-    if path_copy_wfd_to_local is not None:
-        # Set tmp path
-        wfd_path = data_settings["waveform_dataset_path"]
-        file_name = wfd_path.split("/")[-1]
-        wfd_path_local = os.path.join(path_copy_wfd_to_local, file_name)
-        print(f"Copying waveform dataset to {wfd_path_local}")
-        # Copy waveform dataset
-        start_time = time.time()
-        shutil.copy(wfd_path, wfd_path_local)
-        elapsed_time = time.time() - start_time
-        print("Done. This took {:2.0f}:{:2.0f} min.".format(*divmod(elapsed_time, 60)))
-        # Replace waveform dataset path
-        wfd_path = wfd_path_local
-    else:
-        wfd_path = data_settings["waveform_dataset_path"]
 
     # Build and truncate datasets
     domain_update = data_settings.get("domain_update", None)
     wfd = WaveformDataset(
-        file_name=wfd_path,
+        file_name=data_settings["waveform_dataset_path"],
         precision="single",
         domain_update=domain_update,
         svd_size_update=data_settings.get("svd_size_update"),
