@@ -38,9 +38,8 @@ def recursive_hdf5_load(
         Group from which to recursively load data.
     keys: list[str] or None
         List of keys to load. If None, load all keys.
+    idx: int or list[int] or None
         If idx is provided, only the datapoints corresponding to the given indices are loaded.
-        This functionality is needed at train time when the data corresponding to the leave_on_disk_keys
-        has to be loaded for each idx/batch.
     """
     d = {}
     for k, v in group.items():
@@ -96,7 +95,7 @@ class DingoDataset:
         file_name: Optional[str] = None,
         dictionary: Optional[dict] = None,
         data_keys: Optional[List] = None,
-        wfd_keys_to_leave_on_disk: Optional[List] = None,
+        leave_polarizations_on_disk: Optional[bool] = False,
     ):
         """
         For constructing, provide either file_name, or dictionary containing data and
@@ -113,10 +112,10 @@ class DingoDataset:
             Variables that should be saved / loaded. This allows for class to store
             additional variables beyond those that are saved. Typically, this list
             would be provided by any subclass.
-        wfd_keys_to_leave_on_disk: list
-            Variables that should not be loaded into RAM when initializing the dataset
-            to reduce the memory footprint during training. Instead, the values associated
-            with these keys are loaded from the HDF5 file during training.
+        leave_polarizations_on_disk: bool
+            If true, the polarizations are not loaded into RAM when initializing the dataset
+            to reduce the memory footprint during training. Instead, the polarizations are
+            loaded from the HDF5 file during training.
         """
         self._data_keys = list(data_keys)  # Make a copy before modifying.
         self._data_keys.append("version")
@@ -125,14 +124,11 @@ class DingoDataset:
         for key in self._data_keys:
             vars(self)[key] = None
         self.settings = None
-        self.version = None
-        self.wfd_keys_to_leave_on_disk = wfd_keys_to_leave_on_disk
+        self.leave_polarizations_on_disk = leave_polarizations_on_disk
 
         # If data provided, load it
         if file_name is not None:
-            self.from_file(
-                file_name, wfd_keys_to_leave_on_disk=wfd_keys_to_leave_on_disk
-            )
+            self.from_file(file_name)
         elif dictionary is not None:
             self.from_dictionary(dictionary)
 
@@ -150,18 +146,14 @@ class DingoDataset:
             if self.dataset_type:
                 f.attrs["dataset_type"] = self.dataset_type
 
-    def from_file(
-        self, file_name: str, wfd_keys_to_leave_on_disk: Optional[List] = None
-    ):
+    def from_file(self, file_name: str):
         keys_to_load = self._data_keys
-        if wfd_keys_to_leave_on_disk is not None:
+        if self.leave_polarizations_on_disk:
             print(
-                f"Loading dataset with wfd_keys_to_leave_on_disk {wfd_keys_to_leave_on_disk} from {str(file_name)}."
+                f"Loading dataset without loading the polarizations from {str(file_name)}."
             )
-            # Remove wfd_keys_to_leave_on_disk from keys_to_load
-            keys_to_load = [
-                k for k in keys_to_load if k not in wfd_keys_to_leave_on_disk
-            ]
+            # Remove polarizations from keys_to_load
+            keys_to_load = [k for k in keys_to_load if k != "polarizations"]
         else:
             print(f"Loading dataset from {str(file_name)}.")
 

@@ -16,13 +16,11 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
 
     It can load the dataset either from an HDF5 file or suitable dictionary.
 
-    It is possible to either load the entire dataset into memory (leave_on_disk_keys=None),
-    or to load the dataset on-demand (leave_on_disk_keys=['polarizations']).
+    It is possible to either load the entire dataset into memory or to load the dataset during training
+    (leave_polarizations_on_disk=True) to reduce the memory footprint.
     At the moment, it is only possible to load the polarizations on-demand since the
     standardization dict for all parameters in the dataset has to be computed at the
     beginning of training.
-    # TODO: Compute the standardization dict when generating the waveform dataset, loading it at
-    # the beginning of training, and adapting the code to work with leave_on_disk_keys=['parameters']
 
     The waveform data is consumed through a __getitem__() or __getitems__() call which optionally loads the
     polarizations and applies a chain of transformations, which are classes that implement a __call__() method.
@@ -38,7 +36,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         precision: Optional[str] = None,
         domain_update: Optional[dict] = None,
         svd_size_update: Optional[int] = None,
-        wfd_keys_to_leave_on_disk: Optional[List] = None,
+        leave_polarizations_on_disk: Optional[bool] = False,
     ):
         """
         For constructing, provide either file_name, or dictionary containing data and
@@ -59,9 +57,9 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             If provided, update domain from existing domain using new settings.
         svd_size_update : int
             If provided, reduces the SVD size when decompressing (for speed).
-        wfd_keys_to_leave_on_disk : list
-            If provided, the values for these keys are not loaded into RAM when initializing the
-            waveform dataset. Instead, the values for these keys are loaded lazily in __getitem__().
+        leave_polarizations_on_disk : bool
+            If True, the values for the polarizations are not loaded into RAM when initializing the
+            waveform dataset. Instead, the polarizations are loaded lazily in __getitem__().
         """
         self.domain = None
         self.transform = transform
@@ -85,7 +83,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             file_name=file_name,
             dictionary=dictionary,
             data_keys=["parameters", "polarizations", "svd"],
-            wfd_keys_to_leave_on_disk=wfd_keys_to_leave_on_disk,
+            leave_polarizations_on_disk=leave_polarizations_on_disk,
         )
         self.file_name = file_name
 
@@ -249,68 +247,27 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         for sample with index `idx`. If defined, a chain of transformations is applied to
         the waveform data.
         """
-        if self.wfd_keys_to_leave_on_disk is not None and self.file_handle is None:
-            # Open hdf5 file
-            self.file_handle = h5py.File(self.file_name, "r")
 
         # Get parameters and data for idx
-        if self.wfd_keys_to_leave_on_disk is None:
+        if self.leave_polarizations_on_disk:
+            # Load polarizations from disk
+            if self.file_handle is None:
+                # Open hdf5 file
+                self.file_handle = h5py.File(self.file_name, "r")
+
+            polarizations = recursive_hdf5_load(
+                self.file_handle, keys=["polarizations"], idx=batched_idx
+            )["polarizations"]
+            # Apply domain update to set waveform to zero for f < f_min
+            if self.svd is None:
+                polarizations = {
+                    pol: self.domain.update_data(waveforms)
+                    for pol, waveforms in polarizations.items()
+                }
             parameters = {
                 k: v if isinstance(v, float) else v.to_numpy()
                 for k, v in self.parameters.iloc[batched_idx].items()
             }
-            polarizations = {
-                pol: waveforms[batched_idx]
-                for pol, waveforms in self.polarizations.items()
-            }
-        else:
-            # Data and/or parameters are not in memory -> load them
-            if (
-                "parameters" in self.wfd_keys_to_leave_on_disk
-                and "h_cross" in self.wfd_keys_to_leave_on_disk
-                and "h_plus" in self.wfd_keys_to_leave_on_disk
-            ):
-                raise ValueError(
-                    "Loading parameters from disk is not implemented at the moment because parameter "
-                    "standardization over the full dataset happens at the beginning of training. "
-                    "Disable loading from disk or change wfd_keys_to_leave_on_disk to ['polarizations']."
-                )
-                # TODO: Adapt code to also load parameters from disk
-                # * Compute parameter standardization when generating waveform dataset and save standardization_dict
-                #   in dataset
-                # * Load standardization dict at the beginning of training
-                # * Adapt code to allow loading parameters from disk
-            elif "parameters" in self.wfd_keys_to_leave_on_disk:
-                raise ValueError(
-                    "Loading parameters from disk is not implemented at the moment because parameter"
-                    "standardization over the full dataset happens at the beginning of training."
-                    "The standardization dict could be saved when generating the waveform dataset."
-                )
-                # TODO: Adapt code to also load parameters from disk (see comment above)
-            elif (
-                "polarizations" in self.wfd_keys_to_leave_on_disk
-                or "h_cross" in self.wfd_keys_to_leave_on_disk
-                or "h_plus" in self.wfd_keys_to_leave_on_disk
-            ):
-                polarizations = recursive_hdf5_load(
-                    self.file_handle, keys=["polarizations"], idx=batched_idx
-                )["polarizations"]
-                if self.svd is None:
-                    # Apply domain update to set waveform to zero for f < f_min
-                    polarizations = {
-                        pol: self.domain.update_data(waveforms)
-                        for pol, waveforms in polarizations.items()
-                    }
-                parameters = {
-                    k: v if isinstance(v, float) else v.to_numpy()
-                    for k, v in self.parameters.iloc[batched_idx].items()
-                }
-            else:
-                raise ValueError(
-                    f"Unknown wfd_keys_to_leave_on_disk {self.wfd_keys_to_leave_on_disk}. "
-                    f"Cannot be loaded during __getitem__()."
-                )
-
             # Convert parameters to dict
             if not isinstance(parameters, dict):
                 parameters = parameters.to_dict()
@@ -335,6 +292,15 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                         polarizations[k] = v[: self.svd_size_update]
                     else:
                         polarizations[k] = v[:, : self.svd_size_update]
+        else:
+            parameters = {
+                k: v if isinstance(v, float) else v.to_numpy()
+                for k, v in self.parameters.iloc[batched_idx].items()
+            }
+            polarizations = {
+                pol: waveforms[batched_idx]
+                for pol, waveforms in self.polarizations.items()
+            }
 
         # Decompression transforms are assumed to apply only to the waveform,
         # and do not involve parameters.

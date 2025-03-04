@@ -84,7 +84,9 @@ def prepare_training_new(
         )
     wfd = build_dataset(
         data_settings=data_settings,
-        wfd_keys_to_leave_on_disk=local_settings.get("wfd_keys_to_leave_on_disk", None),
+        leave_polarizations_on_disk=local_settings.get(
+            "leave_polarizations_on_disk", None
+        ),
     )  # No transforms yet
     initial_weights = {}
 
@@ -182,7 +184,9 @@ def prepare_training_resume(
         )
     wfd = build_dataset(
         data_settings=data_settings,
-        wfd_keys_to_leave_on_disk=local_settings.get("wfd_keys_to_leave_on_disk", None),
+        leave_polarizations_on_disk=local_settings.get(
+            "leave_polarizations_on_disk", None
+        ),
     )
 
     if local_settings.get("wandb", False):

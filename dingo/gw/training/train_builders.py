@@ -30,7 +30,7 @@ from dingo.core.utils import *
 
 def build_dataset(
     data_settings: dict,
-    wfd_keys_to_leave_on_disk: Optional[List[str]] = None,
+    leave_polarizations_on_disk: Optional[bool] = False,
 ) -> WaveformDataset:
     """Build a dataset based on a settings dictionary. This should contain the path of
     a saved waveform dataset.
@@ -40,8 +40,8 @@ def build_dataset(
     Parameters
     ----------
     data_settings : dict
-    wfd_keys_to_leave_on_disk: list[str] | None
-        If provided, the values associated with these keys will not be loaded into memory during initialization.
+    leave_polarizations_on_disk: bool
+        If provided, the values associated with the polarizations will not be loaded into memory during initialization.
         Instead, they will be loaded from disk when the dataset is accessed. This is useful for reducing the memory
         load of large datasets, but can slow down data preprocessing.
 
@@ -57,7 +57,7 @@ def build_dataset(
         precision="single",
         domain_update=domain_update,
         svd_size_update=data_settings.get("svd_size_update"),
-        wfd_keys_to_leave_on_disk=wfd_keys_to_leave_on_disk,
+        leave_polarizations_on_disk=leave_polarizations_on_disk,
     )
     return wfd
 
