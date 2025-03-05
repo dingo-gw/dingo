@@ -48,7 +48,6 @@ def test_noise_dataset_load(noise_dataset):
         assert asd_dataset.asds[ifo].shape == (n, len(asd_dataset.domain))
     # check that sampling work correctly
     asd_samples = asd_dataset.sample_random_asds()
-    asd_samples = {ifo: asd[0] for ifo, asd in asd_samples.items()}
     assert asd_samples.keys() == ifos_num_asds.keys()
     for _, asd in asd_samples.items():
         assert len(asd) == len(asd_dataset.domain)
@@ -67,7 +66,6 @@ def test_noise_dataset_load(noise_dataset):
         )
     # check that sampling work correctly
     asd_samples = asd_dataset.sample_random_asds()
-    asd_samples = {ifo: asd[0] for ifo, asd in asd_samples.items()}
     assert set(asd_samples.keys()) == set(ifos)
     for _, asd in asd_samples.items():
         assert len(asd) == len(asd_dataset.domain)
