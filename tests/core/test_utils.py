@@ -43,8 +43,10 @@ def test_load_torch_with_fallback(model_path) -> None:
     raise an error and map at least correctly to cpu
     """
     devices = get_args(Device)
-    model, device = torch_load_with_fallback(model_path, preferred_map_location="cpu")
-    assert device == "cpu"
+    model, device = torch_load_with_fallback(
+        model_path, preferred_map_location="cpu"
+    )
+    assert device == torch.device("cpu")
     for device in devices:
         # just checking no error is raised.
         # Not checking if it is mapped to the proper device, as we do not

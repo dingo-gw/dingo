@@ -1,6 +1,9 @@
 from typing import Dict, List, Literal, Tuple
+import logging
 
 import torch
+
+_logger = logging.getLogger(__name__)
 
 Device = Literal["meta", "cuda", "mps", "hip", "cpu"]
 
@@ -8,13 +11,13 @@ Device = Literal["meta", "cuda", "mps", "hip", "cpu"]
 def torch_available_devices() -> List[Device]:
     """
     Returns a list of all available PyTorch devices,
-    ordered: meta, cuda, mps, hip, cpu
+    ordered: cuda, mps, hip, cpu, meta
 
     Returns
     -------
     List of available device identifiers
     """
-    devices: List[Device] = ["meta"]
+    devices: List[Device] = []
 
     # cuda
     if torch.cuda.is_available():
@@ -37,12 +40,15 @@ def torch_available_devices() -> List[Device]:
     # cpu
     devices.append("cpu")
 
+    # meta
+    devices.append("meta")
+
     return devices
 
 
 def torch_load_with_fallback(
     filename: str, preferred_map_location: Device = "cuda"
-) -> Tuple[Dict, Device]:
+) -> Tuple[Dict, torch.device]:
     """
     Loads a PyTorch file with fallback behavior:
     1. Tries preferred_map_location (default: cuda)
@@ -51,14 +57,16 @@ def torch_load_with_fallback(
 
     Returns
     -------
-    Loaded model
+    Loaded model and torch device on which it has been loaded
     """
 
     try:
-        return (
+        r = (
             torch.load(filename, map_location=preferred_map_location),
-            preferred_map_location,
+            torch.device(preferred_map_location),
         )
+        _logger.debug(f"loaded model {filename} to {preferred_map_location}")
+        return r
     except RuntimeError:
         pass
 
@@ -66,12 +74,20 @@ def torch_load_with_fallback(
 
     for location in [d for d in devices if d != preferred_map_location]:
         try:
-            return torch.load(filename, map_location=location), location
+            r = torch.load(filename, map_location=location), torch.device(
+                location
+            )
+            _logger.debug(
+                f"loaded model {filename} to fallback device {location} "
+                f"(preferred device was {preferred_map_location})"
+            )
+            return r
         except RuntimeError:
             pass
 
     raise RuntimeError(
-        f"failed to load model {filename} on any device, " "tried: {', '.join(devices)}"
+        f"failed to load model {filename} on any device, "
+        "tried: {', '.join(devices)}"
     )
 
 
@@ -90,5 +106,7 @@ def update_model_config(model_settings: dict):
         del model_settings["type"]
         model_settings["posterior_kwargs"] = model_settings["nsf_kwargs"]
         del model_settings["nsf_kwargs"]
-        model_settings["embedding_kwargs"] = model_settings["embedding_net_kwargs"]
+        model_settings["embedding_kwargs"] = model_settings[
+            "embedding_net_kwargs"
+        ]
         del model_settings["embedding_net_kwargs"]
