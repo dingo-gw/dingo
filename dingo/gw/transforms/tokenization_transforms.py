@@ -224,7 +224,7 @@ class StrainTokenization(object):
         token_position[..., 2] = np.repeat(
             detectors, self.num_tokens_per_detector, axis=1
         )
-        sample["position"] = token_position
+        sample["position"] = token_position.astype(sample["waveform"].dtype)
         # Convention of torch transformer: positions with a True value are not allowed to participate in the attention
         # see https://pytorch.org/docs/stable/generated/torch.nn.Transformer.html#torch.nn.Transformer
         sample["drop_token_mask"] = np.zeros(
