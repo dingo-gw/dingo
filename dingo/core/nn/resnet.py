@@ -184,7 +184,7 @@ class MLP(nn.Module):
         self.activation = activation_fn
         self.linear1 = nn.Linear(hidden_size, output_size)
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, context: Optional[Tensor] = None) -> Tensor:
         x = self.activation(self.linear0(x))
         x = self.activation(self.linear1(x))
         return x
