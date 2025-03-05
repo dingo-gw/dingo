@@ -124,16 +124,27 @@ class ASDDataset(DingoDataset):
                 low_value=HIGH_ASD_VALUE,
             )
 
-    def sample_random_asds(self, n=1):
+    def sample_random_asds(self, n=None):
         """
-        Sample a random asd for each detector.
-        Returns
-        -------
-        Dict with a random asd from the dataset for each detector.
+        Sample n random ASDs for each detector.
 
+        Parameters
+        ----------
         n : int
             Number of asds to sample 
+
+        Returns
+        -------
+        dict[str, np.ndarray]
+            Where the keys correspond to the detectors and the values 
+            are arrays of shape (n, D) where D is the number of frequency bins
+            and n is the number of ASDs requested. If n=None, then the 
+            function returns a single ASD for each detector, so the array is 
+            flattened to be shape D
         """
-        return {k: v[np.random.choice(len(v), n)] for k, v in self.asds.items()}
+        if n is None:
+            return {k: v[np.random.choice(len(v), 1)[0]] for k, v in self.asds.items()}
+        else:
+            return {k: v[np.random.choice(len(v), n)] for k, v in self.asds.items()}
 
     

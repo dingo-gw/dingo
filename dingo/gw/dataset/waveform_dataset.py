@@ -201,24 +201,44 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         """The number of waveform samples."""
         return len(self.parameters)
 
-    def __getitem__(self, idx) -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
+    def __getitem__(self, idx: int) -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
         """
         Return a nested dictionary containing parameters and waveform polarizations
-        for sample with index `idx`. If defined, a chain of transformations is applied to
+        for samples with indices `idx_batched`. If defined, a chain of transformations is applied to
         the waveform data.
+
+        Parameters
+        ----------
+        idx : int
+            Index of the sample in the WaveformDataset to return.
+
+        Returns
+        -------
+        Dict[str, Dict[str, Union[float, np.ndarray]]]
+            Nested dictionary containing parameters and waveform polarizations.
         """
         return self.__getitems__([idx])[0]
 
     def __getitems__(
-        self, batched_idx
-    ) -> Dict[str, Dict[str, Union[float, np.ndarray]]]:
+        self, batched_idx: list[int]
+    ) -> list[Dict[str, Dict[str, Union[float, np.ndarray]]]]:
         """
         Return a nested dictionary containing parameters and waveform polarizations
         for sample with index `idx`. If defined, a chain of transformations is applied to
         the waveform data.
+
+        Parameters
+        ----------
+        batched_idx : list[int]
+            List of indices to return.
+
+        Returns
+        -------
+        repackaged_data : list[Dict[str, Dict[str, Union[float, np.ndarray]]]]
+            Nested dictionary containing parameters and waveform polarizations.
         """
         parameters = {
-            k: v if isinstance(v, float) else v.to_numpy()
+    k: v.to_numpy()
             for k, v in self.parameters.iloc[batched_idx].items()
         }
         polarizations = {
@@ -235,29 +255,24 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         if self.transform is not None:
             data = self.transform(data)
 
-        # Currently, the data is of shape [M, N, ...] with where M is the number
-        # of arrays returned by the transform and N is the batch_size.  This
-        # array is repackaged to group different indices of `M` into one sample,
-        # resulting in data of shape [N, M, ...].  That is, data is of the form
-        #
-        # [arr1, ... arrM]
-        #
-        # where each arr is shape (N, ...).  Whereas the repackaged data is of form
-        #
-        # [[arr1[0, ...], ... arrM[0, ...]], ..., [arr1[N, ...], ... arrM[N, ...]]]
-        #
-        # which is a list of length N, where each element is an arr of shape (M, ...).
-        # this is useful for collation
+        # The DataLoader expects a list of items from the dataset, which it will later
+        # collate. However, depending on self.transform, here data is either a nested
+        # dict of arrays or a list of arrays, each array having length batch_size.
+        # Repackage data into a list of length batch_size, each item having the same
+        # structure as before.
+
         if isinstance(data, dict):
-            repackaged_data = [
+            data = [
                 {k1: {k2: v2[j] for k2, v2 in v1.items()} for k1, v1 in data.items()}
                 for j in range(len(batched_idx))
             ]
         elif isinstance(data, list):
-            repackaged_data = [
+            data = [
                 [data[i][j] for i in range(len(data))] for j in range(len(batched_idx))
             ]
-        return repackaged_data
+        else:
+            raise NotImplementedError()
+        return data
 
     def parameter_mean_std(self):
         mean = self.parameters.mean().to_dict()
