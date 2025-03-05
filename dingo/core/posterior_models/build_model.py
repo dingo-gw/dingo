@@ -1,3 +1,4 @@
+from typing import Optional
 import numpy as np
 import torch
 
@@ -6,6 +7,7 @@ from dingo.core.nn.transformer import (
     create_transformer_enet,
     create_pooling_transformer,
 )
+from dingo.core.posterior_models.base_model import BasePosteriorModel
 from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
 from dingo.core.posterior_models.flow_matching import FlowMatchingPosteriorModel
 from dingo.core.posterior_models.score_matching import ScoreDiffusionPosteriorModel
@@ -14,13 +16,13 @@ from dingo.core.utils.backward_compatibility import update_model_config
 
 
 def build_model_from_kwargs(
-    filename: str = None,
-    settings: dict = None,
-    pretraining: bool = False,
-    pretrained_embedding_net: torch.nn.Module = None,
-    print_output: bool = True,
+    filename: Optional[str] = None,
+    settings: Optional[dict] = None,
+    pretraining: Optional[bool] = False,
+    pretrained_embedding_net: Optional[torch.nn.Module] = None,
+    print_output: Optional[bool] = True,
     **kwargs,
-):
+) -> BasePosteriorModel:
     """
     Returns a PosteriorModel (from settings file or rebuild from file). Extracts the relevant arguments (normalizing flow
     or continuous flow) from setting.
@@ -46,7 +48,7 @@ def build_model_from_kwargs(
 
     Returns
     -------
-    PosteriorModel
+    BasePosteriorModel
     """
     if (filename is None) == (settings is None):
         raise ValueError(

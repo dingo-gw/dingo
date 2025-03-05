@@ -1,4 +1,3 @@
-import os
 import tempfile
 import uuid
 from pathlib import Path
@@ -55,7 +54,7 @@ compression:
 """
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def temp_dir() -> Generator[Path, None, None]:
     """
     Fixture to provide a temporary directory path using pathlib.Path.
@@ -68,7 +67,7 @@ def temp_dir() -> Generator[Path, None, None]:
         yield Path(tmpdirname)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def generate_waveform_dataset_small(temp_dir: Path) -> Path:
     """
     Create a small waveform dataset on-the-fly
@@ -133,8 +132,15 @@ def test_load_waveform_dataset(generate_waveform_dataset_small):
     assert isinstance(el_list[0]["waveform"]["h_plus"], np.ndarray)
     assert isinstance(el_list[0]["waveform"]["h_cross"], np.ndarray)
 
-    """Check truncation of wd. Ideally, this should be an individual test,
-    but since the setup takes so long it is added here."""
+
+@pytest.mark.slow
+def test_truncation_of_waveform(generate_waveform_dataset_small):
+    """Check truncation of wfd."""
+    wfd_path = generate_waveform_dataset_small
+
+    path = f"{wfd_path}/waveform_dataset.hdf5"
+    wfd = WaveformDataset(file_name=path, precision="single")
+    el = wfd[0]
 
     f_min = wfd.domain.f_min
     f_max = wfd.domain.f_max
@@ -173,7 +179,7 @@ def test_load_waveform_dataset(generate_waveform_dataset_small):
 
 
 @pytest.mark.slow
-def test_load_waveform_dataset_with_keys_to_leave_on_disk(
+def test_load_waveform_dataset_with_leave_polarizations_on_disk(
     generate_waveform_dataset_small,
 ):
 
@@ -183,7 +189,7 @@ def test_load_waveform_dataset_with_keys_to_leave_on_disk(
     wfd = WaveformDataset(
         file_name=path,
         precision="single",
-        wfd_keys_to_leave_on_disk=["polarizations"],
+        leave_polarizations_on_disk=True,
     )
 
     assert len(wfd) > 0
@@ -206,45 +212,23 @@ def test_load_waveform_dataset_with_keys_to_leave_on_disk(
     assert isinstance(el_list[0]["waveform"]["h_plus"], np.ndarray)
     assert isinstance(el_list[0]["waveform"]["h_cross"], np.ndarray)
 
-    """Check truncation of wfd. Ideally, this should be an individual test, 
-    but since the setup takes so long it is added here."""
-
-    f_min = wfd.domain.f_min
-    f_max = wfd.domain.f_max
-    delta_f = wfd.domain._delta_f
-
-    # check that truncation works as intended when setting new range
-    f_min_new = 20
-    f_max_new = 100
-    wfd2 = WaveformDataset(
-        file_name=path,
-        domain_update={"f_min": f_min_new, "f_max": f_max_new},
-        wfd_keys_to_leave_on_disk=["polarizations"],
+    """Check that using a randomly ordered list of indices provides the expected ordering."""
+    ind_list_rand = np.random.permutation(ind_list).tolist()
+    el_list_rand = wfd.__getitems__(ind_list_rand)
+    assert np.all(
+        [
+            el_list_rand[ind_list_rand[i]]["waveform"]["h_plus"]
+            == el_list[i]["waveform"]["h_plus"]
+            for i in range(len(ind_list))
+        ]
     )
-    assert len(wfd2.domain) == len(wfd2.domain())
-    # check that new domain settings are correctly adapted
-    assert wfd2.domain.f_min == f_min_new
-    assert wfd2.domain.f_max == f_max_new
-    assert wfd2.domain._delta_f == wfd.domain._delta_f
-    # check that truncation works as intended
-    for pol in ["h_cross", "h_plus"]:
-        # f_min_new to f_max_new check
-        a = el["waveform"][pol][int(f_min_new / delta_f) : int(f_max_new / delta_f) + 1]
-        b = wfd2[0]["waveform"][pol][int(f_min_new / delta_f) :]
-        scale_factor = np.max(np.abs(a))
-        assert len(a) == f_max_new / delta_f + 1 - f_min_new / delta_f
-        assert np.allclose(b / scale_factor, a / scale_factor)
-        assert not np.allclose(b / scale_factor, np.roll(a, 1) / scale_factor)
-
-        # f_min to f_min_new check
-        a = el["waveform"][pol][int(f_min / delta_f) : int(f_min_new / delta_f)]
-        b = wfd2[0]["waveform"][pol][int(f_min / delta_f) : int(f_min_new / delta_f)]
-        assert not np.allclose(b / scale_factor, a / scale_factor)
-
-        # below f_min_new check
-        assert np.all(wfd2[0]["waveform"][pol][: int(f_min_new)] == 0.0)
-    assert len(wfd2.domain) == f_max_new / delta_f + 1
-    assert len(wfd2.domain) == len(wfd2.domain())
+    assert np.all(
+        [
+            el_list_rand[ind_list_rand[i]]["waveform"]["h_cross"]
+            == el_list[i]["waveform"]["h_cross"]
+            for i in range(len(ind_list))
+        ]
+    )
 
 
 @pytest.fixture

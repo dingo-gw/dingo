@@ -1,11 +1,14 @@
-from typing import Tuple
+from typing import Optional, Tuple
 import argparse
 import numpy as np
 import os
 import queue
+import shutil
 import sys
 import textwrap
+import time
 import yaml
+from copy import deepcopy
 
 import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -44,12 +47,38 @@ from dingo.gw.training.train_builders import (
 )
 
 
+def copy_files_to_local(file_path: str, local_dir: str) -> str:
+    """
+    Copy files to local node to minimize network traffic during training.
+
+    Parameters
+    ----------
+    file_path: str
+        Path to file that should be copied.
+    local_dir: str
+        Directory where file should be copied.
+
+    Returns
+    ----------
+    local_file_path: str
+    """
+    file_name = file_path.split("/")[-1]
+    local_file_path = os.path.join(local_dir, file_name)
+    print(f"Copying file to {local_file_path}")
+    # Copy file
+    start_time = time.time()
+    shutil.copy(file_path, local_file_path)
+    elapsed_time = time.time() - start_time
+    print("Done. This took {:2.0f}:{:2.0f} min.".format(*divmod(elapsed_time, 60)))
+    return local_file_path
+
+
 def prepare_wfd_and_initialization_for_embedding_network(
     train_settings: dict,
     train_dir: str,
     local_settings: dict,
-    pretraining: bool = False,
-    print_output: bool = True,
+    pretraining: Optional[bool] = False,
+    print_output: Optional[bool] = True,
 ):
     """
     Based on a settings dictionary, initialize a WaveformDataset and parts of the embedding network.
@@ -74,13 +103,18 @@ def prepare_wfd_and_initialization_for_embedding_network(
     (WaveformDataset, initial_weights, BasePosteriorModel)
     """
 
+    data_settings = deepcopy(train_settings["data"])
+    if "path_copy_wfd_to_local" in local_settings:
+        data_settings["waveform_dataset_path"] = copy_files_to_local(
+            file_path=data_settings["waveform_dataset_path"],
+            local_dir=local_settings["path_copy_wfd_to_local"],
+        )
     # No transforms yet
     wfd = build_dataset(
-        data_settings=train_settings["data"],
-        path_copy_wfd_to_local=local_settings.get(
-            "path_copy_waveform_dataset_to_local", None
+        data_settings=data_settings,
+        leave_polarizations_on_disk=local_settings.get(
+            "leave_polarizations_on_disk", None
         ),
-        wfd_keys_to_leave_on_disk=local_settings.get("wfd_keys_to_leave_on_disk", None),
     )
     initial_weights = {}
     pretrained_embedding_net = None
@@ -317,7 +351,7 @@ def prepare_model_resume(
     checkpoint_name: str,
     local_settings: dict,
     train_dir: str,
-    pretraining: bool = False,
+    pretraining: Optional[bool] = False,
 ):
     """
     Loads a PosteriorModel from a checkpoint in order to continue training. It initializes the saved optimizer
@@ -370,8 +404,8 @@ def prepare_training_resume(
     checkpoint_name: str,
     local_settings: dict,
     train_dir: str,
-    pretraining: bool = False,
-):
+    pretraining: Optional[bool] = False,
+) -> Tuple[BasePosteriorModel, WaveformDataset]:
     """
     Loads a PosteriorModel from a checkpoint, as well as the corresponding
     WaveformDataset, in order to continue training. It initializes the saved optimizer
@@ -390,14 +424,22 @@ def prepare_training_resume(
 
     Returns
     -------
-    (Base, WaveformDataset)
+    (BasePosteriorModel, WaveformDataset)
     """
 
     train_settings = load_settings_from_ckpt(checkpoint_name)
+
+    data_settings = deepcopy(train_settings["data"])
+    if "path_copy_wfd_to_local" in local_settings:
+        data_settings["waveform_dataset_path"] = copy_files_to_local(
+            file_path=data_settings["waveform_dataset_path"],
+            local_dir=local_settings["path_copy_wfd_to_local"],
+        )
     wfd = build_dataset(
-        data_settings=train_settings["data"],
-        path_copy_wfd_to_local=local_settings.get("path_copy_wfd_to_local", None),
-        wfd_keys_to_leave_on_disk=local_settings.get("wfd_keys_to_leave_on_disk", None),
+        data_settings=data_settings,
+        leave_polarizations_on_disk=local_settings.get(
+            "leave_polarizations_on_disk", None
+        ),
     )
 
     pm = prepare_model_resume(
@@ -411,13 +453,13 @@ def prepare_training_resume(
 
 
 def initialize_stage(
-    pm,
-    wfd,
-    stage,
-    num_workers,
-    world_size: int = None,
-    rank: int = None,
-    resume=False,
+    pm: BasePosteriorModel,
+    wfd: WaveformDataset,
+    stage: dict,
+    num_workers: int,
+    world_size: Optional[int] = None,
+    rank: Optional[int] = None,
+    resume: Optional[bool] = False,
 ):
     """
     Initializes training based on PosteriorModel metadata and current stage:
