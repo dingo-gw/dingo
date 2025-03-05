@@ -50,6 +50,13 @@ class ImportanceSamplingNode(AnalysisNode):
         self.arguments.add("event-data-file", generation_node.event_data_file)
 
         self.extra_lines.extend(self._checkpoint_submit_lines())
+
+        # if running on the OSG we need to specify the sites
+        if self.inputs.osg:
+            sites = self.inputs.desired_sites
+            self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
+            self.requirements.append("IS_GLIDEIN=?=True")
+
         env_vars = []
         # if self.request_cpus > 1:
         #     env_vars.append("OMP_NUM_THREADS=1")
