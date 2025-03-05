@@ -429,6 +429,7 @@ class TransformerModel(nn.Module):
         nhead: int,
         num_layers: int,
         dropout: float = 0.1,
+        norm_first: bool = False,
     ):
         """
         Parameters
@@ -447,6 +448,9 @@ class TransformerModel(nn.Module):
             number of transformer layers
         dropout: float
             dropout
+        norm_first: bool
+            argument of TransformerEncoderLayer, whether to normalize to attention and feedforward operations,
+            respectively. Otherwise, it’s done after. Default: False (i.e., after).
         """
         super().__init__()
         self.model_type = "Transformer"
@@ -460,6 +464,7 @@ class TransformerModel(nn.Module):
             dim_feedforward=dim_feedforward,
             dropout=dropout,
             batch_first=True,
+            norm_first=norm_first,
         )
         self.transformer_encoder = TransformerEncoder(encoder_layers, num_layers)
         self.d_model = d_model
