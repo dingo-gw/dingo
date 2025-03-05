@@ -34,7 +34,7 @@ jobs:
           pytest --junit-xml=pytest-report.xml tests/
 
       - name: Upload Pytest Report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: pytest-report.xml
           path: pytest-report.xml
