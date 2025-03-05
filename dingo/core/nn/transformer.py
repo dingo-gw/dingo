@@ -1,12 +1,11 @@
 import math
-from types import SimpleNamespace
 from typing import Callable, List, Union
 
 import torch
 from torch import nn, Tensor
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
-from dingo.core.nn.resnet import DenseResidualNet
+from dingo.core.nn.resnet import DenseResidualNet, MLP
 from dingo.core.utils import torchutils
 
 
@@ -64,31 +63,59 @@ class Tokenizer(nn.Module):
         self.num_tokens, self.num_features = input_dims
         self.individual_token_embedding = individual_token_embedding
         if self.individual_token_embedding:
-            self.stack_tokenizer_nets = nn.ModuleList(
-                [
-                    DenseResidualNet(
-                        input_dim=self.num_features,
-                        output_dim=output_dim,
-                        hidden_dims=tuple(hidden_dims),
-                        activation=activation,
-                        dropout=dropout,
-                        batch_norm=batch_norm,
-                        layer_norm=layer_norm,
-                    )
-                    for _ in range(self.num_tokens)
-                ]
-            )
-
+            if isinstance(hidden_dims, list):
+                self.stack_tokenizer_nets = nn.ModuleList(
+                    [
+                        DenseResidualNet(
+                            input_dim=self.num_features,
+                            output_dim=output_dim,
+                            hidden_dims=tuple(hidden_dims),
+                            activation=activation,
+                            dropout=dropout,
+                            batch_norm=batch_norm,
+                            layer_norm=layer_norm,
+                        )
+                        for _ in range(self.num_tokens)
+                    ]
+                )
+            elif isinstance(hidden_dims, int):
+                self.stack_embedding_networks = nn.ModuleList(
+                    [
+                        MLP(
+                            input_size=self.num_features,
+                            hidden_size=hidden_dims,
+                            output_size=output_dim,
+                            activation_fn=activation,
+                        )
+                        for _ in range(self.num_tokens)
+                    ]
+                )
+            else:
+                raise ValueError(
+                    f"hidden_dims in tokenizer_kwargs must be a list or int, got {hidden_dims}"
+                )
         else:
-            self.tokenizer_net = DenseResidualNet(
-                input_dim=self.num_features,
-                output_dim=output_dim,
-                hidden_dims=tuple(hidden_dims),
-                activation=activation,
-                dropout=dropout,
-                batch_norm=batch_norm,
-                layer_norm=layer_norm,
-            )
+            if isinstance(hidden_dims, list):
+                self.tokenizer_net = DenseResidualNet(
+                    input_dim=self.num_features,
+                    output_dim=output_dim,
+                    hidden_dims=tuple(hidden_dims),
+                    activation=activation,
+                    dropout=dropout,
+                    batch_norm=batch_norm,
+                    layer_norm=layer_norm,
+                )
+            elif isinstance(hidden_dims, int):
+                self.tokenizer_net = MLP(
+                    input_size=self.num_features,
+                    hidden_size=hidden_dims,
+                    output_size=output_dim,
+                    activation_fn=activation,
+                )
+            else:
+                raise ValueError(
+                    f"hidden_dims in tokenizer_kwargs must be a list or int, got {hidden_dims}"
+                )
 
     def forward(self, x: Tensor):
         """

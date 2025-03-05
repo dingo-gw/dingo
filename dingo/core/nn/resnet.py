@@ -1,7 +1,7 @@
-from typing import Callable, Tuple
+from typing import Callable, Optional, Tuple
 
 import torch
-from torch import nn
+from torch import nn, Tensor
 from torch.nn import functional as F, init
 
 
@@ -12,13 +12,13 @@ class MyResidualBlock(nn.Module):
 
     def __init__(
         self,
-        features,
-        context_features,
+        features: int,
+        context_features: Optional[int] = None,
         activation=F.relu,
-        dropout_probability=0.0,
-        use_batch_norm=False,
-        use_layer_norm=False,
-        zero_initialization=True,
+        dropout_probability: float = 0.0,
+        use_batch_norm: bool = False,
+        use_layer_norm: bool = False,
+        zero_initialization: bool = True,
     ):
         super().__init__()
         self.activation = activation
@@ -152,7 +152,7 @@ class DenseResidualNet(nn.Module):
             + [nn.Linear(self.hidden_dims[-1], self.output_dim)]
         )
 
-    def forward(self, x, context=None):
+    def forward(self, x: Tensor, context: Optional[Tensor] = None) -> Tensor:
         if context is None:
             x = self.initial_layer(x)
         else:
@@ -161,4 +161,25 @@ class DenseResidualNet(nn.Module):
         for block, resize_layer in zip(self.blocks, self.resize_layers):
             x = block(x, context=context)
             x = resize_layer(x)
+        return x
+
+
+class MLP(nn.Module):
+    """Simple MLP with one hidden layer."""
+
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size: int,
+        output_size: int,
+        activation_fn: Callable,
+    ):
+        super(MLP, self).__init__()
+        self.linear0 = nn.Linear(input_size, hidden_size)
+        self.activation = activation_fn
+        self.linear1 = nn.Linear(hidden_size, output_size)
+
+    def forward(self, x: Tensor) -> Tensor:
+        x = self.activation(self.linear0(x))
+        x = self.activation(self.linear1(x))
         return x
