@@ -53,7 +53,7 @@ def torch_load_with_fallback(
     Loads a PyTorch file with fallback behavior:
     1. Tries preferred_map_location (default: cuda)
     2. Falls back to CUDA/MPS/HIP if available
-    3. Finally falls back to CPU
+    3. Finally falls back to CPU, and if that fails, meta.
 
     Returns
     -------

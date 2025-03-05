@@ -20,7 +20,6 @@ from torch.utils.data import Dataset
 import dingo.core.utils as utils
 import dingo.core.utils.trainutils
 from dingo.core.utils.backward_compatibility import (
-    torch_load_with_fallback,
     update_model_config,
 )
 from dingo.core.utils.misc import get_version
