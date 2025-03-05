@@ -90,6 +90,7 @@ class DenseResidualNet(nn.Module):
         dropout: float = 0.0,
         batch_norm: bool = True,
         layer_norm: bool = False,
+        context_in_initial_layer: bool = True,
     ):
         """
         Parameters
@@ -111,6 +112,8 @@ class DenseResidualNet(nn.Module):
             flag that specifies whether to use batch normalization
         layer_norm: bool=False
             flag that specifies whether to use layer normalization
+        context_in_initial_layer: bool=True
+            whether to concatenate the context features to the input of the initial layer or not.
         """
 
         super(DenseResidualNet, self).__init__()
@@ -118,12 +121,13 @@ class DenseResidualNet(nn.Module):
         self.output_dim = output_dim
         self.hidden_dims = hidden_dims
         self.num_res_blocks = len(self.hidden_dims)
+        self.context_in_initial_layer = context_in_initial_layer
 
         # This attribute is required by nflows.
         if all([d == self.hidden_dims[0] for d in self.hidden_dims]):
             self.hidden_features = self.hidden_dims[0]
 
-        if context_features is not None:
+        if context_features is not None and context_in_initial_layer:
             self.initial_layer = nn.Linear(input_dim + context_features, hidden_dims[0])
         else:
             self.initial_layer = nn.Linear(self.input_dim, hidden_dims[0])
@@ -153,11 +157,12 @@ class DenseResidualNet(nn.Module):
         )
 
     def forward(self, x: Tensor, context: Optional[Tensor] = None) -> Tensor:
-        if context is None:
-            x = self.initial_layer(x)
+        if context is not None and self.context_in_initial_layer:
+            # dim=-1 below to allow for sequence dimension
+            x = self.initial_layer(torch.cat((x, context), dim=-1))
         else:
-            # Should dim=-1 below to allow for seq dimension?
-            x = self.initial_layer(torch.cat((x, context), dim=1))
+            x = self.initial_layer(x)
+
         for block, resize_layer in zip(self.blocks, self.resize_layers):
             x = block(x, context=context)
             x = resize_layer(x)

@@ -1,5 +1,5 @@
 import math
-from typing import Callable, List, Union
+from typing import Callable, List, Optional, Union
 
 import torch
 from torch import nn, Tensor
@@ -28,10 +28,12 @@ class Tokenizer(nn.Module):
         hidden_dims: Union[List, int],
         output_dim: int,
         activation: Callable,
+        context_features: Optional[int] = None,
         dropout: float = 0.0,
         batch_norm: bool = True,
         layer_norm: bool = False,
         individual_token_embedding: bool = False,
+        context_in_initial_layer: bool = True,
     ):
         """
         Parameters
@@ -46,6 +48,9 @@ class Tokenizer(nn.Module):
             output dimension
         activation: str
             activation function for DenseResidualNet
+        context_features: Optional[int]
+            If provided, the tokenizer is a conditional ResNet and with the context features corresponding to the
+            positional information of each token.
         dropout: float
             dropout rate for DenseResidualNet
         batch_norm: bool
@@ -54,12 +59,20 @@ class Tokenizer(nn.Module):
             whether to use layer normalization for DenseResidualNet
         individual_token_embedding: bool
             whether to use an individual linear layer for each token
+        context_in_initial_layer: bool
+            whether to provide the context features to the initial layer of the ResNet. Has no effect if MLP is used.
         """
         super(Tokenizer, self).__init__()
-
-        assert (
-            len(input_dims) == 2
-        ), f"Invalid shape in Tokenizer, expected len(input_dims) == 2, got {input_dims})."
+        if len(input_dims) != 2:
+            raise ValueError(
+                f"Invalid shape in Tokenizer, expected len(input_dims) == 2, got {input_dims})."
+            )
+        if context_features is not None and isinstance(hidden_dims, int):
+            raise ValueError(
+                f"Conditional tokenizer can only be used with ResNet architecture. "
+                f"Got single value for hidden_dims={hidden_dims}, but requires tuple."
+            )
+        self.context_features = context_features
         self.num_tokens, self.num_features = input_dims
         self.individual_token_embedding = individual_token_embedding
         if self.individual_token_embedding:
@@ -71,9 +84,11 @@ class Tokenizer(nn.Module):
                             output_dim=output_dim,
                             hidden_dims=tuple(hidden_dims),
                             activation=activation,
+                            context_features=context_features,
                             dropout=dropout,
                             batch_norm=batch_norm,
                             layer_norm=layer_norm,
+                            context_in_initial_layer=context_in_initial_layer,
                         )
                         for _ in range(self.num_tokens)
                     ]
@@ -101,9 +116,11 @@ class Tokenizer(nn.Module):
                     output_dim=output_dim,
                     hidden_dims=tuple(hidden_dims),
                     activation=activation,
+                    context_features=context_features,
                     dropout=dropout,
                     batch_norm=batch_norm,
                     layer_norm=layer_norm,
+                    context_in_initial_layer=context_in_initial_layer,
                 )
             elif isinstance(hidden_dims, int):
                 self.tokenizer_net = MLP(
@@ -117,7 +134,7 @@ class Tokenizer(nn.Module):
                     f"hidden_dims in tokenizer_kwargs must be a list or int, got {hidden_dims}"
                 )
 
-    def forward(self, x: Tensor):
+    def forward(self, x: Tensor, context: Optional[Tensor] = None) -> Tensor:
         """
         Parameters
         --------
@@ -125,6 +142,8 @@ class Tokenizer(nn.Module):
             shape [batch_size, num_tokens, num_features]
                  =[batch_size, num_blocks * num_tokens_per_block, num_channels * num_bins_per_token]
             where num_blocks = number of interferometers in GW use case, and num_channels = [real, imag, asd].
+        context: Tensor
+            Conditional information of shape [batch_size, num_tokens, ] provided to tokenizer network.
 
         Returns
         --------
@@ -136,16 +155,24 @@ class Tokenizer(nn.Module):
                 f"Invalid shape for token embedding layer. "
                 f"Expected last dimension to be {self.num_features}, got {tuple(x.shape[-1])}."
             )
+        if (
+            self.context_features is not None
+            and self.context_features != context.shape[-1]
+        ):
+            raise ValueError(
+                f"Invalid shape for context in conditional tokenizer. "
+                f"Expected last dimension to be {self.context_features}, got {tuple(context.shape[-1])}."
+            )
         if self.individual_token_embedding:
             x = torch.stack(
                 [
-                    self.stack_tokenizer_nets[i](x[:, i, ...])
+                    self.stack_tokenizer_nets[i](x[:, i, ...], context=context)
                     for i in range(self.num_tokens)
                 ],
                 dim=1,
             )
         else:
-            x = self.tokenizer_net(x)
+            x = self.tokenizer_net(x, context=context)
 
         return x
 
@@ -476,7 +503,10 @@ class TransformerModel(nn.Module):
             shape [batch_size, d_out_of_final_net if final_net else d_model]
         """
         if self.tokenizer is not None:
-            x = self.tokenizer(x)
+            if self.tokenizer.context_features is not None:
+                x = self.tokenizer(x, context=position)
+            else:
+                x = self.tokenizer(x)
         if self.positional_encoding is not None:
             x = self.positional_encoding(x, position[..., 0:2])
         if self.block_encoding is not None:
@@ -535,10 +565,29 @@ def create_transformer_enet(
     """
     if added_context:
         raise ValueError(
-            "GNPE is not yet implemented for transformer embedding network."
+            "GNPE is not yet implemented for transformer embedding network. "
         )
 
     if tokenizer_kwargs is not None:
+        if (
+            "condition_on_position" in tokenizer_kwargs
+            and tokenizer_kwargs["condition_on_position"]
+        ):
+            # Make sure that conditional tokenizer is not used with positional and block encoding
+            if positional_encoder_kwargs is not None:
+                raise ValueError(
+                    "Conditional tokenizer is not compatible with positional encoding. "
+                    "Either set conditional=False in tokenizer_kwargs or remove positional_encoder_kwargs. "
+                )
+            if block_encoder_kwargs is not None:
+                raise ValueError(
+                    "Conditional tokenizer is not compatible with block encoding. "
+                    "Either set conditional=False in tokenizer_kwargs or remove block_encoder_kwargs. "
+                )
+            # Include context_features corresponding to positional information: [min, max, block]
+            tokenizer_kwargs["context_features"] = 3
+            # Remove condition_on_position
+            tokenizer_kwargs.pop("condition_on_position")
         tokenizer_kwargs["activation"] = torchutils.get_activation_function_from_string(
             tokenizer_kwargs["activation"]
         )
