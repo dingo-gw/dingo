@@ -95,7 +95,7 @@ class DingoDataset:
         file_name: Optional[str] = None,
         dictionary: Optional[dict] = None,
         data_keys: Optional[List] = None,
-        leave_polarizations_on_disk: Optional[bool] = False,
+        leave_on_disk_keys: Optional[list] = None,
     ):
         """
         For constructing, provide either file_name, or dictionary containing data and
@@ -112,9 +112,9 @@ class DingoDataset:
             Variables that should be saved / loaded. This allows for class to store
             additional variables beyond those that are saved. Typically, this list
             would be provided by any subclass.
-        leave_polarizations_on_disk: bool
-            If true, the polarizations are not loaded into RAM when initializing the dataset
-            to reduce the memory footprint during training. Instead, the polarizations are
+        leave_on_disk_keys: Optional[list]
+            Keys for which the values are not loaded into RAM when initializing the dataset.
+            This reduces the memory footprint during training. Instead, the values are
             loaded from the HDF5 file during training.
         """
         self._data_keys = list(data_keys)  # Make a copy before modifying.
@@ -124,7 +124,7 @@ class DingoDataset:
         for key in self._data_keys:
             vars(self)[key] = None
         self.settings = None
-        self.leave_polarizations_on_disk = leave_polarizations_on_disk
+        self.leave_on_disk_keys = leave_on_disk_keys
 
         # If data provided, load it
         if file_name is not None:
@@ -148,12 +148,12 @@ class DingoDataset:
 
     def from_file(self, file_name: str):
         keys_to_load = self._data_keys
-        if self.leave_polarizations_on_disk:
+        if self.leave_on_disk_keys is not None:
             print(
-                f"Loading dataset without loading the polarizations from {str(file_name)}."
+                f"Loading dataset without loading {self.leave_on_disk_keys} from {str(file_name)}."
             )
-            # Remove polarizations from keys_to_load
-            keys_to_load = [k for k in keys_to_load if k != "polarizations"]
+            # Remove keys from keys_to_load
+            keys_to_load = [k for k in keys_to_load if k not in self.leave_on_disk_keys]
         else:
             print(f"Loading dataset from {str(file_name)}.")
 

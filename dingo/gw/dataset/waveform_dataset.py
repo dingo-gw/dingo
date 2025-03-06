@@ -17,8 +17,8 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
     It can load the dataset either from an HDF5 file or suitable dictionary.
 
     It is possible to either load the entire dataset into memory or to load the dataset during training
-    (leave_polarizations_on_disk=True) to reduce the memory footprint.
-    At the moment, it is only possible to load the polarizations on-demand since the
+    (leave_waveforms_on_disk=True) to reduce the memory footprint.
+    At the moment, it is only possible to load the waveforms on-demand since the
     standardization dict for all parameters in the dataset has to be computed at the
     beginning of training.
 
@@ -36,7 +36,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         precision: Optional[str] = None,
         domain_update: Optional[dict] = None,
         svd_size_update: Optional[int] = None,
-        leave_polarizations_on_disk: Optional[bool] = False,
+        leave_waveforms_on_disk: Optional[bool] = False,
     ):
         """
         For constructing, provide either file_name, or dictionary containing data and
@@ -57,9 +57,9 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             If provided, update domain from existing domain using new settings.
         svd_size_update : int
             If provided, reduces the SVD size when decompressing (for speed).
-        leave_polarizations_on_disk : bool
-            If True, the values for the polarizations are not loaded into RAM when initializing the
-            waveform dataset. Instead, the polarizations are loaded lazily in __getitem__().
+        leave_waveforms_on_disk : bool
+            If True, the values for the waveforms are not loaded into RAM when initializing the
+            waveform dataset. Instead, they are loaded lazily in __getitem__().
         """
         self.domain = None
         self.transform = transform
@@ -79,11 +79,15 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                 )
         else:
             self.real_type, self.complex_type = None, None
+        if leave_waveforms_on_disk:
+            self.leave_on_disk_keys = ["polarizations"]
+        else:
+            self.leave_on_disk_keys = None
         super().__init__(
             file_name=file_name,
             dictionary=dictionary,
             data_keys=["parameters", "polarizations", "svd"],
-            leave_polarizations_on_disk=leave_polarizations_on_disk,
+            leave_on_disk_keys=self.leave_on_disk_keys,
         )
         self.file_name = file_name
 
@@ -249,14 +253,17 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         """
 
         # Get parameters and data for idx
-        if self.leave_polarizations_on_disk:
+        if (
+            self.leave_on_disk_keys is not None
+            and "polarizations" in self.leave_on_disk_keys
+        ):
             # Load polarizations from disk
             if self.file_handle is None:
                 # Open hdf5 file
                 self.file_handle = h5py.File(self.file_name, "r")
 
             polarizations = recursive_hdf5_load(
-                self.file_handle, keys=["polarizations"], idx=batched_idx
+                self.file_handle, keys=self.leave_on_disk_keys, idx=batched_idx
             )["polarizations"]
             # Apply domain update to set waveform to zero for f < f_min
             if self.svd is None:
