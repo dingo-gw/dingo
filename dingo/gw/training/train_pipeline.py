@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Optional, Tuple
 import os
 
 import numpy as np
@@ -31,25 +31,47 @@ from gw.dataset import WaveformDataset
 from core.posterior_models import BasePosteriorModel
 
 
-def copy_files_to_local(file_path: str, local_dir: str) -> str:
+def copy_files_to_local(
+    file_path: str, local_dir: Optional[str], leave_keys_on_disk: bool
+) -> str:
     """
-    Copy files to local node to minimize network traffic during training.
+    Copy files to local node if local_dir is provided to minimize network traffic during training.
 
     Parameters
     ----------
     file_path: str
         Path to file that should be copied.
-    local_dir: str
-        Directory where file should be copied.
+    local_dir: Optional[str]
+        Directory where file should be copied. If None, file will not be copied.
+    leave_keys_on_disk: bool
+        Whether to leave keys on disk and load them during training. If dataset is not copied and
+        leave_keys_on_disk is True, a warning will be raised.
+
+    Returns
+    -------
+    local_file_path: str
+        Modified file path if file was copied to local node, else the original file path.
     """
-    file_name = file_path.split("/")[-1]
-    local_file_path = os.path.join(local_dir, file_name)
-    print(f"Copying file to {local_file_path}")
-    # Copy file
-    start_time = time.time()
-    shutil.copy(file_path, local_file_path)
-    elapsed_time = time.time() - start_time
-    print("Done. This took {:2.0f}:{:2.0f} min.".format(*divmod(elapsed_time, 60)))
+    local_file_path = file_path
+    if local_dir is not None:
+        file_name = file_path.split("/")[-1]
+        local_file_path = os.path.join(local_dir, file_name)
+        print(f"Copying file to {local_file_path}")
+        # Copy file
+        start_time = time.time()
+        shutil.copy(file_path, local_file_path)
+        elapsed_time = time.time() - start_time
+        print("Done. This took {:2.0f}:{:2.0f} min.".format(*divmod(elapsed_time, 60)))
+    elif leave_keys_on_disk:
+        print(
+            f"Warning: leave_waveforms_on_disk defaults to True, but path_copy_wfd_to_local is not specified. "
+            f"This means that the waveforms will be loaded during training from {local_file_path} ."
+            f"This can lead to unexpected long times for data loading during training due to network traffic. "
+            f"To prevent this, specify 'path_copy_wfd_to_local = tmp' in the local settings or set "
+            f"leave_waveforms_on_disk = False. However, the latter is not recommended for large datasets since "
+            f"it can lead to memory issues when loading the entire dataset into RAM. "
+        )
+
     return local_file_path
 
 
@@ -77,11 +99,12 @@ def prepare_training_new(
     (BasePosteriorModel, WaveformDataset)
     """
     data_settings = deepcopy(train_settings["data"])
-    if "path_copy_wfd_to_local" in local_settings:
-        data_settings["waveform_dataset_path"] = copy_files_to_local(
-            file_path=data_settings["waveform_dataset_path"],
-            local_dir=local_settings["path_copy_wfd_to_local"],
-        )
+    # Optionally copy files to local and update path
+    data_settings["waveform_dataset_path"] = copy_files_to_local(
+        file_path=data_settings["waveform_dataset_path"],
+        local_dir=local_settings.get("path_copy_wfd_to_local", None),
+        leave_keys_on_disk=local_settings.get("leave_waveforms_on_disk", True),
+    )
     wfd = build_dataset(
         data_settings=data_settings,
         leave_waveforms_on_disk=local_settings.get("leave_waveforms_on_disk", True),
@@ -175,11 +198,12 @@ def prepare_training_resume(
         filename=checkpoint_name, device=local_settings["device"]
     )
     data_settings = deepcopy(pm.metadata["train_settings"]["data"])
-    if "path_copy_wfd_to_local" in local_settings:
-        data_settings["waveform_dataset_path"] = copy_files_to_local(
-            file_path=data_settings["waveform_dataset_path"],
-            local_dir=local_settings["path_copy_wfd_to_local"],
-        )
+    # Optionally copy files to local and update path
+    data_settings["waveform_dataset_path"] = copy_files_to_local(
+        file_path=data_settings["waveform_dataset_path"],
+        local_dir=local_settings.get("path_copy_wfd_to_local", None),
+        leave_keys_on_disk=local_settings.get("leave_waveforms_on_disk", True),
+    )
     wfd = build_dataset(
         data_settings=data_settings,
         leave_waveforms_on_disk=local_settings.get("leave_waveforms_on_disk", True),
