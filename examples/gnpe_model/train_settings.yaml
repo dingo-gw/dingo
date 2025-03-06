@@ -110,6 +110,8 @@ local:
     max_time_per_run: 3600000
     max_epochs_per_run: 500
   checkpoint_epochs: 10
+  leave_waveforms_on_disk: True
+  wfd_cache_path: tmp
   # Local settings related to condor, remove if not used on cluster
   condor:
     num_cpus: 16
