@@ -64,10 +64,10 @@ def copy_files_to_local(
         print("Done. This took {:2.0f}:{:2.0f} min.".format(*divmod(elapsed_time, 60)))
     elif leave_keys_on_disk:
         print(
-            f"Warning: leave_waveforms_on_disk defaults to True, but path_copy_wfd_to_local is not specified. "
+            f"Warning: leave_waveforms_on_disk defaults to True, but wfd_cache_path is not specified. "
             f"This means that the waveforms will be loaded during training from {local_file_path} ."
             f"This can lead to unexpected long times for data loading during training due to network traffic. "
-            f"To prevent this, specify 'path_copy_wfd_to_local = tmp' in the local settings or set "
+            f"To prevent this, specify 'wfd_cache_path = tmp' in the local settings or set "
             f"leave_waveforms_on_disk = False. However, the latter is not recommended for large datasets since "
             f"it can lead to memory issues when loading the entire dataset into RAM. "
         )
@@ -102,7 +102,7 @@ def prepare_training_new(
     # Optionally copy files to local and update path
     data_settings["waveform_dataset_path"] = copy_files_to_local(
         file_path=data_settings["waveform_dataset_path"],
-        local_dir=local_settings.get("path_copy_wfd_to_local", None),
+        local_dir=local_settings.get("wfd_cache_path", None),
         leave_keys_on_disk=local_settings.get("leave_waveforms_on_disk", True),
     )
     wfd = build_dataset(
@@ -201,7 +201,7 @@ def prepare_training_resume(
     # Optionally copy files to local and update path
     data_settings["waveform_dataset_path"] = copy_files_to_local(
         file_path=data_settings["waveform_dataset_path"],
-        local_dir=local_settings.get("path_copy_wfd_to_local", None),
+        local_dir=local_settings.get("wfd_cache_path", None),
         leave_keys_on_disk=local_settings.get("leave_waveforms_on_disk", True),
     )
     wfd = build_dataset(
