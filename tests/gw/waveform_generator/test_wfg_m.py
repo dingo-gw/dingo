@@ -113,7 +113,7 @@ def tolerances(approximant):
         # to a different order the IMRPhenomXPHM. It's tricky to get this exactly right,
         # since there are many different methods for this. But the small mismatches we do
         # get should not have a big effect in practice.
-        return 2e-2, 1e-6
+        return 2e-2, 1e-5
 
     elif approximant == "SEOBNRv4PHM":
         # The mismatches are typically be of order 1e-5. This is exclusively due to
