@@ -66,19 +66,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         self.decompression_transform = None
         self.file_handle = None
         self.precision = precision
-        if self.precision is not None:
-            if self.precision == "single":
-                self.complex_type = np.complex64
-                self.real_type = np.float32
-            elif self.precision == "double":
-                self.complex_type = np.complex128
-                self.real_type = np.float64
-            else:
-                raise TypeError(
-                    'precision can only be changed to "single" or "double".'
-                )
-        else:
-            self.real_type, self.complex_type = None, None
+
         if leave_waveforms_on_disk:
             self.leave_on_disk_keys = ["polarizations"]
         else:
@@ -120,18 +108,10 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         self.update_domain(domain_update)
 
         # Update dtypes if necessary
-        if (
-            self.precision is not None
-            and self.complex_type is not None
-            and self.real_type is not None
-        ):
+        if self.precision is not None:
             if self.parameters is not None:
                 self.parameters = self.parameters.astype(self.real_type, copy=False)
-            if (
-                self.polarizations is not None
-                and self.polarizations["h_cross"] is not None
-                and self.polarizations["h_plus"] is not None
-            ):
+            if self.polarizations is not None:
                 for k, v in self.polarizations.items():
                     self.polarizations[k] = v.astype(self.complex_type, copy=False)
 
@@ -175,10 +155,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             and "svd" in self.settings["compression"]
         ):
             self.svd["V"] = self.domain.update_data(self.svd["V"], axis=0)
-        elif (
-            self.polarizations["h_cross"] is not None
-            and self.polarizations["h_plus"] is not None
-        ):
+        elif self.polarizations is not None:
             for k, v in self.polarizations.items():
                 self.polarizations[k] = self.domain.update_data(v)
 
@@ -231,6 +208,34 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
 
         self.decompression_transform = Compose(decompression_transform_list)
 
+    @property
+    def real_type(self):
+        if self.precision is not None:
+            if self.precision == "single":
+                return np.float32
+            elif self.precision == "double":
+                return np.float64
+            else:
+                raise TypeError(
+                    "Precision can only be changed to 'single' or 'double'."
+                )
+        else:
+            return None
+
+    @property
+    def complex_type(self):
+        if self.precision is not None:
+            if self.precision == "single":
+                return np.complex64
+            elif self.precision == "double":
+                return np.complex128
+            else:
+                raise TypeError(
+                    "Precision can only be changed to 'single' or 'double'."
+                )
+        else:
+            return None
+
     def __len__(self):
         """The number of waveform samples."""
         return len(self.parameters)
@@ -279,15 +284,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             if not isinstance(parameters, dict):
                 parameters = parameters.to_dict()
             # Update precision
-            if (
-                self.precision is not None
-                and self.real_type is not None
-                and self.complex_type is not None
-            ):
-                parameters = {
-                    k: v.astype(self.real_type, copy=False)
-                    for k, v in parameters.items()
-                }
+            if self.precision is not None:
                 polarizations = {
                     k: v.astype(self.complex_type, copy=False)
                     for k, v in polarizations.items()
