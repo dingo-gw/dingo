@@ -1,18 +1,14 @@
-import lal
 import numpy as np
-import torch
-from typing import Optional
 
 from dingo.gw.domains import Domain, MultibandedFrequencyDomain, FrequencyDomain
 
 
-class Decimate(object):
+class DecimateAll(object):
     """Transform operator for decimation to multibanded frequency domain."""
 
     def __init__(
         self,
         multibanded_frequency_domain: MultibandedFrequencyDomain,
-        decimation_keys,
     ):
         """
         Parameters
@@ -20,12 +16,8 @@ class Decimate(object):
         multibanded_frequency_domain: MultibandedFrequencyDomain
             New domain of the decimated data. Original data must be in
             multibanded_frequency_domain.base_domain
-        decimation_keys: list
-            Keys for decimation, e.g., "waveform". If sample[decimation_key] is a dict,
-            the decimation is applied to every element of the dict.
         """
         self.multibanded_frequency_domain = multibanded_frequency_domain
-        self.decimation_keys = decimation_keys
 
     def __call__(self, input_sample: dict):
         """
@@ -41,19 +33,28 @@ class Decimate(object):
         dict of the same form as the input, but with transformed (decimated) data.
         """
         sample = input_sample.copy()
-
-        for decimation_key in self.decimation_keys:
-            if isinstance(sample[decimation_key], dict):
-                sample[decimation_key] = {
-                    k: self.multibanded_frequency_domain.decimate(v)
-                    for k, v in sample[decimation_key].items()
-                }
-            else:
-                sample[decimation_key] = self.multibanded_frequency_domain.decimate(
-                    sample[decimation_key]
-                )
-
+        decimate_recursive(sample, self.multibanded_frequency_domain)
         return sample
+
+
+def decimate_recursive(d: dict, mfd: MultibandedFrequencyDomain):
+    """
+    In-place decimation of nested dicts of arrays.
+
+    Parameters
+    ----------
+    d : dict
+        Nested dictionary to decimate.
+    mfd : MultibandedFrequencyDomain
+    """
+    for k, v in d.items():
+        if isinstance(v, dict):
+            decimate_recursive(v, mfd)
+        elif isinstance(v, np.ndarray):
+            if v.shape[-1] == len(mfd.base_domain):
+                d[k] = mfd.decimate(v)
+        else:
+            raise ValueError(f"Cannot decimate item of type {type(v)}.")
 
 
 class DecimateWaveformsAndASDS(object):

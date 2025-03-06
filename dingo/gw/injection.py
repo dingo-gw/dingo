@@ -105,7 +105,7 @@ class GWSignal(object):
             if value:
                 if hasattr(self.data_domain, "base_domain"):
                     self.waveform_generator.domain = (
-                        self.waveform_generator.domain.base_domain
+                        self.waveform_generator.full_domain.base_domain
                     )
                     self.data_domain = self.data_domain.base_domain
                     self._use_base_domain = True

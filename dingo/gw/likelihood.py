@@ -274,10 +274,13 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
     def log_likelihood_phase_grid(self, theta, phases=None):
-        if isinstance(self.waveform_generator.domain, FrequencyDomain):
+        if isinstance(
+            self.waveform_generator.domain,
+            (FrequencyDomain, MultibandedFrequencyDomain),
+        ):
             return self._log_likelihood_phase_grid_mode_decomposed(theta, phases=phases)
-        elif isinstance(self.waveform_generator.domain, MultibandedFrequencyDomain):
-            return self._log_likelihood_phase_grid_manual(theta, phases=phases)
+        # elif isinstance(self.waveform_generator.domain, MultibandedFrequencyDomain):
+        #     return self._log_likelihood_phase_grid_manual(theta, phases=phases)
         else:
             raise NotImplementedError(
                 f"Phase grid not implemented for "
