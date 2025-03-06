@@ -111,3 +111,4 @@ local:
     memory_cpus: 128000
     num_gpus: 1
     memory_gpus: 8000
+    request_disk: 50GB
