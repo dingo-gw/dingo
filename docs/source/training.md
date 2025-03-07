@@ -170,7 +170,7 @@ leave_waveforms_on_disk
 : To improve memory efficiency during training, the waveforms are not loaded into memory at the beginning of training, but separately for each batch during training. When training on a cluster, it is highly recommended to include a local path where the dataset is cached at the beginning of training (see `local_cache_path`). If RAM is not an issue, the default `leave_waveforms_on_disk=True` can be set to `False`. 
 
 local_cache_path
-: When training on a cluster and loading waveforms during training (i.e., `leave_waveforms_on_disk=True`), the waveform dataset should be copied to the disk storage of the local node at the beginning of training. This prevents unexpected long data loading times during training due to network traffic. Usually, paths for local storage are `tmp` or `dev/shm`. When submitting the job with `condor`, `request_disk: 50GB` should be included in the `condor` settings.
+: When training on a cluster and loading waveforms during training (i.e., `leave_waveforms_on_disk=True`), the waveform dataset should be copied to the disk storage of the local node at the beginning of training. This prevents unexpected long data loading times during training due to network traffic. Usually, paths for local storage are `tmp` or `dev/shm`. When submitting the job with `condor`, `request_disk: 50GB` should be included in the `condor` settings with the requested disk space larger than the size of the waveform dataset used for training.
 
 condor
 : Settings for [HTCondor](https://htcondor.readthedocs.io/en/latest/index.html). The condor script will (re)submit itself according to these options.
