@@ -27,8 +27,8 @@ from dingo.core.utils import (
     build_train_and_test_loaders,
 )
 from dingo.core.utils.trainutils import EarlyStopping
-from gw.dataset import WaveformDataset
-from core.posterior_models import BasePosteriorModel
+from dingo.gw.dataset import WaveformDataset
+from dingo.core.posterior_models import BasePosteriorModel
 
 
 def copy_files_to_local(

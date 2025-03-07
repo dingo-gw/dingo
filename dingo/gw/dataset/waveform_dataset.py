@@ -68,14 +68,14 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         self.precision = precision
 
         if leave_waveforms_on_disk:
-            self.leave_on_disk_keys = ["polarizations"]
+            leave_on_disk_keys = ["polarizations"]
         else:
-            self.leave_on_disk_keys = None
+            leave_on_disk_keys = []
         super().__init__(
             file_name=file_name,
             dictionary=dictionary,
             data_keys=["parameters", "polarizations", "svd"],
-            leave_on_disk_keys=self.leave_on_disk_keys,
+            leave_on_disk_keys=leave_on_disk_keys,
         )
         self.file_name = file_name
 
@@ -278,17 +278,14 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         """
 
         # Get parameters and data for idx
-        if (
-            self.leave_on_disk_keys is not None
-            and "polarizations" in self.leave_on_disk_keys
-        ):
+        if "polarizations" in self._leave_on_disk_keys:
             # Load polarizations from disk
             if self.file_handle is None:
                 # Open hdf5 file
                 self.file_handle = h5py.File(self.file_name, "r")
 
             polarizations = recursive_hdf5_load(
-                self.file_handle, keys=self.leave_on_disk_keys, idx=batched_idx
+                self.file_handle, keys=self._leave_on_disk_keys, idx=batched_idx
             )["polarizations"]
             # Apply domain update to set waveform to zero for f < f_min
             if self.svd is None:
@@ -318,8 +315,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                         polarizations[k] = v[:, : self.svd_size_update]
         else:
             parameters = {
-                k: v.to_numpy()
-                for k, v in self.parameters.iloc[batched_idx].items()
+                k: v.to_numpy() for k, v in self.parameters.iloc[batched_idx].items()
             }
             polarizations = {
                 pol: waveforms[batched_idx]
