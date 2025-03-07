@@ -27,6 +27,7 @@ from dingo.gw.transforms import (
     GetDetectorTimes,
     StrainTokenization,
     UnpackDict,
+    DecimateWaveformsAndASDS,
 )
 
 
@@ -159,6 +160,7 @@ class GWSampler(GWSamplerMixin, Sampler):
     data for the inference network.
 
     transform_pre :
+        * Decimates data (if necessary and using MultibandedFrequencyDomain).
         * Whitens strain.
         * Repackages strain data and the inverse ASDs (suitably scaled) into a torch
           tensor.
@@ -180,12 +182,18 @@ class GWSampler(GWSamplerMixin, Sampler):
 
     def _initialize_transforms(self):
         # preprocessing transforms:
+        transform_pre = []
+        #   * in case of MultibandedFrequencyDomain, decimate data from base domain
+        if isinstance(self.domain, MultibandedFrequencyDomain):
+            transform_pre.append(
+                DecimateWaveformsAndASDS(self.domain, decimation_mode="whitened")
+            )
         #   * whiten and scale strain (since the inference network expects standardized
         #   data)
         #   * repackage strains and asds from dicts to an array
         #   * convert array to torch tensor on the correct device
         #   * extract only strain/waveform from the sample
-        transforms = [
+        transform_pre += [
             WhitenAndScaleStrain(self.domain.noise_std),
             # Use base metadata so that unconditional samplers still know how to
             # transform data, since this transform is used by the GNPE sampler as
@@ -219,7 +227,7 @@ class GWSampler(GWSamplerMixin, Sampler):
                 single_tokenizer = data_settings["tokenization"]["single_tokenizer"]
             else:
                 single_tokenizer = False
-            transforms.append(
+            transform_pre += [
                 StrainTokenization(
                     self.domain,
                     num_tokens_per_block=num_tokens,
@@ -227,7 +235,7 @@ class GWSampler(GWSamplerMixin, Sampler):
                     normalize_frequency=norm_freq,
                     single_tokenizer=single_tokenizer,
                 )
-            )
+            ]
             selected_keys.append("position")
             selected_keys.append("drop_token_mask")
 
@@ -239,10 +247,12 @@ class GWSampler(GWSamplerMixin, Sampler):
                 "No tokenization information found, omitting StrainTokenization transform."
             )
 
-        transforms.append(ToTorch(device=self.model.device))
-        transforms.append(UnpackDict(selected_keys=selected_keys))
+        transform_pre += [
+            ToTorch(device=self.model.device),
+            UnpackDict(selected_keys=selected_keys),
+        ]
 
-        self.transform_pre = Compose(transforms)
+        self.transform_pre = Compose(transform_pre)
 
         # postprocessing transforms:
         #   * de-standardize data and extract inference parameters
@@ -252,29 +262,6 @@ class GWSampler(GWSamplerMixin, Sampler):
             inverse=True,
             as_type="dict",
         )
-
-    @Sampler.context.setter
-    def context(self, value):
-        super(GWSampler, type(self)).context.fset(self, value)
-        if isinstance(self.domain, MultibandedFrequencyDomain):
-            d = list(self._context["waveform"].values())[0]
-            # FIXME: Ideally, one would separately check whether the data amd/or the ASD has to be decimated
-            # FIXME: Ideally, we would not re-implement the decimation, but rely on functions such as
-            #  ASDDataset.update_domain() that include the decimation code and are used during training to
-            #  minimize mistakes arising from multiple implementations.
-            if d.shape[-1] == len(self.domain.base_domain):
-                print("Decimating data to multi-banded frequency domain.")
-                base_context = copy.deepcopy(self._context)
-                self._context = {}
-                self._context["waveform"] = {
-                    k: self.domain.decimate(v)
-                    for k, v in base_context["waveform"].items()
-                }
-                self._context["asds"] = {
-                    k: 1 / self.domain.decimate(1 / v)
-                    for k, v in base_context["asds"].items()
-                }
-                self._context["base_data"] = base_context
 
 
 class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
