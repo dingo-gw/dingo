@@ -32,7 +32,13 @@ class EarlyStopping:
     early stopping occurs.
     """
 
-    def __init__(self, patience: int = 5, verbose: bool = False, delta: float = 0.0, metric: Literal["training", "validation"]="validation"):
+    def __init__(
+        self,
+        patience: int = 5,
+        verbose: bool = False,
+        delta: float = 0.0,
+        metric: Literal["training", "validation"] = "validation",
+    ):
         """
         Parameters
         ----------
@@ -42,6 +48,8 @@ class EarlyStopping:
             Whether to print counter increments.
         delta: float = 0.0
             Amount by which loss must decrease in patience epochs.
+        metric: Literal["training", "validation"]
+            Whether to use the training loss to determine early stopping ("training") or the test loss ("validation")
         """
         self.patience = patience
         self.verbose = verbose
@@ -51,7 +59,9 @@ class EarlyStopping:
         self.val_loss_min = np.Inf
         self.delta = delta
         if metric not in ["training", "validation"]:
-            raise ValueError("Early Stopping metric must be 'training' or 'validation'.")
+            raise ValueError(
+                "Early Stopping metric must be 'training' or 'validation'."
+            )
         self.metric = metric
 
     def __call__(self, val_loss: float):
