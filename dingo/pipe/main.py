@@ -278,7 +278,7 @@ def write_complete_config_file(parser, args, inputs, input_cls=MainInput):
         if key == "label":
             continue
         if isinstance(val, str):
-            if (os.path.isfile(val) or os.path.isdir(val)) and not val == "data":
+            if (os.path.isfile(val) or os.path.isdir(val)):
                 setattr(args, key, os.path.abspath(val))
         if isinstance(val, list):
             if isinstance(val[0], str):
