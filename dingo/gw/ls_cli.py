@@ -23,7 +23,7 @@ def ls():
     path = Path(args.file_name)
     if path.suffix == ".pt":
         print("Extracting information about torch model.\n")
-        d, _ = torch_load_with_fallback(path)
+        d, _ = torch_load_with_fallback(path, preferred_map_location="meta")
         print(f"Version: {d.get('version')}\n")
         print(f"Model epoch: {d['epoch']}\n")
         print("Model metadata:")
