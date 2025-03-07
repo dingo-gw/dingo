@@ -1,5 +1,5 @@
-from typing import Dict, List, Literal, Tuple
 import logging
+from typing import Dict, List, Literal, Tuple
 
 import torch
 
@@ -11,7 +11,9 @@ Device = Literal["meta", "cuda", "mps", "hip", "cpu"]
 def torch_available_devices() -> List[Device]:
     """
     Returns a list of all available PyTorch devices,
-    ordered: cuda, mps, hip, cpu, meta
+    ordered: cuda, mps, hip, cpu
+    Note: 'meta' is not included from the returned list,
+    even if supported.
 
     Returns
     -------
@@ -40,9 +42,6 @@ def torch_available_devices() -> List[Device]:
     # cpu
     devices.append("cpu")
 
-    # meta
-    devices.append("meta")
-
     return devices
 
 
@@ -53,7 +52,7 @@ def torch_load_with_fallback(
     Loads a PyTorch file with fallback behavior:
     1. Tries preferred_map_location (default: cuda)
     2. Falls back to CUDA/MPS/HIP if available
-    3. Finally falls back to CPU, and if that fails, meta.
+    3. Finally falls back to CPU
 
     Returns
     -------
@@ -74,9 +73,7 @@ def torch_load_with_fallback(
 
     for location in [d for d in devices if d != preferred_map_location]:
         try:
-            r = torch.load(filename, map_location=location), torch.device(
-                location
-            )
+            r = torch.load(filename, map_location=location), torch.device(location)
             _logger.debug(
                 f"loaded model {filename} to fallback device {location} "
                 f"(preferred device was {preferred_map_location})"
@@ -86,8 +83,7 @@ def torch_load_with_fallback(
             pass
 
     raise RuntimeError(
-        f"failed to load model {filename} on any device, "
-        "tried: {', '.join(devices)}"
+        f"failed to load model {filename} on any device, " "tried: {', '.join(devices)}"
     )
 
 
@@ -106,7 +102,5 @@ def update_model_config(model_settings: dict):
         del model_settings["type"]
         model_settings["posterior_kwargs"] = model_settings["nsf_kwargs"]
         del model_settings["nsf_kwargs"]
-        model_settings["embedding_kwargs"] = model_settings[
-            "embedding_net_kwargs"
-        ]
+        model_settings["embedding_kwargs"] = model_settings["embedding_net_kwargs"]
         del model_settings["embedding_net_kwargs"]

@@ -3,26 +3,24 @@ This module contains the abstract base class for representing posterior models,
 as well as functions for training and testing across an epoch.
 """
 
-import json
+from abc import abstractmethod, ABC
 import os
-import time
-from abc import ABC, abstractmethod
-from collections import OrderedDict
 from os.path import join
-from typing import Optional
-
 import h5py
-import numpy as np
-import torch
-from threadpoolctl import threadpool_limits
-from torch.utils.data import Dataset
 
+import torch
 import dingo.core.utils as utils
+from torch.utils.data import Dataset
+import time
+import numpy as np
+from threadpoolctl import threadpool_limits
 import dingo.core.utils.trainutils
-from dingo.core.utils.backward_compatibility import (
-    update_model_config,
-)
+import json
+from collections import OrderedDict
+from typing import Optional
+from dingo.core.utils.backward_compatibility import update_model_config
 from dingo.core.utils.misc import get_version
+
 from dingo.core.utils.trainutils import EarlyStopping
 
 
@@ -83,9 +81,7 @@ class BasePosteriorModel(ABC):
         # build model
         if model_filename is not None:
             self.load_model(
-                model_filename,
-                load_training_info=load_training_info,
-                device=device,
+                model_filename, load_training_info=load_training_info, device=device
             )
         else:
             self.initialize_network()
@@ -121,9 +117,7 @@ class BasePosteriorModel(ABC):
         pass
 
     @abstractmethod
-    def sample_and_log_prob(
-        self, *context: torch.Tensor, num_samples: int = 1
-    ):
+    def sample_and_log_prob(self, *context: torch.Tensor, num_samples: int = 1):
         """
         Sample parameters theta from the posterior model,
 
@@ -196,9 +190,7 @@ class BasePosteriorModel(ABC):
         Put model to device, and set self.device accordingly.
         """
         if device not in ("cpu", "cuda"):
-            raise ValueError(
-                f"Device should be either cpu or cuda, got {device}."
-            )
+            raise ValueError(f"Device should be either cpu or cuda, got {device}.")
         self.device = torch.device(device)
         # Commented below so that code runs on first cuda device in the case of multiple.
         # if device == 'cuda' and torch.cuda.device_count() > 1:
@@ -260,13 +252,9 @@ class BasePosteriorModel(ABC):
             model_dict["optimizer_kwargs"] = self.optimizer_kwargs
             model_dict["scheduler_kwargs"] = self.scheduler_kwargs
             if self.optimizer is not None:
-                model_dict["optimizer_state_dict"] = (
-                    self.optimizer.state_dict()
-                )
+                model_dict["optimizer_state_dict"] = self.optimizer.state_dict()
             if self.scheduler is not None:
-                model_dict["scheduler_state_dict"] = (
-                    self.scheduler.state_dict()
-                )
+                model_dict["scheduler_state_dict"] = self.scheduler.state_dict()
 
         torch.save(model_dict, model_filename)
 
@@ -301,9 +289,7 @@ class BasePosteriorModel(ABC):
             # Load model weights
             model_state_dict = OrderedDict()
             for k, v in fp["model_weights"].items():
-                model_state_dict[k] = torch.from_numpy(
-                    np.array(v, dtype=np.float32)
-                )
+                model_state_dict[k] = torch.from_numpy(np.array(v, dtype=np.float32))
             d["model_state_dict"] = model_state_dict
 
         return d
@@ -444,12 +430,8 @@ class BasePosteriorModel(ABC):
                 utils.perform_scheduler_step(self.scheduler, test_loss)
 
                 # write history and save model
-                utils.write_history(
-                    train_dir, self.epoch, train_loss, test_loss, lr
-                )
-                utils.save_model(
-                    self, train_dir, checkpoint_epochs=checkpoint_epochs
-                )
+                utils.write_history(train_dir, self.epoch, train_loss, test_loss, lr)
+                utils.save_model(self, train_dir, checkpoint_epochs=checkpoint_epochs)
                 if use_wandb:
                     try:
                         import wandb
@@ -467,9 +449,7 @@ class BasePosteriorModel(ABC):
                             }
                         )
                     except ImportError:
-                        print(
-                            "wandb not installed. Skipping logging to wandb."
-                        )
+                        print("wandb not installed. Skipping logging to wandb.")
 
                 if early_stopping is not None:
                     # Whether to use train or test loss
@@ -481,8 +461,7 @@ class BasePosteriorModel(ABC):
                     is_best_model = early_stopping(early_stopping_loss)
                     if is_best_model:
                         self.save_model(
-                            join(train_dir, "best_model.pt"),
-                            save_training_info=False,
+                            join(train_dir, "best_model.pt"), save_training_info=False
                         )
                     if early_stopping.early_stop:
                         print("Early stopping")

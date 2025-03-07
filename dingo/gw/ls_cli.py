@@ -7,9 +7,9 @@ import h5py
 import torch
 import yaml
 
-from dingo.core.backward_compatibility import torch_load_with_fallback
 from dingo.core.dataset import DingoDataset
 from dingo.core.result import Result
+from dingo.core.utils.backward_compatibility import torch_load_with_fallback
 from dingo.gw.dataset import WaveformDataset
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.SVD import SVDBasis
