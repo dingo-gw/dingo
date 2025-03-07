@@ -235,7 +235,6 @@ class MainInput(BilbyMainInput):
         self.psd_fractional_overlap = args.psd_fractional_overlap
         self.psd_start_time = args.psd_start_time
         self.spline_calibration_envelope_dict = args.spline_calibration_envelope_dict
-        self.calibration_correction_type = args.calibration_correction_type
 
         # self.check_source_model(args)
 
