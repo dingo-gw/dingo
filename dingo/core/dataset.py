@@ -124,7 +124,9 @@ class DingoDataset:
         for key in self._data_keys:
             vars(self)[key] = None
         self.settings = None
-        self.leave_on_disk_keys = leave_on_disk_keys
+        if leave_on_disk_keys is None:
+            leave_on_disk_keys = []
+        self._leave_on_disk_keys = leave_on_disk_keys
 
         # If data provided, load it
         if file_name is not None:
@@ -147,18 +149,15 @@ class DingoDataset:
                 f.attrs["dataset_type"] = self.dataset_type
 
     def from_file(self, file_name: str):
-        keys_to_load = self._data_keys
-        if self.leave_on_disk_keys is not None:
-            print(
-                f"Loading dataset without loading {self.leave_on_disk_keys} from {str(file_name)}."
-            )
-            # Remove keys from keys_to_load
-            keys_to_load = [k for k in keys_to_load if k not in self.leave_on_disk_keys]
-        else:
-            print(f"Loading dataset from {str(file_name)}.")
+        print(f"Loading dataset from {str(file_name)}.")
+        if self._leave_on_disk_keys:
+            print(f"Omitting data keys {self._leave_on_disk_keys}.")
 
         with h5py.File(file_name, "r") as f:
-            loaded_dict = recursive_hdf5_load(f, keys=keys_to_load)
+            loaded_dict = recursive_hdf5_load(
+                f,
+                keys=[k for k in self._data_keys if k not in self._leave_on_disk_keys],
+            )
             # Set the keys that the class expects
             for k, v in loaded_dict.items():
                 assert k in self._data_keys
