@@ -32,7 +32,7 @@ from core.posterior_models import BasePosteriorModel
 
 
 def copy_files_to_local(
-    file_path: str, local_dir: Optional[str], leave_keys_on_disk: bool
+    file_path: str, local_dir: Optional[str], leave_keys_on_disk: bool, is_condor: bool = False,
 ) -> str:
     """
     Copy files to local node if local_dir is provided to minimize network traffic during training.
@@ -46,6 +46,8 @@ def copy_files_to_local(
     leave_keys_on_disk: bool
         Whether to leave keys on disk and load them during training. If dataset is not copied and
         leave_keys_on_disk is True, a warning will be raised.
+    is_condor: bool
+        Whether this is a condor job.
 
     Returns
     -------
@@ -62,7 +64,7 @@ def copy_files_to_local(
         shutil.copy(file_path, local_file_path)
         elapsed_time = time.time() - start_time
         print("Done. This took {:2.0f}:{:2.0f} min.".format(*divmod(elapsed_time, 60)))
-    elif leave_keys_on_disk:
+    elif leave_keys_on_disk and is_condor:
         print(
             f"Warning: leave_waveforms_on_disk defaults to True, but local_cache_path is not specified. "
             f"This means that the waveforms will be loaded during training from {local_file_path} ."
@@ -104,6 +106,7 @@ def prepare_training_new(
         file_path=data_settings["waveform_dataset_path"],
         local_dir=local_settings.get("local_cache_path", None),
         leave_keys_on_disk=local_settings.get("leave_waveforms_on_disk", True),
+        is_condor=True if "condor" in local_settings else False,
     )
     wfd = build_dataset(
         data_settings=data_settings,
@@ -203,6 +206,7 @@ def prepare_training_resume(
         file_path=data_settings["waveform_dataset_path"],
         local_dir=local_settings.get("local_cache_path", None),
         leave_keys_on_disk=local_settings.get("leave_waveforms_on_disk", True),
+        is_condor=True if "condor" in local_settings else False,
     )
     wfd = build_dataset(
         data_settings=data_settings,
