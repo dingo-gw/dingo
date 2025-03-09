@@ -259,7 +259,6 @@ class GWSignal(object):
             asd = self._asd
         elif isinstance(self._asd, ASDDataset):
             asd = self._asd.sample_random_asds()
-            asd = {ifo: asd[0] for ifo, asd in asd.items()}
         elif self._asd is None:
             return None
         else:
