@@ -1,10 +1,13 @@
 import torch
 
 from dingo.core.posterior_models.base_model import BasePosteriorModel
-from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
 from dingo.core.posterior_models.flow_matching import FlowMatchingPosteriorModel
+from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
 from dingo.core.posterior_models.score_matching import ScoreDiffusionPosteriorModel
-from dingo.core.utils.backward_compatibility import update_model_config
+from dingo.core.utils.backward_compatibility import (
+    torch_load_with_fallback,
+    update_model_config,
+)
 
 
 def build_model_from_kwargs(
@@ -41,7 +44,7 @@ def build_model_from_kwargs(
     }
 
     if filename is not None:
-        d = torch.load(filename, map_location="meta")
+        d, _ = torch_load_with_fallback(filename, preferred_map_location="meta")
         update_model_config(d["metadata"]["train_settings"]["model"])  # Backward compat
         posterior_model_type = d["metadata"]["train_settings"]["model"][
             "posterior_model_type"
