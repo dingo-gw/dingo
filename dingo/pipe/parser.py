@@ -600,6 +600,12 @@ def create_parser(top_level=True):
         ),
     )
     submission_parser.add(
+        "--conda-env",
+        type=nonestr,
+        default=None,
+        help="Either a conda environment name of a absolute path to the conda env folder.",
+    )
+    submission_parser.add(
         "--request-cpus-importance-sampling",
         type=int,
         default=1,
@@ -629,12 +635,6 @@ def create_parser(top_level=True):
             "Strip off the following lines from submission files: getenv, universe, "
             "accounting_group, priority."
         ),
-    )
-    submission_parser.add(
-        "--conda-env",
-        type=nonestr,
-        default=None,
-        help="Either a conda environment name of a absolute path to the conda env folder.",
     )
     submission_parser.add(
         "--scheduler",
@@ -794,7 +794,17 @@ def create_parser(top_level=True):
             "https://computing.docs.ligo.org/guide/htcondor/credentials."
         ),
     )
-
+    submission_parser.add(
+        "--container",
+        default=None,
+        type=nonestr,
+        help=(
+            "(Optional) singularity image to use, see "
+            "https://computing.docs.ligo.org/guide/htcondor/software "
+            "and https://computing.docs.ligo.org/guide/dhtc/containers "
+            "for more details."
+        ),
+    )
     # likelihood_parser = parser.add_argument_group(
     #     title="Likelihood arguments",
     #     description="Options for setting up the likelihood.",

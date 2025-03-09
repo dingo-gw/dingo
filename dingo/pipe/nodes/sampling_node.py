@@ -53,6 +53,11 @@ class SamplingNode(AnalysisNode):
         if self.device == "cuda":
             self.extra_lines.append("request_gpus = 1")
 
+        if self.inputs.osg:
+            sites = self.inputs.desired_sites
+            self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
+            self.requirements.append("IS_GLIDEIN=?=True")
+
         self.process_node()
         self.job.add_parent(generation_node.job)
 
