@@ -1,5 +1,6 @@
 import torch
 
+from dingo.core.posterior_models.base_model import BasePosteriorModel
 from dingo.core.posterior_models.flow_matching import FlowMatchingPosteriorModel
 from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
 from dingo.core.posterior_models.score_matching import ScoreDiffusionPosteriorModel
@@ -9,7 +10,9 @@ from dingo.core.utils.backward_compatibility import (
 )
 
 
-def build_model_from_kwargs(filename: str = None, settings: dict = None, **kwargs):
+def build_model_from_kwargs(
+    filename: str = None, settings: dict = None, **kwargs
+) -> BasePosteriorModel:
     """
     Returns a PosteriorModel based on a saved network or settings dict.
 

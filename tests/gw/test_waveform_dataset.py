@@ -3,17 +3,16 @@ import tempfile
 import uuid
 from pathlib import Path
 from typing import Generator
-import yaml 
+import yaml
 
 import numpy as np
 import pytest
-import bilby 
+import bilby
 
 from dingo.gw.dataset.generate_dataset import _generate_dataset_main
-from dingo.gw.dataset.generate_dataset_dag import create_args_string
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.gw.domains import Domain
-from dingo.gw.dataset import generate_dataset 
+from dingo.gw.dataset import generate_dataset
 
 SETTINGS_YAML_SMALL = """\
 # settings for domain of waveforms
@@ -56,7 +55,7 @@ compression:
 """
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def temp_dir() -> Generator[Path, None, None]:
     """
     Fixture to provide a temporary directory path using pathlib.Path.
@@ -69,7 +68,7 @@ def temp_dir() -> Generator[Path, None, None]:
         yield Path(tmpdirname)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def generate_waveform_dataset_small(temp_dir: Path) -> Path:
     """
     Create a small waveform dataset on-the-fly
@@ -97,10 +96,10 @@ def test_load_waveform_dataset(generate_waveform_dataset_small):
     wfd_path = generate_waveform_dataset_small
 
     path = f"{wfd_path}/waveform_dataset.hdf5"
-    wd = WaveformDataset(file_name=path, precision="single")
+    wfd = WaveformDataset(file_name=path, precision="single")
 
-    assert len(wd) > 0
-    el = wd[0]
+    assert len(wfd) > 0
+    el = wfd[0]
     assert isinstance(el, dict)
     assert set(el.keys()) == {"parameters", "waveform"}
     assert isinstance(el["parameters"], dict)
@@ -109,9 +108,9 @@ def test_load_waveform_dataset(generate_waveform_dataset_small):
     assert isinstance(el["waveform"]["h_cross"], np.ndarray)
 
     # Check the associated domain
-    assert len(wd.domain) > 0
-    assert isinstance(wd.domain, Domain)
-    assert isinstance(wd.domain.domain_dict, dict)
+    assert len(wfd.domain) > 0
+    assert isinstance(wfd.domain, Domain)
+    assert isinstance(wfd.domain.domain_dict, dict)
 
     # Check the associated data settings
     data_settings_keys = {
@@ -121,67 +120,136 @@ def test_load_waveform_dataset(generate_waveform_dataset_small):
         "num_samples",
         "compression",
     }
-    assert set(wd.settings.keys()) == data_settings_keys
+    assert set(wfd.settings.keys()) == data_settings_keys
 
-    """Check truncation of wd. Ideally, this should be an individual test, 
-    but since the setup takes so long it is added here."""
+    """Check that using a list of indices also works."""
+    ind_list = [0, 1, 2]
+    el_list = wfd.__getitems__(ind_list)
+    assert isinstance(el_list, list)
+    assert len(el_list) == len(ind_list)
+    assert set(el_list[0].keys()) == {"parameters", "waveform"}
+    assert isinstance(el_list[0]["parameters"], dict)
+    assert isinstance(el_list[0]["waveform"], dict)
+    assert isinstance(el_list[0]["waveform"]["h_plus"], np.ndarray)
+    assert isinstance(el_list[0]["waveform"]["h_cross"], np.ndarray)
 
-    f_min = wd.domain.f_min
-    f_max = wd.domain.f_max
-    delta_f = wd.domain._delta_f
+
+@pytest.mark.slow
+def test_truncation_of_waveform(generate_waveform_dataset_small):
+    """Check truncation of wfd."""
+    wfd_path = generate_waveform_dataset_small
+
+    path = f"{wfd_path}/waveform_dataset.hdf5"
+    wfd = WaveformDataset(file_name=path, precision="single")
+    el = wfd[0]
+
+    f_min = wfd.domain.f_min
+    f_max = wfd.domain.f_max
+    delta_f = wfd.domain._delta_f
 
     # check that truncation works as intended when setting new range
     f_min_new = 20
     f_max_new = 100
-    wd2 = WaveformDataset(
-        path, domain_update={"f_min": f_min_new, "f_max": f_max_new}
+    wfd2 = WaveformDataset(
+        file_name=path, domain_update={"f_min": f_min_new, "f_max": f_max_new}
     )
-    assert len(wd2.domain) == len(wd2.domain())
+    assert len(wfd2.domain) == len(wfd2.domain())
     # check that new domain settings are correctly adapted
-    assert wd2.domain.f_min == f_min_new
-    assert wd2.domain.f_max == f_max_new
-    assert wd2.domain._delta_f == wd.domain._delta_f
+    assert wfd2.domain.f_min == f_min_new
+    assert wfd2.domain.f_max == f_max_new
+    assert wfd2.domain._delta_f == wfd.domain._delta_f
     # check that truncation works as intended
     for pol in ["h_cross", "h_plus"]:
         # f_min_new to f_max_new check
-        a = el["waveform"][pol][
-            int(f_min_new / delta_f) : int(f_max_new / delta_f) + 1
-        ]
-        b = wd2[0]["waveform"][pol][int(f_min_new / delta_f) :]
+        a = el["waveform"][pol][int(f_min_new / delta_f) : int(f_max_new / delta_f) + 1]
+        b = wfd2[0]["waveform"][pol][int(f_min_new / delta_f) :]
         scale_factor = np.max(np.abs(a))
         assert len(a) == f_max_new / delta_f + 1 - f_min_new / delta_f
         assert np.allclose(b / scale_factor, a / scale_factor)
         assert not np.allclose(b / scale_factor, np.roll(a, 1) / scale_factor)
 
         # f_min to f_min_new check
-        a = el["waveform"][pol][
-            int(f_min / delta_f) : int(f_min_new / delta_f)
-        ]
-        b = wd2[0]["waveform"][pol][
-            int(f_min / delta_f) : int(f_min_new / delta_f)
-        ]
+        a = el["waveform"][pol][int(f_min / delta_f) : int(f_min_new / delta_f)]
+        b = wfd2[0]["waveform"][pol][int(f_min / delta_f) : int(f_min_new / delta_f)]
         assert not np.allclose(b / scale_factor, a / scale_factor)
 
         # below f_min_new check
-        assert np.all(wd2[0]["waveform"][pol][: int(f_min_new)] == 0.0)
-    assert len(wd2.domain) == f_max_new / delta_f + 1
-    assert len(wd2.domain) == len(wd2.domain())
+        assert np.all(wfd2[0]["waveform"][pol][: int(f_min_new)] == 0.0)
+    assert len(wfd2.domain) == f_max_new / delta_f + 1
+    assert len(wfd2.domain) == len(wfd2.domain())
+
+
+@pytest.mark.slow
+def test_load_waveform_dataset_with_leave_polarizations_on_disk(
+    generate_waveform_dataset_small,
+):
+
+    wfd_path = generate_waveform_dataset_small
+
+    path = f"{wfd_path}/waveform_dataset.hdf5"
+    wfd = WaveformDataset(
+        file_name=path,
+        precision="single",
+        leave_waveforms_on_disk=True,
+    )
+
+    assert len(wfd) > 0
+    el = wfd[0]
+    assert isinstance(el, dict)
+    assert set(el.keys()) == {"parameters", "waveform"}
+    assert isinstance(el["parameters"], dict)
+    assert isinstance(el["waveform"], dict)
+    assert isinstance(el["waveform"]["h_plus"], np.ndarray)
+    assert isinstance(el["waveform"]["h_cross"], np.ndarray)
+
+    """Check that using a list of indices also works."""
+    ind_list = [0, 1, 2]
+    el_list = wfd.__getitems__(ind_list)
+    assert isinstance(el_list, list)
+    assert len(el_list) == len(ind_list)
+    assert set(el_list[0].keys()) == {"parameters", "waveform"}
+    assert isinstance(el_list[0]["parameters"], dict)
+    assert isinstance(el_list[0]["waveform"], dict)
+    assert isinstance(el_list[0]["waveform"]["h_plus"], np.ndarray)
+    assert isinstance(el_list[0]["waveform"]["h_cross"], np.ndarray)
+
+    """Check that using a randomly ordered list of indices provides the expected ordering."""
+    ind_list_rand = np.random.permutation(ind_list).tolist()
+    el_list_rand = wfd.__getitems__(ind_list_rand)
+    assert np.all(
+        [
+            el_list_rand[ind_list_rand[i]]["waveform"]["h_plus"]
+            == el_list[i]["waveform"]["h_plus"]
+            for i in range(len(ind_list))
+        ]
+    )
+    assert np.all(
+        [
+            el_list_rand[ind_list_rand[i]]["waveform"]["h_cross"]
+            == el_list[i]["waveform"]["h_cross"]
+            for i in range(len(ind_list))
+        ]
+    )
+
 
 @pytest.fixture
 def wfd_settings():
-  settings = yaml.safe_load(SETTINGS_YAML_SMALL)
-  return settings 
+    settings = yaml.safe_load(SETTINGS_YAML_SMALL)
+    return settings
+
 
 class BinaryPrior(bilby.prior.Prior):
-  def __init__(self):
-      super().__init__(name="failing_prior")
+    def __init__(self):
+        super().__init__(name="failing_prior")
 
-  def sample(self, size):
-      return np.random.choice([30, -1], size=size, p=[0.8, 0.2])
+    def sample(self, size):
+        return np.random.choice([30, -1], size=size, p=[0.8, 0.2])
+
 
 @pytest.fixture
 def binary_prior():
     return BinaryPrior()
+
 
 def test_wfd_size(wfd_settings: str, binary_prior: BinaryPrior):
     """
@@ -190,8 +258,8 @@ def test_wfd_size(wfd_settings: str, binary_prior: BinaryPrior):
     in the waveform generation
     """
     # changing the waveform generator settings to create a prior which will create
-    # failing waveforms for a fraction of the prior. I.e. can't generate negative 
-    # chirp masses so the waveform generator will fail 
+    # failing waveforms for a fraction of the prior. I.e. can't generate negative
+    # chirp masses so the waveform generator will fail
     wfd_settings["intrinsic_prior"]["chirp_mass"] = binary_prior
     del wfd_settings["intrinsic_prior"]["mass_1"]
     del wfd_settings["intrinsic_prior"]["mass_2"]

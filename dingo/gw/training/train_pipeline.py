@@ -1,14 +1,20 @@
+from typing import Optional, Tuple
 import os
 
 import numpy as np
 import yaml
 import argparse
+import shutil
 import textwrap
-
+import time
+from copy import deepcopy
 
 from threadpoolctl import threadpool_limits
 
-from dingo.core.posterior_models.build_model import autocomplete_model_kwargs, build_model_from_kwargs
+from dingo.core.posterior_models.build_model import (
+    autocomplete_model_kwargs,
+    build_model_from_kwargs,
+)
 from dingo.gw.training.train_builders import (
     build_dataset,
     set_train_transforms,
@@ -21,9 +27,59 @@ from dingo.core.utils import (
     build_train_and_test_loaders,
 )
 from dingo.core.utils.trainutils import EarlyStopping
+from dingo.gw.dataset import WaveformDataset
+from dingo.core.posterior_models import BasePosteriorModel
 
 
-def prepare_training_new(train_settings: dict, train_dir: str, local_settings: dict):
+def copy_files_to_local(
+    file_path: str, local_dir: Optional[str], leave_keys_on_disk: bool, is_condor: bool = False,
+) -> str:
+    """
+    Copy files to local node if local_dir is provided to minimize network traffic during training.
+
+    Parameters
+    ----------
+    file_path: str
+        Path to file that should be copied.
+    local_dir: Optional[str]
+        Directory where file should be copied. If None, file will not be copied.
+    leave_keys_on_disk: bool
+        Whether to leave keys on disk and load them during training. If dataset is not copied and
+        leave_keys_on_disk is True, a warning will be raised.
+    is_condor: bool
+        Whether this is a condor job.
+
+    Returns
+    -------
+    local_file_path: str
+        Modified file path if file was copied to local node, else the original file path.
+    """
+    local_file_path = file_path
+    if local_dir is not None:
+        file_name = file_path.split("/")[-1]
+        local_file_path = os.path.join(local_dir, file_name)
+        print(f"Copying file to {local_file_path}")
+        # Copy file
+        start_time = time.time()
+        shutil.copy(file_path, local_file_path)
+        elapsed_time = time.time() - start_time
+        print("Done. This took {:2.0f}:{:2.0f} min.".format(*divmod(elapsed_time, 60)))
+    elif leave_keys_on_disk and is_condor:
+        print(
+            f"Warning: leave_waveforms_on_disk defaults to True, but local_cache_path is not specified. "
+            f"This means that the waveforms will be loaded during training from {local_file_path} ."
+            f"This can lead to unexpected long times for data loading during training due to network traffic. "
+            f"To prevent this, specify 'local_cache_path = tmp' in the local settings or set "
+            f"leave_waveforms_on_disk = False. However, the latter is not recommended for large datasets since "
+            f"it can lead to memory issues when loading the entire dataset into RAM. "
+        )
+
+    return local_file_path
+
+
+def prepare_training_new(
+    train_settings: dict, train_dir: str, local_settings: dict
+) -> Tuple[BasePosteriorModel, WaveformDataset]:
     """
     Based on a settings dictionary, initialize a WaveformDataset and PosteriorModel.
 
@@ -42,10 +98,20 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
 
     Returns
     -------
-    (WaveformDataset, BasePosteriorModel)
+    (BasePosteriorModel, WaveformDataset)
     """
-
-    wfd = build_dataset(train_settings["data"])  # No transforms yet
+    data_settings = deepcopy(train_settings["data"])
+    # Optionally copy files to local and update path
+    data_settings["waveform_dataset_path"] = copy_files_to_local(
+        file_path=data_settings["waveform_dataset_path"],
+        local_dir=local_settings.get("local_cache_path", None),
+        leave_keys_on_disk=local_settings.get("leave_waveforms_on_disk", True),
+        is_condor=True if "condor" in local_settings else False,
+    )
+    wfd = build_dataset(
+        data_settings=data_settings,
+        leave_waveforms_on_disk=local_settings.get("leave_waveforms_on_disk", True),
+    )  # No transforms yet
     initial_weights = {}
 
     # The embedding network is assumed to have an SVD projection layer. If other types
@@ -109,7 +175,9 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
     return pm, wfd
 
 
-def prepare_training_resume(checkpoint_name, local_settings, train_dir):
+def prepare_training_resume(
+    checkpoint_name: str, local_settings: dict, train_dir: str
+) -> Tuple[BasePosteriorModel, WaveformDataset]:
     """
     Loads a PosteriorModel from a checkpoint, as well as the corresponding
     WaveformDataset, in order to continue training. It initializes the saved optimizer
@@ -119,8 +187,10 @@ def prepare_training_resume(checkpoint_name, local_settings, train_dir):
     ----------
     checkpoint_name : str
         File name containing the checkpoint (.pt format).
-    device : str
-        'cuda' or 'cpu'
+    local_settings : dict
+        Local settings (e.g., num_workers, device)
+    train_dir: str
+        Path to training directory where the wandb info is saved.
 
     Returns
     -------
@@ -130,7 +200,18 @@ def prepare_training_resume(checkpoint_name, local_settings, train_dir):
     pm = build_model_from_kwargs(
         filename=checkpoint_name, device=local_settings["device"]
     )
-    wfd = build_dataset(pm.metadata["train_settings"]["data"])
+    data_settings = deepcopy(pm.metadata["train_settings"]["data"])
+    # Optionally copy files to local and update path
+    data_settings["waveform_dataset_path"] = copy_files_to_local(
+        file_path=data_settings["waveform_dataset_path"],
+        local_dir=local_settings.get("local_cache_path", None),
+        leave_keys_on_disk=local_settings.get("leave_waveforms_on_disk", True),
+        is_condor=True if "condor" in local_settings else False,
+    )
+    wfd = build_dataset(
+        data_settings=data_settings,
+        leave_waveforms_on_disk=local_settings.get("leave_waveforms_on_disk", True),
+    )
 
     if local_settings.get("wandb", False):
         try:
@@ -147,7 +228,13 @@ def prepare_training_resume(checkpoint_name, local_settings, train_dir):
     return pm, wfd
 
 
-def initialize_stage(pm, wfd, stage, num_workers, resume=False):
+def initialize_stage(
+    pm: BasePosteriorModel,
+    wfd: WaveformDataset,
+    stage: dict,
+    num_workers: int,
+    resume: bool = False,
+):
     """
     Initializes training based on PosteriorModel metadata and current stage:
         * Builds transforms (based on noise settings for current stage);
@@ -210,7 +297,9 @@ def initialize_stage(pm, wfd, stage, num_workers, resume=False):
     return train_loader, test_loader
 
 
-def train_stages(pm, wfd, train_dir, local_settings):
+def train_stages(
+    pm: BasePosteriorModel, wfd: WaveformDataset, train_dir: str, local_settings: dict
+) -> bool:
     """
     Train the network, iterating through the sequence of stages. Stages can change
     certain settings such as the noise characteristics, optimizer, and scheduler settings.
@@ -264,12 +353,13 @@ def train_stages(pm, wfd, train_dir, local_settings):
             )
         early_stopping = None
         if stage.get("early_stopping"):
-            try: 
+            try:
                 early_stopping = EarlyStopping(**stage["early_stopping"])
             except Exception:
-                print("Early stopping settings invalid. Please pass 'patience', 'delta', 'metric'")
+                print(
+                    "Early stopping settings invalid. Please pass 'patience', 'delta', 'metric'"
+                )
                 raise
-            
 
         runtime_limits.max_epochs_total = end_epochs[n]
         pm.train(
