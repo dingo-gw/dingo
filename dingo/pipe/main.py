@@ -6,26 +6,34 @@ import os
 from bilby_pipe.input import Input
 from bilby_pipe.main import MainInput as BilbyMainInput
 from bilby_pipe.utils import (
-    parse_args,
+    convert_string_to_dict,
     get_command_line_arguments,
     logger,
-    convert_string_to_dict,
+    parse_args,
 )
+
+from dingo.core.posterior_models.build_model import build_model_from_kwargs
+from dingo.gw.domains import build_domain_from_model_metadata
 
 from .dag_creator import generate_dag
 from .parser import create_parser
-
-from dingo.gw.domains import build_domain_from_model_metadata
-from dingo.core.posterior_models.build_model import build_model_from_kwargs
 
 logger.name = "dingo_pipe"
 
 
 def fill_in_arguments_from_model(args):
     logger.info(f"Loading dingo model from {args.model} in order to access settings.")
-    model = build_model_from_kwargs(
-        filename=args.model, device="meta", load_training_info=False
-    )
+
+    try:
+        model = build_model_from_kwargs(
+            filename=args.model, device="meta", load_training_info=False
+        )
+    except RuntimeError:
+        # 'meta' is not supported by older version of python / torch
+        model = build_model_from_kwargs(
+            filename=args.model, device=args.device, load_training_info=False
+        )
+
     model_metadata = model.metadata
 
     domain = build_domain_from_model_metadata(model_metadata)
