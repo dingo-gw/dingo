@@ -54,9 +54,20 @@ class SamplingNode(AnalysisNode):
             self.extra_lines.append("request_gpus = 1")
 
         if self.inputs.osg:
-            sites = self.inputs.desired_sites
+            sites = self.inputs.gpu_desired_sites
+            if sites is None:
+                sites = "nogrid"
             self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
             self.requirements.append("IS_GLIDEIN=?=True")
+
+            # only supporting OSDF transfers for now
+            input_files_to_transfer = [f"igwn+osdf://{x}" for x in [self.inputs.model, self.inputs.model_init]]
+            self.extra_lines.extend(
+                self._condor_file_transfer_lines(
+                    input_files_to_transfer,
+                    [self._relative_topdir(self.inputs.outdir, self.inputs.initialdir)],
+                )
+            )
 
         self.process_node()
         self.job.add_parent(generation_node.job)

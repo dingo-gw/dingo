@@ -750,12 +750,21 @@ def create_parser(top_level=True):
         help="If true, format condor submission for running on OSG, default is False",
     )
     submission_parser.add(
-        "--desired-sites",
+        "--gpu-desired-sites",
         type=nonestr,
         help=(
             "A comma-separated list of desired sites, wrapped in quoates."
             " e.g., desired-sites='site1,site2'. This can be used on the OSG"
-            " to specify specific run nodes."
+            " to specify specific run nodes. This determines which GPU site to use."
+        ),
+    )
+    submission_parser.add(
+        "--cpu-desired-sites",
+        type=nonestr,
+        help=(
+            "A comma-separated list of desired sites, wrapped in quoates."
+            " e.g., desired-sites='site1,site2'. This can be used on the OSG"
+            " to specify specific run nodes. This determines which CPU site to use."
         ),
     )
     submission_parser.add(

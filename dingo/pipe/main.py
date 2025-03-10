@@ -126,7 +126,9 @@ class MainInput(BilbyMainInput):
         self.transfer_files = args.transfer_files
         self.additional_transfer_paths = args.additional_transfer_paths
         self.osg = args.osg
-        self.desired_sites = args.desired_sites
+        self.desired_sites = args.cpu_desired_sites  # Dummy variable so bilby_pipe doesn't complain.
+        self.cpu_desired_sites = args.cpu_desired_sites
+        self.gpu_desired_sites = args.gpu_desired_sites
         # self.analysis_executable = args.analysis_executable
         # self.analysis_executable_parser = args.analysis_executable_parser
         self.result_format = "hdf5"
