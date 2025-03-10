@@ -94,9 +94,6 @@ def td_modes_to_fd_modes(hlm_td, domain):
     delta_f = domain.delta_f
     delta_t = 0.5 / domain.f_max
     f_nyquist = domain.f_max  # use f_max as f_nyquist
-    n = round(f_nyquist / delta_f)
-    if (n & (n - 1)) != 0:
-        raise NotImplementedError("f_nyquist not a power of two of delta_f.")
     chirplen = int(2 * f_nyquist / delta_f)
     # sample frequencies, -f_max,...,-f_min,...0,...,f_min,...,f_max
     freqs = np.concatenate((-domain()[::-1], domain()[1:]), axis=0)
