@@ -55,13 +55,17 @@ class SamplingNode(AnalysisNode):
 
         if self.inputs.osg:
             sites = self.inputs.gpu_desired_sites
-            if sites is None:
-                sites = "nogrid"
-            self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
+            if sites is not None:
+                self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
             self.requirements.append("IS_GLIDEIN=?=True")
 
             # only supporting OSDF transfers for now
-            input_files_to_transfer = [f"igwn+osdf://{x}" for x in [self.inputs.model, self.inputs.model_init]]
+            # stripping osdf prefix as it is not needed
+            input_files_to_transfer = [s.replace("/osdf", "") for s in [self.inputs.model, self.inputs.model_init]]
+            input_files_to_transfer = [f"igwn+osdf://{s}" for s in input_files_to_transfer]
+            # This is needed to access the networks which are in OSDF
+            self.extra_lines.extend(self.scitoken_lines)
+
             self.extra_lines.extend(
                 self._condor_file_transfer_lines(
                     input_files_to_transfer,

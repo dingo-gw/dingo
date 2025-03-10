@@ -49,11 +49,10 @@ class ImportanceSamplingNode(AnalysisNode):
         # if running on the OSG we need to specify the sites
         if self.inputs.osg:
             sites = self.inputs.desired_sites
-            if sites is None:
-                sites = "nogrid"
-            self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
+            if sites is not None:
+                self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
             self.requirements.append("IS_GLIDEIN=?=True")
-            input_files_to_transfer = [f"igwn+osdf://{x}" for x in [proposal_samples_file, generation_node.event_data_file]]
+            input_files_to_transfer = [proposal_samples_file, generation_node.event_data_file]
             self.extra_lines.extend(
                 self._condor_file_transfer_lines(
                     input_files_to_transfer,
