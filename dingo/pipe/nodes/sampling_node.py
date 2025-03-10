@@ -63,6 +63,8 @@ class SamplingNode(AnalysisNode):
             # stripping osdf prefix as it is not needed
             input_files_to_transfer = [s.replace("/osdf", "") for s in [self.inputs.model, self.inputs.model_init]]
             input_files_to_transfer = [f"igwn+osdf://{s}" for s in input_files_to_transfer]
+            input_files_to_transfer.append(self.inputs.complete_ini_file)
+            input_files_to_transfer.append(generation_node.event_data_file)
             # This is needed to access the networks which are in OSDF
             self.extra_lines.extend(self.scitoken_lines)
 

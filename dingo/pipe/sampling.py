@@ -44,13 +44,11 @@ class SamplingInput(Input):
         self.detectors = args.detectors
 
         # if running on the OSG, the network has been transferred to
-        # the local directory
+        # the local directory, replace osdf string
         if args.osg:
-            self.model = os.path.basename(args.model)
-            self.model_init = os.path.basename(args.model_init)
-        else:
-            self.model = args.model
-            self.model_init = args.model_init
+            self.model = args.model.replace("/osdf", "")
+            self.model_init = args.model_init.replace("/osdf", "")
+        print(self.model, self.model_init)
         self.recover_log_prob = args.recover_log_prob
         self.device = args.device
         self.num_gnpe_iterations = args.num_gnpe_iterations
