@@ -28,7 +28,7 @@ def fill_in_arguments_from_model(args):
     )
     model_metadata = model.metadata
 
-    domain = build_domain_from_model_metadata(model_metadata)
+    domain = build_domain_from_model_metadata(model_metadata, base=True)
 
     data_settings = model_metadata["train_settings"]["data"]
 
