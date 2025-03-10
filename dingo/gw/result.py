@@ -13,7 +13,7 @@ from dingo.core.density import (
 from dingo.core.multiprocessing import apply_func_with_multiprocessing
 from dingo.core.result import Result as CoreResult
 from dingo.gw.conversion import change_spin_conversion_phase
-from dingo.gw.domains import build_domain
+from dingo.gw.domains import build_domain, MultibandedFrequencyDomain
 from dingo.gw.gwutils import get_extrinsic_prior_dict, get_window_factor
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 from dingo.gw.prior import build_prior_with_defaults
@@ -101,6 +101,18 @@ class Result(CoreResult):
         self.importance_sampling_metadata["calibration_marginalization"] = value
 
     @property
+    def use_base_domain(self) -> bool:
+        return self.importance_sampling_metadata.get("use_base_domain", False)
+
+    @use_base_domain.setter
+    def use_base_domain(self, value: bool):
+        if hasattr(self.domain, "base_domain"):
+            self.importance_sampling_metadata["use_base_domain"] = value
+        # previously
+        # self._use_base_domain = value
+        # self._build_domain()
+
+    @property
     def f_ref(self):
         return self.base_metadata["dataset_settings"]["waveform_generator"]["f_ref"]
 
@@ -125,15 +137,6 @@ class Result(CoreResult):
             return self.base_metadata["train_settings"]["data"]["ref_time"]
 
     @property
-    def use_base_domain(self):
-        return self._use_base_domain
-
-    @use_base_domain.setter
-    def use_base_domain(self, value):
-        self._use_base_domain = value
-        self._build_domain()
-
-    @property
     def context(self):
         if self.use_base_domain:
             return self._context["base_data"]
@@ -152,8 +155,8 @@ class Result(CoreResult):
         Called by __init__() immediately after _build_prior().
         """
         self.domain = build_domain(self.base_metadata["dataset_settings"]["domain"])
-        if self._use_base_domain:
-            self.domain = self.domain.base_domain
+        # if self._use_base_domain:
+        #     self.domain = self.domain.base_domain
 
         data_settings = self.base_metadata["train_settings"]["data"]
         if "domain_update" in data_settings:
@@ -171,6 +174,10 @@ class Result(CoreResult):
         # Assume that updates can contain T, f_s, roll_off, f_min, f_max, but no other
         # quantities that define a new domain (e.g., delta_f). Typical event metadata
         # will be constructed in this way.
+
+        # TODO: Make compatible with MultibandedFrequencyDomain.
+        if isinstance(self.domain, MultibandedFrequencyDomain):
+            raise NotImplementedError()
 
         if "f_s" in updates or "T" in updates or "roll_off" in updates:
             window_settings = self.base_metadata["train_settings"]["data"][
@@ -225,7 +232,7 @@ class Result(CoreResult):
         else:
             self.phase_prior = None
 
-    def update_prior(self, prior_update):
+    def update_prior(self, prior_update: dict):
         """
         Update the prior based on a new dict of priors. Use the existing prior for
         parameters not included in the new dict.
@@ -243,7 +250,7 @@ class Result(CoreResult):
             the Result and later instantiated.
         """
         self.importance_sampling_metadata["prior_update"] = prior_update.copy()
-        prior_update = PriorDict(prior_update)
+        prior_update = PriorDict(dictionary=prior_update)
 
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
         theta = self.samples[param_keys]
@@ -285,7 +292,6 @@ class Result(CoreResult):
         phase_marginalization_kwargs: Optional[dict] = None,
         calibration_marginalization_kwargs: Optional[dict] = None,
         phase_grid: Optional[np.ndarray] = None,
-        decimate: Optional[bool] = False,
     ):
         """
         Build the likelihood function based on model metadata. This is called at the
@@ -301,8 +307,6 @@ class Result(CoreResult):
             kwargs for phase marginalization.
         calibration_marginalization_kwargs: dict
             Calibration marginalization parameters. If None, no calibration marginalization is used.
-        decimate : bool, optional
-            If set, decimate data from domain.base_domain to domain
         """
         if time_marginalization_kwargs is not None:
             if self.geocent_time_prior is None:
@@ -333,7 +337,6 @@ class Result(CoreResult):
         self.time_marginalization_kwargs = time_marginalization_kwargs
         self.phase_marginalization_kwargs = phase_marginalization_kwargs
         self.calibration_marginalization_kwargs = calibration_marginalization_kwargs
-        self.decimate = decimate
 
         # Choose the WaveformGenerator domain. This is ultimately projected to the data domain, but generally we
         # allow it to be different, e.g., to start integrating from lower frequencies than the lower bound of the
@@ -347,12 +350,7 @@ class Result(CoreResult):
         # TODO: Add functionality to update other waveform settings, i.e., approximant, generation minimum and
         #  maximum frequencies, reference frequency, and starting frequency.
 
-        if self.use_base_domain:
-            wfg_domain_dict = self.base_metadata["dataset_settings"]["domain"][
-                "base_domain"
-            ].copy()
-        else:
-            wfg_domain_dict = self.base_metadata["dataset_settings"]["domain"].copy()
+        wfg_domain_dict = self.base_metadata["dataset_settings"]["domain"].copy()
         if "updates" in self.importance_sampling_metadata:
             if "T" in self.importance_sampling_metadata["updates"]:
                 delta_f_new = 1 / self.importance_sampling_metadata["updates"]["T"]
@@ -362,29 +360,22 @@ class Result(CoreResult):
                 wfg_domain_dict["delta_f"] = delta_f_new
         wfg_domain = build_domain(wfg_domain_dict)
 
-        if self.event_metadata is not None:
-            event_domain, event_data = get_updated_event_domain_and_data(
-                self.domain, self.context, self.event_metadata
-            )
-        else:
-            event_domain, event_data = self.domain, self.context
-
         self.likelihood = StationaryGaussianGWLikelihood(
             wfg_kwargs=self.base_metadata["dataset_settings"]["waveform_generator"],
             wfg_domain=wfg_domain,
-            data_domain=event_domain,
-            event_data=event_data,
+            data_domain=self.domain,
+            event_data=self.context,
             t_ref=self.t_ref,
             time_marginalization_kwargs=time_marginalization_kwargs,
             phase_marginalization_kwargs=phase_marginalization_kwargs,
             calibration_marginalization_kwargs=calibration_marginalization_kwargs,
             phase_grid=phase_grid,
-            decimate=decimate
+            use_base_domain=self.use_base_domain,
         )
 
     def sample_synthetic_phase(
         self,
-        synthetic_phase_kwargs,
+        synthetic_phase_kwargs: dict,
         likelihood_kwargs: Optional[dict] = None,
         inverse: bool = False,
     ):
@@ -641,42 +632,3 @@ class Result(CoreResult):
                 except AttributeError:
                     continue
         return prior
-
-
-def get_updated_event_domain_and_data(domain, event_data, event_metadata):
-    # Get event domain, which is just the input domain with a potentially updated range.
-    domain = get_updated_domain_for_event(domain, event_metadata)
-
-    # Update event data to the new domain. This is a trivial operation if f_max is a
-    # node of the domain, but if not, we need to account for rounding errors.
-    base_domain = getattr(domain, "base_domain", domain)
-    event_data = {
-        k1: {
-            k2: base_domain.update_data(v2, low_value=(1 if k1 == "asds" else 0))
-            for k2, v2 in v1.items()
-        }
-        for k1, v1 in event_data.items()
-    }
-
-    return domain, event_data
-
-
-def get_updated_domain_for_event(domain, event_metadata):
-    # check compatibility of window factors
-    window_factor = get_window_factor(
-        dict(
-            type=event_metadata["window_type"],
-            T=event_metadata["T"],
-            f_s=event_metadata["f_s"],
-            roll_off=event_metadata["roll_off"],
-        )
-    )
-    if domain.window_factor != window_factor:
-        raise ValueError(
-            f"Network trained with window factor {domain.window_factor}, but event data "
-            f"requires window factor {window_factor}."
-        )
-    # Get event domain, which is just the input domain with a potentially updated range.
-    domain = build_domain(domain.domain_dict)
-    domain.update(dict(f_min=event_metadata["f_min"], f_max=event_metadata["f_max"]))
-    return domain

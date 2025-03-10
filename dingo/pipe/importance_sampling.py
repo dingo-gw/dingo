@@ -1,6 +1,6 @@
 #!/usr/bin/env python
-""" Script to importance sample based on Dingo samples. Based on bilby_pipe data
-analysis script. """
+"""Script to importance sample based on Dingo samples. Based on bilby_pipe data
+analysis script."""
 import os
 import sys
 
@@ -9,6 +9,7 @@ from bilby_pipe.input import Input
 from bilby_pipe.utils import parse_args, logger, convert_string_to_dict
 
 from dingo.gw.data.event_dataset import EventDataset
+from dingo.gw.domains import MultibandedFrequencyDomain
 from dingo.pipe.default_settings import IMPORTANCE_SAMPLING_SETTINGS
 from dingo.pipe.parser import create_parser
 from dingo.gw.result import Result
@@ -140,6 +141,10 @@ class ImportanceSamplingInput(Input):
             ]
         else:
             self._importance_sampling_settings = dict()
+        if isinstance(self.result.domain, MultibandedFrequencyDomain):
+            self._importance_sampling_settings.update(
+                IMPORTANCE_SAMPLING_SETTINGS["MultibandingDefault"]
+            )
 
         if settings is not None:
             if settings.lower() == "default":
@@ -165,7 +170,9 @@ class ImportanceSamplingInput(Input):
             phase_marginalization_kwargs=self.importance_sampling_settings.get(
                 "phase_marginalization"
             ),
-            decimate=self.importance_sampling_settings.get("decimate"),
+        )
+        self.result.use_base_domain = self.importance_sampling_settings.get(
+            "use_base_domain", False
         )
 
         if "synthetic_phase" in self.importance_sampling_settings:
@@ -183,7 +190,9 @@ class ImportanceSamplingInput(Input):
                 synthetic_phase_kwargs, likelihood_kwargs_synthetic_phase
             )
 
-        self.result.importance_sample(num_processes=self.request_cpus, **likelihood_kwargs)
+        self.result.importance_sample(
+            num_processes=self.request_cpus, **likelihood_kwargs
+        )
 
         if self.prior_dict:
             logger.info("Updating prior from network prior. Changes:")

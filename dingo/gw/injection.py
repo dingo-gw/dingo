@@ -101,18 +101,23 @@ class GWSignal(object):
 
     @use_base_domain.setter
     def use_base_domain(self, value: bool):
-        if value:
-            if hasattr(self.data_domain, "base_domain"):
-                self.waveform_generator.domain = (
-                    self.waveform_generator.domain.base_domain
-                )
-                self.data_domain = self.data_domain.base_domain
-                self._use_base_domain = True
-                self._initialize_transform()
+        if value != self._use_base_domain:
+            if value:
+                if hasattr(self.data_domain, "base_domain"):
+                    self.waveform_generator.domain = (
+                        self.waveform_generator.full_domain.base_domain
+                    )
+                    self.data_domain = self.data_domain.base_domain
+                    self._use_base_domain = True
+                    self._initialize_transform()
+                else:
+                    print(
+                        f"{type(self.data_domain)} has no base domain. Nothing to do."
+                    )
             else:
-                print(f"{type(self.data_domain)} has no base domain. Nothing to do.")
-        else:
-            raise NotImplementedError()
+                raise NotImplementedError(
+                    "Cannot recover original domain from base " "domain alone."
+                )
 
     @property
     def whiten(self):
@@ -284,7 +289,6 @@ class GWSignal(object):
             asd = self._asd
         elif isinstance(self._asd, ASDDataset):
             asd = self._asd.sample_random_asds()
-            asd = {ifo: asd[0] for ifo, asd in asd.items()}
         elif self._asd is None:
             return None
         else:

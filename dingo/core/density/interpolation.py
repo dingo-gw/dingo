@@ -1,3 +1,4 @@
+from typing import Tuple
 from functools import partial
 from multiprocessing import Pool
 from itertools import starmap
@@ -8,8 +9,8 @@ from threadpoolctl import threadpool_limits
 
 
 def interpolated_sample_and_log_prob_multi(
-    sample_points, values, num_processes: int = 1
-):
+    sample_points: np.ndarray, values: np.ndarray, num_processes: int = 1
+) -> Tuple[np.ndarray, np.ndarray]:
     """
     Given a distribution discretized on a grid, return a sample and the log prob from an
     interpolated distribution. Wraps the bilby.core.prior.Interped class. Works with
@@ -41,7 +42,9 @@ def interpolated_sample_and_log_prob_multi(
     return sample, log_prob
 
 
-def interpolated_sample_and_log_prob(sample_points, values):
+def interpolated_sample_and_log_prob(
+    sample_points: np.ndarray, values: np.ndarray
+) -> Tuple[float, float]:
     """
     Given a distribution discretized on a grid, return a sample and the log prob from an
     interpolated distribution. Wraps the bilby.core.prior.Interped class.
@@ -65,8 +68,11 @@ def interpolated_sample_and_log_prob(sample_points, values):
 
 
 def interpolated_log_prob_multi(
-    sample_points, values, evaluation_points, num_processes: int = 1
-):
+    sample_points: np.ndarray,
+    values: np.ndarray,
+    evaluation_points: np.ndarray,
+    num_processes: int = 1,
+) -> np.ndarray:
     """
     Given a distribution discretized on a grid, the log prob at a specific point
     using an interpolated distribution. Wraps the bilby.core.prior.Interped class.
@@ -86,7 +92,7 @@ def interpolated_log_prob_multi(
 
     Returns
     -------
-    (np.ndarray, np.ndarray) : sample and log_prob arrays, each of length B
+    np.ndarray: containing sample and log_prob arrays, each of length B
     """
     with threadpool_limits(limits=1, user_api="blas"):
         data_generator = zip(iter(values), iter(evaluation_points))
@@ -99,7 +105,9 @@ def interpolated_log_prob_multi(
     return np.array(result_list)
 
 
-def interpolated_log_prob(sample_points, values, evaluation_point):
+def interpolated_log_prob(
+    sample_points: np.ndarray, values: np.ndarray, evaluation_point: float
+) -> float:
     """
     Given a distribution discretized on a grid, return a sample and the log prob from an
     interpolated distribution. Wraps the bilby.core.prior.Interped class.

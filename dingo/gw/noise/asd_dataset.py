@@ -1,5 +1,5 @@
 import copy
-from typing import Iterable
+from typing import Iterable, Optional
 
 from dingo.gw.domains import build_domain, FrequencyDomain, MultibandedFrequencyDomain
 from dingo.gw.gwutils import *
@@ -19,11 +19,11 @@ class ASDDataset(DingoDataset):
 
     def __init__(
         self,
-        file_name=None,
-        dictionary=None,
-        ifos=None,
-        precision=None,
-        domain_update=None,
+        file_name: Optional[str] = None,
+        dictionary: Optional[dict] = None,
+        ifos: Optional[list] = None,
+        precision: Optional[str] = None,
+        domain_update: Optional[dict] = None,
         print_output: bool = True,
     ):
         """
@@ -76,12 +76,12 @@ class ASDDataset(DingoDataset):
                 )
 
     @property
-    def length_info(self):
+    def length_info(self) -> dict:
         """The number of asd samples per detector."""
         return {key: len(val) for key, val in self.asds.items()}
 
     @property
-    def gps_info(self):
+    def gps_info(self) -> dict:
         """Min/Max GPS time for each detector."""
         gps_info_dict = {}
         for key, val in self.gps_times.items():
@@ -91,7 +91,7 @@ class ASDDataset(DingoDataset):
                 gps_info_dict[key] = (min(val), max(val))
         return gps_info_dict
 
-    def update_domain(self, domain_update):
+    def update_domain(self, domain_update: dict):
         """
         Update the domain based on new configuration. Also adjust data arrays to match
         the new domain.
@@ -110,6 +110,8 @@ class ASDDataset(DingoDataset):
             Settings dictionary. Must contain a subset of the keys contained in
             domain_dict.
         """
+        # Note that we require domain_update to have a type specified, even if
+        # unchanged from the original domain. This reduces risks of errors.
         if self.domain.domain_dict["type"] == domain_update["type"]:
             len_domain_original = len(self.domain)
             self.domain.update(domain_update)
@@ -167,16 +169,25 @@ class ASDDataset(DingoDataset):
                 f"{self.domain.domain_dict['type']} to {domain_update['type']}"
             )
 
-    def sample_random_asds(self, n=1):
+    def sample_random_asds(self, n: Optional[int] = None) -> dict[str, np.ndarray]:
         """
-        Sample a random asd for each detector.
+        Sample n random ASDs for each detector.
+
+        Parameters
+        ----------
+        n : int
+            Number of asds to sample
+
         Returns
         -------
-        Dict with a random asd from the dataset for each detector.
-
-        n : int
-            Number of asds to sample 
+        dict[str, np.ndarray]
+            Where the keys correspond to the detectors and the values
+            are arrays of shape (n, D) where D is the number of frequency bins
+            and n is the number of ASDs requested. If n=None, then the
+            function returns a single ASD for each detector, so the array is
+            flattened to be shape D
         """
-        return {k: v[np.random.choice(len(v), n)] for k, v in self.asds.items()}
-
-    
+        if n is None:
+            return {k: v[np.random.choice(len(v), 1)[0]] for k, v in self.asds.items()}
+        else:
+            return {k: v[np.random.choice(len(v), n)] for k, v in self.asds.items()}

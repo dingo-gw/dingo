@@ -1,9 +1,8 @@
-from typing import Iterable, Union
+from typing import Iterable, Optional, Union
 import numpy as np
 import torch
 import lal
 from copy import copy
-import math
 
 from .base import Domain
 from .frequency_domain import FrequencyDomain
@@ -61,7 +60,7 @@ class MultibandedFrequencyDomain(Domain):
         self.range_update_idx_upper = None
         self.range_update_initial_length = None
 
-    def initialize_bands(self, delta_f_initial):
+    def initialize_bands(self, delta_f_initial: float):
         if len(self.nodes.shape) != 1:
             raise ValueError(
                 f"Expected format [num_bands + 1] for nodes, "
@@ -106,7 +105,7 @@ class MultibandedFrequencyDomain(Domain):
         assert self.f_max in self.base_domain()
         self.base_domain.update({"f_min": self.f_min, "f_max": self.f_max})
 
-    def decimate(self, data):
+    def decimate(self, data: np.ndarray) -> np.ndarray:
         if data.shape[-1] == len(self.base_domain):
             offset_idx = 0
         elif data.shape[-1] == len(self.base_domain) - self.base_domain.min_idx:
@@ -178,7 +177,9 @@ class MultibandedFrequencyDomain(Domain):
                 f'{list(self.domain_dict.keys())} or a subset of ["f_min, f_max"].'
             )
 
-    def set_new_range(self, f_min: float = None, f_max: float = None):
+    def set_new_range(
+        self, f_min: Optional[float] = None, f_max: Optional[float] = None
+    ):
         """
         Set a new range [f_min, f_max] for the domain. This operation is only allowed
         if the new range is contained within the old one.

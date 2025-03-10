@@ -1,4 +1,3 @@
-import sys
 from multiprocessing import Pool
 
 import numpy as np
@@ -10,6 +9,7 @@ from threadpoolctl import threadpool_limits
 
 from dingo.core.likelihood import Likelihood
 from dingo.gw.injection import GWSignal
+from dingo.gw.transforms import DecimateWaveformsAndASDS
 from dingo.gw.waveform_generator import WaveformGenerator
 from dingo.gw.domains import build_domain, FrequencyDomain, MultibandedFrequencyDomain
 from dingo.gw.data.data_preparation import get_event_data_and_domain
@@ -31,7 +31,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         phase_marginalization_kwargs=None,
         calibration_marginalization_kwargs=None,
         phase_grid=None,
-        decimate=False,
+        use_base_domain=False,
     ):
         # TODO: Does the phase_grid argument ever get used?
         """
@@ -55,19 +55,9 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             Calibration marginalization parameters. If None, no calibration marginalization is used.
         phase_marginalization_kwargs: dict
             Phase marginalization parameters. If None, no phase marginalization is used.
-        decimate: bool = False
+        use_base_domain: bool = False
             If set, decimate data from domain.base_domain to domain
         """
-        # determine domains based on whether we decimate or not
-        if decimate:
-            if not hasattr(data_domain, "base_domain"):
-                raise ValueError("Decimation requires data domain to have base_domain.")
-            if not hasattr(wfg_domain, "base_domain"):
-                raise ValueError("Decimation requires wfg domain to have base_domain.")
-        else:
-            data_domain = data_domain
-            wfg_domain = wfg_domain
-
         super().__init__(
             wfg_kwargs=wfg_kwargs,
             wfg_domain=wfg_domain,
@@ -76,32 +66,21 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             t_ref=t_ref,
         )
 
-        # optionally decimate
-        if decimate:
-            # whiten (without noise std, do this after decimation!)
-            self.whitened_strains = {
-                k: v / event_data["asds"][k] for k, v in event_data["waveform"].items()
-            }
-            # decimate
-            self.whitened_strains = {
-                ifo: data_domain.decimate(waveform_base) / data_domain.noise_std
-                for ifo, waveform_base in self.whitened_strains.items()
-            }
-            self.asd = {
-                ifo: 1 / data_domain.decimate(1 / asd_base)
-                for ifo, asd_base in event_data["asds"].items()
-            }
-            del event_data
-        else:
-            # whiten
-            self.asd = event_data["asds"]
-            self.whitened_strains = {
-                k: v / self.asd[k] / self.data_domain.noise_std
-                for k, v in event_data["waveform"].items()
-            }
-            if len(list(self.whitened_strains.values())[0]) != data_domain.max_idx + 1:
-                raise ValueError("Strain data does not match domain.")
-            del event_data
+        if isinstance(data_domain, MultibandedFrequencyDomain) and not use_base_domain:
+            decimator = DecimateWaveformsAndASDS(
+                data_domain, decimation_mode="whitened"
+            )
+            event_data = decimator(event_data)
+        self.use_base_domain = use_base_domain  # Set up appropriate domain objects.
+
+        self.asd = event_data["asds"]
+        self.whitened_strains = {
+            k: v / self.asd[k] / self.data_domain.noise_std
+            for k, v in event_data["waveform"].items()
+        }
+        if len(list(self.whitened_strains.values())[0]) != len(self.data_domain):
+            raise ValueError("Strain data does not match domain.")
+        del event_data
 
         # log noise evidence, independent of theta and waveform model
         self.log_Zn = sum(
@@ -297,17 +276,41 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
     def log_likelihood_phase_grid(self, theta, phases=None):
-        if isinstance(self.waveform_generator.domain, FrequencyDomain):
+        if isinstance(
+            self.waveform_generator.domain,
+            (FrequencyDomain, MultibandedFrequencyDomain),
+        ):
             return self._log_likelihood_phase_grid_mode_decomposed(theta, phases=phases)
-        elif isinstance(self.waveform_generator.domain, MultibandedFrequencyDomain):
-            return self._log_likelihood_phase_grid_manual(theta, phases=phases)
+            # elif isinstance(self.waveform_generator.domain, MultibandedFrequencyDomain):
+            #     return self._log_likelihood_phase_grid_manual(theta, phases=phases)
         else:
             raise NotImplementedError(
                 f"Phase grid not implemented for "
                 f"{type(self.waveform_generator.domain)}."
             )
 
-    def _log_likelihood_phase_grid_manual(self, theta, phases=None):
+    def _log_likelihood_phase_grid_manual(self, theta, phases=None) -> np.ndarray:
+        if self.phase_marginalization:
+            raise ValueError(
+                "Can't compute likelihood on a phase grid for "
+                "phase-marginalized posteriors"
+            )
+        if self.time_marginalization:
+            raise NotImplementedError(
+                "log_likelihood on phase grid not yet implemented."
+            )
+
+        if phases is None:
+            phases = self.phase_grid
+
+        log_likelihoods = np.ones(len(phases))
+        for idx, p in enumerate(phases):
+            log_likelihoods[idx] = self._log_likelihood({**theta, "phase": p})
+
+        return log_likelihoods
+
+    def _log_likelihood_phase_grid_mode_decomposed(self, theta, phases=None):
+        # TODO: Implement for time marginalization
         if self.phase_marginalization:
             raise ValueError(
                 "Can't compute likelihood on a phase grid for "
