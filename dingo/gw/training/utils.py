@@ -1,7 +1,10 @@
+import argparse
+
 import numpy as np
 import torch
-import argparse
 import yaml
+
+from dingo.core.utils.backward_compatibility import torch_load_with_fallback
 
 
 def append_stage():
@@ -13,13 +16,8 @@ def append_stage():
     parser.add_argument("--replace", type=int)
     args = parser.parse_args()
 
-    # Typically training is done on the GPU, so the model could be saved on a GPU
-    # device. Since this routine may be run on a CPU machine, allow for a remap of the
-    # torch tensors.
-    if torch.cuda.is_available():
-        d = torch.load(args.checkpoint)
-    else:
-        d = torch.load(args.checkpoint, map_location=torch.device("cpu"))
+    # trying to load on CUDA, MPS, HIP or CPU
+    d, _ = torch_load_with_fallback(args.checkpoint)
 
     stages = [
         v
@@ -34,8 +32,10 @@ def append_stage():
 
     if args.replace is not None:
         if args.replace < 0 or args.replace >= num_stages:
-            raise ValueError(f"Invalid argument replace={args.replace}. Valid values "
-                             f"are {list(range(num_stages))}.")
+            raise ValueError(
+                f"Invalid argument replace={args.replace}. Valid values "
+                f"are {list(range(num_stages))}."
+            )
         current_epoch = d["epoch"]
         stage_epoch = np.sum([s["epochs"] for s in stages[: args.replace]])
         if current_epoch > stage_epoch:

@@ -103,9 +103,12 @@ local:
     max_time_per_run: 3600000
     max_epochs_per_run: 500
   checkpoint_epochs: 50
+  leave_waveforms_on_disk: True
+  # local_cache_path: tmp # uncomment to avoid slow data loading during training due to network traffic on cluster
   # Local settings related to condor, remove if not used on cluster
   condor:
     num_cpus: 16
     memory_cpus: 128000
     num_gpus: 1
     memory_gpus: 8000
+    request_disk: 50GB
