@@ -117,3 +117,4 @@ local:
   runtime_limits:
     max_epochs_per_run: 500
     max_time_per_run: 360000
+  leave_waveforms_on_disk: True
