@@ -818,19 +818,18 @@ def run_multi_gpu_training(
     else:
         checkpoint_file = os.path.join(train_dir, ckpt_file)
         train_settings = load_settings_from_ckpt(ckpt_file)
-
-    data_settings = deepcopy(train_settings["data"])
-    # Optionally copy files to local and update path
-    data_settings["waveform_dataset_path"] = copy_files_to_local(
-        file_path=data_settings["waveform_dataset_path"],
-        local_dir=local_settings.get("local_cache_path", None),
-        leave_keys_on_disk=local_settings.get("leave_waveforms_on_disk", True),
-        is_condor=True if "condor" in local_settings else False,
-    )
-    wfd = build_dataset(
-        data_settings=data_settings,
-        leave_waveforms_on_disk=local_settings.get("leave_waveforms_on_disk", True),
-    )
+        data_settings = deepcopy(train_settings["data"])
+        # Optionally copy files to local and update path
+        data_settings["waveform_dataset_path"] = copy_files_to_local(
+            file_path=data_settings["waveform_dataset_path"],
+            local_dir=local_settings.get("local_cache_path", None),
+            leave_keys_on_disk=local_settings.get("leave_waveforms_on_disk", True),
+            is_condor=True if "condor" in local_settings else False,
+        )
+        wfd = build_dataset(
+            data_settings=data_settings,
+            leave_waveforms_on_disk=local_settings.get("leave_waveforms_on_disk", True),
+        )
     if pretrained_emb_net is not None:
         pretraining = True
     else:
