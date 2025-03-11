@@ -1,7 +1,6 @@
 from .base import Domain
 from .frequency_domain import FrequencyDomain
 from .time_domain import TimeDomain
-from .irregular_frequency_domain import IrregularFrequencyDomain
 from .multibanded_frequency_domain import (
     MultibandedFrequencyDomain,
     get_decimation_bands_adaptive,

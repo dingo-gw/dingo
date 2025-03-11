@@ -3,7 +3,6 @@ import numpy as np
 import torch
 import lal
 from copy import copy
-import math
 
 from .base import Domain
 from .frequency_domain import FrequencyDomain
