@@ -17,17 +17,15 @@ if [[ ! -v PYTHON_VERSION ]]; then
 fi
 
 # arguments are
-# --base-dir: where all run will be executed and
-#   the virtual env (reused accross runs set). Default: /tmp/dingo
+# --base-dir: directory in which all run will be executed and
+#   the virtual env created (reused accross runs set). Default: /tmp/dingo
 # --email: an optional email server config for sending report
 #   emails (upon success and failure)
-# This section defines the related variable $BIN_DIR and $EMAIL_CONFIG_PATH
 # --checkout: an optional (git) checkout to perform, e.g. a commit id
 
 DINGO_REPO="https://github.com/dingo-gw/dingo.git"
 
 DEFAULT_BASE_DIR="/tmp/dingo"
-
 
 # Parse optional arguments
 while [ $# -gt 0 ]; do
@@ -51,6 +49,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# creating the base directory
 BASE_DIR=${BASE_DIR:-$DEFAULT_BASE_DIR}
 if ! mkdir -p "$BASE_DIR"; then
     echo "Failed to create base directory '$BASE_DIR'" >&2
@@ -73,7 +72,7 @@ echo -e "\nUsing BASE_DIR: ${BASE_DIR}\n"
 
 # if checkout has been passed as argument
 # (branch, or commit, or tag), then
-# the name of the checkout as folder name.
+# the name of the checkout will be the folder name.
 
 # otherwise, current date is used
 
@@ -183,7 +182,10 @@ send_email() {
     exit ${status}
 }
 
+
+# early exit upon any error
 set -e
+# making sure email report is also sent upon failure
 trap send_email EXIT
 
 
@@ -230,8 +232,7 @@ echo ""
 #########
 
 # clone, pip installing and creating
-# folders required to run toy_npe_model
-# example
+# folders required to run toy_npe_model example
 
 echo -e "\nStarting DINGO installation..."
 
