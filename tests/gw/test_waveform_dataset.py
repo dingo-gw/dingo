@@ -189,7 +189,7 @@ def test_load_waveform_dataset_with_leave_polarizations_on_disk(
     wfd = WaveformDataset(
         file_name=path,
         precision="single",
-        leave_polarizations_on_disk=True,
+        leave_waveforms_on_disk=True,
     )
 
     assert len(wfd) > 0

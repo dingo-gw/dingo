@@ -1,9 +1,10 @@
 from typing import List, Optional
+import copy
+
 import torch.multiprocessing
 import torchvision
-from bilby.gw.detector import InterferometerList
-import copy
 from threadpoolctl import threadpool_limits
+from bilby.gw.detector import InterferometerList
 
 from dingo.core.utils import *
 from dingo.gw.SVD import SVDBasis
@@ -31,7 +32,7 @@ from dingo.gw.transforms import (
 
 def build_dataset(
     data_settings: dict,
-    leave_polarizations_on_disk: Optional[bool] = False,
+    leave_waveforms_on_disk: Optional[bool] = False,
 ) -> WaveformDataset:
     """Build a dataset based on a settings dictionary. This should contain the path of
     a saved waveform dataset.
@@ -41,10 +42,10 @@ def build_dataset(
     Parameters
     ----------
     data_settings : dict
-    leave_polarizations_on_disk: bool
-         If provided, the values associated with the polarizations will not be loaded into memory during initialization.
-         Instead, they will be loaded from disk when the dataset is accessed. This is useful for reducing the memory
-         load of large datasets, but can slow down data preprocessing.
+    leave_waveforms_on_disk: bool
+        If provided, the values associated with the waveforms will not be loaded into memory during initialization.
+        Instead, they will be loaded from disk when the dataset is accessed. This is useful for reducing the memory
+        load of large datasets, but can slow down data preprocessing.
 
     Returns
     -------
@@ -58,7 +59,7 @@ def build_dataset(
         precision="single",
         domain_update=domain_update,
         svd_size_update=data_settings.get("svd_size_update"),
-        leave_polarizations_on_disk=leave_polarizations_on_disk,
+        leave_waveforms_on_disk=leave_waveforms_on_disk,
     )
     return wfd
 

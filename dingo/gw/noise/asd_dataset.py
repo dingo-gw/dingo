@@ -1,7 +1,7 @@
 import copy
 from typing import Iterable, Optional
 
-from dingo.gw.domains import build_domain, FrequencyDomain, MultibandedFrequencyDomain
+from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import *
 from dingo.gw.dataset import DingoDataset
 
@@ -119,6 +119,7 @@ class ASDDataset(DingoDataset):
 
             # truncate the dataset
             for ifo, asds in self.asds.items():
+
                 # Is there a reason this check is needed? I would think that a dataset
                 # should never be saved with this not matching.
                 assert asds.shape[-1] == len_domain_original, (
@@ -129,7 +130,6 @@ class ASDDataset(DingoDataset):
                     asds,
                     low_value=HIGH_ASD_VALUE,
                 )
-
         elif (
             self.domain.domain_dict["type"] == "FrequencyDomain"
             and domain_update["type"] == "MultibandedFrequencyDomain"

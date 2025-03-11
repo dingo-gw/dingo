@@ -65,7 +65,7 @@ def recursive_hdf5_load(
                     # Load specific idx
                     d[k] = v[idx]
                 # Update data types
-                # If the array has column names, convert it to a pandas DataFrame
+                # If the array has column names, load it as a pandas DataFrame
                 if d[k].dtype.names is not None:
                     d[k] = pd.DataFrame(d[k])
                 # Convert arrays of size 1 to scalars
@@ -99,7 +99,7 @@ class DingoDataset:
         file_name: Optional[str] = None,
         dictionary: Optional[dict] = None,
         data_keys: Optional[List] = None,
-        leave_polarizations_on_disk: Optional[bool] = False,
+        leave_on_disk_keys: Optional[list] = None,
         print_output: bool = True,
     ):
         """
@@ -117,10 +117,10 @@ class DingoDataset:
             Variables that should be saved / loaded. This allows for class to store
             additional variables beyond those that are saved. Typically, this list
             would be provided by any subclass.
-        leave_polarizations_on_disk: bool
-             If true, the polarizations are not loaded into RAM when initializing the dataset
-             to reduce the memory footprint during training. Instead, the polarizations are
-             loaded from the HDF5 file during training.
+        leave_on_disk_keys: Optional[list]
+            Keys for which the values are not loaded into RAM when initializing the dataset.
+            This reduces the memory footprint during training. Instead, the values are
+            loaded from the HDF5 file during training.
         print_output: bool
             Whether to write print statements to the console.
         """
@@ -131,8 +131,9 @@ class DingoDataset:
         for key in self._data_keys:
             vars(self)[key] = None
         self.settings = None
-        self.version = None
-        self.leave_polarizations_on_disk = leave_polarizations_on_disk
+        if leave_on_disk_keys is None:
+            leave_on_disk_keys = []
+        self._leave_on_disk_keys = leave_on_disk_keys
         self.print_output = print_output
 
         # If data provided, load it
@@ -141,9 +142,8 @@ class DingoDataset:
         elif dictionary is not None:
             self.from_dictionary(dictionary)
 
-    def to_file(self, file_name, mode="w"):
-        if self.print_output:
-            print("Saving dataset to " + str(file_name))
+    def to_file(self, file_name: str, mode: str = "w"):
+        print("Saving dataset to " + str(file_name))
         save_dict = {
             k: v
             for k, v in vars(self).items()
@@ -156,21 +156,16 @@ class DingoDataset:
             if self.dataset_type:
                 f.attrs["dataset_type"] = self.dataset_type
 
-                # Explicit line for loading and closing, only close it if there's nothing left on disk
-
     def from_file(self, file_name: str):
-        keys_to_load = self._data_keys
-        if self.leave_polarizations_on_disk:
-            print(
-                f"Loading dataset without loading the polarizations from {str(file_name)}."
-            )
-            # Remove polarizations from keys_to_load
-            keys_to_load = [k for k in keys_to_load if k != "polarizations"]
-        else:
-            print(f"Loading dataset from {str(file_name)}.")
+        print(f"Loading dataset from {str(file_name)}.")
+        if self._leave_on_disk_keys:
+            print(f"Omitting data keys {self._leave_on_disk_keys}.")
 
         with h5py.File(file_name, "r") as f:
-            loaded_dict = recursive_hdf5_load(f, keys=keys_to_load)
+            loaded_dict = recursive_hdf5_load(
+                f,
+                keys=[k for k in self._data_keys if k not in self._leave_on_disk_keys],
+            )
             # Set the keys that the class expects
             for k, v in loaded_dict.items():
                 assert k in self._data_keys

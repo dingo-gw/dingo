@@ -94,7 +94,7 @@ dingo_generate_asd_dataset --settings_file asd_dataset_settings_fiducial.yaml --
 
 However, this time, during training we will need two sets of ASDs. The first one will be
 fixed during the initial training -- this is the fiducial dataset generated above.
-This dataset will contain only  a single ASD. The second ASDDataset will contain many
+This dataset will contain only a single ASD. The second ASDDataset will contain many
 ASDs and is used during the fine tuning stage. The reason to use just one ASD during the first 
 stage is to allow the network to train in an easier inference setting. It should learn how
 to infer parameters in the presence of that one ASD. However, during inference
@@ -137,12 +137,10 @@ number/size of the layers in the embedding network.
 Notice, we are not inferring the phase parameter here as it is not listed below `inference_parameters`. However,
 we do recover the phase in post processing. To see why and how this is done see [synthetic phase](result.md)
 
-Also notice there are now two training stages `stage_0` and `stage_1`. In `stage_0` a fixed ASD is used and the reduced basis layer
-is frozen. Then in `stage_1` all ASDs are used and the reduced basis layer is unfrozen. 
+Also notice there are now two training stages `stage_0` and `stage_1`. In `stage_0`, a fixed ASD is used and the reduced basis layer
+is frozen. Then in `stage_1`, all ASDs are used and the reduced basis layer is unfrozen. 
 
 The main difference in the local settings is that the `device` is set to `CUDA`.
-Note if you have multiple GPUs on the machine, you can select which GPU to use
-by running 
 
 ```{important}
 It is recommended to have at least 40 GB of GPU memory on the device. If there is not enough memory on the machine,

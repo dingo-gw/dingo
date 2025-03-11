@@ -8,6 +8,7 @@ import sys
 import textwrap
 import time
 import yaml
+
 from copy import deepcopy
 
 import torch.multiprocessing as mp
@@ -46,30 +47,49 @@ from dingo.gw.training.train_builders import (
     build_svd_for_embedding_network,
 )
 
-
-def copy_files_to_local(file_path: str, local_dir: str) -> str:
+def copy_files_to_local(
+    file_path: str, local_dir: Optional[str], leave_keys_on_disk: bool, is_condor: bool = False,
+) -> str:
     """
-    Copy files to local node to minimize network traffic during training.
+    Copy files to local node if local_dir is provided to minimize network traffic during training.
 
     Parameters
     ----------
     file_path: str
         Path to file that should be copied.
-    local_dir: str
-        Directory where file should be copied.
+    local_dir: Optional[str]
+        Directory where file should be copied. If None, file will not be copied.
+    leave_keys_on_disk: bool
+        Whether to leave keys on disk and load them during training. If dataset is not copied and
+        leave_keys_on_disk is True, a warning will be raised.
+    is_condor: bool
+        Whether this is a condor job.
 
     Returns
-    ----------
+    -------
     local_file_path: str
+        Modified file path if file was copied to local node, else the original file path.
     """
-    file_name = file_path.split("/")[-1]
-    local_file_path = os.path.join(local_dir, file_name)
-    print(f"Copying file to {local_file_path}")
-    # Copy file
-    start_time = time.time()
-    shutil.copy(file_path, local_file_path)
-    elapsed_time = time.time() - start_time
-    print("Done. This took {:2.0f}:{:2.0f} min.".format(*divmod(elapsed_time, 60)))
+    local_file_path = file_path
+    if local_dir is not None:
+        file_name = file_path.split("/")[-1]
+        local_file_path = os.path.join(local_dir, file_name)
+        print(f"Copying file to {local_file_path}")
+        # Copy file
+        start_time = time.time()
+        shutil.copy(file_path, local_file_path)
+        elapsed_time = time.time() - start_time
+        print("Done. This took {:2.0f}:{:2.0f} min.".format(*divmod(elapsed_time, 60)))
+    elif leave_keys_on_disk and is_condor:
+        print(
+            f"Warning: leave_waveforms_on_disk defaults to True, but local_cache_path is not specified. "
+            f"This means that the waveforms will be loaded during training from {local_file_path} ."
+            f"This can lead to unexpected long times for data loading during training due to network traffic. "
+            f"To prevent this, specify 'local_cache_path = tmp' in the local settings or set "
+            f"leave_waveforms_on_disk = False. However, the latter is not recommended for large datasets since "
+            f"it can lead to memory issues when loading the entire dataset into RAM. "
+        )
+
     return local_file_path
 
 
@@ -102,20 +122,18 @@ def prepare_wfd_and_initialization_for_embedding_network(
     -------
     (WaveformDataset, initial_weights, BasePosteriorModel)
     """
-
     data_settings = deepcopy(train_settings["data"])
-    if "path_copy_wfd_to_local" in local_settings:
-        data_settings["waveform_dataset_path"] = copy_files_to_local(
-            file_path=data_settings["waveform_dataset_path"],
-            local_dir=local_settings["path_copy_wfd_to_local"],
-        )
-    # No transforms yet
+    # Optionally copy files to local and update path
+    data_settings["waveform_dataset_path"] = copy_files_to_local(
+        file_path=data_settings["waveform_dataset_path"],
+        local_dir=local_settings.get("local_cache_path", None),
+        leave_keys_on_disk=local_settings.get("leave_waveforms_on_disk", True),
+        is_condor=True if "condor" in local_settings else False,
+    )
     wfd = build_dataset(
         data_settings=data_settings,
-        leave_polarizations_on_disk=local_settings.get(
-            "leave_polarizations_on_disk", None
-        ),
-    )
+        leave_waveforms_on_disk=local_settings.get("leave_waveforms_on_disk", True),
+    )  # No transforms yet
     initial_weights = {}
     pretrained_embedding_net = None
 
@@ -325,7 +343,6 @@ def prepare_training_new(
 
     return pm, wfd
 
-
 def load_settings_from_ckpt(checkpoint_name: str):
     """Load settings from checkpoint file.
 
@@ -346,15 +363,15 @@ def load_settings_from_ckpt(checkpoint_name: str):
     )
     return pm.metadata["train_settings"]
 
-
 def prepare_model_resume(
     checkpoint_name: str,
     local_settings: dict,
     train_dir: str,
     pretraining: Optional[bool] = False,
-):
+) -> BasePosteriorModel:
     """
-    Loads a PosteriorModel from a checkpoint in order to continue training. It initializes the saved optimizer
+    Loads a PosteriorModel from a checkpoint, as well as the corresponding
+    WaveformDataset, in order to continue training. It initializes the saved optimizer
     and scheduler from the checkpoint.
 
     Parameters
@@ -362,9 +379,9 @@ def prepare_model_resume(
     checkpoint_name : str
         File name containing the checkpoint (.pt format).
     local_settings : dict
-        A dictionary containing the local settings.
+        Local settings (e.g., num_workers, device)
     train_dir: str
-        The directory where all training information is saved.
+        Path to training directory where the wandb info is saved.
     pretraining: bool
         Whether to resume in pretraining mode
 
@@ -430,16 +447,16 @@ def prepare_training_resume(
     train_settings = load_settings_from_ckpt(checkpoint_name)
 
     data_settings = deepcopy(train_settings["data"])
-    if "path_copy_wfd_to_local" in local_settings:
-        data_settings["waveform_dataset_path"] = copy_files_to_local(
-            file_path=data_settings["waveform_dataset_path"],
-            local_dir=local_settings["path_copy_wfd_to_local"],
-        )
+    # Optionally copy files to local and update path
+    data_settings["waveform_dataset_path"] = copy_files_to_local(
+        file_path=data_settings["waveform_dataset_path"],
+        local_dir=local_settings.get("local_cache_path", None),
+        leave_keys_on_disk=local_settings.get("leave_waveforms_on_disk", True),
+        is_condor=True if "condor" in local_settings else False,
+    )
     wfd = build_dataset(
         data_settings=data_settings,
-        leave_polarizations_on_disk=local_settings.get(
-            "leave_polarizations_on_disk", None
-        ),
+        leave_waveforms_on_disk=local_settings.get("leave_waveforms_on_disk", True),
     )
 
     pm = prepare_model_resume(
@@ -801,13 +818,19 @@ def run_multi_gpu_training(
     else:
         checkpoint_file = os.path.join(train_dir, ckpt_file)
         train_settings = load_settings_from_ckpt(ckpt_file)
-        wfd = build_dataset(
-            data_settings=train_settings["data"],
-            path_copy_wfd_to_local=local_settings.get("path_copy_wfd_to_local", None),
-            wfd_keys_to_leave_on_disk=local_settings.get(
-                "wfd_keys_to_leave_on_disk", None
-            ),
-        )
+
+    data_settings = deepcopy(train_settings["data"])
+    # Optionally copy files to local and update path
+    data_settings["waveform_dataset_path"] = copy_files_to_local(
+        file_path=data_settings["waveform_dataset_path"],
+        local_dir=local_settings.get("local_cache_path", None),
+        leave_keys_on_disk=local_settings.get("leave_waveforms_on_disk", True),
+        is_condor=True if "condor" in local_settings else False,
+    )
+    wfd = build_dataset(
+        data_settings=data_settings,
+        leave_waveforms_on_disk=local_settings.get("leave_waveforms_on_disk", True),
+    )
     if pretrained_emb_net is not None:
         pretraining = True
     else:

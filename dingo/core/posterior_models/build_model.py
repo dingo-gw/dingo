@@ -8,11 +8,14 @@ from dingo.core.nn.transformer import (
     create_pooling_transformer,
 )
 from dingo.core.posterior_models.base_model import BasePosteriorModel
-from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
 from dingo.core.posterior_models.flow_matching import FlowMatchingPosteriorModel
+from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
 from dingo.core.posterior_models.score_matching import ScoreDiffusionPosteriorModel
 from dingo.core.posterior_models.pretraining_model import PretrainingModel
-from dingo.core.utils.backward_compatibility import update_model_config
+from dingo.core.utils.backward_compatibility import (
+    torch_load_with_fallback,
+    update_model_config,
+)
 
 
 def build_model_from_kwargs(
@@ -26,7 +29,6 @@ def build_model_from_kwargs(
     """
     Returns a PosteriorModel (from settings file or rebuild from file). Extracts the relevant arguments (normalizing flow
     or continuous flow) from setting.
-    Returns a PosteriorModel based on a saved network or settings dict.
 
     The function is careful to choose the appropriate PosteriorModel class (e.g.,
     for a normalizing flow, flow matching, or score matching).
@@ -70,8 +72,7 @@ def build_model_from_kwargs(
 
     allow_tf32 = False
     if filename is not None:
-        # Load model to extract settings
-        d = torch.load(filename, map_location="meta")
+        d, _ = torch_load_with_fallback(filename, preferred_map_location="meta")
         update_model_config(d["metadata"]["train_settings"]["model"])  # Backward compat
         posterior_model_type = d["metadata"]["train_settings"]["model"][
             "posterior_model_type"
