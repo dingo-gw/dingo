@@ -77,7 +77,11 @@ def copy_files_to_local(
         print(f"Copying file from {file_path} to {local_file_path}")
         # Copy file
         start_time = time.time()
-        shutil.copy(file_path, local_file_path)
+        try:
+            shutil.copy(file_path, local_file_path)
+        except FileNotFoundError as e:
+            print(f"Error: {e}")
+            print(f"Path to os.environ['TMPDIR'] is {os.environ['TMPDIR']}")
         elapsed_time = time.time() - start_time
         print("Done. This took {:2.0f}:{:2.0f} min.".format(*divmod(elapsed_time, 60)))
     elif leave_keys_on_disk and is_condor:
