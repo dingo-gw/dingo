@@ -1,6 +1,9 @@
+from typing import Optional
 import numpy as np
 
 from dingo.gw.domains import FrequencyDomain, MultibandedFrequencyDomain
+
+DETECTOR_DICT = {"H1": 0, "L1": 1, "V1": 2}
 
 
 class StrainTokenization(object):
@@ -181,15 +184,14 @@ class StrainTokenization(object):
             num_channels * self.num_bins_per_token,
         )
         # Prepare position information for each token
-        detector_dict = {"H1": 0, "L1": 1, "V1": 2}
         if strain.shape[:-4] == ():
             detectors = np.array(
-                [[detector_dict[k] for k, v in input_sample["asds"].items()]]
+                [[DETECTOR_DICT[k] for k, v in input_sample["asds"].items()]]
             )
         else:
             detectors = np.array(
                 [
-                    [detector_dict[k] for _ in range(len(v))]
+                    [DETECTOR_DICT[k] for _ in range(len(v))]
                     for k, v in input_sample["asds"].items()
                 ]
             ).T
@@ -481,6 +483,8 @@ class DropDetectors(object):
         """
         Parameters
         ----------
+        num_blocks: int
+            Number of blocks (= detectors) in GW use case.
         p_drop_012_detectors: list[float]
             Specifies the categorical probability distribution for how many detectors to drop, in ascending order
             example: [0.1, 0.6, 0.3] = [10% probability to drop 0 detectors (=3 detector setup), 60 % probability for
@@ -507,8 +511,7 @@ class DropDetectors(object):
         if np.sum(list(p_drop_hlv.values())) != 1:
             raise ValueError(f"p_drop_hlv {p_drop_hlv} does not sum to 1.")
         # Update keys equivalently to tokenization transform
-        detector_dict = {"H1": 0, "L1": 1, "V1": 2}
-        self.p_drop_hlv = {detector_dict[k]: v for k, v in p_drop_hlv.items()}
+        self.p_drop_hlv = {DETECTOR_DICT[k]: v for k, v in p_drop_hlv.items()}
 
         if len(p_drop_012_detectors) > num_blocks:
             raise ValueError(

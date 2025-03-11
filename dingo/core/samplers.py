@@ -14,8 +14,10 @@ from dingo.core.posterior_models import BasePosteriorModel
 from dingo.core.result import Result
 from dingo.core.result import DATA_KEYS as RESULT_DATA_KEYS
 from dingo.core.utils import torch_detach_to_cpu, IterationTracker
+
 # FIXME: transform below should be in core
 from dingo.gw.transforms import SelectStandardizeRepackageParameters
+from dingo.gw.transforms import DETECTOR_DICT
 
 
 #
@@ -84,6 +86,8 @@ class Sampler(object):
             self.event_metadata = None
             self.base_model_metadata = self.metadata
 
+        self._detectors = self.metadata["train_settings"]["data"]["detectors"]
+
         self.inference_parameters = self.metadata["train_settings"]["data"][
             "inference_parameters"
         ]
@@ -108,8 +112,25 @@ class Sampler(object):
         if value is not None and "parameters" in value:
             self.metadata["injection_parameters"] = value.pop("parameters")
         if value is not None and "extrinsic_parameters" in value:
-            self.metadata["injection_extrinsic_parameters"] = value.pop("extrinsic_parameters")
+            self.metadata["injection_extrinsic_parameters"] = value.pop(
+                "extrinsic_parameters"
+            )
+        if value is not None and "asds" in value:
+            self.detectors = [k for k in value["asds"].keys()]
         self._context = value
+
+    @property
+    def detectors(self) -> Optional[list[str]]:
+        """
+        Detector configuration that is used when running the sampler.
+        """
+        return self._detectors
+
+    @detectors.setter
+    def detectors(self, value: list[str]):
+        self._detectors = value
+        # Update transforms
+        self._initialize_transforms()
 
     @property
     def event_metadata(self):

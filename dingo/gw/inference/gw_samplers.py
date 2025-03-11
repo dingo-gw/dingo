@@ -27,6 +27,7 @@ from dingo.gw.transforms import (
     StrainTokenization,
     UnpackDict,
     DecimateWaveformsAndASDS,
+    SelectDetectors,
 )
 
 
@@ -198,7 +199,7 @@ class GWSampler(GWSamplerMixin, Sampler):
             # transform data, since this transform is used by the GNPE sampler as
             # well.
             RepackageStrainsAndASDS(
-                self.base_model_metadata["train_settings"]["data"]["detectors"],
+                ifos=self.detectors,
                 first_index=self.domain.min_idx,
             ),
         ]
@@ -239,8 +240,7 @@ class GWSampler(GWSamplerMixin, Sampler):
             selected_keys.append("drop_token_mask")
 
             # TODO: Append transforms for ...
-            # * Drop detectors according to detectors available in the event
-            # * Drop frequency range (probably based on specifications in settings file?)
+            # * Configure frequency range (probably based on specifications in settings file?)
         except KeyError:
             print(
                 "No tokenization information found, omitting StrainTokenization transform."
