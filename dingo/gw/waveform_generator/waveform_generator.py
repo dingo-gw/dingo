@@ -836,6 +836,11 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             f_min = self.f_start
         else:
             f_min = self.domain.f_min
+            # for SEOBNRv5EHM, the starting frequency must be the same as the reference frequency
+            if self.approximant_str == "SEOBNRv5EHM":
+                if f_min != f_ref:
+                    print("Warning: setting f_min of waveform generation to f_ref, this is required for SEOBNRv5EHM")
+                f_min = self.f_ref
         # parameters needed for TD waveforms
         delta_t = 0.5 / self.domain.f_max
 
@@ -856,10 +861,32 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             "phi_ref": p["phase"] * u.rad,
             "distance": p["luminosity_distance"] * u.Mpc,
             "inclination": iota * u.rad,
-            "ModeArray": self.mode_list,
             "condition": 1,
         }
 
+        if self.mode_list is not None:
+            params_gwsignal["ModeArray"] = self.mode_list
+
+        # allow for the possibility of setting log10_eccentricity instead of 
+        # eccentricity
+        if self.approximant_str == "SEOBNRv5EHM":
+            # eccentric parameters
+            if "log10_eccentricity" in p and "eccentricity" in p:
+                raise ValueError("Cannot specify both log10_eccentricity and eccentricity")
+
+            if "log10_eccentricity" in p:
+                eccentricity = np.power(10, p["log10_eccentricity"])
+            else:
+                eccentricity = p.get("eccentricity", 0.0)
+            longitude_ascending_nodes = p.get("long_asc_nodes", 0.0)
+            mean_per_ano = p.get("mean_anomaly", 0.0)
+
+            params_gwsignal.update({
+                'eccentricity' : eccentricity * u.dimensionless_unscaled,
+                'longAscNodes' : longitude_ascending_nodes * u.rad,
+                'meanPerAno' : mean_per_ano * u.rad,
+            })
+            
         # SEOBNRv5 specific parameters
         if "postadiabatic" in p:
             params_gwsignal["postadiabatic"] = p["postadiabatic"]
@@ -870,7 +897,8 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         if "lmax_nyquist" in p:
             params_gwsignal["lmax_nyquist"] = p["lmax_nyquist"]
         else:
-            params_gwsignal["lmax_nyquist"] = 2
+            if not "ROM" in self.approximant_str:
+                params_gwsignal["lmax_nyquist"] = 2
 
         return params_gwsignal
 
@@ -1045,6 +1073,8 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 # Step 2: Transform modes to target domain.
                 hlm_fd = wfg_utils.td_modes_to_fd_modes(hlm_td, self.domain)
             else:
+                # For SEOBNRv5EHM, we don't use the extra time conditioning
+
                 # assert LS.SimInspiralImplementedTDApproximants(self.approximant)
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: TD)
@@ -1156,6 +1186,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         """
         # TD approximants that are implemented in L0 frame. Currently tested for:
         #   52: SEOBNRv4PHM
+        #   N/A: SEOBNRv5EHM
 
         parameters_gwsignal = self._convert_parameters(
             {**parameters, "f_ref": self.f_ref}
