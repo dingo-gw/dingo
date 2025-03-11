@@ -97,7 +97,7 @@ To run with GPU support:
 docker run --rm --shm-size=16g --runtime=nvidia --gpus all -v /data/dingo:/data/dingo dingo:toy_npe_model --base-dir /data/dingo 
 ```
 
-This requires the (nvidia container toolkit)[https://docs.nvidia.com/datacenter/cloud-native/container-toolkit] to be installed on the host machine.
+This requires the [nvidia container toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit) to be installed on the host machine.
 
 ## Set a continous integration server
 
