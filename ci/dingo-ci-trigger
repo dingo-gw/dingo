@@ -10,6 +10,7 @@
 
 # Configuration
 DINGO_REPO="https://github.com/dingo-gw/dingo.git"
+
 BRANCH="main"
 CLONE_PATH="/data/dingo/repo-checker/"
 JOBS_PATH="/data/dingo"

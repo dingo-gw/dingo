@@ -8,8 +8,8 @@
 # to get the version of torch suitable for your hardware
 # Note: if running in docker, you may need to edit the Dockerfile
 #   to install the required python version. 
-#PYTHON_VERSION="python3.9"
-#TORCH_INSTALL_COMMAND="pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu113 --upgrade"
+# PYTHON_VERSION="python3.9"
+# TORCH_INSTALL_COMMAND="pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu113 --upgrade"
 
 # if no python version specified, using default system python3
 if [[ ! -v PYTHON_VERSION ]]; then
@@ -24,8 +24,7 @@ fi
 # This section defines the related variable $BIN_DIR and $EMAIL_CONFIG_PATH
 # --checkout: an optional (git) checkout to perform, e.g. a commit id
 
-#DINGO_REPO="https://github.com/dingo-gw/dingo.git"
-DINGO_REPO="https://github.com/vincentberenz/dingo.git"
+DINGO_REPO="https://github.com/dingo-gw/dingo.git"
 
 DEFAULT_BASE_DIR="/tmp/dingo"
 
@@ -134,7 +133,7 @@ dingo_ci_email() {
     # Create email body
     body=$(cat <<EOF
 DINGO Workflow Report
-====================
+=====================
 Start Time: $(if [[ -f "$LOG_FILE" ]]; then head -n 1 "$LOG_FILE" | cut -d']' -f1 | cut -c2-; else echo "N/A"; fi)
 End Time: $(date +"%Y-%m-%d %H:%M:%S")
 Status: $(if [ "$STATUS" -eq 0 ]; then echo "SUCCESS"; else echo "FAILURE"; fi) (${STATUS})

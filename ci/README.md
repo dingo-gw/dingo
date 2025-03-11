@@ -4,9 +4,9 @@ This folder provide the bash script `dingo-ci` which automates execution of the 
 
 - [Toy NPE Example](https://dingo-gw.readthedocs.io/en/latest/example_toy_npe_model.html)
 
-It also provide to setup a related continuous integration script which will:
+It also provides utilities to setup a related continuous integration script which will:
 
-- check continuously if a new commit or a new tag has been added to the main branch
+- check continuously if a new commit to the main branch or a new tag has been added
 - run `dingo-ci` in docker if there has been a new commit or a new tag
 - send a report email (success or failure in running toy-npe-model)
 
@@ -48,15 +48,19 @@ email.json should look like:
 
 - activate `/tmp/dingo/venv` (create it first if it does not exist)
 - perform a new clone of dingo
-- optional: perform a checkout
-- pip install
+- optional: perform a checkout (if the `--checkout` argument is used)
+- pip install dingo
 - run the toy npe example
 - optional: send an email
 
 ## Using another python/torch
 
+By default, the default python3 and the latest torch will be used. To use other versions:
+
 Uncommand/edit the lines defining the variables `PYTHON_VERSION`
-and `TORCH_INSTALL_COMMAND` at the top of `dingo-ci`. For example:
+and `TORCH_INSTALL_COMMAND` at the top of `dingo-ci`.
+
+For example:
 
 ```bash
 PYTHON_VERSION="python3.9"
@@ -78,12 +82,13 @@ docker build -t dingo:toy_npe_model .
 For running the script, for example:
 
 ```bash
-docker run --shm-size=16g -v /data/dingo:/data/dingo dingo:toy_npe_model --base-dir /data/dingo --email /data/dingo/email.json
+docker run --shm-size=16g -v /data/dingo:/data/dingo dingo:toy_npe_model \
+            --base-dir /data/dingo --email /data/dingo/email.json
 ``` 
 
 Notes:
 
-- If you would like to check the files created/used by the script, mount the base directory (here `/data/dingo`)
+- If you would like to check the files created/used by the script, mount the base directory using '-v' argument (here `/data/dingo`)
 - The `email.json` file must be accessible to the docker container (here `/data/dingo` is mounted)
 
 To run with GPU support:
@@ -100,9 +105,10 @@ A continuous integration server will use systemctl services to call the `dingo-c
 
 To set it up:
 
-- build the dingo:toy_npe_model docker image
+- build the dingo:toy_npe_model docker image (see above)
 - copy the `dingo-ci-trigger` script to `/usr/local/bin`.
 - copy the `dingo-ci.service` file to `/etc/systemd/system`
+- copy the `dingo-ci.timer` file to `/etc/systemd/system`
 - reload systemctl:
 
 ```bash
