@@ -74,7 +74,7 @@ def copy_files_to_local(
     if local_dir is not None:
         file_name = file_path.split("/")[-1]
         local_file_path = os.path.join(local_dir, file_name)
-        print(f"Copying file to {local_file_path}")
+        print(f"Copying file from {file_path} to {local_file_path}")
         # Copy file
         start_time = time.time()
         shutil.copy(file_path, local_file_path)
