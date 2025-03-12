@@ -156,6 +156,16 @@ class ImportanceSamplingInput(Input):
             self._importance_sampling_settings = dict()
 
     def run_sampler(self):
+        if self.prior_dict:
+            logger.info("Updating prior from network prior. Changes:")
+            logger.info(
+                yaml.dump(
+                    self.prior_dict,
+                    default_flow_style=False,
+                    sort_keys=False,
+                )
+            )
+            self.result.update_prior(self.prior_dict)
         if "synthetic_phase" in self.importance_sampling_settings:
             logger.info("Sampling synthetic phase.")
             synthetic_phase_kwargs = {
@@ -175,16 +185,6 @@ class ImportanceSamplingInput(Input):
             calibration_marginalization_kwargs=self.calibration_marginalization_kwargs,
         )
 
-        if self.prior_dict:
-            logger.info("Updating prior from network prior. Changes:")
-            logger.info(
-                yaml.dump(
-                    self.prior_dict,
-                    default_flow_style=False,
-                    sort_keys=False,
-                )
-            )
-            self.result.update_prior(self.prior_dict)
 
         self.result.print_summary()
         self.result.to_file(os.path.join(self.result_directory, self.label + ".hdf5"))
