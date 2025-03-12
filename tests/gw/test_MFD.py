@@ -69,6 +69,7 @@ def test_mfd(mfd_params, mfd):
         num_bins_cum += num_bins
     assert mfd.min_idx == 0
     assert mfd.max_idx == len(mfd) - 1
+    assert np.all(mfd.sample_frequencies_torch.numpy() == mfd.sample_frequencies)
 
 
 def test_mfd_mask(mfd):
