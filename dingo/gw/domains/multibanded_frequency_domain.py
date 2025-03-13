@@ -4,45 +4,60 @@ import torch
 import lal
 from copy import copy
 
-from .base import Domain
-from .frequency_domain import FrequencyDomain
+from .base_frequency_domain import BaseFrequencyDomain
+from .uniform_frequency_domain import UniformFrequencyDomain
 
 
-class MultibandedFrequencyDomain(Domain):
-    """Defines the physical domain on which the data of interest live.
+class MultibandedFrequencyDomain(BaseFrequencyDomain):
+    """
+    Defines a non-uniform frequency domain that is made up of a sequence of
+    uniform-frequency domain bands. Each subsequent band in the sequence has double the
+    bin-width of the previous one, i.e., delta_f is doubled each band as one moves up
+    the bands. This is intended to allow for efficient representation of gravitational
+    waveforms, which generally have slower oscillations at higher frequencies. Indeed,
+    the leading order chirp has phase evolution [see
+    https://doi.org/10.1103/PhysRevD.49.2658],
+    $$
+    \Psi(f) = \frac{3}{4}(8 \pi \mathcal{M} f)^{-5/3},
+    $$
+    hence a coarser grid can be used at higher f.
 
-    The frequency bins are assumed to be uniform between [0, f_max]
-    with spacing delta_f.
-    Given a finite length of time domain data, the Fourier domain data
-    starts at a frequency f_min and is zero below this frequency.
-    window_kwargs specify windowing used for FFT to obtain FD data from TD
-    data in practice.
+    The domain is partitioned into bands via a sequence of nodes that are specified at
+    initialization.
+
+    In comparison to the UniformFrequencyDomain, the MultibandedFrequencyDomain has the
+    following key differences:
+    * The sample frequencies start at the first node, rather than f = 0.0 Hz.
+    * Quantities such as delta_f, noise_std, etc., are represented as arrays rather than
+    scalars, as they vary depending on f.
+
+    The MultibandedFrequencyDomain furthermore has an attribute base_domain,
+    which holds an underlying UniformFrequencyDomain object. The decimate() method
+    decimates data in the base_domain to the multi-banded domain.
     """
 
     def __init__(
         self,
         nodes: Iterable[float],
         delta_f_initial: float,
-        base_domain: Union[FrequencyDomain, dict],
+        base_domain: Union[UniformFrequencyDomain, dict],
     ):
         """
         Parameters
         ----------
         nodes: Iterable[float]
-            Frequency nodes for bands.
-            In total, there are len(nodes) - 1 frequency bands.
-            Band j consists of decimated data from the base domain in the range
-            [nodes[j]:nodes[j+1].
+            Defines the partitioning of the underlying frequency domain into bands. In
+            total, there are len(nodes) - 1 frequency bands. Band j consists of
+            decimated data from the base domain in the range [nodes[j]:nodes[j+1]).
         delta_f_initial: float
             delta_f of band 0. The decimation factor doubles between adjacent bands,
             so delta_f is halved.
-        base_domain: Union[FrequencyDomain, dict]
+        base_domain: Union[UniformFrequencyDomain, dict]
             Original (uniform frequency) domain of data, which is the starting point
             for the decimation. This determines the decimation details and the noise_std.
             Either provided as dict for build_domain, or as domain_object.
-        window_factor: float = None
-            Window factor for this domain. Required when using self.noise_std.
         """
+        super().__init__()
         if type(base_domain) == dict:
             from dingo.gw.domains import build_domain
 
@@ -50,24 +65,24 @@ class MultibandedFrequencyDomain(Domain):
 
         self.nodes = np.array(nodes, dtype=np.float32)
         self.base_domain = base_domain
-        self.initialize_bands(delta_f_initial)
-        if not isinstance(self.base_domain, FrequencyDomain):
+        self._initialize_bands(delta_f_initial)
+        if not isinstance(self.base_domain, UniformFrequencyDomain):
             raise ValueError(
-                f"Expected domain type FrequencyDomain, got {type(base_domain)}."
+                f"Expected domain type UniformFrequencyDomain, got {type(base_domain)}."
             )
         # truncation indices for domain update
-        self.range_update_idx_lower = None
-        self.range_update_idx_upper = None
-        self.range_update_initial_length = None
+        self._range_update_idx_lower = None
+        self._range_update_idx_upper = None
+        self._range_update_initial_length = None
 
-    def initialize_bands(self, delta_f_initial):
+    def _initialize_bands(self, delta_f_initial: float):
         if len(self.nodes.shape) != 1:
             raise ValueError(
                 f"Expected format [num_bands + 1] for nodes, "
                 f"got {self.nodes.shape}."
             )
         self.num_bands = len(self.nodes) - 1
-        self.nodes_indices = (self.nodes / self.base_domain.delta_f).astype(int)
+        self._nodes_indices = (self.nodes / self.base_domain.delta_f).astype(int)
 
         self._delta_f_bands = (
             delta_f_initial * (2 ** np.arange(self.num_bands))
@@ -76,7 +91,7 @@ class MultibandedFrequencyDomain(Domain):
             self._delta_f_bands / self.base_domain.delta_f
         ).astype(int)
         self._num_bins_bands = (
-            (self.nodes_indices[1:] - self.nodes_indices[:-1])
+            (self._nodes_indices[1:] - self._nodes_indices[:-1])
             / self._decimation_factors_bands
         ).astype(int)
 
@@ -87,27 +102,41 @@ class MultibandedFrequencyDomain(Domain):
             ]
         )
         self._delta_f = self._delta_f_bands[self._band_assignment]
-        # for each bin, [self._f_base_lower, self._f_base_upper] describes the
-        # frequency range in the base domain which is used for truncation
+
+        # For each bin, [self._f_base_lower, self._f_base_upper] describes the
+        # frequency range in the base domain which is used for truncation.
         self._f_base_lower = np.concatenate(
             (self.nodes[:1], self.nodes[0] + np.cumsum(self._delta_f[:-1]))
         )
         self._f_base_upper = (
             self.nodes[0] + np.cumsum(self._delta_f) - self.base_domain.delta_f
         )
-        # set sample frequencies as mean of decimation range
+
+        # Set sample frequencies as mean of decimation range.
         self._sample_frequencies = (self._f_base_upper + self._f_base_lower) / 2
         self._sample_frequencies_torch = None
         self._sample_frequencies_torch_cuda = None
-        # this should always just be the decimated version of the base domain
-        assert (self._sample_frequencies == self.decimate(self.base_domain())).all()
+        # sample_frequencies should always be the decimation of the base domain
+        # frequencies.
 
-        # update base domain to required range
-        assert self.f_min in self.base_domain()
-        assert self.f_max in self.base_domain()
+        # Update base domain to required range.
         self.base_domain.update({"f_min": self.f_min, "f_max": self.f_max})
 
-    def decimate(self, data):
+    def decimate(self, data: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
+        """
+        Decimate data from the base_domain to the multi-banded domain.
+
+        Parameters
+        ----------
+        data : array-like (np.ndarray or torch.Tensor)
+            Decimation is done along the trailing dimension of this array. This
+            dimension should therefore be compatible with the base frequency domain,
+            i.e., running from 0.0 Hz or f_min up to f_max, with uniform delta_f.
+
+        Returns
+        -------
+        Decimated array of the same type as the input.
+        """
         if data.shape[-1] == len(self.base_domain):
             offset_idx = 0
         elif data.shape[-1] == len(self.base_domain) - self.base_domain.min_idx:
@@ -130,8 +159,8 @@ class MultibandedFrequencyDomain(Domain):
 
         lower_out = 0  # running index for decimated band data
         for idx_band in range(self.num_bands):
-            lower_in = self.nodes_indices[idx_band] + offset_idx
-            upper_in = self.nodes_indices[idx_band + 1] + offset_idx
+            lower_in = self._nodes_indices[idx_band] + offset_idx
+            upper_in = self._nodes_indices[idx_band + 1] + offset_idx
             decimation_factor = self._decimation_factors_bands[idx_band]
             num_bins = self._num_bins_bands[idx_band]
 
@@ -146,25 +175,25 @@ class MultibandedFrequencyDomain(Domain):
 
     def update(self, new_settings: dict):
         """
-        Update the domain by truncating the frequency range.
+        Update the domain by truncating the frequency range (by specifying new f_min,
+        f_max).
 
-        After calling this function, data from the initial (unupdated) domain can be
-        updated to this domain with self.update(data), which truncates the data
-        accordingly. We don't allow for multiple updates of the domain to avoid bugs
-        due to an unclear initial domain.
+        After calling this function, data from the original domain can be truncated to
+        the new domain using self.update_data(). For simplicity, we do not allow for
+        multiple updates of the domain.
 
         Parameters
         ----------
         new_settings : dict
-            Settings dictionary. Keys must either be a subset of the keys contained in
-            domain_dict, or a subset of ["f_min", "f_max"].
+            Settings dictionary. Keys must either be the keys contained in domain_dict, or
+            a subset of ["f_min", "f_max"].
         """
         if set(new_settings.keys()).issubset(["f_min", "f_max"]):
-            self.set_new_range(**new_settings)
+            self._set_new_range(**new_settings)
         elif set(new_settings.keys()) == self.domain_dict.keys():
             if new_settings == self.domain_dict:
                 return
-            self.set_new_range(
+            self._set_new_range(
                 f_min=new_settings["base_domain"]["f_min"],
                 f_max=new_settings["base_domain"]["f_max"],
             )
@@ -179,7 +208,7 @@ class MultibandedFrequencyDomain(Domain):
                 f'{list(self.domain_dict.keys())} or a subset of ["f_min, f_max"].'
             )
 
-    def set_new_range(self, f_min: float = None, f_max: float = None):
+    def _set_new_range(self, f_min: float = None, f_max: float = None):
         """
         Set a new range [f_min, f_max] for the domain. This operation is only allowed
         if the new range is contained within the old one.
@@ -188,7 +217,7 @@ class MultibandedFrequencyDomain(Domain):
         """
         if f_min is None and f_max is None:
             return
-        if self.range_update_initial_length is not None:
+        if self._range_update_initial_length is not None:
             raise ValueError(f"Can't update domain of type {type(self)} a second time.")
         if f_min is not None and f_max is not None and f_min >= f_max:
             raise ValueError("f_min must not be larger than f_max.")
@@ -223,30 +252,49 @@ class MultibandedFrequencyDomain(Domain):
         nodes_new[0] = self._f_base_lower[lower_bin]
         nodes_new[-1] = self._f_base_upper[upper_bin] + self.base_domain.delta_f
 
-        self.range_update_initial_length = len(self)
-        self.range_update_idx_lower = lower_bin
-        self.range_update_idx_upper = upper_bin
+        self._range_update_initial_length = len(self)
+        self._range_update_idx_lower = lower_bin
+        self._range_update_idx_upper = upper_bin
 
         self.nodes = nodes_new
-        self.initialize_bands(self._delta_f_bands[lower_band])
-        assert self.range_update_idx_upper - self.range_update_idx_lower + 1 == len(
+        self._initialize_bands(self._delta_f_bands[lower_band])
+        assert self._range_update_idx_upper - self._range_update_idx_lower + 1 == len(
             self
         )
 
-    def update_data(self, data: np.ndarray, axis: int = -1, low_value: float = 0.0):
+    def update_data(
+        self, data: np.ndarray | torch.Tensor, axis: int = -1
+    ) -> np.ndarray | torch.Tensor:
         """
-        Adjusts the data to be compatible with the domain.
+        Truncates the data array to be compatible with the domain. This is used when
+        changing f_min or f_max.
+
+        update_data() will only have an effect after updating the domain to have a new
+        frequency range using self.update().
+
+        Parameters
+        ----------
+        data : array-like (np.ndarray or torch.Tensor)
+            Array should be compatible with either the original or updated
+            MultibandedFrequencyDomain along the specified axis. In the latter
+            case, nothing is done. In the former, data are truncated appropriately.
+        axis: int
+            Axis along which to operate.
+
+        Returns
+        -------
+        Updated data of the same type as input.
         """
         if data.shape[axis] == len(self):
             return data
         elif (
-            self.range_update_initial_length is not None
-            and data.shape[axis] == self.range_update_initial_length
+            self._range_update_initial_length is not None
+            and data.shape[axis] == self._range_update_initial_length
         ):
             sl = [slice(None)] * data.ndim
             # First truncate beyond f_max.
             sl[axis] = slice(
-                self.range_update_idx_lower, self.range_update_idx_upper + 1
+                self._range_update_idx_lower, self._range_update_idx_upper + 1
             )
             data = data[tuple(sl)]
             return data
@@ -256,174 +304,17 @@ class MultibandedFrequencyDomain(Domain):
                 f"(length {len(self)})."
             )
 
-    def time_translate_data(self, data, dt):
-        """
-        TODO: like self.add_phase, this is just copied from FrequencyDomain and
-        TODO: could be inherited instead.
-        Time translate frequency-domain data by dt. Time translation corresponds (in
-        frequency domain) to multiplication by
-
-        .. math::
-            \exp(-2 \pi i \, f \, dt).
-
-        This method allows for multiple batch dimensions. For torch.Tensor data,
-        allow for either a complex or a (real, imag) representation.
-
-        Parameters
-        ----------
-        data : array-like (numpy, torch)
-            Shape (B, C, N), where
-
-                - B corresponds to any dimension >= 0,
-                - C is either absent (for complex data) or has dimension >= 2 (for data
-                  represented as real and imaginary parts), and
-                - N is either len(self) or len(self)-self.min_idx (for truncated data).
-
-        dt : torch tensor, or scalar (if data is numpy)
-            Shape (B)
-
-        Returns
-        -------
-        Array-like of the same form as data.
-        """
-        f = self.get_sample_frequencies_astype(data)
-        if isinstance(dt, float) or data.ndim == 1:
-            # unbatched case
-            phase_shift = 2 * np.pi * dt * f
-        elif isinstance(data, np.ndarray):
-            phase_shift = 2 * np.pi * np.einsum("...,i", dt, f)
-        elif isinstance(data, torch.Tensor):
-            # Allow for possible multiple "batch" dimensions (e.g., batch + detector,
-            # which might have independent time shifts).
-            phase_shift = 2 * np.pi * torch.einsum("...,i", dt, f)
-        else:
-            raise NotImplementedError(
-                f"Time translation not implemented for data of " "type {data}."
-            )
-        return self.add_phase(data, phase_shift)
-
-    def get_sample_frequencies_astype(self, data):
-        """
-        Returns a 1D frequency array compatible with the last index of data array.
-
-        Decides whether array is numpy or torch tensor (and cuda vs cpu).
-
-        Parameters
-        ----------
-        data : Union[np.array, torch.Tensor]
-            Sample data
-
-        Returns
-        -------
-        frequency array compatible with last index
-        """
-        # Type
-        if isinstance(data, np.ndarray):
-            f = self.sample_frequencies
-        elif isinstance(data, torch.Tensor):
-            if data.is_cuda:
-                f = self.sample_frequencies_torch_cuda
-            else:
-                f = self.sample_frequencies_torch
-        else:
-            raise TypeError("Invalid data type. Should be np.array or torch.Tensor.")
-
-        return f
-
-    @staticmethod
-    def add_phase(data, phase):
-        """
-        TODO: Copied from FrequencyDomain. Should this be inherited instead?
-        TODO: Maybe there should be a shared parent class FrequencyDomain, that
-        TODO: UniformFrequencyDomain and MultibandedFrequencyDomain inherit from.
-
-        Add a (frequency-dependent) phase to a frequency series. Allows for batching,
-        as well as additional channels (such as detectors). Accounts for the fact that
-        the data could be a complex frequency series or real and imaginary parts.
-
-        Convention: the phase phi(f) is defined via exp(- 1j * phi(f)).
-
-        Parameters
-        ----------
-        data : Union[np.array, torch.Tensor]
-        phase : Union[np.array, torch.Tensor]
-
-        Returns
-        -------
-        New array or tensor of the same shape as data.
-        """
-        if isinstance(data, np.ndarray) and np.iscomplexobj(data):
-            # This case is assumed to only occur during inference, with un-batched data.
-            return data * np.exp(-1j * phase)
-
-        elif isinstance(data, torch.Tensor):
-            if torch.is_complex(data):
-                # Expand the trailing batch dimensions to allow for broadcasting.
-                while phase.dim() < data.dim():
-                    phase = phase[..., None, :]
-                return data * torch.exp(-1j * phase)
-            else:
-                # The first two components of the second last index should be the real
-                # and imaginary parts of the data. Remaining components correspond to,
-                # e.g., the ASD. The "-1" below accounts for this extra dimension when
-                # broadcasting.
-                while phase.dim() < data.dim() - 1:
-                    phase = phase[..., None, :]
-
-                cos_phase = torch.cos(phase)
-                sin_phase = torch.sin(phase)
-                result = torch.empty_like(data)
-                result[..., 0, :] = (
-                    data[..., 0, :] * cos_phase + data[..., 1, :] * sin_phase
-                )
-                result[..., 1, :] = (
-                    data[..., 1, :] * cos_phase - data[..., 0, :] * sin_phase
-                )
-                if data.shape[-2] > 2:
-                    result[..., 2:, :] = data[..., 2:, :]
-                return result
-
-        else:
-            raise TypeError(f"Invalid data type {type(data)}.")
-
-    def __len__(self):
-        """Number of frequency bins in the domain"""
-        return len(self._sample_frequencies)
-
-    def __call__(self) -> np.ndarray:
-        """Array of multibanded frequency bins in the domain [f_min, f_max]"""
-        return self.sample_frequencies
-
-    def __getitem__(self, idx):
-        """Slice of joint frequency grid."""
-        raise NotImplementedError()
-
     @property
-    def sample_frequencies(self):
+    def sample_frequencies(self) -> np.ndarray:
         return self._sample_frequencies
 
     @property
-    def sample_frequencies_torch(self):
-        if self._sample_frequencies_torch is None:
-            self._sample_frequencies_torch = torch.tensor(
-                self.sample_frequencies, dtype=torch.float32
-            )
-        return self._sample_frequencies_torch
-
-    @property
-    def sample_frequencies_torch_cuda(self):
-        if self._sample_frequencies_torch_cuda is None:
-            self._sample_frequencies_torch_cuda = self.sample_frequencies_torch.to(
-                "cuda"
-            )
-        return self._sample_frequencies_torch_cuda
-
-    @property
     def frequency_mask(self) -> np.ndarray:
-        return np.ones_like(self.sample_frequencies)
+        """Array of len(self) consisting of ones.
 
-    def _reset_caches(self):
-        raise NotImplementedError()
+        As the MultibandedFrequencyDomain starts from f_min, no masking is generally
+        required."""
+        return np.ones_like(self.sample_frequencies)
 
     @property
     def frequency_mask_length(self) -> int:
@@ -447,51 +338,15 @@ class MultibandedFrequencyDomain(Domain):
         self.base_domain.window_factor = float(value)
 
     @property
-    def noise_std(self) -> float:
-        """Standard deviation of the whitened noise distribution.
-
-        To have noise that comes from a multivariate *unit* normal
-        distribution, you must divide by this array. In practice, this means
-        dividing the whitened waveforms by this.
-
-        In contrast to the uniform FrequencyDomain, this is an array and not a number,
-        as self._delta_f is not constant.
-
-        TODO: This description makes some assumptions that need to be clarified.
-        Windowing of TD data; tapering window has a slope -> reduces power only for noise,
-        but not for the signal which is in the main part unaffected by the taper
-        """
-        if self.window_factor is None:
-            raise ValueError("Window factor needs to be set for noise_std.")
-        return np.sqrt(self.window_factor) / np.sqrt(4.0 * self._delta_f)
-
-    @property
     def f_max(self) -> float:
         return self._f_base_upper[-1]
-
-    @f_max.setter
-    def f_max(self, value):
-        raise NotImplementedError()
 
     @property
     def f_min(self) -> float:
         return self._f_base_lower[0]
 
-    @f_min.setter
-    def f_min(self, value):
-        raise NotImplementedError()
-
-    @property
-    def delta_f(self):
-        return self._delta_f
-
-    @delta_f.setter
-    def delta_f(self, value):
-        raise NotImplementedError()
-
     @property
     def duration(self) -> float:
-        """Waveform duration in seconds."""
         raise NotImplementedError()
 
     @property
@@ -499,7 +354,7 @@ class MultibandedFrequencyDomain(Domain):
         raise NotImplementedError()
 
     @property
-    def domain_dict(self):
+    def domain_dict(self) -> dict:
         """Enables to rebuild the domain via calling build_domain(domain_dict)."""
         # Call tolist() on self.bands, such that it can be saved as str for metadata.
         return {
@@ -516,7 +371,7 @@ class MultibandedFrequencyDomain(Domain):
 
 
 def get_decimation_bands_adaptive(
-    base_domain: FrequencyDomain,
+    base_domain: UniformFrequencyDomain,
     waveforms: np.ndarray,
     min_num_bins_per_period: int = 16,
     delta_f_max: float = np.inf,
@@ -530,7 +385,7 @@ def get_decimation_bands_adaptive(
 
     Parameters
     ----------
-    base_domain: FrequencyDomain
+    base_domain: UniformFrequencyDomain
         Original uniform frequency domain of the data to be decimated.
     waveforms: np.ndarray
         2D array with complex waveforms in the original uniform frequency domain. Used
@@ -593,7 +448,7 @@ def get_decimation_bands_adaptive(
 
 
 def get_decimation_bands_from_chirp_mass(
-    base_domain: FrequencyDomain,
+    base_domain: UniformFrequencyDomain,
     chirp_mass_min: float,
     alpha: int = 1,
     delta_f_max: float = np.inf,
@@ -606,7 +461,7 @@ def get_decimation_bands_from_chirp_mass(
 
     Parameters
     ----------
-    base_domain: FrequencyDomain
+    base_domain: UniformFrequencyDomain
         Original uniform frequency domain of the data to be decimated.
     chirp_mass_min: float
         Minimum chirp mass. Smaller chirp masses require larger resolution.

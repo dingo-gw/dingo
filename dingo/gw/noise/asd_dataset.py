@@ -1,7 +1,7 @@
 import copy
 from typing import Iterable
 
-from dingo.gw.domains import build_domain, FrequencyDomain, MultibandedFrequencyDomain
+from dingo.gw.domains import build_domain, UniformFrequencyDomain, MultibandedFrequencyDomain
 from dingo.gw.gwutils import *
 from dingo.gw.dataset import DingoDataset
 
@@ -127,7 +127,7 @@ class ASDDataset(DingoDataset):
                 )
 
         elif (
-            self.domain.domain_dict["type"] == "FrequencyDomain"
+            self.domain.domain_dict["type"] == "UniformFrequencyDomain"
             and domain_update["type"] == "MultibandedFrequencyDomain"
         ):
             print("Updating ASD dataset to MultibandedFrequencyDomain.")

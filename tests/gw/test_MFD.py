@@ -12,9 +12,9 @@ def mfd_params():
         "nodes": [20.0, 26.0, 34.0, 46.0, 62.0, 78.0, 1038.0],
         "delta_f_initial": 0.0625,
         "base_domain": {
-            "type": "FrequencyDomain",
+            "type": "UniformFrequencyDomain",
             "f_min": 20.0,
-            "f_max": 1037.9375,
+            "f_max": 2048.0,
             "delta_f": 0.0625,
         },
     }
@@ -80,7 +80,7 @@ def test_mfd_mask(mfd):
 
 def test_mfd_domain_dict(mfd):
     domain2 = build_domain(mfd.domain_dict)
-    # dicts contain lists of nodes so use np.testing.assert_equal to compare.
+    # dicts contain arrays so use np.testing.assert_equal to compare.
     np.testing.assert_equal(mfd.__dict__, domain2.__dict__)
 
 
@@ -88,18 +88,18 @@ def test_mfd_set_new_range(mfd_params, mfd):
     domain = mfd
     # test that ValueErrors are raised for infeasible inputs
     with pytest.raises(ValueError):
-        domain.set_new_range(domain.f_max + 10, None)
+        domain._set_new_range(domain.f_max + 10, None)
     with pytest.raises(ValueError):
-        domain.set_new_range(domain.f_min - 10, None)
+        domain._set_new_range(domain.f_min - 10, None)
     with pytest.raises(ValueError):
-        domain.set_new_range(None, domain.f_max + 10)
+        domain._set_new_range(None, domain.f_max + 10)
     with pytest.raises(ValueError):
-        domain.set_new_range(None, domain.f_min - 10)
+        domain._set_new_range(None, domain.f_min - 10)
     with pytest.raises(ValueError):
-        domain.set_new_range(domain.f_min + 10, domain.f_min + 5)
+        domain._set_new_range(domain.f_min + 10, domain.f_min + 5)
     # test that setting new frequency range works as intended
     f_min_new, f_max_new = 40, 800
-    domain.set_new_range(f_min_new, f_max_new)
+    domain._set_new_range(f_min_new, f_max_new)
     # Test that the end nodes are reasonable.
     assert domain.nodes[0] >= f_min_new
     assert domain.nodes[0] - f_min_new < domain.delta_f[0]
@@ -118,31 +118,39 @@ def test_mfd_set_new_range(mfd_params, mfd):
     # Test that the boundaries are correct
     mfd_original = MultibandedFrequencyDomain(**mfd_params)
     len_original = len(mfd_original)
-    assert len_original == domain.range_update_initial_length
-    assert domain.range_update_idx_upper - domain.range_update_idx_lower + 1 == len_new
+    assert len_original == domain._range_update_initial_length
+    assert (
+        domain._range_update_idx_upper - domain._range_update_idx_lower + 1 == len_new
+    )
     idx_lower = 0
     while mfd_original.sample_frequencies[idx_lower] < f_min_new:
         idx_lower += 1
-    assert idx_lower == domain.range_update_idx_lower
+    assert idx_lower == domain._range_update_idx_lower
     idx_upper = mfd_original.max_idx
     while f_max_new < mfd_original.sample_frequencies[idx_upper]:
         idx_upper -= 1
-    assert idx_upper == domain.range_update_idx_upper
+    assert idx_upper == domain._range_update_idx_upper
     # Test new mask
     assert len(domain.frequency_mask) == len_new
     assert np.all(domain.frequency_mask == 1.0)
     # Test that data range adjustment works
     a = np.random.random(len_original)
     assert np.all(
-        a[domain.range_update_idx_lower : domain.range_update_idx_upper + 1]
+        a[domain._range_update_idx_lower : domain._range_update_idx_upper + 1]
         == domain.update_data(a)
     )
     # Test that data range adjustment works specifying different axis
     a = np.random.random((20, len_original, 30))
     assert np.all(
-        a[:, domain.range_update_idx_lower : domain.range_update_idx_upper + 1, :]
+        a[:, domain._range_update_idx_lower : domain._range_update_idx_upper + 1, :]
         == domain.update_data(a, axis=1)
     )
+
+
+def test_mfd_base_domain_consistency(mfd):
+    assert np.all(mfd.sample_frequencies == mfd.decimate(mfd.base_domain()))
+    assert mfd.f_min == mfd.base_domain.f_min
+    assert mfd.f_max == mfd.base_domain.f_max
 
 
 def test_mfd_time_translation(mfd):

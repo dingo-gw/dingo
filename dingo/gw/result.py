@@ -36,7 +36,7 @@ class Result(CoreResult):
             Contains parameter samples, as well as (possibly) log_prob, log_likelihood,
             weights, log_prior, delta_log_prob_target.
         domain : Domain
-            The domain of the data (e.g., FrequencyDomain), needed for calculating
+            The domain of the data (e.g., UniformFrequencyDomain), needed for calculating
             likelihoods.
         prior : PriorDict
             The prior distribution, used for importance sampling.

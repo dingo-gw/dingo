@@ -1,32 +1,38 @@
 import numpy as np
-import torch
 
-from .base import Domain
 from dingo.gw.gwutils import *
+from .base_frequency_domain import BaseFrequencyDomain
 
 
-class FrequencyDomain(Domain):
+class UniformFrequencyDomain(BaseFrequencyDomain):
     """Defines the physical domain on which the data of interest live.
 
-    The frequency bins are assumed to be uniform between [0, f_max]
-    with spacing delta_f.
-    Given a finite length of time domain data, the Fourier domain data
-    starts at a frequency f_min and is zero below this frequency.
-    window_kwargs specify windowing used for FFT to obtain FD data from TD
-    data in practice.
+    The frequency bins are assumed to be uniform between [0, f_max] with spacing
+    delta_f.
+
+    Given a finite length of time domain data, the Fourier domain data starts
+    at a frequency f_min and is zero below this frequency.
+
+    window_kwargs specify windowing used for FFT to obtain FD data from TD data in
+    practice.
     """
 
     def __init__(
         self, f_min: float, f_max: float, delta_f: float, window_factor: float = None
     ):
+        """
+        Parameters
+        ----------
+        f_min : float
+        f_max : float
+        delta_f : float
+        window_factor Optional[float]
+        """
+        super().__init__()
         self._f_min = f_min
         self._f_max = f_max
         self._delta_f = delta_f
         self._window_factor = window_factor
-
-        self._sample_frequencies = None
-        self._sample_frequencies_torch = None
-        self._sample_frequencies_torch_cuda = None
         self._frequency_mask = None
 
     def update(self, new_settings: dict):
@@ -43,10 +49,12 @@ class FrequencyDomain(Domain):
         """
         new_settings = new_settings.copy()
         if "type" in new_settings and new_settings.pop("type") not in [
-            "FrequencyDomain",
+            "UniformFrequencyDomain",
             "FD",
         ]:
-            raise ValueError("Cannot update domain to type other than FrequencyDomain.")
+            raise ValueError(
+                "Cannot update domain to type other than UniformFrequencyDomain."
+            )
         for k, v in new_settings.items():
             if k not in ["f_min", "f_max", "delta_f", "window_factor"]:
                 raise KeyError(f"Invalid key for domain update: {k}.")
@@ -54,11 +62,11 @@ class FrequencyDomain(Domain):
                 raise ValueError("Cannot update window_factor.")
             if k == "delta_f" and v != self._delta_f:
                 raise ValueError("Cannot update delta_f.")
-        self.set_new_range(
+        self._set_new_range(
             f_min=new_settings.get("f_min", None), f_max=new_settings.get("f_max", None)
         )
 
-    def set_new_range(self, f_min: float = None, f_max: float = None):
+    def _set_new_range(self, f_min: float = None, f_max: float = None):
         """
         Set a new range [f_min, f_max] for the domain. This is only allowed if the new
         range is contained within the old one.
@@ -116,47 +124,6 @@ class FrequencyDomain(Domain):
 
         return data
 
-    def time_translate_data(self, data, dt):
-        """
-        Time translate frequency-domain data by dt. Time translation corresponds (in
-        frequency domain) to multiplication by
-
-        .. math::
-            \exp(-2 \pi i \, f \, dt).
-
-        This method allows for multiple batch dimensions. For torch.Tensor data,
-        allow for either a complex or a (real, imag) representation.
-
-        Parameters
-        ----------
-        data : array-like (numpy, torch)
-            Shape (B, C, N), where
-
-                - B corresponds to any dimension >= 0,
-                - C is either absent (for complex data) or has dimension >= 2 (for data
-                  represented as real and imaginary parts), and
-                - N is either len(self) or len(self)-self.min_idx (for truncated data).
-
-        dt : torch tensor, or scalar (if data is numpy)
-            Shape (B)
-
-        Returns
-        -------
-        Array-like of the same form as data.
-        """
-        f = self.get_sample_frequencies_astype(data)
-        if isinstance(data, np.ndarray):
-            phase_shift = 2 * np.pi * np.einsum("...,i", dt, f)
-        elif isinstance(data, torch.Tensor):
-            # Allow for possible multiple "batch" dimensions (e.g., batch + detector,
-            # which might have independent time shifts).
-            phase_shift = 2 * np.pi * torch.einsum("...,i", dt, f)
-        else:
-            raise NotImplementedError(
-                f"Time translation not implemented for data of type {data}."
-            )
-        return self.add_phase(data, phase_shift)
-
     def get_sample_frequencies_astype(self, data):
         """
         Returns a 1D frequency array compatible with the last index of data array.
@@ -173,16 +140,7 @@ class FrequencyDomain(Domain):
         -------
         frequency array compatible with last index
         """
-        # Type
-        if isinstance(data, np.ndarray):
-            f = self.sample_frequencies
-        elif isinstance(data, torch.Tensor):
-            if data.is_cuda:
-                f = self.sample_frequencies_torch_cuda
-            else:
-                f = self.sample_frequencies_torch
-        else:
-            raise TypeError("Invalid data type. Should be np.array or torch.Tensor.")
+        f = super().get_sample_frequencies_astype(data)
 
         # Whether to include zeros below f_min
         if data.shape[-1] == len(self) - self.min_idx:
@@ -195,95 +153,18 @@ class FrequencyDomain(Domain):
 
         return f
 
-    @staticmethod
-    def add_phase(data, phase):
-        """
-        Add a (frequency-dependent) phase to a frequency series. Allows for batching,
-        as well as additional channels (such as detectors). Accounts for the fact that
-        the data could be a complex frequency series or real and imaginary parts.
-
-        Convention: the phase phi(f) is defined via exp(- 1j * phi(f)).
-
-        Parameters
-        ----------
-        data : Union[np.array, torch.Tensor]
-        phase : Union[np.array, torch.Tensor]
-
-        Returns
-        -------
-        New array or tensor of the same shape as data.
-        """
-        if isinstance(data, np.ndarray) and np.iscomplexobj(data):
-            return data * np.exp(-1j * phase)
-
-        elif isinstance(data, torch.Tensor):
-            if torch.is_complex(data):
-                # Expand the trailing batch dimensions to allow for broadcasting.
-                while phase.dim() < data.dim():
-                    phase = phase[..., None, :]
-                return data * torch.exp(-1j * phase)
-            else:
-                # The first two components of the second last index should be the real
-                # and imaginary parts of the data. Remaining components correspond to,
-                # e.g., the ASD. The "-1" below accounts for this extra dimension when
-                # broadcasting.
-                while phase.dim() < data.dim() - 1:
-                    phase = phase[..., None, :]
-
-                cos_phase = torch.cos(phase)
-                sin_phase = torch.sin(phase)
-                result = torch.empty_like(data)
-                result[..., 0, :] = (
-                    data[..., 0, :] * cos_phase + data[..., 1, :] * sin_phase
-                )
-                result[..., 1, :] = (
-                    data[..., 1, :] * cos_phase - data[..., 0, :] * sin_phase
-                )
-                if data.shape[-2] > 2:
-                    result[..., 2:, :] = data[..., 2:, :]
-                return result
-
-        else:
-            raise TypeError(f"Invalid data type {type(data)}.")
-
     def __len__(self):
         """Number of frequency bins in the domain [0, f_max]"""
         return int(self.f_max / self.delta_f) + 1
 
-    def __call__(self) -> np.ndarray:
-        """Array of uniform frequency bins in the domain [0, f_max]"""
-        return self.sample_frequencies
-
-    def __getitem__(self, idx):
-        """Slice of uniform frequency grid."""
-        sample_frequencies = self.__call__()
-        return sample_frequencies[idx]
-
     @property
-    def sample_frequencies(self):
+    def sample_frequencies(self) -> np.ndarray:
         if self._sample_frequencies is None:
             num_bins = len(self)
             self._sample_frequencies = np.linspace(
                 0.0, self.f_max, num=num_bins, endpoint=True, dtype=np.float32
             )
         return self._sample_frequencies
-
-    @property
-    def sample_frequencies_torch(self):
-        if self._sample_frequencies_torch is None:
-            num_bins = len(self)
-            self._sample_frequencies_torch = torch.linspace(
-                0.0, self.f_max, steps=num_bins, dtype=torch.float32
-            )
-        return self._sample_frequencies_torch
-
-    @property
-    def sample_frequencies_torch_cuda(self):
-        if self._sample_frequencies_torch_cuda is None:
-            self._sample_frequencies_torch_cuda = self.sample_frequencies_torch.to(
-                "cuda"
-            )
-        return self._sample_frequencies_torch_cuda
 
     @property
     def frequency_mask(self) -> np.ndarray:
@@ -321,22 +202,6 @@ class FrequencyDomain(Domain):
     def window_factor(self, value):
         """Set self._window_factor."""
         self._window_factor = float(value)
-
-    @property
-    def noise_std(self) -> float:
-        """Standard deviation of the whitened noise distribution.
-
-        To have noise that comes from a multivariate *unit* normal
-        distribution, you must divide by this factor. In practice, this means
-        dividing the whitened waveforms by this.
-
-        TODO: This description makes some assumptions that need to be clarified.
-        Windowing of TD data; tapering window has a slope -> reduces power only for noise,
-        but not for the signal which is in the main part unaffected by the taper
-        """
-        if self._window_factor is None:
-            raise ValueError("Window factor needs to be set for noise_std.")
-        return np.sqrt(self._window_factor) / np.sqrt(4.0 * self._delta_f)
 
     @property
     def f_max(self) -> float:
@@ -382,7 +247,7 @@ class FrequencyDomain(Domain):
     def domain_dict(self):
         """Enables to rebuild the domain via calling build_domain(domain_dict)."""
         return {
-            "type": "FrequencyDomain",
+            "type": "UniformFrequencyDomain",
             "f_min": self.f_min,
             "f_max": self.f_max,
             "delta_f": self.delta_f,

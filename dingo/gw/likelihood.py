@@ -12,7 +12,7 @@ from dingo.core.likelihood import Likelihood
 from dingo.gw.injection import GWSignal
 from dingo.gw.transforms.waveform_transforms import DecimateWaveformsAndASDS
 from dingo.gw.waveform_generator import WaveformGenerator
-from dingo.gw.domains import build_domain, FrequencyDomain, MultibandedFrequencyDomain
+from dingo.gw.domains import build_domain, UniformFrequencyDomain, MultibandedFrequencyDomain
 from dingo.gw.data.data_preparation import get_event_data_and_domain
 
 
@@ -276,7 +276,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
     def log_likelihood_phase_grid(self, theta, phases=None):
         if isinstance(
             self.waveform_generator.domain,
-            (FrequencyDomain, MultibandedFrequencyDomain),
+            (UniformFrequencyDomain, MultibandedFrequencyDomain),
         ):
             return self._log_likelihood_phase_grid_mode_decomposed(theta, phases=phases)
         # elif isinstance(self.waveform_generator.domain, MultibandedFrequencyDomain):

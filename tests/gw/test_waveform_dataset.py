@@ -17,7 +17,7 @@ from dingo.gw.dataset import generate_dataset
 SETTINGS_YAML_SMALL = """\
 # settings for domain of waveforms
 domain:
-  type: FrequencyDomain
+  type: UniformFrequencyDomain
   f_min: 10.0
   f_max: 1024.0
   delta_f: 1.0

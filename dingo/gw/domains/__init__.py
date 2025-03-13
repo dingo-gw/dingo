@@ -1,5 +1,5 @@
 from .base import Domain
-from .frequency_domain import FrequencyDomain
+from .uniform_frequency_domain import UniformFrequencyDomain
 from .time_domain import TimeDomain
 from .multibanded_frequency_domain import (
     MultibandedFrequencyDomain,
@@ -33,8 +33,8 @@ def build_domain(settings: dict) -> Domain:
 
     # The settings other than 'type' correspond to the kwargs of the Domain constructor.
     kwargs = {k: v for k, v in settings.items() if k != "type"}
-    if settings["type"] in ["FrequencyDomain", "FD"]:
-        return FrequencyDomain(**kwargs)
+    if settings["type"] in ["UniformFrequencyDomain", "UniformFrequencyDomain", "FD"]:
+        return UniformFrequencyDomain(**kwargs)
     elif settings["type"] in ["MultibandedFrequencyDomain", "MFD"]:
         return MultibandedFrequencyDomain(**kwargs)
     elif settings["type"] == ["TimeDomain", "TD"]:
@@ -79,7 +79,7 @@ def build_domain_from_wfd_settings(settings: dict, num_processes: int = 0) -> Do
         if multibanding_method == "adaptive":
             from dingo.gw.dataset import generate_dataset
 
-            # Generate polarizations in uniform FrequencyDomain
+            # Generate polarizations in uniform UniformFrequencyDomain
             print(
                 "Generating polarizations to determine suitable bands for the "
                 "MultibandedFrequencyDomain."
@@ -127,7 +127,7 @@ def build_domain_from_model_metadata(model_metadata, base=False) -> Domain:
         typically obtained from the model.metadata attribute
     base: bool = False
         If base=True, return domain.base_domain if this is an attribute of domain,
-        else return domain. Example: MultibandedFrequencyDomain has a FrequencyDomain
+        else return domain. Example: MultibandedFrequencyDomain has a UniformFrequencyDomain
         object as a base_domain. In dingo_pipe, we want to load data in the
         base_domain, and later decimate from base_domain to domain.
 

@@ -1,6 +1,6 @@
 import numpy as np
 
-from dingo.gw.domains import Domain, MultibandedFrequencyDomain, FrequencyDomain
+from dingo.gw.domains import Domain, MultibandedFrequencyDomain, UniformFrequencyDomain
 
 
 class DecimateAll(object):

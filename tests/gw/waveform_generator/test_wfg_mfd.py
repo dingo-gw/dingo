@@ -14,7 +14,7 @@ def mfd():
         "nodes": [20.0, 26.0, 34.0, 46.0, 62.0, 78.0, 1038.0],
         "delta_f_initial": 0.0625,
         "base_domain": {
-            "type": "FrequencyDomain",
+            "type": "UniformFrequencyDomain",
             "f_min": 20.0,
             "f_max": 1037.9375,
             "delta_f": 0.0625,

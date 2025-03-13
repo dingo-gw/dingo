@@ -1,4 +1,4 @@
-from dingo.gw.domains import FrequencyDomain
+from dingo.gw.domains import UniformFrequencyDomain
 from dingo.gw.waveform_generator.waveform_generator import WaveformGenerator
 from dingo.gw.transforms.parameter_transforms import StandardizeParameters
 import pytest
@@ -10,7 +10,7 @@ import torch.distributions
 @pytest.fixture
 def uniform_fd_domain():
     p = {'f_min': 20.0, 'f_max': 4096.0, 'delta_f': 1.0/4.0}
-    return FrequencyDomain(**p)
+    return UniformFrequencyDomain(**p)
 
 @pytest.fixture
 def aligned_spin_wf_parameters():
@@ -72,7 +72,7 @@ def test_waveform_generator_FD_f_max_failure(precessing_spin_wf_parameters):
     # This includes a check in WaveformGenerator.generate_FD_waveform() which ensures
     # that the generated waveform agrees with the frequency grid defined in the domain.
     p_OK1 = {'f_min': 20.0, 'f_max': 896.0, 'delta_f': 1.0/8.0}
-    domain_OK1 = FrequencyDomain(**p_OK1)
+    domain_OK1 = UniformFrequencyDomain(**p_OK1)
 
     wf_gen = WaveformGenerator(approximant, domain_OK1, f_ref)
     wf_dict = wf_gen.generate_hplus_hcross(parameters)
@@ -80,7 +80,7 @@ def test_waveform_generator_FD_f_max_failure(precessing_spin_wf_parameters):
     # (2)
     # Check that generating this waveform **succeeds** as expected.
     p_OK = {'f_min': 20.0, 'f_max': 1024.0, 'delta_f': 1.0/8.0}
-    domain_OK = FrequencyDomain(**p_OK)
+    domain_OK = UniformFrequencyDomain(**p_OK)
 
     wf_gen = WaveformGenerator(approximant, domain_OK, f_ref)
     wf_dict = wf_gen.generate_hplus_hcross(parameters)

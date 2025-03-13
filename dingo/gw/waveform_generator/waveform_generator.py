@@ -25,7 +25,7 @@ import dingo.gw.waveform_generator.wfg_utils as wfg_utils
 import dingo.gw.waveform_generator.frame_utils as frame_utils
 from dingo.gw.domains import (
     Domain,
-    FrequencyDomain,
+    UniformFrequencyDomain,
     MultibandedFrequencyDomain,
     TimeDomain,
 )
@@ -123,7 +123,7 @@ class WaveformGenerator:
             and "SEOBNR" in self.approximant_str
         ):
             # EOB waveforms do not work with SimInspiralChooseFDWaveformSequence,
-            # so instead we generate waveforms in the base FrequencyDomain, and later
+            # so instead we generate waveforms in the base UniformFrequencyDomain, and later
             # decimate.
             self._use_base_domain = True
             self._domain_transform = DecimateAll(self._domain)
@@ -217,7 +217,7 @@ class WaveformGenerator:
         )
 
         # Generate GW polarizations
-        if isinstance(self.domain, (FrequencyDomain, MultibandedFrequencyDomain)):
+        if isinstance(self.domain, (UniformFrequencyDomain, MultibandedFrequencyDomain)):
             wf_generator = self.generate_FD_waveform
         elif isinstance(self.domain, TimeDomain):
             wf_generator = self.generate_TD_waveform
@@ -312,7 +312,7 @@ class WaveformGenerator:
         """
         # check that the target_function is valid
         if target_function is None:
-            if isinstance(self.domain, FrequencyDomain):
+            if isinstance(self.domain, UniformFrequencyDomain):
                 target_function = "SimInspiralFD"
             elif isinstance(self.domain, MultibandedFrequencyDomain):
                 target_function = "SimInspiralChooseFDWaveformSequence"
@@ -384,7 +384,7 @@ class WaveformGenerator:
 
         # Get domain parameters
         f_ref = p["f_ref"]
-        if isinstance(self.domain, FrequencyDomain):
+        if isinstance(self.domain, UniformFrequencyDomain):
             delta_f = self.domain.delta_f
             f_max = self.domain.f_max
             if self.f_start is not None:
@@ -573,7 +573,7 @@ class WaveformGenerator:
         #   lal_params, approximant
 
         # call the lalsimulation waveform generation function. For uniform frequency
-        #   FrequencyDomain:                LS.SimInspiralFD
+        #   UniformFrequencyDomain:                LS.SimInspiralFD
         #   MultibandedFrequencyDomain:     SimInspiralChooseFDWaveformSequence
         hp, hc = lal_target_function(*parameters_lal)
 
@@ -722,7 +722,7 @@ class WaveformGenerator:
         elif not isinstance(list(parameters.values())[0], float):
             raise ValueError("parameters dictionary must contain floats", parameters)
 
-        if isinstance(self.domain, FrequencyDomain):
+        if isinstance(self.domain, UniformFrequencyDomain):
             # Generate FD modes in for frequencies [-f_max, ..., 0, ..., f_max].
             if LS.SimInspiralImplementedFDApproximants(self.approximant):
                 # Step 1: generate waveform modes in L0 frame in native domain of
@@ -1189,7 +1189,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             raise ValueError("parameters dictionary must contain floats", parameters)
 
         generator = new_interface_get_waveform_generator(self.approximant_str)
-        if isinstance(self.domain, FrequencyDomain):
+        if isinstance(self.domain, UniformFrequencyDomain):
             # Generate FD modes in for frequencies [-f_max, ..., 0, ..., f_max].
             if generator.domain == "freq":
                 # Step 1: generate waveform modes in L0 frame in native domain of
@@ -1548,7 +1548,7 @@ if __name__ == "__main__":
     from dingo.gw.prior import build_prior_with_defaults
 
     domain_settings = {
-        "type": "FrequencyDomain",
+        "type": "UniformFrequencyDomain",
         "f_min": 10.0,
         "f_max": 2048.0,
         "delta_f": 0.125,

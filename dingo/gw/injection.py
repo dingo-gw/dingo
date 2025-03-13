@@ -4,7 +4,7 @@ from torchvision.transforms import Compose
 
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.domains import (
-    FrequencyDomain,
+    UniformFrequencyDomain,
     build_domain,
     build_domain_from_model_metadata,
     Domain,
@@ -89,8 +89,8 @@ class GWSignal(object):
                 "Output domain is not contained within WaveformGenerator domain."
             )
         if (
-            domain_in.domain_dict["type"] == "FrequencyDomain"
-            and domain_out.domain_dict["type"] == "FrequencyDomain"
+            domain_in.domain_dict["type"] == "UniformFrequencyDomain"
+            and domain_out.domain_dict["type"] == "UniformFrequencyDomain"
         ):
             if domain_in.delta_f != domain_out.delta_f:
                 raise ValueError("Domains must have same delta_f.")

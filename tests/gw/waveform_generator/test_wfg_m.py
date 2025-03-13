@@ -28,7 +28,7 @@ from dingo.gw.prior import build_prior_with_defaults
 @pytest.fixture
 def uniform_fd_domain():
     domain_settings = {
-        "type": "FrequencyDomain",
+        "type": "UniformFrequencyDomain",
         "f_min": 10.0,
         "f_max": 2048.0,  # Note that if this isn't a power of 2, mismatches are worse.
         "delta_f": 0.125,

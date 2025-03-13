@@ -7,7 +7,7 @@ from dingo.core.dataset import DingoDataset
 from dingo.core.utils.misc import recursive_check_dicts_are_equal
 from dingo.gw.data.data_download import download_raw_data
 from dingo.gw.gwutils import get_window
-from dingo.gw.domains import build_domain_from_model_metadata, FrequencyDomain
+from dingo.gw.domains import build_domain_from_model_metadata, UniformFrequencyDomain
 
 
 def load_raw_data(time_event, settings, event_dataset=None):
@@ -66,7 +66,7 @@ def load_raw_data(time_event, settings, event_dataset=None):
 def parse_settings_for_raw_data(model_metadata, time_psd, time_buffer):
     domain_type = model_metadata["dataset_settings"]["domain"]["type"]
 
-    if domain_type == "FrequencyDomain":
+    if domain_type == "UniformFrequencyDomain":
         data_settings = model_metadata["train_settings"]["data"]
         settings = {
             "window": data_settings["window"],
@@ -98,7 +98,7 @@ def data_to_domain(raw_data, settings_raw_data, domain, **kwargs):
 
     """
 
-    if type(domain) == FrequencyDomain:
+    if type(domain) == UniformFrequencyDomain:
         window = get_window(kwargs["window"])
         data = {"waveform": {}, "asds": {}}
         # convert event strains to frequency domain

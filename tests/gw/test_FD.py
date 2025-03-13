@@ -1,6 +1,6 @@
 import torch
 
-from dingo.gw.domains import FrequencyDomain, TimeDomain, build_domain
+from dingo.gw.domains import UniformFrequencyDomain, TimeDomain, build_domain
 from dingo.gw.gwutils import get_window_factor
 import pytest
 import numpy as np
@@ -32,7 +32,7 @@ def window_setup():
 
 def test_uniform_FD(uniform_FD_params):
     p = uniform_FD_params
-    domain = FrequencyDomain(**p)
+    domain = UniformFrequencyDomain(**p)
     n = int(p["f_max"] / p["delta_f"]) + 1
     frequencies_expected = np.linspace(0, p["f_max"], n)
     frequencies = domain()
@@ -41,7 +41,7 @@ def test_uniform_FD(uniform_FD_params):
 
 def test_uniform_FD_mask(uniform_FD_params):
     p = uniform_FD_params
-    domain = FrequencyDomain(**p)
+    domain = UniformFrequencyDomain(**p)
     mask = domain.frequency_mask
     n_masked = int((p["f_max"] - p["f_min"]) / p["delta_f"]) + 1
     frequencies_expected_masked = np.linspace(p["f_min"], p["f_max"], n_masked)
@@ -51,14 +51,14 @@ def test_uniform_FD_mask(uniform_FD_params):
 
 def test_FD_domain_dict(uniform_FD_params):
     p = uniform_FD_params
-    domain = FrequencyDomain(**p)
+    domain = UniformFrequencyDomain(**p)
     domain2 = build_domain(domain.domain_dict)
     assert domain.__dict__ == domain2.__dict__
 
 
 def test_FD_update_data(uniform_FD_params):
     p = uniform_FD_params
-    domain = FrequencyDomain(**p)
+    domain = UniformFrequencyDomain(**p)
     n = int(p["f_max"] / p["delta_f"]) + 1
     nt = int((p["f_max"] - p["f_min"]) / p["delta_f"]) + 1
     # test that the sample frequencies are correct
@@ -85,22 +85,22 @@ def test_FD_update_data(uniform_FD_params):
 
 def test_FD_set_new_range(uniform_FD_params):
     p = uniform_FD_params
-    domain = FrequencyDomain(**p)
+    domain = UniformFrequencyDomain(**p)
     # test that ValueErrors are raised for infeasible inputs
     with pytest.raises(ValueError):
-        domain.set_new_range(p["f_max"] + 10, None)
+        domain._set_new_range(p["f_max"] + 10, None)
     with pytest.raises(ValueError):
-        domain.set_new_range(p["f_min"] - 10, None)
+        domain._set_new_range(p["f_min"] - 10, None)
     with pytest.raises(ValueError):
-        domain.set_new_range(None, p["f_max"] + 10)
+        domain._set_new_range(None, p["f_max"] + 10)
     with pytest.raises(ValueError):
-        domain.set_new_range(None, p["f_min"] - 10)
+        domain._set_new_range(None, p["f_min"] - 10)
     with pytest.raises(ValueError):
-        domain.set_new_range(p["f_min"] + 10, p["f_min"] + 5)
+        domain._set_new_range(p["f_min"] + 10, p["f_min"] + 5)
     # test that setting new frequency range works as intended
     f_min_new, f_max_new = 40, 800
     n = int(f_max_new / p["delta_f"]) + 1
-    domain.set_new_range(f_min_new, f_max_new)
+    domain._set_new_range(f_min_new, f_max_new)
     assert n == len(domain) == len(domain())
     assert np.all(domain() == np.linspace(0, f_max_new, n))
     mask = np.ones(n)
@@ -117,7 +117,7 @@ def test_FD_set_new_range(uniform_FD_params):
 
 def test_FD_time_translation(uniform_FD_params):
     p = uniform_FD_params
-    domain = FrequencyDomain(**p)
+    domain = UniformFrequencyDomain(**p)
     # test normal time translation
     dt = 1e-3
     a = np.sin(np.outer(np.arange(3) + 1, domain()) / 100) + 1j * np.cos(
@@ -134,7 +134,7 @@ def test_FD_time_translation(uniform_FD_params):
 
 def test_FD_time_translation_torch(uniform_FD_params):
     p = uniform_FD_params
-    domain = FrequencyDomain(**p)
+    domain = UniformFrequencyDomain(**p)
     batch_size = 5
     num_detectors = 2
     dt = torch.randn(batch_size, num_detectors, dtype=torch.float32)
@@ -163,8 +163,8 @@ def test_FD_time_translation_torch(uniform_FD_params):
 
 def test_FD_caching(uniform_FD_params):
     p = uniform_FD_params
-    domain = FrequencyDomain(**p)
-    domain_ref = FrequencyDomain(**p)
+    domain = UniformFrequencyDomain(**p)
+    domain_ref = UniformFrequencyDomain(**p)
 
     assert np.all(domain() == domain_ref())
     # we now modify domain._f_max by hand, which should not be done, as this
@@ -179,7 +179,7 @@ def test_FD_caching(uniform_FD_params):
 
 def test_FD_window_factor(uniform_FD_params, window_setup):
     p = uniform_FD_params
-    domain = FrequencyDomain(**p)
+    domain = UniformFrequencyDomain(**p)
     _, window_factor = window_setup
     assert window_factor == 0.9374713897717841
     # check that window_factor is initially None
