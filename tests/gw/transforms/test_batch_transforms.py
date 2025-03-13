@@ -18,7 +18,7 @@ from dingo.gw.transforms import (
     UnpackDict,
 )
 from dingo.gw.prior import default_extrinsic_dict
-from dingo.gw.domains import FrequencyDomain
+from dingo.gw.domains import UniformFrequencyDomain
 from dingo.gw.noise.asd_dataset import ASDDataset
 
 
@@ -38,7 +38,7 @@ def standardization_dict():
 
 @pytest.fixture
 def domain():
-    return FrequencyDomain(0, 1024, 0.125, 1.0)
+    return UniformFrequencyDomain(0, 1024, 0.125, 1.0)
 
 
 def input_sample_batched(batch_size, input_domain):
