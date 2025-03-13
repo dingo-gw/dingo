@@ -47,7 +47,9 @@ class BaseFrequencyDomain(Domain, ABC):
             )
         return self._sample_frequencies_torch_cuda
 
-    def get_sample_frequencies_astype(self, data):
+    def get_sample_frequencies_astype(
+        self, data: np.ndarray | torch.Tensor
+    ) -> np.ndarray | torch.Tensor:
         """
         Returns a 1D frequency array compatible with the last index of data array.
 
@@ -60,7 +62,7 @@ class BaseFrequencyDomain(Domain, ABC):
 
         Returns
         -------
-        frequency array compatible with last index
+        Frequency array compatible with last index, of the same type as input
         """
         # Type
         if isinstance(data, np.ndarray):

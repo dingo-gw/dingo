@@ -2,8 +2,6 @@ import numpy as np
 import lal
 import lalsimulation as LS
 
-from dingo.gw.domains import build_domain
-
 
 def linked_list_modes_to_dict_modes(hlm_ll):
     """Convert linked list of modes into dictionary with keys (l,m)."""

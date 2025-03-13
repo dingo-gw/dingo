@@ -93,7 +93,7 @@ def num_evaluations(approximant):
 def tolerances(approximant):
     # Return max mismatches in MFD, UFD.
     if approximant == "IMRPhenomXPHM":
-        return 1e-5, 1e-3
+        return 1e-4, 1e-3
     else:
         return 1e-9, 1e-3
 

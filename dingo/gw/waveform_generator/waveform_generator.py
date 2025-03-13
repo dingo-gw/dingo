@@ -210,14 +210,16 @@ class WaveformGenerator:
         parameters = parameters.copy()
         parameters["f_ref"] = self.f_ref
 
-        parameters_generator, lal_target_function = self._convert_parameters(
+        parameters_generator, target_function = self._convert_parameters(
             parameters,
             self.lal_params,
             return_target_function=True,
         )
 
         # Generate GW polarizations
-        if isinstance(self.domain, (UniformFrequencyDomain, MultibandedFrequencyDomain)):
+        if isinstance(
+            self.domain, (UniformFrequencyDomain, MultibandedFrequencyDomain)
+        ):
             wf_generator = self.generate_FD_waveform
         elif isinstance(self.domain, TimeDomain):
             wf_generator = self.generate_TD_waveform
@@ -225,8 +227,8 @@ class WaveformGenerator:
             raise ValueError(f"Unsupported domain type {type(self.domain)}.")
 
         try:
-            if lal_target_function is not None:
-                wf_dict = wf_generator(parameters_generator, lal_target_function)
+            if target_function is not None:
+                wf_dict = wf_generator(parameters_generator, target_function)
             else:
                 wf_dict = wf_generator(parameters_generator)
         except Exception as e:
@@ -402,8 +404,6 @@ class WaveformGenerator:
             # parameters needed for FD waveforms
             f_max = 1.0 / self.domain.delta_t
             delta_f = 1.0 / self.domain.duration
-        # else:
-        #     raise ValueError(f"Unsupported domain type {type(self.domain)}.")
 
         if target_function == "SimInspiralFD":
             # LS.SimInspiralFD takes parameters:

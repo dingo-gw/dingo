@@ -1,4 +1,4 @@
-from typing import Iterable, Union
+from typing import Iterable, Union, Optional
 import numpy as np
 import torch
 import lal
@@ -51,14 +51,14 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
             decimated data from the base domain in the range [nodes[j]:nodes[j+1]).
         delta_f_initial: float
             delta_f of band 0. The decimation factor doubles between adjacent bands,
-            so delta_f is halved.
+            so delta_f is doubled as well.
         base_domain: Union[UniformFrequencyDomain, dict]
             Original (uniform frequency) domain of data, which is the starting point
             for the decimation. This determines the decimation details and the noise_std.
             Either provided as dict for build_domain, or as domain_object.
         """
         super().__init__()
-        if type(base_domain) == dict:
+        if isinstance(base_domain, dict):
             from dingo.gw.domains import build_domain
 
             base_domain = build_domain(base_domain)
@@ -119,6 +119,12 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
         # sample_frequencies should always be the decimation of the base domain
         # frequencies.
 
+        if self.f_min not in self.base_domain() or self.f_max not in self.base_domain():
+            raise ValueError(
+                f"Endpoints ({self.f_min}, {self.f_max}) not in base "
+                f"domain, {self.base_domain.domain_dict}"
+            )
+
         # Update base domain to required range.
         self.base_domain.update({"f_min": self.f_min, "f_max": self.f_max})
 
@@ -167,7 +173,7 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
             data_decimated[..., lower_out : lower_out + num_bins] = decimate_uniform(
                 data[..., lower_in:upper_in], decimation_factor
             )
-            lower_out = lower_out + num_bins
+            lower_out += num_bins
 
         assert lower_out == len(self)
 
@@ -208,12 +214,21 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
                 f'{list(self.domain_dict.keys())} or a subset of ["f_min, f_max"].'
             )
 
-    def _set_new_range(self, f_min: float = None, f_max: float = None):
+    def _set_new_range(
+        self, f_min: Optional[float] = None, f_max: Optional[float] = None
+    ):
         """
         Set a new range [f_min, f_max] for the domain. This operation is only allowed
         if the new range is contained within the old one.
 
         Note: f_min, f_max correspond to the range in the *base_domain*.
+
+        Parameters
+        ----------
+        f_min : float
+            New minimum frequency (optional).
+        f_max : float
+            New maximum frequency (optional).
         """
         if f_min is None and f_max is None:
             return

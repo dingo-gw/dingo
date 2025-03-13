@@ -65,7 +65,6 @@ class Result(CoreResult):
     dataset_type = "gw_result"
 
     def __init__(self, **kwargs):
-        # self._use_base_domain = False
         super().__init__(**kwargs)
 
     @property
@@ -101,11 +100,11 @@ class Result(CoreResult):
         self.importance_sampling_metadata["calibration_marginalization"] = value
 
     @property
-    def use_base_domain(self):
+    def use_base_domain(self) -> bool:
         return self.importance_sampling_metadata.get("use_base_domain", False)
 
     @use_base_domain.setter
-    def use_base_domain(self, value):
+    def use_base_domain(self, value: bool):
         if hasattr(self.domain, "base_domain"):
             self.importance_sampling_metadata["use_base_domain"] = value
 
@@ -141,8 +140,6 @@ class Result(CoreResult):
         Called by __init__() immediately after _build_prior().
         """
         self.domain = build_domain(self.base_metadata["dataset_settings"]["domain"])
-        # if self._use_base_domain:
-        #     self.domain = self.domain.base_domain
 
         data_settings = self.base_metadata["train_settings"]["data"]
         if "domain_update" in data_settings:
