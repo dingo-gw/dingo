@@ -1,5 +1,6 @@
 import sys
 from multiprocessing import Pool
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -10,9 +11,13 @@ from threadpoolctl import threadpool_limits
 
 from dingo.core.likelihood import Likelihood
 from dingo.gw.injection import GWSignal
-from dingo.gw.transforms.waveform_transforms import DecimateWaveformsAndASDS
+from dingo.gw.transforms import DecimateWaveformsAndASDS
 from dingo.gw.waveform_generator import WaveformGenerator
-from dingo.gw.domains import build_domain, UniformFrequencyDomain, MultibandedFrequencyDomain
+from dingo.gw.domains import (
+    build_domain,
+    UniformFrequencyDomain,
+    MultibandedFrequencyDomain,
+)
 from dingo.gw.data.data_preparation import get_event_data_and_domain
 
 
@@ -56,6 +61,9 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             Calibration marginalization parameters. If None, no calibration marginalization is used.
         phase_marginalization_kwargs: dict
             Phase marginalization parameters. If None, no phase marginalization is used.
+        use_base_domain: bool (default False)
+            When the domain is a MultibandedFrequencyDomain, whether to use the
+            associated base UniformFrequencyDomain for likelihood computations.
         """
         super().__init__(
             wfg_kwargs=wfg_kwargs,
@@ -273,7 +281,9 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         )
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
-    def log_likelihood_phase_grid(self, theta, phases=None):
+    def log_likelihood_phase_grid(
+        self, theta: dict, phases: Optional[np.ndarray] = None
+    ) -> np.ndarray:
         if isinstance(
             self.waveform_generator.domain,
             (UniformFrequencyDomain, MultibandedFrequencyDomain),
@@ -287,7 +297,9 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 f"{type(self.waveform_generator.domain)}."
             )
 
-    def _log_likelihood_phase_grid_manual(self, theta, phases=None):
+    def _log_likelihood_phase_grid_manual(
+        self, theta: dict, phases: Optional[np.ndarray] = None
+    ) -> np.ndarray:
         if self.phase_marginalization:
             raise ValueError(
                 "Can't compute likelihood on a phase grid for "

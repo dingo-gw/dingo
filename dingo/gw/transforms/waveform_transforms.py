@@ -1,6 +1,6 @@
 import numpy as np
 
-from dingo.gw.domains import Domain, MultibandedFrequencyDomain, UniformFrequencyDomain
+from dingo.gw.domains import MultibandedFrequencyDomain, UniformFrequencyDomain
 
 
 class DecimateAll(object):
@@ -19,7 +19,7 @@ class DecimateAll(object):
         """
         self.multibanded_frequency_domain = multibanded_frequency_domain
 
-    def __call__(self, input_sample: dict):
+    def __call__(self, input_sample: dict) -> dict:
         """
         Parameters
         ----------
@@ -127,7 +127,7 @@ class DecimateWaveformsAndASDS(object):
             )
         self.decimation_mode = decimation_mode
 
-    def __call__(self, input_sample: dict):
+    def __call__(self, input_sample: dict) -> dict:
         """
         Parameters
         ----------
@@ -184,7 +184,7 @@ class DecimateWaveformsAndASDS(object):
         return sample
 
 
-def check_sample_in_domain(sample, domain):
+def check_sample_in_domain(sample, domain: UniformFrequencyDomain) -> bool:
     lengths = []
     base_domain_length = len(domain)
     for k in ["waveform", "asds"]:

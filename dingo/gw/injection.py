@@ -2,6 +2,7 @@ import numpy as np
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 
+from dingo.gw.domains.base_frequency_domain import BaseFrequencyDomain
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.domains import (
     UniformFrequencyDomain,
@@ -35,8 +36,8 @@ class GWSignal(object):
     def __init__(
         self,
         wfg_kwargs: dict,
-        wfg_domain: Domain,
-        data_domain: Domain,
+        wfg_domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
+        data_domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
         ifo_list: list,
         t_ref: float,
     ):
@@ -45,10 +46,10 @@ class GWSignal(object):
         ----------
         wfg_kwargs : dict
             Waveform generator parameters [approximant, f_ref, and (optionally) f_start].
-        wfg_domain : Domain
+        wfg_domain : UniformFrequencyDomain | MultibandedFrequencyDomain
             Domain used for waveform generation. This can potentially deviate from the
             final domain, having a wider frequency range needed for waveform generation.
-        data_domain : Domain
+        data_domain : UniformFrequencyDomain | MultibandedFrequencyDomain
             Domain object for final signal.
         ifo_list : list
             Names of interferometers for projection.
@@ -83,7 +84,10 @@ class GWSignal(object):
         self.asd = None
 
     @staticmethod
-    def _check_domains(domain_in, domain_out):
+    def _check_domains(
+        domain_in: UniformFrequencyDomain | MultibandedFrequencyDomain,
+        domain_out: UniformFrequencyDomain | MultibandedFrequencyDomain,
+    ):
         if domain_in.f_min > domain_out.f_min or domain_in.f_max < domain_out.f_max:
             raise ValueError(
                 "Output domain is not contained within WaveformGenerator domain."
@@ -116,7 +120,7 @@ class GWSignal(object):
                     )
             else:
                 raise NotImplementedError(
-                    "Cannot recover original domain from base " "domain alone."
+                    "Cannot recover original domain from base domain alone."
                 )
 
     @property

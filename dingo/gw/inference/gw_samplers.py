@@ -25,8 +25,8 @@ from dingo.gw.transforms import (
     PostCorrectGeocentTime,
     CopyToExtrinsicParameters,
     GetDetectorTimes,
+    DecimateWaveformsAndASDS,
 )
-from dingo.gw.transforms.waveform_transforms import DecimateWaveformsAndASDS
 
 
 class GWSamplerMixin(object):
