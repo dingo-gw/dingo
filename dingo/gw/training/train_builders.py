@@ -263,6 +263,7 @@ def build_svd_for_embedding_network(
             RepackageStrainsAndASDS,
             SelectStandardizeRepackageParameters,
             UnpackDict,
+            CropMaskStrainRandom,
         ],
     )
 
