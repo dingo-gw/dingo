@@ -33,7 +33,7 @@ def build_domain(settings: dict) -> Domain:
 
     # The settings other than 'type' correspond to the kwargs of the Domain constructor.
     kwargs = {k: v for k, v in settings.items() if k != "type"}
-    if settings["type"] in ["UniformFrequencyDomain", "UniformFrequencyDomain", "FD"]:
+    if settings["type"] in ["UniformFrequencyDomain", "FrequencyDomain", "FD"]:
         return UniformFrequencyDomain(**kwargs)
     elif settings["type"] in ["MultibandedFrequencyDomain", "MFD"]:
         return MultibandedFrequencyDomain(**kwargs)
