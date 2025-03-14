@@ -109,12 +109,11 @@ class BaseFrequencyDomain(Domain, ABC):
     def time_translate_data(
         self, data: np.ndarray | torch.Tensor, dt: float | np.ndarray | torch.Tensor
     ) -> np.ndarray | torch.Tensor:
-        """
+        r"""
         Time translate frequency-domain data by dt. Time translation corresponds (in
         frequency domain) to multiplication by
-
         $$
-            \exp(-2 \pi i \, f \, dt).
+        \exp(-2 \pi i f \cdot dt).
         $$
 
         This method allows for multiple batch dimensions. For torch.Tensor data,
@@ -159,7 +158,7 @@ class BaseFrequencyDomain(Domain, ABC):
         as well as additional channels (such as detectors). Accounts for the fact that
         the data could be a complex frequency series or real and imaginary parts.
 
-        Convention: the phase phi(f) is defined via exp(- 1j * phi(f)).
+        Convention: the phase $\phi(f)$ is defined via $\exp[- i \phi(f)]$.
 
         Parameters
         ----------
@@ -205,18 +204,24 @@ class BaseFrequencyDomain(Domain, ABC):
 
     @property
     def noise_std(self) -> float:
-        """Standard deviation of the whitened noise distribution.
+        r"""
+        Standard deviation per bin for white noise,
+        $$
+        \sigma_{\mathrm{noise}} = \sqrt{\frac{w}{4 \delta f}}
+        $$
+        where $w$ is the window factor.
 
-        To have noise that comes from a multivariate *unit* normal
-        distribution, you must divide by this array. In practice, this means
-        dividing the whitened waveforms by this.
+        The window factor arises because of the way frequency domain data is
+        constructed from observed time domain data. Generally a window is applied to
+        the time domain data before taking the Fourier transform. This reduces the
+        power in the noise by $w^2$. However, the signal is assumed to be unaffected by
+        the window, which tapers near the edges of the domain. We keep track of this in
+        DINGO by generating noise with standard deviation as above.
 
-        In contrast to the uniform UniformFrequencyDomain, this is an array and not a number,
-        as self._delta_f is not constant.
-
-        TODO: This description makes some assumptions that need to be clarified.
-        Windowing of TD data; tapering window has a slope -> reduces power only for noise,
-        but not for the signal which is in the main part unaffected by the taper
+        To scale noise such that it is consistent with a multivariate *unit* normal
+        distribution, you must divide whitened data by the noise_std. For the
+        UniformFrequencyDomain, noise_std is a number, as delta_f is constant across
+        the domain. For the MultibandedFrequencyDomain, it is an array.
         """
         if self.window_factor is None:
             raise ValueError("Window factor needs to be set for noise_std.")

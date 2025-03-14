@@ -13,7 +13,8 @@ from dingo.core.density import (
 from dingo.core.multiprocessing import apply_func_with_multiprocessing
 from dingo.core.result import Result as CoreResult
 from dingo.gw.conversion import change_spin_conversion_phase
-from dingo.gw.domains import build_domain, MultibandedFrequencyDomain
+from dingo.gw.domains import MultibandedFrequencyDomain
+from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_extrinsic_prior_dict, get_window_factor
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 from dingo.gw.prior import build_prior_with_defaults

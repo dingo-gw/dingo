@@ -1,4 +1,7 @@
+from typing import Optional
+
 import numpy as np
+import torch
 
 from dingo.gw.gwutils import *
 from .base_frequency_domain import BaseFrequencyDomain
@@ -18,7 +21,11 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
     """
 
     def __init__(
-        self, f_min: float, f_max: float, delta_f: float, window_factor: float = None
+        self,
+        f_min: float,
+        f_max: float,
+        delta_f: float,
+        window_factor: Optional[float] = None,
     ):
         """
         Parameters
@@ -66,7 +73,9 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
             f_min=new_settings.get("f_min", None), f_max=new_settings.get("f_max", None)
         )
 
-    def _set_new_range(self, f_min: float = None, f_max: float = None):
+    def _set_new_range(
+        self, f_min: Optional[float] = None, f_max: Optional[float] = None
+    ):
         """
         Set a new range [f_min, f_max] for the domain. This is only allowed if the new
         range is contained within the old one.
@@ -124,7 +133,9 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
 
         return data
 
-    def get_sample_frequencies_astype(self, data):
+    def get_sample_frequencies_astype(
+        self, data: np.ndarray | torch.Tensor
+    ) -> np.ndarray | torch.Tensor:
         """
         Returns a 1D frequency array compatible with the last index of data array.
 
@@ -187,19 +198,19 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
         return len(np.flatnonzero(np.asarray(mask)))
 
     @property
-    def min_idx(self):
+    def min_idx(self) -> int:
         return round(self._f_min / self._delta_f)
 
     @property
-    def max_idx(self):
+    def max_idx(self) -> int:
         return round(self._f_max / self._delta_f)
 
     @property
-    def window_factor(self):
+    def window_factor(self) -> float:
         return self._window_factor
 
     @window_factor.setter
-    def window_factor(self, value):
+    def window_factor(self, value: float):
         """Set self._window_factor."""
         self._window_factor = float(value)
 

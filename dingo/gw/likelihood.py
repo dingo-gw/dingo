@@ -14,10 +14,10 @@ from dingo.gw.injection import GWSignal
 from dingo.gw.transforms import DecimateWaveformsAndASDS
 from dingo.gw.waveform_generator import WaveformGenerator
 from dingo.gw.domains import (
-    build_domain,
     UniformFrequencyDomain,
     MultibandedFrequencyDomain,
 )
+from dingo.gw.domains import build_domain
 from dingo.gw.data.data_preparation import get_event_data_and_domain
 
 

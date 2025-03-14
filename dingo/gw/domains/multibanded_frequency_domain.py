@@ -9,7 +9,7 @@ from .uniform_frequency_domain import UniformFrequencyDomain
 
 
 class MultibandedFrequencyDomain(BaseFrequencyDomain):
-    """
+    r"""
     Defines a non-uniform frequency domain that is made up of a sequence of
     uniform-frequency domain bands. Each subsequent band in the sequence has double the
     bin-width of the previous one, i.e., delta_f is doubled each band as one moves up
@@ -27,7 +27,9 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
 
     In comparison to the UniformFrequencyDomain, the MultibandedFrequencyDomain has the
     following key differences:
+
     * The sample frequencies start at the first node, rather than f = 0.0 Hz.
+
     * Quantities such as delta_f, noise_std, etc., are represented as arrays rather than
     scalars, as they vary depending on f.
 
@@ -59,7 +61,7 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
         """
         super().__init__()
         if isinstance(base_domain, dict):
-            from dingo.gw.domains import build_domain
+            from .build_domain import build_domain
 
             base_domain = build_domain(base_domain)
 

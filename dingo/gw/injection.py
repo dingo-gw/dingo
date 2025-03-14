@@ -6,11 +6,10 @@ from dingo.gw.domains.base_frequency_domain import BaseFrequencyDomain
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.domains import (
     UniformFrequencyDomain,
-    build_domain,
-    build_domain_from_model_metadata,
     Domain,
     MultibandedFrequencyDomain,
 )
+from dingo.gw.domains import build_domain, build_domain_from_model_metadata
 from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.prior import build_prior_with_defaults, split_off_extrinsic_parameters
 from dingo.gw.transforms import (

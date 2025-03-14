@@ -1,6 +1,6 @@
 import torch
 
-from dingo.gw.domains import MultibandedFrequencyDomain, build_domain
+from dingo.gw.domains import build_domain, MultibandedFrequencyDomain
 from dingo.gw.gwutils import get_window_factor
 import pytest
 import numpy as np

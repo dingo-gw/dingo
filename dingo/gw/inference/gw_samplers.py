@@ -10,7 +10,8 @@ from torchvision.transforms import Compose
 
 from dingo.core.samplers import Sampler, GNPESampler
 from dingo.core.transforms import GetItem, RenameKey
-from dingo.gw.domains import build_domain, MultibandedFrequencyDomain
+from dingo.gw.domains import MultibandedFrequencyDomain
+from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_window_factor, get_extrinsic_prior_dict
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.result import Result

@@ -1,7 +1,8 @@
 import copy
 from typing import Iterable
 
-from dingo.gw.domains import build_domain, UniformFrequencyDomain, MultibandedFrequencyDomain
+from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain
+from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import *
 from dingo.gw.dataset import DingoDataset
 
@@ -163,7 +164,6 @@ class ASDDataset(DingoDataset):
                 f"Cannot update ASD domain type "
                 f"{self.domain.domain_dict['type']} to {domain_update['type']}"
             )
-
 
     def sample_random_asds(self, n=None):
         """
