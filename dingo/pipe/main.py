@@ -2,6 +2,7 @@
 #  Adapted from bilby_pipe. In particular, uses the bilby_pipe data generation code.
 #
 import os
+import ast
 
 from bilby_pipe.input import Input
 from bilby_pipe.main import MainInput as BilbyMainInput
@@ -179,22 +180,16 @@ class MainInput(BilbyMainInput):
         # self.ignore_gwpy_data_quality_check = args.ignore_gwpy_data_quality_check
         self.trigger_time = args.trigger_time
         # self.deltaT = args.deltaT
-        self.gps_tuple = args.gps_tuple
-        self.gps_file = args.gps_file
+        self.gps_tuple = None # args.gps_tuple
+        self.gps_file = None #  args.gps_file
         self.timeslide_file = args.timeslide_file
-        self.gaussian_noise = False  # DINGO MOD: Cannot use different noise types.
-        self.zero_noise = False  # DINGO MOD: does not support zero noise yet
-        # self.n_simulation = args.n_simulation
-        #
-        # self.injection = args.injection
-        # self.injection_numbers = args.injection_numbers
+        self.gaussian_noise = args.gaussian_noise
+        self.zero_noise = args.zero_noise
+        self.num_noise_realizations = args.num_noise_realizations
         self.injection_file = args.injection_file
-        # self.injection_dict = args.injection_dict
-        # self.injection_waveform_arguments = args.injection_waveform_arguments
-        # self.injection_waveform_approximant = args.injection_waveform_approximant
-        # self.generation_seed = args.generation_seed
-        # if self.injection:
-        #     self.check_injection()
+        if args.injection_dict is not None:
+            self.injection_numbers = None
+            self.injection_dict = ast.literal_eval(args.injection_dict)
 
         self.importance_sample = args.importance_sample
 
