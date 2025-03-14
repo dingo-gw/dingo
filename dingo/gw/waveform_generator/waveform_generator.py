@@ -118,16 +118,16 @@ class WaveformGenerator:
     @domain.setter
     def domain(self, value):
         self._domain = value
-        if (
-            isinstance(self._domain, MultibandedFrequencyDomain)
-            and "SEOBNR" in self.approximant_str
-        ):
-            # EOB waveforms do not work with SimInspiralChooseFDWaveformSequence,
-            # so instead we generate waveforms in the base UniformFrequencyDomain, and later
-            # decimate.
+        if isinstance(
+            self._domain, MultibandedFrequencyDomain
+        ) and not LS.SimInspiralImplementedFDApproximants(self.approximant):
+            # For non-frequency domain approximants, generate waveforms in the base
+            # UniformFrequencyDomain, and later decimate.
             self._use_base_domain = True
             self._domain_transform = DecimateAll(self._domain)
         else:
+            # For frequency-domain approximants, generate waveforms directly in either
+            # UFD or MFD.
             self._use_base_domain = False
             self._domain_transform = None
 
@@ -948,6 +948,26 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         ] = gwsignal_get_waveform_generator
 
         self.mode_list = kwargs.get("mode_list", None)
+
+    @property
+    def domain(self):
+        if self._use_base_domain:
+            return self._domain.base_domain
+        else:
+            return self._domain
+
+    @domain.setter
+    def domain(self, value):
+        self._domain = value
+        if isinstance(self._domain, MultibandedFrequencyDomain):
+            # If using the MultibandedFrequencyDomain and an approximant implemented
+            # in gwsignal, assume it's a time-domain approximant and decimate after
+            # generating the waveform.
+            self._use_base_domain = True
+            self._domain_transform = DecimateAll(self._domain)
+        else:
+            self._use_base_domain = False
+            self._domain_transform = None
 
     def _convert_parameters(
         self,
