@@ -99,8 +99,7 @@ class DecimateWaveformsAndASDS(object):
 
     Method 1) better preserves the signal.
 
-    [1] https://github.com/dingo-gw/dingo-development/blob/binary_neutron_stars/
-    binary_neutron_stars/prototyping/psd_decimation.ipynb
+    [1] https://github.com/dingo-gw/dingo/blob/fede5c01524f3e205acf5750c0a0f101ff17e331/binary_neutron_stars/prototyping/psd_decimation.ipynb
     """
 
     def __init__(
@@ -174,7 +173,7 @@ class DecimateWaveformsAndASDS(object):
                     for k, v in sample["waveform"].items()
                 }
                 sample["asds"] = {
-                    k: self.multibanded_frequency_domain.decimate(v**2) ** 0.5
+                    k: self.multibanded_frequency_domain.decimate(v ** 2) ** 0.5
                     for k, v in sample["asds"].items()
                 }
 
