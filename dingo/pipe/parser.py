@@ -600,6 +600,12 @@ def create_parser(top_level=True):
         ),
     )
     submission_parser.add(
+        "--conda-env",
+        type=nonestr,
+        default=None,
+        help="Either a conda environment name of a absolute path to the conda env folder.",
+    )
+    submission_parser.add(
         "--request-cpus-importance-sampling",
         type=int,
         default=1,
@@ -629,12 +635,6 @@ def create_parser(top_level=True):
             "Strip off the following lines from submission files: getenv, universe, "
             "accounting_group, priority."
         ),
-    )
-    submission_parser.add(
-        "--conda-env",
-        type=nonestr,
-        default=None,
-        help="Either a conda environment name of a absolute path to the conda env folder.",
     )
     submission_parser.add(
         "--scheduler",
@@ -750,12 +750,21 @@ def create_parser(top_level=True):
         help="If true, format condor submission for running on OSG, default is False",
     )
     submission_parser.add(
-        "--desired-sites",
+        "--gpu-desired-sites",
         type=nonestr,
         help=(
             "A comma-separated list of desired sites, wrapped in quoates."
             " e.g., desired-sites='site1,site2'. This can be used on the OSG"
-            " to specify specific run nodes."
+            " to specify specific run nodes. This determines which GPU site to use."
+        ),
+    )
+    submission_parser.add(
+        "--cpu-desired-sites",
+        type=nonestr,
+        help=(
+            "A comma-separated list of desired sites, wrapped in quoates."
+            " e.g., desired-sites='site1,site2'. This can be used on the OSG"
+            " to specify specific run nodes. This determines which CPU site to use."
         ),
     )
     submission_parser.add(
@@ -794,7 +803,17 @@ def create_parser(top_level=True):
             "https://computing.docs.ligo.org/guide/htcondor/credentials."
         ),
     )
-
+    submission_parser.add(
+        "--container",
+        default=None,
+        type=nonestr,
+        help=(
+            "(Optional) singularity image to use, see "
+            "https://computing.docs.ligo.org/guide/htcondor/software "
+            "and https://computing.docs.ligo.org/guide/dhtc/containers "
+            "for more details."
+        ),
+    )
     # likelihood_parser = parser.add_argument_group(
     #     title="Likelihood arguments",
     #     description="Options for setting up the likelihood.",

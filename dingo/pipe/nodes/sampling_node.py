@@ -53,6 +53,28 @@ class SamplingNode(AnalysisNode):
         if self.device == "cuda":
             self.extra_lines.append("request_gpus = 1")
 
+        if self.inputs.osg:
+            sites = self.inputs.gpu_desired_sites
+            if sites is not None:
+                self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
+            self.requirements.append("IS_GLIDEIN=?=True")
+
+            # only supporting OSDF transfers for now
+            # stripping osdf prefix as it is not needed
+            input_files_to_transfer = [s.replace("/osdf", "") for s in [self.inputs.model, self.inputs.model_init]]
+            input_files_to_transfer = [f"igwn+osdf://{s}" for s in input_files_to_transfer]
+            input_files_to_transfer.append(self.inputs.complete_ini_file)
+            input_files_to_transfer.append(generation_node.event_data_file)
+            # This is needed to access the networks which are in OSDF
+            self.extra_lines.extend(self.scitoken_lines)
+
+            self.extra_lines.extend(
+                self._condor_file_transfer_lines(
+                    input_files_to_transfer,
+                    [self._relative_topdir(self.inputs.outdir, self.inputs.initialdir)],
+                )
+            )
+
         self.process_node()
         self.job.add_parent(generation_node.job)
 
