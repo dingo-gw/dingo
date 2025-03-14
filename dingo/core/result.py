@@ -294,6 +294,9 @@ class Result(DingoDataset):
         self.log_noise_evidence = self.likelihood.log_Zn
         self.samples["log_prior"] = log_prior
         self.samples.loc[valid_samples, "log_likelihood"] = log_likelihood
+        # where the likelihood is nan, we set the log_likelihood to -inf as it 
+        # corresponds to an unphysical system
+        self.samples["log_likelihood"] = self.samples["log_likelihood"].fillna(-np.inf)
         self._calculate_evidence()
 
     def _calculate_evidence(self):
