@@ -296,7 +296,6 @@ def perform_scheduler_step(
 
     Parameters
     ----------
-
     scheduler:
         scheduler for learning rate
     loss: float, optional
@@ -312,7 +311,7 @@ def perform_scheduler_step(
     if scheduler_kwargs is None:
         scheduler_kwargs = {}
 
-    def perform_step(sched, metric: float = None):
+    def perform_step(sched, metric: Optional[float] = None):
         if metric is not None:
             sched.step(metrics=metric)
         else:
@@ -324,7 +323,10 @@ def perform_scheduler_step(
         if (update_level == "epoch" and not update_per_step) or (
             update_level == "optimizer_step" and update_per_step
         ):
-            perform_step(scheduler, loss)
+            if isinstance(scheduler, ReduceLROnPlateau):
+                perform_step(scheduler, loss)
+            else:
+                perform_step(scheduler)
     # Sequential scheduler
     elif isinstance(scheduler, CustomSequentialLR):
         # Get currently active scheduler
