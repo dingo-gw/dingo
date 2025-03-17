@@ -27,7 +27,6 @@ from dingo.gw.transforms import (
     StrainTokenization,
     UnpackDict,
     DecimateWaveformsAndASDS,
-    SelectDetectors,
 )
 
 
