@@ -280,7 +280,7 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
         )
 
     def update_data(
-        self, data: np.ndarray | torch.Tensor, axis: int = -1
+        self, data: np.ndarray | torch.Tensor, axis: int = -1, **kwargs
     ) -> np.ndarray | torch.Tensor:
         """
         Truncates the data array to be compatible with the domain. This is used when
