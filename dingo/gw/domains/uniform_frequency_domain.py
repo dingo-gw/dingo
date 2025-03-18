@@ -57,6 +57,7 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
         new_settings = new_settings.copy()
         if "type" in new_settings and new_settings.pop("type") not in [
             "UniformFrequencyDomain",
+            "FrequencyDomain",
             "FD",
         ]:
             raise ValueError(

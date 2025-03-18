@@ -225,3 +225,22 @@ class BaseFrequencyDomain(Domain, ABC):
         if self.window_factor is None:
             raise ValueError("Window factor needs to be set for noise_std.")
         return np.sqrt(self.window_factor) / np.sqrt(4.0 * self.delta_f)
+
+    def check_data_compatibility(self, data: np.ndarray) -> bool:
+        """
+        Check that the trailing dimension of data is compatible with the domain, i.e.,
+        compare against the domain length.
+
+        Parameters
+        ----------
+        data : np.ndarray
+
+        Returns
+        -------
+        bool
+            Whether the data are compatible with domain.
+        """
+        if data.shape[-1] == len(self.sample_frequencies):
+            return True
+        else:
+            return False

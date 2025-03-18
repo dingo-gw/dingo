@@ -1,8 +1,8 @@
 import copy
-from typing import Iterable
+from typing import Iterable, Optional
 
-from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain
-from dingo.gw.domains import build_domain
+from dingo.gw.domains import build_domain, UniformFrequencyDomain
+from dingo.gw.domains.base_frequency_domain import BaseFrequencyDomain
 from dingo.gw.gwutils import *
 from dingo.gw.dataset import DingoDataset
 
@@ -56,6 +56,8 @@ class ASDDataset(DingoDataset):
                     self.gps_times.pop(ifo)
 
         self.domain = build_domain(self.settings["domain_dict"])
+        if not check_domain_compatibility(self.asds, self.domain):
+            raise ValueError("ASDs in dataset not compatible with domain.")
         if domain_update is not None:
             self.update_domain(domain_update)
 
@@ -94,7 +96,7 @@ class ASDDataset(DingoDataset):
         the new domain.
 
         The ASD dataset provides ASDs in a particular domain. In Frequency domain,
-        this is [0, domain._f_max]. In practice one may want to train a network based on
+        this is [0, domain.f_max]. In practice one may want to train a network based on
         slightly different domain settings, which corresponds to truncating the likelihood
         integral.
 
@@ -110,18 +112,11 @@ class ASDDataset(DingoDataset):
         # Note that we require domain_update to have a type specified, even if
         # unchanged from the original domain. This reduces risks of errors.
         if self.domain.domain_dict["type"] == domain_update["type"]:
-            len_domain_original = len(self.domain)
             self.domain.update(domain_update)
             self.settings["domain"] = copy.deepcopy(self.domain.domain_dict)
 
             # truncate the dataset
             for ifo, asds in self.asds.items():
-                # Is there a reason this check is needed? I would think that a dataset
-                # should never be saved with this not matching.
-                assert asds.shape[-1] == len_domain_original, (
-                    f"ASDs with shape {asds.shape[-1]} are not compatible"
-                    f"with the domain of length {len_domain_original}."
-                )
                 self.asds[ifo] = self.domain.update_data(
                     asds,
                     low_value=HIGH_ASD_VALUE,
@@ -135,20 +130,30 @@ class ASDDataset(DingoDataset):
             asd_dataset_decimated = {}
             mfd = build_domain(domain_update)
             ufd = mfd.base_domain
+            if not check_domain_compatibility(self.asds, ufd):
+                # If the ASD length is not compatible with the new base UFD,
+                # first truncate it.
+                print(
+                    f"  Truncating first to new base UniformFrequencyDomain: f_max "
+                    f"{self.domain.f_max} Hz -> {ufd.f_max} Hz"
+                )
+                self.domain.update(ufd.domain_dict)  # Additional compatibility check.
+                for ifo, asds in self.asds.items():
+                    self.asds[ifo] = self.domain.update_data(
+                        asds,
+                        low_value=HIGH_ASD_VALUE,
+                    )
+
             decimation_method = "inverse-asd-decimation"
 
             for ifo, asds in self.asds.items():
                 asd_dataset_decimated[ifo] = np.zeros((len(asds), len(mfd)))
                 for idx, asd in enumerate(asds):
-                    interp = interp1d(self.domain(), asd)
-                    asd_ufd = interp(ufd())
                     if decimation_method == "inverse-asd-decimation":
-                        asd_dataset_decimated[ifo][idx, :] = 1 / mfd.decimate(
-                            1 / asd_ufd
-                        )
+                        asd_dataset_decimated[ifo][idx, :] = 1 / mfd.decimate(1 / asd)
                     elif decimation_method == "psd-decimation":
                         asd_dataset_decimated[ifo][idx, :] = (
-                            1e-20 * mfd.decimate((asd_ufd * 1e20) ** 2) ** 0.5
+                            1e-20 * mfd.decimate((asd * 1e20) ** 2) ** 0.5
                         )
                     else:
                         raise NotImplementedError(
@@ -165,7 +170,7 @@ class ASDDataset(DingoDataset):
                 f"{self.domain.domain_dict['type']} to {domain_update['type']}"
             )
 
-    def sample_random_asds(self, n=None):
+    def sample_random_asds(self, n: Optional[int] = None) -> dict[str, np.ndarray]:
         """
         Sample n random ASDs for each detector.
 
@@ -187,3 +192,10 @@ class ASDDataset(DingoDataset):
             return {k: v[np.random.choice(len(v), 1)[0]] for k, v in self.asds.items()}
         else:
             return {k: v[np.random.choice(len(v), n)] for k, v in self.asds.items()}
+
+
+def check_domain_compatibility(data: dict, domain: BaseFrequencyDomain) -> bool:
+    for v in data.values():
+        if not domain.check_data_compatibility(v):
+            return False
+    return True

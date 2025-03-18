@@ -39,7 +39,9 @@ def build_domain(settings: dict) -> Domain:
         raise NotImplementedError(f'Domain {settings["name"]} not implemented.')
 
 
-def build_domain_from_model_metadata(model_metadata, base=False) -> Domain:
+def build_domain_from_model_metadata(
+    model_metadata: dict, base: bool = False
+) -> Domain:
     """
     Instantiate a domain class from settings of model.
 
