@@ -26,8 +26,22 @@ def _evaluate_multibanding_main(
     if "compression" in settings:
         del settings["compression"]
 
+    # Update prior to challenge the multi-banding:
+    #
+    # (a) Set geocent_time = 0.12 s (boundary of usual prior + Earth-radius crossing time)
+    # (b) Set chirp mass to bottom end of prior.
     prior = build_prior_with_defaults(settings["intrinsic_prior"])
+    settings["intrinsic_prior"]["geocent_time"] = 0.12
+    settings["intrinsic_prior"]["chirp_mass"] = prior["chirp_mass"].minimum
+    # Rebuild prior with updated settings.
+    prior = build_prior_with_defaults(settings["intrinsic_prior"])
+    print("Prior")
+    for k, v in prior.items():
+        print(f"{k}: {v}")
+
     domain = build_domain(settings["domain"])
+    print("\nDomain")
+    print(domain.domain_dict)
 
     if not isinstance(domain, MultibandedFrequencyDomain):
         raise ValueError("Waveform dataset domain not a MultibandedFrequencyDomain.")
@@ -74,7 +88,7 @@ def _evaluate_multibanding_main(
                 asd_file="aLIGO_ZERO_DET_high_P_asd.txt",
             )
 
-    print("Mismatches between UFD waveforms and MFD waveforms interpolated to MFD.")
+    print("\nMismatches between UFD waveforms and MFD waveforms interpolated to MFD.")
     print(
         "This is a conservative estimate of the MFD performance when training "
         "networks."
