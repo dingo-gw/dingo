@@ -1,0 +1,10 @@
+[Unit]
+Description=Run dingo-ci service every 5 minutes
+
+[Timer]
+OnUnitActiveSec=5min
+OnBootSec=1min
+Unit=dingo-ci.service
+
+[Install]
+WantedBy=timers.target

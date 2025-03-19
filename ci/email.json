@@ -1,0 +1,9 @@
+{
+    "root": "user@host.de",
+    "mailhub": "host.de",
+    "port": 465,
+    "authUser": "user",
+    "authPass": "pass",
+    "recipients": ["friend@otherhost.de"]
+}
+
