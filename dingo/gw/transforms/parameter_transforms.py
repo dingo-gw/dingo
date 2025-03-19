@@ -110,6 +110,12 @@ class SelectStandardizeRepackageParameters(object):
                     else:
                         standardized = np.empty(len(v), dtype=np.float32)
                     for idx, par in enumerate(v):
+                        if self.std[par] == 0:
+                            raise ValueError(
+                                f"Parameter {par} with standard deviation zero is included in inference parameters. "
+                                f"This is not allowed. Please remove it from inference_parameters or create a new "
+                                f"dataset where std({par}) is not zero."
+                            )
                         standardized[..., idx] = (
                             full_parameters[par] - self.mean[par]
                         ) / self.std[par]

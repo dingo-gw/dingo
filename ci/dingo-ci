@@ -1,0 +1,345 @@
+#!/bin/bash
+
+##################
+# reading config #
+##################
+
+# optional for GPU support: uncomment and edit
+# to get the version of torch suitable for your hardware
+# Note: if running in docker, you may need to edit the Dockerfile
+#   to install the required python version. 
+# PYTHON_VERSION="python3.9"
+# TORCH_INSTALL_COMMAND="pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu113 --upgrade"
+
+# if no python version specified, using default system python3
+if [[ ! -v PYTHON_VERSION ]]; then
+     PYTHON_VERSION="python3"
+fi
+
+# arguments are
+# --base-dir: directory in which all run will be executed and
+#   the virtual env created (reused accross runs set). Default: /tmp/dingo
+# --email: an optional email server config for sending report
+#   emails (upon success and failure)
+# --checkout: an optional (git) checkout to perform, e.g. a commit id
+
+DINGO_REPO="https://github.com/dingo-gw/dingo.git"
+
+DEFAULT_BASE_DIR="/tmp/dingo"
+
+# Parse optional arguments
+while [ $# -gt 0 ]; do
+    case "$1" in
+	--base-dir)
+	    BASE_DIR="$2"
+	    shift 2
+	    ;;
+	--email)
+	    EMAIL_CONFIG_PATH="$2"
+	    shift 2
+	    ;;
+	--checkout)
+	    CHECKOUT="$2"
+	    shift 2
+	    ;;
+	*)
+	    echo "Unknown option: $1" >&2
+	    exit 1
+	    ;;
+    esac
+done
+
+# creating the base directory
+BASE_DIR=${BASE_DIR:-$DEFAULT_BASE_DIR}
+if ! mkdir -p "$BASE_DIR"; then
+    echo "Failed to create base directory '$BASE_DIR'" >&2
+    exit 1
+fi
+if [ ! -w "$BASE_DIR" ]; then
+    echo "Base directory '$BASE_DIR' is not writable" >&2
+    exit 1
+fi
+
+
+echo -e "\nUsing BASE_DIR: ${BASE_DIR}\n"
+
+###########
+# RUN_DIR #
+###########
+
+# $RUN_DIR is the subfolder of $BASE_DIR
+# specific to this specific run
+
+# if checkout has been passed as argument
+# (branch, or commit, or tag), then
+# the name of the checkout will be the folder name.
+
+# otherwise, current date is used
+
+if [[ -v CHECKOUT ]]; then
+    RUN_DIR="${BASE_DIR}/${CHECKOUT}"
+else
+    CURRENT_DATETIME="$(date +"%Y-%m-%d_%H-%M-%S")"
+    RUN_DIR="${BASE_DIR}/${CURRENT_DATETIME}"
+fi
+rm -rf "$RUN_DIR"
+# Create and verify run directory
+if ! mkdir -p "$RUN_DIR"; then
+    echo "Failed to create run directory '$RUN_DIR'" >&2
+    exit 1
+fi
+
+########################
+# Early exit and email #
+########################
+
+# making sure that upon error, the script exit early.
+# making sure email are sent upon exit (if $EMAIL_CONFIG_PATH is set)
+
+dingo_ci_email() {
+
+# Assign arguments to variables
+    INSTALL_DIR="$1"
+    LOG_FILE="$2"
+    ERROR_FILE="$3"
+    STATUS="$4"
+    EMAIL_CONFIG_PATH="$5"
+
+    # parsing the email config
+    EMAIL_CONFIG=$(jq '.' "$EMAIL_CONFIG_PATH")
+    smtp_server=$(jq -r '.mailhub' <<< "$EMAIL_CONFIG")
+    port=$(jq -r '.port' <<< "$EMAIL_CONFIG")
+    from_addr=$(jq -r '.root' <<< "$EMAIL_CONFIG")
+    auth_user=$(jq -r '.authUser' <<< "$EMAIL_CONFIG")
+    auth_pass=$(jq -r '.authPass' <<< "$EMAIL_CONFIG")
+    recipients=$(jq -r '.recipients[]' <<< "$EMAIL_CONFIG")
+    
+    echo ""
+    echo "sending email:"
+    echo "  config: ${EMAIL_CONFIG_PATH}"
+    echo "  status: ${STATUS}"
+    echo "  server: ${smtp_server}:${port}"
+    echo "  to: ${recipients}"
+    echo "  based on:"
+    echo "    ${INSTALL_DIR}"
+    echo "    ${LOG_FILE}"
+    echo "    ${ERROR_FILE}"
+    echo ""
+    
+    # Set email subject based on success/failure
+    subject="dingo toy-npe-model example: $(if [ "$STATUS" -eq 0 ]; then echo "SUCCEEDED"; else echo "FAILED"; fi)"
+    
+    # Create email body
+    body=$(cat <<EOF
+DINGO Workflow Report
+=====================
+Start Time: $(if [[ -f "$LOG_FILE" ]]; then head -n 1 "$LOG_FILE" | cut -d']' -f1 | cut -c2-; else echo "N/A"; fi)
+End Time: $(date +"%Y-%m-%d %H:%M:%S")
+Status: $(if [ "$STATUS" -eq 0 ]; then echo "SUCCESS"; else echo "FAILURE"; fi) (${STATUS})
+Branch: $(if [[ -d "$INSTALL_DIR" ]]; then cd "$INSTALL_DIR" && git branch --show-current; else echo "N/A"; fi)
+Commit: $(if [[ -d "$INSTALL_DIR" ]]; then cd "$INSTALL_DIR" && git rev-parse HEAD; else echo "N/A"; fi)
+
+See attached files.
+EOF
+	)
+
+    # Prepare attachments
+    attachments=()
+    if [[ -f "$LOG_FILE" ]]; then
+	attachments+=("-a" "$LOG_FILE")
+    fi
+    if [[ -f "$ERROR_FILE" ]]; then
+	attachments+=("-a" "$ERROR_FILE")
+    fi
+    
+    # URI the mail will be set to
+    smpt_url="smtps://${auth_user}@${smtp_server}:${port}"
+    
+    # sending the email
+    echo "$body" | mutt \
+		       -e "set from=${from_addr}" \
+		       -e "set smtp_url=${smpt_url}" \
+		       -e "set smtp_pass=${auth_pass}" \
+		       -e "set smtp_authenticators='login'" \
+		       -s "${subject}" ${attachments[@]} -- ${recipients}
+
+}
+
+
+send_email() {
+    # Save the exit status immediately
+    local status=$?
+    
+    # Check if EMAIL_CONFIG_PATH is provided
+    if [ -n "${EMAIL_CONFIG_PATH}" ]; then
+	# Attempt to send the report email
+	if ! dingo_ci_email "${INSTALL_DIR}" "${LOG_FILE}" "${ERROR_FILE}" "${status}" "${EMAIL_CONFIG_PATH}"; then
+	    echo "Error: Failed to send report email" >&2
+	fi
+    fi
+    
+    # Exit with the original status
+    exit ${status}
+}
+
+
+# early exit upon any error
+set -e
+# making sure email report is also sent upon failure
+trap send_email EXIT
+
+
+#####################
+# Variables and log #
+#####################
+
+# setting up variables related to path to folders
+# and files.
+# setting outputs: both stdout and stderr are both
+# printed to the terminal, but also directed to output.txt
+# and error.txt (in $RUN_DIR)
+
+# Define directories based on RUN_DIR
+VENV_DIR="${RUN_DIR}/../venv"
+INSTALL_DIR="${RUN_DIR}/install"
+EXAMPLE_DIR="${INSTALL_DIR}/examples/toy_npe_model"
+OUTPUT_DIR="${RUN_DIR}/output"
+
+# Log file paths
+LOG_FILE="${RUN_DIR}/log.txt"
+ERROR_FILE="${RUN_DIR}/error.txt"
+
+# Initialize logging with separate streams
+exec > >(tee -a "$LOG_FILE") 2> >(tee -a "$ERROR_FILE")
+
+echo ""
+echo "dingo_variables:"
+echo "  repo:     ${DINGO_REPO}"
+if [[ -v CHECKOUT ]]; then
+    echo "  checkout: ${CHECKOUT}"
+fi
+echo "  python:   ${PYTHON_VERSION}"
+echo "  venv:     ${VENV_DIR}"
+echo "  install:  ${INSTALL_DIR}"
+echo "  example:  ${EXAMPLE_DIR}"
+echo "  output:   ${OUTPUT_DIR}"
+echo "  log:      ${LOG_FILE}"
+echo "  error:    ${ERROR_FILE}"
+echo ""
+
+#########
+# Setup #
+#########
+
+# clone, pip installing and creating
+# folders required to run toy_npe_model example
+
+echo -e "\nStarting DINGO installation..."
+
+# Check if virtual environment directory exists
+if [ -d "$VENV_DIR" ]; then
+    echo -e "\nUsing existing virtual environment: $VENV_DIR"
+else
+    echo -e "\nCreating new virtual environment: $VENV_DIR"
+    eval "${PYTHON_VERSION} -m venv ${VENV_DIR}"
+fi
+echo -e "Python version: $(source "$VENV_DIR/bin/activate" && python --version)"
+
+echo -e "\nCreating ${INSTALL_DIR}"
+mkdir -p "$INSTALL_DIR"
+
+echo -e "\nCloning repository from $dingo_repo to $INSTALL_DIR"
+git clone "$DINGO_REPO" "$INSTALL_DIR"
+
+if [[ -v CHECKOUT ]]; then
+    echo -e "\nChecking out ${CHECKOUT}"
+    cd "$INSTALL_DIR"
+    git checkout "$CHECKOUT"
+fi
+
+echo -e "\nActivating VENV ${VENV_DIR}"
+source "$VENV_DIR/bin/activate" 
+
+echo -e "\nUpdating pip"
+pip install pip --upgrade
+
+if [[ -v TORCH_INSTALL_COMMAND ]]; then
+    echo -e "\nCustom install of torch"
+    eval "$TORCH_INSTALL_COMMAND"
+fi
+
+echo -e "\nInstalling Dingo (pip)"
+cd "$INSTALL_DIR" && pip install .
+
+echo -e "\nListing pip packages"
+pip list
+
+echo -e "\nSetting up ${OUTPUT_DIR}"
+mkdir -p "$OUTPUT_DIR"
+
+echo -e "\nCopying files from $INSTALL_DIR to $OUTPUT_DIR"
+cp -r "$EXAMPLE_DIR"/* "$OUTPUT_DIR/"
+mkdir -p "$OUTPUT_DIR/training_data" || ! mkdir -p "$OUTPUT_DIR/training"
+
+
+#############
+# GPU check #
+#############
+
+# prints in terminal info if pytorch detected any GPU
+        
+echo -e "\n----- Checking GPU availability -----"
+source "$VENV_DIR/bin/activate"
+python - <<EOF
+import torch
+
+def check_gpus():
+    if torch.cuda.is_available():
+        print("CUDA is available")
+        num_gpus = torch.cuda.device_count()
+        print(f"Found {num_gpus} GPU(s)")
+        for i in range(num_gpus):
+            print(f"\nGPU {i}:")
+            print(f"  Device Name: {torch.cuda.get_device_name(i)}")
+            props = torch.cuda.get_device_properties(i)
+            print(f"  Memory: {props.total_memory / 1e9:.2f} GB")
+            print(f"  Compute Capability: {props.major}.{props.minor}")
+    else:
+        print("No CUDA-capable devices found")
+
+check_gpus()
+EOF
+echo -e "-------------------------------------\n"
+
+#######################
+# Dingo Toy NPE model #
+#######################
+
+# running dingo/examples/toy_npe_model
+
+# Change directory to the output folder
+cd "$OUTPUT_DIR"
+
+echo -e "\n================= Generating Waveform Dataset ================="
+dingo_generate_dataset --settings waveform_dataset_settings.yaml --out_file training_data/waveform_dataset.hdf5
+echo -e "================================================================\n"
+
+echo -e "================= Generating ASD Dataset ================="
+dingo_generate_asd_dataset --settings_file asd_dataset_settings.yaml --data_dir training_data/asd_dataset
+echo -e "============================================================\n"
+
+echo -e "================= Training Model ================="
+dingo_train --settings_file train_settings.yaml --train_dir training
+echo -e "==============================================\n"
+
+echo -e "================= Running Inference ================="
+dingo_pipe GW150914.ini
+echo -e "===================================================\n"
+
+
+########
+# EXIT #
+########
+
+echo -e "\nfinished with success"
+exit 0
