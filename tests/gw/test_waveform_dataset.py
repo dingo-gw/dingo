@@ -203,7 +203,7 @@ def test_load_waveform_dataset_with_leave_polarizations_on_disk(
     assert isinstance(el["waveform"]["h_cross"], np.ndarray)
 
     """Check that using a list of indices also works."""
-    ind_list = [0, 1, 2]
+    ind_list = [0, 1, 2, 3, 4, 5]
     el_list = wfd.__getitems__(ind_list)
     assert isinstance(el_list, list)
     assert len(el_list) == len(ind_list)
@@ -216,20 +216,16 @@ def test_load_waveform_dataset_with_leave_polarizations_on_disk(
     """Check that using a randomly ordered list of indices provides the expected ordering."""
     ind_list_rand = np.random.permutation(ind_list).tolist()
     el_list_rand = wfd.__getitems__(ind_list_rand)
-    assert np.all(
-        [
-            el_list_rand[ind_list_rand[i]]["waveform"]["h_plus"]
-            == el_list[i]["waveform"]["h_plus"]
-            for i in range(len(ind_list))
-        ]
+    np.testing.assert_equal([el_list[i] for i in ind_list_rand], el_list_rand)
+
+    """Check that waveforms and parameters are loaded from disk equivalently to loading the full dataset."""
+    wfd_full = WaveformDataset(
+        file_name=path,
+        precision="single",
+        leave_waveforms_on_disk=False,
     )
-    assert np.all(
-        [
-            el_list_rand[ind_list_rand[i]]["waveform"]["h_cross"]
-            == el_list[i]["waveform"]["h_cross"]
-            for i in range(len(ind_list))
-        ]
-    )
+    el_list_full = wfd_full.__getitems__(ind_list)
+    np.testing.assert_equal(el_list, el_list_full)
 
 
 @pytest.fixture
