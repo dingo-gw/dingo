@@ -16,6 +16,7 @@ not listed.
 
 ### Contributors
 
+* Vincent Berenz
 * Samuel Clyne
 * Hector Estelles
 * Jonathan Gair
