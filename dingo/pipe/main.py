@@ -113,6 +113,7 @@ class MainInput(BilbyMainInput):
         self.condor_job_priority = args.condor_job_priority
         self.create_summary = args.create_summary
         self.scitoken_issuer = args.scitoken_issuer
+        self.container = args.container
 
         self.outdir = args.outdir
         self.label = args.label
@@ -133,7 +134,9 @@ class MainInput(BilbyMainInput):
         self.transfer_files = args.transfer_files
         self.additional_transfer_paths = args.additional_transfer_paths
         self.osg = args.osg
-        self.desired_sites = args.desired_sites
+        self.desired_sites = args.cpu_desired_sites  # Dummy variable so bilby_pipe doesn't complain.
+        self.cpu_desired_sites = args.cpu_desired_sites
+        self.gpu_desired_sites = args.gpu_desired_sites
         # self.analysis_executable = args.analysis_executable
         # self.analysis_executable_parser = args.analysis_executable_parser
         self.result_format = "hdf5"
@@ -287,7 +290,10 @@ def write_complete_config_file(parser, args, inputs, input_cls=MainInput):
             continue
         if isinstance(val, str):
             if os.path.isfile(val) or os.path.isdir(val):
-                setattr(args, key, os.path.abspath(val))
+                if not args.osg:
+                    setattr(args, key, os.path.abspath(val))
+                else:
+                    setattr(args, key, val)
         if isinstance(val, list):
             if isinstance(val[0], str):
                 setattr(args, key, f"[{', '.join(val)}]")
