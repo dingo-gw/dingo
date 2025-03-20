@@ -52,7 +52,7 @@ class ImportanceSamplingNode(AnalysisNode):
             if sites is not None:
                 self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
             self.requirements.append("IS_GLIDEIN=?=True")
-            input_files_to_transfer = [proposal_samples_file, generation_node.event_data_file]
+            input_files_to_transfer = [proposal_samples_file, generation_node.event_data_file, self.inputs.complete_ini_file]
             self.extra_lines.extend(
                 self._condor_file_transfer_lines(
                     input_files_to_transfer,
