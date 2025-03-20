@@ -172,5 +172,5 @@ def test_cropping_bounds_independence(cropping_setup):
 
 
 # TODO once multibanded frequency domain is merged into main
-# def test_maksing_multibanded():
+# def test_cropping_multibanded():
 #     pass
