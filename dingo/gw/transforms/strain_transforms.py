@@ -32,7 +32,7 @@ class CropMaskStrainRandom(object):
             domain is not uniform (e.g., MultibandedFrequencyDomain).
         deterministic: bool
             If True, don't sample truncation range, but instead always truncate to range
-            [f_min_lower, f_max_lower]. This is used for inference.
+            [f_min_upper, f_max_lower]. This is used for inference.
         cropping_probability: float
             probability for a given sample to be cropped
         independent_detectors: bool
