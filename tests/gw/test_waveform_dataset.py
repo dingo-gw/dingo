@@ -17,7 +17,7 @@ from dingo.gw.dataset import generate_dataset
 SETTINGS_YAML_SMALL = """\
 # settings for domain of waveforms
 domain:
-  type: FrequencyDomain
+  type: UniformFrequencyDomain
   f_min: 10.0
   f_max: 1024.0
   delta_f: 1.0
@@ -92,7 +92,6 @@ def generate_waveform_dataset_small(temp_dir: Path) -> Path:
 
 @pytest.mark.slow
 def test_load_waveform_dataset(generate_waveform_dataset_small):
-
     wfd_path = generate_waveform_dataset_small
 
     path = f"{wfd_path}/waveform_dataset.hdf5"
@@ -183,7 +182,6 @@ def test_truncation_of_waveform(generate_waveform_dataset_small):
 def test_load_waveform_dataset_with_leave_polarizations_on_disk(
     generate_waveform_dataset_small,
 ):
-
     wfd_path = generate_waveform_dataset_small
 
     path = f"{wfd_path}/waveform_dataset.hdf5"

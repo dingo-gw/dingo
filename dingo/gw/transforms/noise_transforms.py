@@ -3,7 +3,7 @@ import torch
 from bilby.gw.detector import PowerSpectralDensity
 from scipy.interpolate import interp1d
 
-from dingo.gw.domains import FrequencyDomain
+from dingo.gw.domains import UniformFrequencyDomain
 from .utils import get_batch_size_of_input_sample
 
 
@@ -56,7 +56,7 @@ class WhitenFixedASD(object):
 
     def __init__(
         self,
-        domain: FrequencyDomain,
+        domain: UniformFrequencyDomain,
         asd_file: str = None,
         inverse: bool = False,
         precision=None,
@@ -64,7 +64,7 @@ class WhitenFixedASD(object):
         """
         Parameters
         ----------
-        domain : FrequencyDomain
+        domain : UniformFrequencyDomain
             ASD is interpolated to the associated frequency grid.
         asd_file : str
             Name of the ASD file. If None, use the aligo ASD.

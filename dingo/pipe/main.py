@@ -18,6 +18,9 @@ from dingo.gw.domains import build_domain_from_model_metadata
 from .dag_creator import generate_dag
 from .parser import create_parser
 
+from ..gw.domains.build_domain import build_domain_from_model_metadata
+from dingo.core.posterior_models.build_model import build_model_from_kwargs
+
 logger.name = "dingo_pipe"
 
 
@@ -36,7 +39,7 @@ def fill_in_arguments_from_model(args):
 
     model_metadata = model.metadata
 
-    domain = build_domain_from_model_metadata(model_metadata)
+    domain = build_domain_from_model_metadata(model_metadata, base=True)
 
     data_settings = model_metadata["train_settings"]["data"]
 

@@ -70,7 +70,7 @@ here is the waveform dataset file
 
 ```yaml
 domain:
-  type: FrequencyDomain
+  type: UniformFrequencyDomain
   f_min: 20.0
   f_max: 1024.0
   delta_f: 0.25  # Expressions like 1.0/8.0 would require eval and are not supported
