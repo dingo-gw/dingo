@@ -2,10 +2,9 @@
 requires = ["setuptools>=62.0", "setuptools_scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
 
-
 [project]
 name = "dingo-gw"
-authors = [ 
+authors = [
     {name = "Maximilian Dax", email = "maximilian.dax@tuebingen.mpg.de"},
     {name = "Stephen Green", email = "Stephen.Green2@nottingham.ac.uk"},
 ]
@@ -43,7 +42,7 @@ dependencies = [
     "pyyaml",
     "requests",
     "scikit-learn",
-    "scipy==1.13.1",
+    "scipy",
     "threadpoolctl",
     "torch",
     "torchdiffeq",
@@ -51,11 +50,9 @@ dependencies = [
     "tqdm",
 ]
 
-
 [tool.setuptools.packages.find]
 include = ["dingo*"]
 namespaces = false
-
 
 [tool.setuptools_scm]
 write_to = "dingo/_version.py"
@@ -67,7 +64,6 @@ markers = [
 
 [project.urls]
 homepage = "https://github.com/dingo-gw/dingo"
-
 
 [project.optional-dependencies]
 dev = [
@@ -88,7 +84,6 @@ dev = [
 pyseobnr = [
     "pyseobnr",
 ]
-
 
 [project.scripts]
 dingo_append_training_stage = "dingo.gw.training:append_stage"
