@@ -499,7 +499,7 @@ class DropDetectors(object):
         self.num_blocks = num_blocks
         if p_drop_012_detectors is None:
             p_drop_012_detectors = [1 / num_blocks for _ in range(num_blocks)]
-        if np.sum(p_drop_012_detectors) != 1:
+        if not np.isclose(np.sum(p_drop_012_detectors), 1., rtol=1e-6, atol=1e-12):
             raise ValueError(
                 f"p_drop_012_detectors {p_drop_012_detectors} does not sum to 1."
             )
@@ -508,7 +508,7 @@ class DropDetectors(object):
             p_drop_hlv = {
                 ["H1", "L1", "V1"][k]: 1 / num_blocks for k in range(num_blocks)
             }
-        if np.sum(list(p_drop_hlv.values())) != 1:
+        if not np.isclose(np.sum(list(p_drop_hlv.values())), 1., rtol=1e-6, atol=1e-12):
             raise ValueError(f"p_drop_hlv {p_drop_hlv} does not sum to 1.")
         # Update keys equivalently to tokenization transform
         self.p_drop_hlv = {DETECTOR_DICT[k]: v for k, v in p_drop_hlv.items()}
