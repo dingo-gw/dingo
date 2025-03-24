@@ -108,9 +108,6 @@ class Result(CoreResult):
     def use_base_domain(self, value: bool):
         if hasattr(self.domain, "base_domain"):
             self.importance_sampling_metadata["use_base_domain"] = value
-        # previously
-        # self._use_base_domain = value
-        # self._build_domain()
 
     @property
     def f_ref(self):
@@ -135,17 +132,6 @@ class Result(CoreResult):
             return self.event_metadata["time_event"]
         else:
             return self.base_metadata["train_settings"]["data"]["ref_time"]
-
-    @property
-    def context(self):
-        if self.use_base_domain:
-            return self._context["base_data"]
-        else:
-            return self._context
-
-    @context.setter
-    def context(self, value):
-        self._context = value
 
     def _build_domain(self):
         """
