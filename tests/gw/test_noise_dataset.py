@@ -11,7 +11,7 @@ def noise_dataset():
     dataset_path = "./asds_toydataset.hdf5"
 
     domain_dict = {
-        "type": "FrequencyDomain",
+        "type": "UniformFrequencyDomain",
         "f_min": 0.0,
         "f_max": 100.0,
         "delta_f": 1.0,
@@ -82,7 +82,11 @@ def test_noise_dataset_update_domain(noise_dataset):
     f_max = asd_dataset.domain.f_max
     f_min_new = 20
     f_max_new = 40
-    domain_update = {"f_min": f_min_new, "f_max": f_max_new}
+    domain_update = {
+        "f_min": f_min_new,
+        "f_max": f_max_new,
+        "type": "UniformFrequencyDomain",
+    }
     asd_dataset_truncated = ASDDataset(dataset_path, domain_update=domain_update)
     asd_samples_truncated = asd_dataset_truncated.sample_random_asds()
 

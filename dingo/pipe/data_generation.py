@@ -8,7 +8,7 @@ from bilby_pipe.data_generation import DataGenerationInput as BilbyDataGeneratio
 import numpy as np
 
 from dingo.gw.data.event_dataset import EventDataset
-from dingo.gw.domains import FrequencyDomain
+from dingo.gw.domains import UniformFrequencyDomain
 from dingo.pipe.parser import create_parser
 
 logger.name = "dingo_pipe"
@@ -183,7 +183,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
             # These arrays extend up to self.sampling_frequency. Truncate them to
             # self.maximum_frequency, and also set the asd to 1.0 below
             # self.minimum_frequency.
-            domain = FrequencyDomain(
+            domain = UniformFrequencyDomain(
                 f_min=self.minimum_frequency,
                 f_max=self.maximum_frequency,
                 delta_f=1 / self.duration,

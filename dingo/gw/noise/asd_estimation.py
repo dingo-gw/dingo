@@ -54,7 +54,7 @@ def download_and_estimate_psds(
     delta_f = 1 / T
     domain = build_domain(
         {
-            "type": "FrequencyDomain",
+            "type": "UniformFrequencyDomain",
             "f_min": f_min,
             "f_max": f_max,
             "delta_f": delta_f,
