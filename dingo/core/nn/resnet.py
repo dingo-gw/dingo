@@ -90,7 +90,7 @@ class DenseResidualNet(nn.Module):
         dropout: float = 0.0,
         batch_norm: bool = True,
         layer_norm: bool = False,
-        context_in_initial_layer: bool = True,
+        context_in_initial_layer: bool = False,
     ):
         """
         Parameters
@@ -112,7 +112,7 @@ class DenseResidualNet(nn.Module):
             flag that specifies whether to use batch normalization
         layer_norm: bool=False
             flag that specifies whether to use layer normalization
-        context_in_initial_layer: bool=True
+        context_in_initial_layer: bool=False
             whether to concatenate the context features to the input of the initial layer or not.
         """
 
