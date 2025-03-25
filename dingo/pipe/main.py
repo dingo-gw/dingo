@@ -31,7 +31,12 @@ def fill_in_arguments_from_model(args):
     domain = build_domain_from_model_metadata(model_metadata, base=True)
 
     data_settings = model_metadata["train_settings"]["data"]
-
+    flexible_detectors = (
+        True
+        if "tokenization" in data_settings
+        and "drop_detectors" in data_settings["tokenization"]
+        else False
+    )
     model_args = {
         "duration": domain.duration,
         "minimum_frequency": domain.f_min,
@@ -84,7 +89,11 @@ def fill_in_arguments_from_model(args):
         importance_sampling_updates = {
             k.replace("-", "_"): v for k, v in importance_sampling_updates.items()
         }
-    return {**changed_args, **importance_sampling_updates}, model_args
+    return (
+        {**changed_args, **importance_sampling_updates},
+        model_args,
+        flexible_detectors,
+    )
 
 
 class MainInput(BilbyMainInput):
@@ -332,8 +341,18 @@ def main():
     parser = create_parser(top_level=True)
     args, unknown_args = parse_args(get_command_line_arguments(), parser)
 
-    importance_sampling_updates, model_args = fill_in_arguments_from_model(args)
+    importance_sampling_updates, model_args, flexible_detectors = (
+        fill_in_arguments_from_model(args)
+    )
     inputs = MainInput(args, unknown_args, importance_sampling_updates)
+
+    # Update detectors for flexible detector config based on channel-dict
+    if flexible_detectors:
+        detectors = list(inputs.channel_dict.keys())
+        model_args["detectors"] = detectors
+        inputs.detectors = detectors
+        args.detectors = detectors
+
     write_complete_config_file(parser, args, inputs)
 
     # TODO: Use two sets of inputs! The first must match the network; the second is
