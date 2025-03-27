@@ -630,8 +630,9 @@ class WaveformGenerator:
             # Step 3: Separate negative and positive frequency parts of the modes,
             # and add contributions according to their transformation behavior under
             # phase shifts.
+            
             pol_m = wfg_utils.get_polarizations_from_fd_modes_m(
-                hlm_fd, iota, parameters["phase"]
+                hlm_fd, iota, parameters["phase"], self.approximant_str
             )
 
         else:
@@ -658,9 +659,13 @@ class WaveformGenerator:
             values.
         iota: float
         """
-        # TD approximants that are implemented in J frame. Currently tested for:
-        #   101: IMRPhenomXPHM
-        if self.approximant in [101]:
+        #  FD Waveform approximants that are implemented in either the L0 or J frame.  Currently tested for:
+        #  IMRPhenomXPHM - Modes returned in J-Frame
+        #  IMRPhenomXHM - Modes returned in L0-Frame
+        
+        
+        tested_approximants = ["IMRPhenomXPHM","IMRPhenomXHM"]
+        if LS.GetStringFromApproximant(self.approximant) in tested_approximants:
             parameters_lal_fd_modes = self._convert_parameters(
                 {**parameters, "f_ref": self.f_ref},
                 lal_target_function="SimInspiralChooseFDModes",
@@ -670,17 +675,18 @@ class WaveformGenerator:
             # unpack linked list, convert lal objects to arrays
             hlm_fd = wfg_utils.linked_list_modes_to_dict_modes(hlm_fd)
             hlm_fd = {k: v.data.data for k, v in hlm_fd.items()}
-            # For the waveform models considered here (e.g., IMRPhenomXPHM), the modes
-            # are returned in the J frame (where the observer is at inclination=theta_JN,
-            # azimuth=0). In this frame, the dependence on the reference phase enters
-            # via the modes themselves. We need to convert to the L0 frame so that the
-            # dependence on phase enters via the spherical harmonics.
-            hlm_fd = frame_utils.convert_J_to_L0_frame(
-                hlm_fd,
-                parameters,
-                self,
-                spin_conversion_phase=self.spin_conversion_phase,
-            )
+
+            # For waveform models where the modes are returned in the J frame (where the observer is
+            # at an inclination=theta_JN, azimuth=0), the dependence on the reference phase enters
+            # via the modes themselves.  We need to convert to the L0 frame so that the
+            # dependence on phase enters via the spherical harmonics. 
+            if LS.GetStringFromApproximant(self.approximant) == "IMRPhenomXPHM":
+                hlm_fd = frame_utils.convert_J_to_L0_frame(
+                    hlm_fd,
+                    parameters,
+                    self,
+                    spin_conversion_phase=self.spin_conversion_phase,
+                )
             return hlm_fd, iota
         else:
             raise NotImplementedError(
@@ -713,7 +719,8 @@ class WaveformGenerator:
         """
         # TD approximants that are implemented in L0 frame. Currently tested for:
         #   52: SEOBNRv4PHM
-        if self.approximant in [52]:
+        tested_approximants = ["SEOBNRv4PHM"]
+        if LS.GetStringFromApproximant(self.approximant) in tested_approximants:
             parameters_lal_td_modes, iota = self._convert_parameters(
                 {**parameters, "f_ref": self.f_ref},
                 lal_target_function="SimInspiralChooseTDModes",
