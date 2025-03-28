@@ -204,27 +204,12 @@ def set_train_transforms(
         selected_keys = ["inference_parameters", "waveform"]
 
     try:
-        if (
-            "normalize_frequency_for_positional_encoding"
-            in data_settings["tokenization"]
-        ):
-            norm_freq = data_settings["tokenization"][
-                "normalize_frequency_for_positional_encoding"
-            ]
-        else:
-            norm_freq = False
-        if "num_tokens" in data_settings["tokenization"]:
-            num_tokens = data_settings["tokenization"]["num_tokens"]
-        else:
-            num_tokens = None
-        if "token_size" in data_settings["tokenization"]:
-            token_size = data_settings["tokenization"]["token_size"]
-        else:
-            token_size = None
-        if "single_tokenizer" in data_settings["tokenization"]:
-            single_tokenizer = data_settings["tokenization"]["single_tokenizer"]
-        else:
-            single_tokenizer = False
+        norm_freq = data_settings["tokenization"].get(
+            "normalize_frequency_for_positional_encoding", False
+        )
+        num_tokens = data_settings["tokenization"].get("num_tokens", None)
+        token_size = data_settings["tokenization"].get("token_size", None)
+        single_tokenizer = data_settings["tokenization"].get("single_tokenizer", False)
         transforms.append(
             StrainTokenization(
                 domain,
