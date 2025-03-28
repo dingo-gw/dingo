@@ -1,0 +1,12 @@
+[Unit]
+Description=Check Dingo Repository for Updates
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/dingo-ci-trigger
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

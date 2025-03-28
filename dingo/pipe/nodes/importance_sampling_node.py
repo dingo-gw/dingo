@@ -44,12 +44,27 @@ class ImportanceSamplingNode(AnalysisNode):
         #     )
         #     self.arguments.add("outdir", os.path.relpath(self.inputs.outdir))
 
+        self.extra_lines.extend(self._checkpoint_submit_lines())
+
+        # if running on the OSG we need to specify the sites
+        if self.inputs.osg:
+            sites = self.inputs.desired_sites
+            if sites is not None:
+                self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
+            self.requirements.append("IS_GLIDEIN=?=True")
+            input_files_to_transfer = [proposal_samples_file, generation_node.event_data_file, self.inputs.complete_ini_file]
+            self.extra_lines.extend(
+                self._condor_file_transfer_lines(
+                    input_files_to_transfer,
+                    [self._relative_topdir(self.inputs.outdir, self.inputs.initialdir)],
+                )
+            )
+            
         # Add extra arguments for dingo
         self.arguments.add("label", self.label)
         self.arguments.add("proposal-samples-file", proposal_samples_file)
         self.arguments.add("event-data-file", generation_node.event_data_file)
 
-        self.extra_lines.extend(self._checkpoint_submit_lines())
         env_vars = []
         # if self.request_cpus > 1:
         #     env_vars.append("OMP_NUM_THREADS=1")

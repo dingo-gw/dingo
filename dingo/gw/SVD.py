@@ -4,7 +4,6 @@ import scipy
 from sklearn.utils.extmath import randomized_svd
 from dingo.core.dataset import DingoDataset
 
-
 class SVDBasis(DingoDataset):
 
     dataset_type = "svd_basis"
@@ -48,7 +47,17 @@ class SVDBasis(DingoDataset):
             if n == 0:
                 n = min(training_data.shape)
 
-            U, s, Vh = randomized_svd(training_data, n, random_state=0)
+            # Using LU as a normalizer in the power iteration "normalizer(A @
+            # Q)" in randomized_range_finder() called by randomized_svd() can cause
+            # segfaults. The QR factorization, while slightly slower than LU is more
+            # numerically stable. These segfaults also disappear when switching off
+            # multithreading, but we want to keep this on.
+            #
+            # The randomized SVD has complexity O(m n k + k^2 (m + n)),
+            # for a m x n matrix and k is the target rank, here called n
+            # For small k this is much faster than the standard SVD.
+            U, s, Vh = randomized_svd(training_data, n, random_state=0,
+                                      power_iteration_normalizer='QR')
 
             self.Vh = Vh.astype(np.complex128)  # TODO: fix types
             self.V = self.Vh.T.conj()
@@ -56,6 +65,7 @@ class SVDBasis(DingoDataset):
             self.s = s
         elif method == "scipy":
             # Code below uses scipy's svd tool. Likely slower.
+            # The deterministic SVD has Complexity O(mn^2).
             U, s, Vh = scipy.linalg.svd(training_data, full_matrices=False)
             V = Vh.T.conj()
 
@@ -213,7 +223,6 @@ class SVDBasis(DingoDataset):
     #         self.Vh = self.Vh[:n, :]
     #         self.s = self.s[:n]
     #         self.n = n
-
 
 class ApplySVD(object):
     """Transform operator for applying an SVD compression / decompression."""
