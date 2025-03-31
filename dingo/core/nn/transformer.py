@@ -29,6 +29,7 @@ class Tokenizer(nn.Module):
         output_dim: int,
         activation: Callable,
         context_features: Optional[int] = None,
+        num_blocks: Optional[int] = None,
         dropout: float = 0.0,
         batch_norm: bool = True,
         layer_norm: bool = False,
@@ -51,6 +52,8 @@ class Tokenizer(nn.Module):
         context_features: Optional[int]
             If provided, the tokenizer is a conditional ResNet and with the context features corresponding to the
             positional information of each token.
+        num_blocks: Optional[int]
+            Number of blocks
         dropout: float
             dropout rate for DenseResidualNet
         batch_norm: bool
@@ -74,6 +77,7 @@ class Tokenizer(nn.Module):
             )
         self.context_features = context_features
         self.num_tokens, self.num_features = input_dims
+        self.num_blocks = num_blocks
         self.individual_token_embedding = individual_token_embedding
         if self.individual_token_embedding:
             if isinstance(hidden_dims, list):
@@ -153,16 +157,29 @@ class Tokenizer(nn.Module):
         if x.shape[-1] != self.num_features:
             raise ValueError(
                 f"Invalid shape for token embedding layer. "
-                f"Expected last dimension to be {self.num_features}, got {tuple(x.shape[-1])}."
+                f"Expected last dimension to be {self.num_features}, got {x.shape[-1]}."
             )
-        if (
-            self.context_features is not None
-            and self.context_features != context.shape[-1]
+        if self.context_features is not None and (
+            self.context_features != context.shape[-1]
+            and self.num_blocks != context.shape[-1]
         ):
             raise ValueError(
                 f"Invalid shape for context in conditional tokenizer. "
-                f"Expected last dimension to be {self.context_features}, got {tuple(context.shape[-1])}."
+                f"Expected last dimension to be {self.context_features} or {self.num_blocks}, got {context.shape[-1]}."
             )
+        if context is not None:
+            # Transform block values from int to one_hot vectors
+            detector_per_token = context[..., 2]
+            detector_one_hot = torch.eye(self.num_blocks)[
+                detector_per_token.to(torch.long)
+            ]
+            context = torch.cat((context[..., :2], detector_one_hot), dim=-1)
+            if context.shape[-1] != self.context_features:
+                raise ValueError(
+                    f"Invalid shape for context in conditional tokenizer. "
+                    f"Expected last dimension to be {self.context_features}, got {context.shape[-1]}."
+                )
+
         if self.individual_token_embedding:
             x = torch.stack(
                 [
@@ -498,7 +515,7 @@ class TransformerModel(nn.Module):
             [batch_size, num_tokens, num_features] =
             [batch_size, num_blocks * num_tokens_per_block, num_channels * num_bins_per_token]
         position: Tensor
-            shape [batch_size, num_blocks, 3], where the last dimension corresponds to [f_min, f_max, detector] per token
+            shape [batch_size, num_tokens, 3], where the last dimension corresponds to [f_min, f_max, detector] per token
         src_key_padding_mask: Tensor
             shape [batch_size, num_tokens]
 
@@ -589,8 +606,6 @@ def create_transformer_enet(
                     "Conditional tokenizer is not compatible with block encoding. "
                     "Either set conditional=False in tokenizer_kwargs or remove block_encoder_kwargs. "
                 )
-            # Include context_features corresponding to positional information: [min, max, block]
-            tokenizer_kwargs["context_features"] = 3
             # Remove condition_on_position
             tokenizer_kwargs.pop("condition_on_position")
         tokenizer_kwargs["activation"] = torchutils.get_activation_function_from_string(

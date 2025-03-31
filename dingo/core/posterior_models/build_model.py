@@ -204,6 +204,20 @@ def autocomplete_model_kwargs(
                 model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]["output_dim"] = (
                     model_kwargs["embedding_kwargs"]["transformer_kwargs"]["d_model"]
                 )
+                if (
+                    "condition_on_position"
+                    in model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]
+                    and model_kwargs["embedding_kwargs"]["tokenizer_kwargs"][
+                        "condition_on_position"
+                    ]
+                ):
+                    # Two values for f_min and f_max + num_detectors
+                    model_kwargs["embedding_kwargs"]["tokenizer_kwargs"][
+                        "context_features"
+                    ] = 2 + len(np.unique(data_sample[2][:, 2]))
+                    model_kwargs["embedding_kwargs"]["tokenizer_kwargs"][
+                        "num_blocks"
+                    ] = len(np.unique(data_sample[2][:, 2]))
             if "block_encoder_kwargs" in model_kwargs["embedding_kwargs"]:
                 model_kwargs["embedding_kwargs"]["block_encoder_kwargs"][
                     "num_blocks"
