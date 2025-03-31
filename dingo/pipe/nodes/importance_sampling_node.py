@@ -30,19 +30,20 @@ class ImportanceSamplingNode(AnalysisNode):
 
         self.setup_arguments()
 
-        # if self.inputs.transfer_files or self.inputs.osg:
-        #     data_dump_file = generation_node.data_dump_file
-        #     input_files_to_transfer = [
-        #         str(data_dump_file),
-        #         str(self.inputs.complete_ini_file),
-        #     ]
-        #     self.extra_lines.extend(
-        #         self._condor_file_transfer_lines(
-        #             input_files_to_transfer,
-        #             [self._relative_topdir(self.inputs.outdir, self.inputs.initialdir)],
-        #         )
-        #     )
-        #     self.arguments.add("outdir", os.path.relpath(self.inputs.outdir))
+        if self.inputs.transfer_files or self.inputs.osg:
+            data_dump_file = generation_node.data_dump_file
+            input_files_to_transfer = [
+                str(data_dump_file),
+                str(self.inputs.complete_ini_file),
+                *(self.inputs.spline_calibration_envelope_dict.values() if self.inputs.spline_calibration_envelope_dict else [])
+            ]
+            self.extra_lines.extend(
+                self._condor_file_transfer_lines(
+                    input_files_to_transfer,
+                    [self._relative_topdir(self.inputs.outdir, self.inputs.initialdir)],
+                )
+            )
+            self.arguments.add("outdir", os.path.relpath(self.inputs.outdir))
 
         # Add extra arguments for dingo
         self.arguments.add("label", self.label)
