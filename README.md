@@ -1,5 +1,8 @@
 [![Python package](https://github.com/dingo-gw/dingo/actions/workflows/pytest.yml/badge.svg)](https://github.com/dingo-gw/dingo/actions/workflows/pytest.yml)
 [![PyPI version](https://img.shields.io/pypi/v/dingo-gw.svg)](https://pypi.org/project/dingo-gw/)
+[![Conda Version](https://img.shields.io/conda/vn/conda-forge/dingo-gw)](https://anaconda.org/conda-forge/dingo-gw)
+[![Conda Downloads](https://img.shields.io/conda/dn/conda-forge/dingo-gw)](https://anaconda.org/conda-forge/dingo-gw)
+
 
 
 # Dingo
@@ -76,11 +79,14 @@ Dingo is based on the following series of papers:
 4. https://arxiv.org/abs/2111.13139: Group-equivariant neural posterior estimation
 5. https://arxiv.org/abs/2210.05686: Importance sampling
 6. https://arxiv.org/abs/2211.08801: Noise forecasting
+7. https://arxiv.org/abs/2407.09602: Binary neutron star inference
+
+Dingo was used also in https://arxiv.org/abs/2404.14286 to find evidence for eccentric binaries.
 
 If you use Dingo in your work, we ask that you please cite at least
 https://arxiv.org/abs/2106.12594.
 
-Contributors to the code are listed in [AUTHORS.md](https://github.com/dingo-gw/dingo/blob/main/AUTHORS.md). We thank Vivien Raymond
+Contributors to the code are listed in [AUTHORS.md](https://github.com/dingo-gw/dingo/blob/main/AUTHORS.md). We thank Charlie Hoy, Vivien Raymond,
 and Rory Smith for acting as LIGO-Virgo-KAGRA (LVK) review chairs. Dingo makes use of
 many LVK software tools, including [Bilby](https://lscsoft.docs.ligo.org/bilby/),
 [bilby_pipe](https://lscsoft.docs.ligo.org/bilby_pipe/master/index.html), and
