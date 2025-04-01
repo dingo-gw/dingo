@@ -638,10 +638,12 @@ def create_transformer_enet(
                 final_net = MLP(**final_net_kwargs)
             else:
                 raise ValueError(
-                    f"hidden_dims in tokenizer_kwargs must be a list or int, got {final_net_kwargs["hidden_dims"]}"
+                    f"hidden_dims in tokenizer_kwargs must be a list or int, got {final_net_kwargs['hidden_dims']}"
                 )
         else:
             final_net = LinearLayer(**final_net_kwargs)
+    else:
+        final_net = None
 
     model = TransformerModel(
         tokenizer=tokenizer,
