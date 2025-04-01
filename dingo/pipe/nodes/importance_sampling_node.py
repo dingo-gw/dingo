@@ -31,9 +31,9 @@ class ImportanceSamplingNode(AnalysisNode):
         self.setup_arguments()
 
         if self.inputs.transfer_files or self.inputs.osg:
-            data_dump_file = generation_node.data_dump_file
+           
             input_files_to_transfer = [
-                str(data_dump_file),
+                str(generation_node.event_data_file),
                 str(self.inputs.complete_ini_file),
                 *(self.inputs.spline_calibration_envelope_dict.values() if self.inputs.spline_calibration_envelope_dict else [])
             ]
