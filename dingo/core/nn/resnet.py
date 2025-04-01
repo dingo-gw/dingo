@@ -174,17 +174,37 @@ class MLP(nn.Module):
 
     def __init__(
         self,
-        input_size: int,
-        hidden_size: int,
-        output_size: int,
-        activation_fn: Callable,
+        input_dim: int,
+        hidden_dims: int,
+        output_dim: int,
+        activation: Callable,
+        **kwargs,
     ):
         super(MLP, self).__init__()
-        self.linear0 = nn.Linear(input_size, hidden_size)
-        self.activation = activation_fn
-        self.linear1 = nn.Linear(hidden_size, output_size)
+        self.linear0 = nn.Linear(input_dim, hidden_dims)
+        self.activation = activation
+        self.linear1 = nn.Linear(hidden_dims, output_dim)
 
     def forward(self, x: Tensor, context: Optional[Tensor] = None) -> Tensor:
         x = self.activation(self.linear0(x))
         x = self.activation(self.linear1(x))
+        return x
+
+
+class LinearLayer(nn.Module):
+    """Simple linear layer with activation function."""
+
+    def __init__(
+        self,
+        input_dim: int,
+        output_dim: int,
+        activation: Callable,
+        **kwargs,
+    ):
+        super(LinearLayer, self).__init__()
+        self.linear = nn.Linear(input_dim, output_dim)
+        self.activation = activation
+
+    def forward(self, x: Tensor, context: Optional[Tensor] = None) -> Tensor:
+        x = self.activation(self.linear(x))
         return x

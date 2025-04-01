@@ -5,7 +5,7 @@ import torch
 from torch import nn, Tensor
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
-from dingo.core.nn.resnet import DenseResidualNet, MLP
+from dingo.core.nn.resnet import DenseResidualNet, MLP, LinearLayer
 from dingo.core.utils import torchutils
 
 
@@ -101,10 +101,10 @@ class Tokenizer(nn.Module):
                 self.stack_embedding_networks = nn.ModuleList(
                     [
                         MLP(
-                            input_size=self.num_features,
-                            hidden_size=hidden_dims,
-                            output_size=output_dim,
-                            activation_fn=activation,
+                            input_dim=self.num_features,
+                            hidden_dims=hidden_dims,
+                            output_dim=output_dim,
+                            activation=activation,
                         )
                         for _ in range(self.num_tokens)
                     ]
@@ -128,10 +128,10 @@ class Tokenizer(nn.Module):
                 )
             elif isinstance(hidden_dims, int):
                 self.tokenizer_net = MLP(
-                    input_size=self.num_features,
-                    hidden_size=hidden_dims,
-                    output_size=output_dim,
-                    activation_fn=activation,
+                    input_dim=self.num_features,
+                    hidden_dims=hidden_dims,
+                    output_dim=output_dim,
+                    activation=activation,
                 )
             else:
                 raise ValueError(
@@ -631,9 +631,17 @@ def create_transformer_enet(
         final_net_kwargs["activation"] = torchutils.get_activation_function_from_string(
             final_net_kwargs["activation"]
         )
-        final_net = DenseResidualNet(**final_net_kwargs)
-    else:
-        final_net = None
+        if "hidden_dims" in final_net_kwargs:
+            if isinstance(final_net_kwargs["hidden_dims"], list):
+                final_net = DenseResidualNet(**final_net_kwargs)
+            elif isinstance(final_net_kwargs["hidden_dims"], int):
+                final_net = MLP(**final_net_kwargs)
+            else:
+                raise ValueError(
+                    f"hidden_dims in tokenizer_kwargs must be a list or int, got {final_net_kwargs["hidden_dims"]}"
+                )
+        else:
+            final_net = LinearLayer(**final_net_kwargs)
 
     model = TransformerModel(
         tokenizer=tokenizer,
