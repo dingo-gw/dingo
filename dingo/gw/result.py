@@ -36,7 +36,7 @@ class Result(CoreResult):
             Contains parameter samples, as well as (possibly) log_prob, log_likelihood,
             weights, log_prior, delta_log_prob_target.
         domain : Domain
-            The domain of the data (e.g., FrequencyDomain), needed for calculating
+            The domain of the data (e.g., UniformFrequencyDomain), needed for calculating
             likelihoods.
         prior : PriorDict
             The prior distribution, used for importance sampling.
@@ -65,7 +65,6 @@ class Result(CoreResult):
     dataset_type = "gw_result"
 
     def __init__(self, **kwargs):
-        self._use_base_domain = False
         super().__init__(**kwargs)
 
     @property
@@ -141,8 +140,6 @@ class Result(CoreResult):
         Called by __init__() immediately after _build_prior().
         """
         self.domain = build_domain(self.base_metadata["dataset_settings"]["domain"])
-        # if self._use_base_domain:
-        #     self.domain = self.domain.base_domain
 
         data_settings = self.base_metadata["train_settings"]["data"]
         if "domain_update" in data_settings:
@@ -236,7 +233,7 @@ class Result(CoreResult):
             the Result and later instantiated.
         """
         self.importance_sampling_metadata["prior_update"] = prior_update.copy()
-        prior_update = PriorDict(dictionary=prior_update)
+        prior_update = PriorDict(prior_update)
 
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
         theta = self.samples[param_keys]
@@ -607,7 +604,11 @@ class Result(CoreResult):
 
         # Redefine phase parameter to be consistent with Bilby. COMMENTED BECAUSE SLOW
         samples = change_spin_conversion_phase(
-            samples, self.f_ref, spin_conversion_phase_old, None, num_processes=num_processes
+            samples,
+            self.f_ref,
+            spin_conversion_phase_old,
+            None,
+            num_processes=num_processes,
         )
 
         self._pesummary_samples = samples

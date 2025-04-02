@@ -10,7 +10,7 @@ class Domain(ABC):
     """
 
     @abstractmethod
-    def __len__(self):
+    def __len__(self) -> int:
         """Number of bins or points in the domain"""
         pass
 

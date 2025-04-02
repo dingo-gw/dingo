@@ -25,6 +25,7 @@ from dingo.gw.waveform_generator import (
 )
 from dingo.core.utils.misc import call_func_strict_output_dim
 
+
 def generate_parameters_and_polarizations(
     waveform_generator: WaveformGenerator,
     prior: BBHPriorDict,
@@ -201,8 +202,11 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
                     generate_parameters_and_polarizations,
                     waveform_generator,
                     prior,
-                    num_processes=num_processes)
-                parameters, polarizations = call_func_strict_output_dim(func, n_train + n_test)
+                    num_processes=num_processes,
+                )
+                parameters, polarizations = call_func_strict_output_dim(
+                    func, n_train + n_test
+                )
                 svd_dataset_settings = copy.deepcopy(settings)
                 svd_dataset_settings["num_samples"] = len(parameters)
                 del svd_dataset_settings["compression"]["svd"]
@@ -234,8 +238,11 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
         generate_parameters_and_polarizations,
         waveform_generator,
         prior,
-        num_processes=num_processes)
-    parameters, polarizations = call_func_strict_output_dim(func, settings["num_samples"])
+        num_processes=num_processes,
+    )
+    parameters, polarizations = call_func_strict_output_dim(
+        func, settings["num_samples"]
+    )
     dataset_dict["parameters"] = parameters
     dataset_dict["polarizations"] = polarizations
 
@@ -320,7 +327,6 @@ def parse_args():
 def _generate_dataset_main(
     settings_file: str, out_file: str, num_processes: int
 ) -> None:
-
     if not Path(settings_file).is_file():
         raise FileNotFoundError(f"dataset generation, failed to find {settings_file}")
     if not Path(out_file).parent.is_dir():

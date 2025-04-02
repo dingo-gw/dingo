@@ -5,6 +5,5 @@ from .general_transforms import *
 from .gnpe_transforms import *
 from .inference_transforms import *
 from .tokenization_transforms import *
-from .waveform_transforms import *
-
 from .utils import *
+from .waveform_transforms import *

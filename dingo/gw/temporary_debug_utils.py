@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def save_training_injection(outname, pm, data, idx=0):
     """
     For debugging: extract a training injection. To be used inside train or test loop.
@@ -37,7 +38,7 @@ def save_training_injection(outname, pm, data, idx=0):
         pm.metadata["train_settings"]["data"]["ref_time"],
     )
     params_2 = params.copy()
-    params_2["phase"] = (params_2["phase"] + np.pi/2.) % (2 * np.pi)
+    params_2["phase"] = (params_2["phase"] + np.pi / 2.0) % (2 * np.pi)
     params_3 = {p: v * 0.99 for p, v in params.items()}
     sample = signal.signal(params)
     sample_2 = signal.signal(params_2)
@@ -45,11 +46,11 @@ def save_training_injection(outname, pm, data, idx=0):
 
     import matplotlib.pyplot as plt
 
-    plt.plot(np.abs(sample["waveform"]["H1"])[domain.min_idx:])
+    plt.plot(np.abs(sample["waveform"]["H1"])[domain.min_idx :])
     plt.plot(np.abs(strains["H1"]), lw=0.8)
     plt.show()
 
-    plt.plot(sample["waveform"]["H1"][domain.min_idx:])
+    plt.plot(sample["waveform"]["H1"][domain.min_idx :])
     plt.plot(strains["H1"], lw=0.8)
     # plt.plot(sample_2["waveform"]["H1"][domain.min_idx:])
     plt.show()

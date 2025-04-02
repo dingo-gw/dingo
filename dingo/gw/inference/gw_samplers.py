@@ -1,3 +1,4 @@
+import copy
 from typing import Union
 
 import numpy as np
@@ -159,7 +160,6 @@ class GWSampler(GWSamplerMixin, Sampler):
     data for the inference network.
 
     transform_pre :
-        * Decimates data (if necessary and using MultibandedFrequencyDomain).
         * Whitens strain.
         * Repackages strain data and the inverse ASDs (suitably scaled) into a torch
           tensor.
@@ -187,6 +187,7 @@ class GWSampler(GWSamplerMixin, Sampler):
             transform_pre.append(
                 DecimateWaveformsAndASDS(self.domain, decimation_mode="whitened")
             )
+
         #   * whiten and scale strain (since the inference network expects standardized
         #   data)
         #   * repackage strains and asds from dicts to an array

@@ -80,7 +80,7 @@ def td_modes_to_fd_modes(hlm_td, domain):
     hlm_td: dict
         Dictionary with (l,m) keys and the complex lal time series objects for the
         corresponding tapered modes.
-    domain: dingo.gw.domains.FrequencyDomain
+    domain: dingo.gw.domains.UniformFrequencyDomain
         Target domain after FFT.
 
     Returns
