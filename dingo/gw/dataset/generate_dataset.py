@@ -14,8 +14,6 @@ from torchvision.transforms import Compose
 from bilby.gw.prior import BBHPriorDict
 
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
-from dingo.gw.prior import build_prior_with_defaults, default_intrinsic_dict
-from dingo.gw.domains import build_domain, build_domain_from_model_metadata
 from dingo.gw.SVD import ApplySVD, SVDBasis
 from dingo.gw.transforms import WhitenFixedASD
 from dingo.gw.waveform_generator import (
