@@ -176,7 +176,7 @@ def get_scheduler_from_kwargs(
     if scheduler_kwargs["type"].lower() not in schedulers_dict:
         raise ValueError("No valid scheduler specified.")
 
-    if scheduler_kwargs["type"] == "sequential":
+    if scheduler_kwargs["type"].lower() == "sequential":
         # List of schedulers
         # Collect scheduler list
         scheduler_keys = []
@@ -279,7 +279,7 @@ def get_scheduler_from_kwargs(
                 scheduler_kwargs, num_optimizer_steps
             )
         # Create scheduler
-        scheduler_type = scheduler_kwargs.pop("type")
+        scheduler_type = scheduler_kwargs.pop("type").lower()
         scheduler = schedulers_dict[scheduler_type]
         return scheduler(optimizer, **scheduler_kwargs)
 
