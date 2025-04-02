@@ -20,19 +20,6 @@ class SamplingNode(AnalysisNode):
 
         self.setup_arguments()
 
-        # if self.inputs.transfer_files or self.inputs.osg:
-        #     data_dump_file = generation_node.data_dump_file
-        #     input_files_to_transfer = [
-        #         str(data_dump_file),
-        #         str(self.inputs.complete_ini_file),
-        #     ]
-        #     self.extra_lines.extend(
-        #         self._condor_file_transfer_lines(
-        #             input_files_to_transfer,
-        #             [self._relative_topdir(self.inputs.outdir, self.inputs.initialdir)],
-        #         )
-        #     )
-        #     self.arguments.add("outdir", os.path.relpath(self.inputs.outdir))
 
         # Add extra arguments for dingo
         self.arguments.add("label", self.label)
@@ -53,20 +40,25 @@ class SamplingNode(AnalysisNode):
         if self.device == "cuda":
             self.extra_lines.append("request_gpus = 1")
 
-        if self.inputs.osg:
-            sites = self.inputs.gpu_desired_sites
-            if sites is not None:
-                self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
-            self.requirements.append("IS_GLIDEIN=?=True")
 
-            # only supporting OSDF transfers for now
-            # stripping osdf prefix as it is not needed
-            input_files_to_transfer = [s.replace("/osdf", "") for s in [self.inputs.model, self.inputs.model_init]]
-            input_files_to_transfer = [f"igwn+osdf://{s}" for s in input_files_to_transfer]
-            input_files_to_transfer.append(self.inputs.complete_ini_file)
-            input_files_to_transfer.append(generation_node.event_data_file)
-            # This is needed to access the networks which are in OSDF
-            self.extra_lines.extend(self.scitoken_lines)
+        if self.inputs.transfer_files or self.inputs.osg:
+            input_files_to_transfer = [
+                str(generation_node.event_data_file),
+                str(self.inputs.complete_ini_file),
+            ]
+            if self.inputs.osg:
+                sites = self.inputs.gpu_desired_sites
+                if sites is not None:
+                    self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
+                self.requirements.append("IS_GLIDEIN=?=True")
+
+                # only supporting OSDF transfers for now
+                # stripping osdf prefix as it is not needed
+                network_files = [s.replace("/osdf", "") for s in [self.inputs.model, self.inputs.model_init] if s is not None]
+                network_files = [f"igwn+osdf://{s}" for s in network_files]
+                input_files_to_transfer.extend(network_files)
+                # This is needed to access the networks which are in OSDF
+                self.extra_lines.extend(self.scitoken_lines)
 
             self.extra_lines.extend(
                 self._condor_file_transfer_lines(
@@ -74,6 +66,8 @@ class SamplingNode(AnalysisNode):
                     [self._relative_topdir(self.inputs.outdir, self.inputs.initialdir)],
                 )
             )
+
+            self.arguments.add("outdir", os.path.relpath(self.inputs.outdir))
 
         self.process_node()
         self.job.add_parent(generation_node.job)
