@@ -563,7 +563,10 @@ class Result(CoreResult):
             return self._pesummary_samples
 
         # Unweighted samples.
-        samples = self.sampling_importance_resampling(random_state=RANDOM_STATE)
+        if "weights" in self.samples:
+            samples = self.sampling_importance_resampling(random_state=RANDOM_STATE)
+        else:
+            samples = self.samples.copy()
 
         # Remove unwanted columns.
         samples.drop(
