@@ -170,7 +170,7 @@ class Tokenizer(nn.Module):
         if context is not None:
             # Transform block values from int to one_hot vectors
             detector_per_token = context[..., 2]
-            detector_one_hot = torch.eye(self.num_blocks)[
+            detector_one_hot = torch.eye(self.num_blocks, device=context.device)[
                 detector_per_token.to(torch.long)
             ]
             context = torch.cat((context[..., :2], detector_one_hot), dim=-1)
