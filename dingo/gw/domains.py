@@ -493,6 +493,9 @@ class TimeDomain(Domain):
             0.0, self._time_duration, num=num_bins, endpoint=False, dtype=np.float32
         )
 
+    def update(self):
+        raise NotImplementedError
+
     @property
     def delta_t(self) -> float:
         """The size of the time bins"""
@@ -597,7 +600,7 @@ def build_domain(settings: Dict) -> Domain:
     kwargs = {k: v for k, v in settings.items() if k != "type"}
     if settings["type"] in ["FrequencyDomain", "FD"]:
         return FrequencyDomain(**kwargs)
-    elif settings["type"] == ["TimeDomain", "TD"]:
+    elif settings["type"] in ["TimeDomain", "TD"]:
         return TimeDomain(**kwargs)
     else:
         raise NotImplementedError(f'Domain {settings["name"]} not implemented.')

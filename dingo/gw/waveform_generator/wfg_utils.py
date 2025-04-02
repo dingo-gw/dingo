@@ -1,3 +1,4 @@
+from glob import escape
 import numpy as np
 import lal
 import lalsimulation as LS
@@ -176,6 +177,160 @@ def get_polarizations_from_fd_modes_m(hlm_fd, iota, phase):
 
     return pol_m
 
+def get_polarizations_from_td_modes_m(hlm_td, iota, phase):
+    # see https://lscsoft.docs.ligo.org/lalsuite/lalsimulation/group___l_a_l_sim_sph_harm_mode__h.html#ga834e376b58f9e71936ba14de58750a2b
+    # Note this is not in the observer's frame but rather in the L0 frame
+
+    pol_m = {}
+    polarizations = ["h_plus", "h_cross"]
+
+    for (l, m), hlm in hlm_td.items():
+        if (l, m) not in pol_m:
+            pol_m[(l, m)] = {k: 0.0 for k in polarizations}
+
+            ylm = np.array(lal.SpinWeightedSphericalHarmonic(iota, np.pi / 2 - phase, -2, l, m))
+
+            hpc = hlm.data.data*ylm
+            h_plus = lal.CreateREAL8TimeSeries("h_plus", hlm.epoch, hlm.f0, hlm.deltaT, hlm.sampleUnits, hlm.data.length)
+            h_plus.data.data = np.real(hpc)
+            h_cross = lal.CreateREAL8TimeSeries("h_cross", hlm.epoch, hlm.f0, hlm.deltaT, hlm.sampleUnits, hlm.data.length)
+            h_cross.data.data = -np.imag(hpc)
+
+            pol_m[(l, m)]["h_plus"] = h_plus
+            pol_m[(l, m)]["h_cross"] = h_cross
+ 
+    return pol_m
+
+def get_polarizations_from_td_modes_m_correct(hlm_td, iota, phase):
+    # see https://lscsoft.docs.ligo.org/lalsuite/lalsimulation/group___l_a_l_sim_sph_harm_mode__h.html#ga834e376b58f9e71936ba14de58750a2b
+    # Note this is not in the observer's frame but rather in the L0 frame
+
+    pol_m = {}
+    polarizations = ["h_plus", "h_cross"]
+
+    for (l, m), hlm in hlm_td.items():
+        if isinstance(hlm, np.ndarray):
+            pass 
+        else:
+            hlm = hlm.data.data
+
+        if (l, m) not in pol_m:
+            pol_m[(l, m)] = {k: 0.0 for k in polarizations}
+            pol_m[(l, -m)] = {k: 0.0 for k in polarizations}
+
+            ylm = np.array(lal.SpinWeightedSphericalHarmonic(iota, np.pi / 2 - phase, -2, l, m))
+            ylmstar = np.array(lal.SpinWeightedSphericalHarmonic(iota, np.pi / 2 - phase, -2, l, -m))
+
+            hpc = hlm*ylm
+            pol_m[(l, m)]["h_plus"] += np.real(hpc)
+            pol_m[(l, m)]["h_cross"] += -np.imag(hpc)
+            
+            if (l % 2):
+                mult = -1
+            else:
+                mult = 1
+            pol_m[(l, -m)]["h_plus"] += np.real(hpc)
+            pol_m[(l, -m)]["h_cross"] += -np.imag(hpc)
+ 
+    return pol_m
+
+def get_aligned_spin_negative_modes_in_place(hlm_td):
+    """
+    Given a dict with (l, +m) as keys will return the dict with the (l, -m). This only works for aligned spins where
+    h_lm = (-1)^l h*_{l -m}
+    """
+    for (l, m), hlm in hlm_td.copy().items():
+        if (l % 2):
+            f = -1
+        else:
+            f = 1
+        
+        name = hlm.name[:4] + "-" + hlm.name[4:]
+        h_conj = lal.CreateCOMPLEX16TimeSeries(name, hlm.epoch, hlm.f0, hlm.deltaT, hlm.sampleUnits, hlm.data.length)
+        h_conj.data.data = f*hlm.data.data.conj()
+        hlm_td[(l, -m)] = h_conj
+
+def correct_for_eob_lal_frame_rotation(h_plus, h_cross):
+    """ Need to correct EOB to LAL wave frame due to different conventions
+    https://git.ligo.org/waveforms/reviews/SEOBNRv4HM/-/blob/master/tests/conventions/conventions.pdf 
+    """
+    cp = np.cos(2*-np.pi / 2)
+    sp = np.sin(2*-np.pi / 2)
+    h_plus = cp*h_plus+ sp*h_cross
+    h_cross = cp*h_cross - sp*h_plus
+    return (h_plus, h_cross)
+
+def taper_aligned_spin(h, m1, m2, extra_time_fraction, t_chirp, t_extra, f_min):
+    # condition the time domain waveform by tapering in the extra time
+    # at the beginning and high-pass filtering above original f_min
+    
+    if isinstance(h, dict) and "h_plus" in h.keys() and "h_cross" in h.keys():
+        h_real, h_imag = h["h_plus"], h["h_cross"]
+    else:
+        # Technically not really h_plus and h_cross, they don't have the spherical harmonics
+        h_real = lal.CreateREAL8TimeSeries("h_real", h.epoch, h.f0, h.deltaT, h.sampleUnits, h.data.length)
+        h_real.data.data = np.real(h.data.data)
+        h_imag = lal.CreateREAL8TimeSeries("h_imag", h.epoch, h.f0, h.deltaT, h.sampleUnits, h.data.length)
+        h_imag.data.data = -np.imag(h.data.data)
+
+    LS.SimInspiralTDConditionStage1(h_real, h_imag, extra_time_fraction * t_chirp + t_extra, f_min)
+
+    # final tapering at the beginning and at the end to remove filter transients
+
+    #  waveform should terminate at a frequency >= Schwarzschild ISCO
+    #     * so taper one cycle at this frequency at the end; should not make
+    #     * any difference to IMR waveforms
+    fisco = 1.0 / ((6.0 ** 1.5) * np.pi * (m1 + m2) * (lal.MTSUN_SI / lal.MSUN_SI))
+    LS.SimInspiralTDConditionStage2(h_real, h_imag, f_min, fisco)
+
+    return h_real, h_imag
+
+def get_stepped_back_f_start(f_min, m1, m2, S1z, S2z):
+    extra_time_fraction = 0.1 # fraction of waveform duration to add as extra time for tapering
+    extra_cycles = 3.0 # more extra time measured in cycles at the starting frequency
+
+    # if the requested low frequency is below the lowest Kerr ISCO
+    # frequency then change it to that frequency
+    fisco = 1.0 / ((9.0 ** 1.5) * np.pi * (m1 + m2) * (lal.MTSUN_SI / lal.MSUN_SI))
+    if f_min > fisco:
+        f_min = fisco
+    
+    # upper bound on the chirp time starting at f_min
+    t_chirp = LS.SimInspiralChirpTimeBound(f_min, m1, m2, S1z, S2z)
+
+    # upper bound on the final black hole spin
+    s = LS.SimInspiralFinalBlackHoleSpinBound(S1z, S2z)
+
+    # upper bound on the final plunge, merger, and ringdown time 
+    t_merge = LS.SimInspiralMergeTimeBound(m1, m2) + LS.SimInspiralRingdownTimeBound(m1 + m2, s)
+
+    # extra time to include for all waveforms to take care of situations
+    # where the frequency is close to merger (and is sweeping rapidly):
+    # this is a few cycles at the low frequency
+    t_extra = extra_cycles / f_min
+
+    # time domain approximant: condition by generating a waveform
+    # with a lower starting frequency and apply tapers in the
+    # region between that lower frequency and the requested
+    # frequency f_min; here compute a new lower frequency
+    f_start = LS.SimInspiralChirpStartFrequencyBound((1.0 + extra_time_fraction) * t_chirp + t_merge + t_extra, m1, m2)
+    
+    return f_start, extra_time_fraction, t_chirp, t_extra
+
+def taper_stepped_back_waveform_modes(hlm_td, m1, m2, extra_time_fraction, t_chirp, t_extra, f_min):
+    for (l, m), hlm in hlm_td.copy().items():
+        h_real, h_imag = taper_aligned_spin(hlm, m1, m2, extra_time_fraction, t_chirp, t_extra, f_min)
+        strain = lal.CreateCOMPLEX16TimeSeries(f"h_{l,m}", hlm.epoch, hlm.f0, hlm.deltaT, hlm.sampleUnits, h_real.data.length)
+        strain.data.data = h_real.data.data - 1j*h_imag.data.data
+        hlm_td[(l, m)] = strain
+
+    # Padding the end of modes with 0
+    longest_arr_length = int(np.max([hlm.data.data.shape[0] for hlm in hlm_td.values()]))
+    for (l, m), hlm in hlm_td.items():
+        arr = np.pad(hlm.data.data, (0, longest_arr_length - hlm.data.data.shape[0]), 'constant', constant_values=(None, 0))
+        hlm_td[(l, m)] = lal.CreateCOMPLEX16TimeSeries(f"h_{l,m}", hlm.epoch, hlm.f0, hlm.deltaT, hlm.sampleUnits, longest_arr_length)
+        hlm_td[(l, m)].data.data = arr
+    
 
 def get_starting_frequency_for_SEOBRNRv5_conditioning(parameters):
     """
