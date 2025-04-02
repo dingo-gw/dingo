@@ -54,7 +54,7 @@ class SamplingNode(AnalysisNode):
 
                 # only supporting OSDF transfers for now
                 # stripping osdf prefix as it is not needed
-                network_files = [s.replace("/osdf", "") for s in [self.inputs.model, self.inputs.model_init]]
+                network_files = [s.replace("/osdf", "") for s in [self.inputs.model, self.inputs.model_init] if s is not None]
                 network_files = [f"igwn+osdf://{s}" for s in network_files]
                 input_files_to_transfer.extend(network_files)
                 # This is needed to access the networks which are in OSDF

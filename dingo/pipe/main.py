@@ -131,7 +131,8 @@ class MainInput(BilbyMainInput):
         self.data_find_url = args.data_find_url
         self.data_find_urltype = args.data_find_urltype
         self.n_parallel = args.n_parallel
-        self.transfer_files = args.transfer_files
+        # useful when condor nodes don't have access to submit filesystem
+        self.transfer_files = args.transfer_files 
         self.additional_transfer_paths = args.additional_transfer_paths
         self.osg = args.osg
         self.desired_sites = args.cpu_desired_sites  # Dummy variable so bilby_pipe doesn't complain.
