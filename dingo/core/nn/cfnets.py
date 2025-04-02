@@ -221,8 +221,9 @@ def create_cf(
         output_dim=theta_dim,
         hidden_dims=posterior_kwargs["hidden_dims"],
         activation=activation_fn,
-        dropout=posterior_kwargs["dropout"],
-        batch_norm=posterior_kwargs["batch_norm"],
+        dropout=posterior_kwargs.get("dropout", 0.0),
+        batch_norm=posterior_kwargs.get("batch_norm", False),
+        layer_norm=posterior_kwargs.get("layer_norm", False),
         context_features=glu_dim,
     )
 
@@ -271,14 +272,15 @@ def get_dim_positional_embedding(encoding: dict, input_dim: int):
         return (1 + 2 * encoding["frequencies"]) * input_dim
     return 2 * encoding["frequencies"] + input_dim
 
+
 class PositionalEncoding(nn.Module):
     """
     Implements positional encoding as commonly used in transformer architectures.
-    
-    Positional encoding introduces a way to inject information about the order of 
-    the input data (e.g., sequence positions) into a neural network that otherwise 
-    lacks a sense of position due to its permutation-invariant nature. This class 
-    computes sinusoidal encodings based on the position of each element in the input 
+
+    Positional encoding introduces a way to inject information about the order of
+    the input data (e.g., sequence positions) into a neural network that otherwise
+    lacks a sense of position due to its permutation-invariant nature. This class
+    computes sinusoidal encodings based on the position of each element in the input
     and concatenates them with the original input features.
 
     Attributes
@@ -298,7 +300,7 @@ class PositionalEncoding(nn.Module):
         The number of sinusoidal frequencies to compute. This determines the dimensionality
         of the positional encoding for each input feature.
     encode_all : bool, optional (default=True)
-        If True, the positional encoding is computed for all features in the input. 
+        If True, the positional encoding is computed for all features in the input.
         Otherwise, it is computed only for the first feature (e.g., the time dimension).
     base_freq : float, optional (default=2 * np.pi)
         The base frequency used for sinusoidal encoding.
@@ -306,12 +308,13 @@ class PositionalEncoding(nn.Module):
     Methods
     -------
     forward(t_theta)
-        Computes the positional encoding for the input tensor `t_theta` and concatenates 
+        Computes the positional encoding for the input tensor `t_theta` and concatenates
         it with the original input features.
         - If `encode_all` is True, the positional encoding is computed for all features.
         - If `encode_all` is False, the positional encoding is applied only to the first
           feature, such as time, while other features remain unchanged.
     """
+
     def __init__(self, nr_frequencies, encode_all=True, base_freq=2 * np.pi):
         super(PositionalEncoding, self).__init__()
         frequencies = base_freq * torch.pow(
