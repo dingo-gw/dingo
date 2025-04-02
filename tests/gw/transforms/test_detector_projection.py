@@ -33,7 +33,7 @@ def setup_detector_projection():
     extrinsic_prior_dict = default_extrinsic_dict
     ref_time = 1126259462.391
     domain_dict = {
-        "type": "FrequencyDomain",
+        "type": "UniformFrequencyDomain",
         "f_min": 10.0,
         "f_max": 1024.0,
         "delta_f": 0.125,

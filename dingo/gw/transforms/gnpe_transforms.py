@@ -79,7 +79,7 @@ class GNPEBase(ABC):
         elif type(g) == np.float64 or type(g) == float:
             epsilon = self.kernel[k].sample()
         elif type(g) == np.ndarray:
-            epsilon = self.kernel[k].sample(len(g))
+            epsilon = self.kernel[k].sample(len(g)).astype(g.dtype)
         else:
             raise NotImplementedError(f"Unsupported data type {type(g)}.")
 
