@@ -15,7 +15,7 @@ from bilby.gw.prior import BBHPriorDict
 
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.gw.prior import build_prior_with_defaults, default_intrinsic_dict
-from dingo.gw.domains import build_domain, build_domain_from_wfd_settings
+from dingo.gw.domains import build_domain, build_domain_from_model_metadata
 from dingo.gw.SVD import ApplySVD, SVDBasis
 from dingo.gw.transforms import WhitenFixedASD
 from dingo.gw.waveform_generator import (
@@ -249,49 +249,6 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
     dataset_dict[settings["num_samples"]] = len(parameters)
     dataset = WaveformDataset(dictionary=dataset_dict)
     return dataset
-
-
-def autocomplete_wfd_settings(wfd_settings: dict, num_processes: int = 1):
-    """
-    Autocomplete dict with settings for waveform dataset generation. This includes
-    the prior settings ('default' priors are explicitly set) and the domain
-    (e.g., band generation for MultibandedFrequencyDomain).
-    """
-
-    wfd_settings = copy.deepcopy(wfd_settings)
-
-    # complete default values for prior
-    for k, v in wfd_settings["intrinsic_prior"].items():
-        if v == "default":
-            wfd_settings["intrinsic_prior"][k] = default_intrinsic_dict[k]
-
-    # build domain
-    domain = build_domain_from_wfd_settings(wfd_settings, num_processes)
-    wfd_settings["domain"] = domain.domain_dict
-
-    return wfd_settings
-
-
-def autocomplete_wfd_settings_cli():
-    """
-    Command line script for autocompletion of wfd settings.
-    """
-    parser = argparse.ArgumentParser(description="Autocomplete wfd settings.")
-    parser.add_argument("--settings_file", type=str, required=True)
-    parser.add_argument("--num_processes", type=int, default=1)
-    args = parser.parse_args()
-    with open(args.settings_file, "r") as f:
-        wfd_settings = yaml.safe_load(f)
-    wfd_settings_autocompleted = autocomplete_wfd_settings(
-        wfd_settings, args.num_processes
-    )
-    out_file = (
-        ".".join(args.settings_file.split(".")[:-1])
-        + "_autocompleted."
-        + args.settings_file.split(".")[-1]
-    )
-    with open(out_file, "w") as f:
-        yaml.dump(wfd_settings_autocompleted, f, default_flow_style=False)
 
 
 def parse_args():

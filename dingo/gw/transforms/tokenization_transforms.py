@@ -1,7 +1,7 @@
 from typing import Optional
 import numpy as np
 
-from dingo.gw.domains import FrequencyDomain, MultibandedFrequencyDomain
+from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain
 
 DETECTOR_DICT = {"H1": 0, "L1": 1, "V1": 2}
 
@@ -17,7 +17,7 @@ class StrainTokenization(object):
 
     def __init__(
         self,
-        domain: FrequencyDomain | MultibandedFrequencyDomain,
+        domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
         num_tokens_per_block: int = None,
         token_size: int = None,
         normalize_frequency: bool = False,
@@ -27,9 +27,9 @@ class StrainTokenization(object):
         """
         Parameters
         ----------
-        domain: FrequencyDomain or MultiBandedFrequencyDomain
+        domain: UniformFrequencyDomain or MultiBandedFrequencyDomain
             Contains domain information, e.g., f_min, f_max, delta_f. Works with
-            FrequencyDomain and MultibandedFrequencyDomain.
+            UniformFrequencyDomain and MultibandedFrequencyDomain.
         num_tokens_per_block: int
             Number of tokens into which the domain should be divided. [Optional]
         token_size: int
@@ -58,9 +58,9 @@ class StrainTokenization(object):
                 "It is necessary to specify either num_tokens or token_size."
             )
         # We assume that we have the same f_min, f_max, and delta_f for all data points in the batch
-        if isinstance(domain, FrequencyDomain):
+        if isinstance(domain, UniformFrequencyDomain):
             assert isinstance(domain.delta_f, float), (
-                "Expected domain.delta_f of FrequencyDomain to be float, but "
+                "Expected domain.delta_f of UniformFrequencyDomain to be float, but "
                 "received {domain.delta_f}"
             )
             delta_fs = np.array([domain.delta_f] * num_tokens_per_block)
@@ -243,14 +243,14 @@ class DropFrequencyValues(object):
 
     def __init__(
         self,
-        domain: FrequencyDomain | MultibandedFrequencyDomain,
+        domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
         drop_f_settings: dict | None = None,
         print_output: bool = True,
     ):
         """
         Parameters
         ----------
-        domain: FrequencyDomain | MultibandedFrequencyDomain
+        domain: UniformFrequencyDomain | MultibandedFrequencyDomain
         drop_f_settings: dict
             Contains settings for the DropFrequencyValues transform.
         print_output: bool
@@ -358,7 +358,7 @@ class DropFrequencyValues(object):
         apply_cut = np.random.choice([False, True], size=num_blocks)
 
         # Sample cut index as well as min and max indices for mask
-        if isinstance(self.domain, FrequencyDomain):
+        if isinstance(self.domain, UniformFrequencyDomain):
             # Sample cut indices in uniform frequency domain
             indices_cut = np.random.choice(
                 np.arange(self.domain.frequency_mask_length), size=num_blocks
@@ -396,7 +396,7 @@ class DropFrequencyValues(object):
             )
         else:
             raise ValueError(
-                f"self.domain is of type {type(self.domain).__name__} but should be either FrequencyDomain or MultibandedFrequencyDomain."
+                f"self.domain is of type {type(self.domain).__name__} but should be either UniformFrequencyDomain or MultibandedFrequencyDomain."
             )
 
         # Decide whether to mask tokens above or below the cut
@@ -499,7 +499,7 @@ class DropDetectors(object):
         self.num_blocks = num_blocks
         if p_drop_012_detectors is None:
             p_drop_012_detectors = [1 / num_blocks for _ in range(num_blocks)]
-        if not np.isclose(np.sum(p_drop_012_detectors), 1., rtol=1e-6, atol=1e-12):
+        if not np.isclose(np.sum(p_drop_012_detectors), 1.0, rtol=1e-6, atol=1e-12):
             raise ValueError(
                 f"p_drop_012_detectors {p_drop_012_detectors} does not sum to 1."
             )
@@ -508,7 +508,9 @@ class DropDetectors(object):
             p_drop_hlv = {
                 ["H1", "L1", "V1"][k]: 1 / num_blocks for k in range(num_blocks)
             }
-        if not np.isclose(np.sum(list(p_drop_hlv.values())), 1., rtol=1e-6, atol=1e-12):
+        if not np.isclose(
+            np.sum(list(p_drop_hlv.values())), 1.0, rtol=1e-6, atol=1e-12
+        ):
             raise ValueError(f"p_drop_hlv {p_drop_hlv} does not sum to 1.")
         # Update keys equivalently to tokenization transform
         self.p_drop_hlv = {DETECTOR_DICT[k]: v for k, v in p_drop_hlv.items()}
