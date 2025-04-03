@@ -66,6 +66,13 @@ class Result(CoreResult):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        # Correct bug in recursive hdf5 load: If we want to analyze a single detector event, the detector list gets
+        # loaded as a string instead of a list (i.e., 'L1' instead of ['L1']). This has to be reverted because the code
+        # expects detectors to be a list in result.reset_event(). If it is not a list, event_metadata is not the same as
+        # the event metadata loaded from the events file (where detectors is a list) and it assumes that a domain update
+        # is necessary (which is not implemented for MFD).
+        if isinstance(self.event_metadata["detectors"], str):
+            self.event_metadata["detectors"] = [self.event_metadata["detectors"]]
 
     @property
     def synthetic_phase_kwargs(self):
