@@ -71,7 +71,7 @@ class Result(CoreResult):
         # expects detectors to be a list in result.reset_event(). If it is not a list, event_metadata is not the same as
         # the event metadata loaded from the events file (where detectors is a list) and it assumes that a domain update
         # is necessary (which is not implemented for MFD).
-        if isinstance(self.event_metadata["detectors"], str):
+        if self.event_metadata is not None and isinstance(self.event_metadata["detectors"], str):
             self.event_metadata["detectors"] = [self.event_metadata["detectors"]]
 
     @property
