@@ -311,7 +311,7 @@ class GWSignal(object):
                 if "window_factor" in domain_dict:
                     print("Dropping window factor for update.")
                     del domain_dict["window_factor"]
-                elif (
+                if (
                     "base_domain" in domain_dict
                     and "window_factor" in domain_dict["base_domain"]
                 ):
