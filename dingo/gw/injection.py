@@ -2,11 +2,9 @@ import numpy as np
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 
-from dingo.gw.domains.base_frequency_domain import BaseFrequencyDomain
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.domains import (
     UniformFrequencyDomain,
-    Domain,
     MultibandedFrequencyDomain,
 )
 from dingo.gw.domains import build_domain, build_domain_from_model_metadata
@@ -313,6 +311,12 @@ class GWSignal(object):
                 if "window_factor" in domain_dict:
                     print("Dropping window factor for update.")
                     del domain_dict["window_factor"]
+                elif (
+                    "base_domain" in domain_dict
+                    and "window_factor" in domain_dict["base_domain"]
+                ):
+                    print("Dropping window factor for update.")
+                    del domain_dict["base_domain"]["window_factor"]
                 asd.update_domain(domain_dict)
         elif isinstance(asd, dict):
             if set(asd.keys()) != set(ifo_names):
