@@ -4,7 +4,7 @@ from os.path import join, isfile
 import yaml
 import argparse
 
-from dingo.core.utils.environment import document_environment
+from dingo.core.utils import document_git_status, document_environment
 from dingo.core.utils.torchutils import document_gpus
 from dingo.gw.training.train_pipeline import run_training, run_multi_gpu_training
 
@@ -120,6 +120,8 @@ def train_condor():
         # TRAIN
         #
 
+        # Document git
+        document_git_status(args.train_dir)
         # Document setup
         document_environment(args.train_dir)
         # Cannot document GPU info here because this results in problems with mp.Process

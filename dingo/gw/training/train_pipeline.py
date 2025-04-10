@@ -30,9 +30,10 @@ from dingo.core.utils import (
     set_requires_grad_flag,
     get_number_of_model_parameters,
     build_train_and_test_loaders,
+    document_git_status,
+    document_environment,
 )
 from dingo.core.utils.trainutils import EarlyStopping, RuntimeLimits
-from dingo.core.utils.environment import document_environment
 from dingo.core.utils.torchutils import (
     document_gpus,
     setup_ddp,
@@ -47,8 +48,12 @@ from dingo.gw.training.train_builders import (
     build_svd_for_embedding_network,
 )
 
+
 def copy_files_to_local(
-    file_path: str, local_dir: Optional[str], leave_keys_on_disk: bool, is_condor: bool = False,
+    file_path: str,
+    local_dir: Optional[str],
+    leave_keys_on_disk: bool,
+    is_condor: bool = False,
 ) -> str:
     """
     Copy files to local node if local_dir is provided to minimize network traffic during training.
@@ -347,6 +352,7 @@ def prepare_training_new(
 
     return pm, wfd
 
+
 def load_settings_from_ckpt(checkpoint_name: str):
     """Load settings from checkpoint file.
 
@@ -366,6 +372,7 @@ def load_settings_from_ckpt(checkpoint_name: str):
         device="meta",
     )
     return pm.metadata["train_settings"]
+
 
 def prepare_model_resume(
     checkpoint_name: str,
@@ -1091,6 +1098,8 @@ def train_local():
         args.train_dir = os.path.join(args.train_dir, "pretraining")
         os.makedirs(args.train_dir, exist_ok=True)
 
+    # Document git
+    document_git_status(args.train_dir)
     # Document setup
     document_environment(args.train_dir)
     # Cannot document GPU info here because this results in problems with mp.Process
