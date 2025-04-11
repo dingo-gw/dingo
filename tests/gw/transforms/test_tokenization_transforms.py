@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from dingo.gw.domains import FrequencyDomain, MultibandedFrequencyDomain
+from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain
 from dingo.gw.transforms import StrainTokenization, DropDetectors
 
 
@@ -11,7 +11,7 @@ def strain_tokenization_setup():
     f_min = 20.0
     f_max = 1024.0
     T = 8.0
-    domain = FrequencyDomain(f_min, f_max, delta_f=1 / T)
+    domain = UniformFrequencyDomain(f_min, f_max, delta_f=1 / T)
     num_f = domain.frequency_mask_length
 
     batch_size = 100
@@ -37,7 +37,7 @@ def strain_tokenization_setup_no_batch():
     f_min = 20.0
     f_max = 1024.0
     T = 8.0
-    domain = FrequencyDomain(f_min, f_max, delta_f=1 / T)
+    domain = UniformFrequencyDomain(f_min, f_max, delta_f=1 / T)
     num_f = domain.frequency_mask_length
 
     waveform_h1 = np.zeros([1, 3, num_f])
@@ -60,7 +60,7 @@ def strain_tokenization_setup_mfd():
     f_min = 20.0
     f_max = 990.0
     T = 8.0
-    base_domain = FrequencyDomain(f_min=f_min, f_max=f_max, delta_f=1 / T)
+    base_domain = UniformFrequencyDomain(f_min=f_min, f_max=f_max, delta_f=1 / T)
     domain = MultibandedFrequencyDomain(
         nodes=nodes, delta_f_initial=1 / T, base_domain=base_domain
     )
@@ -294,7 +294,7 @@ def test_DroDetectors(request, setup):
     # Check that mask has expected shape
     assert out["drop_token_mask"].shape[-1] == num_tokens_per_block * num_blocks
     # Check that mask only contains True for tokens of one detector
-    assert np.all(np.sum(out["drop_token_mask"], axis=1) == num_tokens_per_block)
+    assert np.all(np.sum(out["drop_token_mask"], axis=-1) == num_tokens_per_block)
 
 
 # TODO: write tests for DropFrequencyRange
