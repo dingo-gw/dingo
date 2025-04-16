@@ -75,16 +75,8 @@ class PopulationSampler(object):
         model = self.population_posterior_model.model
         model.eval()
     
-        # TODO: write more general
-        emb_dim = self.metadata['embedding_emulator_metadata']['train_settings']['model']['input_dim']
-        max_events = self.metadata['train_settings']['data']['maximum_population_size']
-        embeddings_full = torch.zeros((max_events,emb_dim))
-        n_events = embeddings.shape[0]
-
-        embeddings_full[:n_events] = embeddings
-
         with torch.no_grad():
-            x = self.pass_embeddings_through_transformer(embeddings_full)
+            x = self.pass_embeddings_through_transformer(embeddings)
 
             # TODO: batch this
             y, log_prob = model.flow.sample_and_log_prob(num_samples, context=x)
