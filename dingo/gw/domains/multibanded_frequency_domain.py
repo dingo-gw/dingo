@@ -424,3 +424,59 @@ def decimate_uniform(data, decimation_factor: int):
         raise NotImplementedError(
             f"Decimation not implemented for data of type {data}."
         )
+
+
+#### Utils functions for finding the nodes of the multibanded frequency domain based on BNS branch
+
+
+def floor_to_power_of_2(x):
+    return 2 ** (np.floor(np.log2(x)))
+
+
+def get_band_nodes_for_adaptive_decimation(
+    max_dec_factor_array: np.ndarray, max_dec_factor_global: int = np.inf
+):
+    """
+    Sets up adaptive multibanding for decimation. The 1D array max_dec_factor_array has
+    the same length as the original, and contains the maximal acceptable decimation
+    factors for each bin. max_dec_factor_global further specifies the maximum
+    decimation factor.
+
+    Parameters
+    ----------
+    max_dec_factor_array: np.ndarray
+        Array with maximal decimation factor for each bin. Monotonically increasing.
+    max_dec_factor_global: int = np.inf
+        Global maximum for decimation factor.
+
+    Returns
+    -------
+    initial_downsampling: int
+        Downsampling factor of band 0.
+    band_nodes: list[int]
+        List with nodes for bands.
+        Band j consists of indices [nodes[j]:nodes[j+1].
+    """
+    if len(max_dec_factor_array.shape) != 1:
+        raise ValueError("max_dec_factor_array needs to be 1D array.")
+    if not (max_dec_factor_array[1:] >= max_dec_factor_array[:-1]).all():
+        raise ValueError("max_dec_factor_array needs to increase monotonically.")
+
+    max_dec_factor_array = np.clip(max_dec_factor_array, None, max_dec_factor_global)
+    N = len(max_dec_factor_array)
+    dec_factor = int(max(1, floor_to_power_of_2(max_dec_factor_array[0])))
+    band_nodes = [0]
+    upper = dec_factor
+    initial_downsampling = dec_factor
+    while upper - 1 < N:
+        if upper - 1 + dec_factor >= N:
+            # conclude while loop, append upper as last node
+            band_nodes.append(upper)
+        elif dec_factor * 2 <= max_dec_factor_array[upper]:
+            # conclude previous band
+            band_nodes.append(upper)
+            # enter new band
+            dec_factor *= 2
+        upper += dec_factor
+
+    return initial_downsampling, band_nodes
