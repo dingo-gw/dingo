@@ -25,9 +25,12 @@ from dingo.gw.transforms import (
     SampleExtrinsicParameters,
     GetDetectorTimes,
     StrainTokenization,
-    DropFrequencyValues,
+    DropFrequenciesToUpdateRange,
+    DropFrequencyInterval,
     DropDetectors,
+    NormalizePosition,
 )
+from gw.transforms import DropRandomTokens
 
 
 def build_dataset(
@@ -204,49 +207,89 @@ def set_train_transforms(
         selected_keys = ["inference_parameters", "waveform"]
 
     try:
+        num_tokens = data_settings["tokenization"].get("num_tokens", None)
+        token_size = data_settings["tokenization"].get("token_size", None)
         norm_freq = data_settings["tokenization"].get(
             "normalize_frequency_for_positional_encoding", False
         )
-        num_tokens = data_settings["tokenization"].get("num_tokens", None)
-        token_size = data_settings["tokenization"].get("token_size", None)
-        single_tokenizer = data_settings["tokenization"].get("single_tokenizer", False)
         transforms.append(
             StrainTokenization(
-                domain,
+                domain=domain,
                 num_tokens_per_block=num_tokens,
                 token_size=token_size,
-                normalize_frequency=norm_freq,
-                single_tokenizer=single_tokenizer,
                 print_output=print_output,
             )
         )
         selected_keys.append("position")
         selected_keys.append("drop_token_mask")
 
-        # Randomly drop frequency ranges or detectors during training
-        if "drop_frequency_range" in data_settings["tokenization"]:
-            transforms.append(
-                DropFrequencyValues(
-                    domain,
-                    drop_f_settings=data_settings["tokenization"][
-                        "drop_frequency_range"
-                    ],
-                    print_output=print_output,
-                )
-            )
+        # Randomly drop detectors, frequency ranges or random tokens during training
         if "drop_detectors" in data_settings["tokenization"]:
+            drop_det_dict = data_settings["tokenization"]["drop_detectors"]
             transforms.append(
                 DropDetectors(
                     num_blocks=len(data_settings["detectors"]),
-                    p_drop_012_detectors=data_settings["tokenization"][
-                        "drop_detectors"
-                    ].get("p_drop_012_detectors", None),
-                    p_drop_hlv=data_settings["tokenization"]["drop_detectors"].get(
-                        "p_drop_hlv", None
+                    p_drop_012_detectors=drop_det_dict.get(
+                        "p_drop_012_detectors", None
                     ),
+                    p_drop_hlv=drop_det_dict.get("p_drop_hlv", None),
                     print_output=print_output,
                 )
             )
+        if "drop_frequency_range" in data_settings["tokenization"]:
+            if "f_cut" in data_settings["tokenization"]["drop_frequency_range"]:
+                f_cut_settings = data_settings["tokenization"]["drop_frequency_range"][
+                    "f_cut"
+                ]
+                transforms.append(
+                    DropFrequenciesToUpdateRange(
+                        domain=domain,
+                        p_cut=f_cut_settings.get("p_cut", 0.2),
+                        f_max_lower_cut=f_cut_settings.get(
+                            "f_max_lower_cut", domain.f_min
+                        ),
+                        f_min_upper_cut=f_cut_settings.get(
+                            "f_min_upper_cut", domain.f_max
+                        ),
+                        p_same_cut_all_detectors=f_cut_settings.get(
+                            "p_same_cut_all_detectors", 0.2
+                        ),
+                        p_lower_upper_both=f_cut_settings.get(
+                            "p_lower_upper_both", [0.4, 0.4, 0.2]
+                        ),
+                        print_output=print_output,
+                    )
+                )
+            if "mask_interval" in data_settings["tokenization"]["drop_frequency_range"]:
+                interval_settings = data_settings["tokenization"][
+                    "drop_frequency_range"
+                ]["mask_interval"]
+                transforms.append(
+                    DropFrequencyInterval(
+                        domain=domain,
+                        p_per_detector=interval_settings.get("p_per_detector", 0.2),
+                        f_min=interval_settings.get("f_min", domain.f_min),
+                        f_max=interval_settings.get("f_max", domain.f_max),
+                        max_width=interval_settings.get(
+                            "max_width", domain.f_max - domain.f_min
+                        ),
+                        print_output=print_output,
+                    )
+                )
+        if "drop_random_tokens" in data_settings["tokenization"]:
+            transforms.append(
+                DropRandomTokens(
+                    p_drop=data_settings["tokenization"]["drop_random_tokens"].get(
+                        "p_drop", 0.4
+                    ),
+                    max_num_tokens=data_settings["tokenization"][
+                        "drop_random_tokens"
+                    ].get("max_num_tokens", num_tokens),
+                )
+            )
+        # Normalize position after all drop transforms
+        if norm_freq:
+            transforms.append(NormalizePosition())
 
     except KeyError:
         print(

@@ -6,113 +6,139 @@ data:
     f_s: 4096
     T: 8.0
     roll_off: 0.4
-  domain_update:
-    f_min: 20.0
-    f_max: 1024.0
-  svd_size_update: 200  # Optionally, reduce the SVD size when decompressing (for performance)
+  # svd_size_update: 150  # Optionally, reduce the SVD size when decompressing (for performance)
   detectors:
     - H1
     - L1
+    - V1
   extrinsic_prior:  # Sampled at train time
     dec: default
     ra: default
-    geocent_time: bilby.core.prior.Uniform(minimum=-0.10, maximum=0.10)
+    geocent_time: bilby.core.prior.Uniform(minimum=-0.1, maximum=0.1)
     psi: default
-    luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0)
+    luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=6000.0)
   ref_time: 1126259462.391
-  tokenization:
-    num_tokens: 25
-    normalize_frequency_for_positional_encoding: True
   inference_parameters:
     - chirp_mass
     - mass_ratio
-    - chi_1
-    - chi_2
+    - a_1
+    - a_2
+    - tilt_1
+    - tilt_2
+    - phi_12
+    - phi_jl
     - theta_jn
-    - dec
-    - ra
-    - geocent_time
     - luminosity_distance
+    - geocent_time
+    - ra
+    - dec
     - psi
+  tokenization:
+    token_size: 16
+    drop_detectors:
+      p_drop_012_detectors: [0.6, 0.3, 0.1]
+      p_drop_hlv:
+        H1: 0.3
+        L1: 0.3
+        V1: 0.4
+    drop_frequency_range:
+      f_cut:
+        p_cut: 0.2
+        f_max_lower_cut: 50.
+        f_min_upper_cut: 800.
+        p_same_cut_all_detectors: 0.7
+        p_lower_upper_both: [0.4, 0.4, 0.2]
+      mask_interval:
+        p_per_detector: 0.4
+        f_min: 20.
+        f_max: 500.
+        max_width: 100.
+#    drop_random_tokens:
+#      p_drop: 0.4
+#      max_num_tokens: 10.
 
 # Model architecture
 model:
-  posterior_model_type: normalizing_flow # or flow_matching or score_matching
+  posterior_model_type: normalizing_flow
   posterior_kwargs:
     num_flow_steps: 30
     base_transform_kwargs:
-      hidden_dim: 1024
+      hidden_dim: 512
       num_transform_blocks: 5
       activation: elu
+      batch_norm: False
+      layer_norm: True
       dropout_probability: 0.0
-      batch_norm: True
       num_bins: 8
       base_transform_type: rq-coupling
   embedding_type: transformer
   embedding_kwargs:
+#    positional_encoder_kwargs:
+#      positional_encoding_type: discrete
+#    block_encoder_kwargs:
+#      block_encoding_type: sine
     tokenizer_kwargs:
-      individual_token_embedding: False
-      hidden_dims: [256, 512, 512]
+      condition_on_position: True
+      context_in_initial_layer: False
+      hidden_dims: [512,]
       activation: elu
       batch_norm: False
       layer_norm: True
-    positional_encoder_kwargs:
-       positional_encoding_type: continuous
-    block_encoder_kwargs:
-      block_encoding_type: sine
     transformer_kwargs:
-      d_model: 512
-      dim_feedforward: 100
-      nhead: 1
-      num_layers: 5
+      d_model: 1024
+      dim_feedforward: 2048
+      nhead: 16
       dropout: 0.0
+      num_layers: 8
+      norm_first: True
     final_net_kwargs:
-      hidden_dims: [512, 512, 256, 256, 128, 128]
+      #hidden_dims: 512 # for single layer or list for resnet: [ 1024, 1024, 512, 512, 512, 512, 256, 256 ]
       output_dim: 128
       activation: elu
-      batch_norm: False
-      layer_norm: True
-    allow_tf32: True
+      # batch_norm: False
+      # layer_norm: True
+    allow_tf32: False
 
 
 # Training is divided in stages. They each require all settings as indicated below.
 training:
   stage_0:
     epochs: 300
-    asd_dataset_path: training_data/asd_dataset_fiducial/asds_O1_fiducial.hdf5 # this should just contain a single fiducial ASD per detector for pretraining
+    asd_dataset_path: training_data/asd_dataset/asds_O1.hdf5 # this should contain many different ASDS per detector
     optimizer:
-      type: adam
-      lr: 5.0e-5
+      type: adamw
+      lr: 0.0001
+      betas:
+        - 0.8
+        - 0.99
     scheduler:
-      type: cosine
-      T_max: 300
-      update_scheduler_every_batch: True # default: False
+      type: reduce_on_plateau
+      mode: min
+      factor: 0.5
+      patience: 3
+      update_every_optimizer_step: False
+    automatic_mixed_precision: True
     batch_size: 4096
 
-  stage_1:
-    epochs: 150
-    asd_dataset_path: training_data/asd_dataset/asds_O1.hdf5 # this should contain many different ASDS per detector for finetuning
-    optimizer:
-      type: adam
-      lr: 1.0e-5
-    scheduler:
-      type: cosine
-      T_max: 150
-      update_scheduler_every_batch: True # default: False
-    batch_size: 4096
 
 # Local settings for training that have no impact on the final trained network.
 local:
   device: cuda # Change this to 'cuda' for training on a GPU.
-  num_workers: 32  # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
+  num_gpus: 8
+  num_workers: 3  # per GPU! num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
   runtime_limits:
-    max_time_per_run: 3600000
+    max_time_per_run: 36000
     max_epochs_per_run: 500
-  checkpoint_epochs: 50
+  checkpoint_epochs: 5
+  local_cache_path: tmp/
+  leave_waveforms_on_disk: True
+  #wandb:
+  #  project: dingo
+  #  name: some_name
+  #  group: some_group_name
   # Local settings related to condor, remove if not used on cluster
-  condor:
-    bid: 100
-    num_cpus: 16
-    memory_cpus: 128000
-    num_gpus: 1
-    memory_gpus: 8000
+  #condor:
+  #  num_cpus: 16
+  #  memory_cpus: 128000
+  #  num_gpus: 1
+  #  memory_gpus: 8000
