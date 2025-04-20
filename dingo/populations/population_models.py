@@ -161,7 +161,7 @@ class PowerLawPeakPopulation(object):
         # (2) Some of the objects (construction of prior, cosmology, DistToZ) are a bit
         # slow to construct, so we should avoid doing so repeatedly for each set of
         # hyperparameters.
-        def generation_func(size, buffer_factor=2):
+        def generation_func(size, buffer_factor=2, train=False):
             s0 = prior.sample(buffer_factor * size)
             s={}
             s["mass_1_source"]=s0["mass_1_source_q"][0]
@@ -176,6 +176,9 @@ class PowerLawPeakPopulation(object):
             # occur in our code. But this is something to watch for.
             s["chirp_mass"] = component_masses_to_chirp_mass(s["mass_1"], s["mass_2"])
             s["mass_ratio"] = component_masses_to_mass_ratio(s["mass_1"], s["mass_2"])
+
+            if not train:
+                add_log_prob(prior, s)
 
             idx_obs = selection_cut_func(s)
 
