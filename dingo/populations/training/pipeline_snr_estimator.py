@@ -162,6 +162,8 @@ def prepare_training_resume(checkpoint_name, local_settings, train_dir):
 
     pm.add_pm_single_event()
 
+    # important! Overwrite inference parameters with SNR here
+    pm.pm_single_event.metadata['train_settings']["data"]['inference_parameters'] = ['matched_filter_snr']
     wfd = build_dataset(pm.pm_single_event.metadata['train_settings']['data'])
     set_train_transforms(
         wfd,
