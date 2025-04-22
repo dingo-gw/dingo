@@ -29,8 +29,8 @@ from dingo.gw.transforms import (
     DropFrequencyInterval,
     DropDetectors,
     NormalizePosition,
+    DropRandomTokens,
 )
-from gw.transforms import DropRandomTokens
 
 
 def build_dataset(
