@@ -447,6 +447,7 @@ class TransformerModel(nn.Module):
         num_layers: int,
         dropout: float = 0.1,
         norm_first: bool = False,
+        pooling: str = "average",
     ):
         """
         Parameters
@@ -485,6 +486,10 @@ class TransformerModel(nn.Module):
         )
         self.transformer_encoder = TransformerEncoder(encoder_layers, num_layers)
         self.d_model = d_model
+
+        self.pooling = pooling
+        if self.pooling == "cls":
+            self.class_token = nn.Parameter(torch.randn((1, 1, d_model)))
 
         self.final_net = final_net
 
@@ -534,14 +539,37 @@ class TransformerModel(nn.Module):
         if self.block_encoding is not None:
             x = self.block_encoding(x, position[..., 2])
 
+        if self.pooling == "cls":
+            # Prepend the class token.
+            batch_size = x.shape[0]
+            x = torch.cat((self.class_token.expand(batch_size, -1, -1), x), dim=1)
+            # Prepend True src_key_padding_mask
+            mask_cls_token = torch.ones(
+                [batch_size, 1], dtype=torch.bool, device=src_key_padding_mask.device
+            )
+            src_key_padding_mask = torch.cat(
+                (mask_cls_token, src_key_padding_mask), dim=1
+            )
+
         x = self.transformer_encoder(x, src_key_padding_mask=src_key_padding_mask)
 
-        # Average over non-masked components.
-        if src_key_padding_mask is not None:
-            denominator = torch.sum(~src_key_padding_mask, -1, keepdim=True)
-            x = torch.sum(x * ~src_key_padding_mask.unsqueeze(-1), dim=-2) / denominator
+        if self.pooling == "average":
+            # Average over non-masked components.
+            if src_key_padding_mask is not None:
+                denominator = torch.sum(~src_key_padding_mask, -1, keepdim=True)
+                x = (
+                    torch.sum(x * ~src_key_padding_mask.unsqueeze(-1), dim=-2)
+                    / denominator
+                )
+            else:
+                x = torch.mean(x, dim=-2)
+        elif self.pooling == "cls":
+            # Take the first token.
+            x = x[..., 0, :]
         else:
-            x = torch.mean(x, dim=-2)
+            raise NotImplementedError(
+                f"Pooling operation {self.pooling} not implemented, select one of [average, cls]."
+            )
 
         if self.final_net is not None:
             x = self.final_net(x)
@@ -554,6 +582,7 @@ def create_transformer_enet(
     tokenizer_kwargs: dict = None,
     positional_encoder_kwargs: dict = None,
     block_encoder_kwargs: dict = None,
+    pooling: str = "average",
     final_net_kwargs: dict = None,
     added_context: bool = False,
 ):
@@ -650,6 +679,7 @@ def create_transformer_enet(
         positional_encoder=positional_encoder,
         block_encoder=block_encoder,
         final_net=final_net,
+        pooling=pooling,
         **transformer_kwargs,
     )
 
