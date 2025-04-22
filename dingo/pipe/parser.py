@@ -82,9 +82,11 @@ def create_parser(top_level=True):
         "--calibration-correction-type",
         type=nonestr,
         default="data",
-        help=("Type of calibration correction: can be either `data` or `template`."
-        " See https://bilby-dev.github.io/bilby/api/bilby.gw.detector.calibration.html "
-        "for more information.")
+        help=(
+            "Type of calibration correction: can be either `data` or `template`."
+            " See https://bilby-dev.github.io/bilby/api/bilby.gw.detector.calibration.html "
+            "for more information."
+        ),
     )
 
     calibration_parser.add(
@@ -183,6 +185,16 @@ def create_parser(top_level=True):
         ),
     )
 
+    data_gen_pars.add(
+        "--shift-segment-for-psd-generation-if-nan",
+        action=StoreBoolean,
+        default=False,
+        help=(
+            "Occasionally there are Nans stored in the strain data from which the PSD is generated. "
+            "If this method is activated, it will roll back the strain data which is being analyzed to "
+            "a segement which contains no Nans."
+        ),
+    )
     data_gen_pars.add(
         "--gps-tuple",
         type=nonestr,

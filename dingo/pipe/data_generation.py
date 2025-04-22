@@ -1,12 +1,14 @@
 import os
 import sys
 
+from bilby.gw.detector.psd import PowerSpectralDensity
 from bilby_pipe.input import Input
 from bilby_pipe.main import parse_args
 from bilby_pipe.utils import logger, convert_string_to_dict
 from bilby_pipe.data_generation import DataGenerationInput as BilbyDataGenerationInput
 import numpy as np
 
+from dingo.gw.data.data_download import download_psd
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import UniformFrequencyDomain
 from dingo.pipe.parser import create_parser
@@ -161,6 +163,41 @@ class DataGenerationInput(BilbyDataGenerationInput):
             self.gaussian_noise = False
 
             self.create_data(args)
+
+    def create_data(self, args):
+        super().create_data(args)
+        # check if there are nan's in the asd, if there are shift the detector segment used to generate the psd to an earlier time
+        for ifo in self.interferometers:
+            frequency_array = ifo.strain_data.frequency_array
+            asd = ifo.power_spectral_density.get_amplitude_spectral_density_array(
+                frequency_array
+            )
+
+            if np.any(np.isnan(asd)):
+                if args.shift_segment_for_psd_generation_if_nan:
+                    window = {
+                        "type": "tukey",
+                        "roll_off": self.tukey_roll_off,
+                        "T": self.duration,
+                        "f_s": self.sampling_frequency,
+                    }
+                    psd_array = download_psd(
+                        ifo.name,
+                        self.start_time + self.psd_start_time,
+                        self.psd_duration,
+                        window,
+                        self.sampling_frequency,
+                    )
+                    psd = PowerSpectralDensity(
+                        frequency_array=frequency_array, psd_array=psd_array
+                    )
+                    ifo.power_spectral_density = psd
+                else:
+                    logger.critical(
+                        f"""Nan encountered in strain data for PSD estimation for detector {ifo.name}. 
+                    Specify --shift-segment-for-psd-generation-if-nan to shift PSD segement to an earlier time without Nans. """
+                    )
+                    raise
 
     def save_hdf5(self):
         """
