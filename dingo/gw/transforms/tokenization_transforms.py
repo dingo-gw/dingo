@@ -20,6 +20,7 @@ class StrainTokenization(object):
         domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
         num_tokens_per_block: int = None,
         token_size: int = None,
+        normalize_frequency: bool = False,
         print_output: bool = True,
     ):
         """
@@ -36,6 +37,7 @@ class StrainTokenization(object):
         print_output: bool
             Whether to write print statements to the console.
         """
+        assert normalize_frequency is False
         if num_tokens_per_block is not None and token_size is not None:
             raise ValueError("Cannot specify both num_tokens and token_size.")
 
