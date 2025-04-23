@@ -64,7 +64,7 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
     pm_embeddings = PosteriorModel(train_settings['data']['posterior_model'], device=device)
 
     # for debug purposes
-    pm_embeddings.metadata['train_settings']['data']['waveform_dataset_path'] = '/mnt/lustre2/gravitational_waves/kleyde/dingo_population/waveform_datasets/waveform_test.hdf5'
+    # pm_embeddings.metadata['train_settings']['data']['waveform_dataset_path'] = '/mnt/lustre2/gravitational_waves/kleyde/dingo_population/waveform_datasets/waveform_test.hdf5'
 
     # read for which parameters we want to fit the embedding emulator
     # if 'params_for_embedding' in train_settings['data']:
