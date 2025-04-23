@@ -126,27 +126,25 @@ class PowerLawPeakPopulation(object):
 
     def get_event_generator(self, p, kwargs_selection_cut={}):
         cosmology = FlatLambdaCDM(Om0=0.3, H0=p["hubble_constant"])
-        prior = PriorDict(
-            {
-                "mass_1_source_q": PowerLawPeak(
-                    alpha=-p["alpha"],
-                    minimum=p["minimum_mass"],
-                    maximum=p["maximum_mass"],
-                    delta=p["delta"],
-                    lam=p["lam"],
-                    mu=p["mu"],
-                    sigma=p["sigma"],
-                    beta=p["beta"],
-                    qlow=0.125,
-                ),
-                "luminosity_distance": UniformSourceFrame(
-                    minimum=self.minimum_distance,
-                    maximum=self.maximum_distance,
-                    cosmology=cosmology,
-                    name="luminosity_distance",
-                ),
-            },
+        prior_mass = PowerLawPeak(
+            alpha=-p["alpha"],
+            minimum=p["minimum_mass"],
+            maximum=p["maximum_mass"],
+            delta=p["delta"],
+            lam=p["lam"],
+            mu=p["mu"],
+            sigma=p["sigma"],
+            beta=p["beta"],
+            qlow=0.125,
         )
+        prior_luminosity_distance = PriorDict({
+            "luminosity_distance": UniformSourceFrame(
+                minimum=self.minimum_distance,
+                maximum=self.maximum_distance,
+                cosmology=cosmology,
+                name="luminosity_distance",
+            )
+        })
 
         # We use the PyCBC class DistToZ, which is much faster than using the astropy
         # function for z(d_L) directly, since it interpolates.
@@ -162,10 +160,10 @@ class PowerLawPeakPopulation(object):
         # slow to construct, so we should avoid doing so repeatedly for each set of
         # hyperparameters.
         def generation_func(size, buffer_factor=2, train=False):
-            s0 = prior.sample(buffer_factor * size)
+            masses = prior_mass.sample(size=buffer_factor * size)
+            s0 = prior_luminosity_distance.sample(buffer_factor * size)
             s={}
-            s["mass_1_source"]=s0["mass_1_source_q"][0]
-            s["mass_2_source"]=s0["mass_1_source_q"][1]*s0["mass_1_source_q"][0]
+            s["mass_1_source"], s["mass_2_source"] = masses[0], masses[1]
             s["luminosity_distance"] = s0["luminosity_distance"]
             s["redshift"] = dist_to_z.get_redshift(s0["luminosity_distance"])
             for k in ["mass_1", "mass_2"]:
@@ -178,7 +176,10 @@ class PowerLawPeakPopulation(object):
             s["mass_ratio"] = component_masses_to_mass_ratio(s["mass_1"], s["mass_2"])
 
             if not train:
-                add_log_prob(prior, s)
+                pass
+                # TODO implement
+                # add_log_prob(prior_mass, s0)
+                # add_log_prob(prior_luminosity_distance, s)
 
             idx_obs = selection_cut_func(s)
 
