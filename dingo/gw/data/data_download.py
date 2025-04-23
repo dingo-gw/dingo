@@ -3,9 +3,28 @@ import numpy as np
 from gwpy.timeseries import TimeSeries
 import pycbc.psd
 import math
+import time
+import random
 
 from bilby_pipe.utils import logger
 from dingo.gw.gwutils import get_window
+
+
+def robust_fetch_open_data(
+    det: str, time_start: float, time_end: float, sample_rate: float, retries: int = 5
+):
+    for attempt in range(retries):
+        try:
+            return TimeSeries.fetch_open_data(
+                det, time_start, time_end, sample_rate=sample_rate, cache=True
+            )
+        except Exception as e:
+            wait = 2**attempt + random.random()
+            logger.warning(
+                f"Retrying ({attempt+1}/{retries}) in {wait:.1f}s due to: {e}"
+            )
+            time.sleep(wait)
+    raise RuntimeError(f"Maximal number of retries exceeded.")
 
 
 def download_psd(
@@ -43,9 +62,7 @@ def download_psd(
     # download strain data for psd
     # print("Downloading strain data for PSD estimation.", end=" ")
     time_end = time_start + time_psd
-    psd_strain = TimeSeries.fetch_open_data(
-        det, time_start, time_end, sample_rate=f_s, cache=True
-    )
+    psd_strain = robust_fetch_open_data(det, time_start, time_end, sample_rate=f_s)
 
     # if strain for PSD data contains nan, shift segment for PSD
     if np.any(np.isnan(psd_strain)):
@@ -60,7 +77,7 @@ def download_psd(
             dt = math.ceil(np.where(np.isnan(psd_strain))[0][-1] / f_s)
             dt_total += dt
             logger.info(f"Shifting strain segment by {dt_total} seconds. ")
-            psd_strain = TimeSeries.fetch_open_data(
+            psd_strain = robust_fetch_open_data(
                 det, time_start + dt_total, time_end + dt_total, sample_rate=f_s
             )
             contains_nan = np.any(np.isnan(psd_strain))

@@ -1,5 +1,7 @@
 import os
+import random
 import sys
+import time
 
 from bilby.gw.detector.psd import PowerSpectralDensity
 from bilby_pipe.input import Input
@@ -165,7 +167,26 @@ class DataGenerationInput(BilbyDataGenerationInput):
             self.create_data(args)
 
     def create_data(self, args):
-        super().create_data(args)
+        # Try downloading data multiple times to prevent failure from network/server time out
+        retries = 5
+        for attempt in range(retries):
+            start = time.time()
+            try:
+                super().create_data(args)
+                break
+            except Exception as e:
+                if attempt == retries - 1:
+                    raise e
+                else:
+                    duration = time.time() - start
+                    logger.info(f"Data fetch took {duration:.2f} seconds. ")
+                    wait = 2**attempt + random.random()
+                    logger.info(
+                        f"Creating data failed after {duration:.2f}s. Retrying attempt "
+                        f"({attempt + 1}/{retries}) in {wait:.1f}s due to: {e} "
+                    )
+                    time.sleep(wait)
+
         # check if there are nan's in the asd, if there are shift the detector segment used to generate the psd to an earlier time
         for ifo in self.interferometers:
             frequency_array = ifo.strain_data.frequency_array
