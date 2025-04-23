@@ -163,7 +163,8 @@ class PowerLawPeakPopulation(object):
             masses = prior_mass.sample(size=buffer_factor * size)
             s0 = prior_luminosity_distance.sample(buffer_factor * size)
             s={}
-            s["mass_1_source"], s["mass_2_source"] = masses[0], masses[1]
+            s["mass_1_source"], mass_ratio = masses[0], masses[1]
+            s["mass_2_source"] = s['mass_1_source'] * mass_ratio
             s["luminosity_distance"] = s0["luminosity_distance"]
             s["redshift"] = dist_to_z.get_redshift(s0["luminosity_distance"])
             for k in ["mass_1", "mass_2"]:
@@ -173,7 +174,7 @@ class PowerLawPeakPopulation(object):
             # things like total mass, symmetric mass ratio, because they don't tend to
             # occur in our code. But this is something to watch for.
             s["chirp_mass"] = component_masses_to_chirp_mass(s["mass_1"], s["mass_2"])
-            s["mass_ratio"] = component_masses_to_mass_ratio(s["mass_1"], s["mass_2"])
+            s["mass_ratio"] = mass_ratio
 
             if not train:
                 pass
