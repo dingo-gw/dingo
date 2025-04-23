@@ -1,12 +1,20 @@
+from typing import Union
 import numpy as np
 from gwpy.timeseries import TimeSeries
 import pycbc.psd
 import math
 
+from bilby_pipe.utils import logger
 from dingo.gw.gwutils import get_window
 
 
-def download_psd(det, time_start, time_psd, window, f_s):
+def download_psd(
+    det: str,
+    time_start: float,
+    time_psd: float,
+    window: Union[np.ndarray, dict],
+    f_s: float,
+) -> np.ndarray:
     """
     Download strain data and generate a PSD based on these. Use num_segments of length
     time_segment, starting at GPS time time_start.
@@ -41,18 +49,31 @@ def download_psd(det, time_start, time_psd, window, f_s):
 
     # if strain for PSD data contains nan, shift segment for PSD
     if np.any(np.isnan(psd_strain)):
-        dt = math.ceil(np.where(np.isnan(psd_strain))[0][-1] / f_s)
-        print(
-            f"Nan encountered in strain data for PSD estimation for detector {det}. "
-            f"Shifting strain segment by {dt} seconds."
+        logger.info(
+            f"NaN encountered in strain data for PSD estimation for detector {det}. "
+            f"Shifting strain segment to find segment without NaNs. "
         )
-        psd_strain = TimeSeries.fetch_open_data(
-            det, time_start + dt, time_end + dt, sample_rate=f_s, cache=True
-        )
-        if np.any(np.isnan(psd_strain)):
-            raise ValueError(
-                f"Nan encountered in strain data for PSD estimation for detector {det}."
+        dt_total = 0.0
+        contains_nan = True
+        count = 0
+        while contains_nan:
+            dt = math.ceil(np.where(np.isnan(psd_strain))[0][-1] / f_s)
+            dt_total += dt
+            logger.info(f"Shifting strain segment by {dt_total} seconds. ")
+            psd_strain = TimeSeries.fetch_open_data(
+                det, time_start + dt_total, time_end + dt_total, sample_rate=f_s
             )
+            contains_nan = np.any(np.isnan(psd_strain))
+            if not contains_nan:
+                logger.info(
+                    f"Found PSD without NaNs for detector {det} after shifting strain by {dt_total} seconds."
+                )
+                break
+            if count > 10:
+                raise ValueError(
+                    f"Shifted strain segment for {det} by {dt_total} seconds, but could not find PSD without NaN."
+                )
+            count += 1
 
     psd_strain = psd_strain.to_pycbc()
 
