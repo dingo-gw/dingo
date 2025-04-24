@@ -11,7 +11,7 @@ except (ModuleNotFoundError, ImportError) as e:
 
 class PowerLawPeak(bilby.core.prior.Prior):
 
-    def __init__(self, alpha, minimum, maximum, delta, lam, mu, sigma, beta, mlow=2., mhigh=100., qlow=None, qhigh=1.,name=None, latex_label=None,unit=None, boundary=None):
+    def __init__(self, alpha, minimum, maximum, delta, lam, mu, sigma, beta, mlow=2., mhigh=100., qlow=0.05, qhigh=1.,name=None, latex_label=None,unit=None, boundary=None):
         """Power law with bounds and alpha, spectral index
 
         Parameters
@@ -71,11 +71,11 @@ class PowerLawPeak(bilby.core.prior.Prior):
         if size is None:
             size=1
 
-        # print(self.params)
-
-        x1s=pdfs.draw_power_law_peak(self.params,size=size,xlow=self.mlow,xhigh=self.mhigh)
-
-        x2s=pdfs.draw_power_law_smooth_conditioned(self.params,x1s,size=size,xlow=self.qlow,xhigh=self.qhigh)
+        x1s, x2s = pdfs.draw_joint_powerlaw_peak(
+            self.params, size=size, 
+            mlow=self.mlow, mhigh=self.mhigh, 
+            qlow=self.qlow, qhigh=self.qhigh,
+        )
 
         return x1s,x2s
 

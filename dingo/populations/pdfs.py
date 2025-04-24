@@ -306,3 +306,60 @@ def draw_power_law_smooth_conditioned(params,x0,size=1,xlow=None,xhigh=1.):
         return samples[0]
     else:
         return samples
+
+
+def get_joint_pdf(params, mlow=2., mhigh=100., qlow=0.05, qhigh=1.0, ngrid=3000):
+
+    # 1. Build 2D grid
+    m1_grid = np.linspace(mlow, mhigh, 2 * ngrid)
+    q_grid = np.linspace(qlow, qhigh, ngrid)
+    m1_mesh, q_mesh = np.meshgrid(m1_grid, q_grid, indexing='ij')  # shape (2 * ngrid, ngrid)
+
+    # 2. Compute joint PDF: p(m1) * p(q | m1)
+    p_m1 = pdf_not_norm_power_law_peak(m1_mesh, params, xlow=mlow, xhigh=mhigh)  # shape (2 * ngrid, ngrid)
+    p_m1 = p_m1 / np.trapz(p_m1, x=m1_grid, axis=0)[None,:]  # Normalize along the m1 dimension
+
+    p_q_given_m1 = pdf_not_norm_power_law_smooth_conditioned(q_mesh, m1_mesh, params, xlow=qlow, xhigh=qhigh)
+
+    norm_m1 = np.trapz(p_q_given_m1, x=q_grid, axis=1)  # shape (2 * ngrid,)
+
+    norm_m1[norm_m1 == 0] = 1e-12  # Avoid division by zero
+
+    p_q_given_m1 /= norm_m1[:,None]
+
+    joint_pdf = p_m1 * p_q_given_m1  # shape (2 * ngrid, ngrid)
+
+    return joint_pdf, m1_grid, q_grid
+
+
+def draw_joint_powerlaw_peak(
+        params, size=1, 
+        mlow=2., mhigh=100., 
+        qlow=0.05, qhigh=1.0, 
+        ngrid=4000
+    ):
+    """
+    Vectorized joint sampler for (m1, q) using inverse transform sampling.
+
+    Returns:
+        m1s: array of shape (size,)
+        qvals: array of shape (size,)
+    """
+
+    joint_pdf, m1_grid, q_grid = get_joint_pdf(params, mlow, mhigh, qlow, qhigh, ngrid)
+    
+    # return m1_grid, q_grid, joint_pdf
+    
+    joint_cdf = np.cumsum(joint_pdf.ravel())
+    joint_cdf /= joint_cdf[-1]  # Normalize the CDF
+
+    # 4. Inverse transform sampling
+    u = np.random.rand(size)
+    idx_flat = np.searchsorted(joint_cdf, u)
+
+    # 5. Convert flat indices to 2D indices
+    i_m1, i_q = np.unravel_index(idx_flat, (len(m1_grid), len(q_grid)))
+    m1s = m1_grid[i_m1]
+    qvals = q_grid[i_q]
+
+    return m1s if size > 1 else m1s[0], qvals if size > 1 else qvals[0]
