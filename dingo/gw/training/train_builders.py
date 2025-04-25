@@ -208,7 +208,6 @@ def set_train_transforms(
 
     try:
         num_tokens = data_settings["tokenization"].get("num_tokens", None)
-        token_size = data_settings["tokenization"].get("token_size", None)
         norm_freq = data_settings["tokenization"].get(
             "normalize_frequency_for_positional_encoding", False
         )
@@ -216,7 +215,10 @@ def set_train_transforms(
             StrainTokenization(
                 domain=domain,
                 num_tokens_per_block=num_tokens,
-                token_size=token_size,
+                token_size=data_settings["tokenization"].get("token_size", None),
+                drop_last_token=data_settings["tokenization"].get(
+                    "drop_last_token", False
+                ),
                 print_output=print_output,
             )
         )

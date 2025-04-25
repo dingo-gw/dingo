@@ -22,6 +22,7 @@ class StrainTokenization(object):
         token_size: int = None,
         normalize_frequency: bool = False,
         single_tokenizer: bool = False,
+        drop_last_token: bool = False,
         print_output: bool = True,
     ):
         """
@@ -35,6 +36,8 @@ class StrainTokenization(object):
         token_size: int
             Number of frequency bins per token. It is necessary to specify one of
             num_tokens or token_size. [Optional]
+        drop_last_token: bool
+            Whether to drop the last token of each block if it is incomplete. False pads the last token with zeros.
         print_output: bool
             Whether to write print statements to the console.
         """
@@ -42,16 +45,31 @@ class StrainTokenization(object):
         if num_tokens_per_block is not None and token_size is not None:
             raise ValueError("Cannot specify both num_tokens and token_size.")
 
+        self.drop_last_token = drop_last_token
         num_f = domain.frequency_mask_length
         if num_tokens_per_block is not None:
-            self.num_bins_per_token = np.ceil(num_f / num_tokens_per_block).astype(int)
+            if num_f % num_tokens_per_block != 0:
+                self.num_bins_per_token = np.ceil(num_f / num_tokens_per_block).astype(
+                    int
+                )
+                if self.drop_last_token:
+                    num_tokens_per_block -= 1
+            else:
+                self.num_bins_per_token = int(num_f / num_tokens_per_block)
         elif token_size is not None:
             self.num_bins_per_token = token_size
-            num_tokens_per_block = np.ceil(num_f / self.num_bins_per_token).astype(int)
+            if num_f % self.num_bins_per_token != 0:
+                if self.drop_last_token:
+                    num_tokens_per_block = np.floor(num_f / token_size).astype(int)
+                else:
+                    num_tokens_per_block = np.ceil(num_f / token_size).astype(int)
+            else:
+                num_tokens_per_block = int(num_f / token_size)
         else:
             raise ValueError(
                 "It is necessary to specify either num_tokens or token_size."
             )
+
         # We assume that we have the same f_min, f_max, and delta_f for all data points in the batch
         if isinstance(domain, UniformFrequencyDomain):
             assert isinstance(domain.delta_f, float), (
@@ -72,7 +90,12 @@ class StrainTokenization(object):
         self.f_max_per_token = domain.sample_frequencies[
             domain.min_idx + self.num_bins_per_token - 1 :: self.num_bins_per_token
         ][:num_tokens_per_block]
-        if len(self.f_min_per_token) != len(self.f_max_per_token):
+
+        self.num_padded_f_bins = 0.0
+        if (
+            len(self.f_min_per_token) > len(self.f_max_per_token)
+            and not self.drop_last_token
+        ):
             # Extrapolate last band
             f_token_widths = self.num_bins_per_token * delta_fs
             f_max_pad = self.f_max_per_token[-1] + f_token_widths[-1]
@@ -80,8 +103,7 @@ class StrainTokenization(object):
             self.num_padded_f_bins = int(
                 (f_max_pad - domain.sample_frequencies[-1]) / delta_fs[-1]
             )
-        else:
-            self.num_padded_f_bins = 0
+
         if not (
             num_tokens_per_block
             == len(self.f_min_per_token)
@@ -91,18 +113,30 @@ class StrainTokenization(object):
                 "f_min_per_token and f_max_per_token are not of length num_tokens_per_block."
             )
         self.num_tokens_per_detector = num_tokens_per_block
+        # Ensure that tokenization is compatible with the position of the MFD nodes
+        if isinstance(domain, MultibandedFrequencyDomain):
+            check_compatibility_of_mfd_nodes_with_tokenization(
+                f_mins=self.f_min_per_token,
+                f_maxs=self.f_max_per_token,
+                mfd_nodes=domain.nodes,
+                drop_last_token=self.drop_last_token,
+            )
 
         if print_output:
             print(
                 f"Tokenization:\n"
-                f"    - Token width {self.num_bins_per_token} frequency bins; {num_tokens_per_block} "
+                f"    - Token width: {self.num_bins_per_token} frequency bins; {num_tokens_per_block} "
                 f"tokens per detector\n"
+                f"    - Dropping last incomplete token: {self.drop_last_token}\n"
                 f"    - First token width {self.f_min_per_token[1] - self.f_min_per_token[0]} "
                 f"Hz\n"
                 f"    - Last token width {self.f_min_per_token[-1] - self.f_min_per_token[-2]} "
                 f"Hz\n"
-                f"    - Extrapolating to maximum frequency of {self.f_max_per_token[-1]} Hz"
             )
+            if self.num_padded_f_bins > 0:
+                print(
+                    f"    - Extrapolating to maximum frequency of {self.f_max_per_token[-1]} Hz"
+                )
 
     def __call__(self, input_sample):
         """
@@ -136,18 +170,26 @@ class StrainTokenization(object):
         """
         sample = input_sample.copy()
 
-        # Pad last dimension
-        pad_width = [
-            (
-                (0, 0)
-                if i < len(sample["waveform"].shape) - 1
-                else (0, self.num_padded_f_bins)
-            )
-            for i in range(len(sample["waveform"].shape))
-        ]
-        strain = np.pad(sample["waveform"], pad_width, "constant")
-        # Reshape strain to shape [seq_length, num_features]
+        # Reshape strain from shape [batch_size, num_blocks, num_channels, num_bins] to [seq_length, num_features]
         # = [num_blocks * num_tokens_per_detector, num_channels * num_bins_per_token]
+        # (0) Cut/Pad num_bins such that it is compatible with num_tokens_per_detector * num_bins_per_token
+        if self.num_padded_f_bins == 0:
+            # Only take bins that fit into the tokens
+            strain = sample["waveform"][
+                ..., : self.num_tokens_per_detector * self.num_bins_per_token
+            ]
+        else:
+            # Pad last dimension with 0.
+            pad_width = [
+                (
+                    (0, 0)
+                    if i < len(sample["waveform"].shape) - 1
+                    else (0, self.num_padded_f_bins)
+                )
+                for i in range(len(sample["waveform"].shape))
+            ]
+            strain = np.pad(sample["waveform"], pad_width, "constant")
+
         num_blocks, num_channels = strain.shape[-3], strain.shape[-2]
         # (1) Reshape strain from [..., num_bins] to [..., num_tokens_per_detector, num_bins_per_token]
         # This step divides the frequency range into equal segments of num_bins_per_token and stacks these segments,
@@ -175,21 +217,25 @@ class StrainTokenization(object):
             num_blocks * self.num_tokens_per_detector,
             num_channels * self.num_bins_per_token,
         )
+
         # Prepare position information for each token
         if strain.shape[:-4] == ():
             detectors = np.array(
-                [[DETECTOR_DICT[k] for k, v in input_sample["asds"].items()]]
+                [[DETECTOR_DICT[k] for k, v in input_sample["asds"].items()]],
+                dtype=strain.dtype,
             )
         else:
             detectors = np.array(
                 [
                     [DETECTOR_DICT[k] for _ in range(len(v))]
                     for k, v in input_sample["asds"].items()
-                ]
+                ],
+                dtype=strain.dtype,
             ).T
-
         num_tokens = num_blocks * self.num_tokens_per_detector
-        token_position = np.empty((*strain.shape[:-4], num_tokens, 3))
+        token_position = np.empty(
+            (*strain.shape[:-4], num_tokens, 3), dtype=strain.dtype
+        )
         # Treat sample without batch dimension separately because repeat with repeats=() throws error
         if strain.shape[:-4] == ():
             token_position[..., 0] = np.tile(self.f_min_per_token, num_blocks)
@@ -208,7 +254,7 @@ class StrainTokenization(object):
         token_position[..., 2] = np.repeat(
             detectors, self.num_tokens_per_detector, axis=1
         )
-        sample["position"] = token_position.astype(sample["waveform"].dtype)
+        sample["position"] = token_position
         # Convention of torch transformer: positions with a True value are not allowed to participate in the attention
         # see https://pytorch.org/docs/stable/generated/torch.nn.Transformer.html#torch.nn.Transformer
         sample["drop_token_mask"] = np.zeros(
@@ -216,6 +262,53 @@ class StrainTokenization(object):
         )
 
         return sample
+
+
+def check_compatibility_of_mfd_nodes_with_tokenization(
+    f_mins: np.array, f_maxs: np.array, mfd_nodes: np.array, drop_last_token: bool
+):
+    """
+    Check whether the nodes of the multibanded frequency domain are located between tokens. This means that for token
+    frequencies $[f_\mathrm{min}^{(i)}, f_\mathrm{max}^{(i)}]$, the nodes have to be located in
+    $[f_\mathrm{max}^{(i)}, f_\mathrm{min}^{(i+1)}]$.
+
+    This is required since we have to make sure that the strain values within one token are equally spaced
+    (i.e., same $\Delta f$).
+
+    Parameters
+    ----------
+    f_mins: np.array
+        f_min for all tokens of a single detector. shape (num_tokens,)
+    f_maxs: np.array
+        f_max for all tokens of a single detector. shape (num_tokens,)
+    mfd_nodes: np.array
+        Nodes of multibanded frequency domain
+    drop_last_token: bool
+        Whether the last token was dropped or not. If False, the last node can appear within the frequency range of the
+        last token.
+    """
+
+    # Construct left and right bounds for intervals
+    left_bounds = np.concatenate([[0], f_maxs[:-1]])
+    right_bounds = f_mins
+    intervals = np.stack([left_bounds, right_bounds], axis=1)
+
+    # Check that each node is in one interval
+    covered = np.any(
+        (mfd_nodes[:, None] >= intervals[:, 0])
+        & (mfd_nodes[:, None] <= intervals[:, 1]),
+        axis=1,
+    )
+
+    # Last node can be larger than last f_max or node can be located in the last token if we extrapolate the last token
+    if not covered[-1] and (mfd_nodes[~covered][0] > f_maxs[-1] or not drop_last_token):
+        covered[-1] = True
+
+    if not np.all(covered):
+        raise ValueError(
+            f"Nodes of MFD {mfd_nodes} are not compatible with tokenization, nodes {mfd_nodes[~covered]} fall within "
+            f"a token."
+        )
 
 
 class DropDetectors(object):

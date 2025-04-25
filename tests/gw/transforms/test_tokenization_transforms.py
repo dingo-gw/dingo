@@ -84,10 +84,40 @@ def strain_tokenization_setup_single_batch():
 
 @pytest.fixture
 def strain_tokenization_setup_mfd():
-    num_tokens_per_block = 20
-    nodes = [20.0, 34.0, 46.0, 62.0, 78.0, 990.0]
+    num_tokens_per_block = 43  # Fits exactly, no truncation/extrapolation necessary
+    nodes = [20.0, 34.0, 46.0, 62.0, 78.0, 1038.0]
     f_min = 20.0
-    f_max = 990.0
+    f_max = 1038.0
+    T = 8.0
+    base_domain = UniformFrequencyDomain(f_min=f_min, f_max=f_max, delta_f=1 / T)
+    domain = MultibandedFrequencyDomain(
+        nodes=nodes, delta_f_initial=1 / T, base_domain=base_domain
+    )
+    num_f = domain.frequency_mask_length
+
+    batch_size = 100
+    waveform_h1 = np.zeros([batch_size, 1, 3, num_f])
+    waveform_l1 = np.ones([batch_size, 1, 3, num_f])
+    # Set real part of second detector to linearly increasing values
+    waveform_l1[0, 0, 0, :] *= np.arange(1, num_f + 1)
+    waveform = np.concatenate([waveform_h1, waveform_l1], axis=-3)
+    num_blocks = waveform.shape[-3]
+    asds = {
+        "H1": np.random.random([batch_size, num_f]),
+        "L1": np.random.random([batch_size, num_f]),
+    }
+
+    sample = {"waveform": waveform, "asds": asds}
+
+    return domain, num_tokens_per_block, num_blocks, sample
+
+
+@pytest.fixture
+def strain_tokenization_setup_mfd_drop_last_token():
+    num_tokens_per_block = 43  # Fits exactly, no truncation/extrapolation necessary
+    nodes = [20.0, 34.0, 46.0, 62.0, 78.0, 1038.0]
+    f_min = 20.0
+    f_max = 1040.0
     T = 8.0
     base_domain = UniformFrequencyDomain(f_min=f_min, f_max=f_max, delta_f=1 / T)
     domain = MultibandedFrequencyDomain(
@@ -174,8 +204,12 @@ def test_StrainTokenization(request, setup):
             num_tokens_per_block,
         )
     ]
-    # Check that f_max of each detector is larger equal domain.f_max
-    assert all([np.all(out["position"][..., i, 1] >= domain.f_max) for i in inds_f_max])
+    # Check that f_max of each detector is larger equal domain.f_max - delta_f
+    if isinstance(domain, MultibandedFrequencyDomain):
+        f_max_check = domain.f_max - domain.delta_f[-1]
+    else:
+        f_max_check = domain.f_max - domain.delta_f
+    assert all([np.all(out["position"][..., i, 1] >= f_max_check) for i in inds_f_max])
     # Check that block information contains correct number of blocks
     assert len(np.unique(out["position"][..., 2])) == num_blocks
     # Check that block encodings are stacked as one block after the other
@@ -264,8 +298,12 @@ def test_StrainTokenization_token_size(request, setup):
             num_tokens_per_block,
         )
     ]
-    # Check that f_max of each detector is larger equal domain.f_max
-    assert all([np.all(out["position"][..., i, 1] >= domain.f_max) for i in inds_f_max])
+    # Check that f_max of each detector is larger equal domain.f_max - delta_f
+    if isinstance(domain, MultibandedFrequencyDomain):
+        f_max_check = domain.f_max - domain.delta_f[-1]
+    else:
+        f_max_check = domain.f_max - domain.delta_f
+    assert all([np.all(out["position"][..., i, 1] >= f_max_check) for i in inds_f_max])
     # Check that block information contains correct number of blocks
     assert len(np.unique(out["position"][..., 2])) == num_blocks
     # Check that block encodings are stacked as one block after the other
@@ -288,6 +326,57 @@ def test_StrainTokenization_token_size(request, setup):
     assert out["drop_token_mask"].shape[-1] == num_tokens_per_block * num_blocks
     # Check that mask default value is False for all tokens (i.e., drop no tokens)
     assert out["drop_token_mask"].all() == False
+
+
+@pytest.mark.parametrize(
+    "setup",
+    [
+        "strain_tokenization_setup",
+        "strain_tokenization_setup_no_batch",
+        "strain_tokenization_setup_single_batch",
+        "strain_tokenization_setup_mfd",
+        "strain_tokenization_setup_mfd_drop_last_token",
+    ],
+)
+def test_StrainTokenization_drop_last_token(request, setup):
+    # transform should also work when specifying a token_size (instead of num_tokens_per_block)
+    domain, num_tokens_per_block, num_blocks, sample = request.getfixturevalue(setup)
+    token_size = int(np.ceil(domain.frequency_mask_length / num_tokens_per_block))
+    requires_drop_last_token = (
+        True if domain.frequency_mask_length % num_tokens_per_block != 0 else False
+    )
+    if requires_drop_last_token:
+        expected_number_of_tokens = (num_tokens_per_block - 1) * num_blocks
+    else:
+        expected_number_of_tokens = num_tokens_per_block * num_blocks
+
+    # ---------- (1) num_tokens_per_block ----------
+    # Initialize StrainTokenization transform
+    token_transformation = StrainTokenization(
+        domain,
+        num_tokens_per_block=num_tokens_per_block,
+        drop_last_token=True,
+    )
+    # Evaluate StrainTokenization transform
+    out = token_transformation(sample)
+
+    # Check that number of tokens is consistent with requires_drop_last_token
+    num_tokens = out["waveform"].shape[-2]
+    assert num_tokens == expected_number_of_tokens
+
+    # ---------- (2) token_size ----------
+    # Initialize StrainTokenization transform
+    token_transformation = StrainTokenization(
+        domain,
+        token_size=token_size,
+        drop_last_token=True,
+    )
+    # Evaluate StrainTokenization transform
+    out = token_transformation(sample)
+
+    # Check that number of tokens is consistent with requires_drop_last_token
+    num_tokens = out["waveform"].shape[-2]
+    assert num_tokens == expected_number_of_tokens
 
 
 @pytest.mark.parametrize(
@@ -483,7 +572,7 @@ def test_DropFrequenciesToUpdateRange(request, setup):
             rtol=0.1,
         )
 
-        # Check that we sample the cut frequencies uniformly in UFD
+        # Check that we sample the cut frequencies uniformly in UFD / uniformly in MFD bands
         # Make sure to only consider bins that are completely in [f_min, f_max_lower] and [f_min_upper, f_max]
         # => remove tokens at border
         edge_mask_lower = mask_lower[..., :-1] & ~mask_lower[..., 1:]
@@ -518,15 +607,16 @@ def test_DropFrequenciesToUpdateRange(request, setup):
         assert np.all(num_tokens_masked_lower[1:] <= num_tokens_masked_lower[:-1])
         assert np.all(num_tokens_masked_upper[1:] >= num_tokens_masked_upper[:-1])
 
+        num_cuts_lower = np.apply_over_axes(
+            np.sum, np.array(edge_mask_lower_blocks), [0, 1]
+        ).squeeze()  # (num_tokens-1)
+        num_cuts_upper = np.apply_over_axes(
+            np.sum, np.array(edge_mask_upper_blocks), [0, 1]
+        ).squeeze()  # (num_tokens-1)
+
         if isinstance(domain, UniformFrequencyDomain):
             # We sample f_max_lower and f_min_upper in UFD, so we expect the masked edge tokens to be uniformly
             # distributed.
-            num_cuts_lower = np.apply_over_axes(
-                np.sum, np.array(edge_mask_lower_blocks), [0, 1]
-            ).squeeze()  # (num_tokens)
-            num_cuts_upper = np.apply_over_axes(
-                np.sum, np.array(edge_mask_upper_blocks), [0, 1]
-            ).squeeze()  # (num_tokens)
             non_zero_lower = num_cuts_lower[num_cuts_lower > 0.0]
             non_zero_upper = num_cuts_upper[num_cuts_upper > 0.0]
             if not non_zero_lower.size == 0:
@@ -541,19 +631,37 @@ def test_DropFrequenciesToUpdateRange(request, setup):
         elif isinstance(domain, MultibandedFrequencyDomain):
             # We expect tokens completely within [f_min, f_max_lower] and [f_min_upper, f_max]
             # AND with the same compression factor (i.e., tokens between the same nodes) to be masked with equal
-            # probability
-            tokens_in_first_band = np.where(
+            # probability.
+            # Lower cut
+            first_band_and_below_lower_cut = np.logical_and(
                 out["position"][0, :num_tokens_per_block, 1] < domain.nodes[1],
-                num_tokens_masked_lower,
-                0.0,
+                mask_lower[0, :],
             )
-            # FIX ME: I cannot test this at the moment because the nodes of the MFD domain do not coincide with the
-            # beginning of a token
-            # This means that some tokens contain strain values separated by different delta_f!
-            # tokens_in_second_band =
-            print(
-                "TODO: Implement test for distribution of frequency cut values in MFD"
+            non_zero_lower = num_cuts_lower[first_band_and_below_lower_cut[:-1]]
+            if not non_zero_lower.size == 0:
+                assert np.isclose(
+                    np.mean(non_zero_lower), non_zero_lower, atol=5, rtol=5
+                ).all()
+            second_band_and_below_lower_cut = np.logical_and(
+                out["position"][0, :num_tokens_per_block, 0] > domain.nodes[1],
+                out["position"][0, :num_tokens_per_block, 1] < domain.nodes[2],
+                mask_lower[0, :],
             )
+            non_zero_lower_2 = num_cuts_lower[second_band_and_below_lower_cut[:-1]]
+            if not non_zero_lower_2.size == 0:
+                assert np.isclose(
+                    np.mean(non_zero_lower_2), non_zero_lower_2, atol=5, rtol=5
+                ).all()
+            # Upper cut
+            last_band_and_above_upper_cut = np.logical_and(
+                out["position"][0, :num_tokens_per_block, 1] > domain.nodes[-2],
+                mask_upper[0, :],
+            )
+            non_zero_upper = num_cuts_upper[last_band_and_above_upper_cut[:-1]]
+            if not non_zero_upper.size == 0:
+                assert np.isclose(
+                    np.mean(non_zero_upper), non_zero_upper, atol=5, rtol=5
+                ).all()
 
 
 @pytest.mark.parametrize(
@@ -654,8 +762,23 @@ def test_DropFrequencyInterval(request, setup):
             prob_glitch, drop_dict["p_glitch_per_detector"], atol=0.1, rtol=0.1
         )
 
-        # Check that f_lower and f_upper are sampled uniformly in UFD between f_min and f_max
-        # Similarly complicated as in test above, TODO
+        mask_tokens = np.logical_and(
+            out["position"][0, :num_tokens_per_block, 0] > drop_dict["f_min"],
+            out["position"][0, :num_tokens_per_block, 1] < drop_dict["f_max"],
+        )
+        # Check that f_lower and f_upper are sampled uniformly in UFD / uniformly in MFD bands between f_min and f_max
+        if isinstance(domain, UniformFrequencyDomain):
+            # We sample the lower edge uniformly between f_min and f_max, so we expect the lower edge to be uniformly
+            # distributed.
+            lower_edge_counts = np.sum(edge_mask_lower, axis=0)
+            non_zero_lower = lower_edge_counts[mask_tokens]
+            if not non_zero_lower.size == 0:
+                assert np.isclose(
+                    np.mean(non_zero_lower), non_zero_lower, atol=5, rtol=5
+                ).all()
+
+            # Since the sampling range of f_max depends on the sampled f_min, it isn't straight forward to assume
+            # something about the statistics.
 
 
 @pytest.mark.parametrize(
