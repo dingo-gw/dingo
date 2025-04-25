@@ -11,7 +11,7 @@ from bilby.gw.prior import UniformSourceFrame
 from pycbc.cosmology import DistToZ
 import numpy as np
 
-from .power_law_peak_class import PowerLawPeak
+from .power_law_gaussian_pdfs import build_massprior_PowerLawPeak
 
 class PowerLawPopulation(object):
     """
@@ -126,17 +126,8 @@ class PowerLawPeakPopulation(object):
 
     def get_event_generator(self, p, kwargs_selection_cut={}):
         cosmology = FlatLambdaCDM(Om0=0.3, H0=p["hubble_constant"])
-        prior_mass = PowerLawPeak(
-            alpha=-p["alpha"],
-            minimum=p["minimum_mass"],
-            maximum=p["maximum_mass"],
-            delta=p["delta"],
-            lam=p["lam"],
-            mu=p["mu"],
-            sigma=p["sigma"],
-            beta=p["beta"],
-            qlow=0.125,
-        )
+        prior_mass = build_massprior_PowerLawPeak(p)
+
         prior_luminosity_distance = PriorDict({
             "luminosity_distance": UniformSourceFrame(
                 minimum=self.minimum_distance,
@@ -161,12 +152,13 @@ class PowerLawPeakPopulation(object):
         # hyperparameters.
         def generation_func(size, buffer_factor=2, train=False):
             masses = prior_mass.sample(size=buffer_factor * size)
-            s0 = prior_luminosity_distance.sample(buffer_factor * size)
+            luminosity_distance = prior_luminosity_distance.sample(buffer_factor * size)["luminosity_distance"]
             s={}
-            s["mass_1_source"], mass_ratio = masses[0], masses[1]
-            s["mass_2_source"] = s['mass_1_source'] * mass_ratio
-            s["luminosity_distance"] = s0["luminosity_distance"]
-            s["redshift"] = dist_to_z.get_redshift(s0["luminosity_distance"])
+            s["mass_1_source"], s["mass_2_source"] = masses[0], masses[1]
+
+            s["luminosity_distance"] = luminosity_distance
+            s["redshift"] = dist_to_z.get_redshift(s["luminosity_distance"])
+            
             for k in ["mass_1", "mass_2"]:
                 s[k] = s[k + "_source"] * (1 + s["redshift"])
             # IMPORTANT: We want all the mass parameters in order to avoid any problems
@@ -174,7 +166,7 @@ class PowerLawPeakPopulation(object):
             # things like total mass, symmetric mass ratio, because they don't tend to
             # occur in our code. But this is something to watch for.
             s["chirp_mass"] = component_masses_to_chirp_mass(s["mass_1"], s["mass_2"])
-            s["mass_ratio"] = mass_ratio
+            s["mass_ratio"] = component_masses_to_mass_ratio(s["mass_1"], s["mass_2"])
 
             if not train:
                 pass
