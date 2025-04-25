@@ -151,7 +151,7 @@ class PowerLawPeakPopulation(object):
         # slow to construct, so we should avoid doing so repeatedly for each set of
         # hyperparameters.
         def generation_func(size, buffer_factor=2, train=False):
-            masses = prior_mass.sample(size=buffer_factor * size)
+            masses = prior_mass.prior.sample(N=buffer_factor * size)
             luminosity_distance = prior_luminosity_distance.sample(buffer_factor * size)["luminosity_distance"]
             s={}
             s["mass_1_source"], s["mass_2_source"] = masses[0], masses[1]
