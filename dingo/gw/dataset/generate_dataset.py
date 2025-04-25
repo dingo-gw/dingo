@@ -14,6 +14,8 @@ from torchvision.transforms import Compose
 from bilby.gw.prior import BBHPriorDict
 
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
+from dingo.gw.domains import build_domain
+from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.SVD import ApplySVD, SVDBasis
 from dingo.gw.transforms import WhitenFixedASD
 from dingo.gw.waveform_generator import (
@@ -121,7 +123,7 @@ def train_svd_basis(dataset: WaveformDataset, size: int, n_train: int):
 
     # Since there is a possibility that the size of the dataset returned by
     # generate_parameters_and_polarizations is smaller than requested, we don't assume
-    # that there are n_test samples. Instead we just look at the size of the test
+    # that there are n_test samples. Instead, we just look at the size of the test
     # dataset.
     if test_data.size != 0:
         basis.compute_test_mismatches(
