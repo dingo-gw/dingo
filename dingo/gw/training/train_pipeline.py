@@ -28,7 +28,7 @@ from dingo.core.posterior_models.pretraining_model import (
 )
 from dingo.core.utils import (
     set_requires_grad_flag,
-    get_number_of_model_parameters,
+    print_number_of_model_parameters,
     build_train_and_test_loaders,
     document_git_status,
     document_environment,
@@ -595,10 +595,8 @@ def initialize_stage(
             set_requires_grad_flag(
                 pm.network, name_contains="layers_rb", requires_grad=True
             )
-    n_grad = get_number_of_model_parameters(pm.network, (True,))
-    n_nograd = get_number_of_model_parameters(pm.network, (False,))
     if print_output:
-        print(f"Fixed parameters: {n_nograd}\nLearnable parameters: {n_grad}\n")
+        print_number_of_model_parameters(network=pm.network)
 
     return train_loader, test_loader, train_sampler
 
