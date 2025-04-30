@@ -87,7 +87,7 @@ def ls():
             svd.print_validation_summary()
 
         elif dataset_type == "waveform_dataset":
-            waveform_dataset = WaveformDataset(file_name=args.file_name)
+            waveform_dataset = WaveformDataset(file_name=args.file_name, leave_waveforms_on_disk=True)
             print(f"Dingo version: {waveform_dataset.version}")
             print("\nWaveform dataset\n" + "================\n")
 
