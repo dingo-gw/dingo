@@ -1,13 +1,34 @@
 import numpy as np
 import pycbc.psd
 from gwpy.timeseries import TimeSeries
+import random
+import time
 
 from dingo.gw.domains import UniformFrequencyDomain
 from dingo.gw.gwutils import (
     get_window,
     get_window_factor,
 )
-from dingo.gw.data.data_download import robust_fetch_open_data
+
+
+def robust_fetch_open_data(
+    det: str,
+    time_start: float,
+    time_end: float,
+    sample_rate: float,
+    cache: bool = True,
+    retries: int = 5,
+):
+    for attempt in range(retries):
+        try:
+            return TimeSeries.fetch_open_data(
+                det, time_start, time_end, sample_rate=sample_rate, cache=cache
+            )
+        except Exception as e:
+            wait = 2**attempt + random.random()
+            print(f"Retrying ({attempt+1}/{retries}) in {wait:.1f}s due to: {e}")
+            time.sleep(wait)
+    raise RuntimeError(f"Maximal number of retries exceeded.")
 
 
 def estimate_single_psd(
@@ -56,16 +77,10 @@ def estimate_single_psd(
         psd_strain = TimeSeries.get(channel, time_start, time_end)
         # TODO: We currently assume that sample rate of channel matches that provided in the settings?
     else:
+        # psd_strain = TimeSeries.fetch_open_data(det, time_start, time_end, sample_rate=f_s, cache=False)
         psd_strain = robust_fetch_open_data(
-            det=channel,
-            time_start=time_start,
-            time_end=time_end,
-            sample_rate=f_s,
-            cache=False,
+            det, time_start, time_end, sample_rate=f_s, cache=False
         )
-        # psd_strain = TimeSeries.fetch_open_data(
-        #     det, time_start, time_end, sample_rate=f_s, cache=False
-        # )
     psd_strain = psd_strain.to_pycbc()
 
     # optionally generate window

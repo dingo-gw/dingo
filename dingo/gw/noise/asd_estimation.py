@@ -96,15 +96,20 @@ def download_and_estimate_psds(
                         "domain_dict": domain.domain_dict,
                     }
                 }
-                psd = estimate_single_psd(time_start=start, **estimation_kwargs)
-                asd = np.sqrt(psd[domain.min_idx : domain.max_idx + 1])
-                gps_time = start
+                try:
+                    psd = estimate_single_psd(time_start=start, **estimation_kwargs)
+                    asd = np.sqrt(psd[domain.min_idx : domain.max_idx + 1])
+                    gps_time = start
 
-                dataset_dict["asds"] = {det: np.array([asd])}
-                dataset_dict["gps_times"] = {det: np.array([gps_time])}
+                    dataset_dict["asds"] = {det: np.array([asd])}
+                    dataset_dict["gps_times"] = {det: np.array([gps_time])}
 
-                dataset = ASDDataset(dictionary=dataset_dict)
-                dataset.to_file(file_name=filename)
+                    dataset = ASDDataset(dictionary=dataset_dict)
+                    dataset.to_file(file_name=filename)
+                except Exception as e:
+                    print(
+                        f"Skipping time segment for {det}, start_time = {start}, end_time = {end} due to error: {e}"
+                    )
 
     return asd_filename_list
 
