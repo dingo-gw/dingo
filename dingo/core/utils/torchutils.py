@@ -143,7 +143,7 @@ def print_number_of_model_parameters(network: FlowWrapper | ContinuousFlow):
     else:
         print(
             "Cannot print more detailed information about the number of learnable parameters in different components"
-            "of the network because posterior model not in [NormalizingFlowPosteriorModel, ContinuousFlowPosteriorModel]."
+            "of the network because posterior model not in [FlowWrapper, ContinuousFlow]."
         )
 
 
