@@ -11,12 +11,17 @@ from dingo.gw.gwutils import get_window
 
 
 def robust_fetch_open_data(
-    det: str, time_start: float, time_end: float, sample_rate: float, retries: int = 5
+    det: str,
+    time_start: float,
+    time_end: float,
+    sample_rate: float,
+    cache: bool = True,
+    retries: int = 5,
 ):
     for attempt in range(retries):
         try:
             return TimeSeries.fetch_open_data(
-                det, time_start, time_end, sample_rate=sample_rate, cache=True
+                det, time_start, time_end, sample_rate=sample_rate, cache=cache
             )
         except Exception as e:
             wait = 2**attempt + random.random()
@@ -78,7 +83,11 @@ def download_psd(
             dt_total += dt
             logger.info(f"Shifting strain segment by {dt_total} seconds. ")
             psd_strain = robust_fetch_open_data(
-                det, time_start + dt_total, time_end + dt_total, sample_rate=f_s
+                det=det,
+                time_start=time_start + dt_total,
+                time_end=time_end + dt_total,
+                sample_rate=f_s,
+                cache=True,
             )
             contains_nan = np.any(np.isnan(psd_strain))
             if not contains_nan:

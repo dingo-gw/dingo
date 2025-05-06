@@ -7,6 +7,7 @@ from dingo.gw.gwutils import (
     get_window,
     get_window_factor,
 )
+from dingo.gw.data.data_download import robust_fetch_open_data
 
 
 def estimate_single_psd(
@@ -55,9 +56,16 @@ def estimate_single_psd(
         psd_strain = TimeSeries.get(channel, time_start, time_end)
         # TODO: We currently assume that sample rate of channel matches that provided in the settings?
     else:
-        psd_strain = TimeSeries.fetch_open_data(
-            det, time_start, time_end, sample_rate=f_s, cache=False
+        psd_strain = robust_fetch_open_data(
+            det=channel,
+            time_start=time_start,
+            time_end=time_end,
+            sample_rate=f_s,
+            cache=False,
         )
+        # psd_strain = TimeSeries.fetch_open_data(
+        #     det, time_start, time_end, sample_rate=f_s, cache=False
+        # )
     psd_strain = psd_strain.to_pycbc()
 
     # optionally generate window
@@ -177,7 +185,7 @@ def download_event_data_in_FD(
                 time_segment,
                 window,
                 num_segments_psd,
-                det=det
+                det=det,
             )
             ** 0.5
         )
