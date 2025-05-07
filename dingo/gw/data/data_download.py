@@ -81,23 +81,23 @@ def download_psd(
         while contains_nan:
             dt = math.ceil(np.where(np.isnan(psd_strain))[0][-1] / f_s)
             dt_total += dt
-            logger.info(f"Shifting strain segment by {dt_total} seconds. ")
+            logger.info(f"Shifting strain segment by -{dt_total} seconds. ")
             psd_strain = robust_fetch_open_data(
                 det=det,
-                time_start=time_start + dt_total,
-                time_end=time_end + dt_total,
+                time_start=time_start - dt_total,
+                time_end=time_end - dt_total,
                 sample_rate=f_s,
                 cache=True,
             )
             contains_nan = np.any(np.isnan(psd_strain))
             if not contains_nan:
                 logger.info(
-                    f"Found PSD without NaNs for detector {det} after shifting strain by {dt_total} seconds."
+                    f"Found PSD without NaNs for detector {det} after shifting strain by -{dt_total} seconds."
                 )
                 break
             if count > 10:
                 raise ValueError(
-                    f"Shifted strain segment for {det} by {dt_total} seconds, but could not find PSD without NaN."
+                    f"Shifted strain segment for {det} by -{dt_total} seconds, but could not find PSD without NaN."
                 )
             count += 1
 

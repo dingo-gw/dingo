@@ -202,12 +202,13 @@ class DataGenerationInput(BilbyDataGenerationInput):
                         "T": self.duration,
                         "f_s": self.sampling_frequency,
                     }
+                    # Comment: self.psd_start_time is defined as a negative value
                     psd_array = download_psd(
-                        ifo.name,
-                        self.start_time + self.psd_start_time,
-                        self.psd_duration,
-                        window,
-                        self.sampling_frequency,
+                        det=ifo.name,
+                        time_start=self.start_time + self.psd_start_time,
+                        time_psd=self.psd_duration,
+                        window=window,
+                        f_s=self.sampling_frequency,
                     )
                     psd = PowerSpectralDensity(
                         frequency_array=frequency_array, psd_array=psd_array
