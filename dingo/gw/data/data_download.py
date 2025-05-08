@@ -82,22 +82,62 @@ def download_psd(
             dt = math.ceil(np.where(np.isnan(psd_strain))[0][-1] / f_s)
             dt_total += dt
             logger.info(f"Shifting strain segment by -{dt_total} seconds. ")
-            psd_strain = robust_fetch_open_data(
-                det=det,
-                time_start=time_start - dt_total,
-                time_end=time_end - dt_total,
-                sample_rate=f_s,
-                cache=True,
-            )
-            contains_nan = np.any(np.isnan(psd_strain))
+            try:
+                psd_strain = robust_fetch_open_data(
+                    det=det,
+                    time_start=time_start - dt_total,
+                    time_end=time_end - dt_total,
+                    sample_rate=f_s,
+                    cache=True,
+                )
+                contains_nan = np.any(np.isnan(psd_strain))
+            except Exception as e:
+                logger.warning(f"Error: {e}")
+                contains_nan = True
             if not contains_nan:
                 logger.info(
                     f"Found PSD without NaNs for detector {det} after shifting strain by -{dt_total} seconds."
                 )
                 break
             if count > 10:
-                raise ValueError(
+                logger.warning(
                     f"Shifted strain segment for {det} by -{dt_total} seconds, but could not find PSD without NaN."
+                )
+            count += 1
+    # If no PSD was found, check whether there is a PSD available after the signal
+    if np.any(np.isnan(psd_strain)):
+        print(
+            f"No suitable PSD was found before the signal, trying to find PSD after the signal."
+        )
+        signal_start_time = time_start + np.abs(time_psd)
+        psd_end_time = signal_start_time + np.abs(time_psd)
+        dt_total = 0.0
+        contains_nan = True
+        count = 0
+        while contains_nan:
+            dt = math.ceil(np.where(np.isnan(psd_strain))[0][-1] / f_s)  # change this?
+            dt_total += dt
+            logger.info(f"Shifting strain segment by -{dt_total} seconds. ")
+            try:
+                psd_strain = robust_fetch_open_data(
+                    det=det,
+                    time_start=signal_start_time + dt_total,
+                    time_end=psd_end_time + dt_total,
+                    sample_rate=f_s,
+                    cache=True,
+                )
+                contains_nan = np.any(np.isnan(psd_strain))
+            except Exception as e:
+                logger.warning(f"Error: {e}")
+                contains_nan = True
+            if not contains_nan:
+                logger.info(
+                    f"Found PSD without NaNs for detector {det} after shifting strain by +{dt_total} seconds."
+                )
+                break
+            if count > 10:
+                raise ValueError(
+                    f"Shifted strain segment for {det} by +{dt_total} seconds, but could not find PSD without NaN."
                 )
             count += 1
 
