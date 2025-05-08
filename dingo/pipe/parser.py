@@ -439,6 +439,17 @@ def create_parser(top_level=True):
         ),
     )
     det_parser.add(
+        "--suppress",
+        default=None,
+        type=nonestr,
+        help=(
+            "Frequency range to suppress in the analysis, either list with "
+            "[f_min_range, f_max_range] which will be applied to all detectors, or "
+            "as a dictionary where the key(s) relate the detectors to frequency "
+            "ranges which should be excluded from the analysis, e.g. {L1: [50, 55]}."
+        )
+    )
+    det_parser.add(
         "--tukey-roll-off",
         # default=0.4,
         default=None,
@@ -1362,6 +1373,18 @@ def create_parser(top_level=True):
             "Dictionary of density-recovery-settings to pass in, e.g., {num_samples: "
             "400_000, nde_settings: (...)} OR pass pre-defined set of "
             "density-recovery-settings {ProxyRecoveryDefault}"
+        ),
+    )
+    sampler_parser.add(
+        "--sampling-updates",
+        type=str,
+        default="{}",
+        help=(
+            "Dictionary of updated settings that are applied to the data when sampling "
+            "from the model, for example, adapting minimum-/maximum-frequency per detector"
+            "or suppressing frequency ranges. This will get populated with any "
+            "settings provided elsewhere that can not directly be applied during data"
+            "generation. "
         ),
     )
     sampler_parser.add(

@@ -17,7 +17,6 @@ from dingo.core.utils import torch_detach_to_cpu, IterationTracker
 
 # FIXME: transform below should be in core
 from dingo.gw.transforms import SelectStandardizeRepackageParameters
-from dingo.gw.transforms import DETECTOR_DICT
 
 
 #
@@ -86,6 +85,9 @@ class Sampler(object):
             self.event_metadata = None
             self.base_model_metadata = self.metadata
 
+        # Not possible to specify this in GWSamplerMixin because this information is required in _initialize_transforms()
+        # which is called here before the __init__ of GWSamplerMixin is completed. It is also not possible to put it
+        # before super().__init__(**kwargs) in GWSamplerMixin because the metadata is not set yet.
         self._detectors = self.metadata["train_settings"]["data"]["detectors"]
 
         self.inference_parameters = self.metadata["train_settings"]["data"][
@@ -124,6 +126,7 @@ class Sampler(object):
         """
         Detector configuration that is used when running the sampler.
         """
+        # Not possible to define this in GWSamplerMixin because self.detectors is called in _initialize_transforms()
         return self._detectors
 
     @detectors.setter

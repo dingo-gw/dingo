@@ -4,6 +4,7 @@ import numpy as np
 from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain
 
 DETECTOR_DICT = {"H1": 0, "L1": 1, "V1": 2}
+DETECTOR_DICT_INVERSE = {0: "H1", 1: "L1", 2: "V1"}
 
 
 class StrainTokenization(object):
@@ -1016,3 +1017,147 @@ class NormalizePosition(object):
         input_sample["position"] = position
 
         return input_sample
+
+
+class UpdateFrequencyRange(object):
+    """
+    Update token mask according to frequency range update
+    """
+
+    def __init__(
+        self,
+        minimum_frequency: Optional[float | dict[str, float]] = None,
+        maximum_frequency: Optional[float | dict[str, float]] = None,
+        suppress_range: Optional[
+            list[float, float] | dict[str, list[float, float]]
+        ] = None,
+        print_output: bool = False,
+    ):
+        """
+        Parameters
+        ----------
+        minimum_frequency: Optional[float | dict[str, float]]
+            Update of f_min, if float, the same value will be used for all detectors.
+        maximum_frequency: Optional[float | dict[str, float]]
+            Update of f_max, if float, the same value will be used for all detectors.
+        suppress_range: list[float, float] | dict[str, list[float, float]] | None
+            Suppress ranges [f_min, f_max], either for all detectors or for individual detectors.
+        print_output: bool
+            Whether to write print statements to the console.
+        """
+        self.minimum_frequency = minimum_frequency
+        self.maximum_frequency = maximum_frequency
+        self.suppress_range = suppress_range
+
+        if print_output:
+            print(
+                f"Transform UpdateFrequencyRange activated:"
+                f"  Settings: \n"
+                f"    - Minimum_frequency update: {self.minimum_frequency}\n"
+                f"    - Maximum_frequency update: {self.maximum_frequency}\n"
+                f"    - Suppress range: {self.suppress_range}\n"
+            )
+
+    def __call__(self, input_sample):
+        """
+        Parameters
+        ----------
+        input_sample: Dict
+            Values for keys
+            - 'waveform':
+            Sample of shape [batch_size, num_tokens, num_features]
+            - 'position', shape [batch_size, num_tokens, 3]
+               contains information [f_min, f_max, block]
+            - 'drop_token_mask', shape [batch_size, num_tokens]
+
+        Returns
+        ----------
+        sample: Dict
+            input_sample with modified value for key
+            - 'drop_token_mask', shape [batch_size, num_tokens]
+
+        """
+        sample = input_sample.copy()
+        blocks = np.unique(sample["position"][..., 2])
+        num_blocks = len(blocks)
+        num_tokens_per_block = sample["position"].shape[-2] // num_blocks
+
+        # Assume that f_min is the same for all detectors
+        f_min_per_token = sample["position"][..., 0]
+        f_max_per_token = sample["position"][..., 1]
+        f_min_per_token_single = f_min_per_token[:num_tokens_per_block]
+        f_max_per_token_single = f_max_per_token[:num_tokens_per_block]
+
+        mask = np.zeros_like(sample["drop_token_mask"], dtype=bool)
+        # Update minimum_frequency
+        if self.minimum_frequency is not None:
+            # Same for all detectors
+            if isinstance(self.minimum_frequency, float):
+                mask_min = np.where(
+                    f_min_per_token <= self.minimum_frequency, True, False
+                )
+                mask = np.logical_or(mask, mask_min)
+            # Different for each detector
+            elif isinstance(self.minimum_frequency, dict):
+                for b in blocks:
+                    if DETECTOR_DICT_INVERSE[b] in self.minimum_frequency:
+                        mask_min = np.where(
+                            f_min_per_token_single
+                            <= self.minimum_frequency[DETECTOR_DICT_INVERSE[b]],
+                            True,
+                            False,
+                        )
+                        mask_b = np.where(sample["position"][..., 2] == b, True, False)
+                        mask[mask_b] = np.logical_or(mask_min, mask[mask_b])
+
+        # Update maximum_frequency
+        if self.maximum_frequency is not None:
+            # Same for all detectors
+            if isinstance(self.maximum_frequency, float):
+                mask_max = np.where(
+                    f_max_per_token >= self.maximum_frequency, True, False
+                )
+                mask = np.logical_or(mask, mask_max)
+            # Different for each detector
+            elif isinstance(self.maximum_frequency, dict):
+                for b in blocks:
+                    if DETECTOR_DICT_INVERSE[b] in self.maximum_frequency:
+                        mask_max = np.where(
+                            f_max_per_token_single
+                            >= self.maximum_frequency[DETECTOR_DICT_INVERSE[b]],
+                            True,
+                            False,
+                        )
+                        mask_b = np.where(sample["position"][..., 2] == b, True, False)
+                        mask[mask_b] = np.logical_or(mask_max, mask[mask_b])
+
+        # Update suppress_range
+        if self.suppress_range is not None:
+            # Same for all detectors
+            if isinstance(self.suppress_range, list):
+                f_min_lower, f_max_upper = self.suppress_range
+                mask_lower = np.where(f_max_per_token >= f_min_lower, True, False)
+                mask_upper = np.where(f_min_per_token <= f_max_upper, True, False)
+                mask_interval = np.logical_and(mask_lower, mask_upper)
+                mask = np.logical_or(mask, mask_interval)
+            # Different for each detector
+            elif isinstance(self.suppress_range, dict):
+                for b in blocks:
+                    if DETECTOR_DICT_INVERSE[b] in self.suppress_range:
+                        f_min_lower, f_max_upper = self.suppress_range[
+                            DETECTOR_DICT_INVERSE[b]
+                        ]
+                        mask_lower = np.where(
+                            f_max_per_token_single >= f_min_lower, True, False
+                        )
+                        mask_upper = np.where(
+                            f_min_per_token_single <= f_max_upper, True, False
+                        )
+                        mask_interval = np.logical_and(mask_lower, mask_upper)
+                        mask_b = np.where(sample["position"][..., 2] == b, True, False)
+                        mask[mask_b] = np.logical_or(mask_interval, mask[mask_b])
+
+        # Update drop_token_mask
+        sample["drop_token_mask"] = np.logical_or(mask, sample["drop_token_mask"])
+
+        return sample
