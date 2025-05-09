@@ -155,3 +155,67 @@ class CropMaskStrainRandom(object):
         sample["waveform"] = strain
 
         return sample
+
+
+class CropMaskStrain(object):
+    """
+    Crop or mask strain with zeros depending on minimum_frequency and maximum_frequency.
+    """
+
+    def __init__(
+        self,
+        minimum_frequency: Optional[float | dict[str, float]] = None,
+        maximum_frequency: Optional[float | dict[str, float]] = None,
+        print_output: bool = False,
+    ):
+        """
+        Parameters
+        ----------
+        minimum_frequency: Optional[float | dict[str, float]]
+            Update of f_min, if float, the same value will be used for all detectors.
+        maximum_frequency: Optional[float | dict[str, float]]
+            Update of f_max, if float, the same value will be used for all detectors.
+        print_output: bool
+            Whether to write print statements to the console.
+        """
+        self.minimum_frequency = minimum_frequency
+        self.maximum_frequency = maximum_frequency
+
+        if print_output:
+            print(
+                f"Transform UpdateFrequencyRange activated:"
+                f"  Settings: \n"
+                f"    - Minimum_frequency update: {self.minimum_frequency}\n"
+                f"    - Maximum_frequency update: {self.maximum_frequency}\n"
+            )
+
+    def __call__(self, input_sample):
+        """
+        Parameters
+        ----------
+        input_sample: Dict
+            Values for keys
+            - 'waveform':
+            Sample of shape [batch_size, num_tokens, num_features]
+            - 'position', shape [batch_size, num_tokens, 3]
+               contains information [f_min, f_max, block]
+            - 'drop_token_mask', shape [batch_size, num_tokens]
+
+        Returns
+        ----------
+        sample: Dict
+            input_sample with modified value for key
+            - 'drop_token_mask', shape [batch_size, num_tokens]
+
+        """
+        sample = input_sample.copy()
+
+        # Update minimum_frequency
+        if self.minimum_frequency is not None:
+            raise ValueError("Update minimum_frequency is not yet implemented.")
+
+        # Update maximum_frequency
+        if self.maximum_frequency is not None:
+            raise ValueError("Update maximum_frequency is not yet implemented.")
+
+        return sample
