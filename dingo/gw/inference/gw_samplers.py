@@ -234,8 +234,6 @@ class GWSampler(GWSamplerMixin, Sampler):
                 self.base_model_metadata["train_settings"]["data"]["detectors"],
                 first_index=self.domain.min_idx,
             ),
-            ToTorch(device=self.model.device),
-            GetItem("waveform"),
         ]
         if self.sampling_updates:
             # Update frequency range
@@ -245,6 +243,10 @@ class GWSampler(GWSamplerMixin, Sampler):
                     maximum_frequency=self.maximum_frequency,
                 )
             ]
+        transform_pre += [
+            ToTorch(device=self.model.device),
+            GetItem("waveform"),
+        ]
         self.transform_pre = Compose(transform_pre)
 
         # postprocessing transforms:
