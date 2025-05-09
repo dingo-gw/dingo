@@ -82,9 +82,11 @@ def create_parser(top_level=True):
         "--calibration-correction-type",
         type=nonestr,
         default="data",
-        help=("Type of calibration correction: can be either `data` or `template`."
-        " See https://bilby-dev.github.io/bilby/api/bilby.gw.detector.calibration.html "
-        "for more information.")
+        help=(
+            "Type of calibration correction: can be either `data` or `template`."
+            " See https://bilby-dev.github.io/bilby/api/bilby.gw.detector.calibration.html "
+            "for more information."
+        ),
     )
 
     calibration_parser.add(
@@ -1331,6 +1333,18 @@ def create_parser(top_level=True):
             "Dictionary of density-recovery-settings to pass in, e.g., {num_samples: "
             "400_000, nde_settings: (...)} OR pass pre-defined set of "
             "density-recovery-settings {ProxyRecoveryDefault}"
+        ),
+    )
+    sampler_parser.add(
+        "--sampling-updates",
+        type=str,
+        default="{}",
+        help=(
+            "Dictionary of updated settings that are applied to the data when sampling "
+            "from the model, for example, adapting minimum-/maximum-frequency per detector"
+            "or suppressing frequency ranges. This will get populated with any "
+            "settings provided elsewhere that can not directly be applied during data"
+            "generation. "
         ),
     )
     sampler_parser.add(

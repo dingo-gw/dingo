@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Dict, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -24,6 +24,7 @@ from dingo.gw.transforms import (
     PostCorrectGeocentTime,
     CopyToExtrinsicParameters,
     GetDetectorTimes,
+    CropMaskStrain,
 )
 
 
@@ -41,10 +42,53 @@ class GWSamplerMixin(object):
         kwargs
             Keyword arguments that are forwarded to the superclass.
         """
+        # Has to be specified before init, because the information is required in _initialize_transforms()
+        self._sampling_updates = {}
         super().__init__(**kwargs)
         self.t_ref = self.base_model_metadata["train_settings"]["data"]["ref_time"]
         self._pesummary_package = "gw"
         self._result_class = Result
+
+        self._minimum_frequency = self.domain.f_min
+        self._maximum_frequency = self.domain.f_max
+
+    @property
+    def minimum_frequency(self) -> float | dict:
+        return self._minimum_frequency
+
+    @minimum_frequency.setter
+    def minimum_frequency(self, value: Union[float, dict]):
+        raise NotImplementedError(
+            "Only possible to update the minimum_frequency through setting "
+            "self.sampling_updates = {minimum_frequency: 20.}"
+        )
+
+    @property
+    def maximum_frequency(self) -> float | dict:
+        return self._maximum_frequency
+
+    @maximum_frequency.setter
+    def maximum_frequency(self, value: Union[float, dict]):
+        raise NotImplementedError(
+            "Only possible to update the maximum_frequency through setting "
+            "self.sampling_updates = {maximum_frequency: 500.}"
+        )
+
+    @property
+    def sampling_updates(self) -> Optional[Dict[str, dict]]:
+        return self._sampling_updates
+
+    @sampling_updates.setter
+    def sampling_updates(
+        self, value: dict[str, float | list[float] | dict[str, list[float]]]
+    ):
+        if "minimum_frequency" in value:
+            self._minimum_frequency = value["minimum_frequency"]
+        if "maximum_frequency" in value:
+            self._maximum_frequency = value["maximum_frequency"]
+        self._sampling_updates = value
+        # Update transforms
+        self._initialize_transforms()
 
     def _build_domain(self):
         """
@@ -181,20 +225,27 @@ class GWSampler(GWSamplerMixin, Sampler):
         #   * repackage strains and asds from dicts to an array
         #   * convert array to torch tensor on the correct device
         #   * extract only strain/waveform from the sample
-        self.transform_pre = Compose(
-            [
-                WhitenAndScaleStrain(self.domain.noise_std),
-                # Use base metadata so that unconditional samplers still know how to
-                # transform data, since this transform is used by the GNPE sampler as
-                # well.
-                RepackageStrainsAndASDS(
-                    self.base_model_metadata["train_settings"]["data"]["detectors"],
-                    first_index=self.domain.min_idx,
-                ),
-                ToTorch(device=self.model.device),
-                GetItem("waveform"),
+        transform_pre = [
+            WhitenAndScaleStrain(self.domain.noise_std),
+            # Use base metadata so that unconditional samplers still know how to
+            # transform data, since this transform is used by the GNPE sampler as
+            # well.
+            RepackageStrainsAndASDS(
+                self.base_model_metadata["train_settings"]["data"]["detectors"],
+                first_index=self.domain.min_idx,
+            ),
+            ToTorch(device=self.model.device),
+            GetItem("waveform"),
+        ]
+        if self.sampling_updates:
+            # Update frequency range
+            transform_pre += [
+                CropMaskStrain(
+                    minimum_frequency=self.minimum_frequency,
+                    maximum_frequency=self.maximum_frequency,
+                )
             ]
-        )
+        self.transform_pre = Compose(transform_pre)
 
         # postprocessing transforms:
         #   * de-standardize data and extract inference parameters

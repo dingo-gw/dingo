@@ -53,6 +53,7 @@ class SamplingInput(Input):
         # self.sampler = args.sampler
         # self.sampler_kwargs = args.sampler_kwargs
         # self.sampling_seed = args.sampling_seed
+        self.sampling_updates = convert_string_to_dict(args.sampling_updates)
 
         # Frequencies
         # self.sampling_frequency = args.sampling_frequency
@@ -128,6 +129,8 @@ class SamplingInput(Input):
 
         self.dingo_sampler.context = self.context
         self.dingo_sampler.event_metadata = self.event_metadata
+        # Update frequency ranges of sampler
+        self.dingo_sampler.sampling_updates = self.sampling_updates
 
     @property
     def density_recovery_settings(self):
