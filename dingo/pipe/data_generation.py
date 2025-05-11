@@ -17,6 +17,7 @@ from dingo.gw.domains import UniformFrequencyDomain
 from dingo.pipe.parser import create_parser
 from dingo.gw.injection import Injection
 from dingo.core.posterior_models import NormalizingFlowPosteriorModel
+from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.data.data_preparation import (
     load_raw_data,
@@ -183,7 +184,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # self.plot_injection = args.plot_injection
 
         if create_data:
-            # TODO what happens if we remove this??
             args.injection = False
             args.injection_numbers = None
             args.injection_file = None
@@ -198,7 +198,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
     def generate_injection(self, args):
         """Generate injection consistent with trained dingo model"""
         # loading posterior model for which we want to generate injections
-        pm = NormalizingFlowPosteriorModel(model_filename=args.model, device="cpu")
+        pm = build_model_from_kwargs(model_filenameq=args.model, device="cpu")
         injection_generator = Injection.from_posterior_model_metadata(pm.metadata)
         injection_generator.t_ref = self.trigger_time
         injection_generator._initialize_transform()
@@ -302,64 +302,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
         logger.info(f"Network optimal SNR of injection: {rho_opt}")
         logger.info(f"Detector optimal SNRs of injection: {rho_opt_ifos}")
 
-    def create_data(self, args):
-        super().create_data(args)
-
-        # check if there are nan's in the asd, if there are shift the detector segment used to generate the psd to an earlier time
-        for ifo in self.interferometers:
-            frequency_array = ifo.strain_data.frequency_array
-            asd = ifo.power_spectral_density.get_amplitude_spectral_density_array(
-                frequency_array
-            )
-            self.injection_waveform_approximant = args.injection_waveform_approximant
-        else:
-            self.injection_waveform_approximant = (
-                injection_generator.waveform_generator.approximant_str
-            )
-
-        self.detectors = [ifo.name for ifo in injection_generator.ifo_list]
-        self.sampling_frequency = (
-            injection_generator.waveform_generator.domain.sampling_rate
-        )
-        self.duration = injection_generator.data_domain.duration
-        self.minimum_frequency = injection_generator.data_domain.f_min
-        self.maximum_frequency = injection_generator.data_domain.f_max
-        self.window_type = pm.metadata["train_settings"]["data"]["window"]["type"]
-        self.tukey_roll_off = pm.metadata["train_settings"]["data"]["window"][
-            "roll_off"
-        ]
-        self.post_trigger_duration = args.post_trigger_duration
-
-        self.strain_data_list = []
-        # if importance sampling with zero-noise, don't add noise to injection
-        # the idea here is to reweight to the zero-noise likelihood
-        if self.zero_noise and self.importance_sampling:
-            self.strain_data_list.append(
-                injection_generator.signal(self.injection_dict)
-            )
-        else:
-            for i in range(self.num_noise_realizations):
-                # add i to the seed to get different noise realizations
-                # but keep consistent across zero noise seed
-                seed = (
-                    args.injection_random_seed + i
-                    if args.injection_random_seed is not None
-                    else None
-                )
-                self.strain_data_list.append(
-                    injection_generator.injection(
-                        self.injection_dict,
-                        seed=seed,
-                    )
-                )
-
-        # Compute optimal SNR
-        rho_opt_ifos, rho_opt = self.compute_optimal_snr(
-            self.strain_data_list[0], injection_generator.data_domain
-        )
-        logger.info(f"Network optimal SNR of injection: {rho_opt}")
-        logger.info(f"Detector optimal SNRs of injection: {rho_opt_ifos}")
-
     def compute_optimal_snr(self, strain_data, data_domain):
         """Compute network optimal signal-to-noise ratio for the first injected strain"""
         mu = strain_data["waveform"]
@@ -392,7 +334,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
                 frequency_array
             )
 
-            if np.max(np.isnan(asd)):
+            if np.any(np.isnan(asd)):
                 if args.shift_segment_for_psd_generation_if_nan:
                     window = {
                         "type": "tukey",
@@ -400,6 +342,9 @@ class DataGenerationInput(BilbyDataGenerationInput):
                         "T": self.duration,
                         "f_s": self.sampling_frequency,
                     }
+                    # This looks strange since we are adding the psd_start_time
+                    # but self.psd_start_time is negative, so in reality
+                    # we are shifting the segment to an earlier time
                     psd_array = download_psd(
                         ifo.name,
                         self.start_time + self.psd_start_time,
@@ -416,7 +361,8 @@ class DataGenerationInput(BilbyDataGenerationInput):
                         f"""Nan encountered in strain data for PSD estimation for detector {ifo.name}. 
                     Specify --shift-segment-for-psd-generation-if-nan to shift PSD segement to an earlier time without Nans. """
                     )
-                    raise
+                    raise ValueError(
+                        f"Nan encountered in strain data for PSD estimation for detector {ifo.name}.")
 
     def save_hdf5(self):
         """
@@ -441,7 +387,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # These arrays extend up to self.sampling_frequency. Truncate them to
         # self.maximum_frequency, and also set the asd to 1.0 below
         # self.minimum_frequency.
-        domain = FrequencyDomain(
+        domain = UniformFrequencyDomain(
             f_min=self.minimum_frequency,
             f_max=self.maximum_frequency,
             delta_f=1 / self.duration,
