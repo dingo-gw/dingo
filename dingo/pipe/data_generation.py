@@ -208,9 +208,9 @@ class DataGenerationInput(BilbyDataGenerationInput):
             else injection_generator.waveform_generator.f_ref
         )
         if "f_start" in pm.metadata["dataset_settings"]["waveform_generator"]:
-            injection_generator.waveform_generator.f_start = (
-                pm.metadata["dataset_settings"]["waveform_generator"]["f_start"]
-            )
+            injection_generator.waveform_generator.f_start = pm.metadata[
+                "dataset_settings"
+            ]["waveform_generator"]["f_start"]
 
         # selecting PSD
         if args.use_psd_of_trigger:
@@ -362,7 +362,8 @@ class DataGenerationInput(BilbyDataGenerationInput):
                     Specify --shift-segment-for-psd-generation-if-nan to shift PSD segement to an earlier time without Nans. """
                     )
                     raise ValueError(
-                        f"Nan encountered in strain data for PSD estimation for detector {ifo.name}.")
+                        f"Nan encountered in strain data for PSD estimation for detector {ifo.name}."
+                    )
 
     def save_hdf5(self):
         """
