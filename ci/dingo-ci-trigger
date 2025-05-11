@@ -1,0 +1,75 @@
+#!/bin/bash
+
+# Script associated with the systemctl dingo-ci.service
+# This script will clone dingo in /data/dingo/repo-checker
+# and check if continuous intregration already run for
+# the latest commit of the main branch and the latest tag.
+# If not, it will run them in the dingo:toy_npe_model
+# docker image.
+
+
+# Configuration
+DINGO_REPO="https://github.com/dingo-gw/dingo.git"
+
+BRANCH="main"
+CLONE_PATH="/data/dingo/repo-checker/"
+JOBS_PATH="/data/dingo"
+EMAIL_CONFIG=/data/dingo/mpi-email.json
+
+# check if a continuous integration run exists for a reference (git commit id or tag)
+# i.e. the subfolder /data/dingo/<ref> exists
+check_job_exists() {
+    local ref="$1"
+    local job_path="${JOBS_PATH}/${ref}"
+    
+    if [ ${#ref} -eq 7 ]; then
+        for dir in "${JOBS_PATH}"/*/; do
+            local dir_hash="$(basename "${dir}")"
+            if [[ "${dir_hash}" == "${ref}"* ]]; then
+                return 0
+            fi
+        done
+        return 1
+    fi
+    
+    [ -d "${job_path}" ]
+}
+
+# execute dingo-ci in dingo:toy_npe_model
+execute_docker() {
+    local reference="$1"
+    echo "Executing docker command for ${reference}"
+    docker run --rm --shm-size=16g --runtime=nvidia --gpus all -v /data/dingo:/data/dingo dingo:toy_npe_model --base-dir ${JOBS_PATH} --checkout ${reference} --email ${EMAIL_CONFIG}
+}
+
+# ensure jobs directory exists
+mkdir -p "${JOBS_PATH}"
+
+# cloning dingo
+echo -e "\n-- cloning ${DINGO_REPO} (${BRANCH}) - ${CLONE_PATH}\n"
+rm -rf $CLONE_PATH
+echo "Cloning repository..."
+git clone "${DINGO_REPO}" "${CLONE_PATH}" || { 
+    echo "Error cloning repository"; 
+    exit 1; 
+}
+git -C "${CLONE_PATH}" checkout "${BRANCH}" || { 
+    echo "Error checking out branch"; 
+    exit 1; 
+}
+
+# checking ci runs for latest commit
+latest_commit=$(git -C "${CLONE_PATH}" rev-parse --short HEAD)
+echo -e "\n- latest commit: ${latest_commit}\n"
+if ! check_job_exists "${latest_commit}"; then
+    execute_docker "${latest_commit}"
+fi
+
+# checking ci runs for latest tag
+latest_tag=$(git -C "${CLONE_PATH}" tag | tail -n 1 2>/dev/null)
+echo -e "\n- latest tag: ${latest_tag}\n"
+if [ -n "${latest_tag}" ] && ! check_job_exists "${latest_tag}"; then
+    execute_docker "${latest_tag}"
+fi
+
+exit 0

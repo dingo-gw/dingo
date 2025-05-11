@@ -153,7 +153,7 @@ class ProjectOntoDetectors(object):
             dec = extrinsic_parameters.pop("dec")
             psi = extrinsic_parameters.pop("psi")
             tc_ref = parameters["geocent_time"]
-            assert tc_ref == 0, (
+            assert np.allclose(tc_ref, 0.0), (
                 "This should always be 0. If for some reason "
                 "you want to save time shifted polarizations,"
                 " then remove this assert statement."
@@ -163,15 +163,43 @@ class ProjectOntoDetectors(object):
             raise ValueError("Missing parameters.")
 
         # (1) rescale polarizations and set distance parameter to sampled value
-        hc = sample["waveform"]["h_cross"] * d_ref / d_new
-        hp = sample["waveform"]["h_plus"] * d_ref / d_new
+        if np.isscalar(d_ref) or np.isscalar(d_new):
+            d_ratio = d_ref / d_new
+        elif isinstance(d_ref, np.ndarray) and isinstance(d_new, np.ndarray):
+            d_ratio = (d_ref / d_new)[:, np.newaxis]
+        else:
+            raise ValueError("luminosity_distance should be a float or a numpy array.")
+        hc = sample["waveform"]["h_cross"] * d_ratio
+        hp = sample["waveform"]["h_plus"] * d_ratio
         parameters["luminosity_distance"] = d_new
 
         strains = {}
         for ifo in self.ifo_list:
             # (2) project strains onto the different detectors
-            fp = ifo.antenna_response(ra, dec, self.ref_time, psi, mode="plus")
-            fc = ifo.antenna_response(ra, dec, self.ref_time, psi, mode="cross")
+            # TODO the Bilby cython functions are not vectorized, so for now
+            # we just loop over the extrinsic parameters. This is not ideal
+            # and eventually one should also vectorize these functions to
+            # achieve optimal batching capabilities.
+            if any(np.isscalar(x) for x in [ra, dec, psi]):
+                fp = ifo.antenna_response(ra, dec, self.ref_time, psi, mode="plus")
+                fc = ifo.antenna_response(ra, dec, self.ref_time, psi, mode="cross")
+            else:
+                fp = np.array(
+                    [
+                        ifo.antenna_response(ra, dec, self.ref_time, psi, mode="plus")
+                        for ra, dec, psi in zip(ra, dec, psi)
+                    ],
+                    dtype=np.float32,
+                )
+                fc = np.array(
+                    [
+                        ifo.antenna_response(ra, dec, self.ref_time, psi, mode="cross")
+                        for ra, dec, psi in zip(ra, dec, psi)
+                    ],
+                    dtype=np.float32,
+                )
+                fp = fp[..., np.newaxis]
+                fc = fc[..., np.newaxis]
             strain = fp * hp + fc * hc
 
             # (3) time shift the strain. If polarizations are timeshifted by
@@ -312,11 +340,11 @@ class ApplyCalibrationUncertainty(object):
             It was discovered in Oct. 2024 that the calibration envelopes specified by
             the detchar group were not being used correctly by PE codes. According to
             the detchar group, envelopes are over $\eta$ which is defined as:
-            
+
             $$
             h_{obs}(f) = \frac{1}{\eta} * h(f).
             $$
-            
+
             Of course, $\frac{1}{\eta} = \alpha$. Previously, the envelopes were
             being used as if $\eta = \alpha$ which is wrong. Therefore, there is
             now an additional option where one can specify correction_type = "data"

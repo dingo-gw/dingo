@@ -3,12 +3,13 @@ import torch
 from bilby.gw.detector import PowerSpectralDensity
 from scipy.interpolate import interp1d
 
-from dingo.gw.domains import FrequencyDomain
+from dingo.gw.domains import UniformFrequencyDomain
+from .utils import get_batch_size_of_input_sample
 
 
 class SampleNoiseASD(object):
     """
-    Sample a random asds for each detector and add them to sample['asds'].
+    Sample a batch of random ASDs for each detector and place them in sample['asds'].
     """
 
     def __init__(self, asd_dataset):
@@ -16,7 +17,11 @@ class SampleNoiseASD(object):
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
-        sample["asds"] = self.asd_dataset.sample_random_asds()
+        batched, batch_size = get_batch_size_of_input_sample(input_sample)
+        sample["asds"] = self.asd_dataset.sample_random_asds(n=batch_size)
+        if not batched:
+            sample["asds"] = {k: v[0] for k, v in sample["asds"].items()}
+
         return sample
 
 
@@ -51,7 +56,7 @@ class WhitenFixedASD(object):
 
     def __init__(
         self,
-        domain: FrequencyDomain,
+        domain: UniformFrequencyDomain,
         asd_file: str = None,
         inverse: bool = False,
         precision=None,
@@ -59,7 +64,7 @@ class WhitenFixedASD(object):
         """
         Parameters
         ----------
-        domain : FrequencyDomain
+        domain : UniformFrequencyDomain
             ASD is interpolated to the associated frequency grid.
         asd_file : str
             Name of the ASD file. If None, use the aligo ASD.
@@ -171,8 +176,8 @@ class AddWhiteNoiseComplex(object):
             # np.random.default_rng().standard_normal() can be set to output single
             # precision, but in testing this is slightly slower than the torch call.
             noise = (
-                torch.randn(len(pure_strain), device=torch.device("cpu"))
-                + torch.randn(len(pure_strain), device=torch.device("cpu")) * 1j
+                torch.randn(pure_strain.shape, device=torch.device("cpu"))
+                + torch.randn(pure_strain.shape, device=torch.device("cpu")) * 1j
             )
             noise = noise.numpy()
             noisy_strains[ifo] = pure_strain + noise
@@ -197,13 +202,24 @@ class RepackageStrainsAndASDS(object):
     def __call__(self, input_sample):
         sample = input_sample.copy()
         strains = np.empty(
-            (len(self.ifos), 3, len(sample["asds"][self.ifos[0]]) - self.first_index),
+            sample["asds"][self.ifos[0]].shape[:-1]  # Possible batch dims
+            + (
+                len(self.ifos),
+                3,
+                sample["asds"][self.ifos[0]].shape[-1] - self.first_index,
+            ),
             dtype=np.float32,
         )
         for idx_ifo, ifo in enumerate(self.ifos):
-            strains[idx_ifo, 0] = sample["waveform"][ifo][self.first_index :].real
-            strains[idx_ifo, 1] = sample["waveform"][ifo][self.first_index :].imag
-            strains[idx_ifo, 2] = 1 / (sample["asds"][ifo][self.first_index :] * 1e23)
+            strains[..., idx_ifo, 0, :] = sample["waveform"][ifo][
+                ..., self.first_index :
+            ].real
+            strains[..., idx_ifo, 1, :] = sample["waveform"][ifo][
+                ..., self.first_index :
+            ].imag
+            strains[..., idx_ifo, 2, :] = 1 / (
+                sample["asds"][ifo][..., self.first_index :] * 1e23
+            )
         sample["waveform"] = strains
         return sample
 

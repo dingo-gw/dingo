@@ -2,7 +2,7 @@ import numpy as np
 import pycbc.psd
 from gwpy.timeseries import TimeSeries
 
-from dingo.gw.domains import FrequencyDomain
+from dingo.gw.domains import UniformFrequencyDomain
 from dingo.gw.gwutils import (
     get_window,
     get_window_factor,
@@ -184,7 +184,7 @@ def download_event_data_in_FD(
 
     # build domain object
     f_s = len(data["waveform"][detectors[0]]) / time_segment
-    domain = FrequencyDomain(
+    domain = UniformFrequencyDomain(
         f_min=0,
         f_max=f_s / 2,
         delta_f=1 / time_segment,

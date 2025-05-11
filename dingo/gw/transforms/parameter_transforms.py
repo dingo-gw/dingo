@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import pandas as pd
 from dingo.gw.prior import BBHExtrinsicPriorDict
+from .utils import get_batch_size_of_input_sample
 
 
 class SampleExtrinsicParameters(object):
@@ -15,8 +16,12 @@ class SampleExtrinsicParameters(object):
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
-        extrinsic_parameters = self.prior.sample()
-        extrinsic_parameters = {k: float(v) for k, v in extrinsic_parameters.items()}
+        batched, batch_size = get_batch_size_of_input_sample(input_sample)
+        extrinsic_parameters = self.prior.sample(batch_size if batched else None)
+        extrinsic_parameters = {
+            k: v.astype(np.float32) if batched else float(v)
+            for k, v in extrinsic_parameters.items()
+        }
         sample["extrinsic_parameters"] = extrinsic_parameters
         return sample
 
@@ -98,9 +103,19 @@ class SelectStandardizeRepackageParameters(object):
                             dtype=torch.float32,
                             device=self.device,
                         )
+                    elif isinstance(full_parameters[v[0]], np.ndarray):
+                        standardized = np.empty(
+                            (*full_parameters[v[0]].shape, len(v)), dtype=np.float32
+                        )
                     else:
                         standardized = np.empty(len(v), dtype=np.float32)
                     for idx, par in enumerate(v):
+                        if self.std[par] == 0:
+                            raise ValueError(
+                                f"Parameter {par} with standard deviation zero is included in inference parameters. "
+                                f"This is not allowed. Please remove it from inference_parameters or create a new "
+                                f"dataset where std({par}) is not zero."
+                            )
                         standardized[..., idx] = (
                             full_parameters[par] - self.mean[par]
                         ) / self.std[par]

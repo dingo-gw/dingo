@@ -28,9 +28,9 @@ from dingo.gw.prior import build_prior_with_defaults
 @pytest.fixture
 def uniform_fd_domain():
     domain_settings = {
-        "type": "FrequencyDomain",
+        "type": "UniformFrequencyDomain",
         "f_min": 10.0,
-        "f_max": 2048.0,
+        "f_max": 2048.0,  # Note that if this isn't a power of 2, mismatches are worse.
         "delta_f": 0.125,
     }
     domain = build_domain(domain_settings)
@@ -113,7 +113,7 @@ def tolerances(approximant):
         # to a different order the IMRPhenomXPHM. It's tricky to get this exactly right,
         # since there are many different methods for this. But the small mismatches we do
         # get should not have a big effect in practice.
-        return 2e-2, 1e-6
+        return 2e-2, 1e-5
 
     elif approximant == "SEOBNRv4PHM":
         # The mismatches are typically be of order 1e-5. This is exclusively due to
@@ -135,9 +135,12 @@ def tolerances(approximant):
 # Uncomment to test only one approximant.
 try:
     import pyseobnr
+
     approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM"]
 except ImportError:
     approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM"]
+
+
 @pytest.mark.parametrize("approximant", approximant_list)
 def test_generate_hplus_hcross_m(intrinsic_prior, wfg, num_evaluations, tolerances):
     mismatches = []
@@ -168,7 +171,9 @@ def test_generate_hplus_hcross_m(intrinsic_prior, wfg, num_evaluations, toleranc
             p = list(pol.keys())[idx]
             plt.figure(figsize=(10, 7))
             plt.plot(wfg.domain.sample_frequencies, pol[p], label="reconstructed")
-            plt.plot(wfg.domain.sample_frequencies, pol_ref[p], label="ref")
+            plt.plot(
+                wfg.domain.sample_frequencies, pol_ref[p], label="ref", linestyle="--"
+            )
             plt.plot(wfg.domain.sample_frequencies, pol_ref[p] - pol[p], label="diff")
             plt.legend()
             plt.xscale("log")

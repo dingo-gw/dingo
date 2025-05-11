@@ -17,7 +17,7 @@ def signal_setup_EOB():
     }
     wfg_domain = build_domain(
         {
-            "type": "FrequencyDomain",
+            "type": "UniformFrequencyDomain",
             "f_min": 20,
             "f_max": 1024,
             "delta_f": 0.125,
@@ -26,7 +26,7 @@ def signal_setup_EOB():
     )
     data_domain = build_domain(
         {
-            "type": "FrequencyDomain",
+            "type": "UniformFrequencyDomain",
             "f_min": 20.0,
             "f_max": 1024.0,
             "delta_f": 0.125,

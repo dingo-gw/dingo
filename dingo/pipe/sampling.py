@@ -3,6 +3,7 @@
 import sys
 import os
 from pathlib import Path
+import os
 
 from bilby_pipe.input import Input
 from bilby_pipe.utils import parse_args, logger, convert_string_to_dict
@@ -52,6 +53,16 @@ class SamplingInput(Input):
         else:
             self.num_noise_realizations = 1
             self.recover_log_prob = args.recover_log_prob
+
+        # if running on the OSG, the network has been transferred to
+        # the local directory, replace osdf string
+        if args.osg:
+            self.model = os.path.basename(args.model)
+            self.model_init = os.path.basename(args.model_init)
+        else:
+            self.model = args.model
+            self.model_init = args.model_init
+        self.recover_log_prob = args.recover_log_prob
         self.device = args.device
         self.num_gnpe_iterations = args.num_gnpe_iterations
         self.num_samples = args.num_samples
@@ -166,7 +177,9 @@ class SamplingInput(Input):
         if len(self.detectors) == 1:
             model_settings = self._density_recovery_settings["nde_settings"]["model"]
             if model_settings["posterior_model_type"] == "normalizing_flow":
-                base_transform_kwargs = model_settings["posterior_kwargs"]["base_transform_kwargs"]
+                base_transform_kwargs = model_settings["posterior_kwargs"][
+                    "base_transform_kwargs"
+                ]
                 if base_transform_kwargs["base_transform_type"] == "rq-coupling":
                     logger.info(
                         "Using autoregressive transform for density estimator since there is only one GNPE proxy "

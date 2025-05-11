@@ -13,7 +13,7 @@ from bilby.gw.detector.psd import PowerSpectralDensity
 import numpy as np
 
 from dingo.gw.data.event_dataset import EventDataset
-from dingo.gw.domains import FrequencyDomain
+from dingo.gw.domains import UniformFrequencyDomain
 from dingo.pipe.parser import create_parser
 from dingo.gw.injection import Injection
 from dingo.core.posterior_models import NormalizingFlowPosteriorModel
@@ -425,9 +425,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
         This method will also save the PSDs as .txt files in the data directory
         for easy reading by pesummary and Bilby.
         """
-
-        # if the data is created via an injection, we don't need to convert anything
-        # from the Bilby format
         # Data conditioning settings.
         settings = {
             "time_event": self.trigger_time,

@@ -1,10 +1,9 @@
+from typing import List, Optional
 import copy
 
-import pandas as pd
 import torch.multiprocessing
 import torchvision
 from threadpoolctl import threadpool_limits
-from torch.utils.data import DataLoader
 from bilby.gw.detector import InterferometerList
 
 from dingo.gw.SVD import SVDBasis
@@ -29,7 +28,10 @@ from dingo.gw.gwutils import *
 from dingo.core.utils import *
 
 
-def build_dataset(data_settings):
+def build_dataset(
+    data_settings: dict,
+    leave_waveforms_on_disk: Optional[bool] = False,
+) -> WaveformDataset:
     """Build a dataset based on a settings dictionary. This should contain the path of
     a saved waveform dataset.
 
@@ -38,11 +40,16 @@ def build_dataset(data_settings):
     Parameters
     ----------
     data_settings : dict
+    leave_waveforms_on_disk: bool
+        If provided, the values associated with the waveforms will not be loaded into memory during initialization.
+        Instead, they will be loaded from disk when the dataset is accessed. This is useful for reducing the memory
+        load of large datasets, but can slow down data preprocessing.
 
     Returns
     -------
     WaveformDataset
     """
+
     # Build and truncate datasets
     domain_update = data_settings.get("domain_update", None)
     wfd = WaveformDataset(
@@ -50,6 +57,7 @@ def build_dataset(data_settings):
         precision="single",
         domain_update=domain_update,
         svd_size_update=data_settings.get("svd_size_update"),
+        leave_waveforms_on_disk=leave_waveforms_on_disk,
     )
     return wfd
 
@@ -107,8 +115,10 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     ifo_list = InterferometerList(data_settings["detectors"])
 
     # Build transforms.
-    transforms = [SampleExtrinsicParameters(extrinsic_prior_dict),
-                  GetDetectorTimes(ifo_list, ref_time)]
+    transforms = [
+        SampleExtrinsicParameters(extrinsic_prior_dict),
+        GetDetectorTimes(ifo_list, ref_time),
+    ]
 
     extra_context_parameters = []
     if "gnpe_time_shifts" in data_settings:
@@ -170,6 +180,7 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     transforms.append(
         RepackageStrainsAndASDS(data_settings["detectors"], first_index=domain.min_idx)
     )
+
     if data_settings["context_parameters"]:
         selected_keys = ["inference_parameters", "waveform", "context_parameters"]
     else:
@@ -194,8 +205,8 @@ def build_svd_for_embedding_network(
     num_validation_samples: int,
     num_workers: int = 0,
     batch_size: int = 1000,
-    out_dir=None,
-):
+    out_dir: Optional[str] = None,
+) -> List:
     """
     Construct SVD matrices V based on clean waveforms in each interferometer. These
     will be used to seed the weights of the initial projection part of the embedding
@@ -275,7 +286,6 @@ def build_svd_for_embedding_network(
     )
     with threadpool_limits(limits=1, user_api="blas"):
         for idx, data in enumerate(loader):
-
             # This is for handling the last batch, which may otherwise push the total
             # number of samples above the number requested.
             lower = idx * batch_size

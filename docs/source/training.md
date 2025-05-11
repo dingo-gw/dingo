@@ -100,12 +100,15 @@ local:
     max_time_per_run: 36000
     max_epochs_per_run: 500
   checkpoint_epochs: 10
+  leave_waveforms_on_disk: True
+  local_cache_path: tmp
 #   condor:
 #     bid: 100
 #     num_cpus: 16
 #     memory_cpus: 128000
 #     num_gpus: 1
 #     memory_gpus: 8000
+#     request_disk: 50GB
 ```
 
 The train settings file is grouped into **four sections:**
@@ -162,6 +165,12 @@ runtime_limits
 
 checkpoint_epochs
 : Dingo saves a temporary checkpoint in `model_latest.py` after every epoch, but this is later overwritten by the next checkpoint. This setting saves a permanent checkpoint after the specified number of epochs. Having these checkpoints can help in recovering from training failures that do not result in program termination.
+
+leave_waveforms_on_disk
+: To improve memory efficiency during training, the waveforms are not loaded into memory at the beginning of training, but separately for each batch during training. When training on a cluster, it is highly recommended to include a local path where the dataset is cached at the beginning of training (see `local_cache_path`). If RAM is not an issue, the default `leave_waveforms_on_disk=True` can be set to `False`. 
+
+local_cache_path
+: When training on a cluster and loading waveforms during training (i.e., `leave_waveforms_on_disk=True`), the waveform dataset should be copied to the disk storage of the local node at the beginning of training. This prevents unexpected long data loading times during training due to network traffic. Usually, paths for local storage are `tmp` or `dev/shm`. When submitting the job with `condor`, `request_disk: 50GB` should be included in the `condor` settings with the requested disk space larger than the size of the waveform dataset used for training.
 
 condor
 : Settings for [HTCondor](https://htcondor.readthedocs.io/en/latest/index.html). The condor script will (re)submit itself according to these options.

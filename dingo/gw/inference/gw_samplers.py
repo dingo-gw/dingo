@@ -1,3 +1,4 @@
+import copy
 from typing import Union
 
 import numpy as np
@@ -9,6 +10,7 @@ from torchvision.transforms import Compose
 
 from dingo.core.samplers import Sampler, GNPESampler
 from dingo.core.transforms import GetItem, RenameKey
+from dingo.gw.domains import MultibandedFrequencyDomain
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_window_factor, get_extrinsic_prior_dict
 from dingo.gw.prior import build_prior_with_defaults
@@ -24,6 +26,7 @@ from dingo.gw.transforms import (
     PostCorrectGeocentTime,
     CopyToExtrinsicParameters,
     GetDetectorTimes,
+    DecimateWaveformsAndASDS,
 )
 
 
@@ -156,6 +159,7 @@ class GWSampler(GWSamplerMixin, Sampler):
     data for the inference network.
 
     transform_pre :
+        * Decimates data (if necessary and using MultibandedFrequencyDomain).
         * Whitens strain.
         * Repackages strain data and the inverse ASDs (suitably scaled) into a torch
           tensor.
@@ -176,25 +180,32 @@ class GWSampler(GWSamplerMixin, Sampler):
 
     def _initialize_transforms(self):
         # preprocessing transforms:
+        transform_pre = []
+        #   * in case of MultibandedFrequencyDomain, decimate data from base domain
+        if isinstance(self.domain, MultibandedFrequencyDomain):
+            transform_pre.append(
+                DecimateWaveformsAndASDS(self.domain, decimation_mode="whitened")
+            )
+
         #   * whiten and scale strain (since the inference network expects standardized
         #   data)
         #   * repackage strains and asds from dicts to an array
         #   * convert array to torch tensor on the correct device
         #   * extract only strain/waveform from the sample
-        self.transform_pre = Compose(
-            [
-                WhitenAndScaleStrain(self.domain.noise_std),
-                # Use base metadata so that unconditional samplers still know how to
-                # transform data, since this transform is used by the GNPE sampler as
-                # well.
-                RepackageStrainsAndASDS(
-                    self.base_model_metadata["train_settings"]["data"]["detectors"],
-                    first_index=self.domain.min_idx,
-                ),
-                ToTorch(device=self.model.device),
-                GetItem("waveform"),
-            ]
-        )
+        transform_pre += [
+            WhitenAndScaleStrain(self.domain.noise_std),
+            # Use base metadata so that unconditional samplers still know how to
+            # transform data, since this transform is used by the GNPE sampler as
+            # well.
+            RepackageStrainsAndASDS(
+                self.base_model_metadata["train_settings"]["data"]["detectors"],
+                first_index=self.domain.min_idx,
+            ),
+            ToTorch(device=self.model.device),
+            GetItem("waveform"),
+        ]
+
+        self.transform_pre = Compose(transform_pre)
 
         # postprocessing transforms:
         #   * de-standardize data and extract inference parameters

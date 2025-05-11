@@ -285,17 +285,6 @@ def create_nsf_model(
     )
     flow = flows.Flow(transform, distribution, embedding_net)
 
-    # Store hyperparameters. This is for reconstructing model when loading from
-    # saved file.
-
-    flow.model_hyperparams = {
-        "input_dim": input_dim,
-        "num_flow_steps": num_flow_steps,
-        "context_dim": context_dim,
-        "base_transform_kwargs": base_transform_kwargs,
-        "embedding_kwargs": embedding_kwargs,
-    }
-
     return flow
 
 
@@ -305,7 +294,7 @@ def create_nsf_wrapped(**kwargs):
     training, and wraps the log_prob method as a forward method.
     """
     flow = create_nsf_model(**kwargs)
-    return FlowWrapper(flow, nn.Identity())
+    return FlowWrapper(flow)
 
 
 def create_nsf_with_rb_projection_embedding_net(
