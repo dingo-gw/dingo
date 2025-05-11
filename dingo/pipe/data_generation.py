@@ -198,7 +198,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
     def generate_injection(self, args):
         """Generate injection consistent with trained dingo model"""
         # loading posterior model for which we want to generate injections
-        pm = build_model_from_kwargs(model_filenameq=args.model, device="cpu")
+        pm = build_model_from_kwargs(filename=args.model, device="cpu")
         injection_generator = Injection.from_posterior_model_metadata(pm.metadata)
         injection_generator.t_ref = self.trigger_time
         injection_generator._initialize_transform()
@@ -272,14 +272,13 @@ class DataGenerationInput(BilbyDataGenerationInput):
         ]
         self.post_trigger_duration = args.post_trigger_duration
 
-        self.strain_data_list = []
         # if importance sampling with zero-noise, don't add noise to injection
         # the idea here is to reweight to the zero-noise likelihood
-        if self.zero_noise:
-            self.strain_data_list.append(
-                injection_generator.signal(self.injection_dict)
-            )
-        else:
+        if self.zero_noise and self.importance_sampling:
+            strain_data = injection_generator.signal(self.injection_dict)
+            self.strain_data = strain_data
+        elif self.zero_noise and not self.importance_sampling:
+            self.strain_data_list = []
             for i in range(self.num_noise_realizations):
                 # add i to the seed to get different noise realizations
                 # but keep consistent across zero noise seed
@@ -294,10 +293,15 @@ class DataGenerationInput(BilbyDataGenerationInput):
                         seed=seed,
                     )
                 )
+            # useful for computing optimal SNR
+            strain_data = self.strain_data_list[0]
+        else:
+            strain_data = injection_generator.injection(self.injection_dict)
+            self.strain_data = strain_data
 
         # Compute optimal SNR
         rho_opt_ifos, rho_opt = self.compute_optimal_snr(
-            self.strain_data_list[0], injection_generator.data_domain
+            strain_data, injection_generator.data_domain
         )
         logger.info(f"Network optimal SNR of injection: {rho_opt}")
         logger.info(f"Detector optimal SNRs of injection: {rho_opt_ifos}")
@@ -393,21 +397,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
             f_max=self.maximum_frequency,
             delta_f=1 / self.duration,
         )
-        if hasattr(self, "strain_data_list"):
-            for data, event_data_file in zip(
-                self.strain_data_list, self.event_data_files
-            ):
-                dataset = EventDataset(
-                    dictionary={
-                        "data": data,
-                        "injection_waveform_approximant": self.injection_waveform_approximant,
-                        "injection_dict": self.injection_dict,
-                        "settings": settings,
-                    }
-                )
-                dataset.to_file(event_data_file)
-
-        domain = FrequencyDomain(
+        domain = UniformFrequencyDomain(
             f_min=self.minimum_frequency,
             f_max=self.maximum_frequency,
             delta_f=1 / self.duration,
@@ -439,6 +429,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
             settings["num_injections"] = self.num_noise_realizations
             settings["injection_waveform_approximant"] = self.injection_waveform_approximant
             settings["injection_dict"] = self.injection_dict
+
         else:
             # PSD and strain data.
             data = {"waveform": {}, "asds": {}}  # TODO: Rename these keys.
