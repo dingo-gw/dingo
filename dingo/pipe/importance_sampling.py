@@ -38,7 +38,7 @@ class ImportanceSamplingInput(Input):
 
         # Samples to run on
         self.proposal_samples_file = args.proposal_samples_file
-        self.event_data_file = args.event_data_files[0].split()[0]
+        self.event_data_file = args.event_data_file
 
         # Prior
         self.prior_dict = args.prior_dict

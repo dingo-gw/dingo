@@ -407,6 +407,38 @@ class DataGenerationInput(BilbyDataGenerationInput):
                 )
                 dataset.to_file(event_data_file)
 
+        domain = FrequencyDomain(
+            f_min=self.minimum_frequency,
+            f_max=self.maximum_frequency,
+            delta_f=1 / self.duration,
+        )
+        if self.injection_dict:
+            if self.zero_noise and not self.importance_sampling:
+                tmp_strain_data = self.strain_data_list[0]
+                asds = {
+                    ifo_name: domain.update_data(
+                        tmp_strain_data["asds"][ifo_name], low_value=1.0
+                    )
+                    for ifo_name in self.detectors
+                }
+
+                # NOTE should we save the asd for each realization? This is convenient for 
+                # analysis but not for storage. For now I didn't save it
+                data = {
+                        **{f"waveform_{i}":self.strain_data_list[i]["waveform"] for i in range(self.num_noise_realizations)},
+                        "asds": asds,
+                }
+
+            else:
+                data = self.strain_data
+                for ifo_name in self.detectors:
+                    data["asds"][ifo_name] = domain.update_data(
+                        data["asds"][ifo_name], low_value=1.0
+                    )
+
+            settings["num_injections"] = self.num_noise_realizations
+            settings["injection_waveform_approximant"] = self.injection_waveform_approximant
+            settings["injection_dict"] = self.injection_dict
         else:
             # PSD and strain data.
             data = {"waveform": {}, "asds": {}}  # TODO: Rename these keys.
@@ -448,15 +480,15 @@ class DataGenerationInput(BilbyDataGenerationInput):
                 if v is not None:
                     settings[k] = v
 
-            dataset = EventDataset(
-                dictionary={
-                    "data": data,
-                    # "event_metadata": event_metadata,
-                    "settings": settings,
-                }
-            )
+        dataset = EventDataset(
+            dictionary={
+                "data": data,
+                # "event_metadata": event_metadata,
+                "settings": settings,
+            }
+        )
 
-            dataset.to_file(self.event_data_files[0])
+        dataset.to_file(self.event_data_file)
 
         # also saving the psd as a .dat file which can be read in
         # easily by pesummary or bilby
@@ -467,20 +499,10 @@ class DataGenerationInput(BilbyDataGenerationInput):
             )
 
     @property
-    def event_data_files(self):
-        if self.zero_noise:
-            return [
-                os.path.join(
-                    self.data_directory, "_".join([self.label, f"event_data_{i}.hdf5"])
-                )
-                for i in range(self.num_noise_realizations)
-            ]
-        else:
-            return [
-                os.path.join(
-                    self.data_directory, "_".join([self.label, f"event_data.hdf5"])
-                )
-            ]
+    def event_data_file(self):
+        return os.path.join(
+            self.data_directory, "_".join([self.label, f"event_data.hdf5"])
+        )
 
     @property
     def importance_sampling_updates(self):
