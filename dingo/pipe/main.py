@@ -45,7 +45,10 @@ def fill_in_arguments_from_model(args):
     flexible_detectors = (
         True
         if "tokenization" in data_settings
-        and "drop_detectors" in data_settings["tokenization"]
+        and (
+            "drop_detectors" in data_settings["tokenization"]
+            or "drop_random_tokens" in data_settings["tokenization"]
+        )
         else False
     )
     # minimum_frequency and maximum_frequency in model_args are provided to the data_generation node.
