@@ -220,28 +220,29 @@ class SamplingInput(Input):
                 )
                 samples_list.append(self.dingo_sampler.samples)
 
-                logger.info(
-                    "Training unconditional density estimator on pool of noise realizations"
-                )
-                training_result = self.dingo_sampler.to_result()
-                outdir = Path(self.result_directory)
-                training_result.to_file(os.path.join(outdir, "training_samples.hdf5"))
-                inference_parameters = list(self.dingo_sampler.samples.columns)
-                # removing proxies since this makes training the unconditional flow easier
-                inference_parameters = [
-                    x for x in inference_parameters if "proxy" not in x
-                ]
-                unconditional_flow = training_result.train_unconditional_flow(
-                    inference_parameters,
-                    nde_settings=self.density_recovery_settings["nde_settings"],
-                )
+            logger.info(
+                "Training unconditional density estimator on pool of noise realizations"
+            )
+            training_result = self.dingo_sampler.to_result()
+            training_result.samples = pd.concat(samples_list, ignore_index=True)
+            outdir = Path(self.result_directory)
+            training_result.to_file(os.path.join(outdir, "training_samples.hdf5"))
+            inference_parameters = list(self.dingo_sampler.samples.columns)
+            # removing proxies since this makes training the unconditional flow easier
+            inference_parameters = [
+                x for x in inference_parameters if "proxy" not in x
+            ]
+            unconditional_flow = training_result.train_unconditional_flow(
+                inference_parameters,
+                nde_settings=self.density_recovery_settings["nde_settings"],
+            )
 
-                nde_sampler = GWSampler(model=unconditional_flow)
-                nde_sampler.metadata = self.dingo_sampler.metadata
-                nde_sampler.run_sampler(
-                    num_samples=self.num_samples, batch_size=self.batch_size
-                )
-                self.dingo_sampler = nde_sampler
+            nde_sampler = GWSampler(model=unconditional_flow)
+            nde_sampler.metadata = self.dingo_sampler.metadata
+            nde_sampler.run_sampler(
+                num_samples=self.num_samples, batch_size=self.batch_size
+            )
+            self.dingo_sampler = nde_sampler
 
         # run the sampler
         self.dingo_sampler.run_sampler(
