@@ -320,6 +320,16 @@ def create_parser(top_level=True):
     action="store_true",
     help="Use a zero noise realisation",
     )
+    data_gen_pars.add(
+    "--zero-noise-num-training-samples",
+    action="store_true",
+    type=int,
+    default=1_000_000,
+    help=("Total number of samples to use for training the unconditional density estimator."
+        "The unconditional density estimator is trained on a pooled set of zero-noise realizations. "
+        "Set the number of zero-noise realizations based num-noise-realizations argument." 
+    )
+    )
 
     det_parser = parser.add_argument_group(
         title="Detector arguments",

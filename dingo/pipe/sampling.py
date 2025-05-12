@@ -44,14 +44,13 @@ class SamplingInput(Input):
 
         # Choices for running
         self.detectors = args.detectors
-        self.model = args.model
-        self.model_init = args.model_init
         self.zero_noise = args.zero_noise
         self.injection = args.injection_dict is not None
         self.recover_log_prob = args.recover_log_prob
         if self.zero_noise:
             self.num_noise_realizations = args.num_noise_realizations
             self.recover_log_prob = False
+            self.zero_noise_num_training_samples = args.zero_noise_num_training_samples
         else:
             self.num_noise_realizations = 1
             self.recover_log_prob = args.recover_log_prob
@@ -64,7 +63,6 @@ class SamplingInput(Input):
         else:
             self.model = args.model
             self.model_init = args.model_init
-        self.recover_log_prob = args.recover_log_prob
         self.device = args.device
         self.num_gnpe_iterations = args.num_gnpe_iterations
         self.num_samples = args.num_samples
@@ -145,6 +143,9 @@ class SamplingInput(Input):
         else:
             self.gnpe = False
             self.dingo_sampler = GWSampler(model=model)
+        
+        self.dingo_sampler.context = self.context
+        self.dingo_sampler.event_metadata = self.event_metadata
 
     @property
     def density_recovery_settings(self):
@@ -189,9 +190,7 @@ class SamplingInput(Input):
     #     return os.path.relpath(result_dir)
 
     def run_sampler(self):
-        self.dingo_sampler.event_metadata = self.event_metadata
         if self.gnpe and self.recover_log_prob and not self.zero_noise:
-            self.dingo_sampler.context = self.context.data
             logger.info(
                 "GNPE network does not provide log probability. Generating "
                 "samples and training a new network to recover it."
@@ -206,7 +205,6 @@ class SamplingInput(Input):
 
         # Training unconditional density estimator if zero noise
         elif self.zero_noise:
-            n_training_samples = 1_000_000
             samples_list = []
             for i in range(self.num_noise_realizations):
                 context = {
@@ -215,7 +213,7 @@ class SamplingInput(Input):
                 }
                 self.dingo_sampler.context = context
                 self.dingo_sampler.run_sampler(
-                    int(n_training_samples / self.num_noise_realizations),
+                    int(self.zero_noise_num_training_samples / self.num_noise_realizations),
                     batch_size=self.batch_size,
                 )
                 samples_list.append(self.dingo_sampler.samples)
@@ -243,6 +241,9 @@ class SamplingInput(Input):
                 num_samples=self.num_samples, batch_size=self.batch_size
             )
             self.dingo_sampler = nde_sampler
+
+        else:
+            self.dingo_sampler.context = self.context.data 
 
         # run the sampler
         self.dingo_sampler.run_sampler(
