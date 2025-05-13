@@ -72,7 +72,7 @@ def fill_in_arguments_from_model(args):
 
     # Collect sampling updates: minimum-frequency, maximum-frequency, and suppress (before they are overwritten)
     sampling_updates = {}
-    if "minimum_frequency" in args:
+    if "minimum_frequency" in args and args.minimum_frequency is not None:
         minimum_frequency_update = ast.literal_eval(args.minimum_frequency)
         if isinstance(minimum_frequency_update, float) or isinstance(
             minimum_frequency_update, int
@@ -100,7 +100,7 @@ def fill_in_arguments_from_model(args):
                     f"minimum_frequency={minimum_frequency_update} is outside domain of "
                     f"posterior model: domain.f_min={minimum_frequency}, domain.f_max={maximum_frequency}"
                 )
-    if "maximum_frequency" in args:
+    if "maximum_frequency" in args and args.maximum_frequency is not None:
         maximum_frequency_update = ast.literal_eval(args.maximum_frequency)
         if isinstance(maximum_frequency_update, float) or isinstance(
             maximum_frequency_update, int
@@ -128,7 +128,7 @@ def fill_in_arguments_from_model(args):
                     f"minimum_frequency={f_maxs_update} is outside domain of posterior model: "
                     f"domain.f_min={minimum_frequency}, domain.f_max={maximum_frequency}"
                 )
-    if "suppress" in args:
+    if "suppress" in args and args.suppress is not None:
         suppress = ast.literal_eval(args.suppress)
         # Update minimum/maximum_frequency with previous updates
         if "minimum_frequency" in sampling_updates:
