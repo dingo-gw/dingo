@@ -296,6 +296,7 @@ class GWSampler(GWSamplerMixin, Sampler):
                     minimum_frequency=self.minimum_frequency,
                     maximum_frequency=self.maximum_frequency,
                     suppress_range=self.suppress,
+                    ifos=self.detectors,
                 )
             ]
 
