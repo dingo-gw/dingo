@@ -1,4 +1,3 @@
-from termios import VLNEXT
 from typing import Optional
 import numpy as np
 
@@ -140,7 +139,7 @@ class StrainTokenization(object):
                     f"    - Extrapolating to maximum frequency of {self.f_max_per_token[-1]} Hz"
                 )
 
-    def __call__(self, input_sample):
+    def __call__(self, input_sample: dict) -> dict:
         """
         Parameters
         ----------
@@ -380,7 +379,7 @@ class DropDetectors(object):
                 f"    - Probabilities for specific detectors are {self.p_drop_hlv}."
             )
 
-    def __call__(self, input_sample):
+    def __call__(self, input_sample: dict) -> dict:
         """
         Parameters
         ----------
@@ -523,7 +522,7 @@ class DropFrequenciesToUpdateRange(object):
                 f"    - Probability to apply the same cut on all detectors: {self.p_same_cut_all_detectors} "
             )
 
-    def __call__(self, input_sample):
+    def __call__(self, input_sample: dict) -> dict:
         """
         Parameters
         ----------
@@ -765,7 +764,7 @@ class DropFrequencyInterval(object):
                 f"if {self.interval_f_min} and {self.interval_f_max} fall in the middle of a token."
             )
 
-    def __call__(self, input_sample):
+    def __call__(self, input_sample: dict) -> dict:
         """
         Parameters
         ----------
@@ -915,7 +914,7 @@ class DropRandomTokens(object):
                 f"    - Maximal number of tokens that can be dropped: {self.max_num_tokens}\n."
             )
 
-    def __call__(self, input_sample):
+    def __call__(self, input_sample: dict) -> dict:
         """
         Parameters
         ----------
@@ -991,7 +990,7 @@ class NormalizePosition(object):
     Normalize f_min and f_max in position
     """
 
-    def __call__(self, input_sample):
+    def __call__(self, input_sample: dict) -> dict:
         """
         Parameters
         ----------
@@ -1075,7 +1074,7 @@ class UpdateFrequencyRange(object):
                 f"    - Suppress range: {self.suppress_range}\n"
             )
 
-    def __call__(self, input_sample):
+    def __call__(self, input_sample: dict) -> dict:
         """
         Parameters
         ----------
