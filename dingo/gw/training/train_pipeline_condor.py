@@ -30,23 +30,25 @@ def create_submission_file(
     lines.append(f'executable = {condor_settings["executable"]}\n')
     lines.append(f'request_cpus = {condor_settings["num_cpus"]}\n')
     lines.append(f'request_memory = {condor_settings["memory_cpus"]}\n')
-    lines.append(f'request_gpus = {condor_settings["num_gpus"]}\n')
+    if "num_gpus" in condor_settings:
+        # TODO: Special settings of MPI-IS cluster => make optional
+        if condor_settings["num_gpus"] == 8:
+            # Request full node
+            lines.append("use template : FullNode\n")
+        elif condor_settings["num_gpus"] >= 6:
+            # Still request full nodes because wait times are long
+            lines.append(f'use template : FullNode({condor_settings["num_gpus"]})\n')
+        else:
+            lines.append(f'request_gpus = {condor_settings["num_gpus"]}\n')
+            lines.append(
+                f"requirements = TARGET.CUDAGlobalMemoryMb > "
+                f'{condor_settings["memory_gpus"]}\n\n'
+            )
     if "request_disk" in condor_settings:
         lines.append(f'request_disk = {condor_settings["request_disk"]}\n')
-    lines.append(
-        f"requirements = TARGET.CUDAGlobalMemoryMb > "
-        f'{condor_settings["memory_gpus"]}\n\n'
-    )
-    if "request_disk" in condor_settings:
-        lines.append(f'request_disk = {condor_settings["request_disk"]}\n')
-    lines.append(f'arguments = "{condor_settings["arguments"]}"\n')
-    # TODO: Special settings of MPI-IS cluster => make optional
-    if condor_settings["num_gpus"] == 8:
-        # Request full node
-        lines.append("use template : FullNode\n")
-    elif condor_settings["num_gpus"] >= 6:
-        # Still request full nodes because wait times are long
-        lines.append(f'use template : FullNode({condor_settings["num_gpus"]})\n')
+    if "arguments" in condor_settings:
+        lines.append(f'arguments = "{condor_settings["arguments"]}"\n')
+
 
     # TODO: Move responsibility to resume job from this file to htcondor job
     # * add args in submission file:
