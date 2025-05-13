@@ -1,3 +1,4 @@
+from termios import VLNEXT
 from typing import Optional
 import numpy as np
 
@@ -1031,6 +1032,7 @@ class UpdateFrequencyRange(object):
         suppress_range: Optional[
             list[float, float] | dict[str, list[float, float]]
         ] = None,
+        ifos: Optional[list[str]] = None,
         print_output: bool = False,
     ):
         """
@@ -1048,6 +1050,21 @@ class UpdateFrequencyRange(object):
         self.minimum_frequency = minimum_frequency
         self.maximum_frequency = maximum_frequency
         self.suppress_range = suppress_range
+        # Check that minimum-/maximum frequency is provided for each detector
+        if isinstance(minimum_frequency, dict):
+            ifos_min = [i for i in minimum_frequency.keys()]
+            if not set(ifos).issubset(ifos_min):
+                raise ValueError(
+                    f"minimum-frequency={minimum_frequency} doesn't contain information about all "
+                    f"detectors present in event: {ifos}."
+                )
+        if isinstance(maximum_frequency, dict):
+            ifos_max = [i for i in maximum_frequency.keys()]
+            if not set(ifos).issubset(ifos_max):
+                raise ValueError(
+                    f"maximum-frequency={maximum_frequency} doesn't contain information about all "
+                    f"detectors present in event: {ifos}."
+                )
 
         if print_output:
             print(
