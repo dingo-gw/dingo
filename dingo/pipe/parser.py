@@ -322,7 +322,6 @@ def create_parser(top_level=True):
     )
     data_gen_pars.add(
     "--zero-noise-num-training-samples",
-    action="store_true",
     type=int,
     default=1_000_000,
     help=("Total number of samples to use for training the unconditional density estimator."
