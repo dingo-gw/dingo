@@ -330,7 +330,7 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
 
         As the MultibandedFrequencyDomain starts from f_min, no masking is generally
         required."""
-        return np.ones_like(self.sample_frequencies)
+        return np.ones_like(self.sample_frequencies, dtype=bool)
 
     @property
     def frequency_mask_length(self) -> int:
