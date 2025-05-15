@@ -18,7 +18,6 @@ from dingo.gw.gwutils import get_extrinsic_prior_dict, get_window_factor
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 from dingo.gw.prior import build_prior_with_defaults
 
-
 RANDOM_STATE = 150914
 
 
@@ -71,7 +70,9 @@ class Result(CoreResult):
         # expects detectors to be a list in result.reset_event(). If it is not a list, event_metadata is not the same as
         # the event metadata loaded from the events file (where detectors is a list) and it assumes that a domain update
         # is necessary (which is not implemented for MFD).
-        if self.event_metadata is not None and isinstance(self.event_metadata["detectors"], str):
+        if self.event_metadata is not None and isinstance(
+            self.event_metadata["detectors"], str
+        ):
             self.event_metadata["detectors"] = [self.event_metadata["detectors"]]
 
     @property
@@ -282,6 +283,7 @@ class Result(CoreResult):
         phase_marginalization_kwargs: Optional[dict] = None,
         calibration_marginalization_kwargs: Optional[dict] = None,
         phase_grid: Optional[np.ndarray] = None,
+        frequency_update: Optional[dict] = None,
     ):
         """
         Build the likelihood function based on model metadata. This is called at the
@@ -361,6 +363,7 @@ class Result(CoreResult):
             calibration_marginalization_kwargs=calibration_marginalization_kwargs,
             phase_grid=phase_grid,
             use_base_domain=self.use_base_domain,
+            frequency_update=frequency_update,
         )
 
     def sample_synthetic_phase(

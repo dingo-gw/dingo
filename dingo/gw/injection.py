@@ -1,3 +1,4 @@
+from typing import Optional
 import numpy as np
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
@@ -17,6 +18,7 @@ from dingo.gw.transforms import (
     ProjectOntoDetectors,
     WhitenAndScaleStrain,
     ApplyCalibrationUncertainty,
+    MaskDataForFrequencyRangeUpdate,
 )
 from dingo.gw.waveform_generator.waveform_generator import (
     WaveformGenerator,
@@ -39,6 +41,7 @@ class GWSignal(object):
         data_domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
         ifo_list: list,
         t_ref: float,
+        frequency_update: Optional[dict] = None,
     ):
         """
         Parameters
@@ -74,6 +77,17 @@ class GWSignal(object):
 
         self.t_ref = t_ref
         self.ifo_list = InterferometerList(ifo_list)
+
+        # Optional frequency update
+        self.minimum_frequency = None
+        self.maximum_frequency = None
+        self.suppress = None
+        if "minimum_frequency" in frequency_update:
+            self.minimum_frequency = frequency_update["minimum_frequency"]
+        if "maximum_frequency" in frequency_update:
+            self.maximum_frequency = frequency_update["maximum_frequency"]
+        if "suppress" in frequency_update:
+            self.suppress = frequency_update["suppress"]
 
         # When we set self.whiten, the projection transforms are automatically prepared.
         self._calibration_envelope = None
@@ -171,6 +185,20 @@ class GWSignal(object):
             )
         if self.whiten:
             transforms.append(WhitenAndScaleStrain(self.data_domain.noise_std))
+        if (
+            self.minimum_frequency is not None
+            or self.maximum_frequency is not None
+            or self.suppress is not None
+        ):
+            transforms.append(
+                MaskDataForFrequencyRangeUpdate(
+                    domain=self.data_domain,
+                    minimum_frequency=self.minimum_frequency,
+                    maximum_frequency=self.maximum_frequency,
+                    suppress_range=self.suppress,
+                    ifos=[ifo.name for ifo in self.ifo_list],
+                )
+            )
         self.projection_transforms = Compose(transforms)
 
     def signal(self, theta):
@@ -313,7 +341,10 @@ class GWSignal(object):
                 if "window_factor" in domain_dict:
                     print("Dropping window factor for update.")
                     del domain_dict["window_factor"]
-                if "base_domain" in domain_dict and "window_factor" in domain_dict["base_domain"]:
+                if (
+                    "base_domain" in domain_dict
+                    and "window_factor" in domain_dict["base_domain"]
+                ):
                     print("Dropping window factor of base domain for update.")
                     del domain_dict["base_domain"]["window_factor"]
                 asd.update_domain(domain_dict)

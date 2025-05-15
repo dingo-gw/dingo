@@ -60,6 +60,13 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.importance_sampling = args.importance_sampling_generation
         self.importance_sampling_updates = args.importance_sampling_updates
         if self.importance_sampling:
+            # Updates to frequency range should not affect the data generation for importance sampling
+            if "minimum_frequency" in self.importance_sampling_updates:
+                self.importance_sampling_updates.pop("minimum_frequency")
+            if "maximum_frequency" in self.importance_sampling_updates:
+                self.importance_sampling_updates.pop("maximum_frequency")
+            if "suppress" in self.importance_sampling_updates:
+                self.importance_sampling_updates.pop("suppress")
             vars(args).update(self.importance_sampling_updates)
 
         # Data arguments
@@ -87,8 +94,15 @@ class DataGenerationInput(BilbyDataGenerationInput):
 
         # Frequencies
         self.sampling_frequency = args.sampling_frequency
-        self.minimum_frequency = args.minimum_frequency
-        self.maximum_frequency = args.maximum_frequency
+        # bilby_pipe input only allows float or str for minimum/maximum_frequency
+        if isinstance(args.minimum_frequency, dict):
+            self.minimum_frequency = str(args.minimum_frequency)
+        else:
+            self.minimum_frequency = args.minimum_frequency
+        if isinstance(args.maximum_frequency, dict):
+            self.maximum_frequency = str(args.maximum_frequency)
+        else:
+            self.maximum_frequency = args.maximum_frequency
         # self.reference_frequency = args.reference_frequency
 
         # Waveform, source model and likelihood

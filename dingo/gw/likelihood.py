@@ -12,10 +12,7 @@ from dingo.core.likelihood import Likelihood
 from dingo.gw.injection import GWSignal
 from dingo.gw.transforms import DecimateWaveformsAndASDS
 from dingo.gw.waveform_generator import WaveformGenerator
-from dingo.gw.domains import (
-    UniformFrequencyDomain,
-    MultibandedFrequencyDomain,
-)
+from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain, Domain
 from dingo.gw.domains import build_domain
 from dingo.gw.data.data_preparation import get_event_data_and_domain
 
@@ -27,16 +24,19 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
     def __init__(
         self,
-        wfg_kwargs,
-        wfg_domain,
-        data_domain,
-        event_data,
-        t_ref=None,
-        time_marginalization_kwargs=None,
-        phase_marginalization_kwargs=None,
-        calibration_marginalization_kwargs=None,
+        wfg_kwargs: dict,
+        wfg_domain: Domain,
+        data_domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
+        event_data: dict,
+        t_ref: Optional[float] = None,
+        time_marginalization_kwargs: Optional[dict] = None,
+        phase_marginalization_kwargs: Optional[dict] = None,
+        calibration_marginalization_kwargs: Optional[dict] = None,
         phase_grid=None,
-        use_base_domain=False,
+        use_base_domain: bool = False,
+        frequency_update: Optional[
+            dict[str : float | dict[str : float | list[float]]]
+        ] = None,
     ):
         # TODO: Does the phase_grid argument ever get used?
         """
@@ -44,10 +44,10 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         ----------
         wfg_kwargs: dict
             Waveform generator parameters (at least approximant and f_ref).
-        wfg_domain : dingo.gw.domains.Domain
+        wfg_domain : UniformFrequencyDomain | MultibandedFrequencyDomain
             Domain used for waveform generation. This can potentially deviate from the
             final domain, having a wider frequency range needed for waveform generation.
-        data_domain: dingo.gw.domains.Domain
+        data_domain: UniformFrequencyDomain | MultibandedFrequencyDomain
             Domain object for event data.
         event_data: dict
             GW data. Contains strain data in event_data["waveforms"] and asds in
@@ -63,6 +63,11 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         use_base_domain: bool (default False)
             When the domain is a MultibandedFrequencyDomain, whether to use the
             associated base UniformFrequencyDomain for likelihood computations.
+        frequency_update: dict
+            Specifies settings for updating the frequency range
+            example: {'minimum_frequency': {'H1': 30., 'L1': 20.},
+                       maximum_frequency: 1024.,
+                       suppress: {'V1': [40., 50.]}}
         """
         super().__init__(
             wfg_kwargs=wfg_kwargs,
@@ -70,6 +75,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             data_domain=data_domain,
             ifo_list=list(event_data["waveform"].keys()),
             t_ref=t_ref,
+            frequency_update=frequency_update,
         )
 
         if isinstance(data_domain, MultibandedFrequencyDomain) and not use_base_domain:
@@ -96,7 +102,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         )
         # For completeness (not used): there is a PSD-dependent contribution to the
         # likelihood,  which is typically ignored as it is constant for a given PSD
-        # (e.g.,  for different waveform models) or event strains. Intuitively it is the
+        # (e.g., for different waveform models) or event strains. Intuitively it is the
         # correction term that needs to be added to the log-likelihood to account
         # for the fact we compute N[0,1](strain/ASD) instead of N[0,ASD^2](strain).
         # But this contribution is typically ignored since we are only interested in
@@ -735,7 +741,7 @@ def build_stationary_gaussian_likelihood(
     ----------
     metadata: dict
         Metadata from stored dingo parameter samples file.
-        Typially accessed via pd.read_pickle(/path/to/dingo-output.pkl).metadata.
+        Typically accessed via pd.read_pickle(/path/to/dingo-output.pkl).metadata.
     event_dataset: str = None
         Path to event dataset for caching. If None, don't cache.
     time_marginalization_kwargs: dict = None

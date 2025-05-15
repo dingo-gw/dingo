@@ -1,6 +1,7 @@
 #!/usr/bin/env python
-""" Script to importance sample based on Dingo samples. Based on bilby_pipe data
-analysis script. """
+"""Script to importance sample based on Dingo samples. Based on bilby_pipe data
+analysis script."""
+import ast
 import os
 import sys
 
@@ -57,8 +58,22 @@ class ImportanceSamplingInput(Input):
         # self.minimum_frequency = args.minimum_frequency
         # self.maximum_frequency = args.maximum_frequency
         # self.reference_frequency = args.reference_frequency
+        self.frequency_update = {}
+        # Extract updates to frequency range
+        if "minimum_frequency" in args.importance_sampling_updates:
+            self.frequency_update["minimum_frequency"] = ast.literal_eval(
+                args.importance_sampling_updates
+            )["minimum_frequency"]
+        if "maximum_frequency" in args.importance_sampling_updates:
+            self.frequency_update["maximum_frequency"] = ast.literal_eval(
+                args.importance_sampling_updates
+            )["maximum_frequency"]
+        if "suppress" in args.importance_sampling_updates:
+            self.frequency_update["suppress"] = ast.literal_eval(
+                args.importance_sampling_updates
+            )["suppress"]
 
-        # # Waveform, source model and likelihood
+        # Waveform, source model and likelihood
         # self.waveform_generator_class = args.waveform_generator
         # self.waveform_approximant = args.waveform_approximant
         # self.catch_waveform_errors = args.catch_waveform_errors
@@ -185,7 +200,12 @@ class ImportanceSamplingInput(Input):
                 **self.importance_sampling_settings["synthetic_phase"],
                 "num_processes": self.request_cpus,
             }
-            self.result.sample_synthetic_phase(synthetic_phase_kwargs)
+            self.result.sample_synthetic_phase(
+                synthetic_phase_kwargs=synthetic_phase_kwargs,
+                likelihood_kwargs={
+                    "frequency_update": self.frequency_update,
+                },
+            )
 
         self.result.importance_sample(
             num_processes=self.request_cpus,
@@ -196,8 +216,8 @@ class ImportanceSamplingInput(Input):
                 "phase_marginalization"
             ),
             calibration_marginalization_kwargs=self.calibration_marginalization_kwargs,
+            frequency_update=self.frequency_update,
         )
-
 
         self.result.print_summary()
         self.result.to_file(os.path.join(self.result_directory, self.label + ".hdf5"))
