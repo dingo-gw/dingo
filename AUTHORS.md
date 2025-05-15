@@ -10,10 +10,13 @@ not listed.
 ### Major contributors
 
 * Nihar Gupte
+* Annalena Kofler
 * Michael Puerrer
 * Jonas Wildberger
 
 ### Contributors
 
+* Vincent Berenz
+* Samuel Clyne
 * Hector Estelles
 * Jonathan Gair

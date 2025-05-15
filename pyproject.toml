@@ -2,24 +2,23 @@
 requires = ["setuptools>=62.0", "setuptools_scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
 
-
 [project]
 name = "dingo-gw"
-authors = [ 
+authors = [
     {name = "Maximilian Dax", email = "maximilian.dax@tuebingen.mpg.de"},
     {name = "Stephen Green", email = "Stephen.Green2@nottingham.ac.uk"},
 ]
 description = "Deep inference for gravitational-wave observations"
 license = {text = "MIT"}
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 dynamic = ["version"]
 
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent"
 ]
@@ -43,7 +42,7 @@ dependencies = [
     "pyyaml",
     "requests",
     "scikit-learn",
-    "scipy==1.13.1",
+    "scipy",
     "threadpoolctl",
     "torch",
     "torchdiffeq",
@@ -51,11 +50,9 @@ dependencies = [
     "tqdm",
 ]
 
-
 [tool.setuptools.packages.find]
 include = ["dingo*"]
 namespaces = false
-
 
 [tool.setuptools_scm]
 write_to = "dingo/_version.py"
@@ -67,7 +64,6 @@ markers = [
 
 [project.urls]
 homepage = "https://github.com/dingo-gw/dingo"
-
 
 [project.optional-dependencies]
 dev = [
@@ -89,11 +85,11 @@ pyseobnr = [
     "pyseobnr",
 ]
 
-
 [project.scripts]
 dingo_append_training_stage = "dingo.gw.training:append_stage"
 dingo_build_svd = "dingo.gw.dataset.utils:build_svd_cli"
 dingo_estimate_psds = "dingo.gw.noise.asd_estimation:download_and_estimate_cli"
+dingo_evaluate_multibanded_domain = "dingo.gw.dataset.evaluate_multibanded_domain:main"
 dingo_generate_asd_dataset = "dingo.gw.noise.generate_dataset:generate_dataset"
 dingo_generate_dataset = "dingo.gw.dataset.generate_dataset:main"
 dingo_generate_dataset_dag = "dingo.gw.dataset.generate_dataset_dag:main"

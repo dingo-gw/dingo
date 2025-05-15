@@ -291,7 +291,6 @@ def build_svd_for_embedding_network(
     )
     with threadpool_limits(limits=1, user_api="blas"):
         for idx, data in enumerate(loader):
-
             # This is for handling the last batch, which may otherwise push the total
             # number of samples above the number requested.
             lower = idx * batch_size

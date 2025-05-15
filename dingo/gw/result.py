@@ -13,6 +13,7 @@ from dingo.core.density import (
 from dingo.core.multiprocessing import apply_func_with_multiprocessing
 from dingo.core.result import Result as CoreResult
 from dingo.gw.conversion import change_spin_conversion_phase
+from dingo.gw.domains import MultibandedFrequencyDomain
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_extrinsic_prior_dict, get_window_factor
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
@@ -36,7 +37,7 @@ class Result(CoreResult):
             Contains parameter samples, as well as (possibly) log_prob, log_likelihood,
             weights, log_prior, delta_log_prob_target.
         domain : Domain
-            The domain of the data (e.g., FrequencyDomain), needed for calculating
+            The domain of the data (e.g., UniformFrequencyDomain), needed for calculating
             likelihoods.
         prior : PriorDict
             The prior distribution, used for importance sampling.
@@ -100,6 +101,15 @@ class Result(CoreResult):
         self.importance_sampling_metadata["calibration_marginalization"] = value
 
     @property
+    def use_base_domain(self) -> bool:
+        return self.importance_sampling_metadata.get("use_base_domain", False)
+
+    @use_base_domain.setter
+    def use_base_domain(self, value: bool):
+        if hasattr(self.domain, "base_domain"):
+            self.importance_sampling_metadata["use_base_domain"] = value
+
+    @property
     def f_ref(self):
         return self.base_metadata["dataset_settings"]["waveform_generator"]["f_ref"]
 
@@ -148,6 +158,10 @@ class Result(CoreResult):
         # Assume that updates can contain T, f_s, roll_off, f_min, f_max, but no other
         # quantities that define a new domain (e.g., delta_f). Typical event metadata
         # will be constructed in this way.
+
+        # TODO: Make compatible with MultibandedFrequencyDomain.
+        if isinstance(self.domain, MultibandedFrequencyDomain):
+            raise NotImplementedError()
 
         if "f_s" in updates or "T" in updates or "roll_off" in updates:
             window_settings = self.base_metadata["train_settings"]["data"][
@@ -340,6 +354,7 @@ class Result(CoreResult):
             phase_marginalization_kwargs=phase_marginalization_kwargs,
             calibration_marginalization_kwargs=calibration_marginalization_kwargs,
             phase_grid=phase_grid,
+            use_base_domain=self.use_base_domain,
         )
 
     def sample_synthetic_phase(
@@ -563,7 +578,10 @@ class Result(CoreResult):
             return self._pesummary_samples
 
         # Unweighted samples.
-        samples = self.sampling_importance_resampling(random_state=RANDOM_STATE)
+        if "weights" in self.samples:
+            samples = self.sampling_importance_resampling(random_state=RANDOM_STATE)
+        else:
+            samples = self.samples.copy()
 
         # Remove unwanted columns.
         samples.drop(
@@ -587,7 +605,11 @@ class Result(CoreResult):
 
         # Redefine phase parameter to be consistent with Bilby. COMMENTED BECAUSE SLOW
         samples = change_spin_conversion_phase(
-            samples, self.f_ref, spin_conversion_phase_old, None, num_processes=num_processes
+            samples,
+            self.f_ref,
+            spin_conversion_phase_old,
+            None,
+            num_processes=num_processes,
         )
 
         self._pesummary_samples = samples

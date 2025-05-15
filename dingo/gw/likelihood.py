@@ -1,5 +1,6 @@
 import sys
 from multiprocessing import Pool
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -10,7 +11,12 @@ from threadpoolctl import threadpool_limits
 
 from dingo.core.likelihood import Likelihood
 from dingo.gw.injection import GWSignal
+from dingo.gw.transforms import DecimateWaveformsAndASDS
 from dingo.gw.waveform_generator import WaveformGenerator
+from dingo.gw.domains import (
+    UniformFrequencyDomain,
+    MultibandedFrequencyDomain,
+)
 from dingo.gw.domains import build_domain
 from dingo.gw.data.data_preparation import get_event_data_and_domain
 
@@ -31,6 +37,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         phase_marginalization_kwargs=None,
         calibration_marginalization_kwargs=None,
         phase_grid=None,
+        use_base_domain=False,
     ):
         # TODO: Does the phase_grid argument ever get used?
         """
@@ -54,6 +61,9 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             Calibration marginalization parameters. If None, no calibration marginalization is used.
         phase_marginalization_kwargs: dict
             Phase marginalization parameters. If None, no phase marginalization is used.
+        use_base_domain: bool (default False)
+            When the domain is a MultibandedFrequencyDomain, whether to use the
+            associated base UniformFrequencyDomain for likelihood computations.
         """
         super().__init__(
             wfg_kwargs=wfg_kwargs,
@@ -63,13 +73,20 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             t_ref=t_ref,
         )
 
+        if isinstance(data_domain, MultibandedFrequencyDomain) and not use_base_domain:
+            decimator = DecimateWaveformsAndASDS(
+                data_domain, decimation_mode="whitened"
+            )
+            event_data = decimator(event_data)
+        self.use_base_domain = use_base_domain  # Set up appropriate domain objects.
+
         self.asd = event_data["asds"]
 
         self.whitened_strains = {
             k: v / self.asd[k] / self.data_domain.noise_std
             for k, v in event_data["waveform"].items()
         }
-        if len(list(self.whitened_strains.values())[0]) != data_domain.max_idx + 1:
+        if len(list(self.whitened_strains.values())[0]) != len(self.data_domain):
             raise ValueError("Strain data does not match domain.")
         # log noise evidence, independent of theta and waveform model
         self.log_Zn = sum(
@@ -264,7 +281,45 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         )
         return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
-    def log_likelihood_phase_grid(self, theta, phases=None):
+    def log_likelihood_phase_grid(
+        self, theta: dict, phases: Optional[np.ndarray] = None
+    ) -> np.ndarray:
+        if isinstance(
+            self.waveform_generator.domain,
+            (UniformFrequencyDomain, MultibandedFrequencyDomain),
+        ):
+            return self._log_likelihood_phase_grid_mode_decomposed(theta, phases=phases)
+        # elif isinstance(self.waveform_generator.domain, MultibandedFrequencyDomain):
+        #     return self._log_likelihood_phase_grid_manual(theta, phases=phases)
+        else:
+            raise NotImplementedError(
+                f"Phase grid not implemented for "
+                f"{type(self.waveform_generator.domain)}."
+            )
+
+    def _log_likelihood_phase_grid_manual(
+        self, theta: dict, phases: Optional[np.ndarray] = None
+    ) -> np.ndarray:
+        if self.phase_marginalization:
+            raise ValueError(
+                "Can't compute likelihood on a phase grid for "
+                "phase-marginalized posteriors"
+            )
+        if self.time_marginalization:
+            raise NotImplementedError(
+                "log_likelihood on phase grid not yet implemented."
+            )
+
+        if phases is None:
+            phases = self.phase_grid
+
+        log_likelihoods = np.ones(len(phases))
+        for idx, p in enumerate(phases):
+            log_likelihoods[idx] = self._log_likelihood({**theta, "phase": p})
+
+        return log_likelihoods
+
+    def _log_likelihood_phase_grid_mode_decomposed(self, theta, phases=None):
         # TODO: Implement for time marginalization
         if self.phase_marginalization:
             raise ValueError(

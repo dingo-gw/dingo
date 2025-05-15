@@ -20,6 +20,9 @@ from dingo.gw.domains import build_domain_from_model_metadata
 from .dag_creator import generate_dag
 from .parser import create_parser
 
+from ..gw.domains.build_domain import build_domain_from_model_metadata
+from dingo.core.posterior_models.build_model import build_model_from_kwargs
+
 logger.name = "dingo_pipe"
 
 
@@ -38,7 +41,7 @@ def fill_in_arguments_from_model(args):
 
     model_metadata = model.metadata
 
-    domain = build_domain_from_model_metadata(model_metadata)
+    domain = build_domain_from_model_metadata(model_metadata, base=True)
 
     data_settings = model_metadata["train_settings"]["data"]
 
@@ -192,6 +195,7 @@ class MainInput(BilbyMainInput):
         self.condor_job_priority = args.condor_job_priority
         self.create_summary = args.create_summary
         self.scitoken_issuer = args.scitoken_issuer
+        self.container = args.container
 
         self.outdir = args.outdir
         self.label = args.label
@@ -209,10 +213,13 @@ class MainInput(BilbyMainInput):
         self.data_find_url = args.data_find_url
         self.data_find_urltype = args.data_find_urltype
         self.n_parallel = args.n_parallel
-        self.transfer_files = args.transfer_files
+        # useful when condor nodes don't have access to submit filesystem
+        self.transfer_files = args.transfer_files 
         self.additional_transfer_paths = args.additional_transfer_paths
         self.osg = args.osg
-        self.desired_sites = args.desired_sites
+        self.desired_sites = args.cpu_desired_sites  # Dummy variable so bilby_pipe doesn't complain.
+        self.cpu_desired_sites = args.cpu_desired_sites
+        self.gpu_desired_sites = args.gpu_desired_sites
         # self.analysis_executable = args.analysis_executable
         # self.analysis_executable_parser = args.analysis_executable_parser
         self.result_format = "hdf5"
@@ -366,7 +373,10 @@ def write_complete_config_file(parser, args, inputs, input_cls=MainInput):
             continue
         if isinstance(val, str):
             if os.path.isfile(val) or os.path.isdir(val):
-                setattr(args, key, os.path.abspath(val))
+                if not args.osg:
+                    setattr(args, key, os.path.abspath(val))
+                else:
+                    setattr(args, key, val)
         if isinstance(val, list):
             if isinstance(val[0], str):
                 setattr(args, key, f"[{', '.join(val)}]")

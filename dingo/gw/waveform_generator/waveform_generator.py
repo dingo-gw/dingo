@@ -4,7 +4,7 @@ from math import isclose
 
 import numpy as np
 import astropy.units as u
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Tuple, Union, Callable
 from numbers import Number
 import warnings
 import pandas as pd
@@ -16,9 +16,20 @@ from bilby.gw.conversion import (
     convert_to_lal_binary_black_hole_parameters,
     bilby_to_lalsimulation_spins,
 )
+from bilby.gw.utils import (
+    lalsim_SimInspiralWaveformParamsInsertTidalLambda1,
+    lalsim_SimInspiralWaveformParamsInsertTidalLambda2,
+)
+
 import dingo.gw.waveform_generator.wfg_utils as wfg_utils
 import dingo.gw.waveform_generator.frame_utils as frame_utils
-from dingo.gw.domains import Domain, FrequencyDomain, TimeDomain
+from dingo.gw.domains import (
+    Domain,
+    UniformFrequencyDomain,
+    MultibandedFrequencyDomain,
+    TimeDomain,
+)
+from dingo.gw.transforms.waveform_transforms import DecimateAll
 
 
 class WaveformGenerator:
@@ -98,6 +109,33 @@ class WaveformGenerator:
         self.spin_conversion_phase = spin_conversion_phase
 
     @property
+    def domain(self):
+        if self._use_base_domain:
+            return self._domain.base_domain
+        else:
+            return self._domain
+
+    @domain.setter
+    def domain(self, value):
+        self._domain = value
+        if isinstance(
+            self._domain, MultibandedFrequencyDomain
+        ) and not LS.SimInspiralImplementedFDApproximants(self.approximant):
+            # For non-frequency domain approximants, generate waveforms in the base
+            # UniformFrequencyDomain, and later decimate.
+            self._use_base_domain = True
+            self._domain_transform = DecimateAll(self._domain)
+        else:
+            # For frequency-domain approximants, generate waveforms directly in either
+            # UFD or MFD.
+            self._use_base_domain = False
+            self._domain_transform = None
+
+    @property
+    def full_domain(self):
+        return self._domain
+
+    @property
     def spin_conversion_phase(self):
         return self._spin_conversion_phase
 
@@ -172,10 +210,16 @@ class WaveformGenerator:
         parameters = parameters.copy()
         parameters["f_ref"] = self.f_ref
 
-        parameters_generator = self._convert_parameters(parameters, self.lal_params)
+        parameters_generator, target_function = self._convert_parameters(
+            parameters,
+            self.lal_params,
+            return_target_function=True,
+        )
 
         # Generate GW polarizations
-        if isinstance(self.domain, FrequencyDomain):
+        if isinstance(
+            self.domain, (UniformFrequencyDomain, MultibandedFrequencyDomain)
+        ):
             wf_generator = self.generate_FD_waveform
         elif isinstance(self.domain, TimeDomain):
             wf_generator = self.generate_TD_waveform
@@ -183,7 +227,10 @@ class WaveformGenerator:
             raise ValueError(f"Unsupported domain type {type(self.domain)}.")
 
         try:
-            wf_dict = wf_generator(parameters_generator)
+            if target_function is not None:
+                wf_dict = wf_generator(parameters_generator, target_function)
+            else:
+                wf_dict = wf_generator(parameters_generator)
         except Exception as e:
             if not catch_waveform_errors:
                 raise
@@ -198,6 +245,9 @@ class WaveformGenerator:
                     wf_dict = {"h_plus": pol_nan, "h_cross": pol_nan}
                 else:
                     raise
+
+        if self._domain_transform is not None:
+            wf_dict = self._domain_transform(wf_dict)
 
         if self.transform is not None:
             return self.transform(wf_dict)
@@ -231,7 +281,8 @@ class WaveformGenerator:
         self,
         parameter_dict: Dict,
         lal_params=None,
-        lal_target_function=None,
+        target_function=None,
+        return_target_function=False,
     ) -> Tuple:
         """Convert to lal source frame parameters
 
@@ -242,7 +293,7 @@ class WaveformGenerator:
             objects. If None, we use a default binary black hole prior.
         lal_params : (None, or Swig Object of type 'tagLALDict *')
             Extra parameters which can be passed to lalsimulation calls.
-        lal_target_function: str = None
+        target_function: str = None
             Name of the lalsimulation function for which to prepare the parameters.
             If None, use SimInspiralFD if self.domain is FD, and SimInspiralTD if
             self.domain is TD.
@@ -251,28 +302,37 @@ class WaveformGenerator:
                 - SimInspiralTD (Also works for SimInspiralChooseTDWaveform)
                 - SimInspiralChooseFDModes
                 - SimInspiralChooseTDModes
+        return_target_function: bool = False
+            if set, also returns lal target function.
         Returns
         -------
         lal_parameter_tuple:
-            A tuple of parameters for the lalsimulation waveform generator
+            A tuple of parameters for the lalsimulation waveform generator.
+        target_function:
+            Target function for waveform generation, only returned if
+            return_target_function = True.
         """
-        # check that the lal_target_function is valid
-        if lal_target_function is None:
-            if isinstance(self.domain, FrequencyDomain):
-                lal_target_function = "SimInspiralFD"
+        # check that the target_function is valid
+        if target_function is None:
+            if isinstance(self.domain, UniformFrequencyDomain):
+                target_function = "SimInspiralFD"
+            elif isinstance(self.domain, MultibandedFrequencyDomain):
+                target_function = "SimInspiralChooseFDWaveformSequence"
             elif isinstance(self.domain, TimeDomain):
-                lal_target_function = "SimInspiralTD"
+                target_function = "SimInspiralTD"
             else:
                 raise ValueError(f"Unsupported domain type {type(self.domain)}.")
-        if lal_target_function not in [
-            "SimInspiralFD",
-            "SimInspiralTD",
-            "SimInspiralChooseTDModes",
-            "SimInspiralChooseFDModes",
-            "SimIMRPhenomXPCalculateModelParametersFromSourceFrame",
-        ]:
+        target_functions_dict = {
+            "SimInspiralFD": LS.SimInspiralFD,
+            "SimInspiralTD": LS.SimInspiralTD,
+            "SimInspiralChooseTDModes": LS.SimInspiralChooseTDModes,
+            "SimInspiralChooseFDModes": LS.SimInspiralChooseFDModes,
+            "SimInspiralChooseFDWaveformSequence": LS.SimInspiralChooseFDWaveformSequence,
+            "SimIMRPhenomXPCalculateModelParametersFromSourceFrame": LS.SimIMRPhenomXPCalculateModelParametersFromSourceFrame,
+        }
+        if target_function not in target_functions_dict:
             raise ValueError(
-                f"Unsupported lalsimulation waveform function {lal_target_function}."
+                f"Unsupported lalsimulation waveform function {target_function}."
             )
 
         # Transform mass, spin, and distance parameters
@@ -313,10 +373,20 @@ class WaveformGenerator:
         r = p["luminosity_distance"]
         phase = p["phase"]
         ecc_params = (0.0, 0.0, 0.0)  # longAscNodes, eccentricity, meanPerAno
+        # for BNS/NSBH: insert tidal deformability
+        if "lambda_1" in p or "lambda_2" in p:
+            if lal_params is None:
+                lal_params = lal.CreateDict()
+            lalsim_SimInspiralWaveformParamsInsertTidalLambda1(
+                lal_params, p.get("lambda_1", 0)
+            )
+            lalsim_SimInspiralWaveformParamsInsertTidalLambda2(
+                lal_params, p.get("lambda_2", 0)
+            )
 
         # Get domain parameters
         f_ref = p["f_ref"]
-        if isinstance(self.domain, FrequencyDomain):
+        if isinstance(self.domain, UniformFrequencyDomain):
             delta_f = self.domain.delta_f
             f_max = self.domain.f_max
             if self.f_start is not None:
@@ -334,10 +404,8 @@ class WaveformGenerator:
             # parameters needed for FD waveforms
             f_max = 1.0 / self.domain.delta_t
             delta_f = 1.0 / self.domain.duration
-        else:
-            raise ValueError(f"Unsupported domain type {type(self.domain)}.")
 
-        if lal_target_function == "SimInspiralFD":
+        if target_function == "SimInspiralFD":
             # LS.SimInspiralFD takes parameters:
             #   m1, m2, S1x, S1y, S1z, S2x, S2y, S2z,
             #   distance, inclination, phiRef,
@@ -354,8 +422,31 @@ class WaveformGenerator:
                 + domain_pars
                 + (lal_params, self.approximant)
             )
+            lal_parameter_tuple = (
+                tuple(float(p) for p in lal_parameter_tuple[:18])
+                + lal_parameter_tuple[18:]
+            )
 
-        elif lal_target_function == "SimInspiralTD":
+        elif target_function == "SimInspiralChooseFDWaveformSequence":
+            # LS.SimInspiralChooseFDWaveformSequence takes parameters:
+            #   phiRef, m1, m2, S1x, S1y, S1z, S2x, S2y, S2z
+            #   f_ref, distance, iota,
+            #   lal_params, approximant, frequency_array
+            lal_parameter_tuple = (phase, *masses, *spins_cartesian, f_ref, r, iota)
+            lal_parameter_tuple = tuple(float(p) for p in lal_parameter_tuple)
+            # create lal object for frequency array
+            frequency_array = lal.CreateREAL8Vector(
+                len(self.domain()[self.domain.min_idx :])
+            )
+            frequency_array.data = self.domain()[self.domain.min_idx :]
+            lal_parameter_tuple = (
+                *lal_parameter_tuple,
+                lal_params,
+                self.approximant,
+                frequency_array,
+            )
+
+        elif target_function == "SimInspiralTD":
             # LS.SimInspiralTD takes parameters:
             #   m1, m2, S1x, S1y, S1z, S2x, S2y, S2z,
             #   distance, inclination, phiRef,
@@ -372,7 +463,7 @@ class WaveformGenerator:
                 + domain_pars
                 + (lal_params, self.approximant)
             )
-        elif lal_target_function == "SimInspiralChooseFDModes":
+        elif target_function == "SimInspiralChooseFDModes":
             domain_pars = (delta_f, f_min, f_max, f_ref)
             domain_pars = tuple(float(p) for p in domain_pars)
             lal_parameter_tuple = (
@@ -383,15 +474,12 @@ class WaveformGenerator:
                 + (lal_params, self.approximant)
             )
 
-        elif (
-            lal_target_function
-            == "SimIMRPhenomXPCalculateModelParametersFromSourceFrame"
-        ):
+        elif target_function == "SimIMRPhenomXPCalculateModelParametersFromSourceFrame":
             lal_parameter_tuple = (
                 masses + (f_ref,) + (phase, iota) + spins_cartesian + (lal_params,)
             )
 
-        elif lal_target_function == "SimInspiralChooseTDModes":
+        elif target_function == "SimInspiralChooseTDModes":
             # LS.SimInspiralChooseTDModes takes parameters:
             #   phiRef=0 (for lal legacy reasons), delta_t,
             #   m1, m2, S1x, S1y, S1z, S2x, S2y, S2z,
@@ -416,7 +504,10 @@ class WaveformGenerator:
             # also pass iota, since this is needed for recombination of the modes
             lal_parameter_tuple = (lal_parameter_tuple, iota)
 
-        return lal_parameter_tuple
+        if return_target_function:
+            return lal_parameter_tuple, target_functions_dict[target_function]
+        else:
+            return lal_parameter_tuple
 
     def setup_mode_array(self, mode_list: List[Tuple]) -> lal.Dict:
         """Define a mode array to select waveform modes
@@ -439,7 +530,11 @@ class WaveformGenerator:
         LS.SimInspiralWaveformParamsInsertModeArray(lal_params, ma)
         return lal_params
 
-    def generate_FD_waveform(self, parameters_lal: Tuple) -> Dict[str, np.ndarray]:
+    def generate_FD_waveform(
+        self,
+        parameters_lal: Tuple,
+        target_function: Callable,
+    ) -> Dict[str, np.ndarray]:
         """
         Generate Fourier domain GW polarizations (h_plus, h_cross).
 
@@ -447,6 +542,8 @@ class WaveformGenerator:
         ----------
         parameters_lal:
             A tuple of parameters for the lalsimulation waveform generator
+        target_function:
+            Lalsimulation function for waveform generation.
 
         Returns
         -------
@@ -475,17 +572,11 @@ class WaveformGenerator:
         #   deltaF, f_min, f_max, f_ref,
         #   lal_params, approximant
 
-        # Sanity check types of arguments
-        check_floats = all(map(lambda x: isinstance(x, float), parameters_lal[:18]))
-        check_int = isinstance(parameters_lal[19], int)
-        # parameters_lal[18]  # lal_params could be None or a LALDict
-        if not (check_floats and check_int):
-            raise ValueError(
-                "SimInspiralFD received invalid argument(s)", parameters_lal
-            )
+        # call the lalsimulation waveform generation function. For uniform frequency
+        #   UniformFrequencyDomain:                LS.SimInspiralFD
+        #   MultibandedFrequencyDomain:     SimInspiralChooseFDWaveformSequence
+        hp, hc = target_function(*parameters_lal)
 
-        # Depending on whether the domain is uniform or non-uniform call the appropriate wf generator
-        hp, hc = LS.SimInspiralFD(*parameters_lal)
         # The check below filters for unphysical waveforms:
         # For IMRPhenomXPHM, the LS.SimInspiralFD result is numerically instable
         # for rare parameter configurations (~1 in 1M), leading to bins with very large
@@ -496,50 +587,75 @@ class WaveformGenerator:
                 f"Generation with parameters {parameters_lal} likely numerically "
                 f"unstable due to multibanding, turn off multibanding."
             )
-            lal_dict = parameters_lal[-2]
+            if target_function == LS.SimInspiralFD:
+                lal_dict_idx = 18
+            elif target_function == LS.SimInspiralChooseFDWaveformSequence:
+                lal_dict_idx = 12
+            else:
+                raise NotImplementedError(
+                    f"Unsupported lal target function " f"{target_function}."
+                )
+            lal_dict = parameters_lal[lal_dict_idx]
             if lal_dict is None:
                 lal_dict = lal.CreateDict()
             LS.SimInspiralWaveformParamsInsertPhenomXHMThresholdMband(lal_dict, 0)
             LS.SimInspiralWaveformParamsInsertPhenomXPHMThresholdMband(lal_dict, 0)
-            hp, hc = LS.SimInspiralFD(
-                *parameters_lal[:-2], lal_dict, parameters_lal[-1]
+            hp, hc = target_function(
+                *parameters_lal[:lal_dict_idx],
+                lal_dict,
+                *parameters_lal[lal_dict_idx + 1 :],
             )
             if max(np.max(np.abs(hp.data.data)), np.max(np.abs(hc.data.data))) > 1e-20:
                 print(
                     f"Warning: turning off multibanding for parameters {parameters_lal}"
-                    f"likely numerically might not have fixed it, check manually."
+                    f" likely numerically might not have fixed it, check manually."
                 )
 
-        # Ensure that the waveform agrees with the frequency grid defined in the domain.
-        if not isclose(self.domain.delta_f, hp.deltaF, rel_tol=1e-6):
-            raise ValueError(
-                f"Waveform delta_f is inconsistent with domain: {hp.deltaF} vs {self.domain.delta_f}!"
-                f"To avoid this, ensure that f_max = {self.domain.f_max} is a power of two"
-                "when you are using a native time-domain waveform model."
-            )
+        # Postprocessing, specific for target_function.
+        # For LS.SimInspiralFD, this includes sanity checks and possibly truncation.
+        if target_function == LS.SimInspiralFD:
+            # Ensure that the waveform agrees with the frequency grid defined in the domain.
+            if not isclose(self.domain.delta_f, hp.deltaF, rel_tol=1e-6):
+                raise ValueError(
+                    f"Waveform delta_f is inconsistent with domain: {hp.deltaF} vs {self.domain.delta_f}!"
+                    f"To avoid this, ensure that f_max = {self.domain.f_max} is a power of two"
+                    "when you are using a native time-domain waveform model."
+                )
 
-        frequency_array = self.domain()
-        h_plus = np.zeros_like(frequency_array, dtype=complex)
-        h_cross = np.zeros_like(frequency_array, dtype=complex)
-        # Ensure that length of wf agrees with length of domain. Enforce by truncating frequencies beyond f_max
-        if len(hp.data.data) > len(frequency_array):
-            warnings.warn(
-                "LALsimulation waveform longer than domain's `frequency_array`"
-                f"({len(hp.data.data)} vs {len(frequency_array)}). Truncating lalsim array."
-            )
-            h_plus = hp.data.data[: len(h_plus)]
-            h_cross = hc.data.data[: len(h_cross)]
+            frequency_array = self.domain()
+            h_plus = np.zeros_like(frequency_array, dtype=complex)
+            h_cross = np.zeros_like(frequency_array, dtype=complex)
+            # Ensure that length of wf agrees with length of domain. Enforce by truncating frequencies beyond f_max
+            if len(hp.data.data) > len(frequency_array):
+                warnings.warn(
+                    "LALsimulation waveform longer than domain's `frequency_array`"
+                    f"({len(hp.data.data)} vs {len(frequency_array)}). Truncating lalsim array."
+                )
+                h_plus = hp.data.data[: len(h_plus)]
+                h_cross = hc.data.data[: len(h_cross)]
+            else:
+                h_plus[: len(hp.data.data)] = hp.data.data
+                h_cross[: len(hc.data.data)] = hc.data.data
+
+            # Undo the time shift done in SimInspiralFD to the waveform
+            dt = 1 / hp.deltaF + (hp.epoch.gpsSeconds + hp.epoch.gpsNanoSeconds * 1e-9)
+            time_shift = np.exp(-1j * 2 * np.pi * dt * frequency_array)
+            h_plus *= time_shift
+            h_cross *= time_shift
+            return {"h_plus": h_plus, "h_cross": h_cross}
+
+        elif target_function == LS.SimInspiralChooseFDWaveformSequence:
+            frequency_array = self.domain()[self.domain.min_idx :]
+            h_plus = np.zeros_like(frequency_array, dtype=complex)
+            h_cross = np.zeros_like(frequency_array, dtype=complex)
+            h_plus[:] = hp.data.data[:]
+            h_cross[:] = hc.data.data[:]
+            return {"h_plus": h_plus, "h_cross": h_cross}
+
         else:
-            h_plus[: len(hp.data.data)] = hp.data.data
-            h_cross[: len(hc.data.data)] = hc.data.data
-
-        # Undo the time shift done in SimInspiralFD to the waveform
-        dt = 1 / hp.deltaF + (hp.epoch.gpsSeconds + hp.epoch.gpsNanoSeconds * 1e-9)
-        time_shift = np.exp(-1j * 2 * np.pi * dt * frequency_array)
-        h_plus *= time_shift
-        h_cross *= time_shift
-        pol_dict = {"h_plus": h_plus, "h_cross": h_cross}
-        return pol_dict
+            raise NotImplementedError(
+                f"Unsupported lal target function " f"{target_function}."
+            )
 
     def generate_hplus_hcross_m(
         self, parameters: Dict[str, float]
@@ -606,7 +722,7 @@ class WaveformGenerator:
         elif not isinstance(list(parameters.values())[0], float):
             raise ValueError("parameters dictionary must contain floats", parameters)
 
-        if isinstance(self.domain, FrequencyDomain):
+        if isinstance(self.domain, UniformFrequencyDomain):
             # Generate FD modes in for frequencies [-f_max, ..., 0, ..., f_max].
             if LS.SimInspiralImplementedFDApproximants(self.approximant):
                 # Step 1: generate waveform modes in L0 frame in native domain of
@@ -633,13 +749,56 @@ class WaveformGenerator:
             pol_m = wfg_utils.get_polarizations_from_fd_modes_m(
                 hlm_fd, iota, parameters["phase"]
             )
+            for h in pol_m.values():
+                # Ensure that length of wf agrees with length of domain. Enforce by
+                # truncating frequencies beyond f_max
+                if len(h["h_plus"]) > len(self.domain):
+                    warnings.warn(
+                        "LALsimulation waveform longer than domain's `frequency_array`"
+                        f"({len(h['h_plus'])} vs {len(self.domain)}). Truncating "
+                        f"lalsim array."
+                    )
+                    h["h_plus"] = h["h_plus"][: len(self.domain)]
+                    h["h_cross"] = h["h_cross"][: len(self.domain)]
+
+        elif isinstance(self.domain, MultibandedFrequencyDomain):
+            if LS.SimInspiralImplementedFDApproximants(self.approximant):
+                # SimInspiralChooseFDModes does not work with multi-banding. Hence,
+                # temporarily switch from MFD to FD, generate the modes, decimate to MFD,
+                # and reset the domain to MFD.
+
+                self._use_base_domain = True
+                self._domain_transform = DecimateAll(self._domain)
+                hlm_fd, iota = self.generate_FD_modes_LO(parameters)
+                pol_m = wfg_utils.get_polarizations_from_fd_modes_m(
+                    hlm_fd, iota, parameters["phase"]
+                )
+                for h in pol_m.values():
+                    # Ensure that length of wf agrees with length of domain. Enforce by
+                    # truncating frequencies beyond f_max
+                    if len(h["h_plus"]) > len(self.domain):
+                        warnings.warn(
+                            "LALsimulation waveform longer than domain's `frequency_array`"
+                            f"({len(h['h_plus'])} vs {len(self.domain)}). Truncating "
+                            f"lalsim array."
+                        )
+                        h["h_plus"] = h["h_plus"][: len(self.domain)]
+                        h["h_cross"] = h["h_cross"][: len(self.domain)]
+                pol_m = self._domain_transform(pol_m)
+                self.domain = self.full_domain
+
+            else:
+                raise NotImplementedError()
 
         else:
             raise NotImplementedError(
                 f"Target domain of type {type(self.domain)} not yet implemented."
             )
 
-        return pol_m
+        if self._domain_transform is not None:
+            return self._domain_transform(pol_m)
+        else:
+            return pol_m
 
     def generate_FD_modes_LO(self, parameters):
         """
@@ -663,7 +822,7 @@ class WaveformGenerator:
         if self.approximant in [101]:
             parameters_lal_fd_modes = self._convert_parameters(
                 {**parameters, "f_ref": self.f_ref},
-                lal_target_function="SimInspiralChooseFDModes",
+                target_function="SimInspiralChooseFDModes",
             )
             iota = parameters_lal_fd_modes[14]
             hlm_fd = LS.SimInspiralChooseFDModes(*parameters_lal_fd_modes)
@@ -716,7 +875,7 @@ class WaveformGenerator:
         if self.approximant in [52]:
             parameters_lal_td_modes, iota = self._convert_parameters(
                 {**parameters, "f_ref": self.f_ref},
-                lal_target_function="SimInspiralChooseTDModes",
+                target_function="SimInspiralChooseTDModes",
             )
             hlm_td = LS.SimInspiralChooseTDModes(*parameters_lal_td_modes)
             return wfg_utils.linked_list_modes_to_dict_modes(hlm_td), iota
@@ -790,10 +949,32 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
 
         self.mode_list = kwargs.get("mode_list", None)
 
+    @property
+    def domain(self):
+        if self._use_base_domain:
+            return self._domain.base_domain
+        else:
+            return self._domain
+
+    @domain.setter
+    def domain(self, value):
+        self._domain = value
+        if isinstance(self._domain, MultibandedFrequencyDomain):
+            # If using the MultibandedFrequencyDomain and an approximant implemented
+            # in gwsignal, assume it's a time-domain approximant and decimate after
+            # generating the waveform.
+            self._use_base_domain = True
+            self._domain_transform = DecimateAll(self._domain)
+        else:
+            self._use_base_domain = False
+            self._domain_transform = None
+
     def _convert_parameters(
         self,
         parameter_dict: Dict,
         lal_params=None,
+        target_function=None,
+        return_target_function=False,
     ):
         # Transform mass, spin, and distance parameters
         p, _ = convert_to_lal_binary_black_hole_parameters(parameter_dict)
@@ -872,7 +1053,13 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         else:
             params_gwsignal["lmax_nyquist"] = 2
 
-        return params_gwsignal
+        if return_target_function:
+            # This is a hack to make compatible with LAL version. Target functions for
+            # new waveform generator are defined in generate_FD_waveform, etc.
+            # TODO: Revamp this whole module.
+            return params_gwsignal, None
+        else:
+            return params_gwsignal
 
     def generate_FD_waveform(self, parameters_gwsignal: Dict) -> Dict[str, np.ndarray]:
         """
@@ -1022,7 +1209,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             raise ValueError("parameters dictionary must contain floats", parameters)
 
         generator = new_interface_get_waveform_generator(self.approximant_str)
-        if isinstance(self.domain, FrequencyDomain):
+        if isinstance(self.domain, UniformFrequencyDomain):
             # Generate FD modes in for frequencies [-f_max, ..., 0, ..., f_max].
             if generator.domain == "freq":
                 # Step 1: generate waveform modes in L0 frame in native domain of
@@ -1067,7 +1254,10 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 f"Target domain of type {type(self.domain)} not yet implemented."
             )
 
-        return pol_m
+        if self._domain_transform is not None:
+            return self._domain_transform(pol_m)
+        else:
+            return pol_m
 
     def generate_FD_modes_LO(self, parameters):  # Pending to adapt
         """
@@ -1378,7 +1568,7 @@ if __name__ == "__main__":
     from dingo.gw.prior import build_prior_with_defaults
 
     domain_settings = {
-        "type": "FrequencyDomain",
+        "type": "UniformFrequencyDomain",
         "f_min": 10.0,
         "f_max": 2048.0,
         "delta_f": 0.125,

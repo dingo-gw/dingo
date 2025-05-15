@@ -44,4 +44,7 @@ IMPORTANCE_SAMPLING_SETTINGS = {
             "uniform_weight": 0.01,
         },
     },
+    "MultibandingDefault": {
+        "use_base_domain": True,
+    },
 }

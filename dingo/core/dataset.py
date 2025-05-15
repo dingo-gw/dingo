@@ -162,7 +162,7 @@ class DingoDataset:
             # Set the keys that the class expects
             for k, v in loaded_dict.items():
                 assert k in self._data_keys
-                vars(self)[k] = v
+                setattr(self, k, v)
             try:
                 self.settings = ast.literal_eval(f.attrs["settings"])
             except KeyError:
@@ -179,6 +179,6 @@ class DingoDataset:
     def from_dictionary(self, dictionary: dict):
         for k, v in dictionary.items():
             if k in self._data_keys or k == "settings":
-                vars(self)[k] = v
+                setattr(self, k, v)
         if "version" not in dictionary:
             self.version = f"dingo={get_version()}"
