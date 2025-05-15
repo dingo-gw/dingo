@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """ Script to importance sample based on Dingo samples. Based on bilby_pipe data
 analysis script. """
+import ast
 import os
 import sys
 
@@ -57,6 +58,16 @@ class ImportanceSamplingInput(Input):
         # self.minimum_frequency = args.minimum_frequency
         # self.maximum_frequency = args.maximum_frequency
         # self.reference_frequency = args.reference_frequency
+        self.frequency_update = {}
+        # Extract updates to frequency range
+        if "minimum_frequency" in args.importance_sampling_updates:
+            self.frequency_update["minimum_frequency"] = ast.literal_eval(
+                args.importance_sampling_updates
+            )["minimum_frequency"]
+        if "maximum_frequency" in args.importance_sampling_updates:
+            self.frequency_update["maximum_frequency"] = ast.literal_eval(
+                args.importance_sampling_updates
+            )["maximum_frequency"]
 
         # # Waveform, source model and likelihood
         # self.waveform_generator_class = args.waveform_generator
@@ -195,7 +206,6 @@ class ImportanceSamplingInput(Input):
             ),
             calibration_marginalization_kwargs=self.calibration_marginalization_kwargs,
         )
-
 
         self.result.print_summary()
         self.result.to_file(os.path.join(self.result_directory, self.label + ".hdf5"))

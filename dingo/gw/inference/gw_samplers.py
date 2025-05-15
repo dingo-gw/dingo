@@ -26,7 +26,7 @@ from dingo.gw.transforms import (
     CopyToExtrinsicParameters,
     GetDetectorTimes,
     DecimateWaveformsAndASDS,
-    CropMaskStrain,
+    MaskDataForFrequencyRangeUpdate,
 )
 
 
@@ -232,28 +232,32 @@ class GWSampler(GWSamplerMixin, Sampler):
 
         #   * whiten and scale strain (since the inference network expects standardized
         #   data)
+        transform_pre.append(WhitenAndScaleStrain(self.domain.noise_std))
+        if self.sampling_updates:
+            # * update frequency range
+            # Needs to happen before RepackageStrainsAndASDs since we might need to apply
+            # detectors specific frequency updates.
+            transform_pre.append(
+                MaskDataForFrequencyRangeUpdate(
+                    domain=self.domain,
+                    minimum_frequency=self.minimum_frequency,
+                    maximum_frequency=self.maximum_frequency,
+                    ifos=self.base_model_metadata["train_settings"]["data"][
+                        "detectors"
+                    ],
+                )
+            )
         #   * repackage strains and asds from dicts to an array
         #   * convert array to torch tensor on the correct device
         #   * extract only strain/waveform from the sample
         transform_pre += [
-            WhitenAndScaleStrain(self.domain.noise_std),
             # Use base metadata so that unconditional samplers still know how to
             # transform data, since this transform is used by the GNPE sampler as
             # well.
             RepackageStrainsAndASDS(
-                self.base_model_metadata["train_settings"]["data"]["detectors"],
+                ifos=self.base_model_metadata["train_settings"]["data"]["detectors"],
                 first_index=self.domain.min_idx,
             ),
-        ]
-        if self.sampling_updates:
-            # Update frequency range
-            transform_pre.append(
-                CropMaskStrain(
-                    minimum_frequency=self.minimum_frequency,
-                    maximum_frequency=self.maximum_frequency,
-                )
-            )
-        transform_pre += [
             ToTorch(device=self.model.device),
             GetItem("waveform"),
         ]

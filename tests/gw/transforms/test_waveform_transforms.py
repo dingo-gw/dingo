@@ -3,7 +3,7 @@ import numpy as np
 from scipy.stats import binom
 
 from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain
-from dingo.gw.transforms import CropMaskStrainRandom
+from dingo.gw.transforms import CropMaskStrainRandom, MaskDataForFrequencyRangeUpdate
 
 
 TOLERANCE = 1e-4  # probability with which we allow confidence tests to fail
@@ -220,3 +220,131 @@ def test_cropping_bounds_independence(cropping_setup):
         assert mask.std(axis=-2).max() == 0
         # there should be variation along detector axis if independent_detectors is True
         assert (mask.std(axis=-3).max() > 0) == independent_detectors
+
+
+@pytest.fixture
+def cropping_with_asd_setup():
+    domain = UniformFrequencyDomain(f_min=20.0, f_max=1024.0, delta_f=1 / 8.0)
+    num_f = len(domain.sample_frequencies)
+    batch_size = 100
+    waveform = {
+        d: np.ones([batch_size, num_f], dtype=np.complex64) for d in ["H1", "L1", "V1"]
+    }
+    asds = {d: np.ones([batch_size, num_f]) for d in ["H1", "L1", "V1"]}
+    sample = {"waveform": waveform, "asds": asds}
+
+    return domain, sample, batch_size
+
+
+@pytest.fixture
+def cropping_with_asd_setup_no_batch():
+    domain = UniformFrequencyDomain(f_min=20.0, f_max=1024.0, delta_f=1 / 8.0)
+    num_f = len(domain.sample_frequencies)
+    waveform = {d: np.ones([num_f], dtype=np.complex64) for d in ["H1", "L1", "V1"]}
+    asds = {d: np.ones([num_f]) for d in ["H1", "L1", "V1"]}
+    sample = {"waveform": waveform, "asds": asds}
+
+    return domain, sample, 0
+
+
+@pytest.fixture
+def cropping_with_asd_setup_single_batch():
+    domain = UniformFrequencyDomain(f_min=20.0, f_max=1024.0, delta_f=1 / 8.0)
+    num_f = len(domain.sample_frequencies)
+    batch_size = 1
+    waveform = {
+        d: np.ones([batch_size, num_f], dtype=np.complex64) for d in ["H1", "L1", "V1"]
+    }
+    asds = {d: np.ones([batch_size, num_f]) for d in ["H1", "L1", "V1"]}
+    sample = {"waveform": waveform, "asds": asds}
+
+    return domain, sample, batch_size
+
+
+@pytest.fixture
+def cropping_with_asd_mfd_setup():
+    domain_settings = {
+        "nodes": [20.0, 26.0, 34.0, 46.0, 62.0, 78.0, 1038.0],
+        "delta_f_initial": 0.0625,
+        "base_domain": {
+            "type": "UniformFrequencyDomain",
+            "f_min": 20.0,
+            "f_max": 2048.0,
+            "delta_f": 0.0625,
+        },
+    }
+    domain = MultibandedFrequencyDomain(**domain_settings)
+    num_f = domain.frequency_mask_length
+
+    batch_size = 100
+    waveform = {
+        d: np.ones([batch_size, num_f], dtype=np.complex64) for d in ["H1", "L1", "V1"]
+    }
+    asds = {d: np.ones([batch_size, num_f]) for d in ["H1", "L1", "V1"]}
+    sample = {"waveform": waveform, "asds": asds}
+
+    return domain, sample, batch_size
+
+
+@pytest.mark.parametrize(
+    "setup",
+    [
+        "cropping_with_asd_setup",
+        "cropping_with_asd_setup_no_batch",
+        "cropping_with_asd_setup_single_batch",
+        "cropping_with_asd_mfd_setup",
+    ],
+)
+def test_MaskDataForFrequencyRangeUpdate(request, setup):
+    domain, sample, batch_size = request.getfixturevalue(setup)
+
+    frequency_update = {
+        "minimum_frequency": {"H1": 30.0, "L1": 20, "V1": 30.0},
+        "maximum_frequency": 1000.0,
+    }
+
+    # Initialize transform
+    trafo = MaskDataForFrequencyRangeUpdate(
+        domain=domain,
+        minimum_frequency=frequency_update["minimum_frequency"],
+        maximum_frequency=frequency_update["maximum_frequency"],
+        ifos=[d for d in sample["waveform"].keys()],
+    )
+    # Pass data through transform
+    out = trafo(sample)
+
+    # Check minimum_frequencies
+    mask = np.logical_and(
+        domain.frequency_mask,
+        domain.sample_frequencies < frequency_update["minimum_frequency"]["H1"],
+    )
+    if batch_size > 0:
+        mask = np.repeat(mask[np.newaxis, :], axis=0, repeats=batch_size)
+    assert np.all(out["waveform"]["H1"][mask] == 0.0)
+    assert np.all(out["asds"]["H1"][mask] == 1.0)
+    mask = np.logical_and(
+        domain.frequency_mask,
+        domain.sample_frequencies < frequency_update["minimum_frequency"]["L1"],
+    )
+    if batch_size > 0:
+        mask = np.repeat(mask[np.newaxis, :], axis=0, repeats=batch_size)
+    assert np.all(out["waveform"]["L1"][mask] == 0.0)
+    assert np.all(out["asds"]["L1"][mask] == 1.0)
+    mask = np.logical_and(
+        domain.frequency_mask,
+        domain.sample_frequencies < frequency_update["minimum_frequency"]["V1"],
+    )
+    if batch_size > 0:
+        mask = np.repeat(mask[np.newaxis, :], axis=0, repeats=batch_size)
+    assert np.all(out["waveform"]["V1"][mask] == 0.0)
+    assert np.all(out["asds"]["V1"][mask] == 1.0)
+
+    # Check maximum frequencies
+    mask = np.logical_and(
+        domain.frequency_mask,
+        domain.sample_frequencies > frequency_update["maximum_frequency"],
+    )
+    if batch_size > 0:
+        mask = np.repeat(mask[np.newaxis, :], axis=0, repeats=batch_size)
+    assert np.all([np.all(v[mask] == 0.0) for v in sample["waveform"].values()])
+    assert np.all([np.all(v[mask] == 1.0) for v in sample["asds"].values()])

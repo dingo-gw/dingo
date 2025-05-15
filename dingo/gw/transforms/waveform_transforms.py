@@ -353,15 +353,17 @@ class CropMaskStrainRandom(object):
         return sample
 
 
-class CropMaskStrain(object):
+class MaskDataForFrequencyRangeUpdate(object):
     """
-    Crop or mask strain with zeros depending on minimum_frequency and maximum_frequency.
+    Set waveform to zero and ASD to one according to minimum_frequency and maximum_frequency.
     """
 
     def __init__(
         self,
+        domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
         minimum_frequency: Optional[float | dict[str, float]] = None,
         maximum_frequency: Optional[float | dict[str, float]] = None,
+        ifos: Optional[list[str]] = None,
         print_output: bool = False,
     ):
         """
@@ -371,15 +373,34 @@ class CropMaskStrain(object):
             Update of f_min, if float, the same value will be used for all detectors.
         maximum_frequency: Optional[float | dict[str, float]]
             Update of f_max, if float, the same value will be used for all detectors.
+        ifos: list[str]
+            List of detectors
         print_output: bool
             Whether to write print statements to the console.
         """
+        self.sample_frequencies = domain.sample_frequencies
+        self.frequency_mask = domain.frequency_mask
         self.minimum_frequency = minimum_frequency
         self.maximum_frequency = maximum_frequency
+        # Check that minimum-/maximum frequency is provided for each detector
+        if isinstance(minimum_frequency, dict) and ifos is not None:
+            ifos_min = [i for i in minimum_frequency.keys()]
+            if not set(ifos).issubset(ifos_min):
+                raise ValueError(
+                    f"minimum-frequency={minimum_frequency} doesn't contain information about all "
+                    f"detectors present in event: {ifos}."
+                )
+        if isinstance(maximum_frequency, dict) and ifos is not None:
+            ifos_max = [i for i in maximum_frequency.keys()]
+            if not set(ifos).issubset(ifos_max):
+                raise ValueError(
+                    f"maximum-frequency={maximum_frequency} doesn't contain information about all "
+                    f"detectors present in event: {ifos}."
+                )
 
         if print_output:
             print(
-                f"Transform UpdateFrequencyRange activated:"
+                f"Transform MaskDataForFrequencyRangeUpdate activated:"
                 f"  Settings: \n"
                 f"    - Minimum_frequency update: {self.minimum_frequency}\n"
                 f"    - Maximum_frequency update: {self.maximum_frequency}\n"
@@ -391,27 +412,98 @@ class CropMaskStrain(object):
         ----------
         input_sample: Dict
             Values for keys
-            - 'waveform':
-            Sample of shape [batch_size, num_tokens, num_features]
-            - 'position', shape [batch_size, num_tokens, 3]
-               contains information [f_min, f_max, block]
-            - 'drop_token_mask', shape [batch_size, num_tokens]
+            - 'waveform', dict containing waveform for each detector
+            - 'asds', dict containing asds for each detector
 
         Returns
         ----------
         sample: Dict
             input_sample with modified value for key
-            - 'drop_token_mask', shape [batch_size, num_tokens]
+            - 'waveform'
+            - 'asds'
 
         """
         sample = input_sample.copy()
+        # Get frequency masks for full domain
+        frequency_masks = create_mask_based_on_frequency_update(
+            sample_frequencies=self.sample_frequencies,
+            detectors=[d for d in sample["waveform"].keys()],
+            minimum_frequency=self.minimum_frequency,
+            maximum_frequency=self.maximum_frequency,
+        )
 
-        # Update minimum_frequency
-        if self.minimum_frequency is not None:
-            raise ValueError("Update minimum_frequency is not yet implemented.")
-
-        # Update maximum_frequency
-        if self.maximum_frequency is not None:
-            raise ValueError("Update maximum_frequency is not yet implemented.")
+        # Update waveforms and ASDs based on masks
+        for d in sample["waveform"].keys():
+            # Exclude frequency values where domain.frequency_mask = False because we assume that these values
+            # have already been adjusted.
+            combined_mask = np.where(self.frequency_mask, ~frequency_masks[d], False)
+            # (1) Set waveform to 0.
+            sample["waveform"][d][..., combined_mask] = 0.0
+            # (2) Set ASD to 1.
+            sample["asds"][d][..., combined_mask] = 1.0
 
         return sample
+
+
+def create_mask_based_on_frequency_update(
+    sample_frequencies: np.array,
+    detectors: list[str],
+    minimum_frequency: Optional[float | dict[str, float]] = None,
+    maximum_frequency: Optional[float | dict[str, float]] = None,
+) -> dict[str : np.array]:
+    """
+    Creates a mask for each detector containing True for sample_frequencies not affected by the frequency updates
+    for minimum and maximum frequencies.
+
+    Parameters
+    ----------
+    sample_frequencies: np.array
+        Frequency values for which we want to create a mask. Assumed to be the same for all detectors.
+    detectors: list[str]
+        List of detector names.
+    minimum_frequency: Optional[float | dict[str, float]]
+        Update of f_min, if float, the same value will be used for all detectors.
+    maximum_frequency: Optional[float | dict[str, float]]
+        Update of f_max, if float, the same value will be used for all detectors.
+
+    Returns
+    ----------
+    frequency_masks: dict
+        Dictionary providing a boolean mask for the sample frequencies of each detector based on provided frequency
+        updates. True for values to keep, False for values to mask.
+    """
+    # We only modify the valid frequency values and assume that values corresponding to frequency_mask = False have
+    # already been adjusted
+    frequency_masks = {
+        i: np.ones_like(sample_frequencies, dtype=bool) for i in detectors
+    }
+    for d in detectors:
+        # Update frequency_masks based on minimum_frequency
+        if minimum_frequency is not None:
+            # Same for all detectors
+            if isinstance(minimum_frequency, float):
+                mask_min = sample_frequencies >= minimum_frequency
+            # Different for each detector
+            elif isinstance(minimum_frequency, dict):
+                mask_min = sample_frequencies >= minimum_frequency[d]
+            else:
+                raise ValueError(
+                    f"minimum-frequency has to be dict or float, not {type(minimum_frequency)}. "
+                )
+            frequency_masks[d] = np.logical_and(frequency_masks[d], mask_min)
+
+        # Update frequency_masks based on maximum_frequency
+        if maximum_frequency is not None:
+            # Same for all detectors
+            if isinstance(maximum_frequency, float):
+                mask_max = sample_frequencies <= maximum_frequency
+            # Different for each detector
+            elif isinstance(maximum_frequency, dict):
+                mask_max = sample_frequencies <= maximum_frequency[d]
+            else:
+                raise ValueError(
+                    f"maximum-frequency has to be dict or float, not {type(maximum_frequency)}. "
+                )
+            frequency_masks[d] = np.logical_and(frequency_masks[d], mask_max)
+
+    return frequency_masks
