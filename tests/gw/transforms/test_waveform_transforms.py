@@ -2,7 +2,7 @@ import pytest
 import numpy as np
 from scipy.stats import binom
 
-from dingo.gw.domains import FrequencyDomain
+from dingo.gw.domains import UniformFrequencyDomain
 from dingo.gw.transforms import CropMaskStrainRandom
 
 
@@ -11,7 +11,7 @@ TOLERANCE = 1e-4  # probability with which we allow confidence tests to fail
 
 @pytest.fixture
 def cropping_setup():
-    domain = FrequencyDomain(f_min=20, f_max=1024, delta_f=1 / 4)
+    domain = UniformFrequencyDomain(f_min=20, f_max=1024, delta_f=1 / 4)
     example_batch = dict(
         waveform=np.random.normal(size=(1000, 2, 3, len(domain) - domain.min_idx))
     )
