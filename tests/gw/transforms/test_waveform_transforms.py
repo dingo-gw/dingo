@@ -2,7 +2,7 @@ import pytest
 import numpy as np
 from scipy.stats import binom
 
-from dingo.gw.domains import UniformFrequencyDomain
+from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain
 from dingo.gw.transforms import CropMaskStrainRandom
 
 
@@ -12,6 +12,25 @@ TOLERANCE = 1e-4  # probability with which we allow confidence tests to fail
 @pytest.fixture
 def cropping_setup():
     domain = UniformFrequencyDomain(f_min=20, f_max=1024, delta_f=1 / 4)
+    example_batch = dict(
+        waveform=np.random.normal(size=(1000, 2, 3, len(domain) - domain.min_idx))
+    )
+    return domain, example_batch
+
+
+@pytest.fixture
+def cropping_setup_mfd():
+    domain_settings = {
+        "nodes": [20.0, 26.0, 34.0, 46.0, 62.0, 78.0, 1038.0],
+        "delta_f_initial": 0.0625,
+        "base_domain": {
+            "type": "UniformFrequencyDomain",
+            "f_min": 20.0,
+            "f_max": 2048.0,
+            "delta_f": 0.0625,
+        },
+    }
+    domain = MultibandedFrequencyDomain(**domain_settings)
     example_batch = dict(
         waveform=np.random.normal(size=(1000, 2, 3, len(domain) - domain.min_idx))
     )
@@ -55,6 +74,38 @@ def test_cropping_frequency_calibration(cropping_setup):
     )
     strain_out = cropping_transform(example_batch)["waveform"]
     # all values above 64Hz should be zero, all values below should be non-zero
+    assert (strain_out[..., idx_f_max + 1 :] == 0).all()
+    assert (strain_out[..., idx_f_max + 1 :] != strain_in[..., idx_f_max + 1 :]).all()
+    assert (strain_out[..., : idx_f_max + 1] != 0).all()
+    assert (strain_out[..., : idx_f_max + 1] == strain_in[..., : idx_f_max + 1]).all()
+
+
+def test_cropping_frequency_calibration_mfd(cropping_setup_mfd):
+    """Test that the crop frequencies are calibrated w.r.t. the strain domain."""
+    domain, example_batch = cropping_setup_mfd
+    strain_in = example_batch["waveform"]
+
+    # test cropping from below
+    idx_f_min = 100
+    f_min = domain()[idx_f_min]
+    cropping_transform = CropMaskStrainRandom(
+        domain, f_min_upper=f_min, deterministic=True
+    )
+    strain_out = cropping_transform(example_batch)["waveform"]
+    # all values below f_min should be zero, all values above should be non-zero
+    assert (strain_out[..., :idx_f_min] == 0).all()
+    assert (strain_out[..., :idx_f_min] != strain_in[..., :idx_f_min]).all()
+    assert (strain_out[..., idx_f_min:] != 0).all()
+    assert (strain_out[..., idx_f_min:] == strain_in[..., idx_f_min:]).all()
+
+    # test cropping from above
+    idx_f_max = 250
+    f_max = domain()[idx_f_max]
+    cropping_transform = CropMaskStrainRandom(
+        domain, f_max_lower=f_max, deterministic=True
+    )
+    strain_out = cropping_transform(example_batch)["waveform"]
+    # all values above f_max should be zero, all values below should be non-zero
     assert (strain_out[..., idx_f_max + 1 :] == 0).all()
     assert (strain_out[..., idx_f_max + 1 :] != strain_in[..., idx_f_max + 1 :]).all()
     assert (strain_out[..., : idx_f_max + 1] != 0).all()
@@ -169,8 +220,3 @@ def test_cropping_bounds_independence(cropping_setup):
         assert mask.std(axis=-2).max() == 0
         # there should be variation along detector axis if independent_detectors is True
         assert (mask.std(axis=-3).max() > 0) == independent_detectors
-
-
-# TODO once multibanded frequency domain is merged into main
-# def test_cropping_multibanded():
-#     pass
