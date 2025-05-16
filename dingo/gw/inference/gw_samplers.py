@@ -154,6 +154,18 @@ class GWSamplerMixin(object):
     def sampling_updates(
         self, value: dict[str, float | list[float] | dict[str, list[float]]]
     ):
+        # Check that model was trained with flexible frequency range
+        if (
+            not "drop_frequency_range"
+            in self.base_model_metadata["train_settings"]["data"]
+            or "drop_random_tokens"
+            in self.base_model_metadata["train_settings"]["data"]
+        ):
+            raise ValueError(
+                f"Model was not trained with drop_frequency_range settings, but sampling updates contain "
+                f"{value}. "
+            )
+        # Check that values are compatible with masked values used during training and update frequency range
         if "minimum_frequency" in value:
             self._minimum_frequency = value["minimum_frequency"]
         if "maximum_frequency" in value:
@@ -283,8 +295,6 @@ class GWSampler(GWSamplerMixin, Sampler):
             selected_keys.append("position")
             selected_keys.append("drop_token_mask")
 
-            # TODO: Append transforms for ...
-            # * Configure frequency range (probably based on specifications in settings file?)
         except KeyError:
             print(
                 "No tokenization information found, omitting StrainTokenization transform."
