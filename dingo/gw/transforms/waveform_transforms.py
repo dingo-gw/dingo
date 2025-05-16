@@ -218,7 +218,7 @@ class CropMaskStrainRandom(object):
             Sampling of f_min is uniform in bins (not in frequency) when the frequency
             domain is not uniform (e.g., MultibandedFrequencyDomain).
         f_max_lower: float
-            New f_max is sampled in range [domain.f_max, f_max_lower].
+            New f_max is sampled in range [f_max_lower, domain.f_max].
             Sampling of f_max is uniform in bins (not in frequency) when the frequency
             domain is not uniform (e.g., MultibandedFrequencyDomain).
         deterministic: bool
