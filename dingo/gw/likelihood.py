@@ -102,8 +102,13 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         asds = event_data["asds"]
         if frequency_update is not None:
             # Get frequency masks for full domain
+            sample_frequencies = data_domain.sample_frequencies
+            if self.use_base_domain and isinstance(
+                data_domain, MultibandedFrequencyDomain
+            ):
+                sample_frequencies = data_domain.base_domain.sample_frequencies
             frequency_masks = create_mask_based_on_frequency_update(
-                sample_frequencies=data_domain.sample_frequencies,
+                sample_frequencies=sample_frequencies,
                 detectors=list(event_data["waveform"].keys()),
                 minimum_frequency=frequency_update.get("minimum_frequency", None),
                 maximum_frequency=frequency_update.get("maximum_frequency", None),
