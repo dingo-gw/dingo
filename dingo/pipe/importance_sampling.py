@@ -194,7 +194,10 @@ class ImportanceSamplingInput(Input):
                 **self.importance_sampling_settings["synthetic_phase"],
                 "num_processes": self.request_cpus,
             }
-            self.result.sample_synthetic_phase(synthetic_phase_kwargs)
+            self.result.sample_synthetic_phase(
+                synthetic_phase_kwargs=synthetic_phase_kwargs,
+                likelihood_kwargs={"frequency_update": self.frequency_update},
+            )
 
         self.result.importance_sample(
             num_processes=self.request_cpus,
@@ -205,6 +208,7 @@ class ImportanceSamplingInput(Input):
                 "phase_marginalization"
             ),
             calibration_marginalization_kwargs=self.calibration_marginalization_kwargs,
+            frequency_update=self.frequency_update,
         )
 
         self.result.print_summary()
