@@ -276,6 +276,9 @@ class Result(CoreResult):
         phase_marginalization_kwargs: Optional[dict] = None,
         calibration_marginalization_kwargs: Optional[dict] = None,
         phase_grid: Optional[np.ndarray] = None,
+        frequency_update: Optional[
+            dict[str, float | dict[str, float | list[float]]]
+        ] = None,
     ):
         """
         Build the likelihood function based on model metadata. This is called at the
@@ -291,6 +294,11 @@ class Result(CoreResult):
             kwargs for phase marginalization.
         calibration_marginalization_kwargs: dict
             Calibration marginalization parameters. If None, no calibration marginalization is used.
+        frequency_update: dict
+            Specifies settings for updating the frequency range
+            example: {'minimum_frequency': {'H1': 30., 'L1': 20.},
+                       maximum_frequency: 1024.,
+                       suppress: {'V1': [40., 50.]}}
         """
         if time_marginalization_kwargs is not None:
             if self.geocent_time_prior is None:
@@ -355,11 +363,13 @@ class Result(CoreResult):
             calibration_marginalization_kwargs=calibration_marginalization_kwargs,
             phase_grid=phase_grid,
             use_base_domain=self.use_base_domain,
+            frequency_update=frequency_update,
         )
 
     def sample_synthetic_phase(
         self,
         synthetic_phase_kwargs,
+        likelihood_kwargs: Optional[dict] = None,
         inverse: bool = False,
     ):
         """
@@ -404,6 +414,8 @@ class Result(CoreResult):
                 num_processes (optional)
                 n_grid
                 uniform_weight (optional)
+        likelihood_kwargs : dict, optional
+            Likelihood kwargs passed to the likelihood.
         inverse : bool, default False
             Whether to apply instead the inverse transformation. This is used prior to
             calculating the log_prob. In inverse mode, the posterior probability over
@@ -446,8 +458,8 @@ class Result(CoreResult):
         t0 = time.time()
 
         if not inverse:
-            # TODO: This can probably be removed.
-            self._build_likelihood()
+            likelihood_kwargs = {} if likelihood_kwargs is None else likelihood_kwargs
+            self._build_likelihood(**likelihood_kwargs)
 
         if inverse:
             # We estimate the log_prob for given phases, so first save the evaluation
