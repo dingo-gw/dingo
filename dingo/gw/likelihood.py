@@ -10,7 +10,10 @@ from threadpoolctl import threadpool_limits
 
 from dingo.core.likelihood import Likelihood
 from dingo.gw.injection import GWSignal
-from dingo.gw.transforms import DecimateWaveformsAndASDS
+from dingo.gw.transforms import (
+    DecimateWaveformsAndASDS,
+    create_mask_based_on_frequency_update,
+)
 from dingo.gw.waveform_generator import WaveformGenerator
 from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain, Domain
 from dingo.gw.domains import build_domain
@@ -75,7 +78,6 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             data_domain=data_domain,
             ifo_list=list(event_data["waveform"].keys()),
             t_ref=t_ref,
-            frequency_update=frequency_update,
         )
 
         if isinstance(data_domain, MultibandedFrequencyDomain) and not use_base_domain:
@@ -85,7 +87,33 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             event_data = decimator(event_data)
         self.use_base_domain = use_base_domain  # Set up appropriate domain objects.
 
-        self.asd = event_data["asds"]
+        # Apply frequency update to ASD:
+        # The following equation numbers refer to Appendix B in http://arxiv.org/abs/1809.02293
+        # The ASD enters the log-likelihood via the noise-weighted inner product (eq. 42)
+        # through the terms log_Zn (eq. 45), kappa^2 (eq. 47), and rho^2_opt (eq. 46).
+        # If we set the ASD to large value (e.g. 1) compared to the data/waveform, the
+        # effective contribution to the sum in the noise-weighted inner product is zero.
+        # This means that we only have to modify the ASD to apply frequency masking to
+        # importance sampling.
+        asds = event_data["asds"]
+        if frequency_update is not None:
+            # Get frequency masks for full domain
+            sample_frequencies = data_domain.sample_frequencies
+            if self.use_base_domain and isinstance(
+                data_domain, MultibandedFrequencyDomain
+            ):
+                sample_frequencies = data_domain.base_domain.sample_frequencies
+            frequency_masks = create_mask_based_on_frequency_update(
+                sample_frequencies=sample_frequencies,
+                detectors=list(event_data["waveform"].keys()),
+                minimum_frequency=frequency_update.get("minimum_frequency", None),
+                maximum_frequency=frequency_update.get("maximum_frequency", None),
+            )
+            for ifo in event_data["waveform"].keys():
+                # Set ASD to 1.
+                asds[ifo][..., ~frequency_masks[ifo]] = 1.0
+
+        self.asd = asds
 
         self.whitened_strains = {
             k: v / self.asd[k] / self.data_domain.noise_std
