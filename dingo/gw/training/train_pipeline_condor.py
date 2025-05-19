@@ -28,13 +28,19 @@ def create_submission_file(
     # getenv required for GPU training because wandb needs $HOME to be defined
     lines.append(f"getenv = True\n")
     lines.append(f'executable = {condor_settings["executable"]}\n')
-    lines.append(f'request_cpus = {condor_settings["num_cpus"]}\n')
-    lines.append(f'request_memory = {condor_settings["memory_cpus"]}\n')
+    if "request_disk" in condor_settings:
+        lines.append(f'request_disk = {condor_settings["request_disk"]}\n')
+    if "request_cpus" in condor_settings:
+        lines.append(f'request_cpus = {condor_settings["num_cpus"]}\n')
+    if "request_memory" in condor_settings:
+        lines.append(f'request_memory = {condor_settings["memory_cpus"]}\n')
     if "num_gpus" in condor_settings:
         if "memory_gpus" in condor_settings:
             lines.append(
                 f"requirements = TARGET.CUDAGlobalMemoryMb > {condor_settings['memory_gpus']}\n"
             )
+        if "num_gpus" in condor_settings:
+            lines.append(f'request_gpus = {condor_settings["num_gpus"]}\n')
         # TODO: Special settings of MPI-IS cluster => make optional
         if condor_settings["num_gpus"] == 8:
             # Request full node
@@ -42,13 +48,9 @@ def create_submission_file(
         elif condor_settings["num_gpus"] >= 6:
             # Still request full nodes because wait times are long
             lines.append(f'use template : FullNode({condor_settings["num_gpus"]})\n')
-        else:
-            lines.append(f'request_gpus = {condor_settings["num_gpus"]}\n')
-    if "request_disk" in condor_settings:
-        lines.append(f'request_disk = {condor_settings["request_disk"]}\n')
+
     if "arguments" in condor_settings:
         lines.append(f'arguments = "{condor_settings["arguments"]}"\n')
-
 
     # TODO: Move responsibility to resume job from this file to htcondor job
     # * add args in submission file:
@@ -65,6 +67,7 @@ def create_submission_file(
     # info from MPI-IS IT team:
     # https://atlas.is.localnet/confluence/display/IT/How+to+automatically+restart+jobs+according+to+the+exit+code
 
+    lines.append('\n')
     lines.append(f'error = {join(train_dir, "info.err")}\n')
     lines.append(f'output = {join(train_dir, "info.out")}\n')
     lines.append(f'log = {join(train_dir, "info.log")}\n')
