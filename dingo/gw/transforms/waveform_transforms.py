@@ -2,7 +2,6 @@ from typing import Optional
 import numpy as np
 
 from dingo.gw.domains import MultibandedFrequencyDomain, UniformFrequencyDomain
-from gw.domains import multibanded_frequency_domain
 
 
 class DecimateAll(object):
