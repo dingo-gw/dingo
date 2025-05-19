@@ -30,9 +30,9 @@ def create_submission_file(
     lines.append(f'executable = {condor_settings["executable"]}\n')
     if "request_disk" in condor_settings:
         lines.append(f'request_disk = {condor_settings["request_disk"]}\n')
-    if "request_cpus" in condor_settings:
+    if "num_cpus" in condor_settings:
         lines.append(f'request_cpus = {condor_settings["num_cpus"]}\n')
-    if "request_memory" in condor_settings:
+    if "memory_cpus" in condor_settings:
         lines.append(f'request_memory = {condor_settings["memory_cpus"]}\n')
     if "num_gpus" in condor_settings:
         if "memory_gpus" in condor_settings:
