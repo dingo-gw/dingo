@@ -33,8 +33,7 @@ def create_submission_file(
     if "num_gpus" in condor_settings:
         if "memory_gpus" in condor_settings:
             lines.append(
-                f"requirements = TARGET.CUDAGlobalMemoryMb > "
-                f'{condor_settings["memory_gpus"]}\n\n'
+                f"requirements = TARGET.CUDAGlobalMemoryMb > {condor_settings['memory_gpus']}\n"
             )
         # TODO: Special settings of MPI-IS cluster => make optional
         if condor_settings["num_gpus"] == 8:
