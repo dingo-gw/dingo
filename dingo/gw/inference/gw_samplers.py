@@ -173,13 +173,13 @@ class GWSamplerMixin(object):
                         f"training. "
                     )
             elif isinstance(maximum_frequency, dict):
-                if not cropping_settings("independent_detectors", True):
+                if not cropping_settings.get("independent_detectors", True):
                     raise ValueError(
                         f"independent_detectors not included or set to false in random_strain_cropping. "
                         f"Not possible to perform inference with independent detectors for "
                         f"maximum_frequency. "
                     )
-                f_maxs = list(maximum_frequency.values())
+                f_maxs = np.array(list((maximum_frequency.values())))
                 if np.any(f_maxs > self.domain.f_max):
                     raise ValueError(
                         f"maximum_frequency {maximum_frequency} < f_max of domain {self.domain.f_max}. "
@@ -471,6 +471,21 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 )
             )
             transform_pre.append(TimeShiftStrain(ifo_list, self.domain))
+
+        if self.sampling_updates:
+            # * update frequency range
+            # Needs to happen before RepackageStrainsAndASDs since we might need to apply
+            # detectors specific frequency updates.
+            transform_pre.append(
+                MaskDataForFrequencyRangeUpdate(
+                    domain=self.domain,
+                    minimum_frequency=self.minimum_frequency,
+                    maximum_frequency=self.maximum_frequency,
+                    ifos=self.base_model_metadata["train_settings"]["data"][
+                        "detectors"
+                    ],
+                )
+            )
         transform_pre.append(
             SelectStandardizeRepackageParameters(
                 {"context_parameters": data_settings["context_parameters"]},

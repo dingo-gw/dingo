@@ -125,6 +125,7 @@ class SamplingInput(Input):
                 filename=self.model_init, device=self.device, load_training_info=False
             )
             init_sampler = GWSampler(model=init_model)
+            init_sampler.sampling_updates = self.sampling_updates
             self.dingo_sampler = GWSamplerGNPE(
                 model=model,
                 init_sampler=init_sampler,
