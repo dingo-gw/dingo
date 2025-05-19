@@ -65,7 +65,7 @@ def fill_in_arguments_from_model(args):
         ]["approximant"],
     }
 
-    # Collect sampling updates: minimum-frequency, maximum-frequency, and suppress (before they are overwritten)
+    # Collect sampling updates: minimum-frequency and maximum-frequency (before they are overwritten)
     sampling_updates = {}
     if "minimum_frequency" in args and args.minimum_frequency is not None:
         minimum_frequency_update = ast.literal_eval(args.minimum_frequency)
