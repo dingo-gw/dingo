@@ -126,8 +126,10 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
                 f"domain, {self.base_domain.domain_dict}"
             )
 
-        # Update base domain to required range.
-        self.base_domain.update({"f_min": self.f_min, "f_max": self.f_max})
+        # Note that f_max from the base domain can differ from that of the multi-banded
+        # domain. This occurs as a boundary effect, since a fixed number of bins in the
+        # base domain are averaged to obtain a bin in the multi-banded domain. When
+        # decimating, any extra bins in the base domain are dropped.
 
     def decimate(self, data: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
         """
