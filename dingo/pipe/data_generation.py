@@ -30,6 +30,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
 
         # Admin arguments
         self.ini = args.ini
+        self.transfer_files = args.transfer_files
 
         # Run index arguments
         self.idx = args.idx
