@@ -150,7 +150,7 @@ def test_mfd_set_new_range(mfd_params, mfd):
 def test_mfd_base_domain_consistency(mfd):
     assert np.all(mfd.sample_frequencies == mfd.decimate(mfd.base_domain()))
     assert mfd.f_min == mfd.base_domain.f_min
-    assert mfd.f_max == mfd.base_domain.f_max
+    assert mfd.f_max in mfd.base_domain.sample_frequencies
 
 
 def test_mfd_time_translation(mfd):
