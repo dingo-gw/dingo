@@ -79,25 +79,24 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
     ):
         """
         Set a new range [f_min, f_max] for the domain. This is only allowed if the new
-        range is contained within the old one.
+        range is contained within the old one and if the new endpoints are pre-existing
+        sample points.
         """
         if f_min is not None and f_max is not None and f_min >= f_max:
             raise ValueError("f_min must not be larger than f_max.")
         if f_min is not None:
-            if self.f_min <= f_min <= self.f_max:
+            if self.f_min <= f_min <= self.f_max and f_min in self.sample_frequencies:
                 self.f_min = f_min
             else:
                 raise ValueError(
-                    f"f_min = {f_min} is not in expected range "
-                    f"[{self.f_min,self.f_max}]."
+                    f"New f_min = {f_min} is incompatible with domain {self.domain_dict}."
                 )
         if f_max is not None:
-            if self.f_min <= f_max <= self.f_max:
+            if f_max >= self.f_min and f_max in self.sample_frequencies:
                 self.f_max = f_max
             else:
                 raise ValueError(
-                    f"f_max = {f_max} is not in expected range "
-                    f"[{self.f_min, self.f_max}]."
+                    f"New f_max = {f_max} is incompatible with domain {self.domain_dict}."
                 )
 
     def update_data(self, data: np.ndarray, axis: int = -1, low_value: float = 0.0):
