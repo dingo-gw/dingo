@@ -76,7 +76,7 @@ def train_unconditional_density_estimator(
     # TODO: Allow for other types of density estimators (e.g., flow matching).
     model = NormalizingFlowPosteriorModel(
         metadata={"train_settings": settings, "base": copy.deepcopy(result.metadata)},
-        device=settings["training"]["device"],
+        device=settings["training"].get("device", "cuda"),
     )
     model.optimizer_kwargs = settings["training"]["optimizer"]
     model.scheduler_kwargs = settings["training"]["scheduler"]

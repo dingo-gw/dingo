@@ -66,7 +66,8 @@ def load_raw_data(time_event, settings, event_dataset=None):
 def parse_settings_for_raw_data(model_metadata, time_psd, time_buffer):
     domain_type = model_metadata["dataset_settings"]["domain"]["type"]
 
-    if domain_type == "UniformFrequencyDomain":
+    # allowing domain_type = "FrequenyDomain" for legacy networks
+    if domain_type == "UniformFrequencyDomain" or domain_type == "FrequencyDomain":
         data_settings = model_metadata["train_settings"]["data"]
         settings = {
             "window": data_settings["window"],
