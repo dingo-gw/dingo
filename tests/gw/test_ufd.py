@@ -98,6 +98,10 @@ def test_FD_set_new_range(uniform_FD_params):
         domain._set_new_range(None, p["f_min"] - 10)
     with pytest.raises(ValueError):
         domain._set_new_range(p["f_min"] + 10, p["f_min"] + 5)
+    with pytest.raises(ValueError):
+        domain._set_new_range(p["f_min"] + 0.1, None)
+    with pytest.raises(ValueError):
+        domain._set_new_range(None, p["f_max"] - 0.1)
     # test that setting new frequency range works as intended
     f_min_new, f_max_new = 40, 800
     n = int(f_max_new / p["delta_f"]) + 1
