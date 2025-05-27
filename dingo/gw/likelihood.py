@@ -108,6 +108,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 detectors=list(event_data["waveform"].keys()),
                 minimum_frequency=frequency_update.get("minimum_frequency", None),
                 maximum_frequency=frequency_update.get("maximum_frequency", None),
+                suppress_range=frequency_update.get("suppress", None),
             )
             for ifo in event_data["waveform"].keys():
                 # Set ASD to 1.
