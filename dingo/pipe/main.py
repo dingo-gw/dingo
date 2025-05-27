@@ -1,7 +1,6 @@
 #
 #  Adapted from bilby_pipe. In particular, uses the bilby_pipe data generation code.
 #
-import ast
 import numpy as np
 import os
 
@@ -13,9 +12,6 @@ from bilby_pipe.utils import (
     logger,
     parse_args,
 )
-
-from dingo.core.posterior_models.build_model import build_model_from_kwargs
-from dingo.gw.domains import build_domain_from_model_metadata
 
 from .dag_creator import generate_dag
 from .parser import create_parser
@@ -68,19 +64,8 @@ def fill_in_arguments_from_model(args):
     # Collect sampling updates: minimum-frequency and maximum-frequency (before they are overwritten)
     sampling_updates = {}
     if "minimum_frequency" in args and args.minimum_frequency is not None:
-        minimum_frequency_update = convert_string_to_dict(args.minimum_frequency)
-        if isinstance(minimum_frequency_update, float) or isinstance(
-            minimum_frequency_update, int
-        ):
-            # Check that updates are compatible with domain
-            if minimum_frequency <= minimum_frequency_update <= maximum_frequency:
-                sampling_updates["minimum_frequency"] = float(minimum_frequency_update)
-            else:
-                raise ValueError(
-                    f"minimum_frequency={minimum_frequency_update} is outside domain "
-                    f"of posterior model: domain.f_min={minimum_frequency}, domain.f_max={maximum_frequency}"
-                )
-        elif isinstance(minimum_frequency_update, dict):
+        if "{" in args.minimum_frequency:
+            minimum_frequency_update = convert_string_to_dict(args.minimum_frequency)
             f_mins_update = np.array([f for f in minimum_frequency_update.values()])
             # Check that updates are compatible with domain
             if np.all(
@@ -95,20 +80,20 @@ def fill_in_arguments_from_model(args):
                     f"minimum_frequency={minimum_frequency_update} is outside domain of "
                     f"posterior model: domain.f_min={minimum_frequency}, domain.f_max={maximum_frequency}"
                 )
-    if "maximum_frequency" in args and args.maximum_frequency is not None:
-        maximum_frequency_update = convert_string_to_dict(args.maximum_frequency)
-        if isinstance(maximum_frequency_update, float) or isinstance(
-            maximum_frequency_update, int
-        ):
+        else:
+            minimum_frequency_update = float(args.minium_frequency)
             # Check that updates are compatible with domain
-            if minimum_frequency <= maximum_frequency_update <= maximum_frequency:
-                sampling_updates["maximum_frequency"] = float(maximum_frequency_update)
+            if minimum_frequency <= minimum_frequency_update <= maximum_frequency:
+                sampling_updates["minimum_frequency"] = float(minimum_frequency_update)
             else:
                 raise ValueError(
-                    f"minimum_frequency={maximum_frequency_update} is outside domain "
+                    f"minimum_frequency={minimum_frequency_update} is outside domain "
                     f"of posterior model: domain.f_min={minimum_frequency}, domain.f_max={maximum_frequency}"
                 )
-        elif isinstance(maximum_frequency_update, dict):
+
+    if "maximum_frequency" in args and args.maximum_frequency is not None:
+        if "{" in args.maximum_frequency:
+            maximum_frequency_update = convert_string_to_dict(args.maximum_frequency)
             f_maxs_update = np.array([f for f in maximum_frequency_update.values()])
             # Check that updates are compatible with domain
             if np.all(
@@ -122,6 +107,16 @@ def fill_in_arguments_from_model(args):
                 raise ValueError(
                     f"minimum_frequency={f_maxs_update} is outside domain of posterior model: "
                     f"domain.f_min={minimum_frequency}, domain.f_max={maximum_frequency}"
+                )
+        else:
+            maximum_frequency_update = float(args.maximum_frequency)
+            # Check that updates are compatible with domain
+            if minimum_frequency <= maximum_frequency_update <= maximum_frequency:
+                sampling_updates["maximum_frequency"] = float(maximum_frequency_update)
+            else:
+                raise ValueError(
+                    f"minimum_frequency={maximum_frequency_update} is outside domain "
+                    f"of posterior model: domain.f_min={minimum_frequency}, domain.f_max={maximum_frequency}"
                 )
 
     changed_args = {}
@@ -214,10 +209,12 @@ class MainInput(BilbyMainInput):
         self.data_find_urltype = args.data_find_urltype
         self.n_parallel = args.n_parallel
         # useful when condor nodes don't have access to submit filesystem
-        self.transfer_files = args.transfer_files 
+        self.transfer_files = args.transfer_files
         self.additional_transfer_paths = args.additional_transfer_paths
         self.osg = args.osg
-        self.desired_sites = args.cpu_desired_sites  # Dummy variable so bilby_pipe doesn't complain.
+        self.desired_sites = (
+            args.cpu_desired_sites
+        )  # Dummy variable so bilby_pipe doesn't complain.
         self.cpu_desired_sites = args.cpu_desired_sites
         self.gpu_desired_sites = args.gpu_desired_sites
         # self.analysis_executable = args.analysis_executable
