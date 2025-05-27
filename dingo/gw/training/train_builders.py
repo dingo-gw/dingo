@@ -21,6 +21,7 @@ from dingo.gw.transforms import (
     GNPECoalescenceTimes,
     SampleExtrinsicParameters,
     GetDetectorTimes,
+    CropMaskStrainRandom,
 )
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.prior import default_inference_parameters
@@ -180,7 +181,10 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     transforms.append(
         RepackageStrainsAndASDS(data_settings["detectors"], first_index=domain.min_idx)
     )
-
+    if "random_strain_cropping" in data_settings:
+        transforms.append(
+            CropMaskStrainRandom(domain, **data_settings["random_strain_cropping"])
+        )
     if data_settings["context_parameters"]:
         selected_keys = ["inference_parameters", "waveform", "context_parameters"]
     else:
@@ -259,6 +263,7 @@ def build_svd_for_embedding_network(
             RepackageStrainsAndASDS,
             SelectStandardizeRepackageParameters,
             UnpackDict,
+            CropMaskStrainRandom,
         ],
     )
 
