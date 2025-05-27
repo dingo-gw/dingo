@@ -38,7 +38,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         phase_grid=None,
         use_base_domain: bool = False,
         frequency_update: Optional[
-            dict[str : float | dict[str : float | list[float]]]
+            dict[str, float | dict[str, float | list[float]]]
         ] = None,
     ):
         # TODO: Does the phase_grid argument ever get used?
