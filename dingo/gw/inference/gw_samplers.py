@@ -156,10 +156,10 @@ class GWSamplerMixin(object):
     ):
         # Check that model was trained with flexible frequency range
         if (
-            not "drop_frequency_range"
-            in self.base_model_metadata["train_settings"]["data"]["tokenization"]
-            or "drop_random_tokens"
-            in self.base_model_metadata["train_settings"]["data"]["tokenization"]
+            "drop_frequency_range"
+            not in self.base_model_metadata["train_settings"]["data"]["tokenization"]
+            and "drop_random_tokens"
+            not in self.base_model_metadata["train_settings"]["data"]["tokenization"]
         ):
             raise ValueError(
                 f"Model was not trained with drop_frequency_range settings, but sampling updates contain "
@@ -306,6 +306,7 @@ class GWSampler(GWSamplerMixin, Sampler):
                     minimum_frequency=self.minimum_frequency,
                     maximum_frequency=self.maximum_frequency,
                     suppress_range=self.suppress,
+                    domain=self.domain,
                     ifos=self.detectors,
                 )
             ]

@@ -1031,6 +1031,7 @@ class UpdateFrequencyRange(object):
         suppress_range: Optional[
             list[float, float] | dict[str, list[float, float]]
         ] = None,
+        domain: Optional[UniformFrequencyDomain | MultibandedFrequencyDomain] = None,
         ifos: Optional[list[str]] = None,
         print_output: bool = False,
     ):
@@ -1043,27 +1044,24 @@ class UpdateFrequencyRange(object):
             Update of f_max, if float, the same value will be used for all detectors.
         suppress_range: list[float, float] | dict[str, list[float, float]] | None
             Suppress ranges [f_min, f_max], either for all detectors or for individual detectors.
+        domain: UniformFrequencyDomain | MultibandedFrequencyDomain
+        ifos: list[str]
+            List of detectors.
         print_output: bool
             Whether to write print statements to the console.
         """
+        # Include defaults in case of missing minimum-/maximum frequency values per detector
+        if isinstance(minimum_frequency, dict) and ifos is not None:
+            for det in ifos:
+                if det not in minimum_frequency.keys():
+                    minimum_frequency[det] = domain.f_min
+        if isinstance(maximum_frequency, dict) and ifos is not None:
+            for det in ifos:
+                if det not in maximum_frequency.keys():
+                    maximum_frequency[det] = domain.f_max
         self.minimum_frequency = minimum_frequency
         self.maximum_frequency = maximum_frequency
         self.suppress_range = suppress_range
-        # Check that minimum-/maximum frequency is provided for each detector
-        if isinstance(minimum_frequency, dict):
-            ifos_min = [i for i in minimum_frequency.keys()]
-            if not set(ifos).issubset(ifos_min):
-                raise ValueError(
-                    f"minimum-frequency={minimum_frequency} doesn't contain information about all "
-                    f"detectors present in event: {ifos}."
-                )
-        if isinstance(maximum_frequency, dict):
-            ifos_max = [i for i in maximum_frequency.keys()]
-            if not set(ifos).issubset(ifos_max):
-                raise ValueError(
-                    f"maximum-frequency={maximum_frequency} doesn't contain information about all "
-                    f"detectors present in event: {ifos}."
-                )
 
         if print_output:
             print(
