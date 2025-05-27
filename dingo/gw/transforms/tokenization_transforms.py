@@ -1,6 +1,5 @@
 from typing import Optional
 import numpy as np
-from copy import deepcopy
 
 from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain
 from dingo.gw.gwutils import add_defaults_for_missing_ifos
