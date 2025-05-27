@@ -380,23 +380,17 @@ class MaskDataForFrequencyRangeUpdate(object):
         """
         self.sample_frequencies = domain.sample_frequencies
         self.frequency_mask = domain.frequency_mask
+        # Include defaults in case of missing minimum-/maximum frequency values per detector
+        if isinstance(minimum_frequency, dict) and ifos is not None:
+            for det in ifos:
+                if det not in minimum_frequency.keys():
+                    minimum_frequency[det] = domain.f_min
+        if isinstance(maximum_frequency, dict) and ifos is not None:
+            for det in ifos:
+                if det not in maximum_frequency.keys():
+                    maximum_frequency[det] = domain.f_max
         self.minimum_frequency = minimum_frequency
         self.maximum_frequency = maximum_frequency
-        # Check that minimum-/maximum frequency is provided for each detector
-        if isinstance(minimum_frequency, dict) and ifos is not None:
-            ifos_min = [i for i in minimum_frequency.keys()]
-            if not set(ifos).issubset(ifos_min):
-                raise ValueError(
-                    f"minimum-frequency={minimum_frequency} doesn't contain information about all "
-                    f"detectors present in event: {ifos}."
-                )
-        if isinstance(maximum_frequency, dict) and ifos is not None:
-            ifos_max = [i for i in maximum_frequency.keys()]
-            if not set(ifos).issubset(ifos_max):
-                raise ValueError(
-                    f"maximum-frequency={maximum_frequency} doesn't contain information about all "
-                    f"detectors present in event: {ifos}."
-                )
 
         if print_output:
             print(
