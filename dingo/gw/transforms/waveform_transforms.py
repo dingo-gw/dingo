@@ -2,6 +2,7 @@ from typing import Optional
 import numpy as np
 
 from dingo.gw.domains import MultibandedFrequencyDomain, UniformFrequencyDomain
+from dingo.gw.gwutils import add_defaults_for_missing_ifos
 
 
 class DecimateAll(object):
@@ -215,24 +216,16 @@ class MaskDataForFrequencyRangeUpdate(object):
         """
         self.sample_frequencies = domain.sample_frequencies
         self.frequency_mask = domain.frequency_mask
+        # Include defaults in case of missing minimum-/maximum frequency values per detector
+        minimum_frequency = add_defaults_for_missing_ifos(
+            object_to_update=minimum_frequency, update_value=domain.f_min, ifos=ifos
+        )
+        maximum_frequency = add_defaults_for_missing_ifos(
+            object_to_update=maximum_frequency, update_value=domain.f_max, ifos=ifos
+        )
         self.minimum_frequency = minimum_frequency
         self.maximum_frequency = maximum_frequency
         self.suppress_range = suppress_range
-        # Check that minimum-/maximum frequency is provided for each detector
-        if isinstance(minimum_frequency, dict) and ifos is not None:
-            ifos_min = [i for i in minimum_frequency.keys()]
-            if not set(ifos).issubset(ifos_min):
-                raise ValueError(
-                    f"minimum-frequency={minimum_frequency} doesn't contain information about all "
-                    f"detectors present in event: {ifos}."
-                )
-        if isinstance(maximum_frequency, dict) and ifos is not None:
-            ifos_max = [i for i in maximum_frequency.keys()]
-            if not set(ifos).issubset(ifos_max):
-                raise ValueError(
-                    f"maximum-frequency={maximum_frequency} doesn't contain information about all "
-                    f"detectors present in event: {ifos}."
-                )
 
         if print_output:
             print(
@@ -310,6 +303,17 @@ def create_mask_based_on_frequency_update(
         Dictionary providing a boolean mask for the sample frequencies of each detector based on provided frequency
         updates. True for values to keep, False for values to mask.
     """
+    # Include defaults in case of missing minimum-/maximum frequency values per detector
+    minimum_frequency = add_defaults_for_missing_ifos(
+        object_to_update=minimum_frequency,
+        update_value=np.min(sample_frequencies),
+        ifos=detectors,
+    )
+    maximum_frequency = add_defaults_for_missing_ifos(
+        object_to_update=maximum_frequency,
+        update_value=np.max(sample_frequencies),
+        ifos=detectors,
+    )
     # We only modify the valid frequency values and assume that values corresponding to frequency_mask = False have
     # already been adjusted
     frequency_masks = {

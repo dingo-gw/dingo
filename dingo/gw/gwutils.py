@@ -1,6 +1,8 @@
 import numpy as np
+from copy import deepcopy
 from scipy.signal.windows import tukey
 from scipy.interpolate import interp1d
+from typing import Optional
 from bilby.gw.detector import PowerSpectralDensity
 
 from dingo.gw.prior import default_extrinsic_dict
@@ -112,10 +114,12 @@ def get_standardization_dict(
     # due to fiducial values (-> std 0)
     for k in std_intrinsic.keys() & std_extrinsic.keys():
         if std_intrinsic[k] != 0:
-            raise ValueError(f'Expected intrinsic prior for {k} to be a fixed value in the waveform dataset, '
-                             f'since {k} is specified as an extrinsic prior in the train settings and will be sampled'
-                             f'during training. However, the standard deviation of {k} is non-zero: {std_intrinsic[k]}'
-                             f'Please re-generate the waveform dataset with a fixed value for {k}.')
+            raise ValueError(
+                f"Expected intrinsic prior for {k} to be a fixed value in the waveform dataset, "
+                f"since {k} is specified as an extrinsic prior in the train settings and will be sampled"
+                f"during training. However, the standard deviation of {k} is non-zero: {std_intrinsic[k]}"
+                f"Please re-generate the waveform dataset with a fixed value for {k}."
+            )
 
     # Merge dicts, overwriting fiducial values for parameters (e.g.,
     # luminosity_distance) in intrinsic parameters by the extrinsic ones
@@ -147,3 +151,17 @@ def get_standardization_dict(
         "std": {k: std[k] for k in selected_parameters},
     }
     return standardization_dict
+
+
+def add_defaults_for_missing_ifos(
+    object_to_update: Optional[float | dict],
+    update_value: float,
+    ifos: list[str],
+):
+    object_to_update = deepcopy(object_to_update)
+    # Include defaults in case of missing values per detector
+    if isinstance(object_to_update, dict) and ifos is not None:
+        for det in ifos:
+            if det not in object_to_update.keys():
+                object_to_update[det] = update_value
+    return object_to_update

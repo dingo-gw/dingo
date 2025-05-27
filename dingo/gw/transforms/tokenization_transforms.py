@@ -1,7 +1,9 @@
 from typing import Optional
 import numpy as np
+from copy import deepcopy
 
 from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain
+from dingo.gw.gwutils import add_defaults_for_missing_ifos
 
 DETECTOR_DICT = {"H1": 0, "L1": 1, "V1": 2}
 DETECTOR_DICT_INVERSE = {0: "H1", 1: "L1", 2: "V1"}
@@ -1051,16 +1053,12 @@ class UpdateFrequencyRange(object):
             Whether to write print statements to the console.
         """
         # Include defaults in case of missing minimum-/maximum frequency values per detector
-        if isinstance(minimum_frequency, dict) and ifos is not None:
-            for det in ifos:
-                if det not in minimum_frequency.keys():
-                    minimum_frequency[det] = domain.f_min
-        if isinstance(maximum_frequency, dict) and ifos is not None:
-            for det in ifos:
-                if det not in maximum_frequency.keys():
-                    maximum_frequency[det] = domain.f_max
-        self.minimum_frequency = minimum_frequency
-        self.maximum_frequency = maximum_frequency
+        self.minimum_frequency = add_defaults_for_missing_ifos(
+            object_to_update=minimum_frequency, update_value=domain.f_min, ifos=ifos
+        )
+        self.maximum_frequency = add_defaults_for_missing_ifos(
+            object_to_update=maximum_frequency, update_value=domain.f_max, ifos=ifos
+        )
         self.suppress_range = suppress_range
 
         if print_output:
