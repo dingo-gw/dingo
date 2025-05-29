@@ -102,22 +102,25 @@ class LossInfo:
         self,
         epoch: int,
         len_dataset: int,
-        batch_size: int,
+        batch_size_per_grad_update: int,
         mode: str = "Train",
         print_freq: int = 1,
         device: torch.device = torch.device("cuda"),
     ):
         # data for print statements
         self.epoch = epoch
+        # iteration = number of optimizer steps
         self.iteration = 0
         self.len_dataset = len_dataset
-        self.batch_size = batch_size
+        self.batch_size_per_grad_update = batch_size_per_grad_update
         self.mode = mode
         self.print_freq = print_freq
         self.device = device
         # track loss
         self.loss_tracker = AvgTracker()
         self.loss = None
+        self.cached_losses = []
+        self.cached_n = []
         # track computation times
         self.times = {"Dataloader": AvgTracker(), "Network": AvgTracker()}
         if torch.cuda.device_count() > 1:
@@ -127,6 +130,17 @@ class LossInfo:
         else:
             self.multi_gpu = False
         self.t = time.time()
+
+    def cache_loss(self, loss: torch.tensor, n: torch.tensor):
+        # Cache loss in case of multiple gradient updates per optimizer step
+        # Detach tensors from compute graph
+        self.cached_losses.append(loss.detach())
+        self.cached_n.append(n)
+        self.update_timer(timer_mode="Network")
+
+    def reset_cached_losses(self):
+        self.cached_losses = []
+        self.cached_n = []
 
     def update_timer(self, timer_mode="Dataloader"):
         if self.multi_gpu:
@@ -143,13 +157,13 @@ class LossInfo:
         self.times[timer_mode].update(dt)
         self.t = time.time()
 
-    def update(self, loss: torch.tensor, n: torch.tensor):
-        self.update_timer(timer_mode="Network")
+    def update(self):
         # Log number of iterations per epoch
         self.iteration += 1
-        # Detach tensors from compute graph
-        loss = loss.detach()
-        n = n.detach()
+        # Aggregate cached values
+        loss = torch.mean(torch.tensor(self.cached_losses, device=self.device))
+        n = torch.sum(torch.tensor(self.cached_n, device=self.device))
+
         if self.multi_gpu:
             # Calculate absolute loss value to ensure correct normalization
             # if GPUs have different number of samples
@@ -166,12 +180,15 @@ class LossInfo:
         n = n.item()
         self.loss_tracker.update(self.loss * n, n)
 
+        # Reset caches
+        self.reset_cached_losses()
+
     def get_avg(self):
         return self.loss_tracker.get_avg()
 
     def get_iteration(self):
         if self.multi_gpu:
-            # Aggregate number of iterations
+            # Aggregate number of iterations (i.e. optimizer steps)
             # Sync all processes before aggregating values
             dist.barrier()
             # Check whether all GPUs performed the same number of iterations. Since we want to track the number of
@@ -202,9 +219,18 @@ class LossInfo:
                 "{} Epoch: {} [{}/{} ({:.0f}%)]".format(
                     self.mode,
                     self.epoch,
-                    min(batch_idx * self.batch_size, self.len_dataset),
+                    min(
+                        (batch_idx + 1) * self.batch_size_per_grad_update,
+                        self.len_dataset,
+                    ),
                     self.len_dataset,
-                    100.0 * batch_idx * self.batch_size / self.len_dataset,
+                    min(
+                        100.0
+                        * (batch_idx + 1)
+                        * self.batch_size_per_grad_update
+                        / self.len_dataset,
+                        100,
+                    ),
                 ),
                 end="\t\t",
             )

@@ -5,7 +5,6 @@ as well as functions for training and testing across an epoch.
 
 import h5py
 import json
-import math
 import numpy as np
 import os
 import time
@@ -84,6 +83,7 @@ class BasePosteriorModel(ABC):
             # separately, and before calling initialize_optimizer_and_scheduler().
 
         self.epoch = 0
+        # iteration = number of optimizer steps
         self.iteration = 0
         self.network = None
         self.optimizer = None
@@ -398,8 +398,8 @@ class BasePosteriorModel(ABC):
         train_dir: str,
         runtime_limits: RuntimeLimits = None,
         checkpoint_epochs: int = None,
-        use_wandb=False,
-        test_only=False,
+        use_wandb: bool = False,
+        test_only: bool = False,
         early_stopping: Optional[EarlyStopping] = None,
         gradient_updates_per_optimizer_step: int = 1,
         automatic_mixed_precision: bool = False,
@@ -575,28 +575,22 @@ def train_epoch(
     world_size: int = 1,
 ):
     pm.network.train()
+    # Compute effective batch size
     if pm.rank is None:
-        loss_info = dingo.core.utils.trainutils.LossInfo(
-            epoch=pm.epoch,
-            len_dataset=len(dataloader.dataset),
-            batch_size=dataloader.batch_size,
-            mode="Train",
-            print_freq=1,
-            device=pm.device,
-        )
+        effective_batch_size_per_grad_update = dataloader.batch_size
     else:
-        # Multiply batch size used for printing with rank=num_gpus
-        loss_info = dingo.core.utils.trainutils.LossInfo(
-            epoch=pm.epoch,
-            len_dataset=len(dataloader.dataset),
-            batch_size=dataloader.batch_size * world_size,
-            mode="Train",
-            print_freq=1,
-            device=pm.device,
-        )
+        effective_batch_size_per_grad_update = dataloader.batch_size * world_size
+    loss_info = dingo.core.utils.trainutils.LossInfo(
+        epoch=pm.epoch,
+        len_dataset=len(dataloader.dataset),
+        batch_size_per_grad_update=effective_batch_size_per_grad_update,
+        mode="Train",
+        print_freq=1,
+        device=pm.device,
+    )
     scaler = None
     if automatic_mixed_precision:
-        # Create scaler for automatic mixed precision
+        # Create scaler for automatic mixed precision (amp)
         # Warning: gradient clipping requires special treatment in amp
         scaler = GradScaler()
 
@@ -618,8 +612,11 @@ def train_epoch(
             loss = pm.loss(data[0], *data[1:])
             # Backward pass
             loss.backward()
+        # Cache loss
+        loss_info.cache_loss(loss, len(data[0]))
+
         # Optimizer step
-        if batch_idx % gradient_updates_per_optimizer_step == 0:
+        if (batch_idx + 1) % gradient_updates_per_optimizer_step == 0:
             if automatic_mixed_precision:
                 # Take a step with the optimizer
                 # Warning: Optimizer.step() is skipped if the unscaled gradients of the optimizer parameters contain
@@ -630,8 +627,7 @@ def train_epoch(
                 pm.optimizer.step()
 
             # Update loss for history and logging
-            num_samples = torch.tensor(len(data[0]), device=pm.device)
-            loss_info.update(loss, num_samples)
+            loss_info.update()
             if pm.rank is None or pm.rank == 0:
                 loss_info.print_info(batch_idx)
 
@@ -648,36 +644,30 @@ def train_epoch(
 def test_epoch(pm, dataloader, world_size: int = 1):
     with torch.no_grad():
         pm.network.eval()
+        # Compute effective batch size
         if pm.rank is None:
-            loss_info = dingo.core.utils.trainutils.LossInfo(
-                epoch=pm.epoch,
-                len_dataset=len(dataloader.dataset),
-                batch_size=dataloader.batch_size,
-                mode="Test",
-                print_freq=1,
-                device=pm.device,
-            )
+            effective_batch_size_per_grad_update = dataloader.batch_size
         else:
-            # Multiply batch size used for printing with rank=num_gpus
-            loss_info = dingo.core.utils.trainutils.LossInfo(
-                epoch=pm.epoch,
-                len_dataset=len(dataloader.dataset),
-                batch_size=dataloader.batch_size * world_size,
-                mode="Test",
-                print_freq=1,
-                device=pm.device,
-            )
+            effective_batch_size_per_grad_update = dataloader.batch_size * world_size
+        loss_info = dingo.core.utils.trainutils.LossInfo(
+            epoch=pm.epoch,
+            len_dataset=len(dataloader.dataset),
+            batch_size_per_grad_update=effective_batch_size_per_grad_update,
+            mode="Test",
+            print_freq=1,
+            device=pm.device,
+        )
 
         for batch_idx, data in enumerate(dataloader):
             loss_info.update_timer()
-            # data to device
+            # Data to device
             data = [d.to(pm.device, non_blocking=True) for d in data]
-            # compute loss
+            # Compute loss
             loss = pm.loss(data[0], *data[1:])
-            # update loss for history and logging
-            num_samples = torch.tensor(len(data[0]), device=pm.device)
-            loss_info.update(loss, num_samples)
-            if pm.rank == 0:
+            # Update loss for history and logging
+            loss_info.cache_loss(loss, len(data[0]))
+            loss_info.update()
+            if pm.rank is None or pm.rank == 0:
                 loss_info.print_info(batch_idx)
 
         return loss_info.get_avg()

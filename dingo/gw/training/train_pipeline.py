@@ -573,14 +573,24 @@ def initialize_stage(
         # has to be a multiple of the number of GPUs and the batch size per GPU:
         effective_samples_per_gpu = int(np.ceil(train_size / num_gpus))
         # (2) When using drop_last = False (default) in the Dataloader, the last batch can be incomplete:
-        effective_batches_per_gpu = int(
+        effective_num_batches_per_gpu = int(
             np.ceil(effective_samples_per_gpu / batch_size_per_gpu)
         )
-        # (3) If we perform multiple gradient updates per optimizer step, this results in fewer optimizer steps than
-        # batches per GPU where the gradient update is just not performed before the next epoch starts:
-        # TODO: Test whether option "multiple gradient updates per optimizer step" works as intended
-        num_optimizer_steps = (
-            effective_batches_per_gpu // grad_updates_per_optimizer_step
+        # (3) If we perform multiple gradient updates per optimizer step, this results in a factor of
+        # grad_updates_per_optimizer_step fewer optimizer steps per GPU because an optimizer step is only performed
+        # after grad_updates_per_optimizer_step backward passes. We expect the effective_batches_per_gpu to be divisible
+        # by grad_updates_per_optimizer_step to avoid handling the last incomplete gradient update explicitly.
+        if effective_num_batches_per_gpu % grad_updates_per_optimizer_step != 0:
+            raise ValueError(
+                f"The effective number of batches per GPU {effective_num_batches_per_gpu} is not divisible "
+                f"by the number of gradient updates per optimizer step {grad_updates_per_optimizer_step}. "
+            )
+        num_optimizer_steps = int(
+            effective_num_batches_per_gpu / grad_updates_per_optimizer_step
+        )
+        print(
+            f"Training with an effective batch size of {batch_size_per_gpu * num_gpus * grad_updates_per_optimizer_step} "
+            f"on {num_gpus} CPU/GPU(s) with {num_optimizer_steps} optimizer steps per epoch. "
         )
 
         pm.initialize_optimizer_and_scheduler(num_optimizer_steps=num_optimizer_steps)
@@ -653,10 +663,10 @@ def train_stages(
                 print(f"\nBeginning training stage {n}. Settings:")
                 print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
             train_loader, test_loader, train_sampler = initialize_stage(
-                pm,
-                wfd,
-                stage,
-                local_settings["num_workers"],
+                pm=pm,
+                wfd=wfd,
+                stage=stage,
+                num_workers=local_settings["num_workers"],
                 world_size=local_settings.get("world_size", None),
                 rank=rank,
                 resume=False,
@@ -666,10 +676,10 @@ def train_stages(
                 print(f"\nResuming training in stage {n}. Settings:")
                 print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
             train_loader, test_loader, train_sampler = initialize_stage(
-                pm,
-                wfd,
-                stage,
-                local_settings["num_workers"],
+                pm=pm,
+                wfd=wfd,
+                stage=stage,
+                num_workers=local_settings["num_workers"],
                 world_size=local_settings.get("world_size", None),
                 rank=rank,
                 resume=True,
@@ -686,9 +696,9 @@ def train_stages(
 
         runtime_limits.max_epochs_total = end_epochs[n]
         pm.train(
-            train_loader,
-            test_loader,
-            train_sampler,
+            train_loader=train_loader,
+            test_loader=test_loader,
+            train_sampler=train_sampler,
             train_dir=train_dir,
             runtime_limits=runtime_limits,
             checkpoint_epochs=local_settings["checkpoint_epochs"],
