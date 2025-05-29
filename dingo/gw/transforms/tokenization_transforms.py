@@ -133,11 +133,11 @@ class StrainTokenization(object):
                 f"    - First token width {self.f_min_per_token[1] - self.f_min_per_token[0]} "
                 f"Hz\n"
                 f"    - Last token width {self.f_min_per_token[-1] - self.f_min_per_token[-2]} "
-                f"Hz\n"
+                f"Hz"
             )
             if self.num_padded_f_bins > 0:
                 print(
-                    f"    - Extrapolating to maximum frequency of {self.f_max_per_token[-1]} Hz"
+                    f"\n    - Extrapolating to maximum frequency of {self.f_max_per_token[-1]} Hz"
                 )
 
     def __call__(self, input_sample: dict) -> dict:
