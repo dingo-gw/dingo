@@ -912,7 +912,7 @@ class DropRandomTokens(object):
                 f"Transform DropRandomTokens activated:"
                 f"  Settings: \n"
                 f"    - Probability of dropping tokens for each data point: {self.p_drop}\n"
-                f"    - Maximal number of tokens that can be dropped: {self.max_num_tokens}\n."
+                f"    - Maximal number of tokens that can be dropped: {self.max_num_tokens}"
             )
 
     def __call__(self, input_sample: dict) -> dict:

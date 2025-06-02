@@ -279,14 +279,12 @@ def set_train_transforms(
                     )
                 )
         if "drop_random_tokens" in data_settings["tokenization"]:
+            rand_drop_settings = data_settings["tokenization"]["drop_random_tokens"]
             transforms.append(
                 DropRandomTokens(
-                    p_drop=data_settings["tokenization"]["drop_random_tokens"].get(
-                        "p_drop", 0.4
-                    ),
-                    max_num_tokens=data_settings["tokenization"][
-                        "drop_random_tokens"
-                    ].get("max_num_tokens", num_tokens),
+                    p_drop=rand_drop_settings.get("p_drop", 0.4),
+                    max_num_tokens=rand_drop_settings.get("max_num_tokens", num_tokens),
+                    print_output=print_output,
                 )
             )
         # Normalize position after all drop transforms
