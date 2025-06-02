@@ -1,4 +1,5 @@
 import copy
+from pathlib import Path
 from typing import Iterable, Optional
 
 from dingo.gw.domains import build_domain, UniformFrequencyDomain
@@ -192,6 +193,18 @@ class ASDDataset(DingoDataset):
             return {k: v[np.random.choice(len(v), 1)[0]] for k, v in self.asds.items()}
         else:
             return {k: v[np.random.choice(len(v), n)] for k, v in self.asds.items()}
+
+    def save_psd(self, directory, ifo_name, idx: Optional[int] = None):
+        if idx is None:
+            idx = np.random.choice(len(self.asds[ifo_name]))
+        directory = Path(directory)
+        directory.mkdir(exist_ok=True)
+        psd_path = directory / f"{ifo_name}_{idx}_psd.txt"
+        np.savetxt(
+            psd_path,
+            np.vstack([self.domain(), self.asds[ifo_name][idx] ** 2]).T,
+        )
+        return psd_path
 
 
 def check_domain_compatibility(data: dict, domain: BaseFrequencyDomain) -> bool:

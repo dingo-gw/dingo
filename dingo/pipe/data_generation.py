@@ -9,6 +9,7 @@ import numpy as np
 
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import UniformFrequencyDomain
+from dingo.gw.gwutils import get_window, get_window_factor
 from dingo.pipe.parser import create_parser
 
 logger.name = "dingo_pipe"
@@ -33,7 +34,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
 
         # Run index arguments
         self.idx = args.idx
-        # self.generation_seed = args.generation_seed
+        self.generation_seed = args.generation_seed
         self.trigger_time = args.trigger_time
 
         # Naming arguments
@@ -46,7 +47,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # self.phase_marginalization = args.phase_marginalization
         # self.prior_file = args.prior_file
         # self.prior_dict = args.prior_dict
-        # self.deltaT = args.deltaT
+        self.deltaT = args.deltaT
         # self.default_prior = args.default_prior
 
         # Whether to generate data for importance sampling. This must be done when
@@ -66,7 +67,8 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.data_format = args.data_format
         self.allow_tape = args.allow_tape
         self.tukey_roll_off = args.tukey_roll_off
-        self.zero_noise = False  # dingo mod
+        self.gaussian_noise = args.gaussian_noise
+        self.zero_noise = args.zero_noise
         self.resampling_method = args.resampling_method
 
         if args.timeslide_dict is not None:
@@ -85,35 +87,37 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.sampling_frequency = args.sampling_frequency
         self.minimum_frequency = args.minimum_frequency
         self.maximum_frequency = args.maximum_frequency
-        # self.reference_frequency = args.reference_frequency
+        self.reference_frequency = args.reference_frequency
 
         # Waveform, source model and likelihood
-        # self.waveform_generator_class = args.waveform_generator
-        # self.waveform_approximant = args.waveform_approximant
-        # self.catch_waveform_errors = args.catch_waveform_errors
-        # self.pn_spin_order = args.pn_spin_order
-        # self.pn_tidal_order = args.pn_tidal_order
-        # self.pn_phase_order = args.pn_phase_order
-        # self.pn_amplitude_order = args.pn_amplitude_order
-        # self.mode_array = args.mode_array
-        # self.waveform_arguments_dict = args.waveform_arguments_dict
-        # self.numerical_relativity_file = args.numerical_relativity_file
-        # self.injection_waveform_approximant = args.injection_waveform_approximant
-        # self.frequency_domain_source_model = args.frequency_domain_source_model
+        self.waveform_generator_class = (
+            "bilby.gw.waveform_generator.LALCBCWaveformGenerator"
+        )
+        self.waveform_approximant = args.waveform_approximant
+        self.catch_waveform_errors = args.catch_waveform_errors
+        # TODO: These are set to parser defaults. Fix to set from model.
+        self.pn_spin_order = -1
+        self.pn_tidal_order = -1
+        self.pn_phase_order = -1
+        self.pn_amplitude_order = 0
+        self.mode_array = None
+        self.waveform_arguments_dict = None
+        self.numerical_relativity_file = args.numerical_relativity_file
+        self.injection_waveform_approximant = args.injection_waveform_approximant
+        self.frequency_domain_source_model = "lal_binary_black_hole"
         # self.conversion_function = args.conversion_function
         # self.generation_function = args.generation_function
         # self.likelihood_type = args.likelihood_type
         # self.extra_likelihood_kwargs = args.extra_likelihood_kwargs
-        # self.enforce_signal_duration = args.enforce_signal_duration
+        self.enforce_signal_duration = args.enforce_signal_duration
 
         # PSD
         self.psd_maximum_duration = args.psd_maximum_duration
         self.psd_dict = args.psd_dict
-        if self.psd_dict is None:
-            self.psd_length = args.psd_length
-            self.psd_fractional_overlap = args.psd_fractional_overlap
-            self.psd_start_time = args.psd_start_time
-            self.psd_method = args.psd_method
+        self.psd_length = args.psd_length
+        self.psd_fractional_overlap = args.psd_fractional_overlap
+        self.psd_start_time = args.psd_start_time
+        self.psd_method = args.psd_method
 
         # # ROQ
         # self.roq_folder = args.roq_folder
@@ -147,19 +151,9 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # # Plotting
         self.plot_data = args.plot_data
         self.plot_spectrogram = args.plot_spectrogram
-        # self.plot_injection = args.plot_injection
+        self.plot_injection = args.plot_injection
 
         if create_data:
-            # Added for dingo so that create_data runs. TODO: enable injections
-            args.injection = False
-            args.injection_numbers = None
-            args.injection_file = None
-            args.injection_dict = None
-            args.injection_waveform_arguments = None
-            args.injection_frequency_domain_source_model = None
-            self.frequency_domain_source_model = None
-            self.gaussian_noise = False
-
             self.create_data(args)
 
     def save_hdf5(self):
@@ -173,7 +167,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # PSD and strain data.
         data = {"waveform": {}, "asds": {}}  # TODO: Rename these keys.
         for ifo in self.interferometers:
-
             strain = ifo.strain_data.frequency_domain_strain
             frequency_array = ifo.strain_data.frequency_array
             asd = ifo.power_spectral_density.get_amplitude_spectral_density_array(
@@ -224,24 +217,42 @@ class DataGenerationInput(BilbyDataGenerationInput):
             "psd_method",
             "channel_dict",
             "data_dict",
+            "injection",
+            "generation_seed",
+            "gaussian_noise",
+            "zero_noise",
+            "numerical_relativity_file",
+            "injection_waveform_approximant",
+            "injection_frequency_domain_source_model",
         ]:
             try:
                 v = getattr(self, k)
             except AttributeError:
                 continue
-            if v is not None:
+            if v is not None and v is not False:
                 settings[k] = v
+
+        if self.injection:
+            settings["injection_parameters"] = self.injection_parameters.copy()
+            # Dingo and Bilby have different geocent_time conventions.
+            settings["injection_parameters"]["geocent_time"] -= self.trigger_time
+            settings["optimal_SNR"] = {
+                k: v["optimal_SNR"] for k, v in self.interferometers.meta_data.items()
+            }
+            settings["matched_filter_SNR"] = {
+                k: v["matched_filter_SNR"]
+                for k, v in self.interferometers.meta_data.items()
+            }
 
         dataset = EventDataset(
             dictionary={
                 "data": data,
-                # "event_metadata": event_metadata,
                 "settings": settings,
             }
         )
         dataset.to_file(self.event_data_file)
 
-        # also saving the psd as a .dat file which can be read in
+        # also saving the psd as a .txt file which can be read in
         # easily by pesummary or bilby
         for ifo in self.interferometers:
             np.savetxt(
@@ -267,6 +278,22 @@ class DataGenerationInput(BilbyDataGenerationInput):
             )
         else:
             self._importance_sampling_updates = None
+
+    def _set_interferometers_from_gaussian_noise(self):
+        super()._set_interferometers_from_gaussian_noise()
+        # Scale the FD strain appropriately by the window factor (not done by default
+        # in Bilby / bilby_pipe). This is to ensure that the injection is consistent
+        # with TD data with a given PSD, making it consistent also with DINGO network
+        # training.
+        for ifo in self.interferometers:
+            # This is a hack to set the window factor. It ensures also that the SNRs
+            # are calculated correctly.
+            td_strain = ifo.time_domain_strain
+            ifo.strain_data.time_domain_window(roll_off=self.tukey_roll_off)
+            ifo.strain_data.frequency_domain_strain = (
+                ifo.strain_data.frequency_domain_strain
+                * np.sqrt(ifo.strain_data.window_factor)
+            )
 
 
 def create_generation_parser():
