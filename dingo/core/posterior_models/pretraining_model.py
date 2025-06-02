@@ -40,7 +40,8 @@ class PretrainingModel(BasePosteriorModel):
         self.network = create_embedding_with_resnet(**model_kwargs)
 
     def loss(self, data, *context_data):
-        return self.loss_fn(self.network(context_data), data)
+        output, logging_info = self.network(context_data)
+        return self.loss_fn(output, data), logging_info
 
 
 def build_pretraining_model_kwargs(train_settings: dict):

@@ -1,5 +1,5 @@
 import math
-from typing import Callable, List, Optional, Union
+from typing import Callable, List, Optional, Tuple, Union
 
 import torch
 from torch import nn, Tensor
@@ -511,7 +511,7 @@ class TransformerModel(nn.Module):
         x: Tensor,
         position: Tensor,
         src_key_padding_mask: Tensor = None,
-    ) -> Tensor:
+    ) -> Tuple[Tensor, dict]:
         """
         Parameters
         --------
@@ -574,7 +574,16 @@ class TransformerModel(nn.Module):
         if self.final_net is not None:
             x = self.final_net(x)
 
-        return x
+        # For logging: Compute total of non-masked tokens the transformer has seen
+        logging_info = {}
+        logging_info["num_tokens"] = (
+            torch.sum(~src_key_padding_mask).detach().cpu().item()
+        )
+        logging_info["num_all_tokens"] = (
+            src_key_padding_mask.shape[0] * src_key_padding_mask.shape[1]
+        )
+
+        return x, logging_info
 
 
 def create_transformer_enet(

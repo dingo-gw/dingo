@@ -65,13 +65,13 @@ class ScoreDiffusionPosteriorModel(ContinuousFlowPosteriorModel):
             Loss.
         """
         t, theta_t, score = self.get_t_theta_t_score(theta_1=theta)
-        pred_score = self.network(t, theta_t, *context_data)
+        pred_score, logging_info = self.network(t, theta_t, *context_data)
 
         weighting = self.likelihood_weighting(t)
         losses = torch.square(pred_score - score)
         losses = 1 / 2 * torch.sum(losses, dim=1) * weighting
         loss = torch.mean(losses)
-        return loss
+        return loss, logging_info
 
     def evaluate_vector_field(self, t, theta_t, *context_data):
         """

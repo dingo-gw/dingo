@@ -87,9 +87,9 @@ class FlowMatchingPosteriorModel(ContinuousFlowPosteriorModel):
         theta_t = ot_conditional_flow(theta_0, theta_1, t, self.sigma_min)
         true_vf = theta - (1 - self.sigma_min) * theta_0
 
-        predicted_vf = self.network(t, theta_t, *context)
+        predicted_vf, logging_info = self.network(t, theta_t, *context)
         loss = mse(predicted_vf, true_vf)
-        return loss
+        return loss, logging_info
 
 
 def ot_conditional_flow(x_0, x_1, t, sigma_min):

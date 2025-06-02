@@ -85,6 +85,7 @@ class BasePosteriorModel(ABC):
         self.epoch = 0
         # iteration = number of optimizer steps
         self.iteration = 0
+        self.logging_info = {}
         self.network = None
         self.optimizer = None
         self.scheduler = None
@@ -463,7 +464,7 @@ class BasePosteriorModel(ABC):
                     if self.rank is None or self.rank == 0:
                         print(f"\nStart training epoch {self.epoch} with lr {lr}")
                     time_start = time.time()
-                    train_loss, iteration = train_epoch(
+                    train_loss, iteration, logging_info = train_epoch(
                         self,
                         train_loader,
                         gradient_updates_per_optimizer_step=gradient_updates_per_optimizer_step,
@@ -474,6 +475,12 @@ class BasePosteriorModel(ABC):
                         time.time() - time_start, device=self.device
                     )
                     self.iteration += iteration
+                    if "num_tokens" in logging_info.keys():
+                        for k, v in logging_info.items():
+                            if k not in self.logging_info.keys():
+                                self.logging_info[k] = v
+                            else:
+                                self.logging_info[k] += v
                     if self.rank is not None:
                         # Sync all processes before aggregating value
                         dist.barrier()
@@ -531,21 +538,24 @@ class BasePosteriorModel(ABC):
 
                             wandb.define_metric("epoch")
                             wandb.define_metric("iteration")
+                            if "num_tokens" in logging_info.keys():
+                                wandb.define_metric("num_tokens")
                             if world_size is None or world_size == 1:
                                 wandb.define_metric("*", step_metric="epoch")
                             else:
                                 wandb.define_metric("*", step_metric="iteration")
-                            wandb.log(
-                                {
-                                    "epoch": self.epoch,
-                                    "iteration": self.iteration,
-                                    "learning_rate": lr[0],
-                                    "train_loss": train_loss,
-                                    "test_loss": test_loss,
-                                    "train_time": train_time,
-                                    "test_time": test_time,
-                                }
-                            )
+                            wandb_log_info = {
+                                "epoch": self.epoch,
+                                "iteration": self.iteration,
+                                "learning_rate": lr[0],
+                                "train_loss": train_loss,
+                                "test_loss": test_loss,
+                                "train_time": train_time,
+                                "test_time": test_time,
+                            }
+                            for k, v in self.logging_info.items():
+                                wandb_log_info[k] = v
+                            wandb.log(wandb_log_info)
                         except ImportError:
                             print("wandb not installed. Skipping logging to wandb.")
 
@@ -603,17 +613,17 @@ def train_epoch(
         if automatic_mixed_precision:
             with autocast():
                 # Compute loss
-                loss = pm.loss(data[0], *data[1:])
+                loss, logging_info = pm.loss(data[0], *data[1:])
             # Backward pass, Note: Backward passes under autocast are not recommended
             # Scales loss before calling backward()
             scaler.scale(loss).backward()
         else:
             # Compute loss
-            loss = pm.loss(data[0], *data[1:])
+            loss, logging_info = pm.loss(data[0], *data[1:])
             # Backward pass
             loss.backward()
         # Cache loss
-        loss_info.cache_loss(loss, len(data[0]))
+        loss_info.cache_loss(loss=loss, n=len(data[0]), logging_info=logging_info)
 
         # Optimizer step
         if (batch_idx + 1) % gradient_updates_per_optimizer_step == 0:
@@ -638,7 +648,7 @@ def train_epoch(
                 update_level="optimizer_step",
             )
 
-    return loss_info.get_avg(), loss_info.get_iteration()
+    return loss_info.get_avg(), loss_info.get_iteration(), loss_info.logging_info
 
 
 def test_epoch(pm, dataloader, world_size: int = 1):
@@ -663,7 +673,7 @@ def test_epoch(pm, dataloader, world_size: int = 1):
             # Data to device
             data = [d.to(pm.device, non_blocking=True) for d in data]
             # Compute loss
-            loss = pm.loss(data[0], *data[1:])
+            loss, _ = pm.loss(data[0], *data[1:])
             # Update loss for history and logging
             loss_info.cache_loss(loss, len(data[0]))
             loss_info.update()

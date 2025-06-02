@@ -39,7 +39,8 @@ class NormalizingFlowPosteriorModel(BasePosteriorModel):
 
     def initialize_network(self):
         model_kwargs = {
-            k: v for k, v in self.model_kwargs.items()
+            k: v
+            for k, v in self.model_kwargs.items()
             if k != "posterior_model_type" and k != "embedding_type"
         }
         if self.initial_weights is not None:
@@ -66,4 +67,5 @@ class NormalizingFlowPosteriorModel(BasePosteriorModel):
         return self.network.sample_and_log_prob(*context, num_samples=num_samples)
 
     def loss(self, theta, *context):
-        return -self.network(theta, *context).mean()
+        loss, logging_info = self.network(theta, *context)
+        return -loss.mean(), logging_info

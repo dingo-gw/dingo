@@ -6,7 +6,7 @@ import torch
 import torch.distributed as dist
 
 from os.path import join, isfile
-from typing import Literal
+from typing import Literal, Optional
 
 
 class AvgTracker:
@@ -121,6 +121,7 @@ class LossInfo:
         self.loss = None
         self.cached_losses = []
         self.cached_n = []
+        self.logging_info = {}
         # track computation times
         self.times = {"Dataloader": AvgTracker(), "Network": AvgTracker()}
         if torch.cuda.device_count() > 1:
@@ -131,11 +132,19 @@ class LossInfo:
             self.multi_gpu = False
         self.t = time.time()
 
-    def cache_loss(self, loss: torch.tensor, n: torch.tensor):
+    def cache_loss(
+        self, loss: torch.tensor, n: torch.tensor, logging_info: Optional[dict] = None
+    ):
         # Cache loss in case of multiple gradient updates per optimizer step
         # Detach tensors from compute graph
         self.cached_losses.append(loss.detach())
         self.cached_n.append(n)
+        if logging_info is not None:
+            for k, v in logging_info.items():
+                if k not in self.logging_info.keys():
+                    self.logging_info[k] = v
+                else:
+                    self.logging_info[k] += v
         self.update_timer(timer_mode="Network")
 
     def reset_cached_losses(self):

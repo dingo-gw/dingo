@@ -4,7 +4,7 @@ from the uci.py example from https://github.com/bayesiains/nsf.
 """
 
 import copy
-from typing import Union, Callable
+from typing import Callable, Tuple, Union
 
 import glasflow.nflows as nflows  # nflows not maintained, so use this maintained fork
 import glasflow.nflows.nn.nets as nflows_nets
@@ -251,14 +251,15 @@ class FlowWrapper(nn.Module):
         self.embedding_net = embedding_net
         self.flow = flow
 
-    def log_prob(self, y, *x):
+    def log_prob(self, y, *x) -> Tuple[torch.Tensor, dict[str, float]]:
+        logging_info = {}
         if len(x) > 0:
             if self.embedding_net is not None:
-                x = self.embedding_net(*x)
-            return self.flow.log_prob(y, x)
+                x, logging_info = self.embedding_net(*x)
+            return self.flow.log_prob(y, x), logging_info
         else:
             # if there is no context
-            return self.flow.log_prob(y)
+            return self.flow.log_prob(y), logging_info
 
     def sample(self, *x, num_samples=1):
         if len(x) > 0:
@@ -278,7 +279,7 @@ class FlowWrapper(nn.Module):
             # if there is no context, omit the context argument
             return self.flow.sample_and_log_prob(num_samples)
 
-    def forward(self, y, *x):
+    def forward(self, y, *x) -> Tuple[torch.Tensor, dict[str, float]]:
         if len(x) > 0:
             return self.log_prob(y, *x)
         else:
