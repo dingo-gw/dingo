@@ -526,8 +526,19 @@ class BasePosteriorModel(ABC):
 
                 if self.rank is None or self.rank == 0:
                     # write history and save model
+                    aux = None
+                    if "num_tokens" in logging_info.keys():
+                        aux = [
+                            self.logging_info["num_tokens"],
+                            self.logging_info["num_all_tokens"],
+                        ]
                     utils.write_history(
-                        train_dir, self.epoch, train_loss, test_loss, lr
+                        log_dir=train_dir,
+                        epoch=self.epoch,
+                        train_loss=train_loss,
+                        test_loss=test_loss,
+                        learning_rates=lr,
+                        aux=aux,
                     )
                     utils.save_model(
                         self, train_dir, checkpoint_epochs=checkpoint_epochs
