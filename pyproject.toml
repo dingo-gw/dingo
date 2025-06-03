@@ -11,7 +11,7 @@ authors = [
 description = "Deep inference for gravitational-wave observations"
 license = {text = "MIT"}
 readme = "README.md"
-requires-python = ">=3.10,<3.12.6"
+requires-python = ">=3.10,<=3.12.6"
 dynamic = ["version"]
 
 classifiers = [
