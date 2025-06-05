@@ -78,6 +78,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             leave_on_disk_keys=leave_on_disk_keys,
         )
         self.file_name = file_name
+        self._epoch = 1
 
         if self.settings is not None:
             self.load_supplemental(domain_update, svd_size_update)
@@ -208,6 +209,14 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         self.decompression_transform = Compose(decompression_transform_list)
 
     @property
+    def epoch(self) -> int:
+        return self._epoch
+
+    @epoch.setter
+    def epoch(self, value: int) -> None:
+        self._epoch = value
+
+    @property
     def real_type(self):
         if self.precision is not None:
             if self.precision == "single":
@@ -327,7 +336,11 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             polarizations = self.decompression_transform(polarizations)
 
         # Main transforms can depend also on parameters.
-        data = {"parameters": parameters, "waveform": polarizations}
+        data = {
+            "parameters": parameters,
+            "waveform": polarizations,
+            "epoch": [self.epoch] * len(batched_idx),
+        }
         if self.transform is not None:
             data = self.transform(data)
 

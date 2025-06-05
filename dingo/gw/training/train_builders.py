@@ -284,6 +284,9 @@ def set_train_transforms(
                 DropRandomTokens(
                     p_drop=rand_drop_settings.get("p_drop", 0.4),
                     max_num_tokens=rand_drop_settings.get("max_num_tokens", num_tokens),
+                    increase_p_until_epoch=rand_drop_settings.get(
+                        "increase_p_until_epoch", None
+                    ),
                     print_output=print_output,
                 )
             )

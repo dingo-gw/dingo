@@ -459,7 +459,9 @@ class BasePosteriorModel(ABC):
                     if train_sampler is not None:
                         # Ensure that data is shuffled every epoch in multi-GPU training
                         train_sampler.set_epoch(self.epoch)
-
+                    # Set epoch in datasets for epoch-dependent transforms
+                    train_loader.dataset.dataset.epoch = self.epoch
+                    train_loader.dataset.dataset.epoch = self.epoch
                     # Only print for one device
                     if self.rank is None or self.rank == 0:
                         print(f"\nStart training epoch {self.epoch} with lr {lr}")

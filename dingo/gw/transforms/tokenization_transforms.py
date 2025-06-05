@@ -893,6 +893,7 @@ class DropRandomTokens(object):
         self,
         p_drop: float,
         max_num_tokens: int,
+        increase_p_until_epoch: Optional[int] = None,
         print_output: bool = True,
     ):
         """
@@ -907,6 +908,7 @@ class DropRandomTokens(object):
         """
         self.p_drop = p_drop
         self.max_num_tokens = max_num_tokens
+        self.increase_until_epoch = increase_p_until_epoch
         if print_output:
             print(
                 f"Transform DropRandomTokens activated:"
@@ -914,6 +916,10 @@ class DropRandomTokens(object):
                 f"    - Probability of dropping tokens for each data point: {self.p_drop}\n"
                 f"    - Maximal number of tokens that can be dropped: {self.max_num_tokens}"
             )
+            if self.increase_until_epoch is not None:
+                print(
+                    f"    - Number of dropped tokens increased during training until epoch: {self.increase_until_epoch}"
+                )
 
     def __call__(self, input_sample: dict) -> dict:
         """
@@ -942,9 +948,19 @@ class DropRandomTokens(object):
             if sample_without_channel.shape[:-1] != ()
             else [1]
         )
+        probs = [self.p_drop, 1 - self.p_drop]
+        if self.increase_until_epoch is not None:
+            epoch = np.array(input_sample["epoch"])
+            assert np.all(epoch[0] == epoch)
+            if epoch[0] <= self.increase_until_epoch:
+                # Epoch count starts from 1, but we want no masking in the beginning
+                frac_epoch = (epoch[0] - 1) / self.increase_until_epoch
+            else:
+                frac_epoch = 1
+            probs = [self.p_drop * frac_epoch, 1 - self.p_drop * frac_epoch]
         drop_mask = np.random.choice(
             [True, False],
-            p=[self.p_drop, 1 - self.p_drop],
+            p=probs,
             replace=True,
             size=batch_size,
         )
