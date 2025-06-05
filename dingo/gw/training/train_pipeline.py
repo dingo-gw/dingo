@@ -578,14 +578,15 @@ def initialize_stage(
         )
         # (3) If we perform multiple gradient updates per optimizer step, this results in a factor of
         # grad_updates_per_optimizer_step fewer optimizer steps per GPU because an optimizer step is only performed
-        # after grad_updates_per_optimizer_step backward passes. We expect the effective_batches_per_gpu to be divisible
-        # by grad_updates_per_optimizer_step to avoid handling the last incomplete gradient update explicitly.
+        # after grad_updates_per_optimizer_step backward passes. If the effective_batches_per_gpu is not divisible
+        # by grad_updates_per_optimizer_step, no optimizer step is performed for the last incomplete gradient update.
         if effective_num_batches_per_gpu % grad_updates_per_optimizer_step != 0:
-            raise ValueError(
-                f"The effective number of batches per GPU {effective_num_batches_per_gpu} is not divisible "
-                f"by the number of gradient updates per optimizer step {grad_updates_per_optimizer_step}. "
+            print(
+                f"The effective number of batches per GPU={effective_num_batches_per_gpu} is not divisible "
+                f"by the number of gradient updates per optimizer step={grad_updates_per_optimizer_step}, discarding"
+                f"the last {effective_num_batches_per_gpu % grad_updates_per_optimizer_step} batches. "
             )
-        num_optimizer_steps = int(
+        num_optimizer_steps = np.floor(
             effective_num_batches_per_gpu / grad_updates_per_optimizer_step
         )
         if print_output:
