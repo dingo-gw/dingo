@@ -443,7 +443,7 @@ class BasePosteriorModel(ABC):
         """
 
         if test_only:
-            test_loss = test_epoch(self, test_loader)
+            test_loss = test_epoch(self, dataloader=test_loader)
             # Only print for one device
             if self.rank is None or self.rank == 0:
                 print(f"test loss: {test_loss:.3f}")
@@ -466,7 +466,7 @@ class BasePosteriorModel(ABC):
                     time_start = time.time()
                     train_loss, iteration, logging_info = train_epoch(
                         self,
-                        train_loader,
+                        dataloader=train_loader,
                         gradient_updates_per_optimizer_step=gradient_updates_per_optimizer_step,
                         automatic_mixed_precision=automatic_mixed_precision,
                         world_size=world_size,
@@ -498,7 +498,11 @@ class BasePosteriorModel(ABC):
                         # Testing
                         print(f"Start testing epoch {self.epoch}")
                     time_start = time.time()
-                    test_loss = test_epoch(self, test_loader, world_size)
+                    test_loss = test_epoch(
+                        self,
+                        dataloader=test_loader,
+                        gradient_updates_per_optimizer_step=gradient_updates_per_optimizer_step,
+                    )
                     test_time = torch.tensor(
                         time.time() - time_start, device=self.device
                     )
@@ -662,7 +666,9 @@ def train_epoch(
     return loss_info.get_avg(), loss_info.get_iteration(), loss_info.logging_info
 
 
-def test_epoch(pm, dataloader, world_size: int = 1):
+def test_epoch(
+    pm, dataloader, gradient_updates_per_optimizer_step: int = 1, world_size: int = 1
+):
     with torch.no_grad():
         pm.network.eval()
         # Compute effective batch size
@@ -687,8 +693,10 @@ def test_epoch(pm, dataloader, world_size: int = 1):
             loss, _ = pm.loss(data[0], *data[1:])
             # Update loss for history and logging
             loss_info.cache_loss(loss, len(data[0]))
-            loss_info.update()
-            if pm.rank is None or pm.rank == 0:
-                loss_info.print_info(batch_idx)
+            # Average loss over multiple batches, equivalent to training
+            if (batch_idx + 1) % gradient_updates_per_optimizer_step == 0:
+                loss_info.update()
+                if pm.rank is None or pm.rank == 0:
+                    loss_info.print_info(batch_idx)
 
         return loss_info.get_avg()
