@@ -7,6 +7,7 @@ import h5py
 import json
 import numpy as np
 import os
+import sys
 import time
 
 from abc import abstractmethod, ABC
@@ -592,6 +593,8 @@ class BasePosteriorModel(ABC):
                         print("Early stopping")
                         break
                 print(f"Finished training epoch {self.epoch}.\n")
+                # Force flush of print statements to info.out
+                sys.stdout.flush()
 
 
 def train_epoch(
