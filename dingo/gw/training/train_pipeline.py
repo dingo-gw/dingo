@@ -588,10 +588,11 @@ def initialize_stage(
         num_optimizer_steps = int(
             effective_num_batches_per_gpu / grad_updates_per_optimizer_step
         )
-        print(
-            f"Training with an effective batch size of {batch_size_per_gpu * num_gpus * grad_updates_per_optimizer_step} "
-            f"on {num_gpus} CPU/GPU(s) with {num_optimizer_steps} optimizer steps per epoch. "
-        )
+        if print_output:
+            print(
+                f"Training with an effective batch size of {batch_size_per_gpu * num_gpus * grad_updates_per_optimizer_step} "
+                f"on {num_gpus} CPU/GPU(s) with {num_optimizer_steps} optimizer steps per epoch. "
+            )
 
         pm.initialize_optimizer_and_scheduler(num_optimizer_steps=num_optimizer_steps)
 

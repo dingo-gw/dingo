@@ -137,7 +137,7 @@ class StrainTokenization(object):
             )
             if self.num_padded_f_bins > 0:
                 print(
-                    f"\n    - Extrapolating to maximum frequency of {self.f_max_per_token[-1]} Hz"
+                    f"    - Extrapolating to maximum frequency of {self.f_max_per_token[-1]} Hz"
                 )
 
     def __call__(self, input_sample: dict) -> dict:
@@ -911,8 +911,7 @@ class DropRandomTokens(object):
         self.increase_until_epoch = increase_p_until_epoch
         if print_output:
             print(
-                f"Transform DropRandomTokens activated:"
-                f"  Settings: \n"
+                f"Transform DropRandomTokens activated:\n"
                 f"    - Probability of dropping tokens for each data point: {self.p_drop}\n"
                 f"    - Maximal number of tokens that can be dropped: {self.max_num_tokens}"
             )
