@@ -32,7 +32,10 @@ from dingo.core.posterior_models import BasePosteriorModel
 
 
 def copy_files_to_local(
-    file_path: str, local_dir: Optional[str], leave_keys_on_disk: bool, is_condor: bool = False,
+    file_path: str,
+    local_dir: Optional[str],
+    leave_keys_on_disk: bool,
+    is_condor: bool = False,
 ) -> str:
     """
     Copy files to local node if local_dir is provided to minimize network traffic during training.
