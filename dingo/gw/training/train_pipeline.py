@@ -10,6 +10,8 @@ import time
 import yaml
 
 from copy import deepcopy
+from multiprocessing import Value
+import ctypes
 
 import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -614,7 +616,11 @@ def initialize_stage(
 
 
 def train_stages(
-    pm: BasePosteriorModel, wfd: WaveformDataset, train_dir: str, local_settings: dict
+    pm: BasePosteriorModel,
+    wfd: WaveformDataset,
+    train_dir: str,
+    local_settings: dict,
+    global_epoch: int,
 ) -> Tuple[bool, bool]:
     """
     Train the network, iterating through the sequence of stages. Stages can change
@@ -712,6 +718,7 @@ def train_stages(
             ),
             automatic_mixed_precision=stage.get("automatic_mixed_precision", False),
             world_size=local_settings.get("world_size", 1),
+            global_epoch=global_epoch,
         )
         # if test_only, model should not be saved, and run is complete
         if local_settings.get("test_only", False):
@@ -780,9 +787,17 @@ def run_training(
             local_settings=local_settings,
             train_dir=train_dir,
         )
+    # Set global epoch
+    global_epoch = Value(ctypes.c_int, pm.epoch)  # Shared across processes
+    wfd.epoch = global_epoch
+
     with threadpool_limits(limits=1, user_api="blas"):
         complete, resume = train_stages(
-            pm=pm, wfd=wfd, train_dir=train_dir, local_settings=local_settings
+            pm=pm,
+            wfd=wfd,
+            train_dir=train_dir,
+            local_settings=local_settings,
+            global_epoch=global_epoch,
         )
 
     return complete, resume, pm.epoch
@@ -856,6 +871,9 @@ def run_multi_gpu_training(
     else:
         pretraining = False
 
+    # Initialize global epoch
+    global_epoch = Value(ctypes.c_int, 0)  # Shared across processes
+
     # Setup multi-processing queue
     result_queue = mp.Queue()
     processes = []
@@ -876,6 +894,7 @@ def run_multi_gpu_training(
                 checkpoint_file,
                 resume,
                 result_queue,
+                global_epoch,
             ),
         )
         p.start()
@@ -950,6 +969,7 @@ def run_training_ddp(
     ckpt_file: str,
     resume: bool,
     result_queue: mp.Queue = None,
+    global_epoch: int = Value(ctypes.c_int, 0),
 ) -> (bool, int):
     """
     Initializes each GPU process of the distributed data parallel (DDP) training.
@@ -980,6 +1000,8 @@ def run_training_ddp(
         Whether to resume training from checkpoint
     result_queue:
         The queue to which the results of the run will be stored
+    global_epoch: multiprocessing.Value
+        Global epoch stored in shared memory
 
     Returns
     ----------
@@ -1028,8 +1050,13 @@ def run_training_ddp(
         pm.network = replace_BatchNorm_with_SyncBatchNorm(pm.network)
         # Wrap the model with DDP
         pm.network = DDP(pm.network, device_ids=[rank])
+        # Set global epoch
+        global_epoch.value = pm.epoch
+        wfd.epoch = global_epoch
 
-        complete, resume = train_stages(pm, wfd, train_dir, local_settings)
+        complete, resume = train_stages(
+            pm, wfd, train_dir, local_settings, global_epoch
+        )
 
         if complete and local_settings.get("wandb", False) and rank == 0.0:
             try:

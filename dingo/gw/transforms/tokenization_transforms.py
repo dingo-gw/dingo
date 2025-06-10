@@ -25,6 +25,7 @@ class StrainTokenization(object):
         normalize_frequency: bool = False,
         single_tokenizer: bool = False,
         drop_last_token: bool = False,
+        additional_information_per_frequency_bin: bool = False,
         print_output: bool = True,
     ):
         """
@@ -123,6 +124,8 @@ class StrainTokenization(object):
                 mfd_nodes=domain.nodes,
                 drop_last_token=self.drop_last_token,
             )
+        self.additional_dim = additional_information_per_frequency_bin
+        self.f_bin_index = -1 if not self.additional_dim else -2
 
         if print_output:
             print(
@@ -146,10 +149,11 @@ class StrainTokenization(object):
         ----------
         input_sample: Dict
             Value for key 'waveform':
-                Sample of shape [batch_size, num_blocks, num_channels, num_bins]
+                Sample of shape [batch_size, num_blocks, num_channels, num_bins, ...]
                 where num_blocks = number of detectors in GW use case,
                 num_channels>=3 (real, imag, auxiliary channels, e.g. asd),
                 and num_bins=number of frequency bins.
+                Dimensions after num_bins are interpreted as information per bin and flattened.
             Value for key 'asds':
                 Dictionary containing asd for each detector. This transform only accesses the asds keys to determine
                 which detectors are involved and does not modify the asds.
@@ -159,7 +163,7 @@ class StrainTokenization(object):
         sample: Dict
             input_sample with modified value for key
             - 'waveform', shape [batch_size, num_tokens, num_features] =
-               [batch_size, num_blocks * num_tokens_per_block, num_channels * num_bins_per_token]
+               [batch_size, num_blocks * num_tokens_per_block, num_channels * num_bins_per_token * ...]
                and additional keys
             - 'position', shape [batch_size, num_blocks, num_tokens, 3]
                where last dimension contains information [f_min, f_max, block]
@@ -172,41 +176,63 @@ class StrainTokenization(object):
         """
         sample = input_sample.copy()
 
-        # Reshape strain from shape [batch_size, num_blocks, num_channels, num_bins] to [seq_length, num_features]
-        # = [num_blocks * num_tokens_per_detector, num_channels * num_bins_per_token]
+        # Reshape strain from shape [batch_size, num_blocks, num_channels, num_bins, num_optional_vals]
+        # to [seq_length, num_features]
+        # = [num_blocks * num_tokens_per_detector, num_channels * num_bins_per_token * num_optional_vals]
         # (0) Cut/Pad num_bins such that it is compatible with num_tokens_per_detector * num_bins_per_token
         if self.num_padded_f_bins == 0:
             # Only take bins that fit into the tokens
-            strain = sample["waveform"][
-                ..., : self.num_tokens_per_detector * self.num_bins_per_token
-            ]
+            if self.additional_dim:
+                strain = sample["waveform"][
+                    ..., : self.num_tokens_per_detector * self.num_bins_per_token, :
+                ]
+            else:
+                strain = sample["waveform"][
+                    ..., : self.num_tokens_per_detector * self.num_bins_per_token
+                ]
         else:
             # Pad last dimension with 0.
             pad_width = [
                 (
                     (0, 0)
-                    if i < len(sample["waveform"].shape) - 1
+                    if i < len(sample["waveform"].shape) + self.f_bin_index
                     else (0, self.num_padded_f_bins)
                 )
                 for i in range(len(sample["waveform"].shape))
             ]
             strain = np.pad(sample["waveform"], pad_width, "constant")
 
-        num_blocks, num_channels = strain.shape[-3], strain.shape[-2]
-        # (1) Reshape strain from [..., num_bins] to [..., num_tokens_per_detector, num_bins_per_token]
+        num_blocks, num_channels = (
+            strain.shape[self.f_bin_index - 2],
+            strain.shape[self.f_bin_index - 1],
+        )
+        # (1) Reshape strain from [..., num_bins, num_optional_vals] to
+        # [..., num_tokens_per_detector, num_bins_per_token, num_optional_vals]
         # This step divides the frequency range into equal segments of num_bins_per_token and stacks these segments,
         # resulting in: [[waveform(f_min_token1), ..., waveform(f_max_token1)],
         #                [waveform(f_min_token2), ..., waveform(f_max_token2)],
         #                ...,
         #                [waveform(f_min_tokenN), ..., waveform(f_max_tokenN)]]
-        strain = strain.reshape(
-            *strain.shape[:-1], self.num_tokens_per_detector, self.num_bins_per_token
+        if self.additional_dim:
+            strain = strain.reshape(
+                *strain.shape[: self.f_bin_index],
+                self.num_tokens_per_detector,
+                self.num_bins_per_token,
+                strain.shape[-1],
+            )
+        else:
+            strain = strain.reshape(
+                *strain.shape[: self.f_bin_index],
+                self.num_tokens_per_detector,
+                self.num_bins_per_token,
+            )
+        # (2) Reshape strain from [..., num_blocks, num_channels, num_tokens_per_detector, num_bins_per_token, num_optional_vals]
+        # to [..., num_blocks, num_tokens_per_detector, num_channels, num_bins_per_token, num_optional_vals]
+        strain = np.moveaxis(
+            strain, source=self.f_bin_index - 1, destination=self.f_bin_index - 2
         )
-        # (2) Reshape strain from [..., num_blocks, num_channels, num_tokens_per_detector, num_bins_per_token]
-        # to [..., num_blocks, num_tokens_per_detector, num_channels, num_bins_per_token]
-        strain = np.moveaxis(strain, source=-2, destination=-3)
-        # (3) Reshape strain from [..., num_blocks, num_tokens_per_detector, num_channels, num_bins_per_token]
-        # to [..., num_blocks*num_tokens_per_detector, num_channels*num_bins_per_token]
+        # (3) Reshape strain from [..., num_blocks, num_tokens_per_detector, num_channels, num_bins_per_token, num_optional_vals]
+        # to [..., num_blocks*num_tokens_per_detector, num_channels*num_bins_per_token*num_optional_vals]
         # = [..., num_tokens, num_features]
         # The ordering of the tokens is relevant for the frequency and detector embedding: We want
         # [H1_token1, H1_token2,..., H1_tokenN, L1_token1,..., L1_tokenN, V1_token1,..., V1_tokenN]
@@ -214,14 +240,19 @@ class StrainTokenization(object):
         # embedding dimension of the transformer. However, for completeness: In each token, the three channels are
         # stacked: [real, imag, asd]. To plot the real part, you can loop over the tokens of the first detector
         # and collect the first num_features/3 values.
+        if self.additional_dim:
+            num_optional_vals = strain.shape[-1]
+        else:
+            num_optional_vals = 1
+        batch_idx = self.f_bin_index - 3
         sample["waveform"] = strain.reshape(
-            *strain.shape[:-4],
+            *strain.shape[:batch_idx],
             num_blocks * self.num_tokens_per_detector,
-            num_channels * self.num_bins_per_token,
+            num_channels * self.num_bins_per_token * num_optional_vals,
         )
 
         # Prepare position information for each token
-        if strain.shape[:-4] == ():
+        if strain.shape[:batch_idx] == ():
             detectors = np.array(
                 [[DETECTOR_DICT[k] for k, v in input_sample["asds"].items()]],
                 dtype=strain.dtype,
@@ -236,21 +267,21 @@ class StrainTokenization(object):
             ).T
         num_tokens = num_blocks * self.num_tokens_per_detector
         token_position = np.empty(
-            (*strain.shape[:-4], num_tokens, 3), dtype=strain.dtype
+            (*strain.shape[:batch_idx], num_tokens, 3), dtype=strain.dtype
         )
         # Treat sample without batch dimension separately because repeat with repeats=() throws error
-        if strain.shape[:-4] == ():
+        if strain.shape[:batch_idx] == ():
             token_position[..., 0] = np.tile(self.f_min_per_token, num_blocks)
             token_position[..., 1] = np.tile(self.f_max_per_token, num_blocks)
         else:
             token_position[..., 0] = np.repeat(
                 np.expand_dims(np.tile(self.f_min_per_token, num_blocks), axis=0),
-                *strain.shape[:-4],
+                *strain.shape[:batch_idx],
                 axis=0,
             )
             token_position[..., 1] = np.repeat(
                 np.expand_dims(np.tile(self.f_max_per_token, num_blocks), axis=0),
-                *strain.shape[:-4],
+                *strain.shape[:batch_idx],
                 axis=0,
             )
         token_position[..., 2] = np.repeat(
@@ -260,7 +291,7 @@ class StrainTokenization(object):
         # Convention of torch transformer: positions with a True value are not allowed to participate in the attention
         # see https://pytorch.org/docs/stable/generated/torch.nn.Transformer.html#torch.nn.Transformer
         sample["drop_token_mask"] = np.zeros(
-            [*strain.shape[:-4], num_tokens], dtype=bool
+            [*strain.shape[:batch_idx], num_tokens], dtype=bool
         )
 
         return sample
@@ -951,7 +982,9 @@ class DropRandomTokens(object):
         if self.increase_until_epoch is not None:
             epoch = np.array(input_sample["epoch"])
             assert np.all(epoch[0] == epoch)
-            if epoch[0] <= self.increase_until_epoch:
+            if epoch[0] == 0:
+                frac_epoch = 0
+            elif self.increase_until_epoch >= epoch[0]:
                 # Epoch count starts from 1, but we want no masking in the beginning
                 frac_epoch = (epoch[0] - 1) / self.increase_until_epoch
             else:

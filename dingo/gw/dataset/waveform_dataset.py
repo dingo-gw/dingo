@@ -1,7 +1,9 @@
 from typing import Dict, List, Optional, Union
+import ctypes
 import h5py
 import numpy as np
 import torch.utils.data
+from multiprocessing import Value
 from torchvision.transforms import Compose
 
 from dingo.core.dataset import DingoDataset, recursive_hdf5_load
@@ -78,7 +80,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             leave_on_disk_keys=leave_on_disk_keys,
         )
         self.file_name = file_name
-        self._epoch = 1
+        self._epoch = Value(ctypes.c_int, 0)  # Shared across processes
 
         if self.settings is not None:
             self.load_supplemental(domain_update, svd_size_update)
@@ -210,10 +212,10 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
 
     @property
     def epoch(self) -> int:
-        return self._epoch
+        return self._epoch.value
 
     @epoch.setter
-    def epoch(self, value: int) -> None:
+    def epoch(self, value: ctypes.c_int) -> None:
         self._epoch = value
 
     @property

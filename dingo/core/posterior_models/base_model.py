@@ -3,6 +3,7 @@ This module contains the abstract base class for representing posterior models,
 as well as functions for training and testing across an epoch.
 """
 
+import ctypes
 import h5py
 import json
 import numpy as np
@@ -12,6 +13,7 @@ import time
 
 from abc import abstractmethod, ABC
 from collections import OrderedDict
+from multiprocessing import Value
 from os.path import join
 from threadpoolctl import threadpool_limits
 from typing import Callable, Optional
@@ -406,6 +408,7 @@ class BasePosteriorModel(ABC):
         gradient_updates_per_optimizer_step: int = 1,
         automatic_mixed_precision: bool = False,
         world_size: int = 1,
+        global_epoch: ctypes.c_int = Value(ctypes.c_int, 1),
     ):
         """
 
@@ -460,9 +463,8 @@ class BasePosteriorModel(ABC):
                     if train_sampler is not None:
                         # Ensure that data is shuffled every epoch in multi-GPU training
                         train_sampler.set_epoch(self.epoch)
-                    # Set epoch in datasets for epoch-dependent transforms
-                    train_loader.dataset.dataset.epoch = self.epoch
-                    train_loader.dataset.dataset.epoch = self.epoch
+                    # Set epoch
+                    global_epoch.value = self.epoch
                     # Only print for one device
                     if self.rank is None or self.rank == 0:
                         print(f"\nStart training epoch {self.epoch} with lr {lr}")
@@ -478,12 +480,15 @@ class BasePosteriorModel(ABC):
                         time.time() - time_start, device=self.device
                     )
                     self.iteration += iteration
+                    for k, v in logging_info.items():
+                        self.logging_info[k] = v
                     if "num_tokens" in logging_info.keys():
-                        for k, v in logging_info.items():
-                            if k not in self.logging_info.keys():
-                                self.logging_info[k] = v
+                        # Add cumulatively tracked values
+                        for k in ["num_tokens", "num_all_tokens"]:
+                            if f"{k}_cumulative" not in self.logging_info.keys():
+                                self.logging_info[f"{k}_cumulative"] = logging_info[k]
                             else:
-                                self.logging_info[k] += v
+                                self.logging_info[f"{k}_cumulative"] += logging_info[k]
                     if self.rank is not None:
                         # Sync all processes before aggregating value
                         dist.barrier()
@@ -681,6 +686,15 @@ def test_epoch(
             effective_batch_size_per_grad_update = dataloader.batch_size
         else:
             effective_batch_size_per_grad_update = dataloader.batch_size * world_size
+        if len(dataloader.dataset) < effective_batch_size_per_grad_update:
+            if pm.rank is None or pm.rank == 0:
+                print(
+                    f"Warning: Test dataset (len {len(dataloader.dataset)}) smaller than "
+                    f"effective_batch_size_per_grad_update={effective_batch_size_per_grad_update}. "
+                    f"Test loss computed over full test dataset, might not be comparable to train loss. "
+                )
+                effective_batch_size_per_grad_update = len(dataloader.dataset)
+                gradient_updates_per_optimizer_step = 1
         loss_info = dingo.core.utils.trainutils.LossInfo(
             epoch=pm.epoch,
             len_dataset=len(dataloader.dataset),
