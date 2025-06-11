@@ -543,14 +543,15 @@ class TransformerModel(nn.Module):
             # Prepend the class token.
             batch_size = x.shape[0]
             x = torch.cat((self.class_token.expand(batch_size, -1, -1), x), dim=1)
-            # Prepend True src_key_padding_mask
-            mask_cls_token = torch.ones(
+            # Ensure that the class token is not masked.
+            mask_cls_token = torch.zeros(
                 [batch_size, 1], dtype=torch.bool, device=src_key_padding_mask.device
             )
             src_key_padding_mask = torch.cat(
                 (mask_cls_token, src_key_padding_mask), dim=1
             )
 
+        # Masks: positions with True are NOT allowed to attend
         x = self.transformer_encoder(x, src_key_padding_mask=src_key_padding_mask)
 
         if self.pooling == "average":
@@ -576,6 +577,9 @@ class TransformerModel(nn.Module):
 
         # For logging: Compute total of non-masked tokens the transformer has seen
         logging_info = {}
+        if self.pooling == "cls":
+            # Remove the summary token for logging
+            src_key_padding_mask = src_key_padding_mask[..., 1:]
         logging_info["num_tokens"] = (
             torch.sum(~src_key_padding_mask).detach().cpu().item()
         )
