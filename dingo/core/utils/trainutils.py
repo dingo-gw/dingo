@@ -139,6 +139,7 @@ class LossInfo:
         # Detach tensors from compute graph
         self.cached_losses.append(loss.detach())
         self.cached_n.append(n)
+        # Sum logging_info over all gradient updates in an epoch
         if logging_info is not None:
             for k, v in logging_info.items():
                 if k not in self.logging_info.keys():
@@ -177,12 +178,16 @@ class LossInfo:
             # Calculate absolute loss value to ensure correct normalization
             # if GPUs have different number of samples
             abs_loss = loss * n
-            # Sync all processes before aggregating values
+            # Sync all processes before aggregating values via sum
             dist.barrier()
             # Aggregate values
             dist.reduce(abs_loss, dst=0)
             dist.reduce(n, dst=0)
             loss = abs_loss / n
+            for k, v in self.logging_info.items():
+                v = torch.tensor(v, device=self.device)
+                dist.reduce(v, dst=0)
+                self.logging_info[k] = v.detach().item()
             self.update_timer(timer_mode="Aggregation")
 
         self.loss = loss.item()
