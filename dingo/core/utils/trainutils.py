@@ -184,10 +184,6 @@ class LossInfo:
             dist.reduce(abs_loss, dst=0)
             dist.reduce(n, dst=0)
             loss = abs_loss / n
-            for k, v in self.logging_info.items():
-                v = torch.tensor(v, device=self.device)
-                dist.reduce(v, dst=0)
-                self.logging_info[k] = v.detach().item()
             self.update_timer(timer_mode="Aggregation")
 
         self.loss = loss.item()
@@ -226,6 +222,17 @@ class LossInfo:
         else:
             iteration = self.iteration
         return iteration
+
+    def get_logging_info(self):
+        if self.multi_gpu:
+            # Aggregate logging info across GPUs
+            # Sync all processes before aggregating values
+            dist.barrier()
+            for k, v in self.logging_info.items():
+                v = torch.tensor(v, device=self.device)
+                dist.reduce(v, dst=0)
+                self.logging_info[k] = v.detach().item()
+        return self.logging_info
 
     def print_info(self, batch_idx):
         if batch_idx % self.print_freq == 0:

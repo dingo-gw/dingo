@@ -673,7 +673,7 @@ def train_epoch(
                 update_level="optimizer_step",
             )
 
-    return loss_info.get_avg(), loss_info.get_iteration(), loss_info.logging_info
+    return loss_info.get_avg(), loss_info.get_iteration(), loss_info.get_logging_info()
 
 
 def test_epoch(
