@@ -191,11 +191,11 @@ class StrainTokenization(object):
                     ..., : self.num_tokens_per_detector * self.num_bins_per_token
                 ]
         else:
-            # Pad last dimension with 0.
+            # Pad f_bins dimension with 0.
             pad_width = [
                 (
                     (0, 0)
-                    if i < len(sample["waveform"].shape) + self.f_bin_index
+                    if i != len(sample["waveform"].shape) + self.f_bin_index
                     else (0, self.num_padded_f_bins)
                 )
                 for i in range(len(sample["waveform"].shape))

@@ -1,5 +1,6 @@
 from typing import Optional
 import numpy as np
+import torch
 
 from dingo.gw.domains import MultibandedFrequencyDomain, UniformFrequencyDomain
 from dingo.gw.gwutils import add_defaults_for_missing_ifos
@@ -377,3 +378,73 @@ def check_sample_in_domain(sample, domain: UniformFrequencyDomain) -> bool:
         return True
     else:
         return False
+
+
+class TimeShiftStrain(object):
+    """
+    Time-shift strain based on grid with t_max and \delta t.
+    """
+
+    def __init__(
+        self,
+        domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
+        max_time_shift: float,
+        delta_t: float,
+        print_output: bool = True,
+    ):
+        """
+        Parameters
+        ----------
+
+        print_output: bool
+            Whether to write print statements to the console.
+        """
+        if max_time_shift < delta_t:
+            raise ValueError(
+                f"max_time_shift={max_time_shift} should not be smaller than delta_t={delta_t}."
+            )
+        self.domain = domain
+        self.time_shift_grid = np.round(
+            np.arange(-max_time_shift, max_time_shift + delta_t, delta_t), decimals=6
+        )
+        if print_output:
+            print(
+                f"TimeshiftStrains:\n"
+                f"    - Maximal time-shift: {max_time_shift}\n"
+                f"    - Delta time-shift: {delta_t}\n"
+                f"    - Resulting time shift grid: {self.time_shift_grid} "
+            )
+
+    def __call__(self, input_sample: dict) -> dict:
+        """
+        Parameters
+        ----------
+        input_sample: Dict
+            Value for key 'waveform':
+                Sample of shape [batch_size, num_blocks, num_channels, num_bins]
+                where num_blocks = number of detectors in GW use case,
+                num_channels>=3 (real, imag, auxiliary channels, e.g. asd),
+                and num_bins=number of frequency bins.
+            Value for key 'asds':
+                Dictionary containing asd for each detector. This transform only accesses the asds keys to determine
+                which detectors are involved and does not modify the asds.
+
+        Returns
+        ----------
+        sample: Dict
+            input_sample with modified value for key
+            - 'waveform', shape [batch_size, num_blocks, num_channels, num_bins, num_time_shifts]
+        """
+        waveform = input_sample["waveform"].copy()
+
+        def func_time_translate_data(dt):
+            return self.domain.time_translate_data(
+                data=torch.tensor(waveform), dt=torch.tensor(dt)
+            ).numpy()
+
+        time_translated_waveform = np.stack(
+            [func_time_translate_data(dt) for dt in self.time_shift_grid], axis=-1
+        )
+        input_sample["waveform"] = time_translated_waveform
+
+        return input_sample

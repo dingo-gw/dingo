@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List
 import copy
 
 import torch.multiprocessing
@@ -24,6 +24,7 @@ from dingo.gw.transforms import (
     GNPECoalescenceTimes,
     SampleExtrinsicParameters,
     GetDetectorTimes,
+    TimeShiftStrain,
     StrainTokenization,
     DropFrequenciesToUpdateRange,
     DropFrequencyInterval,
@@ -206,7 +207,18 @@ def set_train_transforms(
     else:
         selected_keys = ["inference_parameters", "waveform"]
 
-    try:
+    if "time_shift_strain" in data_settings.keys():
+        transforms.append(
+            TimeShiftStrain(
+                domain=domain,
+                max_time_shift=data_settings["time_shift_strain"].get(
+                    "max_time_shift", 0.1
+                ),
+                delta_t=data_settings["time_shift_strain"].get("delta_t", 0.025),
+            )
+        )
+
+    if "tokenization" in data_settings.keys():
         num_tokens = data_settings["tokenization"].get("num_tokens", None)
         norm_freq = data_settings["tokenization"].get(
             "normalize_frequency_for_positional_encoding", False
@@ -218,6 +230,9 @@ def set_train_transforms(
                 token_size=data_settings["tokenization"].get("token_size", None),
                 drop_last_token=data_settings["tokenization"].get(
                     "drop_last_token", False
+                ),
+                additional_information_per_frequency_bin=(
+                    True if "time_shift_strain" in data_settings.keys() else False
                 ),
                 print_output=print_output,
             )
@@ -293,11 +308,6 @@ def set_train_transforms(
         # Normalize position after all drop transforms
         if norm_freq:
             transforms.append(NormalizePosition())
-
-    except KeyError:
-        print(
-            "No tokenization information found, omitting StrainTokenization transform."
-        )
 
     transforms.append(UnpackDict(selected_keys=selected_keys))
 
