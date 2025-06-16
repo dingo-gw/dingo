@@ -354,7 +354,14 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
 
         if isinstance(data, dict):
             data = [
-                {k1: {k2: v2[j] for k2, v2 in v1.items()} for k1, v1 in data.items()}
+                {
+                    k1: (
+                        {k2: v2[j] for k2, v2 in v1.items()}
+                        if isinstance(v1, dict)
+                        else v1
+                    )
+                    for k1, v1 in data.items()
+                }
                 for j in range(len(batched_idx))
             ]
         elif isinstance(data, list):

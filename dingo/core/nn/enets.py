@@ -197,6 +197,30 @@ class ModuleMerger(nn.Module):
         return torch.cat(x, axis=1)
 
 
+class ModuleLoggingWrapper(nn.Module):
+    """
+    This is a wrapper adding empty logging information to embedding networks that
+    don't inherently return it.
+    """
+
+    def __init__(
+        self,
+        embedding_net: nn.Module,
+    ):
+        """
+        Parameters
+        ----------
+        embedding_net : nn.Module
+            Embedding network to be wrapped.
+        """
+        super(ModuleLoggingWrapper, self).__init__()
+        self.embedding_net = embedding_net
+
+    def forward(self, *x):
+        x = self.embedding_net(*x)
+        return x, {}
+
+
 def create_enet_with_projection_layer_and_dense_resnet(
     input_dims: List[int],
     # n_rb: int,
@@ -291,9 +315,9 @@ def create_enet_with_projection_layer_and_dense_resnet(
     enet = nn.Sequential(module_1, module_2)
 
     if not added_context:
-        return enet
+        return ModuleLoggingWrapper(enet)
     else:
-        return ModuleMerger((enet, nn.Identity()))
+        return ModuleLoggingWrapper(ModuleMerger((enet, nn.Identity())))
 
 
 if __name__ == "__main__":

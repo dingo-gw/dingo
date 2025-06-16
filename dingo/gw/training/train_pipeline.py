@@ -261,9 +261,11 @@ def prepare_model_new(
     """
 
     # This modifies the model settings in-place.
+    is_gnpe = True if "gnpe_time_shifts" in train_settings["data"] else False
     autocomplete_model_kwargs(
         model_kwargs=train_settings["model"],
         data_sample=wfd[0],
+        gnpe=is_gnpe,
     )
     full_settings = {
         "dataset_settings": wfd.settings,
@@ -343,13 +345,13 @@ def prepare_training_new(
         pretraining=pretraining,
     )
     pm = prepare_model_new(
-        train_settings,
-        train_dir,
-        local_settings,
-        wfd,
-        initial_weights,
-        pretraining,
-        pretrained_embedding_net,
+        train_settings=train_settings,
+        train_dir=train_dir,
+        local_settings=local_settings,
+        wfd=wfd,
+        initial_weights=initial_weights,
+        pretraining=pretraining,
+        pretrained_embedding_net=pretrained_embedding_net,
     )
 
     return pm, wfd
