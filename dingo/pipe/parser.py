@@ -1095,8 +1095,8 @@ def create_parser(top_level=True):
     # )
     prior_parser.add(
         "--deltaT",
-        type=float,
-        default=0.2,
+        type=nonefloat,
+        default=None,
         help=(
             "The symmetric width (in s) around the trigger time to"
             " search over the coalescence time"
