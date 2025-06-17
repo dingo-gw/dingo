@@ -619,6 +619,11 @@ def initialize_stage(
     # Freeze/unfreeze RB layer if necessary
     if "freeze_rb_layer" in stage:
         if stage["freeze_rb_layer"]:
+            # Multi-GPU training: Changes to the model have to be made before wrapping the model in DDP
+            if world_size is not None and world_size > 1:
+                raise ValueError(
+                    f"Not possible to freeze RB layer during multi-GPU training."
+                )
             set_requires_grad_flag(
                 pm.network, name_contains="layers_rb", requires_grad=False
             )
