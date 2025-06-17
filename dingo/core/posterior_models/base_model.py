@@ -510,6 +510,7 @@ class BasePosteriorModel(ABC):
                         self,
                         dataloader=test_loader,
                         gradient_updates_per_optimizer_step=gradient_updates_per_optimizer_step,
+                        world_size=world_size,
                     )
                     test_time = torch.tensor(
                         time.time() - time_start, device=self.device
