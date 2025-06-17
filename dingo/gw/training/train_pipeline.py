@@ -162,7 +162,10 @@ def prepare_wfd_and_initialization_for_embedding_network(
                 print("\nBuilding SVD for initialization of ResNet embedding network.")
 
             batch_size = train_settings["training"]["stage_0"]["batch_size"]
-            num_gpus = local_settings["condor"].get("num_gpus", 1)
+            if "condor" in local_settings:
+                num_gpus = local_settings["condor"].get("num_gpus", 1)
+            else:
+                num_gpus = 1
             # Compute batch size per GPU in case of multi-GPU training
             if num_gpus > 1:
                 if batch_size % num_gpus != 0:
