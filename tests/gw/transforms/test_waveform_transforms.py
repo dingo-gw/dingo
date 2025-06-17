@@ -1,8 +1,15 @@
 import numpy as np
 import pytest
+import torch
+
+from copy import deepcopy
 
 from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain
-from dingo.gw.transforms import MaskDataForFrequencyRangeUpdate
+from dingo.gw.transforms import (
+    MaskDataForFrequencyRangeUpdate,
+    RepackageStrainsAndASDS,
+    TimeShiftStrain,
+)
 
 
 @pytest.fixture
@@ -183,3 +190,50 @@ def test_MaskDataForFrequencyRangeUpdate(request, setup):
         mask = np.repeat(mask[np.newaxis, :], axis=0, repeats=batch_size)
     assert np.all(out["waveform"]["V1"][mask] == 0.0)
     assert np.all(out["asds"]["V1"][mask] == 1.0)
+
+
+@pytest.mark.parametrize(
+    "setup",
+    [
+        "strain_tokenization_setup",
+        "strain_tokenization_setup_no_batch",
+        "strain_tokenization_setup_single_batch",
+        "strain_tokenization_setup_mfd",
+    ],
+)
+def test_TimeShiftStrain(request, setup):
+    domain, sample, batch_size = request.getfixturevalue(setup)
+
+    max_time_shift = 0.1
+    delta_t = 0.025
+    repackage_trafo = RepackageStrainsAndASDS(
+        ifos=[i for i in sample["waveform"].keys()],
+        first_index=domain.min_idx,
+    )
+    time_shift_trafo = TimeShiftStrain(
+        domain=domain, max_time_shift=max_time_shift, delta_t=delta_t
+    )
+    # Apply trafos
+    sample = repackage_trafo(sample)
+    out = time_shift_trafo(deepcopy(sample))
+
+    waveform = sample["waveform"]
+    waveform_out = out["waveform"]
+
+    # Check that shapes are as expected
+    assert waveform_out.shape[:-1] == waveform.shape
+    assert waveform_out.shape[-1] == int(2 * max_time_shift / delta_t + 1)
+
+    # Check that vectorized implementation of time-shifting the data is equivalent
+    # to looping over the time-shifts
+
+    def func_time_translate_data(dt):
+        return domain.time_translate_data(
+            data=torch.tensor(waveform), dt=torch.tensor(dt)
+        ).numpy()
+
+    loop_time_translated_waveform = np.stack(
+        [func_time_translate_data(dt) for dt in time_shift_trafo.time_shift_grid],
+        axis=-1,
+    )
+    assert np.allclose(waveform_out, loop_time_translated_waveform)

@@ -437,14 +437,16 @@ class TimeShiftStrain(object):
         """
         waveform = input_sample["waveform"].copy()
 
-        def func_time_translate_data(dt):
-            return self.domain.time_translate_data(
-                data=torch.tensor(waveform), dt=torch.tensor(dt)
-            ).numpy()
-
-        time_translated_waveform = np.stack(
-            [func_time_translate_data(dt) for dt in self.time_shift_grid], axis=-1
+        # Prepend additional dimension
+        expanded_waveform = np.repeat(
+            waveform[None, ...], axis=0, repeats=len(self.time_shift_grid)
         )
-        input_sample["waveform"] = time_translated_waveform
+        # Time-translate data expects last two dimensions to be [..., channels (real, imag, asd), freq_bins]
+        time_translated_data = self.domain.time_translate_data(
+            data=torch.tensor(expanded_waveform), dt=torch.tensor(self.time_shift_grid)
+        ).numpy()
+        # Move time-shift dimension to last index
+        time_translated_data = np.moveaxis(time_translated_data, 0, -1)
+        input_sample["waveform"] = time_translated_data
 
         return input_sample
