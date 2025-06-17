@@ -160,12 +160,24 @@ def prepare_wfd_and_initialization_for_embedding_network(
             # Build the SVD for seeding the resnet embedding network.
             if print_output:
                 print("\nBuilding SVD for initialization of ResNet embedding network.")
+
+            batch_size = train_settings["training"]["stage_0"]["batch_size"]
+            num_gpus = local_settings["condor"].get("num_gpus", 1)
+            # Compute batch size per GPU in case of multi-GPU training
+            if num_gpus > 1:
+                if batch_size % num_gpus != 0:
+                    raise ValueError(
+                        f"Total batch size {batch_size} is not divisible by the number of GPUs {num_gpus}."
+                    )
+                batch_size = int(batch_size / num_gpus)
             initial_weights["V_rb_list"] = build_svd_for_embedding_network(
-                wfd,
-                train_settings["data"],
-                train_settings["training"]["stage_0"]["asd_dataset_path"],
+                wfd=wfd,
+                data_settings=train_settings["data"],
+                asd_dataset_path=train_settings["training"]["stage_0"][
+                    "asd_dataset_path"
+                ],
                 num_workers=local_settings["num_workers"],
-                batch_size=train_settings["training"]["stage_0"]["batch_size"],
+                batch_size=batch_size,
                 out_dir=train_dir,
                 **train_settings["model"]["embedding_kwargs"]["svd"],
             )
@@ -212,9 +224,9 @@ def prepare_wfd_and_initialization_for_embedding_network(
     # transforms will be reset later by initialize_stage().
 
     set_train_transforms(
-        wfd,
-        train_settings["data"],
-        train_settings["training"]["stage_0"]["asd_dataset_path"],
+        wfd=wfd,
+        data_settings=train_settings["data"],
+        asd_dataset_path=train_settings["training"]["stage_0"]["asd_dataset_path"],
         print_output=print_output,
     )
 
@@ -526,9 +538,9 @@ def initialize_stage(
     # Rebuild transforms based on possibly different noise.
     print_output = True if rank is None or rank == 0 else False
     set_train_transforms(
-        wfd,
-        train_settings["data"],
-        stage["asd_dataset_path"],
+        wfd=wfd,
+        data_settings=train_settings["data"],
+        asd_dataset_path=stage["asd_dataset_path"],
         print_output=print_output,
     )
 
@@ -622,7 +634,7 @@ def train_stages(
     wfd: WaveformDataset,
     train_dir: str,
     local_settings: dict,
-    global_epoch: int,
+    global_epoch: ctypes.c_int = Value(ctypes.c_int, 1),
 ) -> Tuple[bool, bool]:
     """
     Train the network, iterating through the sequence of stages. Stages can change
@@ -782,7 +794,11 @@ def run_training(
         The epoch number where the training finished
     """
     if not resume:
-        pm, wfd = prepare_training_new(train_settings, train_dir, local_settings)
+        pm, wfd = prepare_training_new(
+            train_settings=train_settings,
+            train_dir=train_dir,
+            local_settings=local_settings,
+        )
     else:
         pm, wfd = prepare_training_resume(
             checkpoint_name=ckpt_file,
@@ -851,7 +867,9 @@ def run_multi_gpu_training(
             initial_weights,
             pretrained_emb_net,
         ) = prepare_wfd_and_initialization_for_embedding_network(
-            train_settings, train_dir, local_settings
+            train_settings=train_settings,
+            train_dir=train_dir,
+            local_settings=local_settings,
         )
     else:
         checkpoint_file = os.path.join(train_dir, ckpt_file)
