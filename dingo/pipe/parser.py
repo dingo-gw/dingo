@@ -1103,6 +1103,15 @@ def create_parser(top_level=True):
         ),
     )
     prior_parser.add(
+        "--Toffset",
+        type=nonefloat,
+        default=None,
+        help=(
+            "Offset of the center of the time prior from the trigger time (in s). "
+            "Useful for DeltaFunction priors. Generally set by DINGO model."
+        ),
+    )
+    prior_parser.add(
         "--prior-dict-updates",
         type=nonestr,
         default=None,

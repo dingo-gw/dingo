@@ -2,7 +2,10 @@
 #  Adapted from bilby_pipe. In particular, uses the bilby_pipe data generation code.
 #
 import copy
+import json
 import os
+
+import dingo.pipe.create_injections
 
 from bilby.core.prior import PriorDict
 from bilby_pipe.input import Input
@@ -55,12 +58,16 @@ def fill_in_arguments_from_model(args):
     domain = build_domain_from_model_metadata(model_metadata, base=True)
 
     prior = Injection.from_posterior_model_metadata(model_metadata).prior
-    deltaT = prior["geocent_time"].maximum - prior["geocent_time"].minimum
+    geocent_time_prior = prior["geocent_time"]
+    deltaT = geocent_time_prior.maximum - geocent_time_prior.minimum
+
+    # Offset needed in case of DeltaFunction priors not peaked at 0.0.
+    Toffset = 0.5 * (geocent_time_prior.minimum + geocent_time_prior.maximum)
 
     # Dingo and Bilby have different conventions for the geocent_time prior. Dingo
-    # always centers it around 0.0, whereas Bilby centers it around the trigger time.
-    # Drop the geocent_time parameter here so that bilby_pipe re-builds it as needed
-    # for Bilby.
+    # always centers it around something close to 0.0, whereas Bilby centers it around
+    # the trigger time. Drop the geocent_time parameter here so that bilby_pipe
+    # re-builds it as needed for Bilby.
     del prior["geocent_time"]
 
     data_settings = model_metadata["train_settings"]["data"]
@@ -79,6 +86,7 @@ def fill_in_arguments_from_model(args):
             "f_ref"
         ],
         "deltaT": deltaT,
+        "Toffset": Toffset,
         "prior_dict": prior,
     }
 
@@ -233,6 +241,7 @@ class MainInput(BilbyMainInput):
         # self.ignore_gwpy_data_quality_check = args.ignore_gwpy_data_quality_check
         self.trigger_time = args.trigger_time
         self.deltaT = args.deltaT
+        self.Toffset = args.Toffset
         self.gps_tuple = args.gps_tuple
         self.gps_file = args.gps_file
         self.timeslide_file = args.timeslide_file
@@ -371,6 +380,81 @@ class MainInput(BilbyMainInput):
         priors = super()._get_priors(add_time=add_time)
         priors.update(PriorDict(self.prior_dict_updates))
         return priors
+
+    def check_injection(self):
+        """Check injection behaviour
+
+        If injections are requested, either use the injection-dict,
+        injection-file, or create an injection-file
+
+        """
+        default_injection_file_name = "{}/{}_injection_file.dat".format(
+            self.data_directory, self.label
+        )
+        if self.injection_dict is not None:
+            logger.debug(
+                "Using injection dict from ini file {}".format(
+                    json.dumps(self.injection_dict, indent=2)
+                )
+            )
+        elif self.injection_file is not None:
+            logger.debug(f"Using injection file {self.injection_file}")
+        elif os.path.isfile(default_injection_file_name):
+            # This is done to avoid overwriting the injection file
+            logger.debug(f"Using injection file {default_injection_file_name}")
+            self.injection_file = default_injection_file_name
+        else:
+            logger.debug("No injection file found, generating one now")
+
+            if self.gps_file is not None or self.gps_tuple is not None:
+                if self.n_simulation > 0 and self.n_simulation != len(self.gpstimes):
+                    raise BilbyPipeError(
+                        "gps_file/gps_tuple option and n_simulation are not matched"
+                    )
+                gpstimes = self.gpstimes
+                n_injection = len(gpstimes)
+            else:
+                gpstimes = None
+                n_injection = self.n_simulation
+
+            if self.trigger_time is None:
+                trigger_time_injections = 0
+            else:
+                trigger_time_injections = self.trigger_time
+
+            dingo.pipe.create_injections.create_injection_file(
+                filename=default_injection_file_name,
+                prior_file=self.prior_file,
+                prior_dict=self.prior_dict,
+                n_injection=n_injection,
+                trigger_time=trigger_time_injections,
+                deltaT=self.deltaT,
+                Toffset=self.Toffset,  # dingo-pipe mod
+                gpstimes=gpstimes,
+                duration=self.duration,
+                post_trigger_duration=self.post_trigger_duration,
+                generation_seed=self.generation_seed,
+                extension="dat",
+                default_prior=self.default_prior,
+            )
+            self.injection_file = default_injection_file_name
+
+        # Check the gps_file has the sample length as number of simulation
+        if self.gps_file is not None:
+            if len(self.gpstimes) != len(self.injection_df):
+                raise BilbyPipeError("Injection file length does not match gps_file")
+
+        if self.n_simulation > 0:
+            if self.n_simulation != len(self.injection_df):
+                raise BilbyPipeError(
+                    "n-simulation does not match the number of injections: "
+                    "please check your ini file"
+                )
+        elif self.n_simulation == 0 and self.gps_file is None:
+            self.n_simulation = len(self.injection_df)
+            logger.debug(
+                f"Setting n_simulation={self.n_simulation} to match injections"
+            )
 
 
 def write_complete_config_file(parser, args, inputs, input_cls=MainInput):
