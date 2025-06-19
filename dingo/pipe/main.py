@@ -425,7 +425,9 @@ class MainInput(BilbyMainInput):
             dingo.pipe.create_injections.create_injection_file(
                 filename=default_injection_file_name,
                 prior_file=self.prior_file,
-                prior_dict=self.prior_dict,
+                prior_dict=self._get_priors(
+                    add_time=False
+                ),  # ensure prior-dict-updates incorporated
                 n_injection=n_injection,
                 trigger_time=trigger_time_injections,
                 deltaT=self.deltaT,
