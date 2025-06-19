@@ -34,7 +34,7 @@ num-samples = 50000
 batch-size = 50000
 recover-log-prob = true
 importance-sample = true
-prior-dict = {
+prior-dict-updates = {
 luminosity_distance = bilby.gw.prior.UniformComovingVolume(minimum=100, maximum=2000, name='luminosity_distance'),
 }
 
@@ -97,7 +97,7 @@ Since sampling uses GPU hardware, there is an additional key `sampling-requireme
 
 For importance sampling, the Result saved in the previous step is loaded. Since this contains the strain data and ASDs, as well as all settings used for training the network, the likelihood and prior can be evaluated for each sample point. If it is necessary to change data conditioning or PSD for importance sampling (i.e., if the `importance-sampling-updates` dictionary is non-empty), then a second [data generation](#data-generation) step is first carried using the new settings, and used as importance sampling context. The importance sampled result is finally saved as HDF5, including the estimated Bayesian evidence.
 
-If a `prior-dict` is specified in the `.ini` file, then this will be used for the importance sampling prior. One example where this is useful is for the luminosity distance prior. Indeed, Dingo tends to train better using a uniform prior over luminosity distance, but physically one would prefer a uniform in volume prior. By specifying a `prior-dict` this change can be made in importance sampling.
+If `prior-dict-updates` is specified in the `.ini` file, then this will be used for the importance sampling prior. One example where this is useful is for the luminosity distance prior. Indeed, Dingo tends to train better using a uniform prior over luminosity distance, but physically one would prefer a uniform in volume prior. By specifying `prior-dict-updates` this change can be made in importance sampling.
 
 ```{caution}
 If extending the prior support during importance sampling, be sure that the posterior does not rail up against the prior boundary being extended.
