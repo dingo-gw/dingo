@@ -87,8 +87,8 @@ class Result(DingoDataset):
 
     @property
     def injection_parameters(self):
-        if self.context:
-            return self.context.get("parameters")
+        if self.event_metadata:
+            return self.event_metadata.get("injection_parameters")
         else:
             return None
 
@@ -596,7 +596,6 @@ class Result(DingoDataset):
         self,
         parameters: list = None,
         filename: str = "corner.pdf",
-        truths: dict = None,
         **kwargs,
     ):
         """
@@ -609,8 +608,6 @@ class Result(DingoDataset):
             (Default: None)
         filename : str
             Where to save samples.
-        truths : dict
-            Dictionary of truth values to include.
 
         Other Parameters
         ----------------
@@ -631,8 +628,8 @@ class Result(DingoDataset):
         # User option to plot specific parameters.
         if parameters:
             theta = theta[parameters]
-        if truths is not None:
-            kwargs["truths"] = [truths.get(k) for k in theta.columns]
+        if self.injection_parameters is not None:
+            kwargs["truths"] = [self.injection_parameters.get(k) for k in theta.columns]
 
         if weights is not None:
             plot_corner_multi(
@@ -643,12 +640,7 @@ class Result(DingoDataset):
                 **kwargs,
             )
         else:
-            plot_corner_multi(
-                theta,
-                labels=["Dingo"],
-                filename=filename,
-                **kwargs
-            )
+            plot_corner_multi(theta, labels=["Dingo"], filename=filename, **kwargs)
 
     def plot_log_probs(self, filename="log_probs.png"):
         """

@@ -20,13 +20,13 @@ logger.name = "dingo_pipe"
 
 def get_trigger_time_list(inputs):
     """Returns a list of GPS trigger times for each data segment"""
-    # if (inputs.gaussian_noise or inputs.zero_noise) and inputs.trigger_time is None:
-    #     trigger_times = [0] * inputs.n_simulation
-    # elif (inputs.gaussian_noise or inputs.zero_noise) and isinstance(
-    #     inputs.trigger_time, float
-    # ):
-    #     trigger_times = [inputs.trigger_time] * inputs.n_simulation
-    if inputs.trigger_time is not None:
+    if (inputs.gaussian_noise or inputs.zero_noise) and inputs.trigger_time is None:
+        trigger_times = [0] * inputs.n_simulation
+    elif (inputs.gaussian_noise or inputs.zero_noise) and isinstance(
+        inputs.trigger_time, float
+    ):
+        trigger_times = [inputs.trigger_time] * inputs.n_simulation
+    elif inputs.trigger_time is not None:
         trigger_times = [inputs.trigger_time]
     elif getattr(inputs, "gpstimes", None) is not None:
         start_times = inputs.gpstimes
@@ -44,7 +44,7 @@ def get_parallel_list(inputs):
         return [f"part{idx}" for idx in range(inputs.n_parallel)]
 
 
-def generate_dag(inputs, model_args):
+def generate_dag(inputs):
     inputs = copy.deepcopy(inputs)
     dag = Dag(inputs)
     trigger_times = get_trigger_time_list(inputs)
@@ -86,7 +86,9 @@ def generate_dag(inputs, model_args):
         #
         # 3. Generate new data for importance sampling **if different settings requested**.
         #
-        # If injecting into simulated noise, be sure to use consistent noise realization.
+        # If injecting into simulated noise, be sure to use consistent noise
+        # realization. Currently simulated noise + importance_sampling_updates is
+        # prohibited in MainInput.
 
         if len(inputs.importance_sampling_updates) > 0:
             # Iterate over all generation nodes and store them in a list
@@ -98,7 +100,9 @@ def generate_dag(inputs, model_args):
                     # Ensures any cached files (e.g. the distance-marginalization
                     # lookup table) are only built once.
                     kwargs["parent"] = generation_node_list[0]
-                generation_node = GenerationNode(inputs, importance_sampling=True, **kwargs)
+                generation_node = GenerationNode(
+                    inputs, importance_sampling=True, **kwargs
+                )
                 importance_sampling_generation_node_list.append(generation_node)
         else:
             importance_sampling_generation_node_list = generation_node_list
@@ -158,9 +162,9 @@ def generate_dag(inputs, model_args):
     #
 
     if inputs.create_summary:
-        # Add the waveform approximant to inputs, so that it can be fed to PESummary.
-        inputs.waveform_approximant = model_args["waveform_approximant"]
-        PESummaryNode(inputs, merged_importance_sampling_node_list, generation_node_list, dag=dag)
+        PESummaryNode(
+            inputs, merged_importance_sampling_node_list, generation_node_list, dag=dag
+        )
 
     dag.build()
     # create_overview(
