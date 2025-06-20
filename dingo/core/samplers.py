@@ -229,22 +229,27 @@ class Sampler(object):
         print(f"Done. This took {time.time() - t0:.1f} s.")
         sys.stdout.flush()
 
-    def log_prob(self, samples: pd.DataFrame) -> np.ndarray:
+    def log_prob(self, samples: pd.DataFrame | dict) -> np.ndarray:
         """
         Calculate the model log probability at specific sample points.
 
         Parameters
         ----------
-        samples : pd.DataFrame
+        samples : pd.DataFrame | dict
             Sample points at which to calculate the log probability.
 
         Returns
         -------
         np.array of log probabilities.
         """
-        # TODO: Check / fix this method. It is likely broken, but is not critical.
         if self.context is None and not self.unconditional_model:
             raise ValueError("Context must be set in order to calculate log_prob.")
+
+        if isinstance(samples, dict):
+            if np.isscalar(list(samples.values())[0]):
+                samples = pd.DataFrame([samples])
+            else:
+                samples = pd.DataFrame(samples)
 
         # This undoes any post-correction that would have been done to the samples,
         # before evaluating the log_prob. E.g., the t_ref / sky position correction.
@@ -267,7 +272,7 @@ class Sampler(object):
             # Context is the same for each sample. Expand across batch dimension after
             # pre-processing.
             x = self.transform_pre(self.context)
-            x = x.expand(len(samples), *x.shape)
+            x = x.expand(len(samples), *x.shape)  # TODO: Make this more efficient.
             x = [x]
         else:
             x = []
