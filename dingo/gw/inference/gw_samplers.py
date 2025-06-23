@@ -155,7 +155,7 @@ class GWSamplerMixin(object):
         self, value: dict[str, float | list[float] | dict[str, list[float]]]
     ):
         # Check that model was trained with flexible frequency range
-        if (
+        if "tokenization" not in self.base_model_metadata["train_settings"]["data"] or (
             "drop_frequency_range"
             not in self.base_model_metadata["train_settings"]["data"]["tokenization"]
             and "drop_random_tokens"
