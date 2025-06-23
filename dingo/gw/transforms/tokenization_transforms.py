@@ -4,6 +4,11 @@ import numpy as np
 from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain
 from dingo.gw.gwutils import add_defaults_for_missing_ifos
 
+HIGH_ASD_VALUE = (
+    1.0  # Cannot import from dingo.gw.noise.asd_dataset due to circular imports.
+)
+# TODO: move definition to separate defaults file.
+
 DETECTOR_DICT = {"H1": 0, "L1": 1, "V1": 2}
 DETECTOR_DICT_INVERSE = {0: "H1", 1: "L1", 2: "V1"}
 
@@ -25,6 +30,7 @@ class StrainTokenization(object):
         normalize_frequency: bool = False,
         single_tokenizer: bool = False,
         drop_last_token: bool = False,
+        mixed_asd_dataset: bool = False,
         additional_information_per_frequency_bin: bool = False,
         print_output: bool = True,
     ):
@@ -124,6 +130,7 @@ class StrainTokenization(object):
                 mfd_nodes=domain.nodes,
                 drop_last_token=self.drop_last_token,
             )
+        self.mixed_asd_dataset = mixed_asd_dataset
         self.additional_dim = additional_information_per_frequency_bin
         self.f_bin_index = -1 if not self.additional_dim else -2
 
@@ -293,6 +300,27 @@ class StrainTokenization(object):
         sample["drop_token_mask"] = np.zeros(
             [*strain.shape[:batch_idx], num_tokens], dtype=bool
         )
+        if self.mixed_asd_dataset:
+            # Update token mask for outlier ASD values that can appear for O1 ASDs, because we have no data for Virgo.
+            asd_max = np.array(
+                [
+                    np.max(sample["asds"][DETECTOR_DICT_INVERSE[i]], axis=-1)
+                    for i in range(len(sample["asds"]))
+                ]
+            ).T
+            detectors_to_drop = np.where(
+                np.array(asd_max) == HIGH_ASD_VALUE, True, False
+            )
+            blocks = token_position[..., 2].astype(int)
+            # Treat sample without batch dimension separately
+            if strain.shape[:batch_idx] == ():
+                mask_position = detectors_to_drop[blocks]
+            else:
+                batch_indices = np.arange(blocks.shape[0])[:, None]
+                mask_position = detectors_to_drop[batch_indices, blocks]
+            sample["drop_token_mask"] = np.logical_or(
+                mask_position, sample["drop_token_mask"]
+            )
 
         return sample
 

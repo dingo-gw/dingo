@@ -1,7 +1,7 @@
 import copy
-from typing import Iterable, Optional
+from typing import Iterable
 
-from dingo.gw.domains import build_domain, UniformFrequencyDomain
+from dingo.gw.domains import build_domain, Domain
 from dingo.gw.domains.base_frequency_domain import BaseFrequencyDomain
 from dingo.gw.gwutils import *
 from dingo.gw.dataset import DingoDataset
@@ -204,3 +204,147 @@ def check_domain_compatibility(data: dict, domain: BaseFrequencyDomain) -> bool:
         if not domain.check_data_compatibility(v):
             return False
     return True
+
+
+class MixedASDDatasetWrapper:
+    """
+    Wrapper for ASD datasets from multiple paths.
+    """
+
+    dataset_type = "mixed_asd_dataset"
+
+    def __init__(
+        self,
+        asd_dataset_paths: list[str],
+        probs: Optional[list[float]] = None,
+        ifos: Optional[list[str]] = None,
+        precision: Optional[str] = None,
+        domain_update: Optional[dict[str, dict]] = None,
+        print_output: bool = True,
+    ):
+        """
+        Parameters
+        ----------
+
+        print_output: bool
+            Whether to write print statements to the console.
+        """
+        self.asd_dataset_paths = asd_dataset_paths
+        if probs is None:
+            probs = (
+                np.ones(len(self.asd_dataset_paths), dtype=float)
+                * 1
+                / len(self.asd_dataset_paths)
+            )
+        if not np.isclose(np.sum(np.array(probs)), 1.0, rtol=1e-6, atol=1e-12):
+            raise ValueError(f"Probabilities probs {probs} does not sum to 1.")
+        self.probs = np.array(probs)
+        self.ifos = ifos
+        # Load asd datasets
+        if print_output:
+            print("Loading multiple ASD datasets")
+        self.asd_datasets = []
+        for path in asd_dataset_paths:
+            asd_dataset = ASDDataset(
+                file_name=path,
+                ifos=ifos,
+                precision=precision,
+                domain_update=domain_update,
+                print_output=print_output,
+            )
+            self.asd_datasets.append(asd_dataset)
+
+    @property
+    def asds(self) -> dict[str, np.ndarray]:
+        # Stack ASDs from individual ASD datasets
+        asds_out = {}
+        for a in self.asd_datasets:
+            for k, v in a.asds.items():
+                if k not in asds_out:
+                    asds_out[k] = v
+                else:
+                    asds_out[k] = np.vstack([asds_out[k], v])
+        return asds_out
+
+    @property
+    def gps_times(self) -> list[np.ndarray]:
+        raise NotImplementedError()
+
+    @property
+    def asd_parameterizations(self) -> list[dict[str, np.ndarray]]:
+        raise NotImplementedError()
+
+    @property
+    def domain(self) -> Domain:
+        domain = self.asd_datasets[0].domain
+        # Check that the domains of all sub-datasets are the same
+        for i in range(1, len(self.asd_datasets)):
+            if domain != self.asd_datasets[i].domain:
+                raise ValueError(
+                    f"Domain of ASD dataset 0: {domain} is not the same as the domain of"
+                    f"ASD dataset {i}: {self.asd_datasets[i].domain}"
+                )
+        return domain
+
+    @property
+    def length_info(self) -> list[dict]:
+        """The number of asd samples per detector per dataset."""
+        raise NotImplementedError()
+
+    @property
+    def gps_info(self) -> list[dict]:
+        raise NotImplementedError()
+
+    def update_domain(self, domain_update: dict):
+        for a in self.asd_datasets:
+            a.update_domain(domain_update)
+
+    def sample_random_asds(self, n: Optional[int] = None) -> dict[str, np.ndarray]:
+        """
+        Sample n random ASDs for each detector.
+
+        Parameters
+        ----------
+        n : int
+            Number of asds to sample
+
+        Returns
+        -------
+        dict[str, np.ndarray]
+            Where the keys correspond to the detectors specified at initialization
+            and the values  are arrays of shape (n, D) where D is the number of
+            frequency bins and n is the number of ASDs requested. If n=None, then the
+            function returns a single ASD for each detector, so the array is
+            flattened to be shape D.
+            If a dataset doesn't contain ASDs for a specific detector (e.g. O1),
+            the ASD is set to HIGH_ASD_VALUE.
+        """
+        if n is None:
+            idx_dataset = np.random.choice(
+                len(self.asd_datasets), p=self.probs, replace=True
+            )
+            return self.asd_datasets[idx_dataset].sample_random_asds(n=None)
+        else:
+            # Sample dataset idx for each n
+            idx_dataset = np.random.choice(
+                len(self.asd_datasets), n, p=self.probs, replace=True
+            )
+            asds_out = {}
+            for idx in np.unique(idx_dataset):
+                num_samples = len(idx_dataset[idx_dataset == idx])
+                # Load ASDs as batches of different lengths
+                asds = self.asd_datasets[idx].sample_random_asds(n=num_samples)
+                # Assemble batch
+                sample_indices = np.argwhere(idx_dataset == idx)[..., 0]
+                #
+                if asds_out == {}:
+                    asd_shape = asds[next(iter(asds))].shape[1:]
+                    asds_out = {
+                        i: HIGH_ASD_VALUE * np.ones([n, *asd_shape]) for i in self.ifos
+                    }
+                # Insert ASDs at correct positions
+                for k in asds_out.keys():
+                    if k in asds:
+                        asds_out[k][sample_indices] = asds[k]
+
+            return asds_out

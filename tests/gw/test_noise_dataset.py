@@ -3,7 +3,7 @@ import h5py
 import numpy as np
 
 from dingo.gw.domains import build_domain
-from dingo.gw.noise.asd_dataset import ASDDataset
+from dingo.gw.noise.asd_dataset import ASDDataset, MixedASDDatasetWrapper
 
 
 @pytest.fixture
@@ -34,6 +34,38 @@ def noise_dataset():
     f.close()
 
     return dataset_path, domain_dict, ifos_num_asds
+
+
+@pytest.fixture
+def noise_datasets():
+    dataset_paths = ["./asds_toydataset_1.hdf5", "./asds_toydataset_2.hdf5"]
+
+    domain_dict = {
+        "type": "UniformFrequencyDomain",
+        "f_min": 0.0,
+        "f_max": 100.0,
+        "delta_f": 1.0,
+    }
+    domain = build_domain(domain_dict)
+    domain_dict = domain.domain_dict
+    ifos_num_asds = {"H1": 10, "L1": 8, "V1": 5}
+    for dataset_path in dataset_paths:
+        f = h5py.File(dataset_path, "w")
+        gps_times = f.create_group("gps_times")
+        grp = f.create_group("asds")
+        settings = {"domain_dict": domain.domain_dict}
+
+        for ifo, num_asds in ifos_num_asds.items():
+            asds = np.sin(np.outer(np.arange(1, num_asds + 1) / 100, domain()))
+            grp.create_dataset(ifo, data=asds)
+            gps_times[ifo] = np.arange(num_asds)
+
+        f.attrs["settings"] = str(settings)
+        f.close()
+    # Update num_asds
+    ifos_num_asds = {k: v * len(dataset_paths) for k, v in ifos_num_asds.items()}
+
+    return dataset_paths, domain_dict, ifos_num_asds
 
 
 def test_noise_dataset_load(noise_dataset):
@@ -120,3 +152,53 @@ def test_noise_dataset_update_domain(noise_dataset):
         assert np.all(
             asd_data_full_truncated[:, : asd_dataset_truncated.domain.min_idx] == 1.0
         )
+
+
+def test_noise_datasets_load(noise_datasets):
+    dataset_paths, domain_dict, ifos_num_asds = noise_datasets
+
+    asd_dataset = MixedASDDatasetWrapper(
+        asd_dataset_paths=dataset_paths, print_output=False
+    )
+    # check domain
+    assert asd_dataset.domain.domain_dict == domain_dict
+    # check that the dataset has the correct ifos and corresponding datasets
+    assert asd_dataset.asds.keys() == ifos_num_asds.keys()
+    for ifo, n in ifos_num_asds.items():
+        assert asd_dataset.asds[ifo].shape == (n, len(asd_dataset.domain))
+    # check that sampling work correctly
+    asd_samples = asd_dataset.sample_random_asds()
+    assert asd_samples.keys() == ifos_num_asds.keys()
+    for _, asd in asd_samples.items():
+        assert len(asd) == len(asd_dataset.domain)
+    # Check that sampling a batch works correctly
+    batch_size = 5
+    asd_samples = asd_dataset.sample_random_asds(n=batch_size)
+    for _, asd in asd_samples.items():
+        assert asd.shape == (batch_size, len(asd_dataset.domain))
+        assert np.all(np.abs(asd.sum(axis=-1)) > 0.0)
+
+    # repeat tests for ASDDataset with only a subset of detectors
+    ifos = ["H1", "V1"]
+    asd_dataset = MixedASDDatasetWrapper(dataset_paths, ifos=ifos, print_output=False)
+    # check domain
+    assert asd_dataset.domain.domain_dict == domain_dict
+    # check that the dataset has the correct ifos and corresponding datasets
+    assert set(asd_dataset.asds.keys()) == set(ifos)
+    for ifo in ifos:
+        assert asd_dataset.asds[ifo].shape == (
+            ifos_num_asds[ifo],
+            len(asd_dataset.domain),
+        )
+    # check that sampling work correctly
+    asd_samples = asd_dataset.sample_random_asds()
+    assert set(asd_samples.keys()) == set(ifos)
+    for _, asd in asd_samples.items():
+        assert len(asd) == len(asd_dataset.domain)
+
+    # Check that sampling a batch works correctly
+    batch_size = 5
+    asd_samples = asd_dataset.sample_random_asds(n=batch_size)
+    for _, asd in asd_samples.items():
+        assert asd.shape == (batch_size, len(asd_dataset.domain))
+        assert np.all(np.abs(asd.sum(axis=-1)) > 0.0)

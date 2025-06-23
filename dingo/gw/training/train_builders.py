@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Union
 import copy
 
 import torch.multiprocessing
@@ -11,7 +11,7 @@ from dingo.gw.SVD import SVDBasis
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import *
-from dingo.gw.noise.asd_dataset import ASDDataset
+from dingo.gw.noise.asd_dataset import ASDDataset, MixedASDDatasetWrapper
 from dingo.gw.prior import default_inference_parameters
 from dingo.gw.transforms import (
     ProjectOntoDetectors,
@@ -71,7 +71,7 @@ def build_dataset(
 def set_train_transforms(
     wfd: WaveformDataset,
     data_settings: dict,
-    asd_dataset_path: str,
+    asd_dataset_path: Union[str, dict],
     omit_transforms=None,
     print_output: bool = True,
 ):
@@ -102,13 +102,39 @@ def set_train_transforms(
     # By passing the wfd domain when instantiating the noise dataset, this ensures the
     # domains will match. In particular, it truncates the ASD dataset beyond the new
     # f_max, and sets it to 1 below f_min.
-    asd_dataset = ASDDataset(
-        asd_dataset_path,
-        ifos=data_settings["detectors"],
-        precision="single",
-        domain_update=wfd.domain.domain_dict,
-        print_output=print_output,
-    )
+    if isinstance(asd_dataset_path, str):
+        asd_dataset = ASDDataset(
+            file_name=asd_dataset_path,
+            ifos=data_settings["detectors"],
+            precision="single",
+            domain_update=wfd.domain.domain_dict,
+            print_output=print_output,
+        )
+        mixed_asd_dataset = False
+    elif isinstance(asd_dataset_path, dict):
+        if "asd_dataset_paths" not in asd_dataset_path.keys():
+            raise ValueError(
+                "asd_dataset_path doesn't contain key asd_dataset_paths which specifies"
+                "a list of ASD datasets to load."
+            )
+        if "percentages" not in asd_dataset_path.keys():
+            raise ValueError(
+                "asd_dataset_path doesn't contain key percentages which specifies the contribution"
+                "of each ASD dataset to the overall training."
+            )
+        asd_dataset = MixedASDDatasetWrapper(
+            asd_dataset_paths=asd_dataset_path.get("asd_dataset_paths"),
+            probs=asd_dataset_path.get("percentages"),
+            ifos=data_settings["detectors"],
+            precision="single",
+            domain_update=wfd.domain.domain_dict,
+            print_output=print_output,
+        )
+        mixed_asd_dataset = True
+    else:
+        raise ValueError(
+            f"asd_dataset_path must be a path or a dict, but is of type: {type(asd_dataset_path)}"
+        )
     assert wfd.domain == asd_dataset.domain
 
     # Add window factor to domain, so that we can compute the noise variance.
@@ -231,6 +257,7 @@ def set_train_transforms(
                 drop_last_token=data_settings["tokenization"].get(
                     "drop_last_token", False
                 ),
+                mixed_asd_dataset=mixed_asd_dataset,
                 additional_information_per_frequency_bin=(
                     True if "time_shift_strain" in data_settings.keys() else False
                 ),
