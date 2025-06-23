@@ -380,7 +380,7 @@ def check_sample_in_domain(sample, domain: UniformFrequencyDomain) -> bool:
         return False
 
 
-class TimeShiftStrain(object):
+class TimeShiftStrainGrid(object):
     """
     Time-shift strain based on grid with t_max and \delta t.
     """
@@ -409,7 +409,7 @@ class TimeShiftStrain(object):
         )
         if print_output:
             print(
-                f"TimeshiftStrains:\n"
+                f"TimeshiftStrainGrid:\n"
                 f"    - Maximal time-shift: {max_time_shift}\n"
                 f"    - Delta time-shift: {delta_t}\n"
                 f"    - Resulting time shift grid: {self.time_shift_grid} "

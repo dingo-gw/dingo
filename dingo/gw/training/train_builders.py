@@ -24,7 +24,7 @@ from dingo.gw.transforms import (
     GNPECoalescenceTimes,
     SampleExtrinsicParameters,
     GetDetectorTimes,
-    TimeShiftStrain,
+    TimeShiftStrainGrid,
     StrainTokenization,
     DropFrequenciesToUpdateRange,
     DropFrequencyInterval,
@@ -209,7 +209,7 @@ def set_train_transforms(
 
     if "time_shift_strain" in data_settings.keys():
         transforms.append(
-            TimeShiftStrain(
+            TimeShiftStrainGrid(
                 domain=domain,
                 max_time_shift=data_settings["time_shift_strain"].get(
                     "max_time_shift", 0.1
