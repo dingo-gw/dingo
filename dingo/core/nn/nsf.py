@@ -270,10 +270,10 @@ class FlowWrapper(nn.Module):
             # if there is no context, omit the context argument
             return self.flow.sample(num_samples)
 
-    def sample_and_log_prob(self, *x, num_samples=1):
+    def sample_and_log_prob(self, *x, num_samples=1) -> torch.Tensor:
         if len(x) > 0:
             if self.embedding_net is not None:
-                x = self.embedding_net(*x)
+                x, _ = self.embedding_net(*x)
             return self.flow.sample_and_log_prob(num_samples, x)
         else:
             # if there is no context, omit the context argument
