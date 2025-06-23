@@ -40,6 +40,11 @@ def fill_in_arguments_from_model(args):
             "the DINGO model. To update the prior, specify "
             "prior-dict-updates."
         )
+    if args.model_reference_time is not None:
+        raise ValueError(
+            "Do not specify model-reference-time in INI file. This is obtained from the "
+            "DINGO model."
+        )
 
     logger.info(f"Loading dingo model from {args.model} in order to access settings.")
 
@@ -88,6 +93,7 @@ def fill_in_arguments_from_model(args):
         "deltaT": deltaT,
         "Toffset": Toffset,
         "prior_dict": prior,
+        "model_reference_time": model_metadata["train_settings"]["data"]["ref_time"],
     }
 
     changed_args = {}
@@ -159,6 +165,7 @@ class MainInput(BilbyMainInput):
         self.num_gnpe_iterations = args.num_gnpe_iterations
         self.importance_sampling_updates = importance_sampling_updates
         self.prior_dict_updates = args.prior_dict_updates
+        self.model_reference_time = args.model_reference_time
 
         Input.__init__(self, args, unknown_args, print_msg=False)
 
@@ -418,7 +425,10 @@ class MainInput(BilbyMainInput):
                 n_injection = self.n_simulation
 
             if self.trigger_time is None:
-                trigger_time_injections = 0
+                # Use the model reference time as the trigger time by default. This
+                # avoids needing to adjust sky position in post-postprocessing,
+                # and it avoids complications due to DeltaFunction ra priors.
+                trigger_time_injections = self.model_reference_time
             else:
                 trigger_time_injections = self.trigger_time
 

@@ -21,7 +21,7 @@ logger.name = "dingo_pipe"
 def get_trigger_time_list(inputs):
     """Returns a list of GPS trigger times for each data segment"""
     if (inputs.gaussian_noise or inputs.zero_noise) and inputs.trigger_time is None:
-        trigger_times = [0] * inputs.n_simulation
+        trigger_times = [inputs.model_reference_time] * inputs.n_simulation
     elif (inputs.gaussian_noise or inputs.zero_noise) and isinstance(
         inputs.trigger_time, float
     ):

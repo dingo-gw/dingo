@@ -1350,6 +1350,13 @@ def create_parser(top_level=True):
         "Must be provided if the main model is a GNPE model. ",
     )
     sampler_parser.add(
+        "--model-reference-time",
+        type=nonefloat,
+        default=None,
+        help="Reference time for neural network. Do not add this manually as it is "
+        "specified by the network.",
+    )
+    sampler_parser.add(
         "--recover-log-prob",
         action=StoreBoolean,
         default=True,
