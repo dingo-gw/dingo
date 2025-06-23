@@ -19,9 +19,6 @@ from bilby_pipe.utils import (
     BilbyPipeError,
 )
 
-from dingo.core.posterior_models.build_model import build_model_from_kwargs
-from dingo.gw.domains import build_domain_from_model_metadata
-
 from .dag_creator import generate_dag
 from .parser import create_parser
 
