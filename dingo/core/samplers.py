@@ -458,6 +458,8 @@ class GNPESampler(Sampler):
             raise ValueError("self.context must be set to run sampler.")
 
         data_ = self.init_sampler.transform_pre(context)
+        if isinstance(data_, list) and len(data_) == 1:
+            data_ = data_[0]
 
         # TODO: Reimplement outlier removal in IterationTracker? Save setting somewhere.
         if self.remove_init_outliers == 0.0:
