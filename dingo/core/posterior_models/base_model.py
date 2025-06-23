@@ -363,6 +363,7 @@ class BasePosteriorModel(ABC):
 
         self.epoch = d["epoch"]
         self.iteration = d.get("iteration", 0)
+        self.logging_info = d.get("logging_info", {})
 
         self.metadata = d["metadata"]
 
