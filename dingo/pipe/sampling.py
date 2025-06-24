@@ -197,7 +197,7 @@ class SamplingInput(Input):
 
             # Note that this will not save any low latency samples at present.
             prepare_log_prob(
-                self.dingo_sampler,
+                sampler=self.dingo_sampler,
                 batch_size=self.batch_size,
                 **self.density_recovery_settings,
             )
