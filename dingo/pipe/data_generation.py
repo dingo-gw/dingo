@@ -9,7 +9,6 @@ import numpy as np
 
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import UniformFrequencyDomain
-from dingo.gw.gwutils import get_window, get_window_factor
 from dingo.pipe.parser import create_parser
 
 logger.name = "dingo_pipe"

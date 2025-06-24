@@ -13,7 +13,7 @@ import scipy
 from matplotlib import pyplot as plt
 from scipy.constants import golden
 from scipy.special import logsumexp
-from bilby.core.prior import Constraint, DeltaFunction, PriorDict
+from bilby.core.prior import Constraint, DeltaFunction, PriorDict, Prior
 
 from dingo.core.dataset import DingoDataset
 from dingo.core.density import train_unconditional_density_estimator
@@ -963,8 +963,8 @@ def freeze(d):
 
 def get_latex_labels(prior: PriorDict) -> dict:
     """
-    Get the latex labels for prior parameters. If no latex label exists, return the
-    parameter key.
+    Get the latex labels for prior parameters. If no latex label exists within the
+    prior object, try to choose based on parameter key. Finally, return the parameter key.
 
     Parameters
     ----------
@@ -976,11 +976,8 @@ def get_latex_labels(prior: PriorDict) -> dict:
     """
     labels = {}
     for k, v in prior.items():
-        try:
-            l = v.latex_label
-            if l is None:
-                l = k
-        except (AttributeError, KeyError):
-            l = k
+        l = v.latex_label
+        if l is None:
+            l = Prior._default_latex_labels.get(k, k)
         labels[k] = l
     return labels
