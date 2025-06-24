@@ -13,7 +13,7 @@ import scipy
 from matplotlib import pyplot as plt
 from scipy.constants import golden
 from scipy.special import logsumexp
-from bilby.core.prior import Constraint, DeltaFunction
+from bilby.core.prior import Constraint, DeltaFunction, PriorDict
 
 from dingo.core.dataset import DingoDataset
 from dingo.core.density import train_unconditional_density_estimator
@@ -640,6 +640,7 @@ class Result(DingoDataset):
                 weights=[None, weights.to_numpy()],
                 labels=["Dingo", "Dingo-IS"],
                 filename=filename,
+                latex_labels_dict=get_latex_labels(self.prior),
                 **kwargs,
             )
         else:
@@ -881,6 +882,7 @@ def make_pp_plot(
         ax.fill_between(x_values, lower, upper, alpha=alpha, color="k")
 
     pvalues = []
+    latex_labels = get_latex_labels(results[0].prior)
     print("Key: KS-test p-value")
     for ii, key in enumerate(credible_levels):
         pp = np.array(
@@ -892,14 +894,7 @@ def make_pp_plot(
         pvalue = scipy.stats.kstest(credible_levels[key], "uniform").pvalue
         pvalues.append(pvalue)
         print("{}: {}".format(key, pvalue))
-
-        try:
-            name = results[0].prior[key].latex_label
-            if name is None:
-                name = key
-        except (AttributeError, KeyError):
-            name = key
-        label = "{} ({:2.3f})".format(name, pvalue)
+        label = "{} ({:2.3f})".format(latex_labels[key], pvalue)
         plt.plot(x_values, pp, lines[ii], label=label, **kwargs)
 
     Pvals = namedtuple("pvals", ["combined_pvalue", "pvalues", "names"])
@@ -958,3 +953,28 @@ def freeze(d):
     elif isinstance(d, list):
         return tuple(freeze(value) for value in d)
     return d
+
+
+def get_latex_labels(prior: PriorDict) -> dict:
+    """
+    Get the latex labels for prior parameters. If no latex label exists, return the
+    parameter key.
+
+    Parameters
+    ----------
+    prior : PriorDict
+
+    Returns
+    -------
+    dict of latex labels
+    """
+    labels = {}
+    for k, v in prior.items():
+        try:
+            l = v.latex_label
+            if l is None:
+                l = k
+        except (AttributeError, KeyError):
+            l = k
+        labels[k] = l
+    return labels
