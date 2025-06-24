@@ -12,7 +12,7 @@ from dingo.pipe.nodes.generation_node import GenerationNode
 from .nodes.importance_sampling_node import ImportanceSamplingNode
 from .nodes.merge_node import MergeNode
 from .nodes.pe_summary_node import PESummaryNode
-from .nodes.plot_node import PlotNode
+from .nodes.plot_node import PlotNode, PlotPPNode
 from .nodes.sampling_node import SamplingNode
 
 logger.name = "dingo_pipe"
@@ -156,6 +156,9 @@ def generate_dag(inputs):
     for merged_node in merged_importance_sampling_node_list:
         if inputs.plot_node_needed:
             plot_nodes_list.append(PlotNode(inputs, merged_node, dag=dag))
+
+    if inputs.plot_pp:
+        PlotPPNode(inputs, merged_importance_sampling_node_list, dag=dag)
 
     #
     # 6. PESummary

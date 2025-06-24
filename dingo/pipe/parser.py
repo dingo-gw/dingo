@@ -988,6 +988,11 @@ def create_parser(top_level=True):
         action="store_true",
         help="Create scatter plot of target versus proposal log probabilities",
     )
+    output_parser.add_argument(
+        "--plot-pp",
+        action="store_true",
+        help="Create PP plot based on several injections.",
+    )
     # output_parser.add_argument(
     #     "--plot-marginal",
     #     action="store_true",

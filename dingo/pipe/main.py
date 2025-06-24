@@ -292,6 +292,8 @@ class MainInput(BilbyMainInput):
             setattr(self, attr, getattr(args, attr))
             if getattr(self, attr):
                 self.plot_node_needed = True
+
+        self.plot_pp = args.plot_pp
         #
         # # Set all other plotting options
         # for plot_attr in [
