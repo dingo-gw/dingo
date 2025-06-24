@@ -88,10 +88,10 @@ def train_unconditional_density_estimator(
 
     # set up dataloaders
     train_loader, test_loader, _ = build_train_and_test_loaders(
-        SampleDataset(samples_torch),
-        settings["training"]["train_fraction"],
-        settings["training"]["batch_size"],
-        settings["training"]["num_workers"],
+        dataset=SampleDataset(samples_torch),
+        train_fraction=settings["training"]["train_fraction"],
+        batch_size=settings["training"]["batch_size"],
+        num_workers=settings["training"]["num_workers"],
     )
 
     # train model
@@ -100,8 +100,8 @@ def train_unconditional_density_estimator(
         max_epochs_total=settings["training"]["epochs"],
     )
     model.train(
-        train_loader,
-        test_loader,
+        train_loader=train_loader,
+        test_loader=test_loader,
         train_dir=train_dir,
         runtime_limits=runtime_limits,
     )

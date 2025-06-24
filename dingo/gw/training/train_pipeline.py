@@ -728,8 +728,8 @@ def train_stages(
         pm.train(
             train_loader=train_loader,
             test_loader=test_loader,
-            train_sampler=train_sampler,
             train_dir=train_dir,
+            train_sampler=train_sampler,
             runtime_limits=runtime_limits,
             checkpoint_epochs=local_settings["checkpoint_epochs"],
             use_wandb=local_settings.get("wandb", False),

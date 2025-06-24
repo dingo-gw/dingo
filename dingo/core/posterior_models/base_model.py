@@ -399,10 +399,10 @@ class BasePosteriorModel(ABC):
         self,
         train_loader: torch.utils.data.DataLoader,
         test_loader: torch.utils.data.DataLoader,
-        train_sampler: torch.utils.data.DistributedSampler,
         train_dir: str,
-        runtime_limits: RuntimeLimits = None,
-        checkpoint_epochs: int = None,
+        train_sampler: Optional[torch.utils.data.DistributedSampler] = None,
+        runtime_limits: Optional[RuntimeLimits] = None,
+        checkpoint_epochs: Optional[int] = None,
         use_wandb: bool = False,
         test_only: bool = False,
         early_stopping: Optional[EarlyStopping] = None,
@@ -419,10 +419,10 @@ class BasePosteriorModel(ABC):
             torch data loader with training data
         test_loader: torch.utils.data.DataLoader
             torch data loader with test data
-        train_sampler: torch.distributed.DistributedSampler
-            torch distributed sampler for training data
         train_dir: str
             directory for saving models and history
+        train_sampler: torch.distributed.DistributedSampler
+            torch distributed sampler for training data
         runtime_limits: RuntimeLimits = None
             allows to check whether the runtime limit is exceeded
         checkpoint_epochs: int=None
