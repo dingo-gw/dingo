@@ -644,7 +644,13 @@ class Result(DingoDataset):
                 **kwargs,
             )
         else:
-            plot_corner_multi(theta, labels=["Dingo"], filename=filename, **kwargs)
+            plot_corner_multi(
+                theta,
+                labels=["Dingo"],
+                filename=filename,
+                latex_labels_dict=get_latex_labels(self.prior),
+                **kwargs,
+            )
 
     def plot_log_probs(self, filename="log_probs.png"):
         """
