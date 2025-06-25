@@ -2,6 +2,8 @@ import copy
 from pathlib import Path
 from typing import Iterable, Optional
 
+import numpy as np
+
 from dingo.gw.domains import build_domain, UniformFrequencyDomain
 from dingo.gw.domains.base_frequency_domain import BaseFrequencyDomain
 from dingo.gw.gwutils import *
@@ -194,9 +196,11 @@ class ASDDataset(DingoDataset):
         else:
             return {k: v[np.random.choice(len(v), n)] for k, v in self.asds.items()}
 
-    def save_psd(self, directory, ifo_name, idx: Optional[int] = None):
+    def save_psd(self, directory, ifo_name, idx: Optional[int] = None, rng=None):
+        if rng is None:
+            rng = np.random.default_rng()
         if idx is None:
-            idx = np.random.choice(len(self.asds[ifo_name]))
+            idx = rng.choice(len(self.asds[ifo_name]))
         directory = Path(directory)
         directory.mkdir(exist_ok=True)
         psd_path = directory / f"{ifo_name}_{idx}_psd.txt"

@@ -5,6 +5,8 @@ import copy
 import json
 import os
 
+import numpy as np
+
 import dingo.pipe.create_injections
 
 from bilby.core.prior import PriorDict
@@ -132,8 +134,9 @@ def fill_in_arguments_from_model(args):
             del domain_dict["window_factor"]
         asd_dataset.update_domain(domain_dict)
         psd_dict = {}
+        rng = np.random.default_rng(args.generation_seed)
         for ifo_name in args.detectors:
-            psd_path = asd_dataset.save_psd(args.outdir, ifo_name)
+            psd_path = asd_dataset.save_psd(args.outdir, ifo_name, rng=rng)
             psd_dict[ifo_name] = str(psd_path)
         args.asd_dataset = None
         args.psd_dict = str(psd_dict)
