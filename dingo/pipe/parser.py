@@ -490,6 +490,15 @@ def create_parser(top_level=True):
         ),
     )
     injection_parser.add(
+        "--dingo-injection",
+        action="store_true",
+        help=(
+            "If true, use the DINGO Injection class to generate the injection signal. "
+            "Otherwise, use bilby_pipe. When using DINGO for injections, the noise is "
+            "still generated using bilby_pipe. Defaults to false."
+        ),
+    )
+    injection_parser.add(
         "--injection-waveform-approximant",
         type=nonestr,
         default=None,

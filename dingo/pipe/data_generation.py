@@ -5,10 +5,13 @@ from bilby_pipe.input import Input
 from bilby_pipe.main import parse_args
 from bilby_pipe.utils import logger, convert_string_to_dict
 from bilby_pipe.data_generation import DataGenerationInput as BilbyDataGenerationInput
+import lalsimulation as LS
 import numpy as np
 
+from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import UniformFrequencyDomain
+from dingo.gw.injection import Injection
 from dingo.pipe.parser import create_parser
 
 logger.name = "dingo_pipe"
@@ -102,6 +105,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.mode_array = None
         self.waveform_arguments_dict = None
         self.numerical_relativity_file = args.numerical_relativity_file
+        self.dingo_injection = args.dingo_injection
         self.injection_waveform_approximant = args.injection_waveform_approximant
         self.frequency_domain_source_model = "lal_binary_black_hole"
         # self.conversion_function = args.conversion_function
@@ -153,7 +157,101 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.plot_injection = args.plot_injection
 
         if create_data:
-            self.create_data(args)
+            if self.dingo_injection:
+                self.create_data_dingo_injection(args)
+            else:
+                self.create_data(args)
+
+    def create_data_dingo_injection(self, args):
+        """Executes create_data but turns off any requested injections. This is
+        intended to create noise-only datasets, to be used with the DINGO signal
+        generator."""
+        # Save values of relevant args.
+        injection = args.injection
+        injection_file = args.injection_file
+        injection_dict = args.injection_dict
+
+        args.injection = False
+        args.injection_file = None
+        args.injection_dict = None
+
+        # Create noise.
+        self.create_data(args)
+
+        # Reset args.
+        args.injection = injection
+        args.injection_file = injection_file
+        args.injection_dict = injection_dict
+        self.injection = args.injection
+        self.injection_file = args.injection_file
+        self.injection_dict = args.injection_dict
+
+        if self.injection:
+            self._inject_dingo_signal(args)
+
+    def _inject_dingo_signal(self, args):
+        """Generate a GW signal using the dingo.gw.injection class and add it to the
+        interferometer strain data. Also compute SNRs and store them."""
+        try:
+            model = build_model_from_kwargs(
+                filename=args.model, device="meta", load_training_info=False
+            )
+        except RuntimeError:
+            # 'meta' is not supported by older version of python / torch
+            model = build_model_from_kwargs(
+                filename=args.model, device="cpu", load_training_info=False
+            )
+
+        injection = Injection.from_posterior_model_metadata(model.metadata)
+        injection.use_base_domain = True  # Do not generate MFD signals.
+        injection.t_ref = self.trigger_time
+        injection._initialize_transform()
+
+        # Possibly update waveform generator based on supplied settings. Note that
+        # default values will have been set by dingo_pipe from the DINGO model.
+        waveform_arguments = self.get_injection_waveform_arguments()
+        injection.f_ref = waveform_arguments["reference_frequency"]
+        injection.waveform_generator.approximant = LS.GetApproximantFromString(
+            waveform_arguments["waveform_approximant"]
+        )
+        injection.waveform_generator.approximant_str = waveform_arguments[
+            "waveform_approximant"
+        ]
+
+        logger.info("Injecting waveform from DINGO with ")
+        logger.info(f"data_domain = {injection.data_domain.domain_dict}")
+        for prop in [
+            "t_ref",
+        ]:
+            logger.info(f"{prop} = {getattr(injection, prop)}")
+        for prop in [
+            "approximant_str",
+            "f_ref",
+            "f_start",
+        ]:
+            logger.info(f"{prop} = {getattr(injection.waveform_generator, prop)}")
+
+        # Generate signal
+        self.injection_parameters = self.injection_df.iloc[self.idx].to_dict()
+        theta = self.injection_parameters.copy()
+        theta["geocent_time"] -= self.trigger_time
+        signal = injection.signal(theta)
+
+        # Add signal to interferometer data
+        domain = injection.data_domain
+        for ifo in self.interferometers:
+            s = signal["waveform"][ifo.name]
+            s = domain.time_translate_data(s, -self.post_trigger_duration)
+            # Interferometer data extends to Nyquist = f_max / 2, so pad signal. Will
+            # be truncated when saved as HDF5.
+            s = np.pad(
+                s, (0, len(ifo.strain_data.frequency_domain_strain) - len(domain))
+            )
+            ifo.strain_data.frequency_domain_strain += s
+            ifo.meta_data["optimal_SNR"] = np.sqrt(
+                ifo.optimal_snr_squared(signal=s).real
+            )
+            ifo.meta_data["matched_filter_SNR"] = ifo.matched_filter_snr(signal=s)
 
     def save_hdf5(self):
         """
@@ -233,6 +331,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
 
         if self.injection:
             settings["injection_parameters"] = self.injection_parameters.copy()
+            settings["dingo_injection"] = self.dingo_injection
             # Dingo and Bilby have different geocent_time conventions.
             settings["injection_parameters"]["geocent_time"] -= self.trigger_time
             settings["optimal_SNR"] = {
