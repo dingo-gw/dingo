@@ -66,6 +66,10 @@ def train_unconditional_density_estimator(
         "std": {param: std[i].item() for i, param in enumerate(parameters)},
     }
     settings["data"]["unconditional"] = True
+    # Carry over settings relevant for transforms
+    settings["data"]["detectors"] = result.base_metadata["train_settings"]["data"][
+        "detectors"
+    ]
     # normalized torch samples
     samples_torch = torch.from_numpy((samples - mean) / std).float()
 

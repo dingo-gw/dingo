@@ -202,7 +202,9 @@ class SamplingInput(Input):
                 **self.density_recovery_settings,
             )
 
-        self.dingo_sampler.run_sampler(self.num_samples, batch_size=self.batch_size)
+        self.dingo_sampler.run_sampler(
+            num_samples=self.num_samples, batch_size=self.batch_size
+        )
         self.dingo_sampler.to_hdf5(label=self.label, outdir=self.result_directory)
 
         if self.n_parallel > 1:

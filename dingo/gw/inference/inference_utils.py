@@ -56,8 +56,8 @@ def prepare_log_prob(
     result = sampler.to_result()
     nde_settings["training"]["device"] = str(sampler.model.device)
     unconditional_model = result.train_unconditional_flow(
-        sampler.gnpe_proxy_parameters,
-        nde_settings,
+        parameters=sampler.gnpe_proxy_parameters,
+        nde_settings=nde_settings,
         threshold_std=threshold_std,
     )
 

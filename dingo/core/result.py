@@ -465,9 +465,9 @@ class Result(DingoDataset):
             train_dir = temporary_directory.name
 
         unconditional_model = train_unconditional_density_estimator(
-            sub_result,
-            nde_settings,
-            train_dir,
+            result=sub_result,
+            settings=nde_settings,
+            train_dir=train_dir,
         )
 
         if temporary_directory is not None:
@@ -645,12 +645,7 @@ class Result(DingoDataset):
                 **kwargs,
             )
         else:
-            plot_corner_multi(
-                theta,
-                labels=["Dingo"],
-                filename=filename,
-                **kwargs
-            )
+            plot_corner_multi(theta, labels=["Dingo"], filename=filename, **kwargs)
 
     def plot_log_probs(self, filename="log_probs.png"):
         """
