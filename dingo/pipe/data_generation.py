@@ -163,9 +163,14 @@ class DataGenerationInput(BilbyDataGenerationInput):
                 self.create_data(args)
 
     def create_data_dingo_injection(self, args):
-        """Executes create_data but turns off any requested injections. This is
-        intended to create noise-only datasets, to be used with the DINGO signal
-        generator."""
+        """Adaptation of create_data to use Dingo signal models rather than Bilby.
+
+        First, executes create_data but without any requested injections. This creates
+        a  noise-only dataset.
+
+        Second, calls _inject_dingo_signal to generate the Dingo signal waveform and
+        add it to the noisy data within the interferometers.
+        """
         # Save values of relevant args.
         injection = args.injection
         injection_file = args.injection_file
