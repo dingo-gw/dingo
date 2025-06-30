@@ -73,8 +73,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         frequency_update: dict
             Specifies settings for updating the frequency range
             example: {'minimum_frequency': {'H1': 30., 'L1': 20.},
-                       maximum_frequency: 1024.,
-                       suppress: {'V1': [40., 50.]}}
+                       maximum_frequency: 1024.}
         """
         super().__init__(
             wfg_kwargs=wfg_kwargs,
