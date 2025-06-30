@@ -6,6 +6,27 @@ import corner
 import numpy as np
 import pandas as pd
 
+LATEX_PARAM_DICT = {
+    "mass1": r"$m_1$",
+    "mass2": r"$m_2$",
+    "chirp_mass": r"$\mathcal{M}_c$",
+    "mass_ratio": r"$q$",
+    "a_1": r"$a_1$",
+    "a_2": r"$a_2$",
+    "tilt_1": r"$\theta_1$",
+    "tilt_2": r"$\theta_2$",
+    "phi_12": r"$\phi_{12}$",
+    "phi_jl": r"$\phi_{jl}$",
+    "theta_jn": r"$\theta_{jn}$",
+    "luminosity_distance": r"$d_L$",
+    "geocent_time": r"$t_c$",
+    "ra": r"$\alpha$",
+    "dec": r"$\delta$",
+    "psi": r"$\psi$",
+    "phase": r"$\phi$",
+    "chi_eff": r"$\chi_{\mathrm{eff}}$",
+}
+
 
 def plot_corner_multi(
     samples,
@@ -75,7 +96,7 @@ def plot_corner_multi(
         color = mpl.colors.rgb2hex(plt.get_cmap(cmap)(i))
         fig = corner.corner(
             s[common_parameters].to_numpy(),
-            labels=common_parameters,
+            labels=[LATEX_PARAM_DICT[p] for p in common_parameters],
             weights=w,
             color=color,
             no_fill_contours=True,
@@ -106,14 +127,14 @@ def plot_corner_multi(
             ax.tick_params(
                 axis="x", labelsize=14, length=6, width=1.5
             )  # Adjust labelsize, length, and width
-            ax.xaxis.label.set_size(16)  # Adjust x-axis label font size
+            ax.xaxis.label.set_size(20)  # Adjust x-axis label font size
         else:
             ax.tick_params(axis="x", which="both", bottom=False)
         if ax.get_ylabel():
             ax.tick_params(
                 axis="y", labelsize=14, length=6, width=1.5
             )  # Adjust labelsize, length, and width
-            ax.yaxis.label.set_size(16)  # Adjust x-axis label font size
+            ax.yaxis.label.set_size(20)  # Adjust x-axis label font size
         else:
             ax.tick_params(axis="y", which="both", left=False)
 
