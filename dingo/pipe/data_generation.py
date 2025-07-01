@@ -392,6 +392,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
             # This is a hack to set the window factor. It ensures also that the SNRs
             # are calculated correctly.
             td_strain = ifo.time_domain_strain
+            # TODO: correct for window factor changes https://git.ligo.org/pe/pe-group-coordination/-/issues/1
             ifo.strain_data.time_domain_window(roll_off=self.tukey_roll_off)
             ifo.strain_data.frequency_domain_strain = (
                 ifo.strain_data.frequency_domain_strain
