@@ -1,5 +1,4 @@
-import copy
-from typing import Union
+from typing import Dict, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -27,6 +26,7 @@ from dingo.gw.transforms import (
     CopyToExtrinsicParameters,
     GetDetectorTimes,
     DecimateWaveformsAndASDS,
+    MaskDataForFrequencyRangeUpdate,
 )
 
 
@@ -44,10 +44,168 @@ class GWSamplerMixin(object):
         kwargs
             Keyword arguments that are forwarded to the superclass.
         """
+        # Has to be specified before init, because the information is required in _initialize_transforms()
+        self._sampling_updates = {}
         super().__init__(**kwargs)
         self.t_ref = self.base_model_metadata["train_settings"]["data"]["ref_time"]
         self._pesummary_package = "gw"
         self._result_class = Result
+
+        self._minimum_frequency = self.domain.f_min
+        self._maximum_frequency = self.domain.f_max
+
+    @property
+    def minimum_frequency(self) -> float | dict:
+        return self._minimum_frequency
+
+    @minimum_frequency.setter
+    def minimum_frequency(self, value: Union[float, dict]):
+        raise NotImplementedError(
+            "Only possible to update the minimum_frequency through setting "
+            "self.sampling_updates = {minimum_frequency: 20.}"
+        )
+
+    @property
+    def maximum_frequency(self) -> float | dict:
+        return self._maximum_frequency
+
+    @maximum_frequency.setter
+    def maximum_frequency(self, value: Union[float, dict]):
+        raise NotImplementedError(
+            "Only possible to update the maximum_frequency through setting "
+            "self.sampling_updates = {maximum_frequency: 500.}"
+        )
+
+    @property
+    def sampling_updates(self) -> Optional[Dict[str, dict]]:
+        return self._sampling_updates
+
+    @sampling_updates.setter
+    def sampling_updates(
+        self, value: dict[str, float | list[float] | dict[str, list[float]]]
+    ):
+        # Check that model was trained with flexible frequency range
+        if (
+            not "random_strain_cropping"
+            in self.base_model_metadata["train_settings"]["data"]
+        ):
+            raise ValueError(
+                f"Model was not trained with random_strain_cropping settings, but sampling updates contain "
+                f"contain {value}. "
+            )
+        # Check that values are compatible with cropping values used during training and update frequency range
+        cropping_settings = self.base_model_metadata["train_settings"]["data"][
+            "random_strain_cropping"
+        ]
+        assert cropping_settings.get("cropping_probability", 0.0) > 0.0
+
+        if "minimum_frequency" in value:
+            minimum_frequency = value["minimum_frequency"]
+            f_min_upper = cropping_settings.get("f_min_upper")
+            has_f_min_upper = f_min_upper is not None
+            if cropping_settings.get("deterministic", False):
+                if has_f_min_upper and f_min_upper != minimum_frequency:
+                    raise ValueError(
+                        f"Deterministic cropping used during training, but minimum_frequency "
+                        f"{minimum_frequency} does not align with f_min_upper {f_min_upper}. "
+                    )
+            if isinstance(minimum_frequency, (float, int)):
+                if minimum_frequency < self.domain.f_min:
+                    raise ValueError(
+                        f"minimum_frequency {minimum_frequency} < f_min of domain {self.domain.f_min}. "
+                    )
+                if not has_f_min_upper:
+                    raise ValueError(
+                        f"Not possible to update minimum_frequency {minimum_frequency} during inference,"
+                        f"since f_min_upper was not set during training. "
+                    )
+                if minimum_frequency > f_min_upper:
+                    raise ValueError(
+                        f"minimum_frequency {minimum_frequency} > f_min_upper {f_min_upper} used during "
+                        f"training. "
+                    )
+            elif isinstance(minimum_frequency, dict):
+                if not cropping_settings.get("independent_detectors", True):
+                    raise ValueError(
+                        f"independent_detectors not enabled in random_strain_cropping; required for "
+                        f"dict-style minimum_frequency update. "
+                    )
+                f_mins = list(minimum_frequency.values())
+                if np.any(np.array(f_mins) < self.domain.f_min):
+                    raise ValueError(
+                        f"minimum_frequency values {minimum_frequency} < f_min of domain "
+                        f"{self.domain.f_min}. "
+                    )
+                if not has_f_min_upper:
+                    raise ValueError(
+                        f"Not possible to update minimum_frequency {minimum_frequency} during inference, "
+                        f"since f_min_upper was not set during training. "
+                    )
+                if np.any(np.array(f_mins) > f_min_upper):
+                    raise ValueError(
+                        f"minimum_frequency {minimum_frequency} > f_min_upper {f_min_upper} used during "
+                        f"training. "
+                    )
+            self._minimum_frequency = minimum_frequency
+        if "maximum_frequency" in value:
+            maximum_frequency = value["maximum_frequency"]
+            f_max_lower = cropping_settings.get("f_max_lower")
+            has_f_max_lower = f_max_lower is not None
+            if cropping_settings.get("deterministic", False):
+                if has_f_max_lower and f_max_lower != maximum_frequency:
+                    raise ValueError(
+                        f"Deterministic cropping used during training, but maximum_frequency "
+                        f"{maximum_frequency} does not align with f_max_lower {f_max_lower}. "
+                    )
+            if isinstance(maximum_frequency, float | int):
+                if maximum_frequency > self.domain.f_max:
+                    raise ValueError(
+                        f"maximum_frequency {maximum_frequency} < f_max of domain {self.domain.f_max}. "
+                    )
+                if not has_f_max_lower:
+                    raise ValueError(
+                        f"Not possible to update maximum_frequency {maximum_frequency} during inference, "
+                        f"since f_max_lower was not set during training. "
+                    )
+                if maximum_frequency < f_max_lower:
+                    raise ValueError(
+                        f"maximum_frequency {maximum_frequency} < f_max_lower {f_max_lower} used during "
+                        f"training. "
+                    )
+            elif isinstance(maximum_frequency, dict):
+                if not cropping_settings.get("independent_detectors", True):
+                    raise ValueError(
+                        f"independent_detectors not included or set to false in random_strain_cropping. "
+                        f"Not possible to perform inference with independent detectors for "
+                        f"maximum_frequency. "
+                    )
+                f_maxs = np.array(list((maximum_frequency.values())))
+                if np.any(f_maxs > self.domain.f_max):
+                    raise ValueError(
+                        f"maximum_frequency {maximum_frequency} < f_max of domain {self.domain.f_max}. "
+                    )
+                if not has_f_max_lower:
+                    raise ValueError(
+                        f"Not possible to update maximum_frequency {maximum_frequency} during inference, "
+                        f"since f_max_lower was not set during training. "
+                    )
+                if np.any(f_maxs < f_max_lower):
+                    raise ValueError(
+                        f"maximum_frequency {maximum_frequency} < f_max_lower {f_max_lower} used during "
+                        f"training. "
+                    )
+
+            self._maximum_frequency = maximum_frequency
+        if "minimum_frequency" in value and "maximum_frequency" in value:
+            if not cropping_settings.get("independent_lower_upper", True):
+                raise ValueError(
+                    f"Model was trained with independent_lower_upper=False, but minimum and "
+                    f"maximum_frequency specified. "
+                )
+
+        self._sampling_updates = value
+        # Update transforms
+        self._initialize_transforms()
 
     def _build_domain(self):
         """
@@ -189,22 +347,35 @@ class GWSampler(GWSamplerMixin, Sampler):
 
         #   * whiten and scale strain (since the inference network expects standardized
         #   data)
+        transform_pre.append(WhitenAndScaleStrain(self.domain.noise_std))
+        if self.sampling_updates:
+            # * update frequency range
+            # Needs to happen before RepackageStrainsAndASDs since we might need to apply
+            # detectors specific frequency updates.
+            transform_pre.append(
+                MaskDataForFrequencyRangeUpdate(
+                    domain=self.domain,
+                    minimum_frequency=self.minimum_frequency,
+                    maximum_frequency=self.maximum_frequency,
+                    ifos=self.base_model_metadata["train_settings"]["data"][
+                        "detectors"
+                    ],
+                )
+            )
         #   * repackage strains and asds from dicts to an array
         #   * convert array to torch tensor on the correct device
         #   * extract only strain/waveform from the sample
         transform_pre += [
-            WhitenAndScaleStrain(self.domain.noise_std),
             # Use base metadata so that unconditional samplers still know how to
             # transform data, since this transform is used by the GNPE sampler as
             # well.
             RepackageStrainsAndASDS(
-                self.base_model_metadata["train_settings"]["data"]["detectors"],
+                ifos=self.base_model_metadata["train_settings"]["data"]["detectors"],
                 first_index=self.domain.min_idx,
             ),
             ToTorch(device=self.model.device),
             GetItem("waveform"),
         ]
-
         self.transform_pre = Compose(transform_pre)
 
         # postprocessing transforms:
@@ -300,6 +471,21 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 )
             )
             transform_pre.append(TimeShiftStrain(ifo_list, self.domain))
+
+        if self.sampling_updates:
+            # * update frequency range
+            # Needs to happen before RepackageStrainsAndASDs since we might need to apply
+            # detectors specific frequency updates.
+            transform_pre.append(
+                MaskDataForFrequencyRangeUpdate(
+                    domain=self.domain,
+                    minimum_frequency=self.minimum_frequency,
+                    maximum_frequency=self.maximum_frequency,
+                    ifos=self.base_model_metadata["train_settings"]["data"][
+                        "detectors"
+                    ],
+                )
+            )
         transform_pre.append(
             SelectStandardizeRepackageParameters(
                 {"context_parameters": data_settings["context_parameters"]},

@@ -31,6 +31,12 @@ data:
   - geocent_time
   - luminosity_distance
   - psi
+  # Uncomment the snippet below to apply random frequency crops. The resulting Dingo
+  # model will be able to perform inference with variable frequency ranges.
+#  random_strain_cropping:
+#    f_min_upper: 32
+#    f_max_lower: 512
+#    cropping_probability: 0.8
 
 # Model architecture
 model:

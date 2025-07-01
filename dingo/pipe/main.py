@@ -1,6 +1,7 @@
 #
 #  Adapted from bilby_pipe. In particular, uses the bilby_pipe data generation code.
 #
+import numpy as np
 import os
 
 from bilby_pipe.input import Input
@@ -11,9 +12,6 @@ from bilby_pipe.utils import (
     logger,
     parse_args,
 )
-
-from dingo.core.posterior_models.build_model import build_model_from_kwargs
-from dingo.gw.domains import build_domain_from_model_metadata
 
 from .dag_creator import generate_dag
 from .parser import create_parser
@@ -43,10 +41,18 @@ def fill_in_arguments_from_model(args):
 
     data_settings = model_metadata["train_settings"]["data"]
 
+    # minimum_frequency and maximum_frequency in model_args are provided to the data_generation node.
+    # We want to download the data for the full frequency range because different frequency ranges for each detector
+    # would require different domains for each detector required for certain transforms. Significant code changes would
+    # be needed to address this. Therefore, updates to the frequency range are made during sampling and importance
+    # sampling.
+    minimum_frequency = domain.f_min
+    maximum_frequency = domain.f_max
+
     model_args = {
         "duration": domain.duration,
-        "minimum_frequency": domain.f_min,
-        "maximum_frequency": domain.f_max,
+        "minimum_frequency": minimum_frequency,
+        "maximum_frequency": maximum_frequency,
         "detectors": data_settings["detectors"],
         "sampling_frequency": data_settings["window"]["f_s"],
         "tukey_roll_off": data_settings["window"]["roll_off"],
@@ -54,6 +60,64 @@ def fill_in_arguments_from_model(args):
             "waveform_generator"
         ]["approximant"],
     }
+
+    # Collect sampling updates: minimum-frequency and maximum-frequency (before they are overwritten)
+    sampling_updates = {}
+    if "minimum_frequency" in args and args.minimum_frequency is not None:
+        if "{" in args.minimum_frequency:
+            minimum_frequency_update = convert_string_to_dict(args.minimum_frequency)
+            f_mins_update = np.array([f for f in minimum_frequency_update.values()])
+            # Check that updates are compatible with domain
+            if np.all(
+                np.logical_and(
+                    minimum_frequency <= f_mins_update,
+                    f_mins_update <= maximum_frequency,
+                )
+            ):
+                sampling_updates["minimum_frequency"] = minimum_frequency_update
+            else:
+                raise ValueError(
+                    f"minimum_frequency={minimum_frequency_update} is outside domain of "
+                    f"posterior model: domain.f_min={minimum_frequency}, domain.f_max={maximum_frequency}"
+                )
+        else:
+            minimum_frequency_update = float(args.minium_frequency)
+            # Check that updates are compatible with domain
+            if minimum_frequency <= minimum_frequency_update <= maximum_frequency:
+                sampling_updates["minimum_frequency"] = float(minimum_frequency_update)
+            else:
+                raise ValueError(
+                    f"minimum_frequency={minimum_frequency_update} is outside domain "
+                    f"of posterior model: domain.f_min={minimum_frequency}, domain.f_max={maximum_frequency}"
+                )
+
+    if "maximum_frequency" in args and args.maximum_frequency is not None:
+        if "{" in args.maximum_frequency:
+            maximum_frequency_update = convert_string_to_dict(args.maximum_frequency)
+            f_maxs_update = np.array([f for f in maximum_frequency_update.values()])
+            # Check that updates are compatible with domain
+            if np.all(
+                np.logical_and(
+                    minimum_frequency <= f_maxs_update,
+                    f_maxs_update <= maximum_frequency,
+                )
+            ):
+                sampling_updates["maximum_frequency"] = maximum_frequency_update
+            else:
+                raise ValueError(
+                    f"minimum_frequency={f_maxs_update} is outside domain of posterior model: "
+                    f"domain.f_min={minimum_frequency}, domain.f_max={maximum_frequency}"
+                )
+        else:
+            maximum_frequency_update = float(args.maximum_frequency)
+            # Check that updates are compatible with domain
+            if minimum_frequency <= maximum_frequency_update <= maximum_frequency:
+                sampling_updates["maximum_frequency"] = float(maximum_frequency_update)
+            else:
+                raise ValueError(
+                    f"minimum_frequency={maximum_frequency_update} is outside domain "
+                    f"of posterior model: domain.f_min={minimum_frequency}, domain.f_max={maximum_frequency}"
+                )
 
     changed_args = {}
     for k, v in model_args.items():
@@ -95,16 +159,26 @@ def fill_in_arguments_from_model(args):
         importance_sampling_updates = {
             k.replace("-", "_"): v for k, v in importance_sampling_updates.items()
         }
-    return {**changed_args, **importance_sampling_updates}, model_args
+
+    # changed_args and sampling_updates are included in importance_sampling_updates because they might influence
+    # the likelihood computation
+    return (
+        {**changed_args, **sampling_updates, **importance_sampling_updates},
+        sampling_updates,
+        model_args,
+    )
 
 
 class MainInput(BilbyMainInput):
-    def __init__(self, args, unknown_args, importance_sampling_updates):
+    def __init__(
+        self, args, unknown_args, sampling_updates, importance_sampling_updates
+    ):
         # Settings added for dingo.
 
         self.model = args.model
         self.model_init = args.model_init
         self.num_gnpe_iterations = args.num_gnpe_iterations
+        self.sampling_updates = sampling_updates
         self.importance_sampling_updates = importance_sampling_updates
 
         Input.__init__(self, args, unknown_args, print_msg=False)
@@ -135,10 +209,12 @@ class MainInput(BilbyMainInput):
         self.data_find_urltype = args.data_find_urltype
         self.n_parallel = args.n_parallel
         # useful when condor nodes don't have access to submit filesystem
-        self.transfer_files = args.transfer_files 
+        self.transfer_files = args.transfer_files
         self.additional_transfer_paths = args.additional_transfer_paths
         self.osg = args.osg
-        self.desired_sites = args.cpu_desired_sites  # Dummy variable so bilby_pipe doesn't complain.
+        self.desired_sites = (
+            args.cpu_desired_sites
+        )  # Dummy variable so bilby_pipe doesn't complain.
         self.cpu_desired_sites = args.cpu_desired_sites
         self.gpu_desired_sites = args.gpu_desired_sites
         # self.analysis_executable = args.analysis_executable
@@ -302,6 +378,7 @@ def write_complete_config_file(parser, args, inputs, input_cls=MainInput):
             if isinstance(val[0], str):
                 setattr(args, key, f"[{', '.join(val)}]")
     # args.sampler_kwargs = str(inputs.sampler_kwargs)
+    args.sampling_updates = str(inputs.sampling_updates)
     args.importance_sampling_updates = str(inputs.importance_sampling_updates)
     args.submit = False
     parser.write_to_file(
@@ -350,8 +427,12 @@ def main():
     parser = create_parser(top_level=True)
     args, unknown_args = parse_args(get_command_line_arguments(), parser)
 
-    importance_sampling_updates, model_args = fill_in_arguments_from_model(args)
-    inputs = MainInput(args, unknown_args, importance_sampling_updates)
+    importance_sampling_updates, sampling_updates, model_args = (
+        fill_in_arguments_from_model(args)
+    )
+    inputs = MainInput(
+        args, unknown_args, sampling_updates, importance_sampling_updates
+    )
     write_complete_config_file(parser, args, inputs)
 
     # TODO: Use two sets of inputs! The first must match the network; the second is
