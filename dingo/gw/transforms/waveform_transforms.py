@@ -262,7 +262,6 @@ class CropMaskStrainRandom(object):
         if deterministic_fmin_fmax is not None:
             self._initialize_deterministic_mask(deterministic_fmin_fmax)
 
-
     def _sample_upper_bound_indices(self, shape: list[int]) -> np.ndarray:
         """Sample indices for upper crop boundaries."""
         assert self._deterministic_mask is None
@@ -299,7 +298,6 @@ class CropMaskStrainRandom(object):
         mask = mask_lower * mask_upper
         # broadcast (detectors, freq) => (batch_size, detectors, channels, freq)
         self._deterministic_mask = mask[None, :, None, :]
-
 
     def _check_fmin_fmax(self, f_min, f_max):
         """Check that domain.f_min < fmin < f_max < domain.f_max."""
@@ -384,6 +382,14 @@ class CropMaskStrainRandom(object):
             )
 
         if self._deterministic_mask is not None:
+            if self._deterministic_mask.shape[1] not in [1, strain.shape[1]]:
+                raise ValueError(
+                    f"Deterministic masking range needs to be either supplied for all "
+                    f"detectors, or for each individual one. Strain provided in "
+                    f"{strain.shape[1]} detectors, so deterministic range should be "
+                    f"be provided as a single [fmin, fmax] pair or as {strain.shape[1]} "
+                    f"pairs, got {self._deterministic_mask.shape[1]}."
+                )
             strain = np.where(self._deterministic_mask, strain, 0)
             sample["waveform"] = strain
             return sample
