@@ -112,6 +112,32 @@ def test_cropping_frequency_calibration_mfd(cropping_setup_mfd):
     assert (strain_out[..., : idx_f_max + 1] == strain_in[..., : idx_f_max + 1]).all()
 
 
+def test_cropping_frequency_calibration_independent_detectors(cropping_setup):
+    """Test that deterministic cropping works in multiple detectors."""
+    domain, example_batch = cropping_setup
+    strain_in = example_batch["waveform"]
+
+    # test cropping from below
+    f_min = 32
+    idx_f_min = np.where(domain()[domain.min_idx :] == f_min)[0][0]
+    cropping_transform = CropMaskStrainRandom(
+        domain, deterministic_fmin_fmax=[[f_min, None], [None, None]]
+    )
+    strain_out = cropping_transform(example_batch)["waveform"]
+    # all values below 32Hz should be zero for detector 0
+    # all values above should be non-zero
+    assert (strain_out[:, 0, :, :idx_f_min] == 0).all()
+    assert (strain_out[:, 1, :, :idx_f_min] != 0).all()
+
+    # test that broadcasting works as intended: error should be raised when
+    # len(deterministic_fmin_fmax) not in [0, num_detectors]
+    cropping_transform = CropMaskStrainRandom(
+        domain, deterministic_fmin_fmax=[[f_min, None], [None, None], [None, None]]
+    )
+    with pytest.raises(ValueError):
+        _ = cropping_transform(example_batch)["waveform"]
+
+
 def test_cropping_bounds(cropping_setup):
     domain, example_batch = cropping_setup
     frequencies = domain()[domain.min_idx :]
