@@ -175,7 +175,7 @@ class DecimateWaveformsAndASDS(object):
                     for k, v in sample["waveform"].items()
                 }
                 sample["asds"] = {
-                    k: self.multibanded_frequency_domain.decimate(v**2) ** 0.5
+                    k: self.multibanded_frequency_domain.decimate(v ** 2) ** 0.5
                     for k, v in sample["asds"].items()
                 }
 
@@ -204,10 +204,12 @@ class CropMaskStrainRandom(object):
         domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
         f_min_upper: Optional[float] = None,
         f_max_lower: Optional[float] = None,
-        deterministic: bool = False,
         cropping_probability: float = 1.0,
         independent_detectors: bool = True,
         independent_lower_upper: bool = True,
+        deterministic_fmin_fmax: Optional[
+            list[float | None] | list[list[float | None]]
+        ] = None,
     ):
         """
         Parameters
@@ -222,9 +224,6 @@ class CropMaskStrainRandom(object):
             New f_max is sampled in range [f_max_lower, domain.f_max].
             Sampling of f_max is uniform in bins (not in frequency) when the frequency
             domain is not uniform (e.g., MultibandedFrequencyDomain).
-        deterministic: bool
-            If True, don't sample truncation range, but instead always truncate to range
-            [f_min_upper, f_max_lower]. This is used for inference.
         cropping_probability: float
             probability for a given sample to be cropped
         independent_detectors: bool
@@ -234,82 +233,135 @@ class CropMaskStrainRandom(object):
             individually. If False, then with a probability of P = cropping_probability
             both lower and upper cropping is applied, and with 1-P, no cropping is
             applied from either direction.
+        deterministic_fmin_fmax: None | list[float | None] | list[list[float | None]]
+            If not None, then cropping will be applied with fixed f_min and f_max,
+            as specified by this argument. Can either be a single list [f_min, f_max],
+            or a list of lists [[f_min_1, f_max_1], [f_min_2, f_max_2], ...] for the
+            different detectors.
         """
-        self.check_inputs(
-            domain, f_min_upper, f_max_lower, cropping_probability, deterministic
+        self._check_inputs(
+            domain,
+            f_min_upper,
+            f_max_lower,
+            cropping_probability,
+            deterministic_fmin_fmax,
         )
-        self._deterministic = deterministic
+        self._deterministic_fmin_fmax = deterministic_fmin_fmax
         self.cropping_probability = cropping_probability
         self.independent_detectors = independent_detectors
         self.independent_lower_upper = independent_lower_upper
-        frequencies = domain()[domain.min_idx :]
-        self.len_domain = len(frequencies)
+        self.frequencies = domain()[domain.min_idx :]
+        self.len_domain = len(self.frequencies)
 
-        if f_max_lower is not None:
-            self._idx_bound_f_max = np.argmin(np.abs(f_max_lower - frequencies))
-        else:
-            self._idx_bound_f_max = self.len_domain - 1
+        # for stochastic sampling of cropping boundaries
+        self._idx_bound_f_max = self._get_domain_idx(f_max_lower, self.len_domain - 1)
+        self._idx_bound_f_min = self._get_domain_idx(f_min_upper, 0)
 
-        if f_min_upper is not None:
-            self._idx_bound_f_min = np.argmin(np.abs(f_min_upper - frequencies))
-        else:
-            self._idx_bound_f_min = 0
+        # for deterministic cropping boundaries
+        self._deterministic_mask = None
+        if deterministic_fmin_fmax is not None:
+            self._initialize_deterministic_mask(deterministic_fmin_fmax)
 
-    def sample_upper_bound_indices(self, shape: list[int]) -> np.ndarray:
+
+    def _sample_upper_bound_indices(self, shape: list[int]) -> np.ndarray:
         """Sample indices for upper crop boundaries."""
-        if self._deterministic:
-            return np.ones(shape) * self._idx_bound_f_max
-        else:
-            return np.random.randint(self._idx_bound_f_max, self.len_domain, shape)
+        assert self._deterministic_mask is None
+        return np.random.randint(self._idx_bound_f_max, self.len_domain, shape)
 
-    def sample_lower_bound_indices(self, shape: list[int]) -> np.ndarray:
+    def _sample_lower_bound_indices(self, shape: list[int]) -> np.ndarray:
         """Sample indices for lower crop boundaries."""
-        if self._deterministic:
-            return np.ones(shape) * self._idx_bound_f_min
-        else:
-            # self._idx_bound_f_min is inclusive bound, so need to add 1
-            return np.random.randint(0, self._idx_bound_f_min + 1, shape)
+        assert self._deterministic_mask is None
+        return np.random.randint(0, self._idx_bound_f_min + 1, shape)
 
-    def check_inputs(
+    def _get_domain_idx(self, f_value: float, default_value: int = 0) -> int:
+        if f_value is not None:
+            return np.argmin(np.abs(f_value - self.frequencies)).item()
+        else:
+            return default_value
+
+    def _initialize_deterministic_mask(self, deterministic_fmin_fmax):
+        if not isinstance(deterministic_fmin_fmax[0], list):
+            deterministic_fmin_fmax = [deterministic_fmin_fmax]
+        masking_indices = []
+        for f_min, f_max in deterministic_fmin_fmax:
+            self._check_fmin_fmax(f_min, f_max)
+            idx_min = self._get_domain_idx(f_min, 0)
+            idx_max = self._get_domain_idx(f_max, self.len_domain - 1)
+            if idx_min >= idx_max:
+                raise ValueError(f"f_min ({f_min}) must be less than f_max ({f_max}).")
+            masking_indices.append([idx_min, idx_max])
+        masking_indices = np.array(masking_indices)
+        lower = masking_indices[:, 0]
+        upper = masking_indices[:, 1]
+        mask_lower = np.arange(len(self.frequencies))[None, :] >= lower[:, None]
+        mask_upper = np.arange(len(self.frequencies))[None, :] <= upper[:, None]
+        # combine masks
+        mask = mask_lower * mask_upper
+        # broadcast (detectors, freq) => (batch_size, detectors, channels, freq)
+        self._deterministic_mask = mask[None, :, None, :]
+
+
+    def _check_fmin_fmax(self, f_min, f_max):
+        """Check that domain.f_min < fmin < f_max < domain.f_max."""
+        domain_f_min = self.frequencies[0]
+        domain_f_max = self.frequencies[-1]
+        if f_min is not None and f_max is not None:
+            if not (domain_f_min < f_min < f_max < domain_f_max):
+                raise ValueError(
+                    f"Expected {f_min} in range ({domain_f_min}, {domain_f_max}) "
+                    f"and {f_max} in range ({domain_f_min}, {domain_f_max})."
+                )
+        elif f_min is not None:
+            if not (domain_f_min < f_min < domain_f_max):
+                raise ValueError(
+                    f"Expected {f_min} in range ({domain_f_min}, {domain_f_max})."
+                )
+        elif f_max is not None:
+            if not (domain_f_min < f_max < domain_f_max):
+                raise ValueError(
+                    f"Expected {f_max} in range ({domain_f_min}, {domain_f_max})."
+                )
+
+    def _check_inputs(
         self,
         domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
         f_min_upper: float,
         f_max_lower: float,
         cropping_probability: float,
-        deterministic: bool,
+        deterministic_fmin_fmax: Optional[
+            list[float | None] | list[list[float | None]]
+        ],
     ):
+
         # check domain
         if not isinstance(domain, (UniformFrequencyDomain, MultibandedFrequencyDomain)):
             raise ValueError(
                 f"Domain should be a frequency domain type, got {type(domain)}."
             )
-        # check validity of ranges
-        if f_min_upper is not None:
-            if not domain.f_min < f_min_upper < domain.f_max:
+        self.frequencies = domain()[domain.min_idx :]
+
+        # check validity of ranges for non-deterministic case
+        if deterministic_fmin_fmax is None:
+            self._check_fmin_fmax(f_min_upper, f_max_lower)
+            if not 0 <= cropping_probability <= 1.0:
                 raise ValueError(
-                    f"Expected f_min_upper in domain range [{domain.f_min},"
-                    f" {domain.f_max}], got {f_min_upper}."
+                    f"Cropping probability should be in [0, 1], got {cropping_probability}."
                 )
-        if f_max_lower is not None:
-            if not domain.f_min < f_max_lower < domain.f_max:
+
+        # check deterministic case
+        else:
+            # check that we don't have non-trivial f_min_upper, f_max_lower,
+            # cropping_probability in deterministic case
+            if f_min_upper is not None or f_max_lower is not None:
                 raise ValueError(
-                    f"Expected f_max_lower in domain range [{domain.f_min},"
-                    f" {domain.f_max}], got {f_max_lower}."
+                    "If deterministic_fmin_fmax is set, f_min_upper and f_max_lower should"
+                    " not be set."
                 )
-        if f_min_upper and f_max_lower and f_min_upper >= f_max_lower:
-            raise ValueError(
-                f"Expected f_min_upper < f_max_lower, got {f_min_upper}, {f_max_lower}."
-            )
-        if not 0 <= cropping_probability <= 1.0:
-            raise ValueError(
-                f"Cropping probability should be in [0, 1], got {cropping_probability}."
-            )
-        # check that no non-trivial cropping probability is set when deterministic = True
-        if deterministic and cropping_probability < 1.0:
-            raise ValueError(
-                f"cropping_probability must be 1.0 when deterministic = True, got "
-                f"{cropping_probability}."
-            )
+            if cropping_probability < 1.0:
+                raise ValueError(
+                    f"cropping_probability must be 1.0 when deterministic = True, got "
+                    f"{cropping_probability}."
+                )
 
     def __call__(self, input_sample: dict) -> dict:
         """
@@ -331,10 +383,15 @@ class CropMaskStrainRandom(object):
                 f"got {strain.shape}."
             )
 
+        if self._deterministic_mask is not None:
+            strain = np.where(self._deterministic_mask, strain, 0)
+            sample["waveform"] = strain
+            return sample
+
         # Sample boundary indices for crops
         constant_ax = 3 - self.independent_detectors
-        lower = self.sample_lower_bound_indices(strain.shape[:-constant_ax])
-        upper = self.sample_upper_bound_indices(strain.shape[:-constant_ax])
+        lower = self._sample_lower_bound_indices(strain.shape[:-constant_ax])
+        upper = self._sample_upper_bound_indices(strain.shape[:-constant_ax])
 
         # Only apply crops to a fraction of self.cropping_probability
         if self.cropping_probability < 1:

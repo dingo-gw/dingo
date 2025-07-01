@@ -57,7 +57,7 @@ def test_cropping_frequency_calibration(cropping_setup):
     f_min = 32
     idx_f_min = np.where(domain()[domain.min_idx :] == f_min)[0][0]
     cropping_transform = CropMaskStrainRandom(
-        domain, f_min_upper=f_min, deterministic=True
+        domain, deterministic_fmin_fmax=[f_min, None]
     )
     strain_out = cropping_transform(example_batch)["waveform"]
     # all values below 32Hz should be zero, all values above should be non-zero
@@ -70,7 +70,7 @@ def test_cropping_frequency_calibration(cropping_setup):
     f_max = 64
     idx_f_max = np.where(domain()[domain.min_idx :] == f_max)[0][0]
     cropping_transform = CropMaskStrainRandom(
-        domain, f_max_lower=f_max, deterministic=True
+        domain, deterministic_fmin_fmax=[[None, f_max], [None, f_max]]
     )
     strain_out = cropping_transform(example_batch)["waveform"]
     # all values above 64Hz should be zero, all values below should be non-zero
@@ -89,7 +89,7 @@ def test_cropping_frequency_calibration_mfd(cropping_setup_mfd):
     idx_f_min = 100
     f_min = domain()[idx_f_min]
     cropping_transform = CropMaskStrainRandom(
-        domain, f_min_upper=f_min, deterministic=True
+        domain, deterministic_fmin_fmax=[f_min, None]
     )
     strain_out = cropping_transform(example_batch)["waveform"]
     # all values below f_min should be zero, all values above should be non-zero
@@ -102,7 +102,7 @@ def test_cropping_frequency_calibration_mfd(cropping_setup_mfd):
     idx_f_max = 250
     f_max = domain()[idx_f_max]
     cropping_transform = CropMaskStrainRandom(
-        domain, f_max_lower=f_max, deterministic=True
+        domain, deterministic_fmin_fmax=[[None, f_max], [None, f_max]]
     )
     strain_out = cropping_transform(example_batch)["waveform"]
     # all values above f_max should be zero, all values below should be non-zero
