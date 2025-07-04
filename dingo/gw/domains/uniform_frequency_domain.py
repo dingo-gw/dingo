@@ -76,29 +76,29 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
 
     def _set_new_range(
         self, f_min: Optional[float] = None, f_max: Optional[float] = None
-    ):
+    ) -> None:
         """
-        Set a new range [f_min, f_max] for the domain. This is only allowed if the new
-        range is contained within the old one.
+        Set a new [f_min, f_max] range for the domain. Both endpoints must be in the
+        existing sample_frequencies, and f_min < f_max. Neither endpoint may lie
+        outside the current range.
         """
-        if f_min is not None and f_max is not None and f_min >= f_max:
-            raise ValueError("f_min must not be larger than f_max.")
-        if f_min is not None:
-            if self.f_min <= f_min <= self.f_max:
-                self.f_min = f_min
-            else:
-                raise ValueError(
-                    f"f_min = {f_min} is not in expected range "
-                    f"[{self.f_min,self.f_max}]."
-                )
-        if f_max is not None:
-            if self.f_min <= f_max <= self.f_max:
-                self.f_max = f_max
-            else:
-                raise ValueError(
-                    f"f_max = {f_max} is not in expected range "
-                    f"[{self.f_min, self.f_max}]."
-                )
+        new_min = f_min if f_min is not None else self.f_min
+        new_max = f_max if f_max is not None else self.f_max
+
+        if new_min >= new_max:
+            raise ValueError("f_min must be strictly less than f_max.")
+
+        if not (self.f_min <= new_min and new_max <= self.f_max):
+            raise ValueError(
+                f"Requested range [{new_min}, {new_max}] lies outside "
+                f"original range [{self.f_min}, {self.f_max}]."
+            )
+
+        missing = [x for x in (new_min, new_max) if x not in self.sample_frequencies]
+        if missing:
+            raise ValueError(f"Endpoints {missing} not in existing sample_frequencies.")
+
+        self.f_min, self.f_max = new_min, new_max
 
     def update_data(self, data: np.ndarray, axis: int = -1, low_value: float = 0.0):
         """
