@@ -26,9 +26,12 @@ LATEX_PARAM_DICT = {
     "phase": r"$\phi$",
     "chi_eff": r"$\chi_{\mathrm{eff}}$",
     "log_prob": r"$\log p$",
-    "H1_time_proxy": r"$\hat{t}_\mathrm{H}$",
-    "L1_time_proxy": r"$\hat{t}_\mathrm{L}$",
-    "V1_time_proxy": r"$\hat{t}_\mathrm{V}$",
+    "log_prior": r"$\log p(\theta)$",
+    "log_likelihood": r"$\log p(x|\theta)$",
+    "weights": r"$w$",
+    "H1_time_proxy": r"$\hat{t}(\mathrm{H})$",
+    "L1_time_proxy": r"$\hat{t}(\mathrm{L})$",
+    "V1_time_proxy": r"$\hat{t}(\mathrm{V})$",
 }
 
 
