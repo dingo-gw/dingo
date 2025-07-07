@@ -25,6 +25,7 @@ LATEX_PARAM_DICT = {
     "psi": r"$\psi$",
     "phase": r"$\phi$",
     "chi_eff": r"$\chi_{\mathrm{eff}}$",
+    "log_prob": r"$\log p$",
 }
 
 
