@@ -26,6 +26,9 @@ LATEX_PARAM_DICT = {
     "phase": r"$\phi$",
     "chi_eff": r"$\chi_{\mathrm{eff}}$",
     "log_prob": r"$\log p$",
+    "H1_time_proxy": r"$\hat{t}_\mathrm{H}$",
+    "L1_time_proxy": r"$\hat{t}_\mathrm{L}$",
+    "V1_time_proxy": r"$\hat{t}_\mathrm{V}$",
 }
 
 
@@ -97,7 +100,10 @@ def plot_corner_multi(
         color = mpl.colors.rgb2hex(plt.get_cmap(cmap)(i))
         fig = corner.corner(
             s[common_parameters].to_numpy(),
-            labels=[LATEX_PARAM_DICT[p] for p in common_parameters],
+            labels=[
+                LATEX_PARAM_DICT[p] if p in LATEX_PARAM_DICT else p
+                for p in common_parameters
+            ],
             weights=w,
             color=color,
             no_fill_contours=True,
