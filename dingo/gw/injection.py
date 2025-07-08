@@ -303,8 +303,13 @@ class GWSignal(object):
     def asd(self, asd):
         ifo_names = [ifo.name for ifo in self.ifo_list]
         if isinstance(asd, ASDDataset):
-            if set(asd.asds.keys()) != set(ifo_names):
-                raise KeyError("ASDDataset ifos do not match signal.")
+            if set(asd.asds.keys()) < set(ifo_names):
+                print(
+                    f"Warning: {set(asd.asds.keys())} is a subset of {set(ifo_names)}. Updating ifo_names to fit ASD"
+                    f"dataset and re-initializing transforms. "
+                )
+                self.ifo_list = InterferometerList([ifo for ifo in asd.asds.keys()])
+                self._initialize_transform()
             if asd.domain.domain_dict != self.data_domain.domain_dict:
                 print("Updating ASDDataset domain to match data domain.")
                 domain_dict = self.data_domain.domain_dict
