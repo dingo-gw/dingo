@@ -2,17 +2,26 @@ import os
 import sys
 
 from bilby_pipe.input import Input
-from bilby_pipe.main import parse_args
-from bilby_pipe.utils import logger, convert_string_to_dict
 from bilby_pipe.data_generation import DataGenerationInput as BilbyDataGenerationInput
+from bilby.core.prior import PriorDict
+from bilby_pipe.utils import (
+    parse_args,
+    logger,
+    convert_string_to_dict,
+    convert_prior_string_input,
+    BilbyPipeError,
+)
 import lalsimulation as LS
 import numpy as np
 
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
+from dingo.gw.prior import build_prior_with_defaults
+from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import UniformFrequencyDomain
 from dingo.gw.injection import Injection
 from dingo.pipe.parser import create_parser
+from dingo.pipe.main import fill_in_arguments_from_model
 
 logger.name = "dingo_pipe"
 
@@ -20,7 +29,6 @@ logger.name = "dingo_pipe"
 class DataGenerationInput(BilbyDataGenerationInput):
     def __init__(self, args, unknown_args, create_data=True):
         Input.__init__(self, args, unknown_args)
-
         # Generic initialisation
         self.meta_data = dict(
             command_line_args=args.__dict__,
@@ -46,12 +54,12 @@ class DataGenerationInput(BilbyDataGenerationInput):
 
         # Prior arguments
         # self.reference_frame = args.reference_frame
-        # self.time_reference = args.time_reference
+        # self.time_reference = "geocent" # DINGO mod used for saving data dump
         # self.phase_marginalization = args.phase_marginalization
-        # self.prior_file = args.prior_file
-        # self.prior_dict = args.prior_dict
-        self.deltaT = args.deltaT
-        # self.default_prior = args.default_prior
+        self.prior_dict = args.prior_dict
+        self.default_prior = "BBHPriorDict"
+        self.time_reference = "geocent"
+        self.prior_dict_updates = args.prior_dict_updates
 
         # Whether to generate data for importance sampling. This must be done when
         # desired data settings differ from those used for network training. If this is
@@ -104,11 +112,23 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.pn_phase_order = -1
         self.pn_amplitude_order = 0
         self.mode_array = None
-        self.waveform_arguments_dict = None
+        self.waveform_arguments_dict = args.waveform_arguments_dict
         self.numerical_relativity_file = args.numerical_relativity_file
         self.dingo_injection = args.dingo_injection
         self.injection_waveform_approximant = args.injection_waveform_approximant
-        self.frequency_domain_source_model = "lal_binary_black_hole"
+        if args.injection_waveform_approximant in ["SEOBNRv5PHM", "SEOBNRv5EHM", "SEOBNRv5HM"]:
+            self.injection_frequency_domain_source_model = "gwsignal_binary_black_hole"
+            self.frequency_domain_source_model = "gwsignal_binary_black_hole"
+        else:
+            self.injection_frequency_domain_source_model = "lal_binary_black_hole"
+            self.frequency_domain_source_model = "lal_binary_black_hole" 
+
+        # DINGO mod
+        self.save_bilby_data_dump = args.save_bilby_data_dump
+        if self.save_bilby_data_dump:
+            self.time_reference = args.time_reference
+            self.deltaT = args.deltaT
+
         # self.conversion_function = args.conversion_function
         # self.generation_function = args.generation_function
         # self.likelihood_type = args.likelihood_type
@@ -267,6 +287,24 @@ class DataGenerationInput(BilbyDataGenerationInput):
         for easy reading by pesummary and Bilby.
         """
 
+        if self.save_bilby_data_dump:
+            # this is needed because we want bilby to use the updated DINGO 
+            # prior
+            self.prior_dict = self.priors 
+            self.likelihood_type = "GravitationalWaveTransient"
+            self.calibration_marginalization = False
+            self.phase_marginalization = False
+            self.time_marginalization = False
+            self.distance_marginalization = False
+            self.number_of_response_curves = 0
+            self._distance_marginalization_lookup_table = None
+            self.reference_frame = "sky"
+            self.fiducial_parameters = None
+            self.update_fiducial_parameters = None 
+            self.epsilon = None 
+            self.jitter_time = True
+            self.save_data_dump()
+
         # PSD and strain data.
         data = {"waveform": {}, "asds": {}}  # TODO: Rename these keys.
         for ifo in self.interferometers:
@@ -400,6 +438,39 @@ class DataGenerationInput(BilbyDataGenerationInput):
                 * np.sqrt(ifo.strain_data.window_factor)
             )
 
+    @property
+    def prior_dict_updates(self):
+        """The input prior_dict from the ini (if given)
+
+        Note, this is not the bilby prior (see self.priors for that), this is
+        a key-val dictionary where the val's are strings which are converting
+        into bilby priors in `_get_prior
+        """
+        return self._prior_dict_updates
+
+    @prior_dict_updates.setter
+    def prior_dict_updates(self, prior_dict_updates):
+        if isinstance(prior_dict_updates, dict):
+            prior_dict_updates = prior_dict_updates
+        elif isinstance(prior_dict_updates, str):
+            prior_dict_updates = convert_prior_string_input(prior_dict_updates)
+        elif prior_dict_updates is None:
+            self._prior_dict_updates = None
+            return
+        else:
+            raise BilbyPipeError(
+                f"prior_dict_updates={prior_dict_updates} not " f"understood"
+            )
+
+        self._prior_dict_updates = {
+            self._convert_prior_dict_key(key): val
+            for key, val in prior_dict_updates.items()
+        }
+        
+    def _get_priors(self, add_time=True):
+        priors = super()._get_priors(add_time=add_time)
+        priors.update(PriorDict(self.prior_dict_updates))
+        return priors
 
 def create_generation_parser():
     """Data generation parser creation"""

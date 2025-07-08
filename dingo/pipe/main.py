@@ -23,6 +23,7 @@ from bilby_pipe.utils import (
 
 from .dag_creator import generate_dag
 from .parser import create_parser
+from .utils import dict_to_string
 
 from ..gw.domains.build_domain import build_domain_from_model_metadata
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
@@ -32,18 +33,19 @@ from ..gw.noise.asd_dataset import ASDDataset
 logger.name = "dingo_pipe"
 
 
-def fill_in_arguments_from_model(args):
-    if args.prior_dict is not None:
-        raise ValueError(
-            "Do not specify prior-dict in INI file. This is obtained from "
-            "the DINGO model. To update the prior, specify "
-            "prior-dict-updates."
-        )
-    if args.model_reference_time is not None:
-        raise ValueError(
-            "Do not specify model-reference-time in INI file. This is obtained from the "
-            "DINGO model."
-        )
+def fill_in_arguments_from_model(args, perform_arg_checks=True):
+    if perform_arg_checks:
+        if args.prior_dict is not None:
+            raise ValueError(
+                "Do not specify prior-dict in INI file. This is obtained from "
+                "the DINGO model. To update the prior, specify "
+                "prior-dict-updates."
+            )
+        if args.model_reference_time is not None:
+            raise ValueError(
+                "Do not specify model-reference-time in INI file. This is obtained from the "
+                "DINGO model."
+            )
 
     logger.info(f"Loading dingo model from {args.model} in order to access settings.")
 
@@ -91,7 +93,7 @@ def fill_in_arguments_from_model(args):
         ],
         "deltaT": deltaT,
         "Toffset": Toffset,
-        "prior_dict": prior,
+        "prior_dict": dict_to_string(prior),
         "model_reference_time": model_metadata["train_settings"]["data"]["ref_time"],
     }
 
@@ -267,11 +269,18 @@ class MainInput(BilbyMainInput):
         # )
         self.generation_seed = args.generation_seed
         if self.importance_sampling_updates and self.gaussian_noise:
-            raise ValueError(
-                "Cannot update data for importance sampling if using "
-                "simulated Gaussian noise. This risks inconsistent noise "
-                "realizations."
-            )
+            if not (
+                list(self.importance_sampling_updates.keys()) == ["minimum_frequency"]
+            ):
+                raise ValueError(
+                    "Cannot update data for importance sampling if using "
+                    "simulated Gaussian noise. This risks inconsistent noise "
+                    "realizations."
+                )
+            else:
+                # only allow for changing the minimum frequency (fstart) for the 
+                # injection waveform. But this should not be an importance sampling update
+                del self.importance_sampling_updates["minimum_frequency"]
 
         self.importance_sample = args.importance_sample
 

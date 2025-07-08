@@ -524,6 +524,15 @@ def create_parser(top_level=True):
             "injection only"
         ),
     )
+    injection_parser.add(
+        "--save-bilby-data-dump",
+        type=bool,
+        default=False,
+        help=(
+            "If given, will also save a data dump consistent with the DINGO injection."
+            "This is useful when comparing with Bilby"
+        ),
+    )
 
     submission_parser = parser.add_argument_group(
         title="Job submission arguments",
@@ -841,10 +850,10 @@ def create_parser(top_level=True):
             "for more details."
         ),
     )
-    # likelihood_parser = parser.add_argument_group(
-    #     title="Likelihood arguments",
-    #     description="Options for setting up the likelihood.",
-    # )
+    likelihood_parser = parser.add_argument_group(
+        title="Likelihood arguments",
+        description="Options for setting up the likelihood.",
+    )
     # likelihood_parser.add(
     #     "--distance-marginalization",
     #     action="store_true",
@@ -882,12 +891,12 @@ def create_parser(top_level=True):
     #     type=str,
     #     help="Reference frame for the sky parameterisation, either 'sky' (default) or, e.g., 'H1L1'",
     # )
-    # likelihood_parser.add(
-    #     "--time-reference",
-    #     default="geocent",
-    #     type=str,
-    #     help="Time parameter to sample in, either 'geocent' (default) or, e.g., 'H1'",
-    # )
+    likelihood_parser.add(
+        "--time-reference",
+        default="geocent",
+        type=str,
+        help="Time parameter to sample in, either 'geocent' (default) or, e.g., 'H1'",
+    )
     # likelihood_parser.add(
     #     "--likelihood-type",
     #     default="GravitationalWaveTransient",
@@ -1097,16 +1106,16 @@ def create_parser(top_level=True):
     prior_parser = parser.add_argument_group(
         title="Prior arguments", description="Specify the prior settings."
     )
-    # prior_parser.add(
-    #     "--default-prior",
-    #     default="BBHPriorDict",
-    #     type=str,
-    #     help=(
-    #         "The name of the prior set to base the prior on. Can be one of"
-    #         "[PriorDict, BBHPriorDict, BNSPriorDict, CalibrationPriorDict]"
-    #         "or a python path to a bilby prior class available in the user's installation."
-    #     ),
-    # )
+    prior_parser.add(
+        "--default-prior",
+        default="BBHPriorDict",
+        type=str,
+        help=(
+            "The name of the prior set to base the prior on. Can be one of"
+            "[PriorDict, BBHPriorDict, BNSPriorDict, CalibrationPriorDict]"
+            "or a python path to a bilby prior class available in the user's installation."
+        ),
+    )
     prior_parser.add(
         "--deltaT",
         type=nonefloat,
@@ -1141,9 +1150,9 @@ def create_parser(top_level=True):
         ),
     )
     prior_parser_main = prior_parser.add_mutually_exclusive_group()
-    # prior_parser_main.add(
-    #     "--prior-file", type=nonestr, default=None, help="The prior file"
-    # )
+    prior_parser_main.add(
+        "--prior-file", type=nonestr, default=None, help="The prior file"
+    )
     prior_parser_main.add(
         "--prior-dict",
         type=nonestr,
@@ -1285,15 +1294,16 @@ def create_parser(top_level=True):
             "https://git.ligo.org/waveforms/lvcnr-lfs for examples"
         ),
     )
-    # waveform_parser.add(
-    #     "--waveform-arguments-dict",
-    #     default=None,
-    #     type=nonestr,
-    #     help=(
-    #         "A dictionary of arbitrary additional waveform-arguments to pass"
-    #         "  to the bilby waveform generator's `waveform_arguments`"
-    #     ),
-    # )
+    waveform_parser.add(
+        "--waveform-arguments-dict",
+        default=None,
+        type=nonestr,
+        help=(
+            "A dictionary of arbitrary additional waveform-arguments to pass"
+            "  to the bilby waveform generator's `waveform_arguments`. Only used "
+            "for injections"
+        ),
+    )
     # waveform_parser.add(
     #     "--mode-array",
     #     default=None,
