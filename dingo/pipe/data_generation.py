@@ -112,7 +112,9 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.pn_phase_order = -1
         self.pn_amplitude_order = 0
         self.mode_array = None
-        self.waveform_arguments_dict = args.waveform_arguments_dict
+        # don't set self.waveform_arguments_dict, it will be updated later by injection_waveform_arguments
+        self.waveform_arguments_dict = None 
+        self.injection_waveform_arguments = args.injection_waveform_arguments
         self.numerical_relativity_file = args.numerical_relativity_file
         self.dingo_injection = args.dingo_injection
         self.injection_waveform_approximant = args.injection_waveform_approximant
@@ -290,6 +292,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
         if self.save_bilby_data_dump:
             # this is needed because we want bilby to use the updated DINGO 
             # prior
+            self.waveform_arguments_dict = self.injection_waveform_arguments
             self.prior_dict = self.priors 
             self.likelihood_type = "GravitationalWaveTransient"
             self.calibration_marginalization = False

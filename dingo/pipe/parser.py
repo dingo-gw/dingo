@@ -1294,16 +1294,16 @@ def create_parser(top_level=True):
             "https://git.ligo.org/waveforms/lvcnr-lfs for examples"
         ),
     )
-    waveform_parser.add(
-        "--waveform-arguments-dict",
-        default=None,
-        type=nonestr,
-        help=(
-            "A dictionary of arbitrary additional waveform-arguments to pass"
-            "  to the bilby waveform generator's `waveform_arguments`. Only used "
-            "for injections"
-        ),
-    )
+    # waveform_parser.add(
+        # "--waveform-arguments-dict",
+        # default=None,
+        # type=nonestr,
+        # help=(
+            # "A dictionary of arbitrary additional waveform-arguments to pass"
+            # "  to the bilby waveform generator's `waveform_arguments`. Only used "
+            # "for injections"
+        # ),
+    # )
     # waveform_parser.add(
     #     "--mode-array",
     #     default=None,

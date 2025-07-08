@@ -269,18 +269,11 @@ class MainInput(BilbyMainInput):
         # )
         self.generation_seed = args.generation_seed
         if self.importance_sampling_updates and self.gaussian_noise:
-            if not (
-                list(self.importance_sampling_updates.keys()) == ["minimum_frequency"]
-            ):
-                raise ValueError(
-                    "Cannot update data for importance sampling if using "
-                    "simulated Gaussian noise. This risks inconsistent noise "
-                    "realizations."
-                )
-            else:
-                # only allow for changing the minimum frequency (fstart) for the 
-                # injection waveform. But this should not be an importance sampling update
-                del self.importance_sampling_updates["minimum_frequency"]
+            raise ValueError(
+                "Cannot update data for importance sampling if using "
+                "simulated Gaussian noise. This risks inconsistent noise "
+                "realizations."
+            )
 
         self.importance_sample = args.importance_sample
 
