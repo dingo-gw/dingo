@@ -262,6 +262,7 @@ class MainInput(BilbyMainInput):
         self.injection_numbers = args.injection_numbers
         self.injection_file = args.injection_file
         self.injection_dict = args.injection_dict
+        self.save_bilby_data_dump = args.save_bilby_data_dump
         # self.injection_waveform_arguments = args.injection_waveform_arguments
         # self.injection_waveform_approximant = args.injection_waveform_approximant
         # self.injection_frequency_domain_source_model = (
