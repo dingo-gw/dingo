@@ -1,3 +1,4 @@
+from typing import Optional
 import argparse
 
 import numpy as np
@@ -15,12 +16,29 @@ from dingo.gw.waveform_generator import (
 )
 
 
-def _evaluate_multibanding_main(
-    settings_file: str,
+def evaluate_multibanding_main(
     num_samples: int,
+    settings_file: Optional[str] = None,
+    settings: Optional[dict] = None,
 ):
-    with open(settings_file, "r") as f:
-        settings = yaml.safe_load(f)
+    """
+    Compute the mismatch of num_samples multibanded frequency domain waveforms and
+    waveforms interpolated to the uniform frequency domain under extreme settings.
+
+    Parameters
+    ----------
+    num_samples: int
+        Number of waveforms to generate.
+    settings_file: str
+        Path to waveform dataset settings file containing information about the
+        multibanded frequency domain to evaluate.
+    settings: Optional[dict]
+        Waveform dataset settings as a dictionary.
+    """
+    assert settings is not None or settings_file is not None
+    if settings_file is not None:
+        with open(settings_file, "r") as f:
+            settings = yaml.safe_load(f)
 
     # Ignore any compression settings
     if "compression" in settings:
@@ -127,4 +145,4 @@ def parse_args():
 
 def main() -> None:
     args = parse_args()
-    _evaluate_multibanding_main(args.settings_file, args.num_samples)
+    evaluate_multibanding_main(num_samples=args.num_samples, settings_file=args.settings_file)
