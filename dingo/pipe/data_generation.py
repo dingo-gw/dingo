@@ -201,7 +201,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
                     )
                     time.sleep(wait)
 
-        # check if there are nan's in the asd, if there are shift the detector segment used to generate the psd to an earlier time
+        # check if there are nan's in the asd, if yes, shift the detector segment used to generate the psd to an earlier time
         for ifo in self.interferometers:
             frequency_array = ifo.strain_data.frequency_array
             asd = ifo.power_spectral_density.get_amplitude_spectral_density_array(

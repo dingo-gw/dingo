@@ -117,7 +117,7 @@ def download_psd(
         while contains_nan:
             dt = math.ceil(np.where(np.isnan(psd_strain))[0][-1] / f_s)  # change this?
             dt_total += dt
-            logger.info(f"Shifting strain segment by -{dt_total} seconds. ")
+            logger.info(f"Shifting strain segment by +{dt_total} seconds. ")
             try:
                 psd_strain = robust_fetch_open_data(
                     det=det,
