@@ -181,6 +181,7 @@ def create_population_transformer(config):
         nhead=config.transformer["nhead"],
         dropout=config.transformer.get("dropout", 0.1),
         batch_first=True,
+        norm_first=config.transformer.get("norm_first", False),
     )
     transformer = nn.TransformerEncoder(
         transformer_layer, num_layers=config.transformer["num_layers"]
