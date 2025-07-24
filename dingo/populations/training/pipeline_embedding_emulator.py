@@ -74,13 +74,13 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
     device = local_settings['device']
 
     # put either model on cpu, or move all tensors to cuda
-    pm_embeddings = PosteriorModel(train_settings['data']['posterior_model'], device=device)
+    pm_single_event = PosteriorModel(train_settings['data']['posterior_model'], device=device)
 
-    pm_embeddings.metadata['train_settings']['data']['waveform_dataset_path'] = train_settings['data']['waveform_dataset_path']
+    pm_single_event.metadata['train_settings']['data']['waveform_dataset_path'] = train_settings['data']['waveform_dataset_path']
 
-    overwrite_posterior_model_metadata(pm_embeddings, train_settings)
+    overwrite_posterior_model_metadata(pm_single_event, train_settings)
 
-    wfd = build_dataset(pm_embeddings.metadata['train_settings']["data"])  # No transforms yet
+    wfd = build_dataset(pm_single_event.metadata['train_settings']["data"])  # No transforms yet
 
     # This is the only case that exists so far, but we leave it open to develop new
     # model types.
@@ -94,18 +94,18 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
 
         set_train_transforms(
             wfd,
-            pm_embeddings.metadata['train_settings']["data"],
+            pm_single_event.metadata['train_settings']["data"],
             asd_dataset_path,
         )
 
         # This modifies the model settings in-place.
-        autocomplete_model_kwargs_nsf_for_embedding(train_settings["model"], wfd[0], pm_embeddings)
+        autocomplete_model_kwargs_nsf_for_embedding(train_settings["model"], wfd[0], pm_single_event)
 
         full_settings = {
             "dataset_settings": wfd.settings,
             "train_settings": train_settings,
             "settings_pm_single_event": {
-                **pm_embeddings.metadata,
+                **pm_single_event.metadata,
             }
         }
 

@@ -74,13 +74,13 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
     device = local_settings['device']
 
     # put either model on cpu, or move all tensors to cuda
-    pm_embeddings = PosteriorModel(train_settings['data']['posterior_model'], device=device)
+    pm_single_event = PosteriorModel(train_settings['data']['posterior_model'], device=device)
 
-    pm_embeddings.metadata['train_settings']['data']['waveform_dataset_path'] = train_settings['data']['waveform_dataset_path']
+    pm_single_event.metadata['train_settings']['data']['waveform_dataset_path'] = train_settings['data']['waveform_dataset_path']
 
     # important! Overwrite inference parameters with SNR here
-    pm_embeddings.metadata['train_settings']["data"]['inference_parameters'] = ['matched_filter_snr']
-    wfd = build_dataset(pm_embeddings.metadata['train_settings']["data"])  # No transforms yet
+    pm_single_event.metadata['train_settings']["data"]['inference_parameters'] = ['matched_filter_snr']
+    wfd = build_dataset(pm_single_event.metadata['train_settings']["data"])  # No transforms yet
 
     # This is the only case that exists so far, but we leave it open to develop new
     # model types.
@@ -94,7 +94,7 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
 
         set_train_transforms(
             wfd,
-            pm_embeddings.metadata['train_settings']["data"],
+            pm_single_event.metadata['train_settings']["data"],
             asd_dataset_path,
         )
 
@@ -103,7 +103,7 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
             train_settings
         )
 
-        complete_train_settings_snr(train_settings["model"], pm_embeddings)
+        complete_train_settings_snr(train_settings["model"], pm_single_event)
         
         full_settings = {
             "dataset_settings": wfd.settings,
@@ -122,7 +122,7 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
     model = SNREstimator(
         metadata=full_settings,
         device=device,
-        pm_single_event=pm_embeddings
+        pm_single_event=pm_single_event
     )
 
     if local_settings.get("wandb", False):
