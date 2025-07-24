@@ -182,6 +182,13 @@ class DecimateWaveformsAndASDS(object):
 
             else:
                 raise NotImplementedError()
+        elif not check_sample_in_domain(sample, self.multibanded_frequency_domain):
+            raise ValueError(
+                f"Sample neither consistent with multibanded frequency domain nor its base domain. "
+                f"Shape of sample: {[sample['waveform'][k] for k in sample['waveform'].keys()][0].shape}, "
+                f"Length of UFD: {len(self.multibanded_frequency_domain.base_domain)}, "
+                f"Length of MFD: {len(self.multibanded_frequency_domain)} "
+            )
 
         return sample
 
@@ -382,7 +389,7 @@ def check_sample_in_domain(sample, domain: UniformFrequencyDomain) -> bool:
 
 class TimeShiftStrainGrid(object):
     """
-    Time-shift strain based on grid with t_max and \delta t.
+    Time-shift strain based on grid with t_max and \\delta t.
     """
 
     def __init__(
