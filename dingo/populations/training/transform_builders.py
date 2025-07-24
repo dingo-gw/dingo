@@ -11,7 +11,8 @@ def set_train_transforms(population_model, data_settings, settings_pm_single_eve
     # If the standardization factors have already been set, use those. Otherwise,
     # calculate them, and save them within the data settings.
     try:
-        standardization_dict = data_settings["standardization"]
+        # standardization_dict = data_settings["standardization"]
+        standardization_dict = population_model["train_settings"]["data"]["standardization"] # TODO: check with standard convention
         print("Using previously-calculated parameter standardizations.")
     except KeyError:
         print("Calculating new parameter standardizations.")
@@ -26,7 +27,11 @@ def set_train_transforms(population_model, data_settings, settings_pm_single_eve
         )
     )
 
-    standardization_dict_parameters = settings_pm_single_event['train_settings']['data']['standardization']
+    standardization_dict_parameters = {}
+    
+    for x in ['mean', 'std']:
+        standardization_dict_parameters[x] = \
+              {k:v for k,v in settings_pm_single_event['train_settings']['data']['standardization'][x].items() if k in population_model.inference_parameters}
     data_settings["standardization_single_events"] = standardization_dict_parameters
     transforms.append(
         StandardizeParameters(
