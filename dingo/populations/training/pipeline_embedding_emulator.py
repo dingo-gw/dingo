@@ -3,6 +3,7 @@ import numpy as np
 import yaml
 import argparse
 import textwrap
+import copy
 
 
 from threadpoolctl import threadpool_limits
@@ -35,7 +36,19 @@ def autocomplete_model_kwargs_nsf_for_embedding(model_kwargs, data_sample, singl
     model_kwargs["context_dim"] = len(data_sample[0])
 
     print('context_dim', model_kwargs["context_dim"])
-        
+
+def overwrite_posterior_model_metadata(pm_embeddings, train_settings):
+
+    # read for which parameters we want to fit the embedding emulator
+    if 'params_for_embedding' in train_settings['data']:
+        params_for_embedding = train_settings['data']['params_for_embedding']
+    else:
+        # using the parameters for which the posterior model was trained
+        params_for_embedding = pm_embeddings.metadata['train_settings']['data']['inference_parameters']
+    print("Using the following parameters for embedding emulator:", params_for_embedding)
+
+    # overwrite the inference parameters in the metadata
+    pm_embeddings.metadata['train_settings']['data']['inference_parameters'] = params_for_embedding
 
 def prepare_training_new(train_settings: dict, train_dir: str, local_settings: dict):
     """
@@ -63,15 +76,9 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
     # put either model on cpu, or move all tensors to cuda
     pm_embeddings = PosteriorModel(train_settings['data']['posterior_model'], device=device)
 
-    # for debug purposes
-    # pm_embeddings.metadata['train_settings']['data']['waveform_dataset_path'] = '/mnt/lustre2/gravitational_waves/kleyde/dingo_population/waveform_datasets/waveform_test.hdf5'
+    pm_embeddings.metadata['train_settings']['data']['waveform_dataset_path'] = train_settings['data']['waveform_dataset_path']
 
-    # read for which parameters we want to fit the embedding emulator
-    # if 'params_for_embedding' in train_settings['data']:
-    #     params_for_embedding = train_settings['data']['params_for_embedding']
-    # else:
-    #     # using the parameters for which the posterior model was trained
-    #     params_for_embedding = pm_embeddings.metadata['train_settings']['data']['inference_parameters']
+    overwrite_posterior_model_metadata(pm_embeddings, train_settings)
 
     wfd = build_dataset(pm_embeddings.metadata['train_settings']["data"])  # No transforms yet
 
@@ -79,10 +86,16 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
     # model types.
     if train_settings["model"]["type"] == "nsf":
 
+        asd_dataset_path = train_settings['training']['stage_0']['asd_dataset_path']
+
+        # data_settings = copy.deepcopy(pm_embeddings.metadata['train_settings']["data"])
+        # # overwrite inference parameters
+        # data_settings['inference_parameters'] = train_settings['data']['params_for_embedding']
+
         set_train_transforms(
             wfd,
             pm_embeddings.metadata['train_settings']["data"],
-            pm_embeddings.metadata['train_settings']["training"]["stage_0"]["asd_dataset_path"],
+            asd_dataset_path,
         )
 
         # This modifies the model settings in-place.
@@ -155,16 +168,17 @@ def prepare_training_resume(checkpoint_name, local_settings, train_dir):
     posterior_model_path = pm.metadata['train_settings']['data']['posterior_model']
 
     # put either model on cpu, or move all tensors to cuda
-    pm_embeddings = PosteriorModel(posterior_model_path, device=device)
-    train_settings = pm_embeddings.metadata['train_settings']
-    wfd = build_dataset(train_settings["data"])
+    pm_single_event = PosteriorModel(posterior_model_path, device=device)
+    overwrite_posterior_model_metadata(pm_single_event, pm.metadata['train_settings'])
+
+    wfd = build_dataset(pm.metadata['train_settings']["data"])
     set_train_transforms(
         wfd,
-        train_settings["data"],
-        train_settings["training"]["stage_0"]["asd_dataset_path"],
+        pm_single_event.metadata['train_settings']["data"],
+        pm.metadata['train_settings']['training']['stage_0']['asd_dataset_path'],
     )
 
-    pm.add_pm_single_event(pm_embeddings)
+    pm.add_pm_single_event(pm_single_event)
     
     if local_settings.get("wandb", False):
         try:
