@@ -97,7 +97,7 @@ class PopulationDataset(torch.utils.data.Dataset):
 
     def get_inference_parameters(self):
 
-        return self.embedding_emulator_metadata['settings_pm_single_event']['train_settings']['data']['inference_parameters']
+        return self.embedding_emulator_metadata['train_settings']['data']['params_for_embedding']
 
     def __getitem__(self, idx):
         size = np.random.randint(
@@ -108,7 +108,7 @@ class PopulationDataset(torch.utils.data.Dataset):
         generate_event_func = self.population_model.get_event_generator(hp, self.kwargs_selection_cut)
 
         is_training = self.mode in ["train", "test"]
-        parameters = generate_event_func(size=self.size_all_events, buffer_factor=23, train=is_training)
+        parameters = generate_event_func(size=self.size_all_events, buffer_factor=55, train=is_training)
         
         # Prepare output, consisting of hyperparameters and an array of embeddings.
         sample = {
@@ -148,7 +148,7 @@ class PopulationDataset(torch.utils.data.Dataset):
         return {"mean": mean, "std": std}
 
 
-def construct_population_dataset(embedding_emulator_path, snr_model_path, device, **kwargs):
+def construct_population_dataset(embedding_emulator_path, device, **kwargs):
     
     embedding_emulator = EmbeddingEmulator(model_filename=embedding_emulator_path, device=device)
     # embedding_emulator.add_pm_single_event()
@@ -164,11 +164,12 @@ def construct_population_dataset(embedding_emulator_path, snr_model_path, device
 
 def build_transforms(embedding_emulator):
 
-    inference_parameters = embedding_emulator.metadata['settings_pm_single_event']['train_settings']['data']['inference_parameters']
+    inference_parameters = embedding_emulator.get_inference_parameters()
+    standardization_dict = embedding_emulator.metadata['settings_pm_single_event']["train_settings"]["data"]["standardization"]
 
     transform_post = SelectStandardizeRepackageParameters(
         {"inference_parameters": inference_parameters},
-        embedding_emulator.metadata['settings_pm_single_event']["train_settings"]["data"]["standardization"],
+        standardization_dict,
         inverse=False,
         as_type="dict",
     )
