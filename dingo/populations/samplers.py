@@ -86,6 +86,10 @@ class PopulationSampler(object):
         result = samples["parameters"]
         result["log_prob"] = samples["log_prob"]
 
+        # Move to CPU if necessary
+        if torch.cuda.is_available():
+            result = {k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in result.items()}
+
         return pd.DataFrame(result)
 
     def get_log_prob(self, parameters):
