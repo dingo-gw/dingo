@@ -572,7 +572,9 @@ class m1m2_conditioned_lowpass(pm1m2_prob):
         p2 = LowpassSmoothedProb(PowerLaw(kwargs['mmin'],kwargs['mmax'],kwargs['beta']),kwargs['delta_m'])
         self.prior=conditional_2dimpdf(p1,p2)
 
-def build_massprior_PowerLawPeak(params):
+def build_massprior_PowerLawPeak(params_in):
+
+    params = copy.deepcopy(params_in)
 
     # rename params
     params['mmin'] = params['minimum_mass']
