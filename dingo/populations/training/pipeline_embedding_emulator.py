@@ -37,18 +37,18 @@ def autocomplete_model_kwargs_nsf_for_embedding(model_kwargs, data_sample, singl
 
     print('context_dim', model_kwargs["context_dim"])
 
-def overwrite_posterior_model_metadata(pm_embeddings, train_settings):
+def overwrite_posterior_model_metadata(pm_single_event, train_settings):
 
     # read for which parameters we want to fit the embedding emulator
     if 'params_for_embedding' in train_settings['data']:
         params_for_embedding = train_settings['data']['params_for_embedding']
     else:
         # using the parameters for which the posterior model was trained
-        params_for_embedding = pm_embeddings.metadata['train_settings']['data']['inference_parameters']
+        params_for_embedding = pm_single_event.metadata['train_settings']['data']['inference_parameters']
     print("Using the following parameters for embedding emulator:", params_for_embedding)
 
     # overwrite the inference parameters in the metadata
-    pm_embeddings.metadata['train_settings']['data']['inference_parameters'] = params_for_embedding
+    pm_single_event.metadata['train_settings']['data']['inference_parameters'] = params_for_embedding
 
 def prepare_training_new(train_settings: dict, train_dir: str, local_settings: dict):
     """
