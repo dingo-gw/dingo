@@ -282,7 +282,7 @@ class EmbeddingEmulator(GenericModel):
     def initialize_transform_pre(self):
         self.transform1 = SelectStandardizeRepackageParameters(
             {
-                "inference_parameters": self.metadata['settings_pm_single_event']['train_settings']['data']['inference_parameters']
+                "inference_parameters": self.metadata['train_settings']['data']['params_for_embedding']
             },
             self.metadata['settings_pm_single_event']["train_settings"]["data"]["standardization"],
             inverse=False,
