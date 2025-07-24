@@ -76,8 +76,7 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
     # put either model on cpu, or move all tensors to cuda
     pm_embeddings = PosteriorModel(train_settings['data']['posterior_model'], device=device)
 
-    # for debug purposes
-    # pm_embeddings.metadata['train_settings']['data']['waveform_dataset_path'] = '/mnt/lustre2/gravitational_waves/kleyde/dingo_population/waveform_datasets/waveform_test.hdf5'
+    pm_embeddings.metadata['train_settings']['data']['waveform_dataset_path'] = train_settings['data']['waveform_dataset_path']
 
     # important! Overwrite inference parameters with SNR here
     pm_embeddings.metadata['train_settings']["data"]['inference_parameters'] = ['matched_filter_snr']
@@ -87,10 +86,16 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
     # model types.
     if train_settings["model"]["type"] == "nn-dense-res":
 
+        # if available, use asd dataset path from train_settings, otherwise use the one from 
+        # the trained model metadata
+
+        asd_dataset_path = train_settings['training']['stage_0']['asd_dataset_path']
+        # asd_dataset_path = pm_embeddings.metadata['train_settings']["training"]["stage_0"]["asd_dataset_path"]
+
         set_train_transforms(
             wfd,
             pm_embeddings.metadata['train_settings']["data"],
-            pm_embeddings.metadata['train_settings']["training"]["stage_0"]["asd_dataset_path"],
+            asd_dataset_path,
         )
 
         set_train_transforms_snr_estimate(
@@ -164,11 +169,11 @@ def prepare_training_resume(checkpoint_name, local_settings, train_dir):
 
     # important! Overwrite inference parameters with SNR here
     pm.pm_single_event.metadata['train_settings']["data"]['inference_parameters'] = ['matched_filter_snr']
-    wfd = build_dataset(pm.pm_single_event.metadata['train_settings']['data'])
+    wfd = build_dataset(pm.metadata['train_settings']['data'])
     set_train_transforms(
         wfd,
         pm.pm_single_event.metadata['train_settings']['data'],
-        pm.pm_single_event.metadata['train_settings']['training']["stage_0"]["asd_dataset_path"],
+        pm.metadata['train_settings']['training']['stage_0']['asd_dataset_path'],
     )
     set_train_transforms_snr_estimate(
         wfd,
