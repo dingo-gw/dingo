@@ -169,10 +169,7 @@ class PowerLawPeakPopulation(object):
             s["mass_ratio"] = component_masses_to_mass_ratio(s["mass_1"], s["mass_2"])
 
             if not train:
-                pass
-                # TODO implement
-                # add_log_prob(prior_mass, s0)
-                # add_log_prob(prior_luminosity_distance, s)
+                add_log_prob_power_law_peak(prior_mass, prior_luminosity_distance, s)
 
             idx_obs = selection_cut_func(s)
 
@@ -181,6 +178,20 @@ class PowerLawPeakPopulation(object):
             return s
 
         return generation_func
+    
+def add_log_prob_power_law_peak(prior_mass, prior_luminosity_distance, sample):
+    """
+    Add the log probability of the sample to the sample dictionary.
+    """
+    # bring into dict
+    samples_dL = dict(
+        luminosity_distance=sample["luminosity_distance"],
+    )
+    sample["ln_prob"] = (
+        prior_mass.log_pdf(sample["mass_1_source"], sample["mass_2_source"])
+        # need to include axis argument for bilby priors
+        + prior_luminosity_distance.ln_prob(samples_dL, axis=0)
+    )
 
 
 def build_population_model(population_model, population_prior, event_model_prior):
