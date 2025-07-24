@@ -138,7 +138,7 @@ class Injection(object):
                 if self.is_detected(event=event):
                     events.append(event)
             else:
-                embeddings = self.get_embeddings_from_emulator(p)
+                embeddings = self.get_embeddings_from_emulator(p, device=self.embedding_emulator.device)
                 if self.is_detected(embedding=embeddings):
                     events.append(embeddings)
             tries += 1
@@ -201,11 +201,11 @@ class Injection(object):
         else:
             raise ValueError(f"Unknown detection model: {self.detection_model}")
 
-    def get_embeddings_from_emulator(self, params):
+    def get_embeddings_from_emulator(self, params, device='cpu'):
         
         p = params
         p = {k:torch.tensor(v) for k,v in p.items()}
-        embeddings = self.embedding_emulator.sample_from_params(params=p, num_samples=1)
+        embeddings = self.embedding_emulator.sample_from_params(params=p, num_samples=1, device=device)
 
         return embeddings
 
