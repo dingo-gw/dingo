@@ -375,22 +375,28 @@ class Injection(GWSignal):
             data[ifo] = self.data_domain.update_data(d, low_value=0.0)
 
         if store_snr:
-            kappa_squared = 0.0
-            rho_opt_squared = 0.0
+            mf_snr_squared = 0
             for ifo, clean_waveform in signal["waveform"].items():
+                
                 psd = asd[ifo] ** 2
-                kappa_squared += inner_product(
+                kappa_squared = inner_product(
                     clean_waveform, data[ifo], delta_f=self.data_domain.delta_f, psd=psd
                 )
-                rho_opt_squared += inner_product(
+                rho_opt_squared = inner_product(
                     clean_waveform,
                     clean_waveform,
                     delta_f=self.data_domain.delta_f,
                     psd=psd,
                 )
-            signal["parameters"]["matched_filter_snr"] = float(
-                kappa_squared / np.sqrt(rho_opt_squared)
-            )
+                mf_snr = float(
+                    kappa_squared / np.sqrt(rho_opt_squared)
+                )
+                # FIXME: temporary fix for window factor to be consistent with 
+                # the computation of the SNR in the whitened case.
+                mf_snr *= self.data_domain.window_factor ** (-1/2)
+
+                mf_snr_squared += mf_snr ** 2
+            signal["parameters"]["matched_filter_snr"] = np.sqrt(mf_snr_squared)
 
         signal["waveform"] = data
         return signal
