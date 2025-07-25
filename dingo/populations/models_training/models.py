@@ -1,5 +1,6 @@
 import pickle
 import copy
+import os
 
 import numpy as np
 import torch, torchvision
@@ -17,12 +18,19 @@ import dingo.core.utils as utils
 
 from dingo.populations.models_training.snr_estimator import (
     train_epoch_snr_estimator,
-    test_epoch_snr_estimator
+    test_epoch_snr_estimator,
 )
 
 from dingo.populations.models_training.embedding_emulator import (
     train_epoch_embedding,
-    test_epoch_embedding
+    test_epoch_embedding,
+    train_epoch_embedding_det,
+    test_epoch_embedding_det,
+)
+
+from dingo.populations.models_training.pdet_model import (
+    train_epoch_pdet_model,
+    test_epoch_pdet_model,
 )
 
 from dingo.populations.models_training.population_model import (
@@ -145,8 +153,12 @@ def construct_train_function(type_pm):
         return train_epoch_snr_estimator
     elif type_pm == 'embedding_emulator':
         return train_epoch_embedding
+    elif type_pm == 'embedding_emulator_det':
+        return train_epoch_embedding_det
     elif type_pm == 'population_model':
         return train_epoch_population_model
+    elif type_pm == 'pdet_model':
+        return train_epoch_pdet_model
     else:
         raise 'Model not known. '
 
@@ -155,14 +167,18 @@ def construct_test_function(type_pm):
         return test_epoch_snr_estimator
     elif type_pm == 'embedding_emulator':
         return test_epoch_embedding
+    elif type_pm == 'embedding_emulator_det':
+        return test_epoch_embedding_det
     elif type_pm == 'population_model':
         return test_epoch_population_model
+    elif type_pm == 'pdet_model':
+        return test_epoch_pdet_model
     else:
         raise 'Model not known. '
 
 def construct_get_model_callable(type_model):
 
-    if(type_model!='snr_estimator'):
+    if(type_model not in ['snr_estimator', 'pdet_model']):
         return get_model_callable
     else:
         def gmc(type_from_model_kwargs):
@@ -242,6 +258,16 @@ class SNREstimator(GenericModel):
             idx = idx.unsqueeze(0)
 
         return idx
+    
+def fix_me_get_snr_threshold_from_filename(model_filename):
+    device = 'cpu'
+    ext = os.path.splitext(model_filename)[-1]
+    if ext == ".pt":
+        metadata = torch.load(model_filename, map_location=device)["metadata"]
+    else:
+        raise ValueError("Models should be in .pt format.")
+    
+    return metadata['train_settings']['data'].get('snr_threshold', None)
 
 class EmbeddingEmulator(GenericModel):
     def __init__(
@@ -251,9 +277,20 @@ class EmbeddingEmulator(GenericModel):
         initial_weights: dict = None,
         device: str = "cuda",
         load_training_info: bool = True,
-        pm_single_event = None
-    ):
-        type_pm = 'embedding_emulator'
+        pm_single_event = None,
+    ):  
+        if metadata is not None:
+            self.snr_threshold = metadata['train_settings']['data'].get('snr_threshold', None)
+
+        # need to get the snr threshold from metadata for model type
+        if model_filename is not None:
+            self.snr_threshold = fix_me_get_snr_threshold_from_filename(model_filename)
+
+        if self.snr_threshold is None:
+            type_pm = 'embedding_emulator'
+        else:
+            print(f'Applying SNR threshold {self.snr_threshold}')
+            type_pm = 'embedding_emulator_det'
 
         # only add single event model if provided
         if(pm_single_event is not None):
@@ -280,9 +317,15 @@ class EmbeddingEmulator(GenericModel):
         self.initialize_transform_pre()
 
     def initialize_transform_pre(self):
+        params_for_embedding = copy.deepcopy(self.metadata['train_settings']['data']['params_for_embedding'])
+
+        # remove matched filter snr if needed (otherwise this will mess with )
+        # the standardization later on
+        if 'matched_filter_snr' in params_for_embedding: params_for_embedding.remove('matched_filter_snr')
+
         self.transform1 = SelectStandardizeRepackageParameters(
             {
-                "inference_parameters": self.metadata['train_settings']['data']['params_for_embedding']
+                "inference_parameters": params_for_embedding 
             },
             self.metadata['settings_pm_single_event']["train_settings"]["data"]["standardization"],
             inverse=False,
@@ -290,11 +333,11 @@ class EmbeddingEmulator(GenericModel):
         )
         self.transform2 = UnpackDict(selected_keys=["inference_parameters"])
 
-        self.transform = torchvision.transforms.Compose([self.transform1, self.transform2])
+        self.transform_params_to_array = torchvision.transforms.Compose([self.transform1, self.transform2])
 
     def sample_from_params(self, params, device=None, num_samples=None):
         
-        x = self.transform(dict(parameters=params))[0]
+        x = self.transform_params_to_array(dict(parameters=params))[0]
         x = torch.tensor(np.array(x)).squeeze()
 
         if(num_samples is not None):
@@ -322,6 +365,57 @@ class EmbeddingEmulator(GenericModel):
             y = y.reshape((*batch_shape_pre, -1))
 
         return y
+    
+class PdetModel(GenericModel):
+    def __init__(
+        self,
+        model_filename: str = None,
+        metadata: dict = None,
+        initial_weights: dict = None,
+        device: str = "cuda",
+        load_training_info: bool = True,
+    ):  
+        if metadata is not None:
+            self.snr_threshold = metadata['train_settings']['data'].get('snr_threshold', None)
+
+        # need to get the snr threshold from metadata for model type
+        if model_filename is not None:
+            self.snr_threshold = fix_me_get_snr_threshold_from_filename(model_filename)
+
+        type_pm = 'pdet_model'
+
+        super().__init__(model_filename, metadata, initial_weights, device, load_training_info, type_pm)
+        self.initialize_transform_pre()
+
+    def sample(self):
+        raise NotImplementedError
+
+    def __call__(self, params):
+        x = self.model(params)
+        x_norm = - torch.nn.functional.softplus(-x)
+
+        return x_norm
+    
+    def initialize_transform_pre(self):
+        params_for_embedding = copy.deepcopy(self.metadata['train_settings']['data']['parameters'])
+
+        self.transform1 = SelectStandardizeRepackageParameters(
+            {
+                "inference_parameters": params_for_embedding 
+            },
+            self.metadata['settings_pm_single_event']["train_settings"]["data"]["standardization"],
+            inverse=False,
+            as_type="dict",
+        )
+        self.transform2 = UnpackDict(selected_keys=["inference_parameters"])
+
+        self.transform_params_to_array = torchvision.transforms.Compose([self.transform1, self.transform2])
+
+    def get_pdet_from_params(self, params):
+        x = self.transform_params_to_array(params)
+        log_pdet = self(x)
+
+        return torch.exp(log_pdet)
 
 class PopulationModel(GenericModel):
     def __init__(

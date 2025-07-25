@@ -106,6 +106,7 @@ dingo_result = "dingo.pipe.dingo_result:main"
 dingo_train = "dingo.gw.training:train_local"
 dingo_train_condor = "dingo.gw.training.train_pipeline_condor:train_condor"
 dingo_train_embedding_emulator = "dingo.populations.training.pipeline_embedding_emulator:train_local"
+dingo_train_pdet_model = "dingo.populations.training.pipeline_pdet_model:train_local"
 dingo_train_snr_estimator = "dingo.populations.training.pipeline_snr_estimator:train_local"
 
 [project.entry-points."asimov.pipelines"]

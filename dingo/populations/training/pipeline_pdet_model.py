@@ -24,14 +24,21 @@ from dingo.core.utils import (
 )
 from dingo.gw.dataset import WaveformDataset
 from dingo.populations.models_training.models import (
-    EmbeddingEmulator
+    PdetModel
 )
 from dingo.gw.transforms import (
     AddWhiteNoiseComplex,
     SelectStandardizeRepackageParameters
 )
 
-def set_train_transforms_embedding_emulator(wfd, train_settings):
+def complete_train_settings_pdet_model(train_settings):
+
+    model_kwargs = train_settings["model"]
+    
+    model_kwargs['input_dim'] = len(train_settings['data']['parameters'])
+    model_kwargs['output_dim'] = 1
+
+def set_train_transforms_pdet_model(wfd, train_settings):
 
     # store SNR for embedding emulator conditioned on detection
     snr_threshold = train_settings['data'].get('snr_threshold', None)
@@ -46,37 +53,17 @@ def set_train_transforms_embedding_emulator(wfd, train_settings):
                 t.mean['matched_filter_snr'] = 0
                 t.std['matched_filter_snr'] = 1
 
-def autocomplete_model_kwargs_nsf_for_embedding(train_settings, data_sample, single_event_model):
-    
-    model_kwargs = train_settings['model']
-
-    input_dim = single_event_model.metadata['train_settings']['model']['embedding_net_kwargs']['output_dim']
-    snr_threshold = train_settings['data'].get('snr_threshold', None)
-
-    # TODO: hard-coded for now
-    model_kwargs["input_dim"] = input_dim
-    model_kwargs["context_dim"] = len(data_sample[0])
-
-    if snr_threshold is not None:
-        # remove the mf snr dimension
-        model_kwargs["context_dim"] -= 1
-
-    print('context_dim', model_kwargs["context_dim"])
-
 def overwrite_posterior_model_metadata(pm_single_event, train_settings):
 
-    snr_threshold = train_settings['data'].get('snr_threshold', None)
-
     # read for which parameters we want to fit the embedding emulator
-    if 'params_for_embedding' in train_settings['data']:
+    if 'parameters' in train_settings['data']:
         # overwrite the inference parameters in the metadata
-        params_for_embedding = train_settings['data']['params_for_embedding']
+        parameters = train_settings['data']['parameters'] + ['matched_filter_snr']
 
-        if snr_threshold is not None:
-            params_for_embedding += ['matched_filter_snr']
-
-        pm_single_event.metadata['train_settings']['data']['inference_parameters'] = params_for_embedding
-        print("Using the following parameters for embedding emulator:", params_for_embedding)
+        pm_single_event.metadata['train_settings']['data']['inference_parameters'] = parameters
+        print("Using the following parameters:", parameters)
+    else:
+        raise 'Need to provide parameters for detection estimation. '
 
 def prepare_training_new(train_settings: dict, train_dir: str, local_settings: dict):
     """
@@ -112,13 +99,9 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
 
     # This is the only case that exists so far, but we leave it open to develop new
     # model types.
-    if train_settings["model"]["type"] == "nsf":
+    if train_settings["model"]["type"] == "nn-dense-res":
 
         asd_dataset_path = train_settings['training']['stage_0']['asd_dataset_path']
-
-        # data_settings = copy.deepcopy(pm_embeddings.metadata['train_settings']["data"])
-        # # overwrite inference parameters
-        # data_settings['inference_parameters'] = train_settings['data']['params_for_embedding']
 
         set_train_transforms(
             wfd,
@@ -126,13 +109,12 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
             asd_dataset_path,
         )
 
-        set_train_transforms_embedding_emulator(
+        set_train_transforms_pdet_model(
             wfd,
             train_settings,
         )
 
-        # This modifies the model settings in-place.
-        autocomplete_model_kwargs_nsf_for_embedding(train_settings, wfd[0], pm_single_event)
+        complete_train_settings_pdet_model(train_settings)
 
         full_settings = {
             "dataset_settings": wfd.settings,
@@ -151,12 +133,10 @@ def prepare_training_new(train_settings: dict, train_dir: str, local_settings: d
 
     print("full_settings", full_settings["train_settings"]["model"])
     
-    pm = EmbeddingEmulator(
+    pm = PdetModel(
         metadata=full_settings,
         device=device,
     )
-    # load the corresponding event model
-    pm.add_pm_single_event()
 
     if local_settings.get("wandb", False):
         try:
@@ -192,10 +172,9 @@ def prepare_training_resume(checkpoint_name, local_settings, train_dir):
     device = local_settings['device']
 
     # TODO: 
-    pm = EmbeddingEmulator(
+    pm = PdetModel(
         model_filename=checkpoint_name,
-        device=device,
-        pm_single_event=None
+        device=device
     )
 
     posterior_model_path = pm.metadata['train_settings']['data']['posterior_model']
@@ -210,12 +189,10 @@ def prepare_training_resume(checkpoint_name, local_settings, train_dir):
         pm_single_event.metadata['train_settings']["data"],
         pm.metadata['train_settings']['training']['stage_0']['asd_dataset_path'],
     )
-    set_train_transforms_embedding_emulator(
+    set_train_transforms_pdet_model(
         wfd,
         pm.metadata['train_settings'],
     )
-
-    pm.add_pm_single_event(pm_single_event)
     
     if local_settings.get("wandb", False):
         try:
