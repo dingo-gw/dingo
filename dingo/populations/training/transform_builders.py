@@ -32,6 +32,11 @@ def set_train_transforms(population_model, data_settings, settings_pm_single_eve
     for x in ['mean', 'std']:
         standardization_dict_parameters[x] = \
               {k:v for k,v in settings_pm_single_event['train_settings']['data']['standardization'][x].items() if k in population_model.inference_parameters}
+
+        if 'matched_filter_snr' in standardization_dict_parameters[x]:
+            # Remove matched_filter_snr from standardization, since it is not used in the population model.
+            del standardization_dict_parameters[x]['matched_filter_snr']
+            
     data_settings["standardization_single_events"] = standardization_dict_parameters
     transforms.append(
         StandardizeParameters(

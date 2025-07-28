@@ -72,7 +72,7 @@ def overwrite_posterior_model_metadata(pm_single_event, train_settings):
         # overwrite the inference parameters in the metadata
         params_for_embedding = train_settings['data']['params_for_embedding']
 
-        if snr_threshold is not None:
+        if snr_threshold is not None and 'matched_filter_snr' not in params_for_embedding:
             params_for_embedding += ['matched_filter_snr']
 
         pm_single_event.metadata['train_settings']['data']['inference_parameters'] = params_for_embedding
