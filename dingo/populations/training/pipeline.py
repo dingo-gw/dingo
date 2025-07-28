@@ -22,7 +22,8 @@ from dingo.populations.training.transform_builders import set_train_transforms
 from dingo.populations.models_training.models import (
     PopulationModel,
     EmbeddingEmulator,
-    SNREstimator
+    SNREstimator,
+    PdetModel,
 )
 
 
@@ -48,16 +49,15 @@ def train(
         train_settings = pm.metadata["train_settings"]
 
         embedding_emulator = EmbeddingEmulator(train_settings["data"]["embedding_emulator_path"], device=local_settings["device"])
-        embedding_emulator.initialize_transform_pre()
-        
-        snr_estimator = SNREstimator(train_settings["data"]["snr_model_path"], device=local_settings["device"])
-        snr_estimator.set_mf_snr_threshold(train_settings["data"]["mf_snr_threshold"])
+        # embedding_emulator.initialize_transform_pre() make sure this is not needed
+
+        pdet_model = PdetModel(train_settings["data"]["pdet_model_path"], device=local_settings["device"])
 
         pm = PopulationModel(
             model_filename=checkpoint,
             device=local_settings["device"],
             embedding_emulator=embedding_emulator,
-            snr_estimator=snr_estimator,   
+            pdet_model=pdet_model
         )
 
     # (1) Prepare training data
@@ -116,16 +116,15 @@ def train(
         }
 
         embedding_emulator = EmbeddingEmulator(train_settings["data"]["embedding_emulator_path"], device=local_settings["device"])
-        embedding_emulator.initialize_transform_pre()
+        # embedding_emulator.initialize_transform_pre() make sure this is not needed
         
-        snr_estimator = SNREstimator(train_settings["data"]["snr_model_path"], device=local_settings["device"])
-        snr_estimator.set_mf_snr_threshold(train_settings["data"]["mf_snr_threshold"])
+        pdet_model = PdetModel(train_settings["data"]["pdet_model_path"], device=local_settings["device"])
         
         pm = PopulationModel(
             metadata=full_settings,
             device=local_settings["device"],
             embedding_emulator=embedding_emulator,
-            snr_estimator=snr_estimator,   
+            pdet_model=pdet_model,
         )
 
         pm.optimizer_kwargs = train_settings["training"]["optimizer"]
