@@ -34,9 +34,10 @@ def train_epoch_pdet_model(pm, dataloader, error_func=None):
         snr = data[0][...,-1]
         
         mask = snr_threshold < snr
+        log_pdet_pred = pm(params).squeeze()
 
         # compute loss
-        loss = error_func(mask.float(), pm(params)).mean()
+        loss = error_func(mask.float(), log_pdet_pred).mean()
         # backward pass and optimizer step
         loss.backward()
         pm.optimizer.step()
@@ -74,9 +75,10 @@ def test_epoch_pdet_model(pm, dataloader, error_func=None):
             snr = data[0][...,-1]
             
             mask = snr_threshold < snr
+            log_pdet_pred = pm(params).squeeze()
 
             # compute loss
-            loss = error_func(mask.float(), pm(params)).mean()
+            loss = error_func(mask.float(), log_pdet_pred).mean()
             # update loss for history and logging
             loss_info.update(loss.item(), len(data[0]))
             loss_info.print_info(batch_idx)
