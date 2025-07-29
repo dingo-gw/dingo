@@ -1017,6 +1017,10 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             f_min = self.f_start
         else:
             f_min = self.domain.f_min
+            # for SEOBNRv5EHM, the starting frequency must be the same as the reference frequency
+            if self.approximant_str == "SEOBNRv5EHM":
+                f_min = self.f_ref
+            f_min = self.domain.f_min
         # parameters needed for TD waveforms
         delta_t = 0.5 / self.domain.f_max
 
@@ -1041,6 +1045,31 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             "condition": 1,
         }
 
+
+        # SEOBNRv5EHM doesn't support setting a reference frequency, it is the
+        # same as the starting frequency
+        if self.approximant_str == "SEOBNRv5EHM":
+            # eccentric parameters
+            if "log10_eccentricity" in p and "eccentricity" in p:
+                if (10 ** p["log10_eccentricity"] - p["eccentricity"]) > 1e-4:
+                    raise ValueError(
+                        f"""log10_eccentricity of {p['log10_eccentricity']} and eccentricity 
+                        of {p['eccentricity']} are inconsistent, check your input values"""
+                    )
+
+            if "log10_eccentricity" in p:
+                eccentricity = np.power(10, p["log10_eccentricity"])
+            else:
+                eccentricity = p.get("eccentricity", 0.0)
+            longitude_ascending_nodes = p.get("long_asc_nodes", 0.0)
+            mean_per_ano = p.get("mean_anomaly", 0.0)
+
+            params_gwsignal.update({
+                'eccentricity' : eccentricity * u.dimensionless_unscaled,
+                'longAscNodes' : longitude_ascending_nodes * u.rad,
+                'meanPerAno' : mean_per_ano * u.rad,
+            })
+
         # SEOBNRv5 specific parameters
         if "postadiabatic" in p:
             params_gwsignal["postadiabatic"] = p["postadiabatic"]
@@ -1051,7 +1080,8 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         if "lmax_nyquist" in p:
             params_gwsignal["lmax_nyquist"] = p["lmax_nyquist"]
         else:
-            params_gwsignal["lmax_nyquist"] = 2
+            if not "ROM" in self.approximant_str:
+                params_gwsignal["lmax_nyquist"] = 2
 
         if return_target_function:
             # This is a hack to make compatible with LAL version. Target functions for
