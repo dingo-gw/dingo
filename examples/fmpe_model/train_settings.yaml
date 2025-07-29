@@ -16,8 +16,8 @@ data:
   - L1
   extrinsic_prior:
     dec: default
-    geocent_time: bilby.core.prior.Uniform(minimum=-0.03, maximum=0.03)
-    luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0)
+    geocent_time: bilby.core.prior.Uniform(minimum=-0.03, maximum=0.03, name='geocent_time')
+    luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0, name='luminosity_distance')
     psi: default
     ra: default
   inference_parameters:

@@ -74,14 +74,14 @@ class BBHExtrinsicPriorDict(BBHPriorDict):
                     std[key] = np.sqrt((p.maximum - p.minimum) ** 2.0 / 12.0).item()
                 elif isinstance(p, Sine) and p.minimum == 0.0 and p.maximum == np.pi:
                     mean[key] = np.pi / 2.0
-                    std[key] = np.sqrt(0.25 * (np.pi ** 2) - 2).item()
+                    std[key] = np.sqrt(0.25 * (np.pi**2) - 2).item()
                 elif (
                     isinstance(p, Cosine)
                     and p.minimum == -np.pi / 2
                     and p.maximum == np.pi / 2
                 ):
                     mean[key] = 0.0
-                    std[key] = np.sqrt(0.25 * (np.pi ** 2) - 2).item()
+                    std[key] = np.sqrt(0.25 * (np.pi**2) - 2).item()
                 else:
                     estimation_keys.append(key)
         else:
@@ -99,31 +99,28 @@ class BBHExtrinsicPriorDict(BBHPriorDict):
         return mean, std
 
 
-# TODO: Add latex labels, names
-
-
 default_extrinsic_dict = {
-    "dec": "bilby.core.prior.Cosine(minimum=-np.pi/2, maximum=np.pi/2)",
-    "ra": 'bilby.core.prior.Uniform(minimum=0., maximum=2*np.pi, boundary="periodic")',
-    "geocent_time": "bilby.core.prior.Uniform(minimum=-0.1, maximum=0.1)",
-    "psi": 'bilby.core.prior.Uniform(minimum=0.0, maximum=np.pi, boundary="periodic")',
-    "luminosity_distance": "bilby.core.prior.Uniform(minimum=100.0, maximum=6000.0)",
+    "dec": "bilby.core.prior.Cosine(minimum=-np.pi/2, maximum=np.pi/2, name='dec')",
+    "ra": 'bilby.core.prior.Uniform(minimum=0., maximum=2*np.pi, boundary="periodic", name="ra")',
+    "geocent_time": "bilby.core.prior.Uniform(minimum=-0.1, maximum=0.1, name='geocent_time')",
+    "psi": 'bilby.core.prior.Uniform(minimum=0.0, maximum=np.pi, boundary="periodic", name="psi")',
+    "luminosity_distance": "bilby.core.prior.Uniform(minimum=100.0, maximum=6000.0, name='luminosity_distance')",
 }
 
 default_intrinsic_dict = {
-    "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
-    "mass_2": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
-    "mass_ratio": "bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.125, maximum=1.0)",
-    "chirp_mass": "bilby.gw.prior.UniformInComponentsChirpMass(minimum=25.0, maximum=100.0)",
+    "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0, name='mass_1')",
+    "mass_2": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0, name='mass_2')",
+    "mass_ratio": "bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.125, maximum=1.0, name='mass_ratio')",
+    "chirp_mass": "bilby.gw.prior.UniformInComponentsChirpMass(minimum=25.0, maximum=100.0, name='chirp_mass')",
     "luminosity_distance": 1000.0,
-    "theta_jn": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
-    "phase": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
-    "a_1": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.99)",
-    "a_2": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.99)",
-    "tilt_1": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
-    "tilt_2": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
-    "phi_12": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
-    "phi_jl": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
+    "theta_jn": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi, name='theta_jn')",
+    "phase": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic", name="phase")',
+    "a_1": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.99, name='a_1')",
+    "a_2": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.99, name='a_2')",
+    "tilt_1": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi, name='tilt_1')",
+    "tilt_2": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi, name='tilt_2')",
+    "phi_12": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic", name="phi_12")',
+    "phi_jl": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic", name="phi_jl")',
     "geocent_time": 0.0,
 }
 

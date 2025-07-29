@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from bilby_pipe.bilbyargparser import BilbyArgParser
 from bilby_pipe.utils import get_command_line_arguments, logger, parse_args
 
@@ -22,10 +20,14 @@ def create_parser():
     parser.add("--label", type=str, default="")
     # parser.add("--calibration", action="store_true", help="Generate calibration plot")
     parser.add("--corner", action="store_true", help="Generate corner plot")
-    parser.add("--weights", action="store_true", help="Generate plot of importance "
-                                                      "weights")
-    parser.add("--log_probs", action="store_true", help="Generate plot of target"
-                                                        "versus proposal log probability")
+    parser.add(
+        "--weights", action="store_true", help="Generate plot of importance " "weights"
+    )
+    parser.add(
+        "--log_probs",
+        action="store_true",
+        help="Generate plot of target" "versus proposal log probability",
+    )
     # parser.add("--marginal", action="store_true", help="Generate marginal plots")
     # parser.add("--skymap", action="store_true", help="Generate skymap")
     # parser.add("--waveform", action="store_true", help="Generate waveform")

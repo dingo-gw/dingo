@@ -30,13 +30,13 @@ waveform_generator:
 # settings for intrinsic prior over parameters
 intrinsic_prior:
   # prior for non-fixed parameters
-  mass_1: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)
-  mass_2: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)
-  mass_ratio: bilby.core.prior.Uniform(minimum=0.125, maximum=1.0)
-  chirp_mass: bilby.core.prior.Uniform(minimum=25.0, maximum=100.0)
+  mass_1: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0, name='mass_1')
+  mass_2: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0, name='mass_2')
+  mass_ratio: bilby.core.prior.Uniform(minimum=0.125, maximum=1.0, name='mass_ratio')
+  chirp_mass: bilby.core.prior.Uniform(minimum=25.0, maximum=100.0, name='chirp_mass')
   phase: default
-  a_1: bilby.core.prior.Uniform(minimum=0.0, maximum=0.88)
-  a_2: bilby.core.prior.Uniform(minimum=0.0, maximum=0.88)
+  a_1: bilby.core.prior.Uniform(minimum=0.0, maximum=0.88, name='a_1')
+  a_2: bilby.core.prior.Uniform(minimum=0.0, maximum=0.88, name='a_2')
   tilt_1: default
   tilt_2: default
   phi_12: default
