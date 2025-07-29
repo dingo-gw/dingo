@@ -13,6 +13,10 @@ on:
 jobs:
   pytest:
     runs-on: ubuntu-latest
+    env:
+      OPENBLAS_NUM_THREADS: 1
+      MKL_NUM_THREADS: 1
+      NUMEXPR_NUM_THREADS: 1
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
