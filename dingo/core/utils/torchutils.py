@@ -106,7 +106,7 @@ def print_number_of_model_parameters(network: FlowWrapper | ContinuousFlow):
     n_grad = get_number_of_model_parameters(network, (True,))
     n_nograd = get_number_of_model_parameters(network, (False,))
     print(f"Fixed parameters: {n_nograd}\nLearnable parameters: {n_grad}")
-    if isinstance(network, FlowWrapper):
+    if network.name == "FlowWrapper":
         try:
             n_grad_embedding = get_number_of_model_parameters(
                 network.embedding_net, (True,)
@@ -120,7 +120,7 @@ def print_number_of_model_parameters(network: FlowWrapper | ContinuousFlow):
             print(
                 "Not possible to list learnable parameters of embedding network and flow separately."
             )
-    elif isinstance(network, ContinuousFlow):
+    elif network.name == "ContinuousFlow":
         try:
             n_grad_theta_embedding = get_number_of_model_parameters(
                 network.theta_embedding_net, (True,)

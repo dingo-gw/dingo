@@ -248,6 +248,7 @@ class FlowWrapper(nn.Module):
         :param embedding_net: nn.Module
         """
         super(FlowWrapper, self).__init__()
+        self.name = "FlowWrapper"
         self.embedding_net = embedding_net
         self.flow = flow
 

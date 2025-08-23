@@ -49,6 +49,7 @@ class ContinuousFlow(nn.Module):
             continuous_flow_net.
         """
         super(ContinuousFlow, self).__init__()
+        self.name = "ContinuousFlow"
         self.continuous_flow_net = continuous_flow_net
         self.context_embedding_net = context_embedding_net
         self.theta_embedding_net = theta_embedding_net
