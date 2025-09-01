@@ -111,10 +111,6 @@ class GWSignal(object):
                     self.data_domain = self.data_domain.base_domain
                     self._use_base_domain = True
                     self._initialize_transform()
-                else:
-                    print(
-                        f"{type(self.data_domain)} has no base domain. Nothing to do."
-                    )
             else:
                 raise NotImplementedError(
                     "Cannot recover original domain from base domain alone."

@@ -82,10 +82,10 @@ waveform_generator:
 
 # Dataset only samples over intrinsic parameters. Extrinsic parameters are chosen at train time.
 intrinsic_prior:
-  mass_1: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)
-  mass_2: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)
-  chirp_mass: bilby.gw.prior.UniformInComponentsChirpMass(minimum=15.0, maximum=100.0)
-  mass_ratio: bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.125, maximum=1.0)
+  mass_1: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0, name='mass_1')
+  mass_2: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0, name='mass_2')
+  chirp_mass: bilby.gw.prior.UniformInComponentsChirpMass(minimum=15.0, maximum=100.0, name='chirp_mass')
+  mass_ratio: bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.125, maximum=1.0, name='mass_ratio')
   phase: default
   chi_1: bilby.gw.prior.AlignedSpin(name='chi_1', a_prior=Uniform(minimum=0, maximum=0.9))
   chi_2: bilby.gw.prior.AlignedSpin(name='chi_2', a_prior=Uniform(minimum=0, maximum=0.9))
@@ -188,9 +188,9 @@ data:
   extrinsic_prior:  # Sampled at train time
     dec: default
     ra: default
-    geocent_time: bilby.core.prior.Uniform(minimum=-0.10, maximum=0.10)
+    geocent_time: bilby.core.prior.Uniform(minimum=-0.10, maximum=0.10, name='geocent_time')
     psi: default
-    luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0)
+    luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0, name='luminosity_distance')
   ref_time: 1126259462.391
   inference_parameters: 
   - chirp_mass
