@@ -949,6 +949,17 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
 
         self.mode_list = kwargs.get("mode_list", None)
 
+        allowed_extra_kwargs = {
+            "postadiabatic",
+            "postadiabatic_type",
+            "lmax_nyquist",
+            "enable_antisymmetric_modes",
+            "antisymmetric_modes_hm",
+        }
+        extra_wf_kwargs = {k: v for k, v in kwargs.items() if k in allowed_extra_kwargs}
+        extra_wf_kwargs["lmax_nyquist"] = kwargs.get("lmax_nyquist", 2)
+        self.extra_wf_kwargs = extra_wf_kwargs
+
     @property
     def domain(self):
         if self._use_base_domain:
@@ -1042,22 +1053,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         }
 
         # SEOBNRv5 specific parameters
-        if "postadiabatic" in p:
-            params_gwsignal["postadiabatic"] = p["postadiabatic"]
-
-            if "postadiabatic_type" in p:
-                params_gwsignal["postadiabatic_type"] = p["postadiabatic_type"]
-
-        if "lmax_nyquist" in p:
-            params_gwsignal["lmax_nyquist"] = p["lmax_nyquist"]
-        else:
-            params_gwsignal["lmax_nyquist"] = 2
-
-        if "enable_antisymmetric_modes" in p:
-            params_gwsignal["enable_antisymmetric_modes"] = p["enable_antisymmetric_modes"]
-
-            if "antisymmetric_modes_hm" in p:
-                params_gwsignal["antisymmetric_modes_hm"] = p["antisymmetric_modes_hm"]
+        params_gwsignal.update(self.extra_wf_kwargs)
 
         if return_target_function:
             # This is a hack to make compatible with LAL version. Target functions for
