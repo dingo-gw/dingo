@@ -1053,6 +1053,12 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         else:
             params_gwsignal["lmax_nyquist"] = 2
 
+        if "enable_antisymmetric_modes" in p:
+            params_gwsignal["enable_antisymmetric_modes"] = p["enable_antisymmetric_modes"]
+
+            if "antisymmetric_modes_hm" in p:
+                params_gwsignal["antisymmetric_modes_hm"] = p["antisymmetric_modes_hm"]
+
         if return_target_function:
             # This is a hack to make compatible with LAL version. Target functions for
             # new waveform generator are defined in generate_FD_waveform, etc.
