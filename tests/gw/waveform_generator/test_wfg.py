@@ -125,4 +125,4 @@ def test_new_interface_extra_kwargs(uniform_fd_domain, precessing_spin_wf_parame
     assert params_gwsignal["postadiabatic"] is True
     assert params_gwsignal["postadiabatic_type"] == "analytic"
     assert params_gwsignal["enable_antisymmetric_modes"] is True
-    assert params_gwsignal["antisymmetric_modes_hm"] == True
+    assert params_gwsignal["antisymmetric_modes_hm"] is True
