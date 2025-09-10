@@ -15,7 +15,7 @@ from dingo.core.result import Result as CoreResult
 from dingo.gw.conversion import change_spin_conversion_phase
 from dingo.gw.domains import MultibandedFrequencyDomain
 from dingo.gw.domains import build_domain
-from dingo.gw.gwutils import get_extrinsic_prior_dict, get_window_factor
+from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 from dingo.gw.prior import build_prior_with_defaults
 
@@ -135,8 +135,7 @@ class Result(CoreResult):
 
     def _build_domain(self):
         """
-        Construct the domain object based on model metadata. Includes the window factor
-        needed for whitening data.
+        Construct the domain object based on model metadata
 
         Called by __init__() immediately after _build_prior().
         """
@@ -145,8 +144,6 @@ class Result(CoreResult):
         data_settings = self.base_metadata["train_settings"]["data"]
         if "domain_update" in data_settings:
             self.domain.update(data_settings["domain_update"])
-
-        self.domain.window_factor = get_window_factor(data_settings["window"])
 
     def _rebuild_domain(self, verbose=False):
         """Rebuild the domain based on settings updated for importance sampling.
@@ -170,7 +167,6 @@ class Result(CoreResult):
             window_settings.update(
                 (k, updates[k]) for k in set(window_settings).intersection(updates)
             )
-            updates["window_factor"] = float(get_window_factor(window_settings))
 
         if "T" in updates:
             updates["delta_f"] = 1.0 / updates["T"]

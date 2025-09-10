@@ -23,14 +23,6 @@ def get_window(window_kwargs):
         raise NotImplementedError(f"Unknown window type {type}.")
 
 
-def get_window_factor(window):
-    """Compute window factor. If window is not provided as array or tensor but as
-    window_kwargs, first build the window."""
-    if type(window) == dict:
-        window = get_window(window)
-    return np.sum(window**2) / len(window)
-
-
 def get_extrinsic_prior_dict(extrinsic_prior):
     """Build dict for extrinsic prior by starting with
     default_extrinsic_dict, and overwriting every element for which
