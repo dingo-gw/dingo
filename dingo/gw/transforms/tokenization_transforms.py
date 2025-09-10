@@ -1180,17 +1180,19 @@ class UpdateFrequencyRange(object):
         if self.minimum_frequency is not None:
             # Same for all detectors
             if isinstance(self.minimum_frequency, float):
+                # Do not mask token if f_min_per_token = minimum_frequency
                 mask_min = np.where(
-                    f_min_per_token <= self.minimum_frequency, True, False
+                    f_min_per_token < self.minimum_frequency, True, False
                 )
                 mask = np.logical_or(mask, mask_min)
             # Different for each detector
             elif isinstance(self.minimum_frequency, dict):
                 for b in blocks:
                     if DETECTOR_DICT_INVERSE[b] in self.minimum_frequency:
+                        # Do not mask token if f_min_per_token = minimum_frequency
                         mask_min = np.where(
                             f_min_per_token_single
-                            <= self.minimum_frequency[DETECTOR_DICT_INVERSE[b]],
+                            < self.minimum_frequency[DETECTOR_DICT_INVERSE[b]],
                             True,
                             False,
                         )
@@ -1201,17 +1203,19 @@ class UpdateFrequencyRange(object):
         if self.maximum_frequency is not None:
             # Same for all detectors
             if isinstance(self.maximum_frequency, float):
+                # Do not mask token if f_max_per_token = maximum_frequency
                 mask_max = np.where(
-                    f_max_per_token >= self.maximum_frequency, True, False
+                    f_max_per_token > self.maximum_frequency, True, False
                 )
                 mask = np.logical_or(mask, mask_max)
             # Different for each detector
             elif isinstance(self.maximum_frequency, dict):
                 for b in blocks:
                     if DETECTOR_DICT_INVERSE[b] in self.maximum_frequency:
+                        # Do not mask token if f_max_per_token = maximum_frequency
                         mask_max = np.where(
                             f_max_per_token_single
-                            >= self.maximum_frequency[DETECTOR_DICT_INVERSE[b]],
+                            > self.maximum_frequency[DETECTOR_DICT_INVERSE[b]],
                             True,
                             False,
                         )
