@@ -223,8 +223,8 @@ def fill_in_arguments_from_model(args):
                 logger.warning(
                     f"Argument {k} provided to dingo_pipe as {args_v} "
                     f"does not match value {v} in model file. Using model value for "
-                    f"inference, and will attempt to change this during importance "
-                    f"sampling."
+                    f"data generation, but will attempt to change this during sampling and "
+                    f"importance sampling."
                 )
                 changed_args[k] = args_v
 
