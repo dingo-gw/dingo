@@ -9,6 +9,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, DistributedSampler
 import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 from dingo.core.nn.cfnets import ContinuousFlow
 from dingo.core.nn.nsf import FlowWrapper
@@ -102,48 +103,55 @@ def get_number_of_model_parameters(
     return num_params
 
 
-def print_number_of_model_parameters(network: FlowWrapper | ContinuousFlow):
+def print_number_of_model_parameters(network: FlowWrapper | ContinuousFlow | DDP):
     n_grad = get_number_of_model_parameters(network, (True,))
     n_nograd = get_number_of_model_parameters(network, (False,))
     print(f"Fixed parameters: {n_nograd}\nLearnable parameters: {n_grad}")
-    if network.name == "FlowWrapper":
-        try:
-            n_grad_embedding = get_number_of_model_parameters(
-                network.embedding_net, (True,)
-            )
-            n_grad_flow = get_number_of_model_parameters(network.flow, (True,))
+    # Extract module from DDP wrapped network
+    network = network.module if hasattr(network, "module") else network
+    try:
+        if network.name == "FlowWrapper":
+            try:
+                n_grad_embedding = get_number_of_model_parameters(
+                    network.embedding_net, (True,)
+                )
+                n_grad_flow = get_number_of_model_parameters(network.flow, (True,))
+                print(
+                    f"   - learnable embedding network parameters: {n_grad_embedding} ({n_grad_embedding / n_grad * 100 :.2f}%)\n"
+                    f"   - learnable flow parameters: {n_grad_flow} ({n_grad_flow / n_grad * 100 :.2f}%)\n"
+                )
+            except:
+                print(
+                    "Not possible to list learnable parameters of embedding network and flow separately."
+                )
+        elif network.name == "ContinuousFlow":
+            try:
+                n_grad_theta_embedding = get_number_of_model_parameters(
+                    network.theta_embedding_net, (True,)
+                )
+                n_grad_context_embedding = get_number_of_model_parameters(
+                    network.context_embedding_net, (True,)
+                )
+                n_grad_cflow = get_number_of_model_parameters(
+                    network.continuous_flow_net, (True,)
+                )
+                print(
+                    f"   - learnable theta embedding network parameters: {n_grad_theta_embedding} ({n_grad_theta_embedding / n_grad * 100 :.2f}%)\n"
+                    f"   - learnable context embedding network parameters: {n_grad_context_embedding} ({n_grad_context_embedding / n_grad * 100 :.2f}%)\n"
+                    f"   - learnable continuous flow parameters: {n_grad_cflow} ({n_grad_cflow / n_grad * 100 :.2f}%)\n"
+                )
+            except:
+                print(
+                    "Not possible to list learnable parameters of embedding network and flow separately."
+                )
+        else:
             print(
-                f"   - learnable embedding network parameters: {n_grad_embedding} ({n_grad_embedding / n_grad * 100 :.2f}%)\n"
-                f"   - learnable flow parameters: {n_grad_flow} ({n_grad_flow / n_grad * 100 :.2f}%)\n"
+                "Cannot print more detailed information about the number of learnable parameters in different components"
+                "of the network because posterior model not in [FlowWrapper, ContinuousFlow]."
             )
-        except:
-            print(
-                "Not possible to list learnable parameters of embedding network and flow separately."
-            )
-    elif network.name == "ContinuousFlow":
-        try:
-            n_grad_theta_embedding = get_number_of_model_parameters(
-                network.theta_embedding_net, (True,)
-            )
-            n_grad_context_embedding = get_number_of_model_parameters(
-                network.context_embedding_net, (True,)
-            )
-            n_grad_cflow = get_number_of_model_parameters(
-                network.continuous_flow_net, (True,)
-            )
-            print(
-                f"   - learnable theta embedding network parameters: {n_grad_theta_embedding} ({n_grad_theta_embedding / n_grad * 100 :.2f}%)\n"
-                f"   - learnable context embedding network parameters: {n_grad_context_embedding} ({n_grad_context_embedding / n_grad * 100 :.2f}%)\n"
-                f"   - learnable continuous flow parameters: {n_grad_cflow} ({n_grad_cflow / n_grad * 100 :.2f}%)\n"
-            )
-        except:
-            print(
-                "Not possible to list learnable parameters of embedding network and flow separately."
-            )
-    else:
+    except:
         print(
-            "Cannot print more detailed information about the number of learnable parameters in different components"
-            "of the network because posterior model not in [FlowWrapper, ContinuousFlow]."
+            "Something went wrong, not possible to list learnable parameters of embedding network and flow separately."
         )
 
 
