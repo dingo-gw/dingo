@@ -66,8 +66,6 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
         for k, v in new_settings.items():
             if k not in ["f_min", "f_max", "delta_f", "window_factor"]:
                 raise KeyError(f"Invalid key for domain update: {k}.")
-            if k == "window_factor" and v != self._window_factor:
-                raise ValueError("Cannot update window_factor.")
             if k == "delta_f" and v != self._delta_f:
                 raise ValueError("Cannot update delta_f.")
         self._set_new_range(
@@ -207,15 +205,6 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
         return round(self._f_max / self._delta_f)
 
     @property
-    def window_factor(self) -> float:
-        return self._window_factor
-
-    @window_factor.setter
-    def window_factor(self, value: float):
-        """Set self._window_factor."""
-        self._window_factor = float(value)
-
-    @property
     def f_max(self) -> float:
         """The maximum frequency [Hz] is typically set to half the sampling
         rate."""
@@ -263,5 +252,4 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
             "f_min": self.f_min,
             "f_max": self.f_max,
             "delta_f": self.delta_f,
-            "window_factor": self.window_factor,
         }

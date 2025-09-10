@@ -92,16 +92,6 @@ class BaseFrequencyDomain(Domain, ABC):
         pass
 
     @property
-    @abstractmethod
-    def window_factor(self) -> float:
-        pass
-
-    @window_factor.setter
-    @abstractmethod
-    def window_factor(self, value: float):
-        pass
-
-    @property
     def delta_f(self) -> float | np.ndarray:
         return self._delta_f
 
@@ -206,25 +196,36 @@ class BaseFrequencyDomain(Domain, ABC):
         r"""
         Standard deviation per bin for white noise,
         $$
+        \sigma_{\mathrm{noise}} = \sqrt{\frac{1}{4 \delta f}}
+        $$
+
+        Historical note: 
+        Note we *no longer* use the noise std of the form 
+        $$
         \sigma_{\mathrm{noise}} = \sqrt{\frac{w}{4 \delta f}}
         $$
-        where $w$ is the window factor.
+        where $w$ is the window factor. For the full discussion, see 
+        https://git.ligo.org/pe/pe-group-coordination/-/issues/1#note_1465275. 
 
-        The window factor arises because of the way frequency domain data is
-        constructed from observed time domain data. Generally a window is applied to
-        the time domain data before taking the Fourier transform. This reduces the
-        power in the noise by $w^2$. However, the signal is assumed to be unaffected by
-        the window, which tapers near the edges of the domain. We keep track of this in
-        DINGO by generating noise with standard deviation as above.
+        The window factor generally arises because of the way frequency domain data is
+        constructed from observed time series. Typically, a window 
+        is applied to time series before taking the Fourier transform. Therefore,
+        for an arbitrary timeseries, applying a window to the time domain 
+        reduces the signal power by $w^2$. 
+        
+        However, with GWs we assume the signal is unaffected by the window (ie where 
+        the window is not one, the signal is assumed to be zero). Thus we should 
+        not divide by the window factor. Now the whitened data is not unit Gaussian 
+        near the boundaries of the domain. So technically, one has a non-stationary
+        noise process, but a reasonable approximation is to ignore this and simply
+        set the window factor to one.
 
         To scale noise such that it is consistent with a multivariate *unit* normal
-        distribution, you must divide whitened data by the noise_std. For the
+        distribution in the, you must divide whitened data by the noise_std. For the
         UniformFrequencyDomain, noise_std is a number, as delta_f is constant across
         the domain. For the MultibandedFrequencyDomain, it is an array.
         """
-        if self.window_factor is None:
-            raise ValueError("Window factor needs to be set for noise_std.")
-        return np.sqrt(self.window_factor) / np.sqrt(4.0 * self.delta_f)
+        return 1 / np.sqrt(4.0 * self.delta_f)
 
     def check_data_compatibility(self, data: np.ndarray) -> bool:
         """

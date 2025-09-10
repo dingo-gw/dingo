@@ -7,6 +7,7 @@ from dingo.core.posterior_models.score_matching import ScoreDiffusionPosteriorMo
 from dingo.core.utils.backward_compatibility import (
     torch_load_with_fallback,
     update_model_config,
+    check_window_factor_fix
 )
 
 
@@ -45,6 +46,7 @@ def build_model_from_kwargs(
 
     if filename is not None:
         d, _ = torch_load_with_fallback(filename, preferred_map_location="meta")
+        check_window_factor_fix(d)
         update_model_config(d["metadata"]["train_settings"]["model"])  # Backward compat
         posterior_model_type = d["metadata"]["train_settings"]["model"][
             "posterior_model_type"

@@ -21,7 +21,6 @@ def signal_setup_EOB():
             "f_min": 20,
             "f_max": 1024,
             "delta_f": 0.125,
-            "window_factor": 1.0,
         }
     )
     data_domain = build_domain(
@@ -30,7 +29,6 @@ def signal_setup_EOB():
             "f_min": 20.0,
             "f_max": 1024.0,
             "delta_f": 0.125,
-            "window_factor": 0.9374713897717841,
         }
     )
     ifo_list = ["H1", "L1"]

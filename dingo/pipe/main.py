@@ -132,8 +132,6 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
     if args.asd_dataset:
         asd_dataset = ASDDataset(file_name=args.asd_dataset)
         domain_dict = copy.deepcopy(domain.domain_dict)
-        if "window_factor" in domain_dict:
-            del domain_dict["window_factor"]
         asd_dataset.update_domain(domain_dict)
         psd_dict = {}
         rng = np.random.default_rng(args.generation_seed)

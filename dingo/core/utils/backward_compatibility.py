@@ -1,5 +1,7 @@
 import logging
 from typing import Dict, List, Literal, Tuple
+from dingo._version import __version__
+import packaging.version as pv
 
 import torch
 
@@ -85,6 +87,54 @@ def torch_load_with_fallback(
     raise RuntimeError(
         f"failed to load model {filename} on any device, " "tried: {', '.join(devices)}"
     )
+
+
+def check_window_factor_fix(model_metadata: dict) -> bool:
+    """
+    Versions of DINGO before 0.8.6 were using an erroneous computation of the
+    window factor. For the full discussion see:
+    https://git.ligo.org/pe/pe-group-coordination/-/issues/1#note_1469386
+    Therefore, we if the version of the network does not match the version of the
+    package, we raise an exception telling the user to either upgrade or
+    downgrade their version of DINGO such that the code and networks
+    are consistent.
+
+    Parameters
+    ----------
+    model_metadata : dict
+        Metdata of the DINGO model
+    """
+    dingo_version = pv.parse(__version__)
+    model_version_str = model_metadata["version"].split("=", 1)[1]
+    model_version = pv.parse(model_version_str)
+    window_factor_fix_version = pv.parse("0.8.6")
+
+    class VersionMismatchError(Exception):
+        pass
+
+    if (
+        dingo_version < window_factor_fix_version
+        and model_version >= window_factor_fix_version
+    ):
+        raise VersionMismatchError(
+            f"""
+        Your DINGO version ({dingo_version}) is before the window factor fix,
+        but the model version ({model_version}) is after the window factor fix.
+        Please upgrade your DINGO version to {window_factor_fix_version} or later
+        to use this network.
+        """.strip()
+        )
+    elif (
+        dingo_version >= window_factor_fix_version
+        and model_version < window_factor_fix_version
+    ):
+        raise VersionMismatchError(
+            f"""
+        Your DINGO version ({dingo_version}) is after the window factor fix and model version ({model_version})
+        is before the window factor fix. Please downgrade your dingo version to before {window_factor_fix_version} 
+        to use this network.
+        """.strip()
+        )
 
 
 def update_model_config(model_settings: dict):
