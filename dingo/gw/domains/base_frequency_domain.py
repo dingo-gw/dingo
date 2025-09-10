@@ -214,8 +214,8 @@ class BaseFrequencyDomain(Domain, ABC):
         reduces the signal power by $w^2$. 
         
         However, with GWs we assume the signal is unaffected by the window (ie where 
-        the window is not one, the signal is assumed to be zero). Thus we should 
-        not divide by the window factor. Now the whitened data is not unit Gaussian 
+        the window is not one, the signal is assumed to be zero). Thus there is 
+        no *signal* power loss from the window. Now the whitened data is not unit Gaussian 
         near the boundaries of the domain. So technically, one has a non-stationary
         noise process, but a reasonable approximation is to ignore this and simply
         set the window factor to one.
