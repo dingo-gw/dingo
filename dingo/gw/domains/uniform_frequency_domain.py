@@ -25,7 +25,6 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
         f_min: float,
         f_max: float,
         delta_f: float,
-        window_factor: Optional[float] = None,
     ):
         """
         Parameters
@@ -33,13 +32,11 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
         f_min : float
         f_max : float
         delta_f : float
-        window_factor Optional[float]
         """
         super().__init__()
         self._f_min = f_min
         self._f_max = f_max
         self._delta_f = delta_f
-        self._window_factor = window_factor
         self._frequency_mask = None
 
     def update(self, new_settings: dict):
@@ -64,7 +61,7 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
                 "Cannot update domain to type other than UniformFrequencyDomain."
             )
         for k, v in new_settings.items():
-            if k not in ["f_min", "f_max", "delta_f", "window_factor"]:
+            if k not in ["f_min", "f_max", "delta_f"]:
                 raise KeyError(f"Invalid key for domain update: {k}.")
             if k == "delta_f" and v != self._delta_f:
                 raise ValueError("Cannot update delta_f.")
