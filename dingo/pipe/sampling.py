@@ -58,6 +58,8 @@ class SamplingInput(Input):
         self.batch_size = args.batch_size
         self.density_recovery_settings = args.density_recovery_settings
 
+        self.zero_noise = args.zero_noise
+
         # self.sampler = args.sampler
         # self.sampler_kwargs = args.sampler_kwargs
         # self.sampling_seed = args.sampling_seed
@@ -132,7 +134,7 @@ class SamplingInput(Input):
 
         else:
             self.gnpe = False
-            self.dingo_sampler = GWSampler(model=model)
+            self.dingo_sampler = GWSampler(model=model, zero_noise=self.zero_noise, batch_size=self.batch_size)
 
         self.dingo_sampler.context = self.context
         self.dingo_sampler.event_metadata = self.event_metadata

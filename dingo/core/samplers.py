@@ -60,6 +60,7 @@ class Sampler(object):
     def __init__(
         self,
         model: BasePosteriorModel,
+        **kwargs,
     ):
         """
         Parameters
@@ -67,6 +68,8 @@ class Sampler(object):
         model : BasePosteriorModel
         """
         self.model = model
+        self.zero_noise = kwargs['zero_noise']
+        self.batch_size = kwargs['batch_size']
 
         self.metadata = self.model.metadata.copy()
         if self.metadata["train_settings"]["data"].get("unconditional", False):
@@ -178,6 +181,7 @@ class Sampler(object):
         self,
         num_samples: int,
         batch_size: Optional[int] = None,
+        zero_noise_alteration: Optional[bool] = False,
     ):
         """
         Generates samples and stores them in self.samples. Conditions the model on
@@ -216,7 +220,10 @@ class Sampler(object):
         if batch_size is None:
             batch_size = num_samples
         full_batches, remainder = divmod(num_samples, batch_size)
-        samples = [self._run_sampler(batch_size, context) for _ in range(full_batches)]
+        if zero_noise_alteration:
+            samples = [self._run_sampler(batch_size, context)]
+        else:
+            samples = [self._run_sampler(batch_size, context) for _ in range(full_batches)]
         if remainder > 0:
             samples.append(self._run_sampler(remainder, context))
         samples = {p: torch.cat([s[p] for s in samples]) for p in samples[0].keys()}
