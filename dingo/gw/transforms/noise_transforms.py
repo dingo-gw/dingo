@@ -184,6 +184,33 @@ class AddWhiteNoiseComplex(object):
         sample["waveform"] = noisy_strains
         return sample
 
+class BatchedAddRandomNoiseComplex(object):
+    """
+    Adds N random noise realisations to the
+    complex strain data.
+    """
+
+    def __init__(self, batch_size):
+        pass
+
+    def __call__(self, input_sample):
+        sample = input_sample.copy()
+        noisy_strains = {}
+        for ifo, pure_strain in sample["waveform"].items():
+            # Use torch rng and convert to numpy, which is slightly faster than using
+            # numpy directly. Using torch.randn gives single-precision floats by default
+            # (which we want)  whereas np.random.random gives double precision (and
+            # must subsequently  be cast to single precision).
+            # np.random.default_rng().standard_normal() can be set to output single
+            # precision, but in testing this is slightly slower than the torch call.
+
+            noise = None # random sample
+
+            noise = noise.numpy()
+            noisy_strains[ifo] = pure_strain + noise
+        sample["waveform"] = noisy_strains
+        return sample
+
 
 class RepackageStrainsAndASDS(object):
     """
