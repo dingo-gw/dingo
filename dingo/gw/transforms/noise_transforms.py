@@ -134,7 +134,7 @@ class WhitenAndScaleStrain(object):
 
     1 / np.sqrt(4.0 * delta_f).
 
-    This accounts for for frequency binning if delta_f is not constant.
+    This accounts for frequency binning 
     """
 
     def __init__(self, scale_factor):
