@@ -18,6 +18,7 @@ from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 from dingo.gw.prior import build_prior_with_defaults
+from dingo.core.utils.backward_compatibility import check_minimum_version
 
 
 RANDOM_STATE = 150914
@@ -140,6 +141,7 @@ class Result(CoreResult):
         Called by __init__() immediately after _build_prior().
         """
         self.domain = build_domain(self.base_metadata["dataset_settings"]["domain"])
+        check_minimum_version(self.version)
 
         data_settings = self.base_metadata["train_settings"]["data"]
         if "domain_update" in data_settings:
@@ -159,14 +161,6 @@ class Result(CoreResult):
         # TODO: Make compatible with MultibandedFrequencyDomain.
         if isinstance(self.domain, MultibandedFrequencyDomain):
             raise NotImplementedError()
-
-        if "f_s" in updates or "T" in updates or "roll_off" in updates:
-            window_settings = self.base_metadata["train_settings"]["data"][
-                "window"
-            ].copy()
-            window_settings.update(
-                (k, updates[k]) for k in set(window_settings).intersection(updates)
-            )
 
         if "T" in updates:
             updates["delta_f"] = 1.0 / updates["T"]

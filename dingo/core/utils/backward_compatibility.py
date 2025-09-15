@@ -1,11 +1,12 @@
 import logging
 from typing import Dict, List, Literal, Tuple
-from dingo._version import __version__
+from dingo.core.utils.misc import get_version
 import packaging.version as pv
 
 import torch
 
 _logger = logging.getLogger(__name__)
+WINDOW_FACTOR_FIX_VERSION = pv.parse("0.8.6")
 
 Device = Literal["meta", "cuda", "mps", "hip", "cpu"]
 
@@ -89,7 +90,7 @@ def torch_load_with_fallback(
     )
 
 
-def check_window_factor_fix(model_metadata: dict) -> bool:
+def check_network_code_compatibility(model_metadata: dict) -> bool:
     """
     Versions of DINGO before 0.8.6 were using an erroneous computation of the
     window factor. For the full discussion see:
@@ -104,38 +105,61 @@ def check_window_factor_fix(model_metadata: dict) -> bool:
     model_metadata : dict
         Metdata of the DINGO model
     """
-    dingo_version = pv.parse(__version__)
+    dingo_version = pv.parse(get_version())
     model_version_str = model_metadata["version"].split("=", 1)[1]
     model_version = pv.parse(model_version_str)
-    window_factor_fix_version = pv.parse("0.8.6")
 
     class VersionMismatchError(Exception):
         pass
 
     if (
-        dingo_version < window_factor_fix_version
-        and model_version >= window_factor_fix_version
+        dingo_version < WINDOW_FACTOR_FIX_VERSION
+        and model_version >= WINDOW_FACTOR_FIX_VERSION
     ):
         raise VersionMismatchError(
             f"""
         Your DINGO version ({dingo_version}) is before the window factor fix,
         but the model version ({model_version}) is after the window factor fix.
-        Please upgrade your DINGO version to {window_factor_fix_version} or later
+        Please upgrade your DINGO version to {WINDOW_FACTOR_FIX_VERSION} or later
         to use this network.
         """.strip()
         )
     elif (
-        dingo_version >= window_factor_fix_version
-        and model_version < window_factor_fix_version
+        dingo_version >= WINDOW_FACTOR_FIX_VERSION
+        and model_version < WINDOW_FACTOR_FIX_VERSION
     ):
         raise VersionMismatchError(
             f"""
         Your DINGO version ({dingo_version}) is after the window factor fix and model version ({model_version})
-        is before the window factor fix. Please downgrade your dingo version to before {window_factor_fix_version} 
+        is before the window factor fix. Please downgrade your dingo version to before {WINDOW_FACTOR_FIX_VERSION} 
         to use this network.
         """.strip()
         )
 
+def check_minimum_version(version_str: str, raise_exception: bool = False):
+    """
+    Check if the version string is at least the minimum required version.
+
+    Parameters
+    ----------
+    version_str : str
+        Version string to check, e.g., "version=0.8.5" or "0.8.5". 
+
+    raise_exception : bool
+        If True, raise an exception if the version is below the minimum required version.
+    """
+    version_str = version_str.split("=", 1)[1]
+    version = pv.parse(version_str)
+
+    if version < WINDOW_FACTOR_FIX_VERSION:
+        if raise_exception:
+            raise Exception(
+                f"This version ({version}) is before the window factor fix which was patched in {WINDOW_FACTOR_FIX_VERSION}."
+            )
+        else: 
+            _logger.warning(
+                f"This version ({version}) is before the window factor fix which was patched in {WINDOW_FACTOR_FIX_VERSION}."
+            )
 
 def update_model_config(model_settings: dict):
     """

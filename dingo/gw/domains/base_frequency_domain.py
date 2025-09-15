@@ -200,25 +200,12 @@ class BaseFrequencyDomain(Domain, ABC):
         $$
 
         Historical note: 
-        Note we *no longer* use the noise std of the form 
+        Note we no longer use the noise std of the form 
         $$
         \sigma_{\mathrm{noise}} = \sqrt{\frac{w}{4 \delta f}}
         $$
         where $w$ is the window factor. For the full discussion, see 
         https://git.ligo.org/pe/pe-group-coordination/-/issues/1#note_1465275. 
-
-        The window factor generally arises because of the way frequency domain data is
-        constructed from observed time series. Typically, a window 
-        is applied to time series before taking the Fourier transform. Therefore,
-        for an arbitrary timeseries, applying a window to the time domain 
-        reduces the signal power by $w^2$. 
-        
-        However, with GWs we assume the signal is unaffected by the window (ie where 
-        the window is not one, the signal is assumed to be zero). Thus there is 
-        no *signal* power loss from the window. Now the whitened data is not unit Gaussian 
-        near the boundaries of the domain. So technically, one has a non-stationary
-        noise process, but a reasonable approximation is to ignore this and simply
-        set the window factor to one.
 
         To scale noise such that it is consistent with a multivariate *unit* normal
         distribution in the, you must divide whitened data by the noise_std. For the
