@@ -15,7 +15,7 @@ def signal_setup_EOB():
         "f_start": 10.0,
         "spin_conversion_phase": 0,
     }
-    wfg_domain = build_domain(
+    domain = build_domain(
         {
             "type": "UniformFrequencyDomain",
             "f_min": 20,
@@ -23,17 +23,9 @@ def signal_setup_EOB():
             "delta_f": 0.125,
         }
     )
-    data_domain = build_domain(
-        {
-            "type": "UniformFrequencyDomain",
-            "f_min": 20.0,
-            "f_max": 1024.0,
-            "delta_f": 0.125,
-        }
-    )
     ifo_list = ["H1", "L1"]
     t_ref = 1126259462.4
-    signal = GWSignal(wfg_kwargs, wfg_domain, data_domain, ifo_list, t_ref)
+    signal = GWSignal(wfg_kwargs, domain, domain, ifo_list, t_ref)
     return signal
 
 

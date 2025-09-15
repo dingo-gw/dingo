@@ -158,7 +158,7 @@ def check_minimum_version(version_str: str, raise_exception: bool = False):
             )
         else: 
             _logger.warning(
-                f"This version ({version}) is before the window factor fix which was patched in {WINDOW_FACTOR_FIX_VERSION}."
+                f"Warning: This version ({version}) is before the window factor fix which was patched in {WINDOW_FACTOR_FIX_VERSION}."
             )
 
 def update_model_config(model_settings: dict):
