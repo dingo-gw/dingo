@@ -382,10 +382,10 @@ class DataGenerationInput(BilbyDataGenerationInput):
             # Dingo and Bilby have different geocent_time conventions.
             settings["injection_parameters"]["geocent_time"] -= self.trigger_time
             settings["optimal_SNR"] = {
-                k: v["optimal_SNR"] for k, v in self.interferometers.meta_data.items()
+                k: v["optimal_SNR"].item() if hasattr(v['optimal_SNR'], 'item') else v['optimal_SNR'] for k, v in self.interferometers.meta_data.items()
             }
             settings["matched_filter_SNR"] = {
-                k: v["matched_filter_SNR"]
+                k: v["matched_filter_SNR"].item() if hasattr(v['matched_filter_SNR'], 'item') else v['matched_filter_SNR']
                 for k, v in self.interferometers.meta_data.items()
             }
 

@@ -526,7 +526,7 @@ def create_parser(top_level=True):
     )
     injection_parser.add(
         "--save-bilby-data-dump",
-        type=bool,
+        action=StoreBoolean,
         default=False,
         help=(
             "If given, will also save a data dump consistent with the DINGO injection."
