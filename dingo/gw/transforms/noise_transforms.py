@@ -191,24 +191,17 @@ class BatchedAddRandomNoiseComplex(object):
     """
 
     def __init__(self, batch_size):
-        pass
+        self.batch_size = batch_size
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
-        noisy_strains = {}
-        for ifo, pure_strain in sample["waveform"].items():
-            # Use torch rng and convert to numpy, which is slightly faster than using
-            # numpy directly. Using torch.randn gives single-precision floats by default
-            # (which we want)  whereas np.random.random gives double precision (and
-            # must subsequently  be cast to single precision).
-            # np.random.default_rng().standard_normal() can be set to output single
-            # precision, but in testing this is slightly slower than the torch call.
+        ifos = sample['waveform'].keys()
 
-            noise = None # random sample
-
-            noise = noise.numpy()
-            noisy_strains[ifo] = pure_strain + noise
-        sample["waveform"] = noisy_strains
+        #duplicate waveforms over the batch
+        for ifo in ifos:
+            sample['waveform'][ifo] = np.tile(sample['waveform'][ifo], (self.batch_size, 1))
+        
+        # add noise realisation
         return sample
 
 
@@ -228,8 +221,9 @@ class RepackageStrainsAndASDS(object):
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
+        breakpoint()
         strains = np.empty(
-            sample["asds"][self.ifos[0]].shape[:-1]  # Possible batch dims
+            sample["waveform"][self.ifos[0]].shape[:-1]  # Possible batch dims, see if swapping for waveform affects training
             + (
                 len(self.ifos),
                 3,
