@@ -187,9 +187,12 @@ class GWSampler(GWSamplerMixin, Sampler):
             transform_pre.append(
                 DecimateWaveformsAndASDS(self.domain, decimation_mode="whitened")
             )
-        # if self.zero_noise:
-        #     print("do this and this and that")
-        #     transform_pre.append(BatchedAddRandomNoiseComplex(batch_size=self.batch_size))
+
+        transform_pre.append(WhitenAndScaleStrain(self.domain.noise_std))
+        
+        if self.zero_noise:
+            print("do this and this and that")
+            transform_pre.append(BatchedAddRandomNoiseComplex(batch_size=self.batch_size))
         
         #   * whiten and scale strain (since the inference network expects standardized
         #   data)
@@ -197,7 +200,6 @@ class GWSampler(GWSamplerMixin, Sampler):
         #   * convert array to torch tensor on the correct device
         #   * extract only strain/waveform from the sample
         transform_pre += [
-            WhitenAndScaleStrain(self.domain.noise_std),
             # Use base metadata so that unconditional samplers still know how to
             # transform data, since this transform is used by the GNPE sampler as
             # well.
