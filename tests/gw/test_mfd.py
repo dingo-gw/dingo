@@ -1,7 +1,6 @@
 import torch
 
 from dingo.gw.domains import build_domain, MultibandedFrequencyDomain
-from dingo.gw.gwutils import get_window_factor
 import pytest
 import numpy as np
 
@@ -24,22 +23,6 @@ def mfd_params():
 @pytest.fixture
 def mfd(mfd_params):
     return MultibandedFrequencyDomain(**mfd_params)
-
-
-@pytest.fixture
-def window_setup():
-    type = "tukey"
-    f_s = 4096
-    T = 8.0
-    roll_off = 0.4
-    window_kwargs = {
-        "type": type,
-        "f_s": f_s,
-        "T": T,
-        "roll_off": roll_off,
-    }
-    window_factor = get_window_factor(window_kwargs)
-    return window_kwargs, window_factor
 
 
 def test_mfd_len(mfd_params, mfd):
@@ -200,26 +183,3 @@ def test_mfd_time_translation_torch(mfd):
     assert torch.allclose(result[..., 1, :], torch.tensor(0.0), atol=1e-2)
     assert torch.allclose(result[..., 2, :], torch.tensor(constant_value))
 
-
-def test_mfd_window_factor(mfd, window_setup):
-    domain = mfd
-    _, window_factor = window_setup
-    assert window_factor == 0.9374713897717841
-    # check that window_factor is initially None
-    assert domain.window_factor is None
-    # set new window_factor
-    domain.window_factor = window_factor
-    assert domain.window_factor == window_factor
-    assert domain.base_domain.window_factor == window_factor
-    noise_std = domain.noise_std
-    assert np.all(noise_std == np.sqrt(window_factor) / np.sqrt(4 * domain.delta_f))
-    assert len(domain.noise_std) == len(domain)
-    window_factor = 1
-    # now set new window factor correctly via the setter and check that
-    # noise_std is updated as intended since the cache is cleared
-    domain.window_factor = window_factor
-    assert domain.window_factor == window_factor
-    assert np.all(domain.noise_std != noise_std)
-    assert np.all(
-        domain.noise_std == np.sqrt(domain.window_factor) / np.sqrt(4 * domain.delta_f)
-    )

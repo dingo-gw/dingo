@@ -38,7 +38,7 @@ def standardization_dict():
 
 @pytest.fixture
 def domain():
-    return UniformFrequencyDomain(0, 1024, 0.125, 1.0)
+    return UniformFrequencyDomain(0, 1024, 0.125)
 
 
 def input_sample_batched(batch_size, input_domain):
