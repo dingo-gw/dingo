@@ -103,7 +103,18 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
         if args_v is not None:
             # Convert type from str to enable comparison.
             try:
-                if isinstance(v, float):
+                # it's possible that the attribute is a dict 
+                # or list.
+                # for example, the minimum-frequency could be 
+                # {H1: 20, L1:20}
+                if "{" and "}" in args_v:
+                    args_v = convert_string_to_dict(args_v)
+                elif isinstance(args_v, list):
+                    # if it's a list we need to strip quotes
+                    # e.g. detectors = ["'H1'", "'L1'"]
+                    # should become ["H1", "L1"] for the comparison
+                    args_v = [l.strip("'") for l in args_v]
+                elif isinstance(v, float):
                     args_v = float(args_v)
                 elif isinstance(v, int):
                     args_v = int(args_v)
@@ -111,6 +122,14 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
                 pass
 
             if args_v != v:
+                # this is for when the minimum-frequency is a float 
+                # but args_v is a dict 
+                if isinstance(args_v, dict) and all(val == v for val in args_v.values()):
+                    continue
+
+                if isinstance(args_v, list):
+                    continue
+
                 if k in ["waveform_approximant"]:
                     raise NotImplementedError(
                         "Cannot change waveform approximant during importance sampling."
