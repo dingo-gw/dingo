@@ -49,7 +49,8 @@ class GWSamplerMixin(object):
         self.t_ref = self.base_model_metadata["train_settings"]["data"]["ref_time"]
         self._pesummary_package = "gw"
         self._result_class = Result
-        self.zero_noise = kwargs['zero_noise']
+        if 'zero_noise' in kwargs:
+            self.zero_noise = kwargs['zero_noise']
 
     def _build_domain(self):
         """
@@ -191,7 +192,6 @@ class GWSampler(GWSamplerMixin, Sampler):
         transform_pre.append(WhitenAndScaleStrain(self.domain.noise_std))
         
         if self.zero_noise:
-            print("do this and this and that")
             transform_pre.append(BatchedAddRandomNoiseComplex(batch_size=self.batch_size))
         
         #   * whiten and scale strain (since the inference network expects standardized
