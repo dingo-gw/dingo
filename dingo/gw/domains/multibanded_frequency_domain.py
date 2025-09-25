@@ -126,8 +126,10 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
                 f"domain, {self.base_domain.domain_dict}"
             )
 
-        # Update base domain to required range.
-        self.base_domain.update({"f_min": self.f_min, "f_max": self.f_max})
+        # Note that f_max from the base domain can differ from that of the multi-banded
+        # domain. This occurs as a boundary effect, since a fixed number of bins in the
+        # base domain are averaged to obtain a bin in the multi-banded domain. When
+        # decimating, any extra bins in the base domain are dropped.
 
     def decimate(self, data: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
         """
@@ -268,6 +270,12 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
         nodes_new[0] = self._f_base_lower[lower_bin]
         nodes_new[-1] = self._f_base_upper[upper_bin] + self.base_domain.delta_f
 
+        # Update base_domain f_min and f_max. These values might differ slightly from
+        # the final values for the multi-banded domain due to edge effects. Note that
+        # we do this update *after* all of our validation checks but *before* changing
+        # the state of the class.
+        self.base_domain.update({"f_min": f_min, "f_max": f_max})
+
         self._range_update_initial_length = len(self)
         self._range_update_idx_lower = lower_bin
         self._range_update_idx_upper = upper_bin
@@ -277,6 +285,9 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
         assert self._range_update_idx_upper - self._range_update_idx_lower + 1 == len(
             self
         )
+
+        assert self.base_domain.f_min <= self.f_min
+        assert self.base_domain.f_max >= self.f_max
 
     def update_data(
         self, data: np.ndarray | torch.Tensor, axis: int = -1, **kwargs

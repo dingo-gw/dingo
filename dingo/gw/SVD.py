@@ -24,7 +24,7 @@ class SVDBasis(DingoDataset):
             data_keys=["V", "s", "mismatches"],
         )
 
-    def generate_basis(self, training_data: np.ndarray, n: int, method: str = "random"):
+    def generate_basis(self, training_data: np.ndarray, n: int, method: str = "scipy"):
         """Generate the SVD basis from training data and store it.
 
         The SVD decomposition takes
@@ -56,8 +56,17 @@ class SVDBasis(DingoDataset):
             # The randomized SVD has complexity O(m n k + k^2 (m + n)),
             # for a m x n matrix and k is the target rank, here called n
             # For small k this is much faster than the standard SVD.
-            U, s, Vh = randomized_svd(training_data, n, random_state=0,
-                                      power_iteration_normalizer='QR')
+            try:
+                U, s, Vh = randomized_svd(training_data, n, random_state=0,
+                                        power_iteration_normalizer='QR')
+            except ValueError as e:
+                raise ValueError(
+                    "randomized_svd failed — possibly due to complex-valued input.\n"
+                    "randomized_svd does not support complex arrays in scikit-learn >=1.2.\n"
+                    "To proceed, downgrade scikit-learn to version 1.1.3:\n\n"
+                    "    pip install scikit-learn==1.1.3\n\n"
+                    f"Original error: {e}"
+                )
 
             self.Vh = Vh.astype(np.complex128)  # TODO: fix types
             self.V = self.Vh.T.conj()

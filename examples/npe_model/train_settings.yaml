@@ -16,9 +16,9 @@ data:
   extrinsic_prior:  # Sampled at train time
     dec: default
     ra: default
-    geocent_time: bilby.core.prior.Uniform(minimum=-0.10, maximum=0.10)
+    geocent_time: bilby.core.prior.Uniform(minimum=-0.10, maximum=0.10, name='geocent_time')
     psi: default
-    luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0)
+    luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0, name='luminosity_distance')
   ref_time: 1126259462.391
   inference_parameters:
   - chirp_mass

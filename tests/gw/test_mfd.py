@@ -97,6 +97,10 @@ def test_mfd_set_new_range(mfd_params, mfd):
         domain._set_new_range(None, domain.f_min - 10)
     with pytest.raises(ValueError):
         domain._set_new_range(domain.f_min + 10, domain.f_min + 5)
+    with pytest.raises(ValueError):
+        domain._set_new_range(domain.f_min + 0.1, None)
+    with pytest.raises(ValueError):
+        domain._set_new_range(None, domain.f_max - 0.1)
     # test that setting new frequency range works as intended
     f_min_new, f_max_new = 40, 800
     domain._set_new_range(f_min_new, f_max_new)
@@ -150,7 +154,7 @@ def test_mfd_set_new_range(mfd_params, mfd):
 def test_mfd_base_domain_consistency(mfd):
     assert np.all(mfd.sample_frequencies == mfd.decimate(mfd.base_domain()))
     assert mfd.f_min == mfd.base_domain.f_min
-    assert mfd.f_max == mfd.base_domain.f_max
+    assert mfd.f_max in mfd.base_domain.sample_frequencies
 
 
 def test_mfd_time_translation(mfd):

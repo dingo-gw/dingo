@@ -6,7 +6,13 @@ import sys
 
 import yaml
 from bilby_pipe.input import Input
-from bilby_pipe.utils import parse_args, logger, convert_string_to_dict
+from bilby_pipe.utils import (
+    parse_args,
+    logger,
+    convert_string_to_dict,
+    convert_prior_string_input,
+    BilbyPipeError,
+)
 
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import MultibandedFrequencyDomain
@@ -44,6 +50,7 @@ class ImportanceSamplingInput(Input):
         self.prior_dict = args.prior_dict
         self.default_prior = "PriorDict"
         self.time_reference = "geocent"
+        self.prior_dict_updates = args.prior_dict_updates
 
         # Choices for running
         # self.detectors = args.detectors
@@ -158,6 +165,8 @@ class ImportanceSamplingInput(Input):
                 self._importance_sampling_settings.update(
                     convert_string_to_dict(settings)
                 )
+            if "phase_marginalization" in self._importance_sampling_settings:
+                self._importance_sampling_settings.pop("synthetic_phase", None)
         else:
             self._importance_sampling_settings = dict()
 
@@ -166,16 +175,16 @@ class ImportanceSamplingInput(Input):
             "use_base_domain", False
         )
 
-        if self.prior_dict:
+        if self.prior_dict_updates:
             logger.info("Updating prior from network prior. Changes:")
             logger.info(
                 yaml.dump(
-                    self.prior_dict,
+                    self.prior_dict_updates,
                     default_flow_style=False,
                     sort_keys=False,
                 )
             )
-            self.result.update_prior(self.prior_dict)
+            self.result.update_prior(self.prior_dict_updates)
 
         if "synthetic_phase" in self.importance_sampling_settings:
             logger.info("Sampling synthetic phase.")
@@ -205,6 +214,35 @@ class ImportanceSamplingInput(Input):
         if getattr(self, "_priors", None) is None:
             self._priors = self._get_priors(add_time=False)
         return self._priors
+
+    @property
+    def prior_dict_updates(self):
+        """The input prior_dict from the ini (if given)
+
+        Note, this is not the bilby prior (see self.priors for that), this is
+        a key-val dictionary where the val's are strings which are converting
+        into bilby priors in `_get_prior
+        """
+        return self._prior_dict_updates
+
+    @prior_dict_updates.setter
+    def prior_dict_updates(self, prior_dict_updates):
+        if isinstance(prior_dict_updates, dict):
+            prior_dict_updates = prior_dict_updates
+        elif isinstance(prior_dict_updates, str):
+            prior_dict_updates = convert_prior_string_input(prior_dict_updates)
+        elif prior_dict_updates is None:
+            self._prior_dict_updates = None
+            return
+        else:
+            raise BilbyPipeError(
+                f"prior_dict_updates={prior_dict_updates} not " f"understood"
+            )
+
+        self._prior_dict_updates = {
+            self._convert_prior_dict_key(key): val
+            for key, val in prior_dict_updates.items()
+        }
 
 
 def create_sampling_parser():

@@ -3,7 +3,7 @@ from typing import Union, Protocol
 import numpy as np
 import pandas as pd
 from astropy.time import Time
-from bilby.core.prior import PriorDict, DeltaFunction
+from bilby.core.prior import PriorDict, DeltaFunction, Constraint
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 
@@ -193,11 +193,9 @@ class GWSamplerMixin(object):
             Whether to apply instead the inverse transformation. This is used prior to
             calculating the log_prob.
         """
-        # FIXME: Update this method to make sure that for models that do not include sky
-        #  position, it does not do anything.
         if self.event_metadata is not None:
             t_event = self.event_metadata.get("time_event")
-            if t_event is not None and t_event != self.t_ref:
+            if t_event is not None and t_event != self.t_ref and "ra" in samples:
                 ra = samples["ra"]
                 time_reference = Time(self.t_ref, format="gps", scale="utc")
                 time_event = Time(t_event, format="gps", scale="utc")
@@ -215,9 +213,9 @@ class GWSamplerMixin(object):
     def _post_process(self, samples: Union[dict, pd.DataFrame], inverse: bool = False):
         """
         Post-processing of parameter samples.
+        * Add any fixed parameters from the prior.
         * Correct the sky position for a potentially fixed reference time.
           (see self._correct_reference_time)
-        * Potentially sample a synthetic phase. (see self._sample_synthetic_phase)
 
         This method modifies the samples in place.
 
@@ -228,34 +226,35 @@ class GWSamplerMixin(object):
             Whether to apply instead the inverse transformation. This is used prior to
             calculating the log_prob.
         """
-        # Add fixed parameters from prior
         intrinsic_prior = self.metadata["dataset_settings"]["intrinsic_prior"]
         extrinsic_prior = get_extrinsic_prior_dict(
             self.metadata["train_settings"]["data"]["extrinsic_prior"]
         )
         prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
-        num_samples = len(samples[list(samples.keys())[0]])
-        for k, p in prior.items():
-            if isinstance(p, DeltaFunction) and k not in samples:
-                v = p.peak
-                print(f"Adding fixed parameter {k} = {v} from prior.")
-                samples[k] = p.peak * np.ones(num_samples)
+
+        if not inverse:
+            # Add fixed parameters from prior.
+            num_samples = len(samples[list(samples.keys())[0]])
+            for k, p in prior.items():
+                if isinstance(p, DeltaFunction) and k not in samples:
+                    v = p.peak
+                    print(f"Adding fixed parameter {k} = {v} from prior.")
+                    samples[k] = p.peak * np.ones(num_samples)
+        else:
+            # Drop non-inference parameters from samples.
+            # NOTE: Important to drop "log_prob" in particular before running
+            # Sampler.log_prob(), otherwise log probabilities are added.
+            drop_parameters = [
+                k for k in samples.keys() if k not in self.inference_parameters
+            ]
+            if isinstance(samples, pd.DataFrame):
+                samples.drop(columns=drop_parameters, inplace=True, errors="ignore")
+            elif isinstance(samples, dict):
+                for k in drop_parameters:
+                    samples.pop(k, None)
 
         if not self.unconditional_model:
             self._correct_reference_time(samples, inverse)
-        # if not inverse:
-        #     self._correct_reference_time(samples, inverse)
-        #     # if self.synthetic_phase_kwargs is not None:
-        #     #     print(f"Sampling synthetic phase.")
-        #     #     t0 = time.time()
-        #     #     self._sample_synthetic_phase(samples, inverse)
-        #     #     print(f"Done. This took {time.time() - t0:.2f} seconds.")
-        #
-        # # If inverting, we go in reverse order.
-        # else:
-        #     # if self.synthetic_phase_kwargs is not None:
-        #     #     self._sample_synthetic_phase(samples, inverse)
-        #     self._correct_reference_time(samples, inverse)
 
 
 class GWSampler(GWSamplerMixin, Sampler):
