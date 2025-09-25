@@ -2,7 +2,6 @@ from typing import Optional
 import numpy as np
 
 from dingo.gw.domains import MultibandedFrequencyDomain, UniformFrequencyDomain
-from dingo.gw.gwutils import add_defaults_for_missing_ifos
 
 
 class DecimateAll(object):
@@ -364,30 +363,21 @@ class MaskDataForFrequencyRangeUpdate(object):
         domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
         minimum_frequency: Optional[float | dict[str, float]] = None,
         maximum_frequency: Optional[float | dict[str, float]] = None,
-        ifos: Optional[list[str]] = None,
         print_output: bool = False,
     ):
         """
         Parameters
         ----------
         minimum_frequency: Optional[float | dict[str, float]]
-            Update of f_min, if float, the same value will be used for all detectors.
+            Update of f_min. If a float, the same value will be used for all detectors.
         maximum_frequency: Optional[float | dict[str, float]]
-            Update of f_max, if float, the same value will be used for all detectors.
-        ifos: list[str]
-            List of detectors
+            Update of f_max. If a float, the same value will be used for all detectors.
         print_output: bool
             Whether to write print statements to the console.
         """
         self.sample_frequencies = domain.sample_frequencies
-        self.frequency_mask = domain.frequency_mask
-        # Include defaults in case of missing minimum-/maximum frequency values per detector
-        self.minimum_frequency = add_defaults_for_missing_ifos(
-            object_to_update=minimum_frequency, update_value=domain.f_min, ifos=ifos
-        )
-        self.maximum_frequency = add_defaults_for_missing_ifos(
-            object_to_update=maximum_frequency, update_value=domain.f_max, ifos=ifos
-        )
+        self.minimum_frequency = minimum_frequency
+        self.maximum_frequency = maximum_frequency
 
         if print_output:
             print(
@@ -415,23 +405,25 @@ class MaskDataForFrequencyRangeUpdate(object):
 
         """
         sample = input_sample.copy()
-        # Get frequency masks for full domain
+
+        ifos = list(sample["waveform"].keys())
         frequency_masks = create_mask_based_on_frequency_update(
             sample_frequencies=self.sample_frequencies,
-            detectors=[d for d in sample["waveform"].keys()],
+            detectors=ifos,
             minimum_frequency=self.minimum_frequency,
             maximum_frequency=self.maximum_frequency,
         )
 
-        # Update waveforms and ASDs based on masks
-        for d in sample["waveform"].keys():
-            # Exclude frequency values where domain.frequency_mask = False because we assume that these values
-            # have already been adjusted.
-            combined_mask = np.where(self.frequency_mask, ~frequency_masks[d], False)
-            # (1) Set waveform to 0.
-            sample["waveform"][d][..., combined_mask] = 0.0
-            # (2) Set ASD to 1.
-            sample["asds"][d][..., combined_mask] = 1.0
+        # Update waveforms and ASDs based on masks. Be sure not to modify dicts or
+        # arrays in-place.
+        sample["waveform"] = {
+            ifo: np.where(frequency_masks[ifo], sample["waveform"][ifo], 0.0)
+            for ifo in ifos
+        }
+        sample["asds"] = {
+            ifo: np.where(frequency_masks[ifo], sample["asds"][ifo], 1.0)
+            for ifo in ifos
+        }
 
         return sample
 
@@ -453,9 +445,9 @@ def create_mask_based_on_frequency_update(
     detectors: list[str]
         List of detector names.
     minimum_frequency: Optional[float | dict[str, float]]
-        Update of f_min, if float, the same value will be used for all detectors.
+        Update of f_min. If a float, the same value will be used for all detectors.
     maximum_frequency: Optional[float | dict[str, float]]
-        Update of f_max, if float, the same value will be used for all detectors.
+        Update of f_max. If a float, the same value will be used for all detectors.
 
     Returns
     ----------
@@ -463,20 +455,6 @@ def create_mask_based_on_frequency_update(
         Dictionary providing a boolean mask for the sample frequencies of each detector based on provided frequency
         updates. True for values to keep, False for values to mask.
     """
-    # Include defaults in case of missing minimum-/maximum frequency values per detector
-    minimum_frequency = add_defaults_for_missing_ifos(
-        object_to_update=minimum_frequency,
-        update_value=np.min(sample_frequencies),
-        ifos=detectors,
-    )
-    maximum_frequency = add_defaults_for_missing_ifos(
-        object_to_update=maximum_frequency,
-        update_value=np.max(sample_frequencies),
-        ifos=detectors,
-    )
-
-    # We only modify the valid frequency values and assume that values corresponding to frequency_mask = False have
-    # already been adjusted
     frequency_masks = {
         i: np.ones_like(sample_frequencies, dtype=bool) for i in detectors
     }
@@ -493,7 +471,7 @@ def create_mask_based_on_frequency_update(
                 raise ValueError(
                     f"minimum-frequency has to be dict or float, not {type(minimum_frequency)}. "
                 )
-            frequency_masks[d] = np.logical_and(frequency_masks[d], mask_min)
+            frequency_masks[d] = frequency_masks[d] & mask_min
 
         # Update frequency_masks based on maximum_frequency
         if maximum_frequency is not None:
@@ -507,6 +485,6 @@ def create_mask_based_on_frequency_update(
                 raise ValueError(
                     f"maximum-frequency has to be dict or float, not {type(maximum_frequency)}. "
                 )
-            frequency_masks[d] = np.logical_and(frequency_masks[d], mask_max)
+            frequency_masks[d] = frequency_masks[d] & mask_max
 
     return frequency_masks

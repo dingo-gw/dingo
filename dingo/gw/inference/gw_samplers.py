@@ -305,7 +305,6 @@ class GWSampler(GWSamplerMixin, Sampler):
                     domain=self.domain,
                     minimum_frequency=self.minimum_frequency,
                     maximum_frequency=self.maximum_frequency,
-                    ifos=self.detectors,
                 )
             )
         #   * repackage strains and asds from dicts to an array
