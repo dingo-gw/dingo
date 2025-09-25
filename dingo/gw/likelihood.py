@@ -112,9 +112,10 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 minimum_frequency=frequency_update.get("minimum_frequency", None),
                 maximum_frequency=frequency_update.get("maximum_frequency", None),
             )
-            for ifo in event_data["waveform"].keys():
-                # Set ASD to 1.
-                asds[ifo][..., ~frequency_masks[ifo]] = 1.0
+            asds = {
+                ifo: np.where(mask, asds[ifo], 1.0)
+                for ifo, mask in frequency_masks.items()
+            }
 
         self.asd = asds
 

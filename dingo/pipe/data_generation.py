@@ -1,14 +1,17 @@
 import os
 import sys
 
+import bilby
 from bilby_pipe.input import Input
 from bilby_pipe.main import parse_args
-from bilby_pipe.utils import logger, convert_string_to_dict
+from bilby_pipe.plotting_utils import plot_whitened_data
+from bilby_pipe.utils import logger, convert_string_to_dict, BilbyPipeError
 from bilby_pipe.data_generation import DataGenerationInput as BilbyDataGenerationInput
 import numpy as np
 
+from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset
-from dingo.gw.domains import UniformFrequencyDomain
+from dingo.gw.domains import UniformFrequencyDomain, build_domain_from_model_metadata
 from dingo.pipe.parser import create_parser
 
 logger.name = "dingo_pipe"
@@ -16,6 +19,9 @@ logger.name = "dingo_pipe"
 
 class DataGenerationInput(BilbyDataGenerationInput):
     def __init__(self, args, unknown_args, create_data=True):
+        self.model = args.model
+        self.model_init = args.model_init
+
         Input.__init__(self, args, unknown_args)
 
         # Generic initialisation
@@ -88,15 +94,8 @@ class DataGenerationInput(BilbyDataGenerationInput):
 
         # Frequencies
         self.sampling_frequency = args.sampling_frequency
-        # bilby_pipe input only allows float or str for minimum/maximum_frequency
-        if isinstance(args.minimum_frequency, dict):
-            self.minimum_frequency = str(args.minimum_frequency)
-        else:
-            self.minimum_frequency = args.minimum_frequency
-        if isinstance(args.maximum_frequency, dict):
-            self.maximum_frequency = str(args.maximum_frequency)
-        else:
-            self.maximum_frequency = args.maximum_frequency
+        self.minimum_frequency = args.minimum_frequency
+        self.maximum_frequency = args.maximum_frequency
         # self.reference_frequency = args.reference_frequency
 
         # Waveform, source model and likelihood
@@ -174,6 +173,33 @@ class DataGenerationInput(BilbyDataGenerationInput):
 
             self.create_data(args)
 
+    @BilbyDataGenerationInput.interferometers.setter
+    def interferometers(self, interferometers):
+        # Monkey patch to avoid bilby_pipe zeroing data below
+        # self.minimum_frequency_dict and above self.maximum_frequency_dict. Remove
+        # this code if we are happy to let bilby_pipe do this. Possible issue is edge
+        # effects for multi-banded frequency domain, so instead we do the masking
+        # within Dingo.
+        for ifo in interferometers:
+            if isinstance(ifo, bilby.gw.detector.Interferometer) is False:
+                raise BilbyPipeError(f"ifo={ifo} is not a bilby Interferometer")
+            # if self.minimum_frequency is not None:
+            #     ifo.minimum_frequency = self.minimum_frequency_dict[ifo.name]
+            # if self.maximum_frequency is not None:
+            #     ifo.maximum_frequency = self.maximum_frequency_dict[ifo.name]
+            # if self.calibration_model is not None:
+            #     self.add_calibration_model_to_interferometers(ifo)
+
+        self._interferometers = interferometers
+        self.data_set = True
+        if self.plot_data:
+            interferometers.plot_data(outdir=self.data_directory, label=self.label)
+            plot_whitened_data(
+                interferometers=interferometers,
+                data_directory=self.data_directory,
+                label=self.label,
+            )
+
     def save_hdf5(self):
         """
         Save frequency-domain strain and ASDs as DingoDataset HDF5 format.
@@ -182,24 +208,30 @@ class DataGenerationInput(BilbyDataGenerationInput):
         for easy reading by pesummary and Bilby.
         """
 
+        try:
+            model = build_model_from_kwargs(
+                filename=self.model, device="meta", load_training_info=False
+            )
+        except RuntimeError:
+            # 'meta' is not supported by older version of python / torch
+            model = build_model_from_kwargs(
+                filename=self.model, device="cpu", load_training_info=False
+            )
+        domain = build_domain_from_model_metadata(model.metadata, base=True)
+        assert isinstance(domain, UniformFrequencyDomain)
+
         # PSD and strain data.
         data = {"waveform": {}, "asds": {}}  # TODO: Rename these keys.
         for ifo in self.interferometers:
-
             strain = ifo.strain_data.frequency_domain_strain
             frequency_array = ifo.strain_data.frequency_array
             asd = ifo.power_spectral_density.get_amplitude_spectral_density_array(
                 frequency_array
             )
 
-            # These arrays extend up to self.sampling_frequency. Truncate them to
-            # self.maximum_frequency, and also set the asd to 1.0 below
-            # self.minimum_frequency.
-            domain = UniformFrequencyDomain(
-                f_min=self.minimum_frequency,
-                f_max=self.maximum_frequency,
-                delta_f=1 / self.duration,
-            )
+            # These arrays extend up to self.sampling_frequency / 2. Truncate them to
+            # the model maximum frequency, and also set the ASD to 1.0 below model
+            # minimum frequency.
             strain = domain.update_data(strain)
             asd = domain.update_data(asd, low_value=1.0)
 
@@ -222,10 +254,10 @@ class DataGenerationInput(BilbyDataGenerationInput):
             "detectors": self.detectors,
             "f_s": self.sampling_frequency,
             "T": self.duration,
-            "f_min": self.minimum_frequency,
-            "f_max": self.maximum_frequency,
             "window_type": "tukey",
             "roll_off": self.tukey_roll_off,
+            "minimum_frequency": self.minimum_frequency_dict,
+            "maximum_frequency": self.maximum_frequency_dict,
         }
 
         for k in [

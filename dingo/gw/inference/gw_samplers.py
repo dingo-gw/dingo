@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Union
+from typing import Union, Protocol
 
 import numpy as np
 import pandas as pd
@@ -9,7 +9,12 @@ from torchvision.transforms import Compose
 
 from dingo.core.samplers import Sampler, GNPESampler
 from dingo.core.transforms import GetItem, RenameKey
-from dingo.gw.domains import MultibandedFrequencyDomain
+from dingo.gw.domains import (
+    MultibandedFrequencyDomain,
+    build_domain_from_model_metadata,
+    UniformFrequencyDomain,
+    Domain,
+)
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_window_factor, get_extrinsic_prior_dict
 from dingo.gw.prior import build_prior_with_defaults
@@ -30,6 +35,19 @@ from dingo.gw.transforms import (
 )
 
 
+class SamplerProtocol(Protocol):
+    base_model_metadata: dict
+
+    def _initialize_transforms(self) -> None:
+        ...
+
+
+class _GWMixinProtocol(SamplerProtocol):
+    detectors: list[str]
+    domain: Domain
+    random_strain_cropping: dict
+
+
 class GWSamplerMixin(object):
     """
     Mixin class designed to add gravitational wave functionality to Sampler classes:
@@ -37,7 +55,7 @@ class GWSamplerMixin(object):
         * correction for fixed detector locations during training (t_ref)
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self: SamplerProtocol, **kwargs):
         """
         Parameters
         ----------
@@ -45,169 +63,99 @@ class GWSamplerMixin(object):
             Keyword arguments that are forwarded to the superclass.
         """
         # Has to be specified before init, because the information is required in _initialize_transforms()
-        self._sampling_updates = {}
+        self._minimum_frequency = None
+        self._maximum_frequency = None
         super().__init__(**kwargs)
         self.t_ref = self.base_model_metadata["train_settings"]["data"]["ref_time"]
         self._pesummary_package = "gw"
         self._result_class = Result
 
-        self._minimum_frequency = self.domain.f_min
-        self._maximum_frequency = self.domain.f_max
+    @property
+    def detectors(self: SamplerProtocol):
+        return self.base_model_metadata["train_settings"]["data"]["detectors"]
 
     @property
-    def minimum_frequency(self) -> float | dict:
-        return self._minimum_frequency
+    def random_strain_cropping(self: SamplerProtocol):
+        return self.base_model_metadata["train_settings"]["data"].get(
+            "random_strain_cropping"
+        )
+
+    @property
+    def minimum_frequency(self) -> float | dict[str, float]:
+        if self._minimum_frequency is not None:
+            return self._minimum_frequency
+        else:
+            return self.domain.f_min
 
     @minimum_frequency.setter
-    def minimum_frequency(self, value: Union[float, dict]):
-        raise NotImplementedError(
-            "Only possible to update the minimum_frequency through setting "
-            "self.sampling_updates = {minimum_frequency: 20.}"
-        )
-
-    @property
-    def maximum_frequency(self) -> float | dict:
-        return self._maximum_frequency
-
-    @maximum_frequency.setter
-    def maximum_frequency(self, value: Union[float, dict]):
-        raise NotImplementedError(
-            "Only possible to update the maximum_frequency through setting "
-            "self.sampling_updates = {maximum_frequency: 500.}"
-        )
-
-    @property
-    def sampling_updates(self) -> Optional[Dict[str, dict]]:
-        return self._sampling_updates
-
-    @sampling_updates.setter
-    def sampling_updates(
-        self, value: dict[str, float | list[float] | dict[str, list[float]]]
-    ):
-        # Check that model was trained with flexible frequency range
-        if (
-            not "random_strain_cropping"
-            in self.base_model_metadata["train_settings"]["data"]
+    def minimum_frequency(self: _GWMixinProtocol, value: dict[str, float] | float):
+        if not isinstance(
+            self.domain, (UniformFrequencyDomain, MultibandedFrequencyDomain)
         ):
-            raise ValueError(
-                f"Model was not trained with random_strain_cropping settings, but sampling updates contain "
-                f"contain {value}. "
-            )
-        # Check that values are compatible with cropping values used during training and update frequency range
-        cropping_settings = self.base_model_metadata["train_settings"]["data"][
-            "random_strain_cropping"
-        ]
-        assert cropping_settings.get("cropping_probability", 0.0) > 0.0
-
-        if "minimum_frequency" in value:
-            minimum_frequency = value["minimum_frequency"]
-            f_min_upper = cropping_settings.get("f_min_upper")
-            has_f_min_upper = f_min_upper is not None
-            if cropping_settings.get("deterministic", False):
-                if has_f_min_upper and f_min_upper != minimum_frequency:
-                    raise ValueError(
-                        f"Deterministic cropping used during training, but minimum_frequency "
-                        f"{minimum_frequency} does not align with f_min_upper {f_min_upper}. "
-                    )
-            if isinstance(minimum_frequency, (float, int)):
-                if minimum_frequency < self.domain.f_min:
-                    raise ValueError(
-                        f"minimum_frequency {minimum_frequency} < f_min of domain {self.domain.f_min}. "
-                    )
-                if not has_f_min_upper:
-                    raise ValueError(
-                        f"Not possible to update minimum_frequency {minimum_frequency} during inference,"
-                        f"since f_min_upper was not set during training. "
-                    )
-                if minimum_frequency > f_min_upper:
-                    raise ValueError(
-                        f"minimum_frequency {minimum_frequency} > f_min_upper {f_min_upper} used during "
-                        f"training. "
-                    )
-            elif isinstance(minimum_frequency, dict):
-                if not cropping_settings.get("independent_detectors", True):
-                    raise ValueError(
-                        f"independent_detectors not enabled in random_strain_cropping; required for "
-                        f"dict-style minimum_frequency update. "
-                    )
-                f_mins = list(minimum_frequency.values())
-                if np.any(np.array(f_mins) < self.domain.f_min):
-                    raise ValueError(
-                        f"minimum_frequency values {minimum_frequency} < f_min of domain "
-                        f"{self.domain.f_min}. "
-                    )
-                if not has_f_min_upper:
-                    raise ValueError(
-                        f"Not possible to update minimum_frequency {minimum_frequency} during inference, "
-                        f"since f_min_upper was not set during training. "
-                    )
-                if np.any(np.array(f_mins) > f_min_upper):
-                    raise ValueError(
-                        f"minimum_frequency {minimum_frequency} > f_min_upper {f_min_upper} used during "
-                        f"training. "
-                    )
-            self._minimum_frequency = minimum_frequency
-        if "maximum_frequency" in value:
-            maximum_frequency = value["maximum_frequency"]
-            f_max_lower = cropping_settings.get("f_max_lower")
-            has_f_max_lower = f_max_lower is not None
-            if cropping_settings.get("deterministic", False):
-                if has_f_max_lower and f_max_lower != maximum_frequency:
-                    raise ValueError(
-                        f"Deterministic cropping used during training, but maximum_frequency "
-                        f"{maximum_frequency} does not align with f_max_lower {f_max_lower}. "
-                    )
-            if isinstance(maximum_frequency, float | int):
-                if maximum_frequency > self.domain.f_max:
-                    raise ValueError(
-                        f"maximum_frequency {maximum_frequency} < f_max of domain {self.domain.f_max}. "
-                    )
-                if not has_f_max_lower:
-                    raise ValueError(
-                        f"Not possible to update maximum_frequency {maximum_frequency} during inference, "
-                        f"since f_max_lower was not set during training. "
-                    )
-                if maximum_frequency < f_max_lower:
-                    raise ValueError(
-                        f"maximum_frequency {maximum_frequency} < f_max_lower {f_max_lower} used during "
-                        f"training. "
-                    )
-            elif isinstance(maximum_frequency, dict):
-                if not cropping_settings.get("independent_detectors", True):
-                    raise ValueError(
-                        f"independent_detectors not included or set to false in random_strain_cropping. "
-                        f"Not possible to perform inference with independent detectors for "
-                        f"maximum_frequency. "
-                    )
-                f_maxs = np.array(list((maximum_frequency.values())))
-                if np.any(f_maxs > self.domain.f_max):
-                    raise ValueError(
-                        f"maximum_frequency {maximum_frequency} < f_max of domain {self.domain.f_max}. "
-                    )
-                if not has_f_max_lower:
-                    raise ValueError(
-                        f"Not possible to update maximum_frequency {maximum_frequency} during inference, "
-                        f"since f_max_lower was not set during training. "
-                    )
-                if np.any(f_maxs < f_max_lower):
-                    raise ValueError(
-                        f"maximum_frequency {maximum_frequency} < f_max_lower {f_max_lower} used during "
-                        f"training. "
-                    )
-
-            self._maximum_frequency = maximum_frequency
-        if "minimum_frequency" in value and "maximum_frequency" in value:
-            if not cropping_settings.get("independent_lower_upper", True):
-                raise ValueError(
-                    f"Model was trained with independent_lower_upper=False, but minimum and "
-                    f"maximum_frequency specified. "
-                )
-
-        self._sampling_updates = value
-        # Update transforms
+            raise ValueError("Frequency updates only possible for frequency domains.")
+        _validate_minimum_frequency(
+            value,
+            self.detectors,
+            self.domain,
+            self.random_strain_cropping,
+        )  # TODO: Ensure minimum frequency is a dict?
+        self._minimum_frequency = value
         self._initialize_transforms()
 
-    def _build_domain(self):
+    @property
+    def maximum_frequency(self) -> float | dict[str, float]:
+        if self._maximum_frequency is not None:
+            return self._maximum_frequency
+        else:
+            return self.domain.f_max
+
+    @maximum_frequency.setter
+    def maximum_frequency(self: _GWMixinProtocol, value: Union[float, dict]):
+        if not isinstance(
+            self.domain, (UniformFrequencyDomain, MultibandedFrequencyDomain)
+        ):
+            raise ValueError("Frequency updates only possible for frequency domains.")
+        _validate_maximum_frequency(
+            value,
+            self.detectors,
+            self.domain,
+            self.random_strain_cropping,
+        )
+        self._maximum_frequency = value
+        self._initialize_transforms()
+
+    @property
+    def frequency_updates(self) -> bool:
+        def normalize(val):
+            if isinstance(val, dict):
+                return set(val.values())
+            return {val}
+
+        return normalize(self.minimum_frequency) != {self.domain.f_min} or normalize(
+            self.maximum_frequency
+        ) != {self.domain.f_max}
+
+    @property
+    def event_metadata(self):
+        if self._event_metadata is not None:
+            metadata = self._event_metadata.copy()
+        else:
+            metadata = {}
+        metadata["minimum_frequency"] = self.minimum_frequency
+        metadata["maximum_frequency"] = self.maximum_frequency
+        return metadata
+
+    @event_metadata.setter
+    def event_metadata(self, value):
+        if value is not None:
+            value = value.copy()
+            if "minimum_frequency" in value:
+                self.minimum_frequency = value.pop("minimum_frequency")
+            if "maximum_frequency" in value:
+                self.maximum_frequency = value.pop("maximum_frequency")
+        self._event_metadata = value
+
+    def _build_domain(self: Sampler):
         """
         Construct the domain object based on model metadata. Includes the window factor
         needed for whitening data.
@@ -225,7 +173,7 @@ class GWSamplerMixin(object):
         self.domain.window_factor = get_window_factor(data_settings["window"])
 
     def _correct_reference_time(
-        self, samples: Union[dict, pd.DataFrame], inverse: bool = False
+        self: Sampler, samples: Union[dict, pd.DataFrame], inverse: bool = False
     ):
         """
         Correct the sky position of an event based on the reference time of the model.
@@ -266,7 +214,7 @@ class GWSamplerMixin(object):
 
     def _post_process(self, samples: Union[dict, pd.DataFrame], inverse: bool = False):
         """
-        Post processing of parameter samples.
+        Post-processing of parameter samples.
         * Correct the sky position for a potentially fixed reference time.
           (see self._correct_reference_time)
         * Potentially sample a synthetic phase. (see self._sample_synthetic_phase)
@@ -348,7 +296,7 @@ class GWSampler(GWSamplerMixin, Sampler):
         #   * whiten and scale strain (since the inference network expects standardized
         #   data)
         transform_pre.append(WhitenAndScaleStrain(self.domain.noise_std))
-        if self.sampling_updates:
+        if self.frequency_updates:
             # * update frequency range
             # Needs to happen before RepackageStrainsAndASDs since we might need to apply
             # detectors specific frequency updates.
@@ -357,9 +305,6 @@ class GWSampler(GWSamplerMixin, Sampler):
                     domain=self.domain,
                     minimum_frequency=self.minimum_frequency,
                     maximum_frequency=self.maximum_frequency,
-                    ifos=self.base_model_metadata["train_settings"]["data"][
-                        "detectors"
-                    ],
                 )
             )
         #   * repackage strains and asds from dicts to an array
@@ -370,7 +315,7 @@ class GWSampler(GWSamplerMixin, Sampler):
             # transform data, since this transform is used by the GNPE sampler as
             # well.
             RepackageStrainsAndASDS(
-                ifos=self.base_model_metadata["train_settings"]["data"]["detectors"],
+                ifos=self.detectors,
                 first_index=self.domain.min_idx,
             ),
             ToTorch(device=self.model.device),
@@ -434,6 +379,42 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
         **not set up**
     """
 
+    @property
+    def minimum_frequency(self) -> float | dict[str, float]:
+        if self.init_sampler is not None:
+            return self.init_sampler.minimum_frequency
+        else:
+            raise AttributeError(
+                "init_sampler not set. Cannot access minimum frequency."
+            )
+
+    @minimum_frequency.setter
+    def minimum_frequency(self, value):
+        if self.init_sampler is not None:
+            self.init_sampler.minimum_frequency = value
+        else:
+            raise AttributeError(
+                "init_sampler not set. Cannot update minimum frequency."
+            )
+
+    @property
+    def maximum_frequency(self) -> float | dict[str, float]:
+        if self.init_sampler is not None:
+            return self.init_sampler.maximum_frequency
+        else:
+            raise AttributeError(
+                "init_sampler not set. Cannot access maximum frequency."
+            )
+
+    @maximum_frequency.setter
+    def maximum_frequency(self, value):
+        if self.init_sampler is not None:
+            self.init_sampler.maximum_frequency = value
+        else:
+            raise AttributeError(
+                "init_sampler not set. Cannot update maximum frequency."
+            )
+
     def _initialize_transforms(self):
         """
         Builds the transforms that are used in the GNPE loop.
@@ -460,7 +441,8 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
         #   * shifting the strain by - gnpe proxies
         #   * repackaging & standardizing proxies to sample['context_parameters']
         #     for conditioning of the inference network
-        transform_pre = [RenameKey("data", "waveform")]
+        transform_pre = []
+        transform_pre.append(RenameKey("data", "waveform"))
         if gnpe_time_settings:
             transform_pre.append(
                 GNPECoalescenceTimes(
@@ -471,21 +453,6 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 )
             )
             transform_pre.append(TimeShiftStrain(ifo_list, self.domain))
-
-        if self.sampling_updates:
-            # * update frequency range
-            # Needs to happen before RepackageStrainsAndASDs since we might need to apply
-            # detectors specific frequency updates.
-            transform_pre.append(
-                MaskDataForFrequencyRangeUpdate(
-                    domain=self.domain,
-                    minimum_frequency=self.minimum_frequency,
-                    maximum_frequency=self.maximum_frequency,
-                    ifos=self.base_model_metadata["train_settings"]["data"][
-                        "detectors"
-                    ],
-                )
-            )
         transform_pre.append(
             SelectStandardizeRepackageParameters(
                 {"context_parameters": data_settings["context_parameters"]},
@@ -539,3 +506,176 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
             for k in self.gnpe_kernel.keys()
         }
         return self.gnpe_kernel.ln_prob(gnpe_proxies_diff, axis=0)
+
+
+# Functions for frequency cropping. Used by Sampler classes and dingo-pipe.
+
+
+def _validate_maximum_frequency(
+    f_max: dict[str, float] | float,
+    detectors: list[str],
+    domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
+    crop_settings: dict | None,
+):
+    if isinstance(f_max, float):
+        f_max = {d: f_max for d in detectors}
+    if set(f_max) != set(detectors):
+        raise ValueError(
+            f"f_max must have exactly detectors {detectors}, got " f"{list(f_max)}."
+        )
+    f_max_vals = np.array([f_max[d] for d in detectors])
+
+    # Hard upper bound
+    if np.any(f_max_vals > domain.f_max):
+        raise ValueError(f"f_max {f_max} > domain.f_max = {domain.f_max}.")
+
+    # Nothing changed
+    if np.all(f_max_vals == domain.f_max):
+        return
+
+    # Cropping must be on
+    if not crop_settings or crop_settings.get("cropping_probability", 0.0) == 0.0:
+        raise ValueError(
+            f"Cropping disabled; cannot lower maximum frequency to {f_max}."
+        )
+
+    # Extract lower bounds
+    floors = crop_settings.get("f_max_lower")
+    if floors is None:
+        floors = domain.f_max
+    if not isinstance(floors, dict):
+        floors = {d: floors for d in detectors}
+
+    # Check lower bound.
+    if not crop_settings.get("independent_detectors", True):
+        if len(set(f_max_vals)) > 1:
+            raise ValueError(
+                f"Independent max frequencies per detector not enabled. "
+                f"All frequencies must match, got f_max = {f_max}."
+            )
+        # TODO: Risk of non-constant floors with non-independent detectors.
+        assert len(set(floors.values())) == 1
+    for d in detectors:
+        if f_max[d] < floors[d]:
+            raise ValueError(
+                f"Maximum frequency requested for {d} ({f_max[d]} Hz) "
+                f"less than lower bound of {floors[d]} Hz."
+            )
+
+
+def _validate_minimum_frequency(
+    f_min: dict[str, float] | float,
+    detectors: list[str],
+    domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
+    crop_settings: dict | None,
+):
+    if isinstance(f_min, float):
+        f_min = {d: f_min for d in detectors}
+    if set(f_min) != set(detectors):
+        raise ValueError(
+            f"f_min must have exactly detectors {detectors}, got {list(f_min)}."
+        )
+    f_min_vals = np.array([f_min[d] for d in detectors])
+
+    # Hard lower bound
+    if np.any(f_min_vals < domain.f_min):
+        raise ValueError(f"f_min {f_min} < domain.f_min = {domain.f_min}.")
+
+    # Nothing changed
+    if np.all(f_min_vals == domain.f_min):
+        return
+
+    # Cropping must be on
+    if not crop_settings or crop_settings.get("cropping_probability", 0.0) == 0.0:
+        raise ValueError(
+            f"Cropping disabled; cannot raise minimum frequency to {f_min}."
+        )
+
+    # Extract upper bounds
+    caps = crop_settings.get("f_min_upper")
+    if caps is None:
+        caps = domain.f_min
+    if not isinstance(caps, dict):
+        caps = {d: caps for d in detectors}
+
+    # Check upper bound.
+    if not crop_settings.get("independent_detectors", True):
+        if len(set(f_min_vals)) > 1:
+            raise ValueError(
+                f"Independent min frequencies per detector not enabled. "
+                f"All frequencies must match, got f_min = {f_min}."
+            )
+        # TODO: Risk of non-constant caps with non-independent detectors.
+        assert len(set(caps.values())) == 1
+    for d in detectors:
+        if f_min[d] > caps[d]:
+            raise ValueError(
+                f"Minimum frequency requested for {d} ({f_min[d]} Hz) "
+                f"greater than upper bound of {caps[d]} Hz."
+            )
+
+
+def check_frequency_updates(
+    model_metadata: dict,
+    f_min: dict[str, float] | float | None = None,
+    f_max: dict[str, float] | float | None = None,
+):
+    """
+    Validate and apply optional minimum and maximum frequency constraints
+    for a model’s frequency domain.
+
+    This function checks that any provided per-detector minimum (`f_min`)
+    or maximum (`f_max`) frequencies—either as a single float applied to
+    all detectors or as a dict mapping each detector to its own value—:
+      - Match exactly the set of detectors in the model metadata.
+      - Respect the hard bounds defined by the domain (`domain.f_min` /
+        `domain.f_max`).
+      - Comply with optional random-strain-cropping settings (probability,
+        independent vs. joint detectors, and per-detector caps/floors).
+
+    Parameters
+    ----------
+    model_metadata : dict
+        Dictionary containing the model’s training settings and data.
+        Must include:
+          - `["train_settings"]["data"]["detectors"]`: list of detector names.
+          - `["train_settings"]["data"]["random_strain_cropping"]`: optional
+            dict of cropping parameters.
+    f_min : dict[str, float], float, or None, optional
+        Single float or per-detector dict of minimum frequencies to enforce.
+        If a float is provided, it is applied to all detectors. Each value
+        must be ≥ `domain.f_min`. If `None`, no minimum-frequency
+        validation is performed.
+    f_max : dict[str, float], float, or None, optional
+        Single float or per-detector dict of maximum frequencies to enforce.
+        If a float is provided, it is applied to all detectors. Each value
+        must be ≤ `domain.f_max`. If `None`, no maximum-frequency
+        validation is performed.
+
+    Raises
+    ------
+    ValueError
+        - If `model_metadata` does not describe a `UniformFrequencyDomain`
+          or `MultibandedFrequencyDomain`.
+        - If `f_min`/`f_max` keys don’t exactly match the detector list.
+        - If any requested frequency lies outside the hard domain bounds.
+        - If cropping is disabled but a change in frequency is requested.
+        - If per-detector constraints (independent vs. joint) or
+          cropping caps/floors are violated.
+
+    Returns
+    -------
+    None
+    """
+    crop_settings = model_metadata["train_settings"]["data"].get(
+        "random_strain_cropping"
+    )
+    detectors = model_metadata["train_settings"]["data"]["detectors"]
+    domain = build_domain_from_model_metadata(model_metadata, base=True)
+    if not isinstance(domain, (UniformFrequencyDomain, MultibandedFrequencyDomain)):
+        raise ValueError("Frequency updates only possible for frequency domains.")
+
+    if f_min is not None:
+        _validate_minimum_frequency(f_min, detectors, domain, crop_settings)
+    if f_max is not None:
+        _validate_maximum_frequency(f_max, detectors, domain, crop_settings)

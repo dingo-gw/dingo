@@ -152,33 +152,3 @@ def get_standardization_dict(
         "std": {k: std[k] for k in selected_parameters},
     }
     return standardization_dict
-
-
-def add_defaults_for_missing_ifos(
-    object_to_update: Optional[float | dict],
-    update_value: float,
-    ifos: list[str],
-) -> Optional[float | dict]:
-    """
-    If object_to_update is a dictionary, include update_value in object_to_update
-    for missing ifos.
-
-    Parameters
-    ----------
-    object_to_update: float or dict
-        Float or dictionary specifying some setting for all ifos (float) or per ifo (dict).
-    update_value: float
-        Value to insert for missing ifos.
-    ifos: list[str]
-        List of interferometers present in data
-
-    Returns
-    -------
-    object_to_update: float or dict
-    """
-    object_to_update = deepcopy(object_to_update)
-    if isinstance(object_to_update, dict):
-        for det in ifos:
-            if det not in object_to_update.keys():
-                object_to_update[det] = update_value
-    return object_to_update
