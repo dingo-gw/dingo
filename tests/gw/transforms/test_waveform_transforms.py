@@ -256,7 +256,7 @@ def cropping_with_asd_setup():
     waveform = {
         d: np.ones([batch_size, num_f], dtype=np.complex64) for d in ["H1", "L1", "V1"]
     }
-    asds = {d: np.ones([batch_size, num_f]) for d in ["H1", "L1", "V1"]}
+    asds = {d: np.ones([batch_size, num_f]) * 1e-20 for d in ["H1", "L1", "V1"]}
     sample = {"waveform": waveform, "asds": asds}
 
     return domain, sample, batch_size
@@ -267,7 +267,7 @@ def cropping_with_asd_setup_no_batch():
     domain = UniformFrequencyDomain(f_min=20.0, f_max=1024.0, delta_f=1 / 8.0)
     num_f = len(domain.sample_frequencies)
     waveform = {d: np.ones([num_f], dtype=np.complex64) for d in ["H1", "L1", "V1"]}
-    asds = {d: np.ones([num_f]) for d in ["H1", "L1", "V1"]}
+    asds = {d: np.ones([num_f]) * 1e-20 for d in ["H1", "L1", "V1"]}
     sample = {"waveform": waveform, "asds": asds}
 
     return domain, sample, 0
@@ -281,7 +281,7 @@ def cropping_with_asd_setup_single_batch():
     waveform = {
         d: np.ones([batch_size, num_f], dtype=np.complex64) for d in ["H1", "L1", "V1"]
     }
-    asds = {d: np.ones([batch_size, num_f]) for d in ["H1", "L1", "V1"]}
+    asds = {d: np.ones([batch_size, num_f]) * 1e-20 for d in ["H1", "L1", "V1"]}
     sample = {"waveform": waveform, "asds": asds}
 
     return domain, sample, batch_size
@@ -306,7 +306,7 @@ def cropping_with_asd_mfd_setup():
     waveform = {
         d: np.ones([batch_size, num_f], dtype=np.complex64) for d in ["H1", "L1", "V1"]
     }
-    asds = {d: np.ones([batch_size, num_f]) for d in ["H1", "L1", "V1"]}
+    asds = {d: np.ones([batch_size, num_f]) * 1e-20 for d in ["H1", "L1", "V1"]}
     sample = {"waveform": waveform, "asds": asds}
 
     return domain, sample, batch_size
@@ -334,7 +334,6 @@ def test_MaskDataForFrequencyRangeUpdate(request, setup):
         domain=domain,
         minimum_frequency=frequency_update["minimum_frequency"],
         maximum_frequency=frequency_update["maximum_frequency"],
-        ifos=[d for d in sample["waveform"].keys()],
     )
     # Pass data through transform
     out = trafo(sample)
@@ -372,5 +371,5 @@ def test_MaskDataForFrequencyRangeUpdate(request, setup):
     )
     if batch_size > 0:
         mask = np.repeat(mask[np.newaxis, :], axis=0, repeats=batch_size)
-    assert np.all([np.all(v[mask] == 0.0) for v in sample["waveform"].values()])
-    assert np.all([np.all(v[mask] == 1.0) for v in sample["asds"].values()])
+    assert np.all([np.all(v[mask] == 0.0) for v in out["waveform"].values()])
+    assert np.all([np.all(v[mask] == 1.0) for v in out["asds"].values()])
