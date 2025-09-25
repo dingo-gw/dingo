@@ -295,7 +295,7 @@ class GWSignal(object):
         else:
             raise TypeError("Invalid ASD type.")
         asd = {
-            k: self.data_domain.update_data(v, low_value=1e-20) for k, v in asd.items()
+            k: self.data_domain.update_data(v, low_value=1.0) for k, v in asd.items()
         }
         return asd
 

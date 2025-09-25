@@ -1355,18 +1355,6 @@ def create_parser(top_level=True):
         ),
     )
     sampler_parser.add(
-        "--sampling-updates",
-        type=str,
-        default="{}",
-        help=(
-            "Dictionary of updated settings that are applied to the data when sampling "
-            "from the model, for example, adapting minimum-/maximum-frequency per detector"
-            "or suppressing frequency ranges. This will get populated with any "
-            "settings provided elsewhere that can not directly be applied during data"
-            "generation. "
-        ),
-    )
-    sampler_parser.add(
         "--importance-sample",
         action=StoreBoolean,
         default=True,
