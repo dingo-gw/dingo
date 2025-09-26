@@ -1,6 +1,8 @@
 import os
 import sys
 
+import dingo.pipe.create_injections  # Needed for delta-function time priors.
+
 import bilby
 from bilby_pipe.input import Input
 from bilby_pipe.plotting_utils import plot_whitened_data
@@ -125,7 +127,11 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.numerical_relativity_file = args.numerical_relativity_file
         self.dingo_injection = args.dingo_injection
         self.injection_waveform_approximant = args.injection_waveform_approximant
-        if args.injection_waveform_approximant in ["SEOBNRv5PHM", "SEOBNRv5EHM", "SEOBNRv5HM"]:
+        if args.injection_waveform_approximant in [
+            "SEOBNRv5PHM",
+            "SEOBNRv5EHM",
+            "SEOBNRv5HM",
+        ]:
             self.injection_frequency_domain_source_model = "gwsignal_binary_black_hole"
             self.frequency_domain_source_model = "gwsignal_binary_black_hole"
         else:
@@ -223,7 +229,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
 
         if self.injection:
             self._inject_dingo_signal(args)
-
 
     @BilbyDataGenerationInput.interferometers.setter
     def interferometers(self, interferometers):
@@ -516,6 +521,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
         priors = super()._get_priors(add_time=add_time)
         priors.update(PriorDict(self.prior_dict_updates))
         return priors
+
 
 def create_generation_parser():
     """Data generation parser creation"""
