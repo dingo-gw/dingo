@@ -210,6 +210,24 @@ class BatchedAddRandomNoiseComplex(object):
         
         # add noise realisation
         return sample
+class DuplicateSamples(object):
+    """
+    Tile the sample waveforms and asds according to the given batch size
+    """
+
+    def __init__(self, batch_size):
+        self.batch_size = batch_size
+
+    def __call__(self, input_sample):
+        sample = input_sample.copy()
+        ifos = sample['waveform'].keys()
+
+        #duplicate waveforms over the batch
+        for ifo in ifos:
+            sample['waveform'][ifo] = np.tile(sample['waveform'][ifo], (self.batch_size, 1))
+            sample['asds'][ifo] = np.tile(sample['asds'][ifo], (self.batch_size, 1))
+        
+        return sample
 
 
 class RepackageStrainsAndASDS(object):
@@ -228,9 +246,8 @@ class RepackageStrainsAndASDS(object):
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
-        breakpoint()
         strains = np.empty(
-            sample["waveform"][self.ifos[0]].shape[:-1]  # Possible batch dims, see if swapping for waveform affects training
+            sample["asds"][self.ifos[0]].shape[:-1]  # Possible batch dims, see if swapping for waveform affects training
             + (
                 len(self.ifos),
                 3,
