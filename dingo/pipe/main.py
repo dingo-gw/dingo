@@ -114,7 +114,7 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
                 # or list.
                 # for example, the minimum-frequency could be
                 # {H1: 20, L1:20}
-                if "{" and "}" in args_v:
+                if isinstance(args_v, str) and "{" and "}" in args_v:
                     args_v = convert_string_to_dict(args_v)
                 elif isinstance(args_v, list):
                     # if it's a list we need to strip quotes
