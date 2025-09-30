@@ -27,7 +27,8 @@ from dingo.gw.transforms import (
     CopyToExtrinsicParameters,
     GetDetectorTimes,
     DecimateWaveformsAndASDS,
-    BatchedAddRandomNoiseComplex,
+    AddWhiteNoiseComplex,
+    DuplicateSamples
 )
 
 
@@ -184,6 +185,10 @@ class GWSampler(GWSamplerMixin, Sampler):
         # preprocessing transforms:
         transform_pre = []
         #   * in case of MultibandedFrequencyDomain, decimate data from base domain
+        
+        if self.zero_noise:
+            transform_pre.append(DuplicateSamples(batch_size=self.batch_size))
+
         if isinstance(self.domain, MultibandedFrequencyDomain):
             transform_pre.append(
                 DecimateWaveformsAndASDS(self.domain, decimation_mode="whitened")
@@ -192,7 +197,7 @@ class GWSampler(GWSamplerMixin, Sampler):
         transform_pre.append(WhitenAndScaleStrain(self.domain.noise_std))
         
         if self.zero_noise:
-            transform_pre.append(BatchedAddRandomNoiseComplex(batch_size=self.batch_size))
+            transform_pre.append(AddWhiteNoiseComplex())
         
         #   * whiten and scale strain (since the inference network expects standardized
         #   data)
