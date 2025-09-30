@@ -1,6 +1,9 @@
+from typing import Optional
 import numpy as np
+from copy import deepcopy
 from scipy.signal.windows import tukey
 from scipy.interpolate import interp1d
+
 from bilby.gw.detector import PowerSpectralDensity
 
 from dingo.gw.prior import default_extrinsic_dict
@@ -104,10 +107,12 @@ def get_standardization_dict(
     # due to fiducial values (-> std 0)
     for k in std_intrinsic.keys() & std_extrinsic.keys():
         if std_intrinsic[k] != 0:
-            raise ValueError(f'Expected intrinsic prior for {k} to be a fixed value in the waveform dataset, '
-                             f'since {k} is specified as an extrinsic prior in the train settings and will be sampled'
-                             f'during training. However, the standard deviation of {k} is non-zero: {std_intrinsic[k]}'
-                             f'Please re-generate the waveform dataset with a fixed value for {k}.')
+            raise ValueError(
+                f"Expected intrinsic prior for {k} to be a fixed value in the waveform dataset, "
+                f"since {k} is specified as an extrinsic prior in the train settings and will be sampled"
+                f"during training. However, the standard deviation of {k} is non-zero: {std_intrinsic[k]}"
+                f"Please re-generate the waveform dataset with a fixed value for {k}."
+            )
 
     # Merge dicts, overwriting fiducial values for parameters (e.g.,
     # luminosity_distance) in intrinsic parameters by the extrinsic ones

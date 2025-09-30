@@ -1,4 +1,3 @@
-import sys
 from multiprocessing import Pool
 from typing import Optional
 
@@ -11,9 +10,13 @@ from threadpoolctl import threadpool_limits
 
 from dingo.core.likelihood import Likelihood
 from dingo.gw.injection import GWSignal
-from dingo.gw.transforms import DecimateWaveformsAndASDS
+from dingo.gw.transforms import (
+    DecimateWaveformsAndASDS,
+    create_mask_based_on_frequency_update,
+)
 from dingo.gw.waveform_generator import WaveformGenerator
 from dingo.gw.domains import (
+    Domain,
     UniformFrequencyDomain,
     MultibandedFrequencyDomain,
 )
@@ -28,16 +31,19 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
     def __init__(
         self,
-        wfg_kwargs,
-        wfg_domain,
-        data_domain,
-        event_data,
-        t_ref=None,
-        time_marginalization_kwargs=None,
-        phase_marginalization_kwargs=None,
-        calibration_marginalization_kwargs=None,
+        wfg_kwargs: dict,
+        wfg_domain: Domain,
+        data_domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
+        event_data: dict,
+        t_ref: Optional[float] = None,
+        time_marginalization_kwargs: Optional[dict] = None,
+        phase_marginalization_kwargs: Optional[dict] = None,
+        calibration_marginalization_kwargs: Optional[dict] = None,
         phase_grid=None,
-        use_base_domain=False,
+        use_base_domain: bool = False,
+        frequency_update: Optional[
+            dict[str, float | dict[str, float | list[float]]]
+        ] = None,
     ):
         # TODO: Does the phase_grid argument ever get used?
         """
@@ -64,6 +70,10 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         use_base_domain: bool (default False)
             When the domain is a MultibandedFrequencyDomain, whether to use the
             associated base UniformFrequencyDomain for likelihood computations.
+        frequency_update: dict
+            Specifies settings for updating the frequency range
+            example: {'minimum_frequency': {'H1': 30., 'L1': 20.},
+                       maximum_frequency: 1024.}
         """
         super().__init__(
             wfg_kwargs=wfg_kwargs,
@@ -80,7 +90,34 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             event_data = decimator(event_data)
         self.use_base_domain = use_base_domain  # Set up appropriate domain objects.
 
-        self.asd = event_data["asds"]
+        # Apply frequency update to ASD:
+        # The following equation numbers refer to Appendix B in http://arxiv.org/abs/1809.02293
+        # The ASD enters the log-likelihood via the noise-weighted inner product (eq. 42)
+        # through the terms log_Zn (eq. 45), kappa^2 (eq. 47), and rho^2_opt (eq. 46).
+        # If we set the ASD to large value (e.g. 1) compared to the data/waveform, the
+        # effective contribution to the sum in the noise-weighted inner product is zero.
+        # This means that we only have to modify the ASD to apply frequency masking to
+        # importance sampling.
+        asds = event_data["asds"]
+        if frequency_update is not None:
+            # Get frequency masks for full domain
+            sample_frequencies = data_domain.sample_frequencies
+            if self.use_base_domain and isinstance(
+                data_domain, MultibandedFrequencyDomain
+            ):
+                sample_frequencies = data_domain.base_domain.sample_frequencies
+            frequency_masks = create_mask_based_on_frequency_update(
+                sample_frequencies=sample_frequencies,
+                detectors=list(event_data["waveform"].keys()),
+                minimum_frequency=frequency_update.get("minimum_frequency", None),
+                maximum_frequency=frequency_update.get("maximum_frequency", None),
+            )
+            asds = {
+                ifo: np.where(mask, asds[ifo], 1.0)
+                for ifo, mask in frequency_masks.items()
+            }
+
+        self.asd = asds
 
         self.whitened_strains = {
             k: v / self.asd[k] / self.data_domain.noise_std
