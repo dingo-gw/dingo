@@ -141,7 +141,7 @@ class Result(CoreResult):
         Called by __init__() immediately after _build_prior().
         """
         self.domain = build_domain(self.base_metadata["dataset_settings"]["domain"])
-        check_minimum_version(self.version)
+        check_minimum_version(self.version, raise_exception=False)
 
         data_settings = self.base_metadata["train_settings"]["data"]
         if "domain_update" in data_settings:

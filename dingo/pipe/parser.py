@@ -377,8 +377,7 @@ def create_parser(top_level=True):
     )
     det_parser.add(
         "--sampling-frequency",
-        # default=4096,
-        default=None,
+        default=4096,
         type=nonefloat,
     )
 
@@ -438,8 +437,7 @@ def create_parser(top_level=True):
     )
     det_parser.add(
         "--tukey-roll-off",
-        # default=0.4,
-        default=None,
+        default=1.0,
         type=nonefloat,
         help="Roll off duration of tukey window in seconds, default is 0.4s",
     )

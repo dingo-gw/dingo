@@ -109,31 +109,28 @@ def check_network_code_compatibility(model_metadata: dict) -> bool:
     model_version_str = model_metadata["version"].split("=", 1)[1]
     model_version = pv.parse(model_version_str)
 
-    class VersionMismatchError(Exception):
-        pass
-
     if (
         dingo_version < WINDOW_FACTOR_FIX_VERSION
         and model_version >= WINDOW_FACTOR_FIX_VERSION
     ):
-        raise VersionMismatchError(
+        raise RuntimeError(
             f"""
-        Your DINGO version ({dingo_version}) is before the window factor fix,
-        but the model version ({model_version}) is after the window factor fix.
-        Please upgrade your DINGO version to {WINDOW_FACTOR_FIX_VERSION} or later
-        to use this network.
+            Your DINGO version ({dingo_version}) is before the the window factor fix, 
+            but your model version ({model_version}) includes this fix. 
+            Please upgrade DINGO to version >= {WINDOW_FACTOR_FIX_VERSION}.
         """.strip()
         )
     elif (
         dingo_version >= WINDOW_FACTOR_FIX_VERSION
         and model_version < WINDOW_FACTOR_FIX_VERSION
     ):
-        raise VersionMismatchError(
+        raise RuntimeError(
             f"""
-        Your DINGO version ({dingo_version}) is after the window factor fix and model version ({model_version})
-        is before the window factor fix. Please downgrade your dingo version to before {WINDOW_FACTOR_FIX_VERSION} 
-        to use this network.
-        """.strip()
+            Your DINGO version ({dingo_version}) includes the window factor fix, but the model version ({model_version}) was created before this fix. 
+            To use this network, either:
+            - downgrade to DINGO < {WINDOW_FACTOR_FIX_VERSION}, or
+            - retrain the network with DINGO >= {WINDOW_FACTOR_FIX_VERSION}.
+            """.strip()
         )
 
 def check_minimum_version(version_str: str, raise_exception: bool = False):
@@ -152,14 +149,11 @@ def check_minimum_version(version_str: str, raise_exception: bool = False):
     version = pv.parse(version_str)
 
     if version < WINDOW_FACTOR_FIX_VERSION:
+        error_str = f"This object was created with a version of DINGO ({version}) before the window factor fix which was patched in {WINDOW_FACTOR_FIX_VERSION}."
         if raise_exception:
-            raise Exception(
-                f"This version ({version}) is before the window factor fix which was patched in {WINDOW_FACTOR_FIX_VERSION}."
-            )
-        else: 
-            _logger.warning(
-                f"Warning: This version ({version}) is before the window factor fix which was patched in {WINDOW_FACTOR_FIX_VERSION}."
-            )
+            raise Exception(error_str)
+        else:
+            _logger.warning("WARNING: " + error_str)
 
 def update_model_config(model_settings: dict):
     """
