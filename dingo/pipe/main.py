@@ -27,6 +27,7 @@ from .utils import dict_to_string
 
 from ..gw.domains.build_domain import build_domain_from_model_metadata
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
+from ..gw.inference.gw_samplers import check_frequency_updates
 from ..gw.injection import Injection
 from ..gw.noise.asd_dataset import ASDDataset
 
@@ -78,6 +79,12 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
 
     data_settings = model_metadata["train_settings"]["data"]
 
+    # In dingo_pipe, we download and prepare data based on the model frequency range.
+    # This is because different maximum frequencies for different detectors would
+    # require separate domain objects within Dingo, and this is not implemented.
+    # Instead, we update frequency ranges using masking within Dingo. Updated frequency
+    # ranges are passed around within Dingo using the event_metadata.
+
     model_args = {
         "duration": domain.duration,
         "minimum_frequency": domain.f_min,
@@ -103,9 +110,9 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
         if args_v is not None:
             # Convert type from str to enable comparison.
             try:
-                # it's possible that the attribute is a dict 
+                # it's possible that the attribute is a dict
                 # or list.
-                # for example, the minimum-frequency could be 
+                # for example, the minimum-frequency could be
                 # {H1: 20, L1:20}
                 if "{" and "}" in args_v:
                     args_v = convert_string_to_dict(args_v)
@@ -122,8 +129,8 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
                 pass
 
             if args_v != v:
-                # this is for when the minimum-frequency is a float 
-                # but args_v is a dict 
+                # this is for when the minimum-frequency is a float
+                # but args_v is a dict
                 if isinstance(args_v, dict) and all(val == v for val in args_v.values()):
                     continue
 
@@ -134,15 +141,32 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
                     raise NotImplementedError(
                         "Cannot change waveform approximant during importance sampling."
                     )  # TODO: Implement this. Also no error if passed explicitly as an update.
+                if k in ["minimum_frequency", "maximum_frequency"]:
+                    logger.info(
+                        f"Strain-cropping: Plan to update network {k} from {v} to"
+                        f" {args_v}."
+                    )
+                    continue  # Do not update args to model value.
                 logger.warning(
                     f"Argument {k} provided to dingo_pipe as {args_v} "
-                    f"does not match value {v} in model file. Using model value for "
+                    f"inconsistent with value {v} in model file. Using model value for "
                     f"inference, and will attempt to change this during importance "
                     f"sampling."
                 )
                 changed_args[k] = args_v
 
         setattr(args, k, v)
+
+    frequency_input = Input([], [], print_msg=False)
+    frequency_input.detectors = model_args["detectors"]
+    frequency_input.sampling_frequency = args.sampling_frequency
+    frequency_input.minimum_frequency = args.minimum_frequency
+    frequency_input.maximum_frequency = args.maximum_frequency
+    check_frequency_updates(
+        model_metadata,
+        frequency_input.minimum_frequency_dict,
+        frequency_input.maximum_frequency_dict,
+    )
 
     # TODO: Also check consistency between model and init_model settings.
 

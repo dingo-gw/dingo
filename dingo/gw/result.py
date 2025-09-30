@@ -133,6 +133,22 @@ class Result(CoreResult):
         else:
             return self.base_metadata["train_settings"]["data"]["ref_time"]
 
+    @property
+    def minimum_frequency(self) -> dict[str, float] | float:
+        return self.event_metadata.get("minimum_frequency", self.domain.f_min)
+
+    @minimum_frequency.setter
+    def minimum_frequency(self, value: dict[str, float] | float):
+        self.event_metadata["minimum_frequency"] = value
+
+    @property
+    def maximum_frequency(self) -> dict[str, float] | float:
+        return self.event_metadata.get("maximum_frequency", self.domain.f_max)
+
+    @maximum_frequency.setter
+    def maximum_frequency(self, value: dict[str, float] | float):
+        self.event_metadata["maximum_frequency"] = value
+
     def _build_domain(self):
         """
         Construct the domain object based on model metadata. Includes the window factor
@@ -355,6 +371,10 @@ class Result(CoreResult):
             calibration_marginalization_kwargs=calibration_marginalization_kwargs,
             phase_grid=phase_grid,
             use_base_domain=self.use_base_domain,
+            frequency_update=dict(
+                minimum_frequency=self.minimum_frequency,
+                maximum_frequency=self.maximum_frequency,
+            ),
         )
 
     def sample_synthetic_phase(
@@ -446,7 +466,6 @@ class Result(CoreResult):
         t0 = time.time()
 
         if not inverse:
-            # TODO: This can probably be removed.
             self._build_likelihood()
 
         if inverse:
