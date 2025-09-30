@@ -53,7 +53,7 @@ class ImportanceSamplingInput(Input):
         self.prior_dict_updates = args.prior_dict_updates
 
         # Choices for running
-        # self.detectors = args.detectors
+        self.detectors = args.detectors
 
         # self.sampler = args.sampler
         # self.sampler_kwargs = args.sampler_kwargs

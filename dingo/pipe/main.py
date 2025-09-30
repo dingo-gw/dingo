@@ -131,7 +131,9 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
             if args_v != v:
                 # this is for when the minimum-frequency is a float
                 # but args_v is a dict
-                if isinstance(args_v, dict) and all(val == v for val in args_v.values()):
+                if isinstance(args_v, dict) and all(
+                    val == v for val in args_v.values()
+                ):
                     continue
 
                 if isinstance(args_v, list):
@@ -223,6 +225,8 @@ class MainInput(BilbyMainInput):
         self.scitoken_issuer = args.scitoken_issuer
         self.container = args.container
 
+        # self.cosmology = args.cosmology
+
         self.outdir = args.outdir
         self.label = args.label
         self.log_directory = args.log_directory
@@ -310,6 +314,9 @@ class MainInput(BilbyMainInput):
         # self.injection_waveform_approximant = args.injection_waveform_approximant
         # self.injection_frequency_domain_source_model = (
         #     args.injection_frequency_domain_source_model
+        # )
+        # self.injection_waveform_generator_class_ctor_args = (
+        #     args.injection_waveform_generator_constructor_dict
         # )
         self.generation_seed = args.generation_seed
         if self.importance_sampling_updates and self.gaussian_noise:
