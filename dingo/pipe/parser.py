@@ -36,7 +36,7 @@ class StoreBoolean(argparse.Action):
             setattr(namespace, self.dest, False)
 
 
-def create_parser(top_level=True):
+def create_parser(top_level=True, usage=None):
     """Creates the BilbyArgParser for dingo_pipe
 
     Parameters
@@ -52,10 +52,11 @@ def create_parser(top_level=True):
 
     """
     parser = BilbyArgParser(
-        usage="Perform inference with dingo based on a .ini file.",
+        usage="%(prog)s ini [options]",
+        description=usage,
         ignore_unknown_config_file_keys=False,
         allow_abbrev=False,
-        formatter_class=configargparse.ArgumentDefaultsHelpFormatter,
+        formatter_class=configargparse.ArgumentDefaultsRawHelpFormatter,
     )
     parser.add("ini", type=str, is_config_file=True, help="Configuration ini file")
     parser.add("-v", "--verbose", action="store_true", help="Verbose output")
@@ -292,8 +293,18 @@ def create_parser(top_level=True):
     )
     data_gen_pars.add(
         "--data-find-url",
-        default="https://datafind.ligo.org",
-        help="URL to use for datafind, default is https://datafind.ligo.org to query CVMFS",
+        type=nonestr,
+        default=None,
+        help=(
+            "URL to use for datafind. This happens during the initial attempt "
+            "to locate frames by :code:`bilby_pipe` or by "
+            ":code:`bilby_pipe_generation`. In both cases, the order of "
+            "preference is: 1) the value of this argument, 2) the value of "
+            "the environment variable GWDATAFIND_SERVER, 3) the value "
+            "of the global default in bilby_pipe.utils.DEFAULT_GWDATAFIND_SERVER. "
+            "This value will override the value of GWDATAFIND_SERVER if it is set"
+            "in :code:`getenv` or :code:`environment-variables`."
+        ),
     )
     data_gen_pars.add(
         "--data-find-urltype",
@@ -522,6 +533,17 @@ def create_parser(top_level=True):
             "A dictionary of arbitrary additional waveform-arguments to pass "
             "to the bilby waveform generator's waveform arguments for the "
             "injection only"
+        ),
+    )
+    injection_parser.add(
+        "--injection-waveform-generator-constructor-dict",
+        default=None,
+        type=nonestr,
+        help=(
+            "A dictionary of arbitrary arguments to pass"
+            " to the bilby waveform generator class constructor for the injection"
+            " only. The class will be the same as the one specified in"
+            " '--waveform-generator'."
         ),
     )
     injection_parser.add(
@@ -1242,6 +1264,15 @@ def create_parser(top_level=True):
     #     help="The waveform generator class, should be a python path. This will "
     #     "not be able to use any arguments not passed to the default.",
     # )
+    # waveform_parser.add(
+    #     "--waveform-generator-constructor-dict",
+    #     default=None,
+    #     type=nonestr,
+    #     help=(
+    #         "A dictionary of arbitrary arguments to pass"
+    #         " to the bilby waveform generator class constructor."
+    #     ),
+    # )
     waveform_parser.add(
         "--reference-frequency",
         default=None,
@@ -1295,14 +1326,14 @@ def create_parser(top_level=True):
         ),
     )
     # waveform_parser.add(
-        # "--waveform-arguments-dict",
-        # default=None,
-        # type=nonestr,
-        # help=(
-            # "A dictionary of arbitrary additional waveform-arguments to pass"
-            # "  to the bilby waveform generator's `waveform_arguments`. Only used "
-            # "for injections"
-        # ),
+    # "--waveform-arguments-dict",
+    # default=None,
+    # type=nonestr,
+    # help=(
+    # "A dictionary of arbitrary additional waveform-arguments to pass"
+    # "  to the bilby waveform generator's `waveform_arguments`. Only used "
+    # "for injections"
+    # ),
     # )
     # waveform_parser.add(
     #     "--mode-array",
@@ -1352,6 +1383,23 @@ def create_parser(top_level=True):
     #         "the generation function is bilby.gw.conversion.generate_all_bns_parameters. "
     #         "If you specify your own function, you may wish to use the I/O of those functions as templates"
     #         "If given as 'noconvert' (case insensitive), no generation is used'"
+    #     ),
+    # )
+
+    # # Constants arguments
+    # global_settings_parser = parser.add_argument_group(
+    #     title="Global settings",
+    #     description="Settings for global configuration",
+    # )
+    # global_settings_parser.add(
+    #     "--cosmology",
+    #     default="Planck15",
+    #     type=str,
+    #     help=(
+    #         "The name of the cosmology to use. "
+    #         "Defaults to Planck15, see "
+    #         ":external:py:func:`bilby.gw.cosmology.get_available_cosmologies` "
+    #         "for a list of the available cosmologies."
     #     ),
     # )
 
