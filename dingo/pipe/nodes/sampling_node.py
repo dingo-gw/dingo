@@ -52,10 +52,17 @@ class SamplingNode(AnalysisNode):
                     self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
                 self.requirements.append("IS_GLIDEIN=?=True")
 
-                # only supporting OSDF transfers for now
-                # stripping osdf prefix as it is not needed
-                network_files = [s.replace("/osdf", "") for s in [self.inputs.model, self.inputs.model_init] if s is not None]
-                network_files = [f"igwn+osdf://{s}" for s in network_files]
+                # modifying the paths for OSDF networks
+                network_files = []
+                for s in [self.inputs.model, self.inputs.model_init]:
+                    if s is None:
+                        continue
+                    if "osdf" in s:
+                        # stripping osdf prefix as it is not needed
+                        network_files.append(f"igwn+osdf://{s.replace('/osdf', '')}")
+                    else:
+                        network_files.append(s)
+
                 input_files_to_transfer.extend(network_files)
                 # This is needed to access the networks which are in OSDF
                 self.extra_lines.extend(self.scitoken_lines)
