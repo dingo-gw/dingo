@@ -136,9 +136,6 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
                 ):
                     continue
 
-                if isinstance(args_v, list):
-                    continue
-
                 if k in ["waveform_approximant"]:
                     raise NotImplementedError(
                         "Cannot change waveform approximant during importance sampling."
