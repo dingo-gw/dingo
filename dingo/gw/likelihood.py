@@ -279,13 +279,11 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         Here, we work with data d and signals mu that are already whitened by
         1 / [sqrt(PSD) * domain.noise_std], where
 
-                  noise_std = np.sqrt(window_factor) / np.sqrt(4 * delta_f).
+                  noise_std = 1 / np.sqrt(4 * delta_f).
 
         With this preprocessing, the inner products thus simply become
 
                   <a, b> = sum(a.conj() * b).real.
-
-        ! Be careful with window factors here !
 
 
         Time marginalization:

@@ -11,7 +11,7 @@ def ufd_setup():
     f_min = 20.0
     f_max = 1024.0
     T = 8.0
-    domain = UniformFrequencyDomain(f_min, f_max, delta_f=1 / T, window_factor=0.9)
+    domain = UniformFrequencyDomain(f_min, f_max, delta_f=1 / T)
 
     # Set waveform below f_min to 0. (This is important for the test to work!)
     waveform = {
@@ -42,7 +42,7 @@ def ufd_setup():
     # Create data with smaller range, e.g. [20., 512.]
     f_max_new = 512.0
     domain_small = UniformFrequencyDomain(
-        f_min, f_max_new, delta_f=1 / T, window_factor=0.9
+        f_min, f_max_new, delta_f=1 / T
     )
 
     waveform_small = {
@@ -102,7 +102,7 @@ def mfd_setup():
     f_max = 1038.0
     T = 8.0
     base_domain = UniformFrequencyDomain(
-        f_min=f_min, f_max=f_max, delta_f=1 / T, window_factor=0.9
+        f_min=f_min, f_max=f_max, delta_f=1 / T
     )
     domain = MultibandedFrequencyDomain(
         nodes=nodes, delta_f_initial=1 / T, base_domain=base_domain
@@ -138,7 +138,7 @@ def mfd_setup():
     f_max_new = 512.0
     nodes_small = [20.0, 34.0, 46.0, 62.0, 78.0, f_max_new]
     base_domain_small = UniformFrequencyDomain(
-        f_min, f_max_new, delta_f=1 / T, window_factor=0.9
+        f_min, f_max_new, delta_f=1 / T
     )
     domain_small = MultibandedFrequencyDomain(
         nodes=nodes_small, delta_f_initial=1 / T, base_domain=base_domain_small
