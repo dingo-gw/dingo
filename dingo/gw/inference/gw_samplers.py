@@ -89,14 +89,16 @@ class GWSamplerMixin(object):
 
     @minimum_frequency.setter
     def minimum_frequency(self: _GWMixinProtocol, value: dict[str, float] | float):
-        if not isinstance(
-            self.domain, (UniformFrequencyDomain, MultibandedFrequencyDomain)
-        ):
+        if isinstance(self.domain, MultibandedFrequencyDomain):
+            domain = self.domain.base_domain
+        elif isinstance(self.domain, UniformFrequencyDomain):
+            domain = self.domain
+        else:
             raise ValueError("Frequency updates only possible for frequency domains.")
         _validate_minimum_frequency(
             value,
             self.detectors,
-            self.domain,
+            domain,
             self.random_strain_cropping,
         )  # TODO: Ensure minimum frequency is a dict?
         self._minimum_frequency = value
@@ -111,14 +113,16 @@ class GWSamplerMixin(object):
 
     @maximum_frequency.setter
     def maximum_frequency(self: _GWMixinProtocol, value: Union[float, dict]):
-        if not isinstance(
-            self.domain, (UniformFrequencyDomain, MultibandedFrequencyDomain)
-        ):
+        if isinstance(self.domain, MultibandedFrequencyDomain):
+            domain = self.domain.base_domain
+        elif isinstance(self.domain, UniformFrequencyDomain):
+            domain = self.domain
+        else:
             raise ValueError("Frequency updates only possible for frequency domains.")
         _validate_maximum_frequency(
             value,
             self.detectors,
-            self.domain,
+            domain,
             self.random_strain_cropping,
         )
         self._maximum_frequency = value
