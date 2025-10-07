@@ -125,11 +125,12 @@ class SamplingInput(Input):
             init_model = build_model_from_kwargs(
                 filename=self.model_init, device=self.device, load_training_info=False
             )
-            init_sampler = GWSampler(model=init_model)
+            init_sampler = GWSampler(model=init_model, zero_noise=self.zero_noise, batch_size=self.batch_size)
             self.dingo_sampler = GWSamplerGNPE(
                 model=model,
                 init_sampler=init_sampler,
                 num_iterations=self.num_gnpe_iterations,
+                zero_noise=self.zero_noise, batch_size=self.batch_size
             )
 
         else:

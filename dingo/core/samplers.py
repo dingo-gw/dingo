@@ -392,6 +392,7 @@ class GNPESampler(Sampler):
         model: BasePosteriorModel,
         init_sampler: Sampler,
         num_iterations: int = 1,
+        **kwargs
     ):
         """
         Parameters
@@ -403,8 +404,10 @@ class GNPESampler(Sampler):
             Number of GNPE iterations to be performed by sampler.
         """
         self.gnpe_parameters = []  # Should be set in subclass _initialize_transform()
+        self.zero_noise = kwargs['zero_noise']
+        self.batch_size = kwargs['batch_size']
 
-        super().__init__(model)
+        super().__init__(model, zero_noise=self.zero_noise, batch_size=self.batch_size)
         self.init_sampler = init_sampler
         self.num_iterations = num_iterations
         self.iteration_tracker = None
