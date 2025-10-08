@@ -107,7 +107,8 @@ def check_minimum_version(version_str: str, raise_exception: bool = False) -> No
     raise_exception : bool
         If True, raise an exception if the version is below the minimum required version.
     """
-    current_version = pv.parse(get_version())
+    if "None" in version_str:
+        version_str = "dingo=0.0.0"
     version_str = version_str.split("=", 1)[1]
     version = pv.parse(version_str)
 
