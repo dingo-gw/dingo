@@ -63,6 +63,9 @@ class SamplingNode(AnalysisNode):
                     else:
                         network_files.append(s)
 
+                if self.transfer_container:
+                    input_files_to_transfer.append(self.inputs.container)
+
                 input_files_to_transfer.extend(network_files)
                 # This is needed to access the networks which are in OSDF
                 self.extra_lines.extend(self.scitoken_lines)
