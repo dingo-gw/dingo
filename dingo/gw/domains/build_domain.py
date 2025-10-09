@@ -4,7 +4,6 @@ from dingo.gw.domains import (
     MultibandedFrequencyDomain,
     TimeDomain,
 )
-from dingo.gw.gwutils import get_window_factor
 
 
 def build_domain(settings: dict) -> Domain:
@@ -63,9 +62,6 @@ def build_domain_from_model_metadata(
     domain = build_domain(model_metadata["dataset_settings"]["domain"])
     if "domain_update" in model_metadata["train_settings"]["data"]:
         domain.update(model_metadata["train_settings"]["data"]["domain_update"])
-    domain.window_factor = get_window_factor(
-        model_metadata["train_settings"]["data"]["window"]
-    )
     if base and hasattr(domain, "base_domain"):
         domain = domain.base_domain
     return domain

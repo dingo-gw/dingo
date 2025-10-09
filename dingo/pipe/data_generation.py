@@ -483,23 +483,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
         else:
             self._importance_sampling_updates = None
 
-    def _set_interferometers_from_gaussian_noise(self):
-        super()._set_interferometers_from_gaussian_noise()
-        # Scale the FD strain appropriately by the window factor (not done by default
-        # in Bilby / bilby_pipe). This is to ensure that the injection is consistent
-        # with TD data with a given PSD, making it consistent also with DINGO network
-        # training.
-        for ifo in self.interferometers:
-            # This is a hack to set the window factor. It ensures also that the SNRs
-            # are calculated correctly.
-            td_strain = ifo.time_domain_strain
-            # TODO: correct for window factor changes https://git.ligo.org/pe/pe-group-coordination/-/issues/1
-            ifo.strain_data.time_domain_window(roll_off=self.tukey_roll_off)
-            ifo.strain_data.frequency_domain_strain = (
-                ifo.strain_data.frequency_domain_strain
-                * np.sqrt(ifo.strain_data.window_factor)
-            )
-
     @property
     def prior_dict_updates(self):
         """The input prior_dict from the ini (if given)
