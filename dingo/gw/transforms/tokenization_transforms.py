@@ -259,6 +259,9 @@ class StrainTokenization(object):
         )
 
         # Prepare position information for each token
+        # TODO: pass self.detectors to _init_ when initializing transforms_pre for the sampler since the asds dict
+        #  doesn't get updated in RepackageStrainsAndASDS like the waveforms! This way the input can have the asd from
+        #  another detector (not used during inference) in it.
         if strain.shape[:batch_idx] == ():
             detectors = np.array(
                 [[DETECTOR_DICT[k] for k, v in input_sample["asds"].items()]],
@@ -1135,7 +1138,7 @@ class UpdateFrequencyRange(object):
             object_to_update=maximum_frequency, update_value=domain.f_max, ifos=ifos
         )
         self.suppress_range = suppress_range
-
+        self.print_output = print_output
         if print_output:
             print(
                 f"Transform UpdateFrequencyRange activated:"
@@ -1179,7 +1182,9 @@ class UpdateFrequencyRange(object):
         # Update minimum_frequency
         if self.minimum_frequency is not None:
             # Same for all detectors
-            if isinstance(self.minimum_frequency, float):
+            if isinstance(self.minimum_frequency, float) or isinstance(
+                self.minimum_frequency, int
+            ):
                 # Do not mask token if f_min_per_token = minimum_frequency
                 mask_min = np.where(
                     f_min_per_token < self.minimum_frequency, True, False
@@ -1198,11 +1203,15 @@ class UpdateFrequencyRange(object):
                         )
                         mask_b = np.where(sample["position"][..., 2] == b, True, False)
                         mask[mask_b] = np.logical_or(mask_min, mask[mask_b])
+            if self.print_output:
+                print(f"Updated f_min with {self.minimum_frequency}.")
 
         # Update maximum_frequency
         if self.maximum_frequency is not None:
             # Same for all detectors
-            if isinstance(self.maximum_frequency, float):
+            if isinstance(self.maximum_frequency, float) or isinstance(
+                self.maximum_frequency, int
+            ):
                 # Do not mask token if f_max_per_token = maximum_frequency
                 mask_max = np.where(
                     f_max_per_token > self.maximum_frequency, True, False
@@ -1221,6 +1230,8 @@ class UpdateFrequencyRange(object):
                         )
                         mask_b = np.where(sample["position"][..., 2] == b, True, False)
                         mask[mask_b] = np.logical_or(mask_max, mask[mask_b])
+            if self.print_output:
+                print(f"Updated f_max with {self.maximum_frequency}.")
 
         # Update suppress_range
         if self.suppress_range is not None:
@@ -1247,6 +1258,8 @@ class UpdateFrequencyRange(object):
                         mask_interval = np.logical_and(mask_lower, mask_upper)
                         mask_b = np.where(sample["position"][..., 2] == b, True, False)
                         mask[mask_b] = np.logical_or(mask_interval, mask[mask_b])
+            if self.print_output:
+                print(f"Updated suppress_range with {self.suppress_range}.")
 
         # Update drop_token_mask
         sample["drop_token_mask"] = np.logical_or(mask, sample["drop_token_mask"])
