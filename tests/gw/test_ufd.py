@@ -2,7 +2,6 @@ import torch
 
 from dingo.gw.domains import UniformFrequencyDomain, TimeDomain
 from dingo.gw.domains import build_domain
-from dingo.gw.gwutils import get_window_factor
 import pytest
 import numpy as np
 
@@ -13,22 +12,6 @@ def uniform_FD_params():
     f_max = 4096.0
     delta_f = 1.0 / 4.0
     return {"f_min": f_min, "f_max": f_max, "delta_f": delta_f}
-
-
-@pytest.fixture
-def window_setup():
-    type = "tukey"
-    f_s = 4096
-    T = 8.0
-    roll_off = 0.4
-    window_kwargs = {
-        "type": type,
-        "f_s": f_s,
-        "T": T,
-        "roll_off": roll_off,
-    }
-    window_factor = get_window_factor(window_kwargs)
-    return window_kwargs, window_factor
 
 
 def test_uniform_FD(uniform_FD_params):
@@ -98,6 +81,10 @@ def test_FD_set_new_range(uniform_FD_params):
         domain._set_new_range(None, p["f_min"] - 10)
     with pytest.raises(ValueError):
         domain._set_new_range(p["f_min"] + 10, p["f_min"] + 5)
+    with pytest.raises(ValueError):
+        domain._set_new_range(p["f_min"] + 0.1, None)
+    with pytest.raises(ValueError):
+        domain._set_new_range(None, p["f_max"] - 0.1)
     # test that setting new frequency range works as intended
     f_min_new, f_max_new = 40, 800
     n = int(f_max_new / p["delta_f"]) + 1
@@ -177,25 +164,3 @@ def test_FD_caching(uniform_FD_params):
     # result
     assert len(domain()) < len(domain_ref())
 
-
-def test_FD_window_factor(uniform_FD_params, window_setup):
-    p = uniform_FD_params
-    domain = UniformFrequencyDomain(**p)
-    _, window_factor = window_setup
-    assert window_factor == 0.9374713897717841
-    # check that window_factor is initially None
-    assert domain.window_factor is None
-    # set new window_factor
-    domain.window_factor = window_factor
-    assert domain._window_factor == domain.window_factor == window_factor
-    noise_std = domain.noise_std
-    assert noise_std == np.sqrt(domain.window_factor) / np.sqrt(4 * domain.delta_f)
-    window_factor = 1
-    # now set new window factor correctly via the setter and check that
-    # noise_std is updated as intended since the cache is cleared
-    domain.window_factor = window_factor
-    assert domain._window_factor == domain.window_factor == window_factor
-    assert domain.noise_std != noise_std
-    assert domain.noise_std == np.sqrt(domain.window_factor) / np.sqrt(
-        4 * domain.delta_f
-    )

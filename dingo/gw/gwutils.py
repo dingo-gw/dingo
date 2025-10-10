@@ -1,8 +1,9 @@
+from typing import Optional
 import numpy as np
 from copy import deepcopy
 from scipy.signal.windows import tukey
 from scipy.interpolate import interp1d
-from typing import Optional
+
 from bilby.gw.detector import PowerSpectralDensity
 
 from dingo.gw.prior import default_extrinsic_dict
@@ -23,14 +24,6 @@ def get_window(window_kwargs):
         return w
     else:
         raise NotImplementedError(f"Unknown window type {type}.")
-
-
-def get_window_factor(window):
-    """Compute window factor. If window is not provided as array or tensor but as
-    window_kwargs, first build the window."""
-    if type(window) == dict:
-        window = get_window(window)
-    return np.sum(window**2) / len(window)
 
 
 def get_extrinsic_prior_dict(extrinsic_prior):

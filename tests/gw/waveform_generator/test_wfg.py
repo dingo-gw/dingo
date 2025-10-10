@@ -1,5 +1,5 @@
 from dingo.gw.domains import UniformFrequencyDomain
-from dingo.gw.waveform_generator.waveform_generator import WaveformGenerator
+from dingo.gw.waveform_generator.waveform_generator import WaveformGenerator, NewInterfaceWaveformGenerator
 from dingo.gw.transforms.parameter_transforms import StandardizeParameters
 import pytest
 import numpy as np
@@ -100,3 +100,29 @@ def test_standardize_parameters_on_distribution():
     tol = 0.01
     assert np.all(np.abs(np.mean(parameters_tr, axis=0)) < tol)
     assert np.all(np.abs(np.std(parameters_tr, axis=0)) - np.ones(3) < tol)
+
+
+def test_new_interface_extra_kwargs(uniform_fd_domain, precessing_spin_wf_parameters):
+    """ When extra kwargs are provided at construction, they should be copied
+    through to the gwsignal parameter dictionary.
+    """
+    parameters, f_ref, _ = precessing_spin_wf_parameters
+
+    wfg = NewInterfaceWaveformGenerator(
+        approximant="SEOBNRv5PHM",
+        domain=uniform_fd_domain,
+        f_ref=f_ref,
+        lmax_nyquist=3,
+        postadiabatic=True,
+        postadiabatic_type="analytic",
+        enable_antisymmetric_modes=True,
+        antisymmetric_modes_hm=True,
+    )
+
+    params_gwsignal = wfg._convert_parameters({**parameters, "f_ref": f_ref})
+
+    assert params_gwsignal["lmax_nyquist"] == 3
+    assert params_gwsignal["postadiabatic"] is True
+    assert params_gwsignal["postadiabatic_type"] == "analytic"
+    assert params_gwsignal["enable_antisymmetric_modes"] is True
+    assert params_gwsignal["antisymmetric_modes_hm"] is True

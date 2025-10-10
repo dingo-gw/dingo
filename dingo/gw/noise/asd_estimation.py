@@ -58,7 +58,6 @@ def download_and_estimate_psds(
             "f_min": f_min,
             "f_max": f_max,
             "delta_f": delta_f,
-            "window_factor": None,
         }
     )
 

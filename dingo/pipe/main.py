@@ -2,9 +2,13 @@
 #  Adapted from bilby_pipe. In particular, uses the bilby_pipe data generation code.
 #
 import ast
+import copy
+import json
 import numpy as np
 import os
 
+from bilby.core.prior import PriorDict
+import dingo.pipe.create_injections
 from bilby_pipe.input import Input
 from bilby_pipe.main import MainInput as BilbyMainInput
 from bilby_pipe.utils import (
@@ -12,19 +16,39 @@ from bilby_pipe.utils import (
     get_command_line_arguments,
     logger,
     parse_args,
+    convert_prior_string_input,
+    BilbyPipeError,
 )
 
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.domains import build_domain_from_model_metadata
+from dingo.gw.inference.gw_samplers import check_frequency_updates
+from dingo.gw.injection import Injection
+from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.transforms import DETECTOR_DICT
+from dingo.pipe.dag_creator import generate_dag
+from dingo.pipe.parser import create_parser
+from dingo.pipe.utils import dict_to_string
 
-from .dag_creator import generate_dag
-from .parser import create_parser
+
 
 logger.name = "dingo_pipe"
 
 
-def fill_in_arguments_from_model(args):
+def fill_in_arguments_from_model(args, perform_arg_checks=True):
+    if perform_arg_checks:
+        if args.prior_dict is not None:
+            raise ValueError(
+                "Do not specify prior-dict in INI file. This is obtained from "
+                "the DINGO model. To update the prior, specify "
+                "prior-dict-updates."
+            )
+        if args.model_reference_time is not None:
+            raise ValueError(
+                "Do not specify model-reference-time in INI file. This is obtained from the "
+                "DINGO model."
+            )
+
     logger.info(f"Loading dingo model from {args.model} in order to access settings.")
 
     try:
@@ -41,166 +65,51 @@ def fill_in_arguments_from_model(args):
 
     domain = build_domain_from_model_metadata(model_metadata, base=True)
 
+    prior = Injection.from_posterior_model_metadata(model_metadata).prior
+    geocent_time_prior = prior["geocent_time"]
+    deltaT = geocent_time_prior.maximum - geocent_time_prior.minimum
+
+    # Offset needed in case of DeltaFunction priors not peaked at 0.0.
+    Toffset = 0.5 * (geocent_time_prior.minimum + geocent_time_prior.maximum)
+
+    # Dingo and Bilby have different conventions for the geocent_time prior. Dingo
+    # always centers it around something close to 0.0, whereas Bilby centers it around
+    # the trigger time. Drop the geocent_time parameter here so that bilby_pipe
+    # re-builds it as needed for Bilby.
+    del prior["geocent_time"]
+
     data_settings = model_metadata["train_settings"]["data"]
     flexible_detectors = (
         True
         if "tokenization" in data_settings
-        and (
-            "drop_detectors" in data_settings["tokenization"]
-            or "drop_random_tokens" in data_settings["tokenization"]
-        )
+           and (
+                   "drop_detectors" in data_settings["tokenization"]
+                   or "drop_random_tokens" in data_settings["tokenization"]
+           )
         else False
     )
-    # minimum_frequency and maximum_frequency in model_args are provided to the data_generation node.
-    # We want to download the data for the full frequency range because different frequency ranges for each detector
-    # would require different domains for each detector required for certain transforms. Significant code changes would
-    # be needed to address this. Therefore, updates to the frequency range are made during sampling and importance
-    # sampling.
-    minimum_frequency = domain.f_min
-    maximum_frequency = domain.f_max
+    # In dingo_pipe, we download and prepare data based on the model frequency range.
+    # This is because different maximum frequencies for different detectors would
+    # require separate domain objects within Dingo, and this is not implemented.
+    # Instead, we update frequency ranges using masking within Dingo. Updated frequency
+    # ranges are passed around within Dingo using the event_metadata.
+
     model_args = {
         "duration": domain.duration,
-        "minimum_frequency": minimum_frequency,
-        "maximum_frequency": maximum_frequency,
+        "minimum_frequency": domain.f_min,
+        "maximum_frequency": domain.f_max,
         "detectors": data_settings["detectors"],
-        "sampling_frequency": data_settings["window"]["f_s"],
-        "tukey_roll_off": data_settings["window"]["roll_off"],
         "waveform_approximant": model_metadata["dataset_settings"][
             "waveform_generator"
         ]["approximant"],
+        "reference_frequency": model_metadata["dataset_settings"]["waveform_generator"][
+            "f_ref"
+        ],
+        "deltaT": deltaT,
+        "Toffset": Toffset,
+        "prior_dict": dict_to_string(prior),
+        "model_reference_time": model_metadata["train_settings"]["data"]["ref_time"],
     }
-
-    # Collect sampling updates: minimum-frequency, maximum-frequency, and suppress (before they are overwritten)
-    sampling_updates = {}
-    if "minimum_frequency" in args and args.minimum_frequency is not None:
-        minimum_frequency_update = ast.literal_eval(args.minimum_frequency)
-        if isinstance(minimum_frequency_update, float) or isinstance(
-            minimum_frequency_update, int
-        ):
-            # Check that updates are compatible with domain
-            if minimum_frequency <= minimum_frequency_update <= maximum_frequency:
-                sampling_updates["minimum_frequency"] = float(minimum_frequency_update)
-            else:
-                raise ValueError(
-                    f"minimum_frequency={minimum_frequency_update} is outside domain "
-                    f"of posterior model: domain.f_min={minimum_frequency}, domain.f_max={maximum_frequency}"
-                )
-        elif isinstance(minimum_frequency_update, dict):
-            f_mins_update = np.array([f for f in minimum_frequency_update.values()])
-            # Check that updates are compatible with domain
-            if np.all(
-                np.logical_and(
-                    minimum_frequency <= f_mins_update,
-                    f_mins_update <= maximum_frequency,
-                )
-            ):
-                sampling_updates["minimum_frequency"] = minimum_frequency_update
-            else:
-                raise ValueError(
-                    f"minimum_frequency={minimum_frequency_update} is outside domain of "
-                    f"posterior model: domain.f_min={minimum_frequency}, domain.f_max={maximum_frequency}"
-                )
-    if "maximum_frequency" in args and args.maximum_frequency is not None:
-        maximum_frequency_update = ast.literal_eval(args.maximum_frequency)
-        if isinstance(maximum_frequency_update, float) or isinstance(
-            maximum_frequency_update, int
-        ):
-            # Check that updates are compatible with domain
-            if minimum_frequency <= maximum_frequency_update <= maximum_frequency:
-                sampling_updates["maximum_frequency"] = float(maximum_frequency_update)
-            else:
-                raise ValueError(
-                    f"minimum_frequency={maximum_frequency_update} is outside domain "
-                    f"of posterior model: domain.f_min={minimum_frequency}, domain.f_max={maximum_frequency}"
-                )
-        elif isinstance(maximum_frequency_update, dict):
-            f_maxs_update = np.array([f for f in maximum_frequency_update.values()])
-            # Check that updates are compatible with domain
-            if np.all(
-                np.logical_and(
-                    minimum_frequency <= f_maxs_update,
-                    f_maxs_update <= maximum_frequency,
-                )
-            ):
-                sampling_updates["maximum_frequency"] = maximum_frequency_update
-            else:
-                raise ValueError(
-                    f"minimum_frequency={f_maxs_update} is outside domain of posterior model: "
-                    f"domain.f_min={minimum_frequency}, domain.f_max={maximum_frequency}"
-                )
-    if "suppress" in args and args.suppress is not None:
-        suppress = ast.literal_eval(args.suppress)
-        # Update minimum/maximum_frequency with previous updates
-        if "minimum_frequency" in sampling_updates:
-            if isinstance(sampling_updates["minimum_frequency"], dict):
-                # Fill dict with values for missing detectors
-                minimum_frequency = {
-                    d: (
-                        sampling_updates["minimum_frequency"][d]
-                        if d in sampling_updates["minimum_frequency"]
-                        else minimum_frequency
-                    )
-                    for d in DETECTOR_DICT.keys()
-                }
-            else:
-                minimum_frequency = sampling_updates["minimum_frequency"]
-        if "maximum_frequency" in sampling_updates:
-            if isinstance(sampling_updates["maximum_frequency"], dict):
-                # Fill dict with values for missing detectors
-                maximum_frequency = {
-                    d: (
-                        sampling_updates["maximum_frequency"][d]
-                        if d in sampling_updates["maximum_frequency"]
-                        else maximum_frequency
-                    )
-                    for d in DETECTOR_DICT.keys()
-                }
-            else:
-                maximum_frequency = sampling_updates["maximum_frequency"]
-        # Check that updates are compatible with domain
-        if isinstance(suppress, list):
-            assert (
-                len(suppress) == 2
-            ), f"[f_min, f_max] required for suppress={suppress}."
-            if np.all(
-                np.logical_and(
-                    minimum_frequency <= np.array(suppress),
-                    np.array(suppress) <= maximum_frequency,
-                )
-            ):
-                sampling_updates["suppress"] = suppress
-            else:
-                raise ValueError(
-                    f"suppress={suppress} is outside domain of posterior model or specified "
-                    f"minimum-/maximum-frequency: f_min={minimum_frequency}, f_max={maximum_frequency}"
-                )
-        elif isinstance(suppress, dict):
-            correct = []
-            for d, v in suppress.items():
-                assert (
-                    len(v) == 2
-                ), f"[f_min, f_max] required for {d} in suppress={suppress}."
-                f_min = (
-                    minimum_frequency[d]
-                    if isinstance(minimum_frequency, dict)
-                    else minimum_frequency
-                )
-                f_max = (
-                    maximum_frequency[d]
-                    if isinstance(maximum_frequency, dict)
-                    else maximum_frequency
-                )
-                if np.all(np.logical_and(f_min <= np.array(v), np.array(v) <= f_max)):
-                    correct.append(True)
-                else:
-                    correct.append(False)
-            if np.all(correct):
-                sampling_updates["suppress"] = suppress
-            else:
-                raise ValueError(
-                    f"suppress={suppress} for {d} is outside domain of posterior model or specified "
-                    f"minimum-/maximum-frequency: f_min={minimum_frequency}, f_max={maximum_frequency}"
-                )
 
     changed_args = {}
     for k, v in model_args.items():
@@ -208,7 +117,18 @@ def fill_in_arguments_from_model(args):
         if args_v is not None:
             # Convert type from str to enable comparison.
             try:
-                if isinstance(v, float):
+                # it's possible that the attribute is a dict
+                # or list.
+                # for example, the minimum-frequency could be
+                # {H1: 20, L1:20}
+                if isinstance(args_v, str) and "{" and "}" in args_v:
+                    args_v = convert_string_to_dict(args_v)
+                elif isinstance(args_v, list):
+                    # if it's a list we need to strip quotes
+                    # e.g. detectors = ["'H1'", "'L1'"]
+                    # should become ["H1", "L1"] for the comparison
+                    args_v = [l.strip("'") for l in args_v]
+                elif isinstance(v, float):
                     args_v = float(args_v)
                 elif isinstance(v, int):
                     args_v = int(args_v)
@@ -216,21 +136,60 @@ def fill_in_arguments_from_model(args):
                 pass
 
             if args_v != v:
+                # this is for when the minimum-frequency is a float
+                # but args_v is a dict
+                if isinstance(args_v, dict) and all(
+                    val == v for val in args_v.values()
+                ):
+                    continue
+
                 if k in ["waveform_approximant"]:
                     raise NotImplementedError(
                         "Cannot change waveform approximant during importance sampling."
                     )  # TODO: Implement this. Also no error if passed explicitly as an update.
+                if k in ["minimum_frequency", "maximum_frequency"]:
+                    logger.info(
+                        f"Strain-cropping: Plan to update network {k} from {v} to"
+                        f" {args_v}."
+                    )
+                    continue  # Do not update args to model value.
                 logger.warning(
                     f"Argument {k} provided to dingo_pipe as {args_v} "
-                    f"does not match value {v} in model file. Using model value for "
-                    f"data generation, but will attempt to change this during sampling and "
-                    f"importance sampling."
+                    f"inconsistent with value {v} in model file. Using model value for "
+                    f"inference, and will attempt to change this during sampling and importance "
+                    f"sampling."
                 )
                 changed_args[k] = args_v
 
         setattr(args, k, v)
 
+    frequency_input = Input([], [], print_msg=False)
+    frequency_input.detectors = model_args["detectors"]
+    frequency_input.sampling_frequency = args.sampling_frequency
+    frequency_input.minimum_frequency = args.minimum_frequency
+    frequency_input.maximum_frequency = args.maximum_frequency
+    check_frequency_updates(
+        model_metadata,
+        frequency_input.minimum_frequency_dict,
+        frequency_input.maximum_frequency_dict,
+    )
+    frequency_input.maximum_frequency = args.suppress
+
     # TODO: Also check consistency between model and init_model settings.
+
+    # If an ASDDataset is specified, pull out PSDs and save them as .txt files. Use
+    # these for downstream tasks by specifying the psd_dict.
+    if args.asd_dataset:
+        asd_dataset = ASDDataset(file_name=args.asd_dataset)
+        domain_dict = copy.deepcopy(domain.domain_dict)
+        asd_dataset.update_domain(domain_dict)
+        psd_dict = {}
+        rng = np.random.default_rng(args.generation_seed)
+        for ifo_name in args.detectors:
+            psd_path = asd_dataset.save_psd(args.outdir, ifo_name, rng=rng)
+            psd_dict[ifo_name] = str(psd_path)
+        args.asd_dataset = None
+        args.psd_dict = str(psd_dict)
 
     # Updates that are explicitly provided take priority.
     if args.importance_sampling_updates is None:
@@ -242,28 +201,21 @@ def fill_in_arguments_from_model(args):
         importance_sampling_updates = {
             k.replace("-", "_"): v for k, v in importance_sampling_updates.items()
         }
-
-    # changed_args and sampling_updates are included in importance_sampling_updates because they might influence
-    # the likelihood computation
-    return (
-        {**changed_args, **sampling_updates, **importance_sampling_updates},
-        sampling_updates,
-        model_args,
-        flexible_detectors,
-    )
+    return {**changed_args, **importance_sampling_updates}, model_args, flexible_detectors
 
 
 class MainInput(BilbyMainInput):
     def __init__(
-        self, args, unknown_args, sampling_updates, importance_sampling_updates
+        self, args, unknown_args, importance_sampling_updates, perform_checks=True
     ):
         # Settings added for dingo.
 
         self.model = args.model
         self.model_init = args.model_init
         self.num_gnpe_iterations = args.num_gnpe_iterations
-        self.sampling_updates = sampling_updates
         self.importance_sampling_updates = importance_sampling_updates
+        self.prior_dict_updates = args.prior_dict_updates
+        self.model_reference_time = args.model_reference_time
 
         Input.__init__(self, args, unknown_args, print_msg=False)
 
@@ -275,6 +227,8 @@ class MainInput(BilbyMainInput):
         self.create_summary = args.create_summary
         self.scitoken_issuer = args.scitoken_issuer
         self.container = args.container
+
+        # self.cosmology = args.cosmology
 
         self.outdir = args.outdir
         self.label = args.label
@@ -292,6 +246,7 @@ class MainInput(BilbyMainInput):
         self.data_find_url = args.data_find_url
         self.data_find_urltype = args.data_find_urltype
         self.n_parallel = args.n_parallel
+        # useful when condor nodes don't have access to submit filesystem
         self.transfer_files = args.transfer_files
         self.additional_transfer_paths = args.additional_transfer_paths
         self.osg = args.osg
@@ -321,7 +276,7 @@ class MainInput(BilbyMainInput):
         self.environment_variables = args.environment_variables
         self.getenv = args.getenv
 
-        # self.waveform_approximant = args.waveform_approximant
+        self.waveform_approximant = args.waveform_approximant
         #
         # self.time_reference = args.time_reference
         self.time_reference = "geocent"
@@ -329,11 +284,11 @@ class MainInput(BilbyMainInput):
         # self.likelihood_type = args.likelihood_type
         self.duration = args.duration
         # self.phase_marginalization = args.phase_marginalization
-        self.prior_file = None  # Dingo update. To change prior use the priod_dict.
+        self.prior_file = None  # Dingo update. To change prior use the prior_dict.
         self.prior_dict = args.prior_dict
-        self.default_prior = "PriorDict"
+        self.default_prior = "BBHPriorDict"
         self.minimum_frequency = args.minimum_frequency
-        # self.enforce_signal_duration = args.enforce_signal_duration
+        self.enforce_signal_duration = args.enforce_signal_duration
 
         self.run_local = args.local
         self.generation_pool = args.generation_pool
@@ -344,23 +299,35 @@ class MainInput(BilbyMainInput):
 
         # self.ignore_gwpy_data_quality_check = args.ignore_gwpy_data_quality_check
         self.trigger_time = args.trigger_time
-        # self.deltaT = args.deltaT
+        self.deltaT = args.deltaT
+        self.Toffset = args.Toffset
         self.gps_tuple = args.gps_tuple
         self.gps_file = args.gps_file
         self.timeslide_file = args.timeslide_file
-        self.gaussian_noise = False  # DINGO MOD: Cannot use different noise types.
-        self.zero_noise = False  # DINGO MOD: does not support zero noise yet
-        # self.n_simulation = args.n_simulation
-        #
-        # self.injection = args.injection
-        # self.injection_numbers = args.injection_numbers
+        self.gaussian_noise = args.gaussian_noise
+        self.zero_noise = args.zero_noise
+        self.n_simulation = args.n_simulation
+
+        self.injection = args.injection
+        self.injection_numbers = args.injection_numbers
         self.injection_file = args.injection_file
-        # self.injection_dict = args.injection_dict
+        self.injection_dict = args.injection_dict
+        self.save_bilby_data_dump = args.save_bilby_data_dump
         # self.injection_waveform_arguments = args.injection_waveform_arguments
         # self.injection_waveform_approximant = args.injection_waveform_approximant
-        # self.generation_seed = args.generation_seed
-        # if self.injection:
-        #     self.check_injection()
+        # self.injection_frequency_domain_source_model = (
+        #     args.injection_frequency_domain_source_model
+        # )
+        # self.injection_waveform_generator_class_ctor_args = (
+        #     args.injection_waveform_generator_constructor_dict
+        # )
+        self.generation_seed = args.generation_seed
+        if self.importance_sampling_updates and self.gaussian_noise:
+            raise ValueError(
+                "Cannot update data for importance sampling if using "
+                "simulated Gaussian noise. This risks inconsistent noise "
+                "realizations."
+            )
 
         self.importance_sample = args.importance_sample
 
@@ -384,6 +351,8 @@ class MainInput(BilbyMainInput):
             setattr(self, attr, getattr(args, attr))
             if getattr(self, attr):
                 self.plot_node_needed = True
+
+        self.plot_pp = args.plot_pp
         #
         # # Set all other plotting options
         # for plot_attr in [
@@ -410,7 +379,12 @@ class MainInput(BilbyMainInput):
         self.psd_start_time = args.psd_start_time
         self.spline_calibration_envelope_dict = args.spline_calibration_envelope_dict
 
-        # self.check_source_model(args)
+        if perform_checks:
+            # self.check_source_model(args)
+            # self.check_calibration_prior_boundary(args)
+            # self.check_cpu_parallelisation()
+            if self.injection:
+                self.check_injection()
 
         self.requirements = []
         self.device = args.device
@@ -439,11 +413,118 @@ class MainInput(BilbyMainInput):
         self._request_cpus_importance_sampling = request_cpus_importance_sampling
 
     @property
-    def priors(self):
-        """Read in and compose the prior at run-time"""
-        if getattr(self, "_priors", None) is None:
-            self._priors = self._get_priors(add_time=False)
-        return self._priors
+    def prior_dict_updates(self):
+        """The input prior_dict from the ini (if given)
+
+        Note, this is not the bilby prior (see self.priors for that), this is
+        a key-val dictionary where the val's are strings which are converting
+        into bilby priors in `_get_prior
+        """
+        return self._prior_dict_updates
+
+    @prior_dict_updates.setter
+    def prior_dict_updates(self, prior_dict_updates):
+        if isinstance(prior_dict_updates, dict):
+            prior_dict_updates = prior_dict_updates
+        elif isinstance(prior_dict_updates, str):
+            prior_dict_updates = convert_prior_string_input(prior_dict_updates)
+        elif prior_dict_updates is None:
+            self._prior_dict_updates = None
+            return
+        else:
+            raise BilbyPipeError(
+                f"prior_dict_updates={prior_dict_updates} not " f"understood"
+            )
+
+        self._prior_dict_updates = {
+            self._convert_prior_dict_key(key): val
+            for key, val in prior_dict_updates.items()
+        }
+
+    def _get_priors(self, add_time=True):
+        priors = super()._get_priors(add_time=add_time)
+        priors.update(PriorDict(self.prior_dict_updates))
+        return priors
+
+    def check_injection(self):
+        """Check injection behaviour
+
+        If injections are requested, either use the injection-dict,
+        injection-file, or create an injection-file
+
+        """
+        default_injection_file_name = "{}/{}_injection_file.dat".format(
+            self.data_directory, self.label
+        )
+        if self.injection_dict is not None:
+            logger.debug(
+                "Using injection dict from ini file {}".format(
+                    json.dumps(self.injection_dict, indent=2)
+                )
+            )
+        elif self.injection_file is not None:
+            logger.debug(f"Using injection file {self.injection_file}")
+        elif os.path.isfile(default_injection_file_name):
+            # This is done to avoid overwriting the injection file
+            logger.debug(f"Using injection file {default_injection_file_name}")
+            self.injection_file = default_injection_file_name
+        else:
+            logger.debug("No injection file found, generating one now")
+
+            if self.gps_file is not None or self.gps_tuple is not None:
+                if self.n_simulation > 0 and self.n_simulation != len(self.gpstimes):
+                    raise BilbyPipeError(
+                        "gps_file/gps_tuple option and n_simulation are not matched"
+                    )
+                gpstimes = self.gpstimes
+                n_injection = len(gpstimes)
+            else:
+                gpstimes = None
+                n_injection = self.n_simulation
+
+            if self.trigger_time is None:
+                # Use the model reference time as the trigger time by default. This
+                # avoids needing to adjust sky position in post-postprocessing,
+                # and it avoids complications due to DeltaFunction ra priors.
+                trigger_time_injections = self.model_reference_time
+            else:
+                trigger_time_injections = self.trigger_time
+
+            dingo.pipe.create_injections.create_injection_file(
+                filename=default_injection_file_name,
+                prior_file=self.prior_file,
+                prior_dict=self._get_priors(
+                    add_time=False
+                ),  # ensure prior-dict-updates incorporated
+                n_injection=n_injection,
+                trigger_time=trigger_time_injections,
+                deltaT=self.deltaT,
+                Toffset=self.Toffset,  # dingo-pipe mod
+                gpstimes=gpstimes,
+                duration=self.duration,
+                post_trigger_duration=self.post_trigger_duration,
+                generation_seed=self.generation_seed,
+                extension="dat",
+                default_prior=self.default_prior,
+            )
+            self.injection_file = default_injection_file_name
+
+        # Check the gps_file has the sample length as number of simulation
+        if self.gps_file is not None:
+            if len(self.gpstimes) != len(self.injection_df):
+                raise BilbyPipeError("Injection file length does not match gps_file")
+
+        if self.n_simulation > 0:
+            if self.n_simulation != len(self.injection_df):
+                raise BilbyPipeError(
+                    "n-simulation does not match the number of injections: "
+                    "please check your ini file"
+                )
+        elif self.n_simulation == 0 and self.gps_file is None:
+            self.n_simulation = len(self.injection_df)
+            logger.debug(
+                f"Setting n_simulation={self.n_simulation} to match injections"
+            )
 
 
 def write_complete_config_file(parser, args, inputs, input_cls=MainInput):
@@ -461,7 +542,6 @@ def write_complete_config_file(parser, args, inputs, input_cls=MainInput):
             if isinstance(val[0], str):
                 setattr(args, key, f"[{', '.join(val)}]")
     # args.sampler_kwargs = str(inputs.sampler_kwargs)
-    args.sampling_updates = str(inputs.sampling_updates)
     args.importance_sampling_updates = str(inputs.importance_sampling_updates)
     args.submit = False
     parser.write_to_file(
@@ -510,13 +590,10 @@ def main():
     parser = create_parser(top_level=True)
     args, unknown_args = parse_args(get_command_line_arguments(), parser)
 
-    importance_sampling_updates, sampling_updates, model_args, flexible_detectors = (
-        fill_in_arguments_from_model(args)
-    )
-    inputs = MainInput(
-        args, unknown_args, sampling_updates, importance_sampling_updates
-    )
+    importance_sampling_updates, model_args, flexible_detectors = fill_in_arguments_from_model(args)
+    inputs = MainInput(args, unknown_args, importance_sampling_updates)
 
+    # TODO: remove the following update and replace it by a transform that strips detectors
     # Update detectors for flexible detector config based on channel-dict
     if flexible_detectors:
         detectors = list(inputs.channel_dict.keys())
@@ -529,7 +606,7 @@ def main():
     # TODO: Use two sets of inputs! The first must match the network; the second is
     #  used in importance sampling.
 
-    generate_dag(inputs, model_args)
+    generate_dag(inputs)
 
     if len(unknown_args) > 0:
         print(f"Unrecognized arguments {unknown_args}")

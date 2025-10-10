@@ -25,7 +25,6 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
         f_min: float,
         f_max: float,
         delta_f: float,
-        window_factor: Optional[float] = None,
     ):
         """
         Parameters
@@ -33,13 +32,11 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
         f_min : float
         f_max : float
         delta_f : float
-        window_factor Optional[float]
         """
         super().__init__()
         self._f_min = f_min
         self._f_max = f_max
         self._delta_f = delta_f
-        self._window_factor = window_factor
         self._frequency_mask = None
 
     def update(self, new_settings: dict):
@@ -64,10 +61,8 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
                 "Cannot update domain to type other than UniformFrequencyDomain."
             )
         for k, v in new_settings.items():
-            if k not in ["f_min", "f_max", "delta_f", "window_factor"]:
+            if k not in ["f_min", "f_max", "delta_f"]:
                 raise KeyError(f"Invalid key for domain update: {k}.")
-            if k == "window_factor" and v != self._window_factor:
-                raise ValueError("Cannot update window_factor.")
             if k == "delta_f" and v != self._delta_f:
                 raise ValueError("Cannot update delta_f.")
         self._set_new_range(
@@ -76,29 +71,29 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
 
     def _set_new_range(
         self, f_min: Optional[float] = None, f_max: Optional[float] = None
-    ):
+    ) -> None:
         """
-        Set a new range [f_min, f_max] for the domain. This is only allowed if the new
-        range is contained within the old one.
+        Set a new [f_min, f_max] range for the domain. Both endpoints must be in the
+        existing sample_frequencies, and f_min < f_max. Neither endpoint may lie
+        outside the current range.
         """
-        if f_min is not None and f_max is not None and f_min >= f_max:
-            raise ValueError("f_min must not be larger than f_max.")
-        if f_min is not None:
-            if self.f_min <= f_min <= self.f_max:
-                self.f_min = f_min
-            else:
-                raise ValueError(
-                    f"f_min = {f_min} is not in expected range "
-                    f"[{self.f_min,self.f_max}]."
-                )
-        if f_max is not None:
-            if self.f_min <= f_max <= self.f_max:
-                self.f_max = f_max
-            else:
-                raise ValueError(
-                    f"f_max = {f_max} is not in expected range "
-                    f"[{self.f_min, self.f_max}]."
-                )
+        new_min = f_min if f_min is not None else self.f_min
+        new_max = f_max if f_max is not None else self.f_max
+
+        if new_min >= new_max:
+            raise ValueError("f_min must be strictly less than f_max.")
+
+        if not (self.f_min <= new_min and new_max <= self.f_max):
+            raise ValueError(
+                f"Requested range [{new_min}, {new_max}] lies outside "
+                f"original range [{self.f_min}, {self.f_max}]."
+            )
+
+        missing = [x for x in (new_min, new_max) if x not in self.sample_frequencies]
+        if missing:
+            raise ValueError(f"Endpoints {missing} not in existing sample_frequencies.")
+
+        self.f_min, self.f_max = new_min, new_max
 
     def update_data(self, data: np.ndarray, axis: int = -1, low_value: float = 0.0):
         """
@@ -207,15 +202,6 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
         return round(self._f_max / self._delta_f)
 
     @property
-    def window_factor(self) -> float:
-        return self._window_factor
-
-    @window_factor.setter
-    def window_factor(self, value: float):
-        """Set self._window_factor."""
-        self._window_factor = float(value)
-
-    @property
     def f_max(self) -> float:
         """The maximum frequency [Hz] is typically set to half the sampling
         rate."""
@@ -263,5 +249,4 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
             "f_min": self.f_min,
             "f_max": self.f_max,
             "delta_f": self.delta_f,
-            "window_factor": self.window_factor,
         }

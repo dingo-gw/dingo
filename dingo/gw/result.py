@@ -14,9 +14,11 @@ from dingo.core.multiprocessing import apply_func_with_multiprocessing
 from dingo.core.result import Result as CoreResult
 from dingo.gw.conversion import change_spin_conversion_phase
 from dingo.gw.domains import build_domain, MultibandedFrequencyDomain
-from dingo.gw.gwutils import get_extrinsic_prior_dict, get_window_factor
+from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 from dingo.gw.prior import build_prior_with_defaults
+from dingo.core.utils.backward_compatibility import check_minimum_version
+
 
 RANDOM_STATE = 150914
 
@@ -140,20 +142,42 @@ class Result(CoreResult):
         else:
             return self.base_metadata["train_settings"]["data"]["ref_time"]
 
+    @property
+    def minimum_frequency(self) -> dict[str, float] | float:
+        return self.event_metadata.get("minimum_frequency", self.domain.f_min)
+
+    @minimum_frequency.setter
+    def minimum_frequency(self, value: dict[str, float] | float):
+        self.event_metadata["minimum_frequency"] = value
+
+    @property
+    def maximum_frequency(self) -> dict[str, float] | float:
+        return self.event_metadata.get("maximum_frequency", self.domain.f_max)
+
+    @maximum_frequency.setter
+    def maximum_frequency(self, value: dict[str, float] | float):
+        self.event_metadata["maximum_frequency"] = value
+
+    @property
+    def suppress(self) -> dict[str, float] | float:
+        return self.event_metadata.get("suppress", None)
+
+    @suppress.setter
+    def suppress(self, value: dict[str, float] | float):
+        self.event_metadata["suppress"] = value
+
     def _build_domain(self):
         """
-        Construct the domain object based on model metadata. Includes the window factor
-        needed for whitening data.
+        Construct the domain object based on model metadata
 
         Called by __init__() immediately after _build_prior().
         """
         self.domain = build_domain(self.base_metadata["dataset_settings"]["domain"])
+        check_minimum_version(self.version, raise_exception=False)
 
         data_settings = self.base_metadata["train_settings"]["data"]
         if "domain_update" in data_settings:
             self.domain.update(data_settings["domain_update"])
-
-        self.domain.window_factor = get_window_factor(data_settings["window"])
 
     def _rebuild_domain(self, verbose=False):
         """Rebuild the domain based on settings updated for importance sampling.
@@ -169,15 +193,6 @@ class Result(CoreResult):
         # TODO: Make compatible with MultibandedFrequencyDomain.
         if isinstance(self.domain, MultibandedFrequencyDomain):
             raise NotImplementedError()
-
-        if "f_s" in updates or "T" in updates or "roll_off" in updates:
-            window_settings = self.base_metadata["train_settings"]["data"][
-                "window"
-            ].copy()
-            window_settings.update(
-                (k, updates[k]) for k in set(window_settings).intersection(updates)
-            )
-            updates["window_factor"] = float(get_window_factor(window_settings))
 
         if "T" in updates:
             updates["delta_f"] = 1.0 / updates["T"]
@@ -283,7 +298,6 @@ class Result(CoreResult):
         phase_marginalization_kwargs: Optional[dict] = None,
         calibration_marginalization_kwargs: Optional[dict] = None,
         phase_grid: Optional[np.ndarray] = None,
-        frequency_update: Optional[dict] = None,
     ):
         """
         Build the likelihood function based on model metadata. This is called at the
@@ -299,11 +313,6 @@ class Result(CoreResult):
             kwargs for phase marginalization.
         calibration_marginalization_kwargs: dict
             Calibration marginalization parameters. If None, no calibration marginalization is used.
-        frequency_update: dict
-            Specifies settings for updating the frequency range
-            example: {'minimum_frequency': {'H1': 30., 'L1': 20.},
-                       maximum_frequency: 1024.,
-                       suppress: {'V1': [40., 50.]}}
         """
         if time_marginalization_kwargs is not None:
             if self.geocent_time_prior is None:
@@ -368,13 +377,16 @@ class Result(CoreResult):
             calibration_marginalization_kwargs=calibration_marginalization_kwargs,
             phase_grid=phase_grid,
             use_base_domain=self.use_base_domain,
-            frequency_update=frequency_update,
+            frequency_update=dict(
+                minimum_frequency=self.minimum_frequency,
+                maximum_frequency=self.maximum_frequency,
+                suppress=self.suppress,
+            ),
         )
 
     def sample_synthetic_phase(
         self,
-        synthetic_phase_kwargs: dict,
-        likelihood_kwargs: Optional[dict] = None,
+        synthetic_phase_kwargs,
         inverse: bool = False,
     ):
         """
@@ -419,8 +431,6 @@ class Result(CoreResult):
                 num_processes (optional)
                 n_grid
                 uniform_weight (optional)
-        likelihood_kwargs : dict, optional
-             Likelihood kwargs passed to the likelihood.
         inverse : bool, default False
             Whether to apply instead the inverse transformation. This is used prior to
             calculating the log_prob. In inverse mode, the posterior probability over
@@ -463,8 +473,7 @@ class Result(CoreResult):
         t0 = time.time()
 
         if not inverse:
-            likelihood_kwargs = {} if likelihood_kwargs is None else likelihood_kwargs
-            self._build_likelihood(**likelihood_kwargs)
+            self._build_likelihood()
 
         if inverse:
             # We estimate the log_prob for given phases, so first save the evaluation
@@ -595,7 +604,10 @@ class Result(CoreResult):
             return self._pesummary_samples
 
         # Unweighted samples.
-        samples = self.sampling_importance_resampling(random_state=RANDOM_STATE)
+        if "weights" in self.samples:
+            samples = self.sampling_importance_resampling(random_state=RANDOM_STATE)
+        else:
+            samples = self.samples.copy()
 
         # Remove unwanted columns.
         samples.drop(

@@ -15,7 +15,11 @@ from dingo.gw.transforms import (
     create_mask_based_on_frequency_update,
 )
 from dingo.gw.waveform_generator import WaveformGenerator
-from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain, Domain
+from dingo.gw.domains import (
+    Domain,
+    UniformFrequencyDomain,
+    MultibandedFrequencyDomain,
+)
 from dingo.gw.domains import build_domain
 from dingo.gw.data.data_preparation import get_event_data_and_domain
 
@@ -47,10 +51,10 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         ----------
         wfg_kwargs: dict
             Waveform generator parameters (at least approximant and f_ref).
-        wfg_domain : UniformFrequencyDomain | MultibandedFrequencyDomain
+        wfg_domain : dingo.gw.domains.Domain
             Domain used for waveform generation. This can potentially deviate from the
             final domain, having a wider frequency range needed for waveform generation.
-        data_domain: UniformFrequencyDomain | MultibandedFrequencyDomain
+        data_domain: dingo.gw.domains.Domain
             Domain object for event data.
         event_data: dict
             GW data. Contains strain data in event_data["waveforms"] and asds in
@@ -110,9 +114,10 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 maximum_frequency=frequency_update.get("maximum_frequency", None),
                 suppress_range=frequency_update.get("suppress", None),
             )
-            for ifo in event_data["waveform"].keys():
-                # Set ASD to 1.
-                asds[ifo][..., ~frequency_masks[ifo]] = 1.0
+            asds = {
+                ifo: np.where(mask, asds[ifo], 1.0)
+                for ifo, mask in frequency_masks.items()
+            }
 
         self.asd = asds
 
@@ -276,13 +281,11 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         Here, we work with data d and signals mu that are already whitened by
         1 / [sqrt(PSD) * domain.noise_std], where
 
-                  noise_std = np.sqrt(window_factor) / np.sqrt(4 * delta_f).
+                  noise_std = 1 / np.sqrt(4 * delta_f).
 
         With this preprocessing, the inner products thus simply become
 
                   <a, b> = sum(a.conj() * b).real.
-
-        ! Be careful with window factors here !
 
 
         Time marginalization:

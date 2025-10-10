@@ -33,3 +33,29 @@ class PlotNode(BilbyPlotNode):
     @property
     def executable(self):
         return self._get_executable_path("dingo_pipe_plot")
+
+
+class PlotPPNode(BilbyPlotNode):
+    def __init__(self, inputs, merged_node_list, dag):
+        super(BilbyPlotNode, self).__init__(inputs)
+        self.dag = dag
+        self.request_cpus = 1
+        self.job_name = f"{self.inputs.label}_plot_pp"
+        self.setup_arguments(
+            add_ini=False, add_unknown_args=False, add_command_line_args=False
+        )
+        self.arguments.add_positional_argument(self.inputs.result_directory)
+
+        if getattr(self, "disable_hdf5_locking", None):
+            self.extra_lines.append('environment = "HDF5_USE_FILE_LOCKING=FALSE"')
+
+        self.process_node()
+        for node in merged_node_list:
+            self.job.add_parent(node.job)
+
+        if self.inputs.simple_submission:
+            _strip_unwanted_submission_keys(self.job)
+
+    @property
+    def executable(self):
+        return self._get_executable_path("dingo_pipe_pp_test")

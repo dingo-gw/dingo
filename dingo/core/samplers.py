@@ -18,7 +18,6 @@ from dingo.core.utils import torch_detach_to_cpu, IterationTracker
 # FIXME: transform below should be in core
 from dingo.gw.transforms import SelectStandardizeRepackageParameters
 
-
 #
 # Sampler classes are motivated by the approach of Bilby.
 #
@@ -68,6 +67,7 @@ class Sampler(object):
         model : BasePosteriorModel
         """
         self.model = model
+        self.event_metadata = None
 
         self.metadata = self.model.metadata.copy()
         if self.metadata["train_settings"]["data"].get("unconditional", False):
@@ -77,12 +77,10 @@ class Sampler(object):
             # However, it will not be used when sampling from the model, since it is
             # unconditional.
             self._context = self.model.context
-            self.event_metadata = self.model.event_metadata
             self.base_model_metadata = self.metadata["base"]
         else:
             self.unconditional_model = False
             self._context = None
-            self.event_metadata = None
             self.base_model_metadata = self.metadata
 
         # Not possible to specify this in GWSamplerMixin because this information is required in _initialize_transforms()
@@ -96,6 +94,10 @@ class Sampler(object):
 
         self.samples = None
         self._build_domain()
+
+        if self.unconditional_model:
+            # Must be after _build_domain(), since setter might access domain.
+            self.event_metadata = self.model.event_metadata
 
         # Must be after _build_domain() since transforms can depend on domain.
         self._initialize_transforms()
@@ -112,11 +114,9 @@ class Sampler(object):
     @context.setter
     def context(self, value):
         if value is not None and "parameters" in value:
-            self.metadata["injection_parameters"] = value.pop("parameters")
-        if value is not None and "extrinsic_parameters" in value:
-            self.metadata["injection_extrinsic_parameters"] = value.pop(
-                "extrinsic_parameters"
-            )
+            if self.event_metadata is None:
+                self.event_metadata = {}
+            self.event_metadata["injection_parameters"] = value.pop("parameters")
         if value is not None and "asds" in value:
             self.detectors = [k for k in value["asds"].keys()]
         self._context = value
@@ -258,22 +258,27 @@ class Sampler(object):
         print(f"Done. This took {time.time() - t0:.1f} s.")
         sys.stdout.flush()
 
-    def log_prob(self, samples: pd.DataFrame) -> np.ndarray:
+    def log_prob(self, samples: pd.DataFrame | dict) -> np.ndarray:
         """
         Calculate the model log probability at specific sample points.
 
         Parameters
         ----------
-        samples : pd.DataFrame
+        samples : pd.DataFrame | dict
             Sample points at which to calculate the log probability.
 
         Returns
         -------
         np.array of log probabilities.
         """
-        # TODO: Check / fix this method. It is likely broken, but is not critical.
         if self.context is None and not self.unconditional_model:
             raise ValueError("Context must be set in order to calculate log_prob.")
+
+        if isinstance(samples, dict):
+            if np.isscalar(list(samples.values())[0]):
+                samples = pd.DataFrame([samples])
+            else:
+                samples = pd.DataFrame(samples)
 
         # This undoes any post-correction that would have been done to the samples,
         # before evaluating the log_prob. E.g., the t_ref / sky position correction.
@@ -296,7 +301,7 @@ class Sampler(object):
             # Context is the same for each sample. Expand across batch dimension after
             # pre-processing.
             x = self.transform_pre(self.context)
-            x = x.expand(len(samples), *x.shape)
+            x = x.expand(len(samples), *x.shape)  # TODO: Make this more efficient.
             x = [x]
         else:
             x = []
@@ -346,27 +351,6 @@ class Sampler(object):
         data_dict = {k: getattr(self, k, None) for k in RESULT_DATA_KEYS}
         # *COPY* the metadata to avoid recursion errors when creating new objects.
         data_dict["settings"] = copy.deepcopy(self.metadata)
-        # The following is a temporary fix for old models, can be removed upon merge!
-        # Replace any numpy objects with their non-numpy counterpart to prevent read-in issues
-        if (
-            "train_settings" in data_dict["settings"]
-            and "training" in data_dict["settings"]["train_settings"]
-            and "stage_0" in data_dict["settings"]["train_settings"]["training"]
-            and "scheduler"
-            in data_dict["settings"]["train_settings"]["training"]["stage_0"]
-            and "num_optimizer_steps_per_epoch"
-            in data_dict["settings"]["train_settings"]["training"]["stage_0"][
-                "scheduler"
-            ]
-        ):
-            # Replace numpy value with float
-            val = data_dict["settings"]["train_settings"]["training"]["stage_0"][
-                "scheduler"
-            ]["num_optimizer_steps_per_epoch"]
-            data_dict["settings"]["train_settings"]["training"]["stage_0"]["scheduler"][
-                "num_optimizer_steps_per_epoch"
-            ] = float(val)
-
         return self._result_class(dictionary=data_dict)
 
     def to_hdf5(self, label="result", outdir="."):

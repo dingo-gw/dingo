@@ -1,7 +1,9 @@
 import copy
-from typing import Iterable
+import numpy as np
+from pathlib import Path
+from typing import Iterable, Optional
 
-from dingo.gw.domains import build_domain, Domain
+from dingo.gw.domains import build_domain, Domain, UniformFrequencyDomain
 from dingo.gw.domains.base_frequency_domain import BaseFrequencyDomain
 from dingo.gw.gwutils import *
 from dingo.gw.dataset import DingoDataset
@@ -59,6 +61,12 @@ class ASDDataset(DingoDataset):
                     self.asds.pop(ifo)
                     self.gps_times.pop(ifo)
 
+        if "window_factor" in self.settings["domain_dict"]:
+            print(
+                "Warning: 'window_factor' is no longer used in ASDDataset. "
+                "Removing from settings."
+            )
+            self.settings["domain_dict"].pop("window_factor")
         self.domain = build_domain(self.settings["domain_dict"])
         if not check_domain_compatibility(self.asds, self.domain):
             raise ValueError("ASDs in dataset not compatible with domain.")
@@ -197,6 +205,20 @@ class ASDDataset(DingoDataset):
             return {k: v[np.random.choice(len(v), 1)[0]] for k, v in self.asds.items()}
         else:
             return {k: v[np.random.choice(len(v), n)] for k, v in self.asds.items()}
+
+    def save_psd(self, directory, ifo_name, idx: Optional[int] = None, rng=None):
+        if rng is None:
+            rng = np.random.default_rng()
+        if idx is None:
+            idx = rng.choice(len(self.asds[ifo_name]))
+        directory = Path(directory)
+        directory.mkdir(exist_ok=True)
+        psd_path = directory / f"{ifo_name}_{idx}_psd.txt"
+        np.savetxt(
+            psd_path,
+            np.vstack([self.domain(), self.asds[ifo_name][idx] ** 2]).T,
+        )
+        return psd_path
 
 
 def check_domain_compatibility(data: dict, domain: BaseFrequencyDomain) -> bool:

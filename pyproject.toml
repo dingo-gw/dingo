@@ -11,7 +11,7 @@ authors = [
 description = "Deep inference for gravitational-wave observations"
 license = {text = "MIT"}
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<=3.12.6"
 dynamic = ["version"]
 
 classifiers = [
@@ -26,7 +26,7 @@ classifiers = [
 dependencies = [
     "astropy",
     "bilby",
-    "bilby_pipe==1.4.2",
+    "bilby_pipe",
     "configargparse",
     "corner",
     "GitPython",
@@ -91,7 +91,7 @@ dingo_append_training_stage = "dingo.gw.training:append_stage"
 dingo_autocomplete_wfd_settings = "dingo.gw.dataset.generate_dataset:autocomplete_wfd_settings_cli"
 dingo_build_svd = "dingo.gw.dataset.utils:build_svd_cli"
 dingo_estimate_psds = "dingo.gw.noise.asd_estimation:download_and_estimate_cli"
-dingo_evaluate_multibanded_domain = "dingo.gw.domains.evaluate_multibanded_domain:main"
+dingo_evaluate_multibanded_domain = "dingo.gw.dataset.evaluate_multibanded_domain:main"
 dingo_generate_asd_dataset = "dingo.gw.noise.generate_dataset:generate_dataset"
 dingo_generate_dataset = "dingo.gw.dataset.generate_dataset:main"
 dingo_generate_dataset_dag = "dingo.gw.dataset.generate_dataset_dag:main"
@@ -102,8 +102,9 @@ dingo_merge_asd_datasets = "dingo.gw.noise.utils:merge_datasets_cli"
 dingo_pipe = "dingo.pipe.main:main"
 dingo_pipe_importance_sampling = "dingo.pipe.importance_sampling:main"
 dingo_pipe_generation = "dingo.pipe.data_generation:main"
-dingo_pipe_sampling = "dingo.pipe.sampling:main"
 dingo_pipe_plot = "dingo.pipe.plot:main"
+dingo_pipe_pp_test = "dingo.pipe.pp_test:main"
+dingo_pipe_sampling = "dingo.pipe.sampling:main"
 dingo_pt_to_hdf5 = "dingo.core.utils.pt_to_hdf5:main"
 dingo_result = "dingo.pipe.dingo_result:main"
 dingo_train = "dingo.gw.training:train_local"

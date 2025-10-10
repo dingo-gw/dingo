@@ -41,6 +41,7 @@ def plot_corner_multi(
     weights=None,
     labels=None,
     filename: str = "corner.pdf",
+    latex_labels_dict: dict = None,
     **kwargs,
 ):
     """
@@ -57,6 +58,8 @@ def plot_corner_multi(
         Labels for the posteriors.
     filename : str
         Where to save samples.
+    latex_labels_dict : dict
+        Dictionary of latex labels.
 
     Other Parameters
     ----------------
@@ -97,6 +100,13 @@ def plot_corner_multi(
         for p in samples[0].columns
         if p in set.intersection(*(set(s.columns) for s in samples))
     ]
+    if latex_labels_dict:
+        parameter_labels = [latex_labels_dict.get(p, p) for p in common_parameters]
+    else:
+        parameter_labels = [
+                LATEX_PARAM_DICT[p] if p in LATEX_PARAM_DICT else p
+                for p in common_parameters
+            ]
 
     fig = None
     handles = []
@@ -104,10 +114,7 @@ def plot_corner_multi(
         color = mpl.colors.rgb2hex(plt.get_cmap(cmap)(i))
         fig = corner.corner(
             s[common_parameters].to_numpy(),
-            labels=[
-                LATEX_PARAM_DICT[p] if p in LATEX_PARAM_DICT else p
-                for p in common_parameters
-            ],
+            labels=parameter_labels,
             weights=w,
             color=color,
             no_fill_contours=True,
@@ -138,14 +145,14 @@ def plot_corner_multi(
             ax.tick_params(
                 axis="x", labelsize=14, length=6, width=1.5
             )  # Adjust labelsize, length, and width
-            ax.xaxis.label.set_size(20)  # Adjust x-axis label font size
+            ax.xaxis.label.set_size(16)  # Adjust x-axis label font size
         else:
             ax.tick_params(axis="x", which="both", bottom=False)
         if ax.get_ylabel():
             ax.tick_params(
                 axis="y", labelsize=14, length=6, width=1.5
             )  # Adjust labelsize, length, and width
-            ax.yaxis.label.set_size(20)  # Adjust x-axis label font size
+            ax.yaxis.label.set_size(16)  # Adjust x-axis label font size
         else:
             ax.tick_params(axis="y", which="both", left=False)
 

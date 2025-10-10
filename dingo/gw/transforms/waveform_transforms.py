@@ -176,19 +176,244 @@ class DecimateWaveformsAndASDS(object):
                     for k, v in sample["waveform"].items()
                 }
                 sample["asds"] = {
-                    k: self.multibanded_frequency_domain.decimate(v**2) ** 0.5
+                    k: self.multibanded_frequency_domain.decimate(v ** 2) ** 0.5
                     for k, v in sample["asds"].items()
                 }
 
             else:
                 raise NotImplementedError()
-        elif not check_sample_in_domain(sample, self.multibanded_frequency_domain):
+
+        return sample
+
+
+def check_sample_in_domain(sample, domain: UniformFrequencyDomain) -> bool:
+    lengths = []
+    base_domain_length = len(domain)
+    for k in ["waveform", "asds"]:
+        lengths += [d.shape[-1] for d in sample[k].values()]
+    if all(l == base_domain_length for l in lengths):
+        return True
+    else:
+        return False
+
+
+class CropMaskStrainRandom(object):
+    """Apply random cropping of strain, by masking waveform and ASD outside the crop."""
+
+    def __init__(
+        self,
+        domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
+        f_min_upper: Optional[float] = None,
+        f_max_lower: Optional[float] = None,
+        cropping_probability: float = 1.0,
+        independent_detectors: bool = True,
+        independent_lower_upper: bool = True,
+        deterministic_fmin_fmax: Optional[
+            list[float | None] | list[list[float | None]]
+        ] = None,
+    ):
+        """
+        Parameters
+        ----------
+        domain: UniformFrequencyDomain | MultibandedFrequencyDomain
+            Domain of the waveform data, has to be a frequency domain type.
+        f_min_upper: float
+            New f_min is sampled in range [domain.f_min, f_min_upper].
+            Sampling of f_min is uniform in bins (not in frequency) when the frequency
+            domain is not uniform (e.g., MultibandedFrequencyDomain).
+        f_max_lower: float
+            New f_max is sampled in range [f_max_lower, domain.f_max].
+            Sampling of f_max is uniform in bins (not in frequency) when the frequency
+            domain is not uniform (e.g., MultibandedFrequencyDomain).
+        cropping_probability: float
+            probability for a given sample to be cropped
+        independent_detectors: bool
+            If True, crop boundaries are sampled independently for different detectors.
+        independent_lower_upper: bool
+            If True, the cropping probability is applied to lower and upper boundaries
+            individually. If False, then with a probability of P = cropping_probability
+            both lower and upper cropping is applied, and with 1-P, no cropping is
+            applied from either direction.
+        deterministic_fmin_fmax: None | list[float | None] | list[list[float | None]]
+            If not None, then cropping will be applied with fixed f_min and f_max,
+            as specified by this argument. Can either be a single list [f_min, f_max],
+            or a list of lists [[f_min_1, f_max_1], [f_min_2, f_max_2], ...] for the
+            different detectors.
+        """
+        self._check_inputs(
+            domain,
+            f_min_upper,
+            f_max_lower,
+            cropping_probability,
+            deterministic_fmin_fmax,
+        )
+        self._deterministic_fmin_fmax = deterministic_fmin_fmax
+        self.cropping_probability = cropping_probability
+        self.independent_detectors = independent_detectors
+        self.independent_lower_upper = independent_lower_upper
+        self.frequencies = domain()[domain.min_idx :]
+        self.len_domain = len(self.frequencies)
+
+        # for stochastic sampling of cropping boundaries
+        self._idx_bound_f_max = self._get_domain_idx(f_max_lower, self.len_domain - 1)
+        self._idx_bound_f_min = self._get_domain_idx(f_min_upper, 0)
+
+        # for deterministic cropping boundaries
+        self._deterministic_mask = None
+        if deterministic_fmin_fmax is not None:
+            self._initialize_deterministic_mask(deterministic_fmin_fmax)
+
+    def _sample_upper_bound_indices(self, shape: list[int]) -> np.ndarray:
+        """Sample indices for upper crop boundaries."""
+        assert self._deterministic_mask is None
+        return np.random.randint(self._idx_bound_f_max, self.len_domain, shape)
+
+    def _sample_lower_bound_indices(self, shape: list[int]) -> np.ndarray:
+        """Sample indices for lower crop boundaries."""
+        assert self._deterministic_mask is None
+        return np.random.randint(0, self._idx_bound_f_min + 1, shape)
+
+    def _get_domain_idx(self, f_value: float, default_value: int = 0) -> int:
+        if f_value is not None:
+            return np.argmin(np.abs(f_value - self.frequencies)).item()
+        else:
+            return default_value
+
+    def _initialize_deterministic_mask(self, deterministic_fmin_fmax):
+        if not isinstance(deterministic_fmin_fmax[0], list):
+            deterministic_fmin_fmax = [deterministic_fmin_fmax]
+        masking_indices = []
+        for f_min, f_max in deterministic_fmin_fmax:
+            self._check_fmin_fmax(f_min, f_max)
+            idx_min = self._get_domain_idx(f_min, 0)
+            idx_max = self._get_domain_idx(f_max, self.len_domain - 1)
+            if idx_min >= idx_max:
+                raise ValueError(f"f_min ({f_min}) must be less than f_max ({f_max}).")
+            masking_indices.append([idx_min, idx_max])
+        masking_indices = np.array(masking_indices)
+        lower = masking_indices[:, 0]
+        upper = masking_indices[:, 1]
+        mask_lower = np.arange(len(self.frequencies))[None, :] >= lower[:, None]
+        mask_upper = np.arange(len(self.frequencies))[None, :] <= upper[:, None]
+        # combine masks
+        mask = mask_lower * mask_upper
+        # broadcast (detectors, freq) => (batch_size, detectors, channels, freq)
+        self._deterministic_mask = mask[None, :, None, :]
+
+    def _check_fmin_fmax(self, f_min, f_max):
+        """Check that domain.f_min < fmin < f_max < domain.f_max."""
+        domain_f_min = self.frequencies[0]
+        domain_f_max = self.frequencies[-1]
+        if f_min is not None and f_max is not None:
+            if not (domain_f_min < f_min < f_max < domain_f_max):
+                raise ValueError(
+                    f"Expected {f_min} in range ({domain_f_min}, {domain_f_max}) "
+                    f"and {f_max} in range ({domain_f_min}, {domain_f_max})."
+                )
+        elif f_min is not None:
+            if not (domain_f_min < f_min < domain_f_max):
+                raise ValueError(
+                    f"Expected {f_min} in range ({domain_f_min}, {domain_f_max})."
+                )
+        elif f_max is not None:
+            if not (domain_f_min < f_max < domain_f_max):
+                raise ValueError(
+                    f"Expected {f_max} in range ({domain_f_min}, {domain_f_max})."
+                )
+
+    def _check_inputs(
+        self,
+        domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
+        f_min_upper: float,
+        f_max_lower: float,
+        cropping_probability: float,
+        deterministic_fmin_fmax: Optional[
+            list[float | None] | list[list[float | None]]
+        ],
+    ):
+
+        # check domain
+        if not isinstance(domain, (UniformFrequencyDomain, MultibandedFrequencyDomain)):
             raise ValueError(
-                f"Sample neither consistent with multibanded frequency domain nor its base domain. "
-                f"Shape of sample: {[sample['waveform'][k] for k in sample['waveform'].keys()][0].shape}, "
-                f"Length of UFD: {len(self.multibanded_frequency_domain.base_domain)}, "
-                f"Length of MFD: {len(self.multibanded_frequency_domain)} "
+                f"Domain should be a frequency domain type, got {type(domain)}."
             )
+        self.frequencies = domain()[domain.min_idx :]
+
+        # check validity of ranges for non-deterministic case
+        if deterministic_fmin_fmax is None:
+            self._check_fmin_fmax(f_min_upper, f_max_lower)
+            if not 0 <= cropping_probability <= 1.0:
+                raise ValueError(
+                    f"Cropping probability should be in [0, 1], got {cropping_probability}."
+                )
+
+        # check deterministic case
+        else:
+            # check that we don't have non-trivial f_min_upper, f_max_lower,
+            # cropping_probability in deterministic case
+            if f_min_upper is not None or f_max_lower is not None:
+                raise ValueError(
+                    "If deterministic_fmin_fmax is set, f_min_upper and f_max_lower should"
+                    " not be set."
+                )
+            if cropping_probability < 1.0:
+                raise ValueError(
+                    f"cropping_probability must be 1.0 when deterministic = True, got "
+                    f"{cropping_probability}."
+                )
+
+    def __call__(self, input_sample: dict) -> dict:
+        """
+        Parameters
+        ----------
+        input_sample : dict
+            sample["waveform"]: Dict with values being arrays containing waveforms,
+            or torch Tensor with the waveform.
+
+        Returns
+        -------
+        dict of the same form as the input, but with transformed (crop-masked) waveforms.
+        """
+        sample = input_sample.copy()
+        strain = sample["waveform"]
+        if strain.shape[-1] != self.len_domain:
+            raise ValueError(
+                f"Expected waveform input of shape [..., {self.len_domain}], "
+                f"got {strain.shape}."
+            )
+
+        if self._deterministic_mask is not None:
+            if self._deterministic_mask.shape[1] not in [1, strain.shape[1]]:
+                raise ValueError(
+                    f"Deterministic masking range needs to be either supplied for all "
+                    f"detectors, or for each individual one. Strain provided in "
+                    f"{strain.shape[1]} detectors, so deterministic range should be "
+                    f"be provided as a single [fmin, fmax] pair or as {strain.shape[1]} "
+                    f"pairs, got {self._deterministic_mask.shape[1]}."
+                )
+            strain = np.where(self._deterministic_mask, strain, 0)
+            sample["waveform"] = strain
+            return sample
+
+        # Sample boundary indices for crops
+        constant_ax = 3 - self.independent_detectors
+        lower = self._sample_lower_bound_indices(strain.shape[:-constant_ax])
+        upper = self._sample_upper_bound_indices(strain.shape[:-constant_ax])
+
+        # Only apply crops to a fraction of self.cropping_probability
+        if self.cropping_probability < 1:
+            mask = np.random.uniform(size=lower.shape) <= self.cropping_probability
+            lower = np.where(mask, lower, 0)
+            if self.independent_lower_upper:
+                mask = np.random.uniform(size=lower.shape) <= self.cropping_probability
+            upper = np.where(mask, upper, self.len_domain)
+
+        # Broadcast boundaries and apply cropping
+        mask_lower = np.arange(self.len_domain) >= lower[(...,) + (None,) * constant_ax]
+        mask_upper = np.arange(self.len_domain) <= upper[(...,) + (None,) * constant_ax]
+        strain = np.where(mask_lower, strain, 0)
+        strain = np.where(mask_upper, strain, 0)
+        sample["waveform"] = strain
 
         return sample
 
@@ -211,9 +436,9 @@ class MaskDataForFrequencyRangeUpdate(object):
         Parameters
         ----------
         minimum_frequency: Optional[float | dict[str, float]]
-            Update of f_min, if float, the same value will be used for all detectors.
+            Update of f_min. If a float, the same value will be used for all detectors.
         maximum_frequency: Optional[float | dict[str, float]]
-            Update of f_max, if float, the same value will be used for all detectors.
+            Update of f_max. If a float, the same value will be used for all detectors.
         suppress_range: list[float, float] | dict[str, list[float, float]] | None
             Suppress ranges [f_min, f_max], either for all detectors or for individual detectors. Frequency bins
             corresponding to f_min and f_max are excluded.
@@ -250,8 +475,8 @@ class MaskDataForFrequencyRangeUpdate(object):
         ----------
         input_sample: Dict
             Values for keys
-            - 'waveform', shape [batch_size, num_frequency_bins]
-            - 'asds', shape [batch_size, num_frequency_bins]
+            - 'waveform', dict containing waveform for each detector of shape [batch_size, num_frequency_bins]
+            - 'asds', dict containing asds for each detector of shape [batch_size, num_frequency_bins]
 
         Returns
         ----------
@@ -262,16 +487,19 @@ class MaskDataForFrequencyRangeUpdate(object):
 
         """
         sample = input_sample.copy()
+
+        ifos = list(sample["waveform"].keys())
         # Get frequency masks for full domain
         frequency_masks = create_mask_based_on_frequency_update(
             sample_frequencies=self.sample_frequencies,
-            detectors=[d for d in sample["waveform"].keys()],
+            detectors=ifos,
             minimum_frequency=self.minimum_frequency,
             maximum_frequency=self.maximum_frequency,
             suppress_range=self.suppress_range,
         )
 
-        # Update waveforms and ASDs based on masks
+        # Update waveforms and ASDs based on masks. Be sure not to modify dicts or
+        # arrays in-place.
         for d in sample["waveform"].keys():
             # Combine with frequency mask from domain
             combined_mask = np.where(self.frequency_mask, ~frequency_masks[d], False)
@@ -291,6 +519,9 @@ def create_mask_based_on_frequency_update(
     suppress_range: Optional[list[float, float] | dict[str, list[float, float]]] = None,
 ) -> dict[str : np.array]:
     """
+    Creates a mask for each detector containing True for sample_frequencies not affected by the frequency updates
+    for minimum and maximum frequencies.
+
     Parameters
     ----------
     sample_frequencies: np.array
@@ -298,9 +529,9 @@ def create_mask_based_on_frequency_update(
     detectors: list[str]
         List of detector names.
     minimum_frequency: Optional[float | dict[str, float]]
-        Update of f_min, if float, the same value will be used for all detectors.
+        Update of f_min. If a float, the same value will be used for all detectors.
     maximum_frequency: Optional[float | dict[str, float]]
-        Update of f_max, if float, the same value will be used for all detectors.
+        Update of f_max. If a float, the same value will be used for all detectors.
     suppress_range: list[float, float] | dict[str, list[float, float]] | None
         Suppress ranges [f_min, f_max], either for all detectors or for individual detectors. Frequency bins
         corresponding to f_min and f_max are excluded.

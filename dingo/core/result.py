@@ -2,15 +2,18 @@ import copy
 import math
 import tempfile
 import time
+from collections import namedtuple
+from itertools import product
 
 import numpy as np
 from typing import Optional
 
 import pandas as pd
+import scipy
 from matplotlib import pyplot as plt
 from scipy.constants import golden
 from scipy.special import logsumexp
-from bilby.core.prior import Constraint, DeltaFunction
+from bilby.core.prior import Constraint, DeltaFunction, PriorDict, Prior
 
 from dingo.core.dataset import DingoDataset
 from dingo.core.density import train_unconditional_density_estimator
@@ -87,8 +90,8 @@ class Result(DingoDataset):
 
     @property
     def injection_parameters(self):
-        if self.context:
-            return self.context.get("parameters")
+        if self.event_metadata:
+            return self.event_metadata.get("injection_parameters")
         else:
             return None
 
@@ -633,8 +636,8 @@ class Result(DingoDataset):
         # User option to plot specific parameters.
         if parameters:
             theta = theta[parameters]
-        if truths is not None:
-            kwargs["truths"] = [truths.get(k) for k in theta.columns]
+        if self.injection_parameters is not None:
+            kwargs["truths"] = [self.injection_parameters.get(k) for k in theta.columns]
 
         if weights is not None:
             plot_corner_multi(
@@ -642,10 +645,17 @@ class Result(DingoDataset):
                 weights=[None, weights.to_numpy()],
                 labels=["Dingo", "Dingo-IS"],
                 filename=filename,
+                latex_labels_dict=get_latex_labels(self.prior),
                 **kwargs,
             )
         else:
-            plot_corner_multi(theta, labels=["Dingo"], filename=filename, **kwargs)
+            plot_corner_multi(
+                theta,
+                labels=["Dingo"],
+                filename=filename,
+                latex_labels_dict=get_latex_labels(self.prior),
+                **kwargs,
+            )
 
     def plot_log_probs(self, filename="log_probs.png"):
         """
@@ -710,6 +720,220 @@ class Result(DingoDataset):
         else:
             print("Results not importance sampled. Cannot plot weights.")
 
+    def get_all_injection_credible_levels(
+        self, keys: list[str] = None, weighted: bool = False
+    ):
+        """
+        Get credible levels for all parameters.
+
+        Adapted from Bilby.
+
+        Parameters
+        ==========
+        keys: list, optional
+            A list of keys for which return the credible levels, if None,
+            defaults to search_parameter_keys
+        weighted: bool, optional
+            Whether to use sample weights in calculating credible level.
+
+        Returns
+        =======
+        credible_levels: dict
+            The credible levels at which the injected parameters are found.
+        """
+        if keys is None:
+            keys = self.search_parameter_keys
+        if self.injection_parameters is None:
+            raise (
+                TypeError,
+                "Result object has no 'injection_parameters'. "
+                "Cannot compute credible levels.",
+            )
+        credible_levels = {
+            key: self.get_injection_credible_level(key, weighted=weighted)
+            for key in keys
+            if isinstance(self.injection_parameters.get(key, None), float)
+        }
+        return credible_levels
+
+    def get_injection_credible_level(self, parameter: str, weighted: bool = False):
+        """
+        Get the credible level of the injected parameter.
+
+        Calculated as CDF(injection value).
+
+        Adapted from Bilby.
+
+        Parameters
+        ==========
+        parameter: str
+            Parameter to get credible level for
+        weighted: bool, optional
+            Whether to use sample weights in calculating credible level.
+
+        Returns
+        =======
+        float: credible level
+        """
+        if self.injection_parameters is None:
+            raise (
+                TypeError,
+                "Result object has no 'injection_parameters'. "
+                "Cannot compute credible levels.",
+            )
+        theta = self._cleaned_samples()
+
+        if weighted:
+            weights = theta["weights"]
+        else:
+            weights = np.ones(len(theta))
+
+        if parameter in theta and parameter in self.injection_parameters:
+            credible_level = sum(
+                np.array(theta[parameter].values < self.injection_parameters[parameter])
+                * weights
+            ) / (sum(weights))
+            return credible_level
+        else:
+            return np.nan
+
+
+def make_pp_plot(
+    results: list[Result],
+    filename=None,
+    save=True,
+    confidence_interval=[0.68, 0.95, 0.997],
+    lines=None,
+    legend_fontsize="x-small",
+    keys=None,
+    title=True,
+    confidence_interval_alpha=0.1,
+    weighted: bool = False,
+    **kwargs,
+):
+    """
+    Make a P-P plot for a set of runs with injected signals.
+
+    Adapted from Bilby.
+
+    Parameters
+    ==========
+    results: list[Result]
+        A list of Result objects, each of these should have injected_parameters
+    filename: str, optional
+        The name of the file to save, the default is "outdir/pp.png"
+    save: bool, optional
+        Whether to save the file, default=True
+    confidence_interval: (float, list), optional
+        The confidence interval to be plotted, defaulting to 1-2-3 sigma
+    lines: list
+        If given, a list of matplotlib line formats to use, must be greater
+        than the number of parameters.
+    legend_fontsize: float
+        The font size for the legend
+    keys: list
+        A list of keys to use, if None defaults to search_parameter_keys
+    title: bool
+        Whether to add the number of results and total p-value as a plot title
+    confidence_interval_alpha: float, list, optional
+        The transparency for the background condifence interval
+    weighted: bool, optional
+        Whether to use weighted vs unweighted samples. It is useful to make PP plots
+        using unweighted samples to test networks without importance sampling.
+    kwargs:
+        Additional kwargs to pass to matplotlib.pyplot.plot
+
+    Returns
+    =======
+    fig, pvals:
+        matplotlib figure and a NamedTuple with attributes `combined_pvalue`,
+        `pvalues`, and `names`.
+    """
+    if keys is None:
+        keys = results[0].search_parameter_keys
+
+    credible_levels = list()
+    for i, result in enumerate(results):
+        credible_levels.append(
+            result.get_all_injection_credible_levels(keys, weighted=weighted)
+        )
+    credible_levels = pd.DataFrame(credible_levels)
+
+    if lines is None:
+        colors = ["C{}".format(i) for i in range(8)]
+        linestyles = ["-", "--", ":"]
+        lines = ["{}{}".format(a, b) for a, b in product(linestyles, colors)]
+    if len(lines) < len(credible_levels.keys()):
+        raise ValueError("Larger number of parameters than unique linestyles")
+
+    x_values = np.linspace(0, 1, 1001)
+
+    N = len(credible_levels)
+    fig, ax = plt.subplots()
+
+    if isinstance(confidence_interval, float):
+        confidence_interval = [confidence_interval]
+    if isinstance(confidence_interval_alpha, float):
+        confidence_interval_alpha = [confidence_interval_alpha] * len(
+            confidence_interval
+        )
+    elif len(confidence_interval_alpha) != len(confidence_interval):
+        raise ValueError(
+            "confidence_interval_alpha must have the same length as confidence_interval"
+        )
+
+    for ci, alpha in zip(confidence_interval, confidence_interval_alpha):
+        edge_of_bound = (1.0 - ci) / 2.0
+        lower = scipy.stats.binom.ppf(1 - edge_of_bound, N, x_values) / N
+        upper = scipy.stats.binom.ppf(edge_of_bound, N, x_values) / N
+        # The binomial point percent function doesn't always return 0 @ 0,
+        # so set those bounds explicitly to be sure
+        lower[0] = 0
+        upper[0] = 0
+        ax.fill_between(x_values, lower, upper, alpha=alpha, color="k")
+
+    pvalues = []
+    latex_labels = get_latex_labels(results[0].prior)
+    print("Key: KS-test p-value")
+    for ii, key in enumerate(credible_levels):
+        pp = np.array(
+            [
+                sum(credible_levels[key].values < xx) / len(credible_levels)
+                for xx in x_values
+            ]
+        )
+        pvalue = scipy.stats.kstest(credible_levels[key], "uniform").pvalue
+        pvalues.append(pvalue)
+        print("{}: {}".format(key, pvalue))
+        label = "{} ({:2.3f})".format(latex_labels[key], pvalue)
+        plt.plot(x_values, pp, lines[ii], label=label, **kwargs)
+
+    Pvals = namedtuple("pvals", ["combined_pvalue", "pvalues", "names"])
+    pvals = Pvals(
+        combined_pvalue=scipy.stats.combine_pvalues(pvalues)[1],
+        pvalues=pvalues,
+        names=list(credible_levels.keys()),
+    )
+    print("Combined p-value: {}".format(pvals.combined_pvalue))
+
+    if title:
+        ax.set_title(
+            "N={}, p-value={:2.4f}".format(len(results), pvals.combined_pvalue)
+            + (", " "IS" if weighted else "")
+        )
+    ax.set_xlabel("p")
+    ax.set_ylabel("CDF(p)")
+    ax.legend(handlelength=2, labelspacing=0.25, fontsize=legend_fontsize)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    fig.tight_layout()
+    if save:
+        if filename is None:
+            filename = "outdir/pp.pdf"
+        fig.savefig(fname=filename)
+
+    return fig, pvals
+
 
 def check_equal_dict_of_arrays(a, b):
     if type(a) != type(b):
@@ -740,3 +964,25 @@ def freeze(d):
     elif isinstance(d, list):
         return tuple(freeze(value) for value in d)
     return d
+
+
+def get_latex_labels(prior: PriorDict) -> dict:
+    """
+    Get the latex labels for prior parameters. If no latex label exists within the
+    prior object, try to choose based on parameter key. Finally, return the parameter key.
+
+    Parameters
+    ----------
+    prior : PriorDict
+
+    Returns
+    -------
+    dict of latex labels
+    """
+    labels = {}
+    for k, v in prior.items():
+        l = v.latex_label
+        if l is None:
+            l = Prior._default_latex_labels.get(k, k)
+        labels[k] = l
+    return labels

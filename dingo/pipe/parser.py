@@ -36,7 +36,7 @@ class StoreBoolean(argparse.Action):
             setattr(namespace, self.dest, False)
 
 
-def create_parser(top_level=True):
+def create_parser(top_level=True, usage=None):
     """Creates the BilbyArgParser for dingo_pipe
 
     Parameters
@@ -52,10 +52,11 @@ def create_parser(top_level=True):
 
     """
     parser = BilbyArgParser(
-        usage="Perform inference with dingo based on a .ini file.",
+        usage="%(prog)s ini [options]",
+        description=usage,
         ignore_unknown_config_file_keys=False,
         allow_abbrev=False,
-        formatter_class=configargparse.ArgumentDefaultsHelpFormatter,
+        formatter_class=configargparse.ArgumentDefaultsRawHelpFormatter,
     )
     parser.add("ini", type=str, is_config_file=True, help="Configuration ini file")
     parser.add("-v", "--verbose", action="store_true", help="Verbose output")
@@ -245,15 +246,15 @@ def create_parser(top_level=True):
             "trigger time"
         ),
     )
-    # data_gen_pars.add(
-    #     "--n-simulation",
-    #     type=int,
-    #     default=0,
-    #     help=(
-    #         "Number of simulated segments to use with gaussian-noise "
-    #         "Note, this must match the number of injections specified"
-    #     ),
-    # )
+    data_gen_pars.add(
+        "--n-simulation",
+        type=int,
+        default=0,
+        help=(
+            "Number of simulated segments to use with gaussian-noise "
+            "Note, this must match the number of injections specified"
+        ),
+    )
     data_gen_pars.add(
         "--data-dict",
         default=None,
@@ -302,25 +303,35 @@ def create_parser(top_level=True):
     )
     data_gen_pars.add(
         "--data-find-url",
-        default="https://datafind.ligo.org",
-        help="URL to use for datafind, default is https://datafind.ligo.org to query CVMFS",
+        type=nonestr,
+        default=None,
+        help=(
+            "URL to use for datafind. This happens during the initial attempt "
+            "to locate frames by :code:`bilby_pipe` or by "
+            ":code:`bilby_pipe_generation`. In both cases, the order of "
+            "preference is: 1) the value of this argument, 2) the value of "
+            "the environment variable GWDATAFIND_SERVER, 3) the value "
+            "of the global default in bilby_pipe.utils.DEFAULT_GWDATAFIND_SERVER. "
+            "This value will override the value of GWDATAFIND_SERVER if it is set"
+            "in :code:`getenv` or :code:`environment-variables`."
+        ),
     )
     data_gen_pars.add(
         "--data-find-urltype",
         default="osdf",
         help="URL type to use for datafind, default is osdf",
     )
-    # data_type_pars = data_gen_pars.add_mutually_exclusive_group()
-    # data_type_pars.add(
-    #     "--gaussian-noise",
-    #     action="store_true",
-    #     help="If true, use simulated Gaussian noise",
-    # )
-    # data_type_pars.add(
-    #     "--zero-noise",
-    #     action="store_true",
-    #     help="Use a zero noise realisation",
-    # )
+    data_type_pars = data_gen_pars.add_mutually_exclusive_group()
+    data_type_pars.add(
+        "--gaussian-noise",
+        action="store_true",
+        help="If true, use simulated Gaussian noise",
+    )
+    data_type_pars.add(
+        "--zero-noise",
+        action="store_true",
+        help="Use a zero noise realisation",
+    )
 
     det_parser = parser.add_argument_group(
         title="Detector arguments",
@@ -350,19 +361,27 @@ def create_parser(top_level=True):
         default=None,
         help="The duration of data around the event to use",
     )
-    # det_parser.add(
-    #     "--generation-seed",
-    #     default=None,
-    #     type=noneint,
-    #     help=(
-    #         "Random seed used during data generation. If no generation seed "
-    #         "provided, a random seed between 1 and 1e6 is selected. If a seed "
-    #         "is provided, it is used as the base seed and all generation jobs "
-    #         "will have their seeds set as {generation_seed = base_seed + job_idx}."
-    #     ),
-    # )
     det_parser.add(
+        "--generation-seed",
+        default=None,
+        type=noneint,
+        help=(
+            "Random seed used during data generation. If no generation seed "
+            "provided, a random seed between 1 and 1e6 is selected. If a seed "
+            "is provided, it is used as the base seed and all generation jobs "
+            "will have their seeds set as {generation_seed = base_seed + job_idx}."
+        ),
+    )
+    psd_dict_parser = det_parser.add_mutually_exclusive_group()
+    psd_dict_parser.add(
         "--psd-dict", type=nonestr, default=None, help="Dictionary of PSD files to use"
+    )
+    psd_dict_parser.add(
+        "--asd-dataset",
+        type=nonestr,
+        default=None,
+        help="DINGO ASDDataset file to be used for injections. If specified, dingo_pipe "
+        "will generate PSD files based on random ASDs in the dataset.",
     )
     det_parser.add(
         "--psd-fractional-overlap",
@@ -379,8 +398,7 @@ def create_parser(top_level=True):
     )
     det_parser.add(
         "--sampling-frequency",
-        # default=4096,
-        default=None,
+        default=4096,
         type=nonefloat,
     )
 
@@ -451,8 +469,7 @@ def create_parser(top_level=True):
     )
     det_parser.add(
         "--tukey-roll-off",
-        # default=0.4,
-        default=None,
+        default=1.0,
         type=nonefloat,
         help="Roll off duration of tukey window in seconds, default is 0.4s",
     )
@@ -468,12 +485,12 @@ def create_parser(top_level=True):
         title="Injection arguments",
         description="Whether to include software injections and how to generate them.",
     )
-    # injection_parser.add(
-    #     "--injection",
-    #     action="store_true",
-    #     default=False,
-    #     help="Create data from an injection file",
-    # )
+    injection_parser.add(
+        "--injection",
+        action="store_true",
+        default=False,
+        help="Create data from an injection file",
+    )
     injection_parser_input = injection_parser.add_mutually_exclusive_group()
     injection_parser_input.add(
         "--injection-dict",
@@ -490,36 +507,73 @@ def create_parser(top_level=True):
             " for supported formats"
         ),
     )
-    # injection_parser.add(
-    #     "--injection-numbers",
-    #     action="append",
-    #     type=nonestr,
-    #     default=None,
-    #     help=(
-    #         "Specific injections rows to use from the injection_file, e.g. "
-    #         "`injection_numbers=[0,3] selects the zeroth and third row. Can be "
-    #         "a list of slice-syntax values, e.g, [0, 2:4] will produce [0, 2, 3]. "
-    #         "Repeated entries will be ignored."
-    #     ),
-    # )
-    # injection_parser.add(
-    #     "--injection-waveform-approximant",
-    #     type=nonestr,
-    #     default=None,
-    #     help="The name of the waveform approximant to use to create injections. "
-    #     "If none is specified, then the `waveform-approximant` will be used"
-    #     "as the `injection-waveform-approximant`.",
-    # )
-    # injection_parser.add(
-    #     "--injection-waveform-arguments",
-    #     type=nonestr,
-    #     default=None,
-    #     help=(
-    #         "A dictionary of arbitrary additional waveform-arguments to pass "
-    #         "to the bilby waveform generator's waveform arguments for the "
-    #         "injection only"
-    #     ),
-    # )
+    injection_parser.add(
+        "--injection-numbers",
+        action="append",
+        type=nonestr,
+        default=None,
+        help=(
+            "Specific injections rows to use from the injection_file, e.g. "
+            "`injection_numbers=[0,3] selects the zeroth and third row. Can be "
+            "a list of slice-syntax values, e.g, [0, 2:4] will produce [0, 2, 3]. "
+            "Repeated entries will be ignored."
+        ),
+    )
+    injection_parser.add(
+        "--dingo-injection",
+        action="store_true",
+        help=(
+            "If true, use the DINGO Injection class to generate the injection signal. "
+            "Otherwise, use bilby_pipe. When using DINGO for injections, the noise is "
+            "still generated using bilby_pipe. Defaults to false."
+        ),
+    )
+    injection_parser.add(
+        "--injection-waveform-approximant",
+        type=nonestr,
+        default=None,
+        help="The name of the waveform approximant to use to create injections. "
+        "If none is specified, then the `waveform-approximant` will be used"
+        "as the `injection-waveform-approximant`.",
+    )
+    injection_parser.add(
+        "--injection-frequency-domain-source-model",
+        type=nonestr,
+        default=None,
+        help="Frequency domain source model to use for generating injections. "
+        "If this is None, it will default to the frequency domain source model"
+        "used for analysis.",
+    )
+    injection_parser.add(
+        "--injection-waveform-arguments",
+        type=nonestr,
+        default=None,
+        help=(
+            "A dictionary of arbitrary additional waveform-arguments to pass "
+            "to the bilby waveform generator's waveform arguments for the "
+            "injection only"
+        ),
+    )
+    injection_parser.add(
+        "--injection-waveform-generator-constructor-dict",
+        default=None,
+        type=nonestr,
+        help=(
+            "A dictionary of arbitrary arguments to pass"
+            " to the bilby waveform generator class constructor for the injection"
+            " only. The class will be the same as the one specified in"
+            " '--waveform-generator'."
+        ),
+    )
+    injection_parser.add(
+        "--save-bilby-data-dump",
+        action=StoreBoolean,
+        default=False,
+        help=(
+            "If given, will also save a data dump consistent with the DINGO injection."
+            "This is useful when comparing with Bilby"
+        ),
+    )
 
     submission_parser = parser.add_argument_group(
         title="Job submission arguments",
@@ -837,10 +891,10 @@ def create_parser(top_level=True):
             "for more details."
         ),
     )
-    # likelihood_parser = parser.add_argument_group(
-    #     title="Likelihood arguments",
-    #     description="Options for setting up the likelihood.",
-    # )
+    likelihood_parser = parser.add_argument_group(
+        title="Likelihood arguments",
+        description="Options for setting up the likelihood.",
+    )
     # likelihood_parser.add(
     #     "--distance-marginalization",
     #     action="store_true",
@@ -878,12 +932,12 @@ def create_parser(top_level=True):
     #     type=str,
     #     help="Reference frame for the sky parameterisation, either 'sky' (default) or, e.g., 'H1L1'",
     # )
-    # likelihood_parser.add(
-    #     "--time-reference",
-    #     default="geocent",
-    #     type=str,
-    #     help="Time parameter to sample in, either 'geocent' (default) or, e.g., 'H1'",
-    # )
+    likelihood_parser.add(
+        "--time-reference",
+        default="geocent",
+        type=str,
+        help="Time parameter to sample in, either 'geocent' (default) or, e.g., 'H1'",
+    )
     # likelihood_parser.add(
     #     "--likelihood-type",
     #     default="GravitationalWaveTransient",
@@ -963,11 +1017,11 @@ def create_parser(top_level=True):
         action="store_true",
         help="Create plot of the frequency domain data",
     )
-    # output_parser.add_argument(
-    #     "--plot-injection",
-    #     action="store_true",
-    #     help="Create time-domain plot of the injection",
-    # )
+    output_parser.add_argument(
+        "--plot-injection",
+        action="store_true",
+        help="Create time-domain plot of the injection",
+    )
     output_parser.add_argument(
         "--plot-spectrogram",
         action="store_true",
@@ -992,6 +1046,11 @@ def create_parser(top_level=True):
         "--plot-log-probs",
         action="store_true",
         help="Create scatter plot of target versus proposal log probabilities",
+    )
+    output_parser.add_argument(
+        "--plot-pp",
+        action="store_true",
+        help="Create PP plot based on several injections.",
     )
     # output_parser.add_argument(
     #     "--plot-marginal",
@@ -1088,29 +1147,53 @@ def create_parser(top_level=True):
     prior_parser = parser.add_argument_group(
         title="Prior arguments", description="Specify the prior settings."
     )
-    # prior_parser.add(
-    #     "--default-prior",
-    #     default="PriorDict",
-    #     type=str,
-    #     help=(
-    #         "The name of the prior set to base the prior on. Can be one of"
-    #         "[PriorDict, BBHPriorDict, BNSPriorDict, CalibrationPriorDict]"
-    #         "or a python path to a bilby prior class available in the user's installation."
-    #     ),
-    # )
-    # prior_parser.add(
-    #     "--deltaT",
-    #     type=float,
-    #     default=0.2,
-    #     help=(
-    #         "The symmetric width (in s) around the trigger time to"
-    #         " search over the coalescence time"
-    #     ),
-    # )
+    prior_parser.add(
+        "--default-prior",
+        default="BBHPriorDict",
+        type=str,
+        help=(
+            "The name of the prior set to base the prior on. Can be one of"
+            "[PriorDict, BBHPriorDict, BNSPriorDict, CalibrationPriorDict]"
+            "or a python path to a bilby prior class available in the user's installation."
+        ),
+    )
+    prior_parser.add(
+        "--deltaT",
+        type=nonefloat,
+        default=None,
+        help=(
+            "The symmetric width (in s) around the trigger time to"
+            " search over the coalescence time"
+        ),
+    )
+    prior_parser.add(
+        "--Toffset",
+        type=nonefloat,
+        default=None,
+        help=(
+            "Offset of the center of the time prior from the trigger time (in s). "
+            "Useful for DeltaFunction priors. Generally set by DINGO model."
+        ),
+    )
+    prior_parser.add(
+        "--prior-dict-updates",
+        type=nonestr,
+        default=None,
+        help=(
+            "A dictionary of priors. Multiline "
+            "dictionaries are supported, but each line must contain a single"
+            "parameter specification and finish with a comma. Dingo priors are set at "
+            "network training time, so the prior-dict-update is used at importance "
+            "sampling "
+            "time to re-weight to the new prior. The prior-dict does not have to be "
+            "a prior over the entire set of parameters, only the parameters for which "
+            "the prior is changed."
+        ),
+    )
     prior_parser_main = prior_parser.add_mutually_exclusive_group()
-    # prior_parser_main.add(
-    #     "--prior-file", type=nonestr, default=None, help="The prior file"
-    # )
+    prior_parser_main.add(
+        "--prior-file", type=nonestr, default=None, help="The prior file"
+    )
     prior_parser_main.add(
         "--prior-dict",
         type=nonestr,
@@ -1119,21 +1202,19 @@ def create_parser(top_level=True):
             "A dictionary of priors (alternative to prior-file). Multiline "
             "dictionaries are supported, but each line must contain a single"
             "parameter specification and finish with a comma. Dingo priors are set at "
-            "network training time, so the prior-dict is used at importance sampling "
-            "time to re-weight to the new prior. The prior-dict does not have to be "
-            "a prior over the entire set of parameters, only the parameters for which "
-            "the prior is changed."
+            "network training time, so the prior-dict should not be provided by the "
+            "user! Use 'prior-dict-update' to update the prior for importance sampling."
         ),
     )
-    # prior_parser.add(
-    #     "--enforce-signal-duration",
-    #     action=StoreBoolean,
-    #     default=True,
-    #     help=(
-    #         "Whether to require that all signals fit within the segment duration. "
-    #         "The signal duration is calculated using a post-Newtonian approximation."
-    #     ),
-    # )
+    prior_parser.add(
+        "--enforce-signal-duration",
+        action=StoreBoolean,
+        default=True,
+        help=(
+            "Whether to require that all signals fit within the segment duration. "
+            "The signal duration is calculated using a post-Newtonian approximation."
+        ),
+    )
 
     # postprocessing_parser = parser.add_argument_group(
     #     title="Post processing arguments",
@@ -1202,6 +1283,15 @@ def create_parser(top_level=True):
     #     help="The waveform generator class, should be a python path. This will "
     #     "not be able to use any arguments not passed to the default.",
     # )
+    # waveform_parser.add(
+    #     "--waveform-generator-constructor-dict",
+    #     default=None,
+    #     type=nonestr,
+    #     help=(
+    #         "A dictionary of arbitrary arguments to pass"
+    #         " to the bilby waveform generator class constructor."
+    #     ),
+    # )
     waveform_parser.add(
         "--reference-frequency",
         default=None,
@@ -1214,12 +1304,12 @@ def create_parser(top_level=True):
         type=nonestr,
         help="The name of the waveform approximant to use for PE.",
     )
-    # waveform_parser.add(
-    #     "--catch-waveform-errors",
-    #     default=True,
-    #     action=StoreBoolean,
-    #     help="Turns on waveform error catching",
-    # )
+    waveform_parser.add(
+        "--catch-waveform-errors",
+        default=True,
+        action=StoreBoolean,
+        help="Turns on waveform error catching",
+    )
     # waveform_parser.add(
     #     "--pn-spin-order",
     #     default=-1,
@@ -1245,23 +1335,24 @@ def create_parser(top_level=True):
     #     help="Post-Newtonian order to use for the amplitude. Also "
     #     "used to determine the waveform starting frequency.",
     # )
+    waveform_parser.add(
+        "--numerical-relativity-file",
+        default=None,
+        type=nonestr,
+        help=(
+            "Path to a h5 numerical relativity file to inject, see"
+            "https://git.ligo.org/waveforms/lvcnr-lfs for examples"
+        ),
+    )
     # waveform_parser.add(
-    #     "--numerical-relativity-file",
-    #     default=None,
-    #     type=nonestr,
-    #     help=(
-    #         "Path to a h5 numerical relativity file to inject, see"
-    #         "https://git.ligo.org/waveforms/lvcnr-lfs for examples"
-    #     ),
-    # )
-    # waveform_parser.add(
-    #     "--waveform-arguments-dict",
-    #     default=None,
-    #     type=nonestr,
-    #     help=(
-    #         "A dictionary of arbitrary additional waveform-arguments to pass"
-    #         "  to the bilby waveform generator's `waveform_arguments`"
-    #     ),
+    # "--waveform-arguments-dict",
+    # default=None,
+    # type=nonestr,
+    # help=(
+    # "A dictionary of arbitrary additional waveform-arguments to pass"
+    # "  to the bilby waveform generator's `waveform_arguments`. Only used "
+    # "for injections"
+    # ),
     # )
     # waveform_parser.add(
     #     "--mode-array",
@@ -1314,6 +1405,23 @@ def create_parser(top_level=True):
     #     ),
     # )
 
+    # # Constants arguments
+    # global_settings_parser = parser.add_argument_group(
+    #     title="Global settings",
+    #     description="Settings for global configuration",
+    # )
+    # global_settings_parser.add(
+    #     "--cosmology",
+    #     default="Planck15",
+    #     type=str,
+    #     help=(
+    #         "The name of the cosmology to use. "
+    #         "Defaults to Planck15, see "
+    #         ":external:py:func:`bilby.gw.cosmology.get_available_cosmologies` "
+    #         "for a list of the available cosmologies."
+    #     ),
+    # )
+
     #
     # Added for Dingo.
     #
@@ -1331,6 +1439,13 @@ def create_parser(top_level=True):
         default=None,
         help="Neural network model for generating samples to initialize Gibbs sampling."
         "Must be provided if the main model is a GNPE model. ",
+    )
+    sampler_parser.add(
+        "--model-reference-time",
+        type=nonefloat,
+        default=None,
+        help="Reference time for neural network. Do not add this manually as it is "
+        "specified by the network.",
     )
     sampler_parser.add(
         "--recover-log-prob",
