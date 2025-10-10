@@ -67,8 +67,10 @@ class SamplingNode(AnalysisNode):
                     input_files_to_transfer.append(self.inputs.container)
 
                 input_files_to_transfer.extend(network_files)
-                # This is needed to access the networks which are in OSDF
-                self.extra_lines.extend(self.scitoken_lines)
+
+                # Credentials are needed to access any OSDF files
+                if any(["osdf" in s for s in input_files_to_transfer]):
+                    self.extra_lines.extend(self.scitoken_lines)
 
             self.extra_lines.extend(
                 self._condor_file_transfer_lines(
