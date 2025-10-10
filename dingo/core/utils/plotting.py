@@ -9,7 +9,7 @@ import pandas as pd
 LATEX_PARAM_DICT = {
     "mass1": r"$m_1$",
     "mass2": r"$m_2$",
-    "chirp_mass": r"$\mathcal{M}_c$",
+    "chirp_mass": r"$\mathcal{M}_c~[\text{M}_{\odot}]$",
     "mass_ratio": r"$q$",
     "a_1": r"$a_1$",
     "a_2": r"$a_2$",
