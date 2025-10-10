@@ -346,6 +346,27 @@ class Sampler(object):
         data_dict = {k: getattr(self, k, None) for k in RESULT_DATA_KEYS}
         # *COPY* the metadata to avoid recursion errors when creating new objects.
         data_dict["settings"] = copy.deepcopy(self.metadata)
+        # The following is a temporary fix for old models, can be removed upon merge!
+        # Replace any numpy objects with their non-numpy counterpart to prevent read-in issues
+        if (
+            "train_settings" in data_dict["settings"]
+            and "training" in data_dict["settings"]["train_settings"]
+            and "stage_0" in data_dict["settings"]["train_settings"]["training"]
+            and "scheduler"
+            in data_dict["settings"]["train_settings"]["training"]["stage_0"]
+            and "num_optimizer_steps_per_epoch"
+            in data_dict["settings"]["train_settings"]["training"]["stage_0"][
+                "scheduler"
+            ]
+        ):
+            # Replace numpy value with float
+            val = data_dict["settings"]["train_settings"]["training"]["stage_0"][
+                "scheduler"
+            ]["num_optimizer_steps_per_epoch"]
+            data_dict["settings"]["train_settings"]["training"]["stage_0"]["scheduler"][
+                "num_optimizer_steps_per_epoch"
+            ] = float(val)
+
         return self._result_class(dictionary=data_dict)
 
     def to_hdf5(self, label="result", outdir="."):
