@@ -605,8 +605,8 @@ def initialize_stage(
                 f"by the number of gradient updates per optimizer step={grad_updates_per_optimizer_step}, discarding"
                 f"the last {effective_num_batches_per_gpu % grad_updates_per_optimizer_step} batches. "
             )
-        num_optimizer_steps = np.floor(
-            effective_num_batches_per_gpu / grad_updates_per_optimizer_step
+        num_optimizer_steps = int(
+            np.floor(effective_num_batches_per_gpu / grad_updates_per_optimizer_step)
         )
         if print_output:
             print(
