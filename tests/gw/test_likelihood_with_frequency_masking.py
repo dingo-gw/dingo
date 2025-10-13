@@ -5,6 +5,7 @@ from copy import deepcopy
 from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 
+# TODO: Add suppress update here
 
 @pytest.fixture
 def ufd_setup():

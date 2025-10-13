@@ -156,9 +156,9 @@ def test_noise_dataset_update_domain(noise_dataset):
 
 def test_noise_datasets_load(noise_datasets):
     dataset_paths, domain_dict, ifos_num_asds = noise_datasets
-
+    ifos = list(ifos_num_asds.keys())
     asd_dataset = MixedASDDatasetWrapper(
-        asd_dataset_paths=dataset_paths, print_output=False
+        asd_dataset_paths=dataset_paths, ifos=ifos, print_output=False
     )
     # check domain
     assert asd_dataset.domain.domain_dict == domain_dict
