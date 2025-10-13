@@ -9,7 +9,7 @@ from dingo.gw.transforms import (
     CropMaskStrainRandom,
     MaskDataForFrequencyRangeUpdate,
     RepackageStrainsAndASDS,
-    TimeShiftStrain,
+    TimeShiftStrainGrid,
 )
 
 
@@ -382,7 +382,6 @@ def test_MaskDataForFrequencyRangeUpdate(request, setup):
     assert np.all([np.all(v[mask] == 1.0) for v in out["asds"].values()])
 
 
-
 @pytest.fixture
 def strain_tokenization_setup():
     f_min = 20.0
@@ -572,7 +571,7 @@ def test_MaskDataForFrequencyRangeUpdate(request, setup):
         "strain_tokenization_setup_mfd",
     ],
 )
-def test_TimeShiftStrain(request, setup):
+def test_TimeShiftStrainGrid(request, setup):
     domain, sample, batch_size = request.getfixturevalue(setup)
 
     max_time_shift = 0.1
@@ -581,7 +580,7 @@ def test_TimeShiftStrain(request, setup):
         ifos=[i for i in sample["waveform"].keys()],
         first_index=domain.min_idx,
     )
-    time_shift_trafo = TimeShiftStrain(
+    time_shift_trafo = TimeShiftStrainGrid(
         domain=domain, max_time_shift=max_time_shift, delta_t=delta_t
     )
     # Apply trafos
@@ -608,4 +607,3 @@ def test_TimeShiftStrain(request, setup):
         axis=-1,
     )
     assert np.allclose(waveform_out, loop_time_translated_waveform)
-
