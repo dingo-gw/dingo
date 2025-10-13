@@ -63,10 +63,10 @@ class SamplingNode(AnalysisNode):
                     else:
                         network_files.append(s)
 
+                input_files_to_transfer.extend(network_files)
+
                 if self.transfer_container:
                     input_files_to_transfer.append(self.inputs.container)
-
-                input_files_to_transfer.extend(network_files)
 
                 # Credentials are needed to access any OSDF files
                 if any(["osdf" in s for s in input_files_to_transfer]):

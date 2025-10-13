@@ -826,6 +826,15 @@ def create_parser(top_level=True, usage=None):
         ),
     )
     submission_parser.add(
+        "--generation-desired-sites",
+        type=nonestr,
+        help=(
+            "A comma-separated list of desired sites, wrapped in quoates."
+            " e.g., desired-sites='site1,site2'. This can be used on the OSG"
+            " to specify specific run nodes. This determines which site to use during data generation."
+        ),
+    )
+    submission_parser.add(
         "--analysis-executable",
         default=None,
         type=nonestr,

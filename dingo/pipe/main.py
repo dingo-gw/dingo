@@ -249,6 +249,7 @@ class MainInput(BilbyMainInput):
         )  # Dummy variable so bilby_pipe doesn't complain.
         self.cpu_desired_sites = args.cpu_desired_sites
         self.gpu_desired_sites = args.gpu_desired_sites
+        self.generation_desired_sites = args.generation_desired_sites
         # self.analysis_executable = args.analysis_executable
         # self.analysis_executable_parser = args.analysis_executable_parser
         self.result_format = "hdf5"

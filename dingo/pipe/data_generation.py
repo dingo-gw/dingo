@@ -29,8 +29,14 @@ logger.name = "dingo_pipe"
 
 class DataGenerationInput(BilbyDataGenerationInput):
     def __init__(self, args, unknown_args, create_data=True):
-        self.model = args.model
-        self.model_init = args.model_init
+        # if running on the OSG, the network has been transferred to
+        # the local directory, replace osdf string
+        if args.osg:
+            self.model = os.path.basename(args.model)
+            self.model_init = os.path.basename(args.model_init)
+        else:
+            self.model = args.model
+            self.model_init = args.model_init
 
         Input.__init__(self, args, unknown_args)
         # Generic initialisation
