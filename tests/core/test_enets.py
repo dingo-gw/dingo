@@ -4,6 +4,7 @@ from dingo.core.nn.enets import LinearProjectionRB, \
     ModuleMerger, create_enet_with_projection_layer_and_dense_resnet
 from dingo.core.nn.resnet import DenseResidualNet
 
+#TODO: Fix all these tests before merging into main and write similar tests for transformer model
 
 @pytest.fixture()
 def data_setup_rb():
@@ -164,6 +165,7 @@ def test_forward_pass_of_2stage_enet(data_setup_rb):
     create_enet_with_projection_layer_and_dense_resnet.
     """
     d = data_setup_rb
+    # TODO: fix for transformer modifications
     enet = create_enet_with_projection_layer_and_dense_resnet(
         **d['enet_kwargs'])
     check_model_forward_pass(enet, [d['enet_kwargs']['output_dim']],

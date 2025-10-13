@@ -11,6 +11,7 @@ from dingo.core.nn.enets import \
     create_enet_with_projection_layer_and_dense_resnet
 from dingo.core.utils import torchutils
 
+# TODO: fix circular imports before merging into main
 
 @pytest.fixture()
 def data_setup_nsf_large():
