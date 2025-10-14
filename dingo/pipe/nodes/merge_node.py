@@ -4,8 +4,22 @@ from dingo.pipe.utils import _strip_unwanted_submission_keys
 
 
 class MergeNode(BilbyMergeNode):
+
+    run_node_on_osg = False
+    
     def __init__(self, **kwargs):
         super().__init__(**kwargs, detectors=[])
+        
+        # Add site selection for merge jobs
+        if self.inputs.osg:
+            # Check for merge-specific desired sites, fall back to cpu_desired_sites or nogrid
+            sites = getattr(self.inputs, 'cpu_desired_sites', 'nogrid')
+            if sites == 'nogrid' or sites is None:
+                self.extra_lines.append("MY.flock_local = True")
+                self.extra_lines.append('MY.DESIRED_Sites = "nogrid"')
+            else:
+                self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
+        
         if self.inputs.simple_submission:
             _strip_unwanted_submission_keys(self.job)
 

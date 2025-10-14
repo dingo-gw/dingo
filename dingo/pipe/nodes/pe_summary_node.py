@@ -6,6 +6,9 @@ logger.name = "dingo_pipe"
 
 
 class PESummaryNode(BilbyPESummaryNode):
+
+    run_node_on_osg = False
+    
     def __init__(self, inputs, merged_node_list, generation_node_list, dag):
         super(BilbyPESummaryNode, self).__init__(inputs)
         self.dag = dag

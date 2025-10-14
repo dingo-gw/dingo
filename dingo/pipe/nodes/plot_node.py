@@ -4,6 +4,9 @@ from dingo.pipe.utils import _strip_unwanted_submission_keys
 
 
 class PlotNode(BilbyPlotNode):
+
+    run_node_on_osg = False
+    
     def __init__(self, inputs, merged_node, dag):
         super(BilbyPlotNode, self).__init__(inputs)
         self.dag = dag
