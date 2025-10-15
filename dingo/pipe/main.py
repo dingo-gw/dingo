@@ -245,6 +245,7 @@ class MainInput(BilbyMainInput):
         )  # Dummy variable so bilby_pipe doesn't complain.
         self.cpu_desired_sites = args.cpu_desired_sites
         self.gpu_desired_sites = args.gpu_desired_sites
+        self.generation_desired_sites = args.generation_desired_sites
         # self.analysis_executable = args.analysis_executable
         # self.analysis_executable_parser = args.analysis_executable_parser
         self.result_format = "hdf5"
@@ -322,9 +323,10 @@ class MainInput(BilbyMainInput):
         self.importance_sample = args.importance_sample
 
         self.request_disk = args.request_disk
-        self.request_memory = args.request_memory
         self.request_memory_generation = args.request_memory_generation
-        self.request_cpus = args.request_cpus
+        self.request_memory_sampling = args.request_memory_sampling
+        self.request_memory_importance_sampling = args.request_memory_importance_sampling
+        self.request_cpus_sampling = args.request_cpus_sampling
         self.request_cpus_importance_sampling = args.request_cpus_importance_sampling
         # self.sampler_kwargs = args.sampler_kwargs
         # self.mpi_samplers = ["pymultinest"]

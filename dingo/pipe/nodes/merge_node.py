@@ -4,6 +4,9 @@ from dingo.pipe.utils import _strip_unwanted_submission_keys
 
 
 class MergeNode(BilbyMergeNode):
+
+    run_node_on_osg = False
+    
     def __init__(self, **kwargs):
         super().__init__(**kwargs, detectors=[])
         if self.inputs.simple_submission:

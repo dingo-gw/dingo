@@ -45,6 +45,13 @@ class ImportanceSamplingNode(AnalysisNode):
                 if sites is not None:
                     self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
                 self.requirements.append("IS_GLIDEIN=?=True")
+
+                if self.transfer_container:
+                    input_files_to_transfer.append(self.inputs.container)
+
+            # Credentials are needed to access any OSDF files
+            if any(["osdf" in s for s in input_files_to_transfer]):
+                self.extra_lines.extend(self.scitoken_lines)
                 
             self.extra_lines.extend(
                 self._condor_file_transfer_lines(
@@ -78,6 +85,10 @@ class ImportanceSamplingNode(AnalysisNode):
 
         if self.inputs.simple_submission:
             _strip_unwanted_submission_keys(self.job)
+
+    @property
+    def request_memory(self):
+        return f"{self.inputs.request_memory_importance_sampling}GB"
 
     @property
     def executable(self):
