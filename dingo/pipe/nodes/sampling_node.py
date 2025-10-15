@@ -10,7 +10,7 @@ class SamplingNode(AnalysisNode):
         super(AnalysisNode, self).__init__(inputs)
         self.dag = dag
         self.generation_node = generation_node
-        self.request_cpus = inputs.request_cpus
+        self.request_cpus = inputs.request_cpus_sampling
         self.device = inputs.device
 
         data_label = generation_node.job_name
@@ -86,6 +86,10 @@ class SamplingNode(AnalysisNode):
 
         if self.inputs.simple_submission:
             _strip_unwanted_submission_keys(self.job)
+
+    @property
+    def request_memory(self):
+        return f"{self.inputs.request_memory_sampling}GB"
 
     @property
     def executable(self):

@@ -634,12 +634,6 @@ def create_parser(top_level=True, usage=None):
         help="Disk allocation request in GB. Default is 5GB.",
     )
     submission_parser.add(
-        "--request-memory",
-        type=float,
-        default=8.0,
-        help="Memory allocation request (GB). Default is 8GB",
-    )
-    submission_parser.add(
         "--request-memory-generation",
         type=nonefloat,
         # default=None,
@@ -647,14 +641,35 @@ def create_parser(top_level=True, usage=None):
         help="Memory allocation request (GB) for data generation step",
     )
     submission_parser.add(
-        "--request-cpus",
+        "--request-memory-sampling",
+        type=float,
+        default=128.0,
+        help="Memory allocation request (GB) for sampling step. Default is 128GB",
+    )
+    submission_parser.add(
+        "--request-memory-importance-sampling",
+        type=float,
+        default=128.0,
+        help="Memory allocation request (GB) for sampling step. Default is 128GB"
+    )
+    submission_parser.add(
+        "--request-cpus-importance-sampling",
+        type=int,
+        default=32,
+        help=(
+            "Use multi-processing. This options sets the number of cores to "
+            "request per job when performing importance sampling. To use a pool of 8 "
+            "threads on an 8-core CPU, set request-cpus-importance-sampling=8."
+        ),
+    )
+    submission_parser.add(
+        "--request-cpus-sampling",
         type=int,
         default=1,
         help=(
             "Use multi-processing. This options sets the number of cores to "
-            "request. To use a pool of 8 threads on an 8-core CPU, set "
-            "request-cpus=8. For the dynesty, ptemcee, cpnest, and "
-            "bilby_mcmc samplers, no additional sampler-kwargs are required"
+            "request per job when performing sampling. To use a pool of 8 "
+            "threads on an 8-core CPU, set request-cpus-sampling=8."
         ),
     )
     submission_parser.add(
@@ -662,16 +677,6 @@ def create_parser(top_level=True, usage=None):
         type=nonestr,
         default=None,
         help="Either a conda environment name of a absolute path to the conda env folder.",
-    )
-    submission_parser.add(
-        "--request-cpus-importance-sampling",
-        type=int,
-        default=1,
-        help=(
-            "Use multi-processing. This options sets the number of cores to "
-            "request per job when performing importance sampling. To use a pool of 8 "
-            "threads on an 8-core CPU, set request-cpus-importance-sampling=8."
-        ),
     )
     submission_parser.add(
         "--sampling-requirements",

@@ -107,6 +107,10 @@ class ImportanceSamplingInput(Input):
         self._load_event()  # Must be called after _load_proposal().
         self.importance_sampling_settings = args.importance_sampling_settings
 
+    @property
+    def request_memory(self):
+        return self.inputs.request_memory_importance_sampling
+
     def _load_proposal(self):
         self.result = Result(file_name=self.proposal_samples_file)
         if "log_prob" not in self.result.samples.columns:

@@ -87,6 +87,10 @@ class ImportanceSamplingNode(AnalysisNode):
             _strip_unwanted_submission_keys(self.job)
 
     @property
+    def request_memory(self):
+        return f"{self.inputs.request_memory_importance_sampling}GB"
+
+    @property
     def executable(self):
         return self._get_executable_path("dingo_pipe_importance_sampling")
 
