@@ -20,7 +20,6 @@ from bilby_pipe.utils import (
 import lalsimulation as LS
 
 
-import dingo.pipe.create_injections  # Needed for delta-function time priors.
 from dingo.gw.data.data_download import download_psd
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset
