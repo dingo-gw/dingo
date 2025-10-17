@@ -176,7 +176,7 @@ class DecimateWaveformsAndASDS(object):
                     for k, v in sample["waveform"].items()
                 }
                 sample["asds"] = {
-                    k: self.multibanded_frequency_domain.decimate(v ** 2) ** 0.5
+                    k: self.multibanded_frequency_domain.decimate(v**2) ** 0.5
                     for k, v in sample["asds"].items()
                 }
 
@@ -562,7 +562,9 @@ def create_mask_based_on_frequency_update(
         # Update frequency_masks based on minimum_frequency
         if minimum_frequency is not None:
             # Same for all detectors
-            if isinstance(minimum_frequency, float):
+            if isinstance(minimum_frequency, float) or isinstance(
+                minimum_frequency, int
+            ):
                 mask_min = sample_frequencies >= minimum_frequency
             # Different for each detector
             elif isinstance(minimum_frequency, dict):
@@ -576,7 +578,9 @@ def create_mask_based_on_frequency_update(
         # Update frequency_masks based on maximum_frequency
         if maximum_frequency is not None:
             # Same for all detectors
-            if isinstance(maximum_frequency, float):
+            if isinstance(maximum_frequency, float) or isinstance(
+                maximum_frequency, int
+            ):
                 mask_max = sample_frequencies <= maximum_frequency
             # Different for each detector
             elif isinstance(maximum_frequency, dict):
@@ -605,17 +609,6 @@ def create_mask_based_on_frequency_update(
                 frequency_masks[d] = np.logical_and(frequency_masks[d], mask_interval)
 
     return frequency_masks
-
-
-def check_sample_in_domain(sample, domain: UniformFrequencyDomain) -> bool:
-    lengths = []
-    base_domain_length = len(domain)
-    for k in ["waveform", "asds"]:
-        lengths += [d.shape[-1] for d in sample[k].values()]
-    if all(l == base_domain_length for l in lengths):
-        return True
-    else:
-        return False
 
 
 class TimeShiftStrainGrid(object):
