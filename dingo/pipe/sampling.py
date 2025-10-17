@@ -67,12 +67,6 @@ class SamplingInput(Input):
         # self.minimum_frequency = args.minimum_frequency
         # self.maximum_frequency = args.maximum_frequency
         # self.reference_frequency = args.reference_frequency
-        self.sampling_updates = convert_string_to_dict(args.sampling_updates)
-        if "suppress" in self.sampling_updates:
-            self.sampling_updates["suppress"] = {
-                k: [float(v1) for v1 in v]
-                for k, v in self.sampling_updates["suppress"].items()
-            }
 
         # # Waveform, source model and likelihood
         # self.waveform_generator_class = args.waveform_generator
@@ -142,9 +136,6 @@ class SamplingInput(Input):
 
         self.dingo_sampler.context = self.context
         self.dingo_sampler.event_metadata = self.event_metadata
-        # Update frequency ranges of sampler
-        if self.sampling_updates:
-            self.dingo_sampler.sampling_updates = self.sampling_updates
 
     @property
     def density_recovery_settings(self):

@@ -41,14 +41,16 @@ from dingo.gw.transforms import (
 class SamplerProtocol(Protocol):
     base_model_metadata: dict
 
-    def _initialize_transforms(self) -> None:
-        ...
+    def _initialize_transforms(self) -> None: ...
 
 
 class _GWMixinProtocol(SamplerProtocol):
     detectors: list[str]
+    _detectors: list[str] | None
     domain: Domain
     random_strain_cropping: dict
+    is_flexible_freq: bool
+    tokenization: dict
 
 
 class GWSamplerMixin(object):
@@ -69,20 +71,63 @@ class GWSamplerMixin(object):
         self._minimum_frequency = None
         self._maximum_frequency = None
         self._suppress = None
+        self._detectors = None
         super().__init__(**kwargs)
         self.t_ref = self.base_model_metadata["train_settings"]["data"]["ref_time"]
         self._pesummary_package = "gw"
         self._result_class = Result
 
     @property
-    def detectors(self: SamplerProtocol):
-        return self.base_model_metadata["train_settings"]["data"]["detectors"]
+    def detectors(self: _GWMixinProtocol):
+        if self._detectors is None:
+            self._detectors = self.base_model_metadata["train_settings"]["data"][
+                "detectors"
+            ]
+        return self._detectors
+
+    @detectors.setter
+    def detectors(self: _GWMixinProtocol, value: list[str]):
+        self._detectors = value
+        # Update transforms
+        self._initialize_transforms()
 
     @property
     def random_strain_cropping(self: SamplerProtocol):
         return self.base_model_metadata["train_settings"]["data"].get(
             "random_strain_cropping"
         )
+
+    @property
+    def tokenization(self: SamplerProtocol):
+        return self.base_model_metadata["train_settings"]["data"].get("tokenization")
+
+    @property
+    def is_flexible_freq(self: SamplerProtocol):
+        flexible_freq = False
+        if (
+            "random_strain_cropping"
+            in self.base_model_metadata["train_settings"]["data"]
+        ):
+            flexible_freq = True
+        if "tokenization" in self.base_model_metadata["train_settings"]["data"]:
+            if (
+                "drop_frequency_range"
+                in self.base_model_metadata["train_settings"]["data"]["tokenization"]
+            ):
+                if (
+                    "f_cut"
+                    in self.base_model_metadata["train_settings"]["data"][
+                        "tokenization"
+                    ]["drop_frequency_range"]
+                ):
+                    flexible_freq = True
+            if (
+                "drop_random_tokens"
+                in self.base_model_metadata["train_settings"]["data"]["tokenization"]
+            ):
+                flexible_freq = True
+
+        return flexible_freq
 
     @property
     def minimum_frequency(self) -> float | dict[str, float]:
@@ -99,12 +144,21 @@ class GWSamplerMixin(object):
             domain = self.domain
         else:
             raise ValueError("Frequency updates only possible for frequency domains.")
-        _validate_minimum_frequency(
-            value,
-            self.detectors,
-            domain,
-            self.random_strain_cropping,
-        )  # TODO: Ensure minimum frequency is a dict?
+        if self.random_strain_cropping is not None and self.is_flexible_freq:
+            _validate_minimum_frequency(
+                f_min=value,
+                detectors=self.detectors,
+                domain=domain,
+                crop_settings=self.random_strain_cropping,
+            )  # TODO: Ensure minimum frequency is a dict?
+        if self.is_flexible_freq:
+            _validate_minimum_frequency_transformer(
+                f_min=value,
+                detectors=self.detectors,
+                domain=domain,
+                settings=self.tokenization["drop_frequency_range"].get("f_cut"),
+            )
+
         self._minimum_frequency = value
         self._initialize_transforms()
 
@@ -123,12 +177,20 @@ class GWSamplerMixin(object):
             domain = self.domain
         else:
             raise ValueError("Frequency updates only possible for frequency domains.")
-        _validate_maximum_frequency(
-            value,
-            self.detectors,
-            domain,
-            self.random_strain_cropping,
-        )
+        if self.random_strain_cropping is not None and self.is_flexible_freq:
+            _validate_maximum_frequency(
+                f_max=value,
+                detectors=self.detectors,
+                domain=domain,
+                crop_settings=self.random_strain_cropping,
+            )  # TODO: Ensure minimum frequency is a dict?
+        if self.is_flexible_freq:
+            _validate_maximum_frequency_transformer(
+                f_max=value,
+                detectors=self.detectors,
+                domain=domain,
+                settings=self.tokenization["drop_frequency_range"].get("f_cut"),
+            )
         self._maximum_frequency = value
         self._initialize_transforms()
 
@@ -150,9 +212,11 @@ class GWSamplerMixin(object):
                 return set(val.values())
             return {val}
 
-        return normalize(self.minimum_frequency) != {self.domain.f_min} or normalize(
-            self.maximum_frequency
-        ) != {self.domain.f_max}
+        min_freq_update = normalize(self.minimum_frequency) != {self.domain.f_min}
+        max_freq_update = normalize(self.maximum_frequency) != {self.domain.f_max}
+        suppress_update = True if self.suppress is not None else False
+
+        return min_freq_update or max_freq_update or suppress_update
 
     @property
     def event_metadata(self):
@@ -162,16 +226,22 @@ class GWSamplerMixin(object):
             metadata = {}
         metadata["minimum_frequency"] = self.minimum_frequency
         metadata["maximum_frequency"] = self.maximum_frequency
+        metadata["suppress"] = self.suppress
+        metadata["detectors"] = self.detectors
         return metadata
 
     @event_metadata.setter
     def event_metadata(self, value):
         if value is not None:
             value = value.copy()
-            if "minimum_frequency" in value:
+            if "minimum_frequency" in value and value["minimum_frequency"] is not None:
                 self.minimum_frequency = value.pop("minimum_frequency")
-            if "maximum_frequency" in value:
+            if "maximum_frequency" in value and value["maximum_frequency"] is not None:
                 self.maximum_frequency = value.pop("maximum_frequency")
+            if "suppress" in value and value["suppress"] is not None:
+                self.suppress = value.pop("suppress")
+            if "detectors" in value and value["detectors"] is not None:
+                self.detectors = value.pop("detectors")
         self._event_metadata = value
 
     def _build_domain(self: Sampler):
@@ -187,7 +257,6 @@ class GWSamplerMixin(object):
         data_settings = self.base_model_metadata["train_settings"]["data"]
         if "domain_update" in data_settings:
             self.domain.update(data_settings["domain_update"])
-
 
     def _correct_reference_time(
         self: Sampler, samples: Union[dict, pd.DataFrame], inverse: bool = False
@@ -302,7 +371,11 @@ class GWSampler(GWSamplerMixin, Sampler):
     """
 
     def _initialize_transforms(self):
-        transformer_model = True if "tokenization" in self.model.metadata["train_settings"]["data"].keys() else False
+        transformer_model = (
+            True
+            if "tokenization" in self.model.metadata["train_settings"]["data"].keys()
+            else False
+        )
         # preprocessing transforms:
         transform_pre = []
         #   * in case of MultibandedFrequencyDomain, decimate data from base domain
@@ -365,6 +438,7 @@ class GWSampler(GWSamplerMixin, Sampler):
                         suppress_range=self.suppress,
                         domain=self.domain,
                         ifos=self.detectors,
+                        print_output=True,
                     )
                 ]
 
@@ -667,10 +741,44 @@ def _validate_minimum_frequency(
             )
 
 
+def _validate_minimum_frequency_transformer(
+    f_min: dict[str, float] | float,
+    detectors: list[str],
+    domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
+    settings: dict | None,
+):
+    # TODO: implement for transformer
+    print("Warning: Checks for f_min update not implemented yet!")
+    pass
+
+
+def _validate_maximum_frequency_transformer(
+    f_max: dict[str, float] | float,
+    detectors: list[str],
+    domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
+    settings: dict | None,
+):
+    # TODO: implement for transformer
+    print("Warning: Checks for f_max update not implemented yet!")
+    pass
+
+
+def _validate_suppress_interval_transformer(
+    suppress_interval: dict[list[float]] | float,
+    detectors: list[str],
+    domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
+    settings: dict | None,
+):
+    # TODO: implement for transformer
+    print("Warning: Checks for suppress interval not implemented yet!")
+    pass
+
+
 def check_frequency_updates(
     model_metadata: dict,
     f_min: dict[str, float] | float | None = None,
     f_max: dict[str, float] | float | None = None,
+    suppress_interval: dict[list[float]] | None = None,
 ):
     """
     Validate and apply optional minimum and maximum frequency constraints
@@ -719,15 +827,162 @@ def check_frequency_updates(
     -------
     None
     """
-    crop_settings = model_metadata["train_settings"]["data"].get(
-        "random_strain_cropping"
-    )
     detectors = model_metadata["train_settings"]["data"]["detectors"]
     domain = build_domain_from_model_metadata(model_metadata, base=True)
     if not isinstance(domain, (UniformFrequencyDomain, MultibandedFrequencyDomain)):
         raise ValueError("Frequency updates only possible for frequency domains.")
+    if "random_strain_cropping" in model_metadata["train_settings"]["data"]:
+        crop_settings = model_metadata["train_settings"]["data"].get(
+            "random_strain_cropping"
+        )
 
-    if f_min is not None:
-        _validate_minimum_frequency(f_min, detectors, domain, crop_settings)
-    if f_max is not None:
-        _validate_maximum_frequency(f_max, detectors, domain, crop_settings)
+        if f_min is not None:
+            _validate_minimum_frequency(
+                f_min=f_min,
+                detectors=detectors,
+                domain=domain,
+                crop_settings=crop_settings,
+            )
+        if f_max is not None:
+            _validate_maximum_frequency(
+                f_max=f_max,
+                detectors=detectors,
+                domain=domain,
+                crop_settings=crop_settings,
+            )
+    elif "tokenization" in model_metadata["train_settings"]["data"]:
+        if (
+            "drop_frequency_range"
+            in model_metadata["train_settings"]["data"]["tokenization"]
+        ):
+            if (
+                "f_cut"
+                in model_metadata["train_settings"]["data"]["tokenization"][
+                    "drop_frequency_range"
+                ]
+            ):
+                f_cut_settings = model_metadata["train_settings"]["data"][
+                    "tokenization"
+                ]["drop_frequency_range"]["f_cut"]
+                if f_min is not None:
+                    _validate_minimum_frequency_transformer(
+                        f_min=f_min,
+                        detectors=detectors,
+                        domain=domain,
+                        settings=f_cut_settings,
+                    )
+                if f_max is not None:
+                    _validate_maximum_frequency_transformer(
+                        f_max=f_max,
+                        detectors=detectors,
+                        domain=domain,
+                        settings=f_cut_settings,
+                    )
+            if (
+                "mask_interval"
+                in model_metadata["train_settings"]["data"]["tokenization"][
+                    "drop_frequency_range"
+                ]
+            ):
+                suppress_settings = model_metadata["train_settings"]["data"][
+                    "tokenization"
+                ]["drop_frequency_range"]["mask_interval"]
+                if suppress_interval is not None:
+                    _validate_suppress_interval_transformer(
+                        suppress_interval=suppress_interval,
+                        detectors=detectors,
+                        domain=domain,
+                        settings=suppress_settings,
+                    )
+        elif (
+            "drop_random_tokens"
+            in model_metadata["train_settings"]["data"]["tokenization"]
+        ):
+            # We would need to know how many tokens correspond to a specific frequency range to test whether the
+            # transform allows inference with the updated frequency ranges
+            pass
+
+
+def _validate_detectors_transformer(
+    detectors_event: list[str],
+    detectors_model: list[str],
+    drop_detector_settings: dict | None,
+):
+    if not set(detectors_event).issubset(set(detectors_model)):
+        raise ValueError(
+            f"Event has detectors {detectors_event} but model was only trained with detectors "
+            f"{detectors_model}. "
+        )
+
+    # Detectors have to be allowed by drop detectors transform
+    # (1) Check p_drop_012_detectors
+    num_detectors = len(detectors_event)
+    if "p_drop_012_detectors" not in drop_detector_settings:
+        raise ValueError(
+            "Adapting detectors at inference time requires p_drop_012_detectors to be set in "
+            "tokenization.drop_detectors."
+        )
+    p_drop_012_detectors = drop_detector_settings.get("p_drop_012_detectors")
+    if p_drop_012_detectors[3 - num_detectors] == 0.0:
+        raise ValueError(
+            f"Event has detectors {detectors_event}, but model was trained with "
+            f"p_drop_012_detectors={p_drop_012_detectors}, not allowing {num_detectors} detectors. "
+        )
+    # (2) Check p_drop_hlv
+    if "p_drop_hlv" not in drop_detector_settings:
+        raise ValueError(
+            "Adapting detectors at inference time requires p_drop_hlv to be set in tokenization.drop_detectors."
+        )
+    p_drop_hlv = drop_detector_settings.get("p_drop_hlv")
+    for det in detectors_event:
+        if det not in p_drop_hlv:
+            raise ValueError(
+                f"Detector {det} not included in p_drop_hlv={p_drop_hlv}. "
+            )
+        if p_drop_hlv[det] == 0.0:
+            raise ValueError(
+                f"Probability of masking detector {det} is 0 in p_drop_hlv={p_drop_hlv}. "
+            )
+
+
+def check_detector_update(
+    model_metadata: dict,
+    detectors: list[str],
+):
+    """
+    Parameters
+    ----------
+    model_metadata : dict
+        Dictionary containing the model’s training settings and data.
+        Must include:
+          - `["train_settings"]["data"]["detectors"]`: list of detector names.
+          - `["train_settings"]["data"]["tokenization"]["drop_detectors"]`: optional
+            dict of parameters specifying detector masking.
+    detectors : list[str]
+
+    Returns
+    -------
+    None
+    """
+    detectors_model = model_metadata["train_settings"]["data"]["detectors"]
+    if "tokenization" in model_metadata["train_settings"]["data"]:
+        if "drop_detectors" in model_metadata["train_settings"]["data"]["tokenization"]:
+            _validate_detectors_transformer(
+                detectors_event=detectors,
+                detectors_model=detectors_model,
+                drop_detector_settings=model_metadata["train_settings"]["data"][
+                    "tokenization"
+                ]["drop_detectors"],
+            )
+        elif (
+            "drop_random_tokens"
+            in model_metadata["train_settings"]["data"]["tokenization"]
+        ):
+            # We would need to know how many tokens correspond to one detector to test whether the transform
+            # allows inference with x detectors
+            pass
+    else:
+        if set(detectors) != set(detectors_model):
+            raise ValueError(
+                f"Detectors {detectors} of event do not match detectors {detectors_model} from model."
+            )

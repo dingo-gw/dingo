@@ -22,14 +22,16 @@ from bilby_pipe.utils import (
 
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.domains import build_domain_from_model_metadata
-from dingo.gw.inference.gw_samplers import check_frequency_updates
+from dingo.gw.inference.gw_samplers import (
+    check_frequency_updates,
+    check_detector_update,
+)
 from dingo.gw.injection import Injection
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.transforms import DETECTOR_DICT
 from dingo.pipe.dag_creator import generate_dag
 from dingo.pipe.parser import create_parser
 from dingo.pipe.utils import dict_to_string
-
 
 
 logger.name = "dingo_pipe"
@@ -79,15 +81,23 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
     del prior["geocent_time"]
 
     data_settings = model_metadata["train_settings"]["data"]
-    flexible_detectors = (
-        True
-        if "tokenization" in data_settings
-           and (
-                   "drop_detectors" in data_settings["tokenization"]
-                   or "drop_random_tokens" in data_settings["tokenization"]
-           )
-        else False
-    )
+
+    # With a transformer model, it is possible to have a detector configuration that deviates from the detectors used
+    # during training. Therefore, we update the detectors based on the args.detectors or args.channel_dict.
+    detectors = data_settings["detectors"]
+    if (
+        "embedding_type" in model_metadata["train_settings"]["model"]
+        and model_metadata["train_settings"]["model"]["embedding_type"] == "transformer"
+    ):
+        if "tokenization" in data_settings and (
+            "drop_detectors" in data_settings["tokenization"]
+            or "drop_random_tokens" in data_settings["tokenization"]
+        ):
+            if args.detectors is not None:
+                detectors = args.detectors
+            elif args.channel_dict is not None:
+                detectors = list(convert_string_to_dict(args.channel_dict).keys())
+
     # In dingo_pipe, we download and prepare data based on the model frequency range.
     # This is because different maximum frequencies for different detectors would
     # require separate domain objects within Dingo, and this is not implemented.
@@ -98,7 +108,7 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
         "duration": domain.duration,
         "minimum_frequency": domain.f_min,
         "maximum_frequency": domain.f_max,
-        "detectors": data_settings["detectors"],
+        "detectors": detectors,
         "waveform_approximant": model_metadata["dataset_settings"][
             "waveform_generator"
         ]["approximant"],
@@ -147,9 +157,9 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
                     raise NotImplementedError(
                         "Cannot change waveform approximant during importance sampling."
                     )  # TODO: Implement this. Also no error if passed explicitly as an update.
-                if k in ["minimum_frequency", "maximum_frequency"]:
+                if k in ["minimum_frequency", "maximum_frequency", "suppress"]:
                     logger.info(
-                        f"Strain-cropping: Plan to update network {k} from {v} to"
+                        f"Strain-masking: Plan to update network {k} from {v} to"
                         f" {args_v}."
                     )
                     continue  # Do not update args to model value.
@@ -164,16 +174,37 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
         setattr(args, k, v)
 
     frequency_input = Input([], [], print_msg=False)
-    frequency_input.detectors = model_args["detectors"]
+    frequency_input.detectors = args.detectors
     frequency_input.sampling_frequency = args.sampling_frequency
     frequency_input.minimum_frequency = args.minimum_frequency
     frequency_input.maximum_frequency = args.maximum_frequency
+    frequency_input.suppress = args.suppress
     check_frequency_updates(
-        model_metadata,
-        frequency_input.minimum_frequency_dict,
-        frequency_input.maximum_frequency_dict,
+        model_metadata=model_metadata,
+        f_min=frequency_input.minimum_frequency_dict,
+        f_max=frequency_input.maximum_frequency_dict,
+        suppress_interval=frequency_input.suppress,
     )
-    frequency_input.maximum_frequency = args.suppress
+    flexible_detectors = (
+        True
+        if "tokenization" in data_settings
+        and (
+            "drop_detectors" in data_settings["tokenization"]
+            or "drop_random_tokens" in data_settings["tokenization"]
+        )
+        else False
+    )
+    if flexible_detectors:
+        check_detector_update(
+            model_metadata=model_metadata, detectors=frequency_input.detectors
+        )
+    else:
+        if set(frequency_input.detectors) != set(model_args["detectors"]):
+            raise ValueError(
+                f"Model not trained with tokenization.drop_detectors or tokenization.drop_random_tokens."
+                f"Model cannot handle updating the detectors from {model_args["detectors"]} during training "
+                f"to {frequency_input.detectors} at inference time."
+            )
 
     # TODO: Also check consistency between model and init_model settings.
 
@@ -201,7 +232,11 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
         importance_sampling_updates = {
             k.replace("-", "_"): v for k, v in importance_sampling_updates.items()
         }
-    return {**changed_args, **importance_sampling_updates}, model_args, flexible_detectors
+    return (
+        {**changed_args, **importance_sampling_updates},
+        model_args,
+        flexible_detectors,
+    )
 
 
 class MainInput(BilbyMainInput):
@@ -237,9 +272,7 @@ class MainInput(BilbyMainInput):
         self.accounting_user = args.accounting_user
         # self.sampler = args.sampler
         self.detectors = args.detectors
-        self.coherence_test = (
-            False  # dingo mod: Cannot use different sets of detectors.
-        )
+        self.coherence_test = False  # dingo mod: Cannot use different sets of detectors. # TODO: Enable for transformer model?
         self.data_dict = args.data_dict
         self.channel_dict = args.channel_dict
         self.frame_type_dict = args.frame_type_dict
@@ -590,16 +623,10 @@ def main():
     parser = create_parser(top_level=True)
     args, unknown_args = parse_args(get_command_line_arguments(), parser)
 
-    importance_sampling_updates, model_args, flexible_detectors = fill_in_arguments_from_model(args)
+    importance_sampling_updates, model_args, flexible_detectors = (
+        fill_in_arguments_from_model(args)
+    )
     inputs = MainInput(args, unknown_args, importance_sampling_updates)
-
-    # TODO: remove the following update and replace it by a transform that strips detectors
-    # Update detectors for flexible detector config based on channel-dict
-    if flexible_detectors:
-        detectors = list(inputs.channel_dict.keys())
-        model_args["detectors"] = detectors
-        inputs.detectors = detectors
-        args.detectors = detectors
 
     write_complete_config_file(parser, args, inputs)
 

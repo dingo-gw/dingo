@@ -83,11 +83,6 @@ class Sampler(object):
             self._context = None
             self.base_model_metadata = self.metadata
 
-        # Not possible to specify this in GWSamplerMixin because this information is required in _initialize_transforms()
-        # which is called here before the __init__ of GWSamplerMixin is completed. It is also not possible to put it
-        # before super().__init__(**kwargs) in GWSamplerMixin because the metadata is not set yet.
-        self._detectors = self.metadata["train_settings"]["data"]["detectors"]
-
         self.inference_parameters = self.metadata["train_settings"]["data"][
             "inference_parameters"
         ]
@@ -117,23 +112,7 @@ class Sampler(object):
             if self.event_metadata is None:
                 self.event_metadata = {}
             self.event_metadata["injection_parameters"] = value.pop("parameters")
-        if value is not None and "asds" in value:
-            self.detectors = [k for k in value["asds"].keys()]
         self._context = value
-
-    @property
-    def detectors(self) -> Optional[list[str]]:
-        """
-        Detector configuration that is used when running the sampler.
-        """
-        # Not possible to define this in GWSamplerMixin because self.detectors is called in _initialize_transforms()
-        return self._detectors
-
-    @detectors.setter
-    def detectors(self, value: list[str]):
-        self._detectors = value
-        # Update transforms
-        self._initialize_transforms()
 
     @property
     def event_metadata(self):
