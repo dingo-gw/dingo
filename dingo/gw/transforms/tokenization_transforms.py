@@ -1101,6 +1101,7 @@ class NormalizePosition(object):
 
 class UpdateFrequencyRange(object):
     """
+    # TODO: Rename MaskDataForFrequencyRangeUpdateTransformer to distinguish from similar transform applied for cropping
     Update token mask according to frequency range update
     """
 
@@ -1113,7 +1114,7 @@ class UpdateFrequencyRange(object):
         ] = None,
         domain: Optional[UniformFrequencyDomain | MultibandedFrequencyDomain] = None,
         ifos: Optional[list[str]] = None,
-        print_output: bool = False,
+        print_output: bool = True,
     ):
         """
         Parameters
@@ -1167,6 +1168,7 @@ class UpdateFrequencyRange(object):
             - 'drop_token_mask', shape [batch_size, num_tokens]
 
         """
+        # TODO: Write test for transform. Vectorize (not required for inference)
         sample = input_sample.copy()
         blocks = np.unique(sample["position"][..., 2])
         num_blocks = len(blocks)
@@ -1178,6 +1180,7 @@ class UpdateFrequencyRange(object):
         f_min_per_token_single = f_min_per_token[:num_tokens_per_block]
         f_max_per_token_single = f_max_per_token[:num_tokens_per_block]
 
+        # Start with empty mask that we will successively update
         mask = np.zeros_like(sample["drop_token_mask"], dtype=bool)
         # Update minimum_frequency
         if self.minimum_frequency is not None:
@@ -1203,6 +1206,10 @@ class UpdateFrequencyRange(object):
                         )
                         mask_b = np.where(sample["position"][..., 2] == b, True, False)
                         mask[mask_b] = np.logical_or(mask_min, mask[mask_b])
+            else:
+                raise TypeError(
+                    f"self.minimum_frequency is type {type(self.minimum_frequency)} but must be either a float, an int or a dict."
+                )
             if self.print_output:
                 print(f"Updated f_min with {self.minimum_frequency}.")
 
@@ -1230,6 +1237,10 @@ class UpdateFrequencyRange(object):
                         )
                         mask_b = np.where(sample["position"][..., 2] == b, True, False)
                         mask[mask_b] = np.logical_or(mask_max, mask[mask_b])
+            else:
+                raise TypeError(
+                    f"self.maximum_frequency is type {type(self.maximum_frequency)} but must be either a float, an int or a dict."
+                )
             if self.print_output:
                 print(f"Updated f_max with {self.maximum_frequency}.")
 
