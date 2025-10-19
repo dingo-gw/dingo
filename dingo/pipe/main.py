@@ -202,7 +202,7 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
         if set(frequency_input.detectors) != set(model_args["detectors"]):
             raise ValueError(
                 f"Model not trained with tokenization.drop_detectors or tokenization.drop_random_tokens."
-                f"Model cannot handle updating the detectors from {model_args["detectors"]} during training "
+                f"Model cannot handle updating the detectors from {model_args['detectors']} during training "
                 f"to {frequency_input.detectors} at inference time."
             )
 
