@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from bilby.gw.detector import PowerSpectralDensity
 from scipy.interpolate import interp1d
+import copy
 
 from dingo.gw.domains import UniformFrequencyDomain
 from .utils import get_batch_size_of_input_sample
@@ -219,13 +220,13 @@ class DuplicateSamples(object):
         self.batch_size = batch_size
 
     def __call__(self, input_sample):
-        sample = input_sample.copy()
+        sample = copy.deepcopy(input_sample)
         ifos = sample['waveform'].keys()
 
         #duplicate waveforms over the batch
         for ifo in ifos:
-            sample['waveform'][ifo] = np.tile(sample['waveform'][ifo], (self.batch_size, 1))
-            sample['asds'][ifo] = np.tile(sample['asds'][ifo], (self.batch_size, 1))
+            sample['waveform'][ifo] = np.broadcast_to(sample['waveform'][ifo], (self.batch_size, len(sample['waveform'][ifo])))
+            sample['asds'][ifo] = np.broadcast_to(sample['asds'][ifo], (self.batch_size, len(sample['asds'][ifo])))
         
         return sample
 

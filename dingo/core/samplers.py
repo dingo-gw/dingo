@@ -151,6 +151,7 @@ class Sampler(object):
 
             # transforms_pre are expected to transform the data in the same way for each
             # requested sample. We therefore apply pre-processing only once.
+            # breakpoint()
             x = self.transform_pre(context)
             # Require a batch dimension for the embedding network. Only invoke if not already batched
             if len(x.shape) == 3:
@@ -228,11 +229,7 @@ class Sampler(object):
         if batch_size is None:
             batch_size = num_samples
         full_batches, remainder = divmod(num_samples, batch_size)
-        if zero_noise_alteration:
-            samples = [self._run_sampler(num_samples, context)]
-        else:
-            samples = [self._run_sampler(batch_size, context) for _ in range(full_batches)]
-        # samples = [self._run_sampler(batch_size, context) for _ in range(full_batches)]
+        samples = [self._run_sampler(batch_size, context) for _ in range(full_batches)]
         if remainder > 0:
             samples.append(self._run_sampler(remainder, context))
         samples = {p: torch.cat([s[p] for s in samples]) for p in samples[0].keys()}
