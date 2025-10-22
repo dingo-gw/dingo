@@ -29,7 +29,7 @@ class SamplingInput(Input):
         self.ini = args.ini
         self.scheduler = args.scheduler
         # self.periodic_restart_time = args.periodic_restart_time
-        self.request_cpus = args.request_cpus
+        self.request_cpus = args.request_cpus_sampling
         self.n_parallel = args.n_parallel
 
         # Naming arguments
