@@ -1,75 +1,145 @@
 #!/bin/bash
+set -euo pipefail
 
-# Script associated with the systemctl dingo-ci.service
-# This script will clone dingo in /data/dingo/repo-checker
-# and check if continuous intregration already run for
-# the latest commit of the main branch and the latest tag.
-# If not, it will run them in the dingo:toy_npe_model
-# docker image.
-
-
-# Configuration
+# Simple repo-checker: run CI when there's a new commit, a new tag, or every Sunday night (once per week).
 DINGO_REPO="https://github.com/dingo-gw/dingo.git"
-
 BRANCH="main"
-CLONE_PATH="/data/dingo/repo-checker/"
+CLONE_PATH="/data/dingo/repo-checker"
 JOBS_PATH="/data/dingo"
-EMAIL_CONFIG=/data/dingo/mpi-email.json
+EMAIL_CONFIG="/data/dingo/mpi-email.json"
+DOCKER_IMAGE="dingo:toy_npe_model"
 
-# check if a continuous integration run exists for a reference (git commit id or tag)
-# i.e. the subfolder /data/dingo/<ref> exists
-check_job_exists() {
+# Sunday-night schedule: hour in 24h (23 = 23:00-23:59). Timer will invoke this script every 5 minutes.
+SCHEDULE_DAY_NUM=7   # 1..7 where 7 = Sunday
+SCHEDULE_HOUR=23
+
+for cmd in git docker stat date; do
+    command -v "$cmd" >/dev/null 2>&1 || { echo "Required command not found: $cmd" >&2; exit 1; }
+done
+
+# Return 0 if a job exists for ref (exact name or prefix match for short sha)
+job_exists_for_ref() {
     local ref="$1"
-    local job_path="${JOBS_PATH}/${ref}"
-    
-    if [ ${#ref} -eq 7 ]; then
-        for dir in "${JOBS_PATH}"/*/; do
-            local dir_hash="$(basename "${dir}")"
-            if [[ "${dir_hash}" == "${ref}"* ]]; then
+    if [[ "$ref" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+        shopt -s nullglob
+        for d in "${JOBS_PATH}"/*/; do
+            d="${d%/}"
+            local name
+            name="$(basename "$d")"
+            if [[ "$name" == "${ref}"* ]]; then
+                shopt -u nullglob
                 return 0
             fi
         done
+        shopt -u nullglob
+        return 1
+    else
+        [ -d "${JOBS_PATH}/${ref}" ]
+    fi
+}
+
+# Print newest job directory mtime (epoch seconds) for ref, prefix-match for short sha.
+# Returns non-zero and prints nothing if none.
+newest_job_mtime_for_ref() {
+    local ref="$1"
+    local newest=0 found=0
+    if [[ "$ref" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+        shopt -s nullglob
+        for d in "${JOBS_PATH}"/*/; do
+            d="${d%/}"
+            local name ts
+            name="$(basename "$d")"
+            if [[ "$name" == "${ref}"* ]]; then
+                found=1
+                ts=$(stat -c %Y "$d")
+                (( ts > newest )) && newest=$ts
+            fi
+        done
+        shopt -u nullglob
+    else
+        local jobdir="${JOBS_PATH}/${ref}"
+        if [ -d "$jobdir" ]; then
+            found=1
+            newest=$(stat -c %Y "$jobdir")
+        fi
+    fi
+
+    if (( found )); then
+        printf '%d' "$newest"
+        return 0
+    else
         return 1
     fi
-    
-    [ -d "${job_path}" ]
 }
 
-# execute dingo-ci in dingo:toy_npe_model
-execute_docker() {
-    local reference="$1"
-    echo "Executing docker command for ${reference}"
-    docker run --rm --shm-size=16g --runtime=nvidia --gpus all -v /data/dingo:/data/dingo dingo:toy_npe_model --base-dir ${JOBS_PATH} --checkout ${reference} --email ${EMAIL_CONFIG}
+# Return 0 if ref has NOT been run this ISO week.
+not_ran_this_iso_week() {
+    local ref="$1"
+    local newest_ts current_week job_week
+    if ! newest_ts=$(newest_job_mtime_for_ref "$ref" 2>/dev/null); then
+        return 0  # no job => not run this week
+    fi
+    current_week=$(date +%V)
+    job_week=$(date -d "@${newest_ts}" +%V)
+    [ "$job_week" != "$current_week" ]
 }
 
-# ensure jobs directory exists
-mkdir -p "${JOBS_PATH}"
-
-# cloning dingo
-echo -e "\n-- cloning ${DINGO_REPO} (${BRANCH}) - ${CLONE_PATH}\n"
-rm -rf $CLONE_PATH
-echo "Cloning repository..."
-git clone "${DINGO_REPO}" "${CLONE_PATH}" || { 
-    echo "Error cloning repository"; 
-    exit 1; 
-}
-git -C "${CLONE_PATH}" checkout "${BRANCH}" || { 
-    echo "Error checking out branch"; 
-    exit 1; 
+is_sunday_night() {
+    local day hour
+    day=$(date +%u)   # 1..7 (Mon..Sun)
+    hour=$(date +%H)  # 00..23
+    if (( day == SCHEDULE_DAY_NUM )) && (( 10#$hour == SCHEDULE_HOUR )); then
+        return 0
+    else
+        return 1
+    fi
 }
 
-# checking ci runs for latest commit
-latest_commit=$(git -C "${CLONE_PATH}" rev-parse --short HEAD)
-echo -e "\n- latest commit: ${latest_commit}\n"
-if ! check_job_exists "${latest_commit}"; then
-    execute_docker "${latest_commit}"
+run_ci_for() {
+    local ref="$1"
+    echo "Launching CI for ${ref}"
+    docker run --rm --shm-size=16g --runtime=nvidia --gpus all \
+        -v "/data/dingo:/data/dingo" \
+        "${DOCKER_IMAGE}" --base-dir "${JOBS_PATH}" --checkout "${ref}" --email "${EMAIL_CONFIG}"
+}
+
+# prepare clone
+rm -rf "${CLONE_PATH}"
+mkdir -p "$(dirname "${CLONE_PATH}")"
+git clone "${DINGO_REPO}" "${CLONE_PATH}"
+git -C "${CLONE_PATH}" fetch --all --tags --prune
+git -C "${CLONE_PATH}" checkout "${BRANCH}"
+
+# latest commit (short)
+latest_commit=$(git -C "${CLONE_PATH}" rev-parse --short=7 HEAD)
+echo "Latest commit: ${latest_commit}"
+if ! job_exists_for_ref "${latest_commit}"; then
+    run_ci_for "${latest_commit}"
+else
+    if is_sunday_night && not_ran_this_iso_week "${latest_commit}"; then
+        echo "Sunday-night scheduled run and commit not yet run this week -> re-running CI for ${latest_commit}"
+        run_ci_for "${latest_commit}"
+    else
+        echo "Job already exists for commit ${latest_commit}; skipping"
+    fi
 fi
 
-# checking ci runs for latest tag
-latest_tag=$(git -C "${CLONE_PATH}" tag | tail -n 1 2>/dev/null)
-echo -e "\n- latest tag: ${latest_tag}\n"
-if [ -n "${latest_tag}" ] && ! check_job_exists "${latest_tag}"; then
-    execute_docker "${latest_tag}"
+# latest tag (if any)
+latest_tag=$(git -C "${CLONE_PATH}" describe --tags --abbrev=0 2>/dev/null || git -C "${CLONE_PATH}" tag --sort=-creatordate 2>/dev/null | head -n1 || true)
+if [ -n "${latest_tag}" ]; then
+    echo "Latest tag: ${latest_tag}"
+    if ! job_exists_for_ref "${latest_tag}"; then
+        run_ci_for "${latest_tag}"
+    else
+        if is_sunday_night && not_ran_this_iso_week "${latest_tag}"; then
+            echo "Sunday-night scheduled run and tag not yet run this week -> re-running CI for ${latest_tag}"
+            run_ci_for "${latest_tag}"
+        else
+            echo "Job already exists for tag ${latest_tag}; skipping"
+        fi
+    fi
+else
+    echo "No tags found"
 fi
 
 exit 0

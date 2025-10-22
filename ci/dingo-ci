@@ -97,8 +97,6 @@ fi
 # making sure email are sent upon exit (if $EMAIL_CONFIG_PATH is set)
 
 dingo_ci_email() {
-
-# Assign arguments to variables
     INSTALL_DIR="$1"
     LOG_FILE="$2"
     ERROR_FILE="$3"
@@ -113,7 +111,44 @@ dingo_ci_email() {
     auth_user=$(jq -r '.authUser' <<< "$EMAIL_CONFIG")
     auth_pass=$(jq -r '.authPass' <<< "$EMAIL_CONFIG")
     recipients=$(jq -r '.recipients[]' <<< "$EMAIL_CONFIG")
-    
+
+    # Gather git info if possible
+    branch="N/A"
+    commit="N/A"
+    commit_msg="N/A"
+    tags="N/A"
+    if [[ -n "$INSTALL_DIR" ]] && [[ -d "$INSTALL_DIR" ]] && command -v git >/dev/null 2>&1; then
+        if git -C "$INSTALL_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            # Branch: prefer a human readable branch name; handle detached HEAD
+            branch=$(git -C "$INSTALL_DIR" symbolic-ref --short -q HEAD 2>/dev/null || true)
+            if [[ -z "$branch" ]]; then
+                # detached HEAD: try to describe, otherwise mark detached
+                branch="(detached)"
+            fi
+
+            # Commit hash
+            commit=$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null || echo "N/A")
+
+            # Commit message (full). Replace leading/trailing blank lines and indent for email readability
+            raw_msg=$(git -C "$INSTALL_DIR" show -s --format=%B HEAD 2>/dev/null || echo "")
+            if [[ -n "$raw_msg" ]]; then
+                # Trim trailing newlines and indent every line by 4 spaces
+                commit_msg=$(printf '%s' "$raw_msg" | sed -e 's/[[:space:]]*$//' -e 's/^/    /' -e ':a;N;$!ba;s/\n/\n    /g')
+            else
+                commit_msg="N/A"
+            fi
+
+            # Tags pointing at HEAD (comma separated) or "N/A"
+            tag_list=$(git -C "$INSTALL_DIR" tag --points-at HEAD 2>/dev/null || true)
+            if [[ -n "$tag_list" ]]; then
+                # join lines with comma
+                tags=$(echo "$tag_list" | paste -sd ", " -)
+            else
+                tags="N/A"
+            fi
+        fi
+    fi
+
     echo ""
     echo "sending email:"
     echo "  config: ${EMAIL_CONFIG_PATH}"
@@ -125,46 +160,44 @@ dingo_ci_email() {
     echo "    ${LOG_FILE}"
     echo "    ${ERROR_FILE}"
     echo ""
-    
-    # Set email subject based on success/failure
+
     subject="dingo toy-npe-model example: $(if [ "$STATUS" -eq 0 ]; then echo "SUCCEEDED"; else echo "FAILED"; fi)"
-    
-    # Create email body
+
     body=$(cat <<EOF
 DINGO Workflow Report
 =====================
 Start Time: $(if [[ -f "$LOG_FILE" ]]; then head -n 1 "$LOG_FILE" | cut -d']' -f1 | cut -c2-; else echo "N/A"; fi)
 End Time: $(date +"%Y-%m-%d %H:%M:%S")
 Status: $(if [ "$STATUS" -eq 0 ]; then echo "SUCCESS"; else echo "FAILURE"; fi) (${STATUS})
-Branch: $(if [[ -d "$INSTALL_DIR" ]]; then cd "$INSTALL_DIR" && git branch --show-current; else echo "N/A"; fi)
-Commit: $(if [[ -d "$INSTALL_DIR" ]]; then cd "$INSTALL_DIR" && git rev-parse HEAD; else echo "N/A"; fi)
+Branch: ${branch}
+Commit: ${commit}
+Tags: ${tags}
+
+Commit message:
+${commit_msg}
 
 See attached files.
 EOF
-	)
+    )
 
     # Prepare attachments
     attachments=()
     if [[ -f "$LOG_FILE" ]]; then
-	attachments+=("-a" "$LOG_FILE")
+        attachments+=("-a" "$LOG_FILE")
     fi
     if [[ -f "$ERROR_FILE" ]]; then
-	attachments+=("-a" "$ERROR_FILE")
+        attachments+=("-a" "$ERROR_FILE")
     fi
-    
-    # URI the mail will be set to
+
     smpt_url="smtps://${auth_user}@${smtp_server}:${port}"
-    
-    # sending the email
+
     echo "$body" | mutt \
-		       -e "set from=${from_addr}" \
-		       -e "set smtp_url=${smpt_url}" \
-		       -e "set smtp_pass=${auth_pass}" \
-		       -e "set smtp_authenticators='login'" \
-		       -s "${subject}" ${attachments[@]} -- ${recipients}
-
+                   -e "set from=${from_addr}" \
+                   -e "set smtp_url=${smpt_url}" \
+                   -e "set smtp_pass=${auth_pass}" \
+                   -e "set smtp_authenticators='login'" \
+                   -s "${subject}" ${attachments[@]} -- ${recipients}
 }
-
 
 send_email() {
     # Save the exit status immediately
@@ -200,7 +233,7 @@ trap send_email EXIT
 # and error.txt (in $RUN_DIR)
 
 # Define directories based on RUN_DIR
-VENV_DIR="${RUN_DIR}/../venv"
+VENV_DIR="${RUN_DIR}/venv"
 INSTALL_DIR="${RUN_DIR}/install"
 EXAMPLE_DIR="${INSTALL_DIR}/examples/toy_npe_model"
 OUTPUT_DIR="${RUN_DIR}/output"
@@ -335,6 +368,13 @@ echo -e "==============================================\n"
 echo -e "================= Running Inference ================="
 dingo_pipe GW150914.ini
 echo -e "===================================================\n"
+
+#################
+# DELETING VENV #
+#################
+
+echo -e "\ndeleting virtual environment ${VENV_DIR}"
+rm -rf ${VENV_DIR}
 
 
 ########

@@ -15,6 +15,8 @@ It also provides utilities to setup a related continuous integration script whic
 
 ## Running dingo-ci
 
+`dingo-ci` is a standalone bash script. Dingo does not need to be installed for it to run.
+
 In a terminal:
 
 ```bash
@@ -101,7 +103,7 @@ This requires the [nvidia container toolkit](https://docs.nvidia.com/datacenter/
 
 ## Set a continous integration server
 
-A continuous integration server will use systemctl services to call the `dingo-ci-trigger` bash script every five minutes. This bash script checks if there are new commits (on the main branch) or new tags added to the dingo repository. If so, it will call `dingo-ci` in docker. 
+A continuous integration server will use systemctl services to call the `dingo-ci-trigger` bash script every five minutes. This bash script checks if there are new commits (on the main branch) or new tags added to the dingo repository. If so, it will call `dingo-ci` in docker. It calls also `dingo-ci` in docker every sunday night.
 
 To set it up:
 
@@ -118,7 +120,7 @@ systemctl daemon-reload
 - activate the dingo-ci service (so that it starts at boot):
 
 ```bash
-systemctl enable docker-ci
+systemctl enable dingo-ci
 ```
 
 - start the service
