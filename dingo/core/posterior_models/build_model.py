@@ -47,10 +47,8 @@ def build_model_from_kwargs(
         if "version" in d:
             check_minimum_version(d["version"])
         else:
-            print(
-                f"Warning: The DINGO model loaded from {filename} was trained with a version older than v0.3.3. "
-            )
-            check_minimum_version("")
+            # version was introduced in v0.3.3
+            check_minimum_version("dingo=0.3.2")
         update_model_config(d["metadata"]["train_settings"]["model"])  # Backward compat
         posterior_model_type = d["metadata"]["train_settings"]["model"][
             "posterior_model_type"
