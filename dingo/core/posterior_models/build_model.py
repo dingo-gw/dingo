@@ -44,7 +44,13 @@ def build_model_from_kwargs(
 
     if filename is not None:
         d, _ = torch_load_with_fallback(filename, preferred_map_location="meta")
-        check_minimum_version(d["version"])
+        if "version" in d:
+            check_minimum_version(d["version"])
+        else:
+            print(
+                f"Warning: The DINGO model loaded from {filename} was trained with a version older than v0.3.3. "
+            )
+            check_minimum_version("")
         update_model_config(d["metadata"]["train_settings"]["model"])  # Backward compat
         posterior_model_type = d["metadata"]["train_settings"]["model"][
             "posterior_model_type"
