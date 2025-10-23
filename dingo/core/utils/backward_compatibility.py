@@ -1,9 +1,12 @@
 import logging
 from typing import Dict, List, Literal, Tuple
+from dingo.core.utils.misc import get_version
+import packaging.version as pv
 
 import torch
 
 _logger = logging.getLogger(__name__)
+WINDOW_FACTOR_FIX_VERSION = pv.parse("0.9.0")
 
 Device = Literal["meta", "cuda", "mps", "hip", "cpu"]
 
@@ -85,6 +88,43 @@ def torch_load_with_fallback(
     raise RuntimeError(
         f"failed to load model {filename} on any device, " "tried: {', '.join(devices)}"
     )
+
+
+def check_minimum_version(version_str: str, raise_exception: bool = False) -> None:
+    """
+    Check that the version string is greater than a certain minimum value.
+
+    By default, logs a warning. Optionally, raises an exception.
+
+    This is used to handle major code changes that may break backwards compatibility
+    with previously trained models or generated results.
+
+    Parameters
+    ----------
+    version_str : str
+        Version string to check, e.g., "version=0.8.5" or "0.8.5".
+
+    raise_exception : bool
+        If True, raise an exception if the version is below the minimum required version.
+    """
+    if "None" in version_str:
+        version_str = "dingo=0.0.0"
+    version_str = version_str.split("=", 1)[1]
+    version = pv.parse(version_str)
+
+    if version < WINDOW_FACTOR_FIX_VERSION:
+        error_str = (
+            f"This object was created using Dingo version {version} < {WINDOW_FACTOR_FIX_VERSION}, which broke backwards compatibility."
+            f"\nFor models trained prior to this change, new inference results will be unreliable."
+            f"\nPreviously-generated result files should be used with caution."
+            f"\nReasons for backward compatibility breaking:\n"
+            f"\nv{WINDOW_FACTOR_FIX_VERSION}: Change to window factor usage, see "
+            f"https://git.ligo.org/pe/pe-group-coordination/-/issues/1#note_1469386."
+        )
+        if raise_exception:
+            raise ValueError(error_str)
+        else:
+            _logger.warning("\n========\nWARNING!\n\n" + error_str + "\n=======\n")
 
 
 def update_model_config(model_settings: dict):

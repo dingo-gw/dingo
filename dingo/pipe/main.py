@@ -90,8 +90,6 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
         "minimum_frequency": domain.f_min,
         "maximum_frequency": domain.f_max,
         "detectors": data_settings["detectors"],
-        "sampling_frequency": data_settings["window"]["f_s"],
-        "tukey_roll_off": data_settings["window"]["roll_off"],
         "waveform_approximant": model_metadata["dataset_settings"][
             "waveform_generator"
         ]["approximant"],
@@ -174,8 +172,6 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
     if args.asd_dataset:
         asd_dataset = ASDDataset(file_name=args.asd_dataset)
         domain_dict = copy.deepcopy(domain.domain_dict)
-        if "window_factor" in domain_dict:
-            del domain_dict["window_factor"]
         asd_dataset.update_domain(domain_dict)
         psd_dict = {}
         rng = np.random.default_rng(args.generation_seed)

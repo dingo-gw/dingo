@@ -16,7 +16,7 @@ from dingo.gw.domains import (
     Domain,
 )
 from dingo.gw.domains import build_domain
-from dingo.gw.gwutils import get_window_factor, get_extrinsic_prior_dict
+from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.result import Result
 from dingo.gw.transforms import (
@@ -161,8 +161,7 @@ class GWSamplerMixin(object):
 
     def _build_domain(self: Sampler):
         """
-        Construct the domain object based on model metadata. Includes the window factor
-        needed for whitening data.
+        Construct the domain object based on model metadata.
 
         Called by __init__() immediately after _build_prior().
         """
@@ -174,7 +173,6 @@ class GWSamplerMixin(object):
         if "domain_update" in data_settings:
             self.domain.update(data_settings["domain_update"])
 
-        self.domain.window_factor = get_window_factor(data_settings["window"])
 
     def _correct_reference_time(
         self: Sampler, samples: Union[dict, pd.DataFrame], inverse: bool = False
