@@ -88,10 +88,6 @@ class SamplingNode(AnalysisNode):
             _strip_unwanted_submission_keys(self.job)
 
     @property
-    def request_memory(self):
-        return f"{self.inputs.request_memory}GB"
-
-    @property
     def executable(self):
         return self._get_executable_path("dingo_pipe_sampling")
 

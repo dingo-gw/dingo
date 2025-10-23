@@ -643,8 +643,8 @@ def create_parser(top_level=True, usage=None):
     submission_parser.add(
         "--request-memory",
         type=float,
-        default=128.0,
-        help="Memory allocation request (GB) for sampling step. Default is 128GB",
+        default=8.0,
+        help="Memory allocation request (GB) for sampling step. Default is 8GB",
     )
     submission_parser.add(
         "--request-cpus",
@@ -653,19 +653,18 @@ def create_parser(top_level=True, usage=None):
         help=(
             "Use multi-processing during sampling. This options sets the number of cores to "
             "request per job when performing sampling."
-            "Currently using multiple CPUs during sampling does not do anything."
         ),
     )
     submission_parser.add(
         "--request-memory-importance-sampling",
         type=float,
-        default=32.0,
-        help="Memory allocation request (GB) for sampling step. Default is 32GB"
+        default=8.0,
+        help="Memory allocation request (GB) for importance sampling step. Default is 32GB"
     )
     submission_parser.add(
         "--request-cpus-importance-sampling",
         type=int,
-        default=16,
+        default=1,
         help=(
             "Use multi-processing. This options sets the number of cores to "
             "request per job when performing importance sampling. To use a pool of 8 "
