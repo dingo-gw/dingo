@@ -174,7 +174,7 @@ class DecimateWaveformsAndASDS(object):
                     for k, v in sample["waveform"].items()
                 }
                 sample["asds"] = {
-                    k: self.multibanded_frequency_domain.decimate(v ** 2) ** 0.5
+                    k: self.multibanded_frequency_domain.decimate(v**2) ** 0.5
                     for k, v in sample["asds"].items()
                 }
 
@@ -525,28 +525,32 @@ def create_mask_based_on_frequency_update(
         # Update frequency_masks based on minimum_frequency
         if minimum_frequency is not None:
             # Same for all detectors
-            if isinstance(minimum_frequency, float):
+            if isinstance(minimum_frequency, float) or isinstance(
+                minimum_frequency, int
+            ):
                 mask_min = sample_frequencies >= minimum_frequency
             # Different for each detector
             elif isinstance(minimum_frequency, dict):
                 mask_min = sample_frequencies >= minimum_frequency[d]
             else:
                 raise ValueError(
-                    f"minimum-frequency has to be dict or float, not {type(minimum_frequency)}. "
+                    f"minimum-frequency has to be dict, int or float, not {type(minimum_frequency)}. "
                 )
             frequency_masks[d] = frequency_masks[d] & mask_min
 
         # Update frequency_masks based on maximum_frequency
         if maximum_frequency is not None:
             # Same for all detectors
-            if isinstance(maximum_frequency, float):
+            if isinstance(maximum_frequency, float) or isinstance(
+                maximum_frequency, int
+            ):
                 mask_max = sample_frequencies <= maximum_frequency
             # Different for each detector
             elif isinstance(maximum_frequency, dict):
                 mask_max = sample_frequencies <= maximum_frequency[d]
             else:
                 raise ValueError(
-                    f"maximum-frequency has to be dict or float, not {type(maximum_frequency)}. "
+                    f"maximum-frequency has to be dict, int or float, not {type(maximum_frequency)}. "
                 )
             frequency_masks[d] = frequency_masks[d] & mask_max
 
