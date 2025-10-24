@@ -599,8 +599,8 @@ class Result(DingoDataset):
         self,
         parameters: list = None,
         filename: str = "corner.pdf",
-        truths: dict = None,
         include_fixed_parameters: bool = False,
+        truths: list | dict = None,
         **kwargs,
     ):
         """
@@ -613,10 +613,11 @@ class Result(DingoDataset):
             (Default: None)
         filename : str
             Where to save samples.
-        truths:
-            Dict of truth values to include.
         include_fixed_parameters : bool
             Whether to plot parameters that have delta-function priors. (Default: False)
+        truths: list | dict
+            Dictionary or list of truth values. If it is a list, the values have to be in the exact order of the
+            posterior parameters (omit values with None).
 
         Other Parameters
         ----------------
@@ -636,6 +637,17 @@ class Result(DingoDataset):
         # User option to plot specific parameters.
         if parameters:
             theta = theta[parameters]
+        if truths is not None:
+            if isinstance(truths, dict):
+                truths = [
+                    truths[k] if k in truths.keys() else None for k in theta.columns
+                ]
+            if isinstance(truths, list) and len(truths) != theta.shape[-1]:
+                raise ValueError(
+                    f"Number of provided truth values is {len(truths)} which doesn't match the number of "
+                    f"posterior parameters for plotting {theta.shape[-1]}. Posterior parameters are: "
+                    f"{theta.columns}. "
+                )
         if self.injection_parameters is not None:
             kwargs["truths"] = [self.injection_parameters.get(k) for k in theta.columns]
 
@@ -646,6 +658,7 @@ class Result(DingoDataset):
                 labels=["Dingo", "Dingo-IS"],
                 filename=filename,
                 latex_labels_dict=get_latex_labels(self.prior),
+                truths=truths,
                 **kwargs,
             )
         else:

@@ -79,6 +79,8 @@ def plot_corner_multi(
         "bins": 30,
     }
     corner_params.update(kwargs)
+    if "truths" in corner_params and "truth_color" not in corner_params:
+        corner_params["truth_color"] = "black"
 
     serif_old = mpl.rcParams["font.family"]
     mpl.rcParams["font.family"] = "serif"
@@ -104,9 +106,9 @@ def plot_corner_multi(
         parameter_labels = [latex_labels_dict.get(p, p) for p in common_parameters]
     else:
         parameter_labels = [
-                LATEX_PARAM_DICT[p] if p in LATEX_PARAM_DICT else p
-                for p in common_parameters
-            ]
+            LATEX_PARAM_DICT[p] if p in LATEX_PARAM_DICT else p
+            for p in common_parameters
+        ]
 
     fig = None
     handles = []
