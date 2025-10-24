@@ -430,7 +430,7 @@ class MaskDataForFrequencyRangeUpdate(object):
         maximum_frequency: Optional[float | dict[str, float]] = None,
         suppress_range: Optional[list[float, float] | dict[str, list[float]]] = None,
         ifos: Optional[list[str]] = None,
-        print_output: bool = False,
+        print_output: bool = True,
     ):
         """
         Parameters
@@ -571,7 +571,7 @@ def create_mask_based_on_frequency_update(
                 mask_min = sample_frequencies >= minimum_frequency[d]
             else:
                 raise ValueError(
-                    f"minimum-frequency has to be dict or float, not {type(minimum_frequency)}. "
+                    f"minimum-frequency has to be dict, float or int, not {type(minimum_frequency)}. "
                 )
             frequency_masks[d] = np.logical_and(frequency_masks[d], mask_min)
 
@@ -587,7 +587,7 @@ def create_mask_based_on_frequency_update(
                 mask_max = sample_frequencies <= maximum_frequency[d]
             else:
                 raise ValueError(
-                    f"maximum-frequency has to be dict or float, not {type(maximum_frequency)}. "
+                    f"maximum-frequency has to be dict, float or int, not {type(maximum_frequency)}. "
                 )
             frequency_masks[d] = np.logical_and(frequency_masks[d], mask_max)
 

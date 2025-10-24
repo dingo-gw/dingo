@@ -357,11 +357,11 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
 
     @property
     def f_max(self) -> float:
-        return self._f_base_upper[-1]
+        return float(self._f_base_upper[-1])
 
     @property
     def f_min(self) -> float:
-        return self._f_base_lower[0]
+        return float(self._f_base_lower[0])
 
     @property
     def duration(self) -> float:
