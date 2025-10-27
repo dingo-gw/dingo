@@ -152,11 +152,17 @@ class GWSamplerMixin(object):
                 crop_settings=self.random_strain_cropping,
             )  # TODO: Ensure minimum frequency is a dict?
         if self.is_flexible_freq:
+            if "drop_frequency_range" in self.tokenization:
+                f_settings = self.tokenization["drop_frequency_range"].get("f_cut")
+            elif "drop_random_tokens" in self.tokenization:
+                f_settings = self.tokenization["drop_random_tokens"]
+            else:
+                f_settings = None
             _validate_minimum_frequency_transformer(
                 f_min=value,
                 detectors=self.detectors,
                 domain=domain,
-                settings=self.tokenization["drop_frequency_range"].get("f_cut"),
+                settings=f_settings,
             )
 
         self._minimum_frequency = value
@@ -185,11 +191,17 @@ class GWSamplerMixin(object):
                 crop_settings=self.random_strain_cropping,
             )  # TODO: Ensure minimum frequency is a dict?
         if self.is_flexible_freq:
+            if "drop_frequency_range" in self.tokenization:
+                f_settings = self.tokenization["drop_frequency_range"].get("f_cut")
+            elif "drop_random_tokens" in self.tokenization:
+                f_settings = self.tokenization["drop_random_tokens"]
+            else:
+                f_settings = None
             _validate_maximum_frequency_transformer(
                 f_max=value,
                 detectors=self.detectors,
                 domain=domain,
-                settings=self.tokenization["drop_frequency_range"].get("f_cut"),
+                settings=f_settings,
             )
         self._maximum_frequency = value
         self._initialize_transforms()
