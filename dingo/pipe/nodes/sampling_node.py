@@ -63,9 +63,6 @@ class SamplingNode(AnalysisNode):
                     else:
                         network_files.append(s)
 
-                if self.transfer_container:
-                    input_files_to_transfer.append(self.inputs.container)
-
                 input_files_to_transfer.extend(network_files)
 
                 if self.transfer_container:

@@ -82,6 +82,10 @@ class GenerationNode(BilbyGenerationNode):
             input_files_to_transfer, need_auth = self.job_needs_authentication(
                 input_files_to_transfer
             )
+
+            # Credentials are needed to access any OSDF files
+            if any(["osdf" in s for s in input_files_to_transfer]):
+                need_auth = True
             need_scitokens = need_scitokens or need_auth
 
             self.extra_lines.extend(
