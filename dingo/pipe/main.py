@@ -324,9 +324,9 @@ class MainInput(BilbyMainInput):
 
         self.request_disk = args.request_disk
         self.request_memory_generation = args.request_memory_generation
-        self.request_memory_sampling = args.request_memory_sampling
+        self.request_memory = args.request_memory
         self.request_memory_importance_sampling = args.request_memory_importance_sampling
-        self.request_cpus_sampling = args.request_cpus_sampling
+        self.request_cpus = args.request_cpus
         self.request_cpus_importance_sampling = args.request_cpus_importance_sampling
         # self.sampler_kwargs = args.sampler_kwargs
         # self.mpi_samplers = ["pymultinest"]

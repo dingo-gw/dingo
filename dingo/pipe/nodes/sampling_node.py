@@ -10,7 +10,7 @@ class SamplingNode(AnalysisNode):
         super(AnalysisNode, self).__init__(inputs)
         self.dag = dag
         self.generation_node = generation_node
-        self.request_cpus = inputs.request_cpus_sampling
+        self.request_cpus = inputs.request_cpus
         self.device = inputs.device
 
         data_label = generation_node.job_name
@@ -63,9 +63,6 @@ class SamplingNode(AnalysisNode):
                     else:
                         network_files.append(s)
 
-                if self.transfer_container:
-                    input_files_to_transfer.append(self.inputs.container)
-
                 input_files_to_transfer.extend(network_files)
 
                 if self.transfer_container:
@@ -89,10 +86,6 @@ class SamplingNode(AnalysisNode):
 
         if self.inputs.simple_submission:
             _strip_unwanted_submission_keys(self.job)
-
-    @property
-    def request_memory(self):
-        return f"{self.inputs.request_memory_sampling}GB"
 
     @property
     def executable(self):
