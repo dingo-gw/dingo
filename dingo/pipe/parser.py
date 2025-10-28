@@ -657,7 +657,7 @@ def create_parser(top_level=True, usage=None):
         "--request-memory-importance-sampling",
         type=float,
         default=8.0,
-        help="Memory allocation request (GB) for importance sampling step. Default is 32GB"
+        help="Memory allocation request (GB) for importance sampling step. Default is 8GB"
     )
     submission_parser.add(
         "--request-cpus-importance-sampling",
