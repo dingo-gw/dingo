@@ -34,13 +34,27 @@ def create_submission_file(
         lines.append(f'request_cpus = {condor_settings["num_cpus"]}\n')
     if "memory_cpus" in condor_settings:
         lines.append(f'request_memory = {condor_settings["memory_cpus"]}\n')
-    if "num_gpus" in condor_settings:
-        if "memory_gpus" in condor_settings:
-            lines.append(
-                f"requirements = TARGET.CUDAGlobalMemoryMb > {condor_settings['memory_gpus']}\n"
+    # Collect requirements
+    requirements = ""
+    if "requirements" in condor_settings:
+        requirements = condor_settings["requirements"]
+    if "memory_gpus" in condor_settings:
+        if requirements == "":
+            requirements = (
+                f"TARGET.CUDAGlobalMemoryMb > {condor_settings['memory_gpus']}"
             )
-        if "num_gpus" in condor_settings:
-            lines.append(f'request_gpus = {condor_settings["num_gpus"]}\n')
+        else:
+            if ")" not in requirements:
+                requirements = f"({requirements})"
+            requirements = (
+                requirements
+                + f" && (TARGET.CUDAGlobalMemoryMb > {condor_settings['memory_gpus']})"
+            )
+    if requirements != "":
+        lines.append(f"requirements = {requirements}\n")
+
+    if "num_gpus" in condor_settings:
+        lines.append(f'request_gpus = {condor_settings["num_gpus"]}\n')
         # TODO: Special settings of MPI-IS cluster => make optional
         if condor_settings["num_gpus"] == 8:
             # Request full node
@@ -67,7 +81,7 @@ def create_submission_file(
     # info from MPI-IS IT team:
     # https://atlas.is.localnet/confluence/display/IT/How+to+automatically+restart+jobs+according+to+the+exit+code
 
-    lines.append('\n')
+    lines.append("\n")
     lines.append(f'error = {join(train_dir, "info.err")}\n')
     lines.append(f'output = {join(train_dir, "info.out")}\n')
     lines.append(f'log = {join(train_dir, "info.log")}\n')
