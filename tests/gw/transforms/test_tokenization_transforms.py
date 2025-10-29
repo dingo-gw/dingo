@@ -574,7 +574,7 @@ def test_DropFrequenciesToUpdateRange(request, setup):
 
         # Check that we sample the cut frequencies uniformly in UFD / uniformly in MFD bands
         # Make sure to only consider bins that are completely in [f_min, f_max_lower] and [f_min_upper, f_max]
-        # => remove tokens at border
+        # => remove tokens at boundary
         edge_mask_lower = mask_lower[..., :-1] & ~mask_lower[..., 1:]
         mask_lower_strict = mask_lower.copy()
         mask_lower_strict[..., :-1][edge_mask_lower] = False
@@ -662,6 +662,39 @@ def test_DropFrequenciesToUpdateRange(request, setup):
                 assert np.isclose(
                     np.mean(non_zero_upper), non_zero_upper, atol=5, rtol=5
                 ).all()
+
+    # Check that we never mask all tokens if f_max_lower > f_min_upper
+    drop_dict = {
+        "p_cut": 1.0,
+        "f_max_lower_cut": 900.0,
+        "f_min_upper_cut": 100.0,
+        "p_lower_upper_both": [0.1, 0.1, 0.8],
+        "p_same_cut_all_detectors": 0.7,
+    }
+    drop_transformation = DropFrequenciesToUpdateRange(
+        domain=domain,
+        p_cut=drop_dict["p_cut"],
+        f_max_lower_cut=drop_dict["f_max_lower_cut"],
+        f_min_upper_cut=drop_dict["f_min_upper_cut"],
+        p_lower_upper_both=drop_dict["p_lower_upper_both"],
+        p_same_cut_all_detectors=drop_dict["p_same_cut_all_detectors"],
+    )
+    # Evaluate transforms
+    out = token_transformation(sample)
+    out = drop_transformation(out)
+
+    # Check that we do not drop all tokens in one sample
+    num_dropped_tokens = np.sum(out["drop_token_mask"], axis=-1)
+    assert np.all(num_dropped_tokens < num_tokens_per_block * num_blocks)
+    # Check that dropped tokens are either at frequencies lower than f_max_lower_cut and larger than f_min_upper_cut
+    dropped_f_mins = out["position"][..., 0][out["drop_token_mask"]]
+    dropped_f_maxs = out["position"][..., 1][out["drop_token_mask"]]
+    assert np.all(
+        np.logical_or(
+            dropped_f_mins < drop_dict["f_max_lower_cut"],
+            dropped_f_maxs > drop_dict["f_min_upper_cut"],
+        )
+    )
 
 
 @pytest.mark.parametrize(

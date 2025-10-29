@@ -568,6 +568,9 @@ class DropFrequenciesToUpdateRange(object):
         self.p_cut = p_cut
         self.f_max_lower_cut = f_max_lower_cut
         self.f_min_upper_cut = f_min_upper_cut
+        self.prevent_zero_information = (
+            True if self.f_max_lower_cut >= self.f_min_upper_cut else False
+        )
         self.p_same_cut_all_detectors = p_same_cut_all_detectors
         if p_lower_upper_both is None:
             p_lower_upper_both = np.array([0.4, 0.4, 0.2])
@@ -584,6 +587,11 @@ class DropFrequenciesToUpdateRange(object):
                 f"    - Upper cut sampled from [{self.f_min_upper_cut}, {self.domain.f_max}]\n"
                 f"    - Probability to apply the same cut on all detectors: {self.p_same_cut_all_detectors} "
             )
+            if self.prevent_zero_information:
+                print(
+                    f"\n    - Preventing zero information is activated since [{self.domain.f_min}, {self.f_max_lower_cut}]"
+                    f"overlaps with [{self.f_min_upper_cut}, {self.domain.f_max}] "
+                )
 
     def __call__(self, input_sample: dict) -> dict:
         """
@@ -710,6 +718,39 @@ class DropFrequenciesToUpdateRange(object):
         token_mask_separate = np.logical_or(
             token_mask_separate_lower, token_mask_separate_upper
         )
+        if self.prevent_zero_information:
+            # If all tokens are masked in one sample, only apply upper or lower mask
+            replace_mask = np.where(
+                np.sum(token_mask_separate, axis=-1) == num_tokens, True, False
+            )
+            repl_mask = np.repeat(
+                replace_mask[..., np.newaxis], repeats=num_tokens, axis=-1
+            )
+            # Decide whether to choose lower or upper instead of both
+            lower_upper_probs = self.p_lower_upper_both[:2] / np.sum(
+                self.p_lower_upper_both[:2]
+            )
+            lower_upper_global = np.random.choice(
+                ["lower", "upper"], p=lower_upper_probs, size=batch_size
+            )
+            mask_lower_separate_replace = np.where(
+                lower_upper_global == "lower", True, False
+            )
+            mask_lower_sep_repl = np.repeat(
+                mask_lower_separate_replace[..., np.newaxis],
+                repeats=num_tokens,
+                axis=-1,
+            )
+            # Create replace mask
+            mask_combined_separate_replace = np.where(
+                mask_lower_sep_repl,
+                token_mask_separate_lower,
+                token_mask_separate_upper,
+            )
+            # Combine with token_mask_separate
+            token_mask_separate = np.where(
+                repl_mask, mask_combined_separate_replace, token_mask_separate
+            )
 
         # (2) Same cut is applied to all detectors
         # Decide whether to mask upper or lower or both
@@ -759,6 +800,40 @@ class DropFrequenciesToUpdateRange(object):
         token_mask_same_one_detector = np.logical_or(
             token_mask_same_lower, token_mask_same_upper
         )
+        if self.prevent_zero_information:
+            # If all tokens are masked in one block, only apply upper or lower mask
+            replace_mask = np.where(
+                np.sum(token_mask_same_one_detector, axis=-1) == num_tokens_per_block,
+                True,
+                False,
+            )
+            repl_mask = np.repeat(
+                replace_mask[..., np.newaxis], repeats=num_tokens_per_block, axis=-1
+            )
+            # Decide whether to choose lower or upper instead of both
+            lower_upper_probs = self.p_lower_upper_both[:2] / np.sum(
+                self.p_lower_upper_both[:2]
+            )
+            lower_upper_global = np.random.choice(
+                ["lower", "upper"], p=lower_upper_probs, size=batch_size
+            )
+            mask_lower_same_replace = np.where(
+                lower_upper_global == "lower", True, False
+            )
+            mask_lower_same_repl = np.repeat(
+                mask_lower_same_replace[..., np.newaxis],
+                repeats=num_tokens_per_block,
+                axis=-1,
+            )
+            # Create replace mask
+            mask_combined_same_replace = np.where(
+                mask_lower_same_repl, token_mask_same_lower, token_mask_same_upper
+            )
+            # Combine with token_mask_same_one_detector
+            token_mask_same_one_detector = np.where(
+                repl_mask, mask_combined_same_replace, token_mask_same_one_detector
+            )
+
         # Duplicate for number of detectors
         token_mask_same = np.tile(token_mask_same_one_detector, reps=num_blocks)
 
