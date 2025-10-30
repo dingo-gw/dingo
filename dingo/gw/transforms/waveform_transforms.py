@@ -517,6 +517,7 @@ def create_mask_based_on_frequency_update(
     minimum_frequency: Optional[float | dict[str, float]] = None,
     maximum_frequency: Optional[float | dict[str, float]] = None,
     suppress_range: Optional[list[float, float] | dict[str, list[float, float]]] = None,
+    print_output: bool = True,
 ) -> dict[str : np.array]:
     """
     Creates a mask for each detector containing True for sample_frequencies not affected by the frequency updates
@@ -574,6 +575,8 @@ def create_mask_based_on_frequency_update(
                     f"minimum-frequency has to be dict, float or int, not {type(minimum_frequency)}. "
                 )
             frequency_masks[d] = np.logical_and(frequency_masks[d], mask_min)
+            if print_output:
+                print(f"{d}: minimum_frequency update to {minimum_frequency}.")
 
         # Update frequency_masks based on maximum_frequency
         if maximum_frequency is not None:
@@ -590,6 +593,8 @@ def create_mask_based_on_frequency_update(
                     f"maximum-frequency has to be dict, float or int, not {type(maximum_frequency)}. "
                 )
             frequency_masks[d] = np.logical_and(frequency_masks[d], mask_max)
+            if print_output:
+                print(f"{d}: maximum_frequency update to {maximum_frequency}.")
 
         # Update frequency_masks based on suppress_range
         if suppress_range is not None:
@@ -600,6 +605,8 @@ def create_mask_based_on_frequency_update(
                 mask_upper = sample_frequencies <= f_max_upper
                 mask_interval = ~np.logical_and(mask_lower, mask_upper)
                 frequency_masks[d] = np.logical_and(frequency_masks[d], mask_interval)
+                if print_output:
+                    print(f"{d}: suppress_range update to {suppress_range}.")
             # Different for each detector
             elif isinstance(suppress_range, dict) and d in suppress_range:
                 f_min_lower, f_max_upper = suppress_range[d]
@@ -607,6 +614,8 @@ def create_mask_based_on_frequency_update(
                 mask_upper = sample_frequencies <= f_max_upper
                 mask_interval = ~np.logical_and(mask_lower, mask_upper)
                 frequency_masks[d] = np.logical_and(frequency_masks[d], mask_interval)
+                if print_output:
+                    print(f"{d}: suppress_range update to {suppress_range}.")
 
     return frequency_masks
 

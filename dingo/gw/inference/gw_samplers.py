@@ -211,11 +211,32 @@ class GWSamplerMixin(object):
         return self._suppress
 
     @suppress.setter
-    def suppress(self, value: list[float] | dict[str, list[float]]):
-        raise NotImplementedError(
-            "Only possible to update suppress through setting "
-            "self.suppress = {'L1': [50., 55.]}"
-        )
+    def suppress(self: _GWMixinProtocol, value: list[float] | dict[str, list[float]]):
+        if self.is_flexible_freq:
+            if isinstance(self.domain, MultibandedFrequencyDomain):
+                domain = self.domain.base_domain
+            elif isinstance(self.domain, UniformFrequencyDomain):
+                domain = self.domain
+            else:
+                raise ValueError(
+                    "Frequency updates only possible for frequency domains."
+                )
+            if "drop_frequency_range" in self.tokenization:
+                f_settings = self.tokenization["drop_frequency_range"].get(
+                    "mask_interval"
+                )
+            elif "drop_random_tokens" in self.tokenization:
+                f_settings = self.tokenization["drop_random_tokens"]
+            else:
+                f_settings = None
+            _validate_suppress_interval_transformer(
+                suppress_interval=value,
+                detectors=self.detectors,
+                domain=domain,
+                settings=f_settings,
+            )
+            self._suppress = value
+            self._initialize_transforms()
 
     @property
     def frequency_updates(self) -> bool:
@@ -776,7 +797,7 @@ def _validate_maximum_frequency_transformer(
 
 
 def _validate_suppress_interval_transformer(
-    suppress_interval: dict[list[float]] | float,
+    suppress_interval: dict[str, list[float]] | float,
     detectors: list[str],
     domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
     settings: dict | None,

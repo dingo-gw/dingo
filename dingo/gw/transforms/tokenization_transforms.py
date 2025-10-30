@@ -1344,6 +1344,10 @@ class UpdateFrequencyRange(object):
                         mask_interval = np.logical_and(mask_lower, mask_upper)
                         mask_b = np.where(sample["position"][..., 2] == b, True, False)
                         mask[mask_b] = np.logical_or(mask_interval, mask[mask_b])
+            else:
+                raise TypeError(
+                    f"self.suppress is type {type(self.suppress_range)} but must be either a list or a dict."
+                )
             if self.print_output:
                 print(f"Updated suppress_range with {self.suppress_range}.")
 

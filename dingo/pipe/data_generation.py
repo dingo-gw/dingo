@@ -1,3 +1,4 @@
+import ast
 import numpy as np
 import os
 import random
@@ -114,14 +115,19 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # Frequencies
         self.sampling_frequency = args.sampling_frequency
         # bilby_pipe input only allows float or str for minimum/maximum_frequency
-        if isinstance(args.minimum_frequency, dict):
+        # Not sure if we still need the following, since we store this information in event_metadata and not directly in bilby
+        if isinstance(args.minimum_frequency, (dict, int, float)):
             self.minimum_frequency = str(args.minimum_frequency)
         else:
             self.minimum_frequency = args.minimum_frequency
-        if isinstance(args.maximum_frequency, dict):
+        if isinstance(args.maximum_frequency, (dict, int, float)):
             self.maximum_frequency = str(args.maximum_frequency)
         else:
             self.maximum_frequency = args.maximum_frequency
+        if isinstance(args.suppress, (dict, list)):
+            self.suppress = str(args.suppress)
+        else:
+            self.suppress = args.suppress
         self.reference_frequency = args.reference_frequency
 
         # Waveform, source model and likelihood
@@ -472,6 +478,11 @@ class DataGenerationInput(BilbyDataGenerationInput):
             "roll_off": self.tukey_roll_off,
             "minimum_frequency": self.minimum_frequency_dict,
             "maximum_frequency": self.maximum_frequency_dict,
+            "suppress": (
+                ast.literal_eval(self.suppress)
+                if isinstance(self.suppress, str)
+                else self.suppress
+            ),
         }
 
         for k in [
@@ -503,15 +514,19 @@ class DataGenerationInput(BilbyDataGenerationInput):
             # Dingo and Bilby have different geocent_time conventions.
             settings["injection_parameters"]["geocent_time"] -= self.trigger_time
             settings["optimal_SNR"] = {
-                k: v["optimal_SNR"].item()
-                if hasattr(v["optimal_SNR"], "item")
-                else v["optimal_SNR"]
+                k: (
+                    v["optimal_SNR"].item()
+                    if hasattr(v["optimal_SNR"], "item")
+                    else v["optimal_SNR"]
+                )
                 for k, v in self.interferometers.meta_data.items()
             }
             settings["matched_filter_SNR"] = {
-                k: v["matched_filter_SNR"].item()
-                if hasattr(v["matched_filter_SNR"], "item")
-                else v["matched_filter_SNR"]
+                k: (
+                    v["matched_filter_SNR"].item()
+                    if hasattr(v["matched_filter_SNR"], "item")
+                    else v["matched_filter_SNR"]
+                )
                 for k, v in self.interferometers.meta_data.items()
             }
 
