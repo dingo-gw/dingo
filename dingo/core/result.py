@@ -74,7 +74,8 @@ class Result(DingoDataset):
                 self.event_metadata["suppress"] = suppress_range.tolist()
             elif isinstance(suppress_range, dict):
                 self.event_metadata["suppress"] = {
-                    k: v.tolist() for k, v in suppress_range.items()
+                    k: v.tolist() if isinstance(v, np.ndarray) else v
+                    for k, v in suppress_range.items()
                 }
             else:
                 raise ValueError(
