@@ -70,17 +70,18 @@ class Result(DingoDataset):
         # Convert suppress np.ndarrays to lists
         if "suppress" in self.event_metadata:
             suppress_range = self.event_metadata["suppress"]
-            if isinstance(suppress_range, np.ndarray):
-                self.event_metadata["suppress"] = suppress_range.tolist()
-            elif isinstance(suppress_range, dict):
-                self.event_metadata["suppress"] = {
-                    k: v.tolist() if isinstance(v, np.ndarray) else v
-                    for k, v in suppress_range.items()
-                }
-            else:
-                raise ValueError(
-                    f"Expected event_metadata['suppress'] to be a numpy array or a dict, not {type(suppress_range)}"
-                )
+            if suppress_range is not None:
+                if isinstance(suppress_range, np.ndarray):
+                    self.event_metadata["suppress"] = suppress_range.tolist()
+                elif isinstance(suppress_range, dict):
+                    self.event_metadata["suppress"] = {
+                        k: v.tolist() if isinstance(v, np.ndarray) else v
+                        for k, v in suppress_range.items()
+                    }
+                else:
+                    raise ValueError(
+                        f"Expected event_metadata['suppress'] to be a numpy array or a dict, not {type(suppress_range)}"
+                    )
 
         # Initialize as empty dict, so we can fill it up later.
         if self.importance_sampling_metadata is None:
