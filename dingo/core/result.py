@@ -151,6 +151,8 @@ class Result(DingoDataset):
         """
         context = event_dataset.data
         event_metadata = event_dataset.settings
+        if "suppress" in event_metadata.keys() and event_metadata["suppress"] is None:
+            event_metadata.pop("suppress")
 
         if self.context is not None and not check_equal_dict_of_arrays(
             self.context, context
