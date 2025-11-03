@@ -517,10 +517,12 @@ class DataGenerationInput(BilbyDataGenerationInput):
             self._convert_prior_dict_key(key): val
             for key, val in prior_dict_updates.items()
         }
+
     def _get_priors(self, add_time=True):
         priors = super()._get_priors(add_time=add_time)
         priors.update(PriorDict(self.prior_dict_updates))
         return priors
+
 
 def create_generation_parser():
     """Data generation parser creation"""
