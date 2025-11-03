@@ -1040,6 +1040,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         else:
             f_min = self.domain.f_min
             # for SEOBNRv5EHM, the starting frequency must be the same as the reference frequency
+            # note this is the orbit averaged reference frequency
             if self.approximant_str == "SEOBNRv5EHM":
                 f_min = self.f_ref
             f_min = self.domain.f_min
@@ -1068,15 +1069,13 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         }
 
 
-        # SEOBNRv5EHM doesn't support setting a reference frequency, it is the
-        # same as the starting frequency
         if self.approximant_str == "SEOBNRv5EHM":
             # eccentric parameters
             log_ecc = p.get("log10_eccentricity")
             ecc = p.get("eccentricity")
 
             if log_ecc is not None and ecc is not None:
-                if abs(10**log_ecc - ecc) > 1e-4:
+                if abs(10**log_ecc - ecc) > 1e-6:
                     raise ValueError(
                         f"log10_eccentricity={log_ecc} and eccentricity={ecc} are inconsistent."
                     )
@@ -1289,6 +1288,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 # Step 2: Transform modes to target domain.
                 hlm_fd = wfg_utils.td_modes_to_fd_modes(hlm_td, self.domain)
             else:
+                # SEOBNRv5EHM uses this conditioning routine
                 # assert LS.SimInspiralImplementedTDApproximants(self.approximant)
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: TD)
