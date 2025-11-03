@@ -960,17 +960,6 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         extra_wf_kwargs["lmax_nyquist"] = kwargs.get("lmax_nyquist", 2)
         self.extra_wf_kwargs = extra_wf_kwargs
 
-        allowed_extra_kwargs = {
-            "postadiabatic",
-            "postadiabatic_type",
-            "lmax_nyquist",
-            "enable_antisymmetric_modes",
-            "antisymmetric_modes_hm",
-        }
-        extra_wf_kwargs = {k: v for k, v in kwargs.items() if k in allowed_extra_kwargs}
-        extra_wf_kwargs["lmax_nyquist"] = kwargs.get("lmax_nyquist", 2)
-        self.extra_wf_kwargs = extra_wf_kwargs
-
     @property
     def domain(self):
         if self._use_base_domain:
