@@ -1337,16 +1337,6 @@ def create_parser(top_level=True, usage=None):
         ),
     )
     # waveform_parser.add(
-<<<<<<< HEAD
-        # "--waveform-arguments-dict",
-        # default=None,
-        # type=nonestr,
-        # help=(
-            # "A dictionary of arbitrary additional waveform-arguments to pass"
-            # "  to the bilby waveform generator's `waveform_arguments`. Only used "
-            # "for injections"
-        # ),
-=======
     # "--waveform-arguments-dict",
     # default=None,
     # type=nonestr,
@@ -1355,7 +1345,6 @@ def create_parser(top_level=True, usage=None):
     # "  to the bilby waveform generator's `waveform_arguments`. Only used "
     # "for injections"
     # ),
->>>>>>> main
     # )
     # waveform_parser.add(
     #     "--mode-array",

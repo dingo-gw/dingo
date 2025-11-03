@@ -960,6 +960,17 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         extra_wf_kwargs["lmax_nyquist"] = kwargs.get("lmax_nyquist", 2)
         self.extra_wf_kwargs = extra_wf_kwargs
 
+        allowed_extra_kwargs = {
+            "postadiabatic",
+            "postadiabatic_type",
+            "lmax_nyquist",
+            "enable_antisymmetric_modes",
+            "antisymmetric_modes_hm",
+        }
+        extra_wf_kwargs = {k: v for k, v in kwargs.items() if k in allowed_extra_kwargs}
+        extra_wf_kwargs["lmax_nyquist"] = kwargs.get("lmax_nyquist", 2)
+        self.extra_wf_kwargs = extra_wf_kwargs
+
     @property
     def domain(self):
         if self._use_base_domain:
@@ -1061,19 +1072,23 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         # same as the starting frequency
         if self.approximant_str == "SEOBNRv5EHM":
             # eccentric parameters
-            if "log10_eccentricity" in p and "eccentricity" in p:
-                if (10 ** p["log10_eccentricity"] - p["eccentricity"]) > 1e-4:
+            log_ecc = p.get("log10_eccentricity")
+            ecc = p.get("eccentricity")
+
+            if log_ecc is not None and ecc is not None:
+                if abs(10**log_ecc - ecc) > 1e-4:
                     raise ValueError(
-                        f"""log10_eccentricity of {p['log10_eccentricity']} and eccentricity 
-                        of {p['eccentricity']} are inconsistent, check your input values"""
+                        f"log10_eccentricity={log_ecc} and eccentricity={ecc} are inconsistent."
                     )
 
-            if "log10_eccentricity" in p:
-                eccentricity = np.power(10, p["log10_eccentricity"])
-            else:
-                eccentricity = p.get("eccentricity", 0.0)
+            eccentricity = 10**log_ecc if log_ecc is not None else p.get("eccentricity", 0.0)
             longitude_ascending_nodes = p.get("long_asc_nodes", 0.0)
-            mean_per_ano = p.get("mean_anomaly", 0.0)
+            if "relativistic_anomaly" in p and "mean_anomaly" in p:
+                raise ValueError(
+                    "Cannot specify both relativistic_anomaly and mean_anomaly."
+                )
+            else:
+                mean_per_ano = p.get("mean_anomaly", p.get("relativistic_anomaly", 0.0))
 
             params_gwsignal.update({
                 'eccentricity' : eccentricity * u.dimensionless_unscaled,
@@ -1388,6 +1403,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         """
         # TD approximants that are implemented in L0 frame. Currently tested for:
         #   52: SEOBNRv4PHM
+        #       SEOBNRV5EHM
 
         parameters_gwsignal = self._convert_parameters(
             {**parameters, "f_ref": self.f_ref}

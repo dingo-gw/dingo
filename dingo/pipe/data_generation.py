@@ -23,7 +23,6 @@ from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import UniformFrequencyDomain, build_domain_from_model_metadata
 from dingo.gw.injection import Injection
 from dingo.pipe.parser import create_parser
-from dingo.pipe.main import fill_in_arguments_from_model
 
 logger.name = "dingo_pipe"
 
@@ -522,10 +521,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
         priors = super()._get_priors(add_time=add_time)
         priors.update(PriorDict(self.prior_dict_updates))
         return priors
-<<<<<<< HEAD
-=======
-
->>>>>>> main
 
 def create_generation_parser():
     """Data generation parser creation"""
