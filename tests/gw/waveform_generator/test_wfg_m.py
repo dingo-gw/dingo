@@ -37,14 +37,15 @@ def uniform_fd_domain():
     return domain
 
 
-@pytest.fixture(params=["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM"])
+@pytest.fixture(params=["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM"])
 def approximant(request):
     return request.param
 
 
 @pytest.fixture
 def intrinsic_prior(approximant):
-    if "PHM" in approximant:
+    if approximant in ["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM"]:
+        # quasi-circular precessing-spin 
         intrinsic_dict = {
             "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
             "mass_2": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
@@ -61,8 +62,8 @@ def intrinsic_prior(approximant):
             "phi_jl": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
             "geocent_time": 0.0,
         }
-    else:
-        # Aligned spins
+    elif approximant in ["SEOBNRv5HM", "SEOBNRv5EHM"]:
+        # quasi-circular aligned-spin
         intrinsic_dict = {
             "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
             "mass_2": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
@@ -75,13 +76,31 @@ def intrinsic_prior(approximant):
             "chi_2": 'bilby.gw.prior.AlignedSpin(name="chi_2", a_prior=Uniform(minimum=0, maximum=0.99))',
             "geocent_time": 0.0,
         }
+    elif approximant in ["SEOBNRv5EHM"]:
+        intrinsic_dict = {
+            "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
+            "mass_2": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
+            "mass_ratio": "bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.125, maximum=1.0)",
+            "chirp_mass": "bilby.gw.prior.UniformInComponentsChirpMass(minimum=25.0, maximum=100.0)",
+            "luminosity_distance": 1000.0,
+            "theta_jn": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
+            "phase": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
+            "chi_1": 'bilby.gw.prior.AlignedSpin(name="chi_1", a_prior=Uniform(minimum=0, maximum=0.99))',
+            "chi_2": 'bilby.gw.prior.AlignedSpin(name="chi_2", a_prior=Uniform(minimum=0, maximum=0.99))',
+            "eccentricity": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.3)",
+            "relativistic_anomaly": "bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi)",
+            "geocent_time": 0.0,
+        }
+    else:
+        raise ValueError(f"Unimplemented approximant {approximant}")
+
     prior = build_prior_with_defaults(intrinsic_dict)
     return prior
 
 
 @pytest.fixture
 def wfg(uniform_fd_domain, approximant):
-    if approximant in ["SEOBNRv5PHM", "SEOBNRv5HM"]:
+    if approximant in ["SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM"]:
         wfg_class = NewInterfaceWaveformGenerator
     else:
         wfg_class = WaveformGenerator
@@ -115,7 +134,7 @@ def tolerances(approximant):
         # get should not have a big effect in practice.
         return 2e-2, 1e-5
 
-    elif approximant == "SEOBNRv4PHM":
+    elif approximant in ["SEOBNRv4PHM", "SEOBNRv5EHM"]:
         # The mismatches are typically be of order 1e-5. This is exclusively due to
         # different tapering. The reference polarizations are tapered and FFTed on the
         # level of polarizations, while for generate_hplus_hcross_m, the tapering and FFT
@@ -136,7 +155,7 @@ def tolerances(approximant):
 try:
     import pyseobnr
 
-    approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM"]
+    approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM"]
 except ImportError:
     approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM"]
 
