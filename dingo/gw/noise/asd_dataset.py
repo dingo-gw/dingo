@@ -58,6 +58,12 @@ class ASDDataset(DingoDataset):
                     self.asds.pop(ifo)
                     self.gps_times.pop(ifo)
 
+        if "window_factor" in self.settings["domain_dict"]:
+            print(
+                "Warning: 'window_factor' is no longer used in ASDDataset. "
+                "Removing from settings."
+            )
+            self.settings["domain_dict"].pop("window_factor")
         self.domain = build_domain(self.settings["domain_dict"])
         if not check_domain_compatibility(self.asds, self.domain):
             raise ValueError("ASDs in dataset not compatible with domain.")

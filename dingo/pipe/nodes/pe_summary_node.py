@@ -6,6 +6,9 @@ logger.name = "dingo_pipe"
 
 
 class PESummaryNode(BilbyPESummaryNode):
+
+    run_node_on_osg = False
+    
     def __init__(self, inputs, merged_node_list, generation_node_list, dag):
         super(BilbyPESummaryNode, self).__init__(inputs)
         self.dag = dag
@@ -15,6 +18,41 @@ class PESummaryNode(BilbyPESummaryNode):
         n_results = len(merged_node_list)
         result_files = [merged_node.result_file for merged_node in merged_node_list]
         labels = [merged_node.label for merged_node in merged_node_list]
+
+        if self.inputs.transfer_files or self.inputs.osg:
+            input_files_to_transfer = [
+                self._relative_topdir(fname, self.inputs.initialdir)
+                for fname in result_files
+            ] + inputs.additional_transfer_paths
+            files = [self.inputs.complete_ini_file]
+            if len(generation_node_list) == 1:
+                files.append(generation_node_list[0].data_dump_file)
+            input_files_to_transfer.extend(
+                [
+                    self._relative_topdir(fname, self.inputs.initialdir)
+                    for fname in files
+                ]
+            )
+            for value in [
+                self.inputs.psd_dict,
+                self.inputs.spline_calibration_envelope_dict,
+            ]:
+                input_files_to_transfer.extend(self.extract_paths_from_dict(value))
+            if self.transfer_container:
+                input_files_to_transfer.append(self.inputs.container)
+
+            input_files_to_transfer, need_scitokens = self.job_needs_authentication(
+                input_files_to_transfer
+            )
+            if need_scitokens:
+                self.extra_lines.extend(self.scitoken_lines)
+
+            self.extra_lines.extend(
+                self._condor_file_transfer_lines(
+                    input_files_to_transfer,
+                    [self._relative_topdir(self.inputs.webdir, self.inputs.initialdir)],
+                )
+            )
 
         self.setup_arguments(
             add_ini=False, add_unknown_args=False, add_command_line_args=False

@@ -36,7 +36,7 @@ class StoreBoolean(argparse.Action):
             setattr(namespace, self.dest, False)
 
 
-def create_parser(top_level=True):
+def create_parser(top_level=True, usage=None):
     """Creates the BilbyArgParser for dingo_pipe
 
     Parameters
@@ -52,10 +52,11 @@ def create_parser(top_level=True):
 
     """
     parser = BilbyArgParser(
-        usage="Perform inference with dingo based on a .ini file.",
+        usage="%(prog)s ini [options]",
+        description=usage,
         ignore_unknown_config_file_keys=False,
         allow_abbrev=False,
-        formatter_class=configargparse.ArgumentDefaultsHelpFormatter,
+        formatter_class=configargparse.ArgumentDefaultsRawHelpFormatter,
     )
     parser.add("ini", type=str, is_config_file=True, help="Configuration ini file")
     parser.add("-v", "--verbose", action="store_true", help="Verbose output")
@@ -292,8 +293,18 @@ def create_parser(top_level=True):
     )
     data_gen_pars.add(
         "--data-find-url",
-        default="https://datafind.ligo.org",
-        help="URL to use for datafind, default is https://datafind.ligo.org to query CVMFS",
+        type=nonestr,
+        default=None,
+        help=(
+            "URL to use for datafind. This happens during the initial attempt "
+            "to locate frames by :code:`bilby_pipe` or by "
+            ":code:`bilby_pipe_generation`. In both cases, the order of "
+            "preference is: 1) the value of this argument, 2) the value of "
+            "the environment variable GWDATAFIND_SERVER, 3) the value "
+            "of the global default in bilby_pipe.utils.DEFAULT_GWDATAFIND_SERVER. "
+            "This value will override the value of GWDATAFIND_SERVER if it is set"
+            "in :code:`getenv` or :code:`environment-variables`."
+        ),
     )
     data_gen_pars.add(
         "--data-find-urltype",
@@ -377,8 +388,7 @@ def create_parser(top_level=True):
     )
     det_parser.add(
         "--sampling-frequency",
-        # default=4096,
-        default=None,
+        default=4096,
         type=nonefloat,
     )
 
@@ -438,8 +448,7 @@ def create_parser(top_level=True):
     )
     det_parser.add(
         "--tukey-roll-off",
-        # default=0.4,
-        default=None,
+        default=1.0,
         type=nonefloat,
         help="Roll off duration of tukey window in seconds, default is 0.4s",
     )
@@ -525,8 +534,19 @@ def create_parser(top_level=True):
         ),
     )
     injection_parser.add(
+        "--injection-waveform-generator-constructor-dict",
+        default=None,
+        type=nonestr,
+        help=(
+            "A dictionary of arbitrary arguments to pass"
+            " to the bilby waveform generator class constructor for the injection"
+            " only. The class will be the same as the one specified in"
+            " '--waveform-generator'."
+        ),
+    )
+    injection_parser.add(
         "--save-bilby-data-dump",
-        type=bool,
+        action=StoreBoolean,
         default=False,
         help=(
             "If given, will also save a data dump consistent with the DINGO injection."
@@ -612,12 +632,6 @@ def create_parser(top_level=True):
         help="Disk allocation request in GB. Default is 5GB.",
     )
     submission_parser.add(
-        "--request-memory",
-        type=float,
-        default=8.0,
-        help="Memory allocation request (GB). Default is 8GB",
-    )
-    submission_parser.add(
         "--request-memory-generation",
         type=nonefloat,
         # default=None,
@@ -625,21 +639,25 @@ def create_parser(top_level=True):
         help="Memory allocation request (GB) for data generation step",
     )
     submission_parser.add(
+        "--request-memory",
+        type=float,
+        default=8.0,
+        help="Memory allocation request (GB) for sampling step. Default is 8GB",
+    )
+    submission_parser.add(
         "--request-cpus",
         type=int,
         default=1,
         help=(
-            "Use multi-processing. This options sets the number of cores to "
-            "request. To use a pool of 8 threads on an 8-core CPU, set "
-            "request-cpus=8. For the dynesty, ptemcee, cpnest, and "
-            "bilby_mcmc samplers, no additional sampler-kwargs are required"
+            "Use multi-processing during sampling. This options sets the number of cores to "
+            "request per job when performing sampling."
         ),
     )
     submission_parser.add(
-        "--conda-env",
-        type=nonestr,
-        default=None,
-        help="Either a conda environment name of a absolute path to the conda env folder.",
+        "--request-memory-importance-sampling",
+        type=float,
+        default=8.0,
+        help="Memory allocation request (GB) for importance sampling step. Default is 8GB"
     )
     submission_parser.add(
         "--request-cpus-importance-sampling",
@@ -650,6 +668,12 @@ def create_parser(top_level=True):
             "request per job when performing importance sampling. To use a pool of 8 "
             "threads on an 8-core CPU, set request-cpus-importance-sampling=8."
         ),
+    )
+    submission_parser.add(
+        "--conda-env",
+        type=nonestr,
+        default=None,
+        help="Either a conda environment name of a absolute path to the conda env folder.",
     )
     submission_parser.add(
         "--sampling-requirements",
@@ -801,6 +825,15 @@ def create_parser(top_level=True):
             "A comma-separated list of desired sites, wrapped in quoates."
             " e.g., desired-sites='site1,site2'. This can be used on the OSG"
             " to specify specific run nodes. This determines which CPU site to use."
+        ),
+    )
+    submission_parser.add(
+        "--generation-desired-sites",
+        type=nonestr,
+        help=(
+            "A comma-separated list of desired sites, wrapped in quoates."
+            " e.g., desired-sites='site1,site2'. This can be used on the OSG"
+            " to specify specific run nodes. This determines which site to use during data generation."
         ),
     )
     submission_parser.add(
@@ -1242,6 +1275,15 @@ def create_parser(top_level=True):
     #     help="The waveform generator class, should be a python path. This will "
     #     "not be able to use any arguments not passed to the default.",
     # )
+    # waveform_parser.add(
+    #     "--waveform-generator-constructor-dict",
+    #     default=None,
+    #     type=nonestr,
+    #     help=(
+    #         "A dictionary of arbitrary arguments to pass"
+    #         " to the bilby waveform generator class constructor."
+    #     ),
+    # )
     waveform_parser.add(
         "--reference-frequency",
         default=None,
@@ -1295,6 +1337,7 @@ def create_parser(top_level=True):
         ),
     )
     # waveform_parser.add(
+<<<<<<< HEAD
         # "--waveform-arguments-dict",
         # default=None,
         # type=nonestr,
@@ -1303,6 +1346,16 @@ def create_parser(top_level=True):
             # "  to the bilby waveform generator's `waveform_arguments`. Only used "
             # "for injections"
         # ),
+=======
+    # "--waveform-arguments-dict",
+    # default=None,
+    # type=nonestr,
+    # help=(
+    # "A dictionary of arbitrary additional waveform-arguments to pass"
+    # "  to the bilby waveform generator's `waveform_arguments`. Only used "
+    # "for injections"
+    # ),
+>>>>>>> main
     # )
     # waveform_parser.add(
     #     "--mode-array",
@@ -1352,6 +1405,23 @@ def create_parser(top_level=True):
     #         "the generation function is bilby.gw.conversion.generate_all_bns_parameters. "
     #         "If you specify your own function, you may wish to use the I/O of those functions as templates"
     #         "If given as 'noconvert' (case insensitive), no generation is used'"
+    #     ),
+    # )
+
+    # # Constants arguments
+    # global_settings_parser = parser.add_argument_group(
+    #     title="Global settings",
+    #     description="Settings for global configuration",
+    # )
+    # global_settings_parser.add(
+    #     "--cosmology",
+    #     default="Planck15",
+    #     type=str,
+    #     help=(
+    #         "The name of the cosmology to use. "
+    #         "Defaults to Planck15, see "
+    #         ":external:py:func:`bilby.gw.cosmology.get_available_cosmologies` "
+    #         "for a list of the available cosmologies."
     #     ),
     # )
 
