@@ -405,6 +405,7 @@ class Injection(GWSignal):
             )
             d = s + noise
             data[ifo] = self.data_domain.update_data(d, low_value=0.0)
+            h[ifo] = s
 
         signal["waveform"] = data
         signal["h"] = h
