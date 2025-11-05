@@ -396,6 +396,7 @@ class Injection(GWSignal):
             self.whiten = False
 
         data = {}
+        h = {}
         for ifo, s in signal["waveform"].items():
             noise = (
                 (np.random.randn(len(s)) + 1j * np.random.randn(len(s)))
@@ -406,6 +407,7 @@ class Injection(GWSignal):
             data[ifo] = self.data_domain.update_data(d, low_value=0.0)
 
         signal["waveform"] = data
+        signal["h"] = h
         return signal
 
     def random_injection(self):
