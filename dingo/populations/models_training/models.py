@@ -412,7 +412,9 @@ class PdetModel(GenericModel):
         self.transform_params_to_array = torchvision.transforms.Compose([self.transform1, self.transform2])
 
     def get_pdet_from_params(self, params):
-        x = self.transform_params_to_array(params)
+        x = self.transform_params_to_array(dict(parameters=params))[0]
+        x = torch.tensor(np.array(x), device=self.device).squeeze()
+
         log_pdet = self(x)
 
         return torch.exp(log_pdet)
@@ -426,23 +428,10 @@ class PopulationModel(GenericModel):
         device: str = "cuda",
         load_training_info: bool = True,
         embedding_emulator: EmbeddingEmulator = None,
-        snr_estimator: SNREstimator = None
+        pdet_model: PdetModel = None
     ):
         type_pm = 'population_model'
         self.embedding_emulator = embedding_emulator
-        self.snr_estimator = snr_estimator
+        self.pdet_model = pdet_model
 
         super().__init__(model_filename, metadata, initial_weights, device, load_training_info, type_pm)
-
-    # def sample(self, params, batch_size, device=None):
-
-    #     x = self.transform(dict(parameters=params))
-    #     x = torch.tensor(np.array(x)).squeeze()
-
-    #     if(batch_size != None):
-    #         x = x.expand(batch_size, *x.shape)
-
-    #     if(device != None):
-    #         x = x.to(device)
-        
-    #     return super().sample(x, batch_size=batch_size)

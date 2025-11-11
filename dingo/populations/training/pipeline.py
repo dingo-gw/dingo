@@ -45,13 +45,29 @@ def train(
 ):
     if resume:
 
-        pm = PopulationModel(model_filename=checkpoint, device=local_settings["device"])
+        pm = PopulationModel(model_filename=checkpoint, device=local_settings["device"])    
         train_settings = pm.metadata["train_settings"]
 
-        embedding_emulator = EmbeddingEmulator(train_settings["data"]["embedding_emulator_path"], device=local_settings["device"])
-        # embedding_emulator.initialize_transform_pre() make sure this is not needed
+        # overwrite settings if provided
+        if train_settings is not None:
+            print('Overwriting settings from file.')
+            train_settings_potential_ow = train_settings.copy()
 
-        pdet_model = PdetModel(train_settings["data"]["pdet_model_path"], device=local_settings["device"])
+            if train_settings_potential_ow["data"].get("embedding_emulator_path"):
+                print('Overwriting embedding emulator path from train settings.')
+                print('This is intended when resuming a model with a new embedding emulator.')
+                train_settings['data']['embedding_emulator_path'] = train_settings_potential_ow["data"]["embedding_emulator_path"]
+
+            if train_settings_potential_ow["data"].get("pdet_model_path"):
+                print('Overwriting pdet model path from train settings.')
+                print('This is intended when resuming a model with a new pdet model.')
+                train_settings['data']['pdet_model_path'] = train_settings_potential_ow["data"]["pdet_model_path"]
+
+        embedding_emulator_path = train_settings["data"]["embedding_emulator_path"] 
+        pdet_model_path = train_settings["data"]["pdet_model_path"]
+
+        embedding_emulator = EmbeddingEmulator(embedding_emulator_path, device=local_settings["device"])
+        pdet_model = PdetModel(pdet_model_path, device=local_settings["device"])
 
         pm = PopulationModel(
             model_filename=checkpoint,
@@ -217,6 +233,11 @@ def parse_args():
         type=str,
         help="Checkpoint file from which to resume training.",
     )
+    parser.add_argument(
+        "--overwrite_settings",
+        type=str,
+        help="YAML file containing training settings that are overwritten (only embedding emulator and pdet model).",
+    )
     args = parser.parse_args()
 
     # The settings file and checkpoint are mutually exclusive.
@@ -251,7 +272,13 @@ def train_local():
         print("Resuming training run.")
         resume = True
         checkpoint = args.checkpoint
-        train_settings = None
+
+        if args.overwrite_settings is None:
+            train_settings = None
+        else:
+            with open(args.overwrite_settings, "r") as fp:
+                train_settings = yaml.safe_load(fp)
+
         with open(os.path.join(args.train_dir, "local_settings.yaml"), "r") as f:
             local_settings = yaml.safe_load(f)
 

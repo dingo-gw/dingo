@@ -26,6 +26,11 @@ class PopulationTransformer(nn.Module):
             self.class_token = nn.Parameter(
                 torch.randn((1, 1, self.tokenizer.output_dim))
             )
+        elif self.pooling.startswith("cls-"):
+            n_pooling = int(self.pooling.split("-")[1])
+            self.class_token = nn.Parameter(
+                torch.randn((1, n_pooling, self.tokenizer.output_dim))
+            )
 
         self.init_weights()
 
@@ -53,6 +58,22 @@ class PopulationTransformer(nn.Module):
                 # Extend the mask.
                 cls_mask = torch.zeros(
                     (batch_size, 1),
+                    dtype=src_key_padding_mask.dtype,
+                    device=src_key_padding_mask.device,
+                )
+                src_key_padding_mask = torch.cat(
+                    [cls_mask, src_key_padding_mask], dim=1
+                )
+        elif self.pooling.startswith("cls-"):
+            n_pooling = int(self.pooling.split("-")[1])
+            # Prepend the class token.
+            batch_size = x.shape[0]
+            cls_tokens = self.class_token.expand(batch_size, n_pooling, -1)
+            x = torch.cat((cls_tokens, x), dim=1)
+            if src_key_padding_mask is not None:
+                # Extend the mask.
+                cls_mask = torch.zeros(
+                    (batch_size, n_pooling),
                     dtype=src_key_padding_mask.dtype,
                     device=src_key_padding_mask.device,
                 )
@@ -140,6 +161,12 @@ class PopulationTransformer(nn.Module):
         elif self.pooling == "cls":
             # Take the first token.
             x = x[:, 0, :]
+        elif self.pooling.startswith("cls-"):
+            # Take the first n tokens.
+            n_pooling = int(self.pooling.split("-")[1])
+            x = x[:, :n_pooling, :]
+            # have to flatten the output
+            x = x.flatten(start_dim=1)
         else:
             raise NotImplementedError(
                 "Pooling operation not implemented. Should not be here."
@@ -158,20 +185,17 @@ def create_population_transformer(config):
     config.tokenizer["input_dim"] = config.d_dingo_encoding
     config.tokenizer["output_dim"] = config.transformer["d_model"]
 
-    # TODO, tempoary fix for old versions
-    use_variance = config.transformer.get("use_variance", False)
-    if use_variance:
-        use_moments = ["mean", "variance"]
-    else:
-        use_moments = ["mean"]
-
-    use_moments = config.transformer.get("use_moments", use_moments)
+    use_moments = config.transformer.get("use_moments", None)
 
     if use_moments is not None:
         n = len(use_moments)
         config.final_net["input_dim"] = n * config.transformer["d_model"]
     else:
-        config.final_net["input_dim"] = config.transformer["d_model"]
+        if config.transformer['pooling'] == "cls":
+            config.final_net["input_dim"] = config.transformer["d_model"]
+        elif config.transformer['pooling'].startswith("cls-"):
+            n_pooling = int(config.transformer['pooling'].split("-")[1])
+            config.final_net["input_dim"] = n_pooling * config.transformer["d_model"]
 
     # build individual modules
     tokenizer = DenseResidualNet(**config.tokenizer)

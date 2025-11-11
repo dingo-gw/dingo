@@ -30,6 +30,8 @@ from dingo.gw.transforms import (
     UnpackDict
 )
 
+# TODO: remove this script? 
+
 class PopulationDataset(torch.utils.data.Dataset):
     """
     Training dataset for population posterior that is based on stored embeddings.
@@ -151,32 +153,28 @@ class PopulationDataset(torch.utils.data.Dataset):
 def construct_population_dataset(embedding_emulator_path, device, **kwargs):
     
     embedding_emulator = EmbeddingEmulator(model_filename=embedding_emulator_path, device=device)
-    # embedding_emulator.add_pm_single_event()
-
-    # snr_model = SNREstimator(snr_model_path, device=device)
-    # snr_model.model.eval()
-
+    
     return PopulationDataset(
         embedding_emulator_metadata=embedding_emulator.metadata, 
         **kwargs
     )
 
 
-def build_transforms(embedding_emulator):
+# def build_transforms(embedding_emulator):
 
-    inference_parameters = embedding_emulator.get_inference_parameters()
-    standardization_dict = embedding_emulator.metadata['settings_pm_single_event']["train_settings"]["data"]["standardization"]
+#     inference_parameters = embedding_emulator.get_inference_parameters()
+#     standardization_dict = embedding_emulator.metadata['settings_pm_single_event']["train_settings"]["data"]["standardization"]
 
-    transform_post = SelectStandardizeRepackageParameters(
-        {"inference_parameters": inference_parameters},
-        standardization_dict,
-        inverse=False,
-        as_type="dict",
-    )
+#     transform_post = SelectStandardizeRepackageParameters(
+#         {"inference_parameters": inference_parameters},
+#         standardization_dict,
+#         inverse=False,
+#         as_type="dict",
+#     )
 
-    transforms = [
-        transform_post,
-        UnpackDict(inference_parameters),
-    ]
+#     transforms = [
+#         transform_post,
+#         UnpackDict(inference_parameters),
+#     ]
 
-    return torchvision.transforms.Compose(transforms)
+#     return torchvision.transforms.Compose(transforms)
