@@ -1,6 +1,8 @@
 import numpy as np
 import lal
 import lalsimulation as LS
+from lalsimulation.gwsignal.core import conditioning_subroutines as cond 
+import astropy.units as u
 
 
 def linked_list_modes_to_dict_modes(hlm_ll):
@@ -69,6 +71,63 @@ def taper_td_modes_in_place(hlm_td, tapering_flag: int = 1):
         window = get_tapering_window_for_complex_time_series(h, tapering_flag)
         h.data.data *= window
 
+def taper_td_modes_in_place_gwsignal(hlm_td, tapering_flag: str = 'start'):
+    """
+    Taper the time domain modes in place using gwsignal conditioning routines.
+    There are apparently slight differences in the tapering functions 
+    between these two and since some wfs (EG TEOB) uses the gwsignal 
+    routine, we use the gwsignal routine sometimes. 
+
+    Parameters
+    ----------
+    hlm_td: dict
+        Dictionary with (l,m) keys and the complex lal time series objects for the
+        corresponding modes.
+
+    """
+    lalseries_to_gwpy_timeseries_in_place(hlm_td)
+    for mode in hlm_td.keys():
+        hlm_td[mode] = cond.taper_gwpy_timeseries(hlm_td[mode], tapering_flag)
+
+def lalseries_to_gwpy_timeseries_in_place(hlm_td):
+    """
+    Convert lal time series in place to gwpy time series.
+
+    Parameters
+    ----------
+    hlm_td: dict
+        Dictionary with (l,m) keys and the complex lal time series objects for the
+        corresponding modes.
+
+    """
+    from gwpy.timeseries import TimeSeries
+    for mode in hlm_td.keys():
+        times = (
+            hlm_td[mode].epoch.gpsSeconds
+            + hlm_td[mode].epoch.gpsNanoSeconds * 1e-9
+            + np.arange(hlm_td[mode].data.length) * hlm_td[mode].deltaT
+        )
+
+        hlm_td[mode] = TimeSeries(
+            data=hlm_td[mode].data.data,
+            times=times,
+            name=f"h_{mode[0]}_{mode[1]}",
+            unit=u.dimensionless_unscaled,
+        )
+
+def gwpyseries_to_lalseries_in_place(hlm_td):
+    """
+    Convert gwpy time series in place to lal time series.
+
+    Parameters
+    ----------
+    hlm_td: dict
+        Dictionary with (l,m) keys and the complex gwpy time series objects for the
+        corresponding modes.
+
+    """
+    for mode in hlm_td.keys():
+        hlm_td[mode] = hlm_td[mode].to_lal()
 
 def td_modes_to_fd_modes(hlm_td, domain):
     """
@@ -137,6 +196,30 @@ def td_modes_to_fd_modes(hlm_td, domain):
 
     return hlm_fd
 
+def td_modes_to_fd_modes_gwsignal(hlm_td, domain):
+    """ 
+    TODO 
+    """
+    hlm_fd = {}
+    
+    delta_f = domain.delta_f
+    delta_t = 0.5 / domain.f_max
+    f_nyquist = domain.f_max  # use f_max as f_nyquist
+    chirplen = int(2 * f_nyquist / delta_f)
+
+    for mode in hlm_td.keys():
+        hlm_td_cond = cond.resize_gwpy_timeseries(hlm_td[mode], len(hlm_td[mode]) - chirplen, chirplen)
+        hlm_fd_cond = hlm_td_cond.fft()
+        hlm_fd_cond.epoch = hlm_td_cond.t0
+        hlm_fd_cond = (hlm_fd_cond / (2 * hlm_fd_cond.df)).value
+
+        # setting up reflection around boundary to create two-sided FFT
+        hlm_fd_cond = np.concatenate((hlm_fd_cond[::-1], hlm_fd_cond[1:]), axis=0)
+        
+        hlm_fd_cond[-1] = hlm_fd_cond[0]
+        hlm_fd[mode] = hlm_fd_cond
+
+    return hlm_fd
 
 def get_polarizations_from_fd_modes_m(hlm_fd, iota, phase):
     pol_m = {}

@@ -37,7 +37,7 @@ def uniform_fd_domain():
     return domain
 
 
-@pytest.fixture(params=["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM"])
+@pytest.fixture(params=["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM", "TEOBResumSDALI"])
 def approximant(request):
     return request.param
 
@@ -62,7 +62,7 @@ def intrinsic_prior(approximant):
             "phi_jl": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
             "geocent_time": 0.0,
         }
-    elif approximant in ["SEOBNRv5HM", "SEOBNRv5EHM"]:
+    elif approximant in ["SEOBNRv5HM"]:
         # quasi-circular aligned-spin
         intrinsic_dict = {
             "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
@@ -76,7 +76,7 @@ def intrinsic_prior(approximant):
             "chi_2": 'bilby.gw.prior.AlignedSpin(name="chi_2", a_prior=Uniform(minimum=0, maximum=0.99))',
             "geocent_time": 0.0,
         }
-    elif approximant in ["SEOBNRv5EHM"]:
+    elif approximant in ["SEOBNRv5EHM", "TEOBResumSDALI"]:
         intrinsic_dict = {
             "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
             "mass_2": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
@@ -100,7 +100,7 @@ def intrinsic_prior(approximant):
 
 @pytest.fixture
 def wfg(uniform_fd_domain, approximant):
-    if approximant in ["SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM"]:
+    if approximant in ["SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM", "TEOBResumSDALI"]:
         wfg_class = NewInterfaceWaveformGenerator
     else:
         wfg_class = WaveformGenerator
@@ -134,7 +134,7 @@ def tolerances(approximant):
         # get should not have a big effect in practice.
         return 2e-2, 1e-5
 
-    elif approximant in ["SEOBNRv4PHM", "SEOBNRv5EHM"]:
+    elif approximant in ["SEOBNRv4PHM", "SEOBNRv5EHM", "TEOBResumSDALI"]:
         # The mismatches are typically be of order 1e-5. This is exclusively due to
         # different tapering. The reference polarizations are tapered and FFTed on the
         # level of polarizations, while for generate_hplus_hcross_m, the tapering and FFT
@@ -153,10 +153,13 @@ def tolerances(approximant):
 
 # Uncomment to test only one approximant.
 try:
-    import pyseobnr
+    # import pyseobnr
+    import EOBRun_module
 
-    approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM"]
+    # approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM", "TEOBResumSDALI"]
+    approximant_list = ["TEOBResumSDALI"]
 except ImportError:
+    raise ValueError("TMP")
     approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM"]
 
 
@@ -183,7 +186,7 @@ def test_generate_hplus_hcross_m(intrinsic_prior, wfg, num_evaluations, toleranc
             ]
         )
 
-        debug = False
+        debug = True
         if debug:
             maxval = max(mismatches[-1])
             idx = mismatches[-1].index(maxval)
@@ -198,6 +201,7 @@ def test_generate_hplus_hcross_m(intrinsic_prior, wfg, num_evaluations, toleranc
             plt.xscale("log")
             plt.xlim((5, 128))
             plt.title(f"{p}, mismatch={maxval}")
+            plt.savefig("/work/nihargupte/src/dingo/tests/gw/mm.png")
             plt.show()
 
     mismatches = np.array(mismatches)

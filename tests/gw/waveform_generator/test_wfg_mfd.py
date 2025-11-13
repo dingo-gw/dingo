@@ -24,7 +24,7 @@ def mfd():
     return domain
 
 
-@pytest.fixture(params=["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM"])
+@pytest.fixture(params=["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM", "TEOBResumSDALI"])
 def approximant(request):
     return request.param
 
@@ -49,7 +49,7 @@ def intrinsic_prior(approximant):
             "phi_jl": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
             "geocent_time": 0.0,
         }
-    elif approximant in ["SEOBNRv5HM", "SEOBNRv5EHM"]:
+    elif approximant in ["SEOBNRv5HM"]:
         # quasi-circular aligned-spin
         intrinsic_dict = {
             "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
@@ -63,7 +63,7 @@ def intrinsic_prior(approximant):
             "chi_2": 'bilby.gw.prior.AlignedSpin(name="chi_2", a_prior=Uniform(minimum=0, maximum=0.99))',
             "geocent_time": 0.0,
         }
-    elif approximant in ["SEOBNRv5EHM"]:
+    elif approximant in ["SEOBNRv5EHM", "TEOBResumSDALI"]:
         intrinsic_dict = {
             "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
             "mass_2": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
@@ -87,7 +87,7 @@ def intrinsic_prior(approximant):
 
 @pytest.fixture
 def wfg_mfd(mfd, approximant):
-    if approximant in ["SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM"]:
+    if approximant in ["SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM", "TEOBResumSDALI"]:
         wfg_class = NewInterfaceWaveformGenerator
     else:
         wfg_class = WaveformGenerator
@@ -102,7 +102,7 @@ def wfg_mfd(mfd, approximant):
 
 @pytest.fixture
 def wfg_ufd(mfd, approximant):
-    if approximant in ["SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM"]:
+    if approximant in ["SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM", "TEOBResumSDALI"]:
         wfg_class = NewInterfaceWaveformGenerator
     else:
         wfg_class = WaveformGenerator
@@ -134,9 +134,11 @@ def tolerances(approximant):
 
 # Uncomment to test only one approximant.
 try:
-    import pyseobnr
+    # import pyseobnr
+    import EOBRun_module
 
-    approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM"]
+    # approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM", "TEOBResumSDALI"]
+    approximant_list = ["TEOBResumSDALI"]
 except ImportError:
     approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM"]
 

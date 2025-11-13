@@ -4,6 +4,7 @@ from math import isclose
 
 import numpy as np
 import astropy.units as u
+import astropy.constants as ac
 from typing import Dict, List, Tuple, Union, Callable
 from numbers import Number
 import warnings
@@ -727,7 +728,7 @@ class WaveformGenerator:
             if LS.SimInspiralImplementedFDApproximants(self.approximant):
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: FD)
-                hlm_fd, iota = self.generate_FD_modes_LO(parameters)
+                hlm_fd, iota = self.generate_FD_modes_L0(parameters)
 
                 # Step 2: Transform modes to target domain.
                 # Not required here, as approximant domain and target domain are both FD.
@@ -769,7 +770,7 @@ class WaveformGenerator:
 
                 self._use_base_domain = True
                 self._domain_transform = DecimateAll(self._domain)
-                hlm_fd, iota = self.generate_FD_modes_LO(parameters)
+                hlm_fd, iota = self.generate_FD_modes_L0(parameters)
                 pol_m = wfg_utils.get_polarizations_from_fd_modes_m(
                     hlm_fd, iota, parameters["phase"]
                 )
@@ -800,7 +801,7 @@ class WaveformGenerator:
         else:
             return pol_m
 
-    def generate_FD_modes_LO(self, parameters):
+    def generate_FD_modes_L0(self, parameters):
         """
         Generate FD modes in the L0 frame.
 
@@ -957,7 +958,8 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             "antisymmetric_modes_hm",
         }
         extra_wf_kwargs = {k: v for k, v in kwargs.items() if k in allowed_extra_kwargs}
-        extra_wf_kwargs["lmax_nyquist"] = kwargs.get("lmax_nyquist", 2)
+        if "SEOB" in self.approximant_str and not "ROM" in self.approximant_str: 
+            extra_wf_kwargs["lmax_nyquist"] = kwargs.get("lmax_nyquist", 2)
         self.extra_wf_kwargs = extra_wf_kwargs
 
     @property
@@ -1058,7 +1060,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         }
 
 
-        if self.approximant_str == "SEOBNRv5EHM":
+        if self.approximant_str in ["SEOBNRv5EHM", "TEOBResumSDALI"]:
             # eccentric parameters
             log_ecc = p.get("log10_eccentricity")
             ecc = p.get("eccentricity")
@@ -1084,18 +1086,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 'meanPerAno' : mean_per_ano * u.rad,
             })
 
-        # SEOBNRv5 specific parameters
-        if "postadiabatic" in p:
-            params_gwsignal["postadiabatic"] = p["postadiabatic"]
 
-            if "postadiabatic_type" in p:
-                params_gwsignal["postadiabatic_type"] = p["postadiabatic_type"]
-
-        if "lmax_nyquist" in p:
-            params_gwsignal["lmax_nyquist"] = p["lmax_nyquist"]
-        else:
-            if not "ROM" in self.approximant_str:
-                params_gwsignal["lmax_nyquist"] = 2
         params_gwsignal.update(self.extra_wf_kwargs)
 
         if return_target_function:
@@ -1256,18 +1247,28 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         generator = new_interface_get_waveform_generator(self.approximant_str)
         if isinstance(self.domain, UniformFrequencyDomain):
             # Generate FD modes in for frequencies [-f_max, ..., 0, ..., f_max].
-            if generator.domain == "freq":
+            if self.approximant_str in ["SEOBNRv5EHM", "TEOBResumSDALI"]:
+                # SEOBNRv5EHM and TEOBResumSDALI use these conditioning routines
+                # assert LS.SimInspiralImplementedTDApproximants(self.approximant)
                 # Step 1: generate waveform modes in L0 frame in native domain of
-                # approximant (here: FD)
-                hlm_fd, iota = self.generate_FD_modes_LO(parameters)
+                # approximant (here: TD)
+                hlm_td, iota = self.generate_TD_modes_L0(parameters)
 
                 # Step 2: Transform modes to target domain.
-                # Not required here, as approximant domain and target domain are both FD.
+                # This requires tapering of TD modes, and FFT to transform to FD.
+                # TEOB and SEOB have slightly different conditioning routine implementations 
+                if self.approximant_str in ["TEOBResumSDALI"]:
+                    wfg_utils.taper_td_modes_in_place_gwsignal(hlm_td)
+                    hlm_fd = wfg_utils.td_modes_to_fd_modes_gwsignal(hlm_td, self.domain)
+                else:
+                    wfg_utils.taper_td_modes_in_place(hlm_td)
+                    hlm_fd = wfg_utils.td_modes_to_fd_modes(hlm_td, self.domain)
 
-            elif (
-                self.approximant_str == "SEOBNRv5PHM"
-                or self.approximant_str == "SEOBNRv5HM"
-            ):
+            # TODO, why are these different? Shouldn't the gwsignal and non-gwsignal be the 
+            # exact same implementation?
+
+                
+            elif self.approximant_str in ["SEOBNRv5PHM", "SEOBNRv5HM"]:
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: TD), applying standard conditioning
                 hlm_td, iota = self.generate_TD_modes_L0_conditioned_extra_time(
@@ -1276,17 +1277,18 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
 
                 # Step 2: Transform modes to target domain.
                 hlm_fd = wfg_utils.td_modes_to_fd_modes(hlm_td, self.domain)
-            else:
-                # SEOBNRv5EHM uses this conditioning routine
-                # assert LS.SimInspiralImplementedTDApproximants(self.approximant)
+
+            elif generator.domain == "freq":
                 # Step 1: generate waveform modes in L0 frame in native domain of
-                # approximant (here: TD)
-                hlm_td, iota = self.generate_TD_modes_L0(parameters)
+                # approximant (here: FD)
+                hlm_fd, iota = self.generate_FD_modes_L0(parameters)
 
                 # Step 2: Transform modes to target domain.
-                # This requires tapering of TD modes, and FFT to transform to FD.
-                wfg_utils.taper_td_modes_in_place(hlm_td)
-                hlm_fd = wfg_utils.td_modes_to_fd_modes(hlm_td, self.domain)
+                # Not required here, as approximant domain and target domain are both FD.
+
+            else:
+                raise NotImplementedError()
+
 
             # Step 3: Separate negative and positive frequency parts of the modes,
             # and add contributions according to their transformation behavior under
@@ -1305,7 +1307,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         else:
             return pol_m
 
-    def generate_FD_modes_LO(self, parameters):  # Pending to adapt
+    def generate_FD_modes_L0(self, parameters):  # Pending to adapt
         """
         Generate FD modes in the L0 frame.
 
@@ -1402,6 +1404,25 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         hlm_td = gws_wfm.GenerateTDModes(parameters_gwsignal, generator)
         hlms_lal = {}
 
+        # TEOBREsumS returns the modes unscaled in the distance version when calling GenerateTDModes
+        # therefore, we rescale them here
+        if "TEOB" in self.approximant_str:
+            m1, m2 = parameters_gwsignal["mass1"], parameters_gwsignal["mass2"]
+            nu = m1 * m2 / (m1 + m2) ** 2 
+            distance_rescaling = -(
+                (
+                    nu
+                    * (parameters_gwsignal["mass1"] + parameters_gwsignal["mass2"])
+                    / parameters_gwsignal["distance"]
+                    * ac.G
+                    / ac.c ** 2
+                )
+                .to(u.dimensionless_unscaled)
+                .value
+            )
+        else:
+            distance_rescaling = 1.0
+
         for key, value in hlm_td.items():
             if type(key) != str:
                 hlm_lal = lal.CreateCOMPLEX16TimeSeries(
@@ -1412,8 +1433,9 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                     lal.DimensionlessUnit,
                     len(value),
                 )
-                hlm_lal.data.data = value.value
+                hlm_lal.data.data = value.value * distance_rescaling
                 hlms_lal[key] = hlm_lal
+
 
         return hlms_lal, parameters_gwsignal["inclination"].value
 
