@@ -1034,7 +1034,6 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             # note this is the orbit averaged reference frequency
             if self.approximant_str == "SEOBNRv5EHM":
                 f_min = self.f_ref
-            f_min = self.domain.f_min
         # parameters needed for TD waveforms
         delta_t = 0.5 / self.domain.f_max
 
@@ -1085,7 +1084,6 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 'longAscNodes' : longitude_ascending_nodes * u.rad,
                 'meanPerAno' : mean_per_ano * u.rad,
             })
-
 
         params_gwsignal.update(self.extra_wf_kwargs)
 
