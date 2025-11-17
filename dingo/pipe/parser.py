@@ -1526,6 +1526,6 @@ def create_parser(top_level=True, usage=None):
         "Optional model metadata",
         description="Machine-written only posterior model metadata.",
     )
-    metadata_parser.add_argument("--model-metadata", type=str, default="{}")
+    metadata_parser.add_argument("--model-metadata-str", type=str, default="{}")
 
     return parser

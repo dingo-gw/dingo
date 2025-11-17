@@ -37,7 +37,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
             command_line_args=args.__dict__,
             unknown_command_line_args=unknown_args,
             injection_parameters=None,
-            model=args.model_metadata,
+            model=json.loads(args.model_metadata_str),
             # bilby_version=bilby.__version__,
             # bilby_pipe_version=get_version_information(),
         )

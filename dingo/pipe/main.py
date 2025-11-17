@@ -584,7 +584,7 @@ def main():
     args, unknown_args = parse_args(get_command_line_arguments(), parser)
 
     importance_sampling_updates, model_metadata_str = fill_in_arguments_from_model(args)
-    args.model_metadata = model_metadata_str
+    args.model_metadata_str = model_metadata_str
 
     inputs = MainInput(args, unknown_args, importance_sampling_updates)
     write_complete_config_file(parser, args, inputs)
