@@ -313,7 +313,7 @@ class ApplyCalibrationUncertainty(object):
         calibration_envelope,
         num_calibration_curves,
         num_calibration_nodes,
-        correction_type="data",
+        correction_type=None,
     ):
         r"""
         Parameters
@@ -336,7 +336,8 @@ class ApplyCalibrationUncertainty(object):
             Monte Carlo estimate of the marginalized likelihood integral.
         num_calibration_nodes : int
             Number of log-spaced frequency nodes $f_i$ to use in defining the spline.
-        correction_type : str = "data"
+        correction_type : dict
+            Dictionary of the form ``{"H1": type, "L1": type}``.
             It was discovered in Oct. 2024 that the calibration envelopes specified by
             the detchar group were not being used correctly by PE codes. According to
             the detchar group, envelopes are over $\eta$ which is defined as:
@@ -350,6 +351,7 @@ class ApplyCalibrationUncertainty(object):
             now an additional option where one can specify correction_type = "data"
             if the calibration envelopes are over $\eta$ and correction_type = "template"
             if the calibration envelopes are over $\alpha$.
+            If `None` is passed, {H1:data, L1:data, V1:template, K1:data} is assumed.
         """
 
         self.ifo_list = ifo_list
@@ -357,7 +359,7 @@ class ApplyCalibrationUncertainty(object):
 
         self.data_domain = data_domain
         self.calibration_prior = {}
-        if all([s.endswith(".txt") for s in calibration_envelope.values()]):
+        if all([s.endswith((".txt", ".dat")) for s in calibration_envelope.values()]):
             # Generating .h5 lookup table from priors in .txt file
             self.calibration_envelope = calibration_envelope
             for ifo in self.ifo_list:
@@ -384,7 +386,7 @@ class ApplyCalibrationUncertainty(object):
                     self.data_domain.f_max,
                     num_calibration_nodes,
                     ifo.name,
-                    correction_type=correction_type,
+                    correction_type=correction_type[ifo.name],
                 )
 
         else:
