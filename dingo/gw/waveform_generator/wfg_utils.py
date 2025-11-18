@@ -214,10 +214,12 @@ def td_modes_to_fd_modes_gwsignal(hlm_td, domain):
         hlm_fd_cond = (hlm_fd_cond / (2 * hlm_fd_cond.df)).value
 
         # setting up reflection around boundary to create two-sided FFT
-        hlm_fd_cond = np.concatenate((hlm_fd_cond[::-1], hlm_fd_cond[1:]), axis=0)
+        hlm_fd_cond = np.concatenate((hlm_fd_cond[::-1], np.conj(hlm_fd_cond[1:])), axis=0)
         
         hlm_fd_cond[-1] = hlm_fd_cond[0]
         hlm_fd[mode] = hlm_fd_cond
+
+        hlm_fd[mode] = hlm_fd[mode] / (2 * hlm_fd_cond.df)
 
     return hlm_fd
 
