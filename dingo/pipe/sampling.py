@@ -125,17 +125,17 @@ class SamplingInput(Input):
             init_model = build_model_from_kwargs(
                 filename=self.model_init, device=self.device, load_training_info=False
             )
-            init_sampler = GWSampler(model=init_model, zero_noise=self.zero_noise, batch_size=self.batch_size)
+            init_sampler = GWSampler(model=init_model, duplicate_samples=self.zero_noise, batch_size=self.batch_size)
             self.dingo_sampler = GWSamplerGNPE(
                 model=model,
                 init_sampler=init_sampler,
                 num_iterations=self.num_gnpe_iterations,
-                zero_noise=self.zero_noise, batch_size=self.batch_size
+                duplicate_samples=self.zero_noise, batch_size=self.batch_size
             )
 
         else:
             self.gnpe = False
-            self.dingo_sampler = GWSampler(model=model, zero_noise=self.zero_noise, batch_size=self.batch_size)
+            self.dingo_sampler = GWSampler(model=model, duplicate_samples=self.zero_noise, batch_size=self.batch_size)
 
         self.dingo_sampler.context = self.context
         self.dingo_sampler.event_metadata = self.event_metadata
@@ -196,7 +196,7 @@ class SamplingInput(Input):
                 **self.density_recovery_settings,
             )
 
-        self.dingo_sampler.run_sampler(self.num_samples, batch_size=self.batch_size, zero_noise_alteration=self.zero_noise)
+        self.dingo_sampler.run_sampler(self.num_samples, batch_size=self.batch_size)
         self.dingo_sampler.to_hdf5(label=self.label, outdir=self.result_directory)
 
         if self.n_parallel > 1:

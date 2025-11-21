@@ -68,7 +68,7 @@ class Sampler(object):
         model : BasePosteriorModel
         """
         self.model = model
-        self.zero_noise = kwargs['zero_noise']
+        self.duplicate_samples = kwargs['duplicate_samples']
         self.batch_size = kwargs['batch_size']
 
         self.metadata = self.model.metadata.copy()
@@ -190,7 +190,6 @@ class Sampler(object):
         self,
         num_samples: int,
         batch_size: Optional[int] = None,
-        zero_noise_alteration: Optional[bool] = False,
     ):
         """
         Generates samples and stores them in self.samples. Conditions the model on
@@ -401,10 +400,10 @@ class GNPESampler(Sampler):
             Number of GNPE iterations to be performed by sampler.
         """
         self.gnpe_parameters = []  # Should be set in subclass _initialize_transform()
-        self.zero_noise = kwargs['zero_noise']
+        self.duplicate_samples = kwargs['duplicate_samples']
         self.batch_size = kwargs['batch_size']
 
-        super().__init__(model, zero_noise=self.zero_noise, batch_size=self.batch_size)
+        super().__init__(model, duplicate_samples=self.duplicate_samples, batch_size=self.batch_size)
         self.init_sampler = init_sampler
         self.num_iterations = num_iterations
         self.iteration_tracker = None

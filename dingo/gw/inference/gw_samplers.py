@@ -50,8 +50,7 @@ class GWSamplerMixin(object):
         self.t_ref = self.base_model_metadata["train_settings"]["data"]["ref_time"]
         self._pesummary_package = "gw"
         self._result_class = Result
-        if 'zero_noise' in kwargs:
-            self.zero_noise = kwargs['zero_noise']
+        self.duplicate_samples = kwargs['duplicate_samples']
 
     def _build_domain(self):
         """
@@ -186,7 +185,7 @@ class GWSampler(GWSamplerMixin, Sampler):
         transform_pre = []
         #   * in case of MultibandedFrequencyDomain, decimate data from base domain
         
-        if self.zero_noise:
+        if self.duplicate_samples:
             transform_pre.append(DuplicateSamples(batch_size=self.batch_size))
 
         if isinstance(self.domain, MultibandedFrequencyDomain):
@@ -196,7 +195,7 @@ class GWSampler(GWSamplerMixin, Sampler):
 
         transform_pre.append(WhitenAndScaleStrain(self.domain.noise_std))
         
-        if self.zero_noise:
+        if self.duplicate_samples:
             transform_pre.append(AddWhiteNoiseComplex())
         
         #   * whiten and scale strain (since the inference network expects standardized
