@@ -1525,4 +1525,10 @@ def create_parser(top_level=True, usage=None):
         ),
     )
 
+    metadata_parser = parser.add_argument_group(
+        "Optional model metadata",
+        description="Machine-written only posterior model metadata.",
+    )
+    metadata_parser.add_argument("--model-metadata-str", type=str, default="{}")
+
     return parser
