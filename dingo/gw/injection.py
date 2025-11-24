@@ -291,7 +291,7 @@ class GWSignal(object):
         else:
             raise TypeError("Invalid ASD type.")
         asd = {
-            k: self.data_domain.update_data(v, low_value=1e-20) for k, v in asd.items()
+            k: self.data_domain.update_data(v, low_value=1.0) for k, v in asd.items()
         }
         return asd
 
@@ -304,15 +304,6 @@ class GWSignal(object):
             if asd.domain.domain_dict != self.data_domain.domain_dict:
                 print("Updating ASDDataset domain to match data domain.")
                 domain_dict = self.data_domain.domain_dict
-                if "window_factor" in domain_dict:
-                    print("Dropping window factor for update.")
-                    del domain_dict["window_factor"]
-                if (
-                    "base_domain" in domain_dict
-                    and "window_factor" in domain_dict["base_domain"]
-                ):
-                    print("Dropping window factor for update.")
-                    del domain_dict["base_domain"]["window_factor"]
                 asd.update_domain(domain_dict)
         elif isinstance(asd, dict):
             if set(asd.keys()) != set(ifo_names):

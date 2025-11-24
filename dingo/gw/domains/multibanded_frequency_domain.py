@@ -356,21 +356,12 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
         return len(self) - 1
 
     @property
-    def window_factor(self):
-        return self.base_domain.window_factor
-
-    @window_factor.setter
-    def window_factor(self, value):
-        """Set window factor of base domain."""
-        self.base_domain.window_factor = float(value)
-
-    @property
     def f_max(self) -> float:
-        return self._f_base_upper[-1]
+        return float(self._f_base_upper[-1])
 
     @property
     def f_min(self) -> float:
-        return self._f_base_lower[0]
+        return float(self._f_base_lower[0])
 
     @property
     def duration(self) -> float:

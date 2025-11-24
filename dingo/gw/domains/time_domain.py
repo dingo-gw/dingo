@@ -9,7 +9,6 @@ class TimeDomain(Domain):
 
     The time bins are assumed to be uniform between [0, duration]
     with spacing 1 / sampling_rate.
-    window_factor is used to compute noise_std().
     """
 
     def __init__(self, time_duration: float, sampling_rate: float):

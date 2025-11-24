@@ -1,7 +1,11 @@
 import os
 import sys
 
+import dingo.pipe.create_injections  # Needed for delta-function time priors.
+
+import bilby
 from bilby_pipe.input import Input
+from bilby_pipe.plotting_utils import plot_whitened_data
 from bilby_pipe.data_generation import DataGenerationInput as BilbyDataGenerationInput
 from bilby.core.prior import PriorDict
 from bilby_pipe.utils import (
@@ -15,19 +19,25 @@ import lalsimulation as LS
 import numpy as np
 
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
-from dingo.gw.prior import build_prior_with_defaults
-from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.data.event_dataset import EventDataset
-from dingo.gw.domains import UniformFrequencyDomain
+from dingo.gw.domains import UniformFrequencyDomain, build_domain_from_model_metadata
 from dingo.gw.injection import Injection
 from dingo.pipe.parser import create_parser
-from dingo.pipe.main import fill_in_arguments_from_model
 
 logger.name = "dingo_pipe"
 
 
 class DataGenerationInput(BilbyDataGenerationInput):
     def __init__(self, args, unknown_args, create_data=True):
+        # if running on the OSG, the network has been transferred to
+        # the local directory, replace osdf string
+        if args.osg:
+            self.model = os.path.basename(args.model)
+            self.model_init = os.path.basename(args.model_init)
+        else:
+            self.model = args.model
+            self.model_init = args.model_init
+
         Input.__init__(self, args, unknown_args)
         # Generic initialisation
         self.meta_data = dict(
@@ -42,6 +52,9 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # Admin arguments
         self.ini = args.ini
         self.transfer_files = args.transfer_files
+
+        # Global settings
+        # self.cosmology = args.cosmology
 
         # Run index arguments
         self.idx = args.idx
@@ -68,6 +81,11 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.importance_sampling = args.importance_sampling_generation
         self.importance_sampling_updates = args.importance_sampling_updates
         if self.importance_sampling:
+            # Updates to frequency range should not affect the data generation for importance sampling
+            if "minimum_frequency" in self.importance_sampling_updates:
+                self.importance_sampling_updates.pop("minimum_frequency")
+            if "maximum_frequency" in self.importance_sampling_updates:
+                self.importance_sampling_updates.pop("maximum_frequency")
             vars(args).update(self.importance_sampling_updates)
 
         # Data arguments
@@ -104,6 +122,9 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.waveform_generator_class = (
             "bilby.gw.waveform_generator.LALCBCWaveformGenerator"
         )
+        # self.waveform_generator_class_ctor_args = (
+        #     args.waveform_generator_constructor_dict
+        # )
         self.waveform_approximant = args.waveform_approximant
         self.catch_waveform_errors = args.catch_waveform_errors
         # TODO: These are set to parser defaults. Fix to set from model.
@@ -113,17 +134,21 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.pn_amplitude_order = 0
         self.mode_array = None
         # don't set self.waveform_arguments_dict, it will be updated later by injection_waveform_arguments
-        self.waveform_arguments_dict = None 
+        self.waveform_arguments_dict = None
         self.injection_waveform_arguments = args.injection_waveform_arguments
         self.numerical_relativity_file = args.numerical_relativity_file
         self.dingo_injection = args.dingo_injection
         self.injection_waveform_approximant = args.injection_waveform_approximant
-        if args.injection_waveform_approximant in ["SEOBNRv5PHM", "SEOBNRv5EHM", "SEOBNRv5HM"]:
+        if args.injection_waveform_approximant in [
+            "SEOBNRv5PHM",
+            "SEOBNRv5EHM",
+            "SEOBNRv5HM",
+        ]:
             self.injection_frequency_domain_source_model = "gwsignal_binary_black_hole"
             self.frequency_domain_source_model = "gwsignal_binary_black_hole"
         else:
             self.injection_frequency_domain_source_model = "lal_binary_black_hole"
-            self.frequency_domain_source_model = "lal_binary_black_hole" 
+            self.frequency_domain_source_model = "lal_binary_black_hole"
 
         # DINGO mod
         self.save_bilby_data_dump = args.save_bilby_data_dump
@@ -155,6 +180,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
         #
         # # Calibration
         # self.calibration_model = args.calibration_model
+        # self.calibration_correction_type = args.calibration_correction_type
         # self.spline_calibration_envelope_dict = args.spline_calibration_envelope_dict
         # self.spline_calibration_amplitude_uncertainty_dict = (
         #     args.spline_calibration_amplitude_uncertainty_dict
@@ -216,6 +242,33 @@ class DataGenerationInput(BilbyDataGenerationInput):
 
         if self.injection:
             self._inject_dingo_signal(args)
+
+    @BilbyDataGenerationInput.interferometers.setter
+    def interferometers(self, interferometers):
+        # Monkey patch to avoid bilby_pipe zeroing data below
+        # self.minimum_frequency_dict and above self.maximum_frequency_dict. Remove
+        # this code if we are happy to let bilby_pipe do this. Possible issue is edge
+        # effects for multi-banded frequency domain, so instead we do the masking
+        # within Dingo.
+        for ifo in interferometers:
+            if isinstance(ifo, bilby.gw.detector.Interferometer) is False:
+                raise BilbyPipeError(f"ifo={ifo} is not a bilby Interferometer")
+            # if self.minimum_frequency is not None:
+            #     ifo.minimum_frequency = self.minimum_frequency_dict[ifo.name]
+            # if self.maximum_frequency is not None:
+            #     ifo.maximum_frequency = self.maximum_frequency_dict[ifo.name]
+            # if self.calibration_model is not None:
+            #     self.add_calibration_model_to_interferometers(ifo)
+
+        self._interferometers = interferometers
+        self.data_set = True
+        if self.plot_data:
+            interferometers.plot_data(outdir=self.data_directory, label=self.label)
+            plot_whitened_data(
+                interferometers=interferometers,
+                data_directory=self.data_directory,
+                label=self.label,
+            )
 
     def _inject_dingo_signal(self, args):
         """Generate a GW signal using the dingo.gw.injection class and add it to the
@@ -289,11 +342,23 @@ class DataGenerationInput(BilbyDataGenerationInput):
         for easy reading by pesummary and Bilby.
         """
 
+        try:
+            model = build_model_from_kwargs(
+                filename=self.model, device="meta", load_training_info=False
+            )
+        except RuntimeError:
+            # 'meta' is not supported by older version of python / torch
+            model = build_model_from_kwargs(
+                filename=self.model, device="cpu", load_training_info=False
+            )
+        domain = build_domain_from_model_metadata(model.metadata, base=True)
+        assert isinstance(domain, UniformFrequencyDomain)
+
         if self.save_bilby_data_dump:
-            # this is needed because we want bilby to use the updated DINGO 
+            # this is needed because we want bilby to use the updated DINGO
             # prior
             self.waveform_arguments_dict = self.injection_waveform_arguments
-            self.prior_dict = self.priors 
+            self.prior_dict = self.priors
             self.likelihood_type = "GravitationalWaveTransient"
             self.calibration_marginalization = False
             self.phase_marginalization = False
@@ -303,8 +368,8 @@ class DataGenerationInput(BilbyDataGenerationInput):
             self._distance_marginalization_lookup_table = None
             self.reference_frame = "sky"
             self.fiducial_parameters = None
-            self.update_fiducial_parameters = None 
-            self.epsilon = None 
+            self.update_fiducial_parameters = None
+            self.epsilon = None
             self.jitter_time = True
             self.save_data_dump()
 
@@ -317,14 +382,9 @@ class DataGenerationInput(BilbyDataGenerationInput):
                 frequency_array
             )
 
-            # These arrays extend up to self.sampling_frequency. Truncate them to
-            # self.maximum_frequency, and also set the asd to 1.0 below
-            # self.minimum_frequency.
-            domain = UniformFrequencyDomain(
-                f_min=self.minimum_frequency,
-                f_max=self.maximum_frequency,
-                delta_f=1 / self.duration,
-            )
+            # These arrays extend up to self.sampling_frequency / 2. Truncate them to
+            # the model maximum frequency, and also set the ASD to 1.0 below model
+            # minimum frequency.
             strain = domain.update_data(strain)
             asd = domain.update_data(asd, low_value=1.0)
 
@@ -347,10 +407,10 @@ class DataGenerationInput(BilbyDataGenerationInput):
             "detectors": self.detectors,
             "f_s": self.sampling_frequency,
             "T": self.duration,
-            "f_min": self.minimum_frequency,
-            "f_max": self.maximum_frequency,
             "window_type": "tukey",
             "roll_off": self.tukey_roll_off,
+            "minimum_frequency": self.minimum_frequency_dict,
+            "maximum_frequency": self.maximum_frequency_dict,
         }
 
         for k in [
@@ -382,10 +442,15 @@ class DataGenerationInput(BilbyDataGenerationInput):
             # Dingo and Bilby have different geocent_time conventions.
             settings["injection_parameters"]["geocent_time"] -= self.trigger_time
             settings["optimal_SNR"] = {
-                k: v["optimal_SNR"] for k, v in self.interferometers.meta_data.items()
+                k: v["optimal_SNR"].item()
+                if hasattr(v["optimal_SNR"], "item")
+                else v["optimal_SNR"]
+                for k, v in self.interferometers.meta_data.items()
             }
             settings["matched_filter_SNR"] = {
-                k: v["matched_filter_SNR"]
+                k: v["matched_filter_SNR"].item()
+                if hasattr(v["matched_filter_SNR"], "item")
+                else v["matched_filter_SNR"]
                 for k, v in self.interferometers.meta_data.items()
             }
 
@@ -424,23 +489,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
         else:
             self._importance_sampling_updates = None
 
-    def _set_interferometers_from_gaussian_noise(self):
-        super()._set_interferometers_from_gaussian_noise()
-        # Scale the FD strain appropriately by the window factor (not done by default
-        # in Bilby / bilby_pipe). This is to ensure that the injection is consistent
-        # with TD data with a given PSD, making it consistent also with DINGO network
-        # training.
-        for ifo in self.interferometers:
-            # This is a hack to set the window factor. It ensures also that the SNRs
-            # are calculated correctly.
-            td_strain = ifo.time_domain_strain
-            # TODO: correct for window factor changes https://git.ligo.org/pe/pe-group-coordination/-/issues/1
-            ifo.strain_data.time_domain_window(roll_off=self.tukey_roll_off)
-            ifo.strain_data.frequency_domain_strain = (
-                ifo.strain_data.frequency_domain_strain
-                * np.sqrt(ifo.strain_data.window_factor)
-            )
-
     @property
     def prior_dict_updates(self):
         """The input prior_dict from the ini (if given)
@@ -469,11 +517,12 @@ class DataGenerationInput(BilbyDataGenerationInput):
             self._convert_prior_dict_key(key): val
             for key, val in prior_dict_updates.items()
         }
-        
+
     def _get_priors(self, add_time=True):
         priors = super()._get_priors(add_time=add_time)
         priors.update(PriorDict(self.prior_dict_updates))
         return priors
+
 
 def create_generation_parser():
     """Data generation parser creation"""

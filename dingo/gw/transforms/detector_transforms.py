@@ -7,7 +7,7 @@ from lal import GreenwichMeanSiderealTime
 from typing import Union
 from bilby.gw.detector import calibration
 from bilby.gw.prior import CalibrationPriorDict
-
+from bilby_pipe.utils import CALIBRATION_CORRECTION_TYPE_LOOKUP
 
 CC = 299792458.0
 
@@ -313,7 +313,7 @@ class ApplyCalibrationUncertainty(object):
         calibration_envelope,
         num_calibration_curves,
         num_calibration_nodes,
-        correction_type="data",
+        correction_type=None,
     ):
         r"""
         Parameters
@@ -336,7 +336,9 @@ class ApplyCalibrationUncertainty(object):
             Monte Carlo estimate of the marginalized likelihood integral.
         num_calibration_nodes : int
             Number of log-spaced frequency nodes $f_i$ to use in defining the spline.
-        correction_type : str = "data"
+        correction_type : dict | str
+            Dictionary of the form ``{"H1": type, "L1": type}``
+            or a string indicating a single correction type applied to all detectors.
             It was discovered in Oct. 2024 that the calibration envelopes specified by
             the detchar group were not being used correctly by PE codes. According to
             the detchar group, envelopes are over $\eta$ which is defined as:
@@ -350,14 +352,26 @@ class ApplyCalibrationUncertainty(object):
             now an additional option where one can specify correction_type = "data"
             if the calibration envelopes are over $\eta$ and correction_type = "template"
             if the calibration envelopes are over $\alpha$.
+            If `None` is passed, {H1:data, L1:data, V1:template, K1:data} is assumed.
         """
 
         self.ifo_list = ifo_list
         self.num_calibration_curves = num_calibration_curves
 
+        if correction_type is None:
+            correction_type_dict = {
+                ifo: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo] for ifo in self.ifo_list
+            }
+        elif correction_type == "data" or correction_type == "template":
+            correction_type_dict = {ifo: correction_type for ifo in self.ifo_list}
+        elif isinstance(correction_type, dict):
+            correction_type_dict = correction_type
+        else:
+            raise Exception(f"{correction_type} not understood")
+
         self.data_domain = data_domain
         self.calibration_prior = {}
-        if all([s.endswith(".txt") for s in calibration_envelope.values()]):
+        if all([s.endswith((".txt", ".dat")) for s in calibration_envelope.values()]):
             # Generating .h5 lookup table from priors in .txt file
             self.calibration_envelope = calibration_envelope
             for ifo in self.ifo_list:
@@ -384,7 +398,7 @@ class ApplyCalibrationUncertainty(object):
                     self.data_domain.f_max,
                     num_calibration_nodes,
                     ifo.name,
-                    correction_type=correction_type,
+                    correction_type=correction_type_dict[ifo.name],
                 )
 
         else:

@@ -27,6 +27,7 @@ from .utils import dict_to_string
 
 from ..gw.domains.build_domain import build_domain_from_model_metadata
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
+from ..gw.inference.gw_samplers import check_frequency_updates
 from ..gw.injection import Injection
 from ..gw.noise.asd_dataset import ASDDataset
 
@@ -78,13 +79,17 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
 
     data_settings = model_metadata["train_settings"]["data"]
 
+    # In dingo_pipe, we download and prepare data based on the model frequency range.
+    # This is because different maximum frequencies for different detectors would
+    # require separate domain objects within Dingo, and this is not implemented.
+    # Instead, we update frequency ranges using masking within Dingo. Updated frequency
+    # ranges are passed around within Dingo using the event_metadata.
+
     model_args = {
         "duration": domain.duration,
         "minimum_frequency": domain.f_min,
         "maximum_frequency": domain.f_max,
         "detectors": data_settings["detectors"],
-        "sampling_frequency": data_settings["window"]["f_s"],
-        "tukey_roll_off": data_settings["window"]["roll_off"],
         "waveform_approximant": model_metadata["dataset_settings"][
             "waveform_generator"
         ]["approximant"],
@@ -103,7 +108,18 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
         if args_v is not None:
             # Convert type from str to enable comparison.
             try:
-                if isinstance(v, float):
+                # it's possible that the attribute is a dict
+                # or list.
+                # for example, the minimum-frequency could be
+                # {H1: 20, L1:20}
+                if isinstance(args_v, str) and "{" and "}" in args_v:
+                    args_v = convert_string_to_dict(args_v)
+                elif isinstance(args_v, list):
+                    # if it's a list we need to strip quotes
+                    # e.g. detectors = ["'H1'", "'L1'"]
+                    # should become ["H1", "L1"] for the comparison
+                    args_v = [l.strip("'") for l in args_v]
+                elif isinstance(v, float):
                     args_v = float(args_v)
                 elif isinstance(v, int):
                     args_v = int(args_v)
@@ -111,19 +127,43 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
                 pass
 
             if args_v != v:
+                # this is for when the minimum-frequency is a float
+                # but args_v is a dict
+                if isinstance(args_v, dict) and all(
+                    val == v for val in args_v.values()
+                ):
+                    continue
+
                 if k in ["waveform_approximant"]:
                     raise NotImplementedError(
                         "Cannot change waveform approximant during importance sampling."
                     )  # TODO: Implement this. Also no error if passed explicitly as an update.
+                if k in ["minimum_frequency", "maximum_frequency"]:
+                    logger.info(
+                        f"Strain-cropping: Plan to update network {k} from {v} to"
+                        f" {args_v}."
+                    )
+                    continue  # Do not update args to model value.
                 logger.warning(
                     f"Argument {k} provided to dingo_pipe as {args_v} "
-                    f"does not match value {v} in model file. Using model value for "
+                    f"inconsistent with value {v} in model file. Using model value for "
                     f"inference, and will attempt to change this during importance "
                     f"sampling."
                 )
                 changed_args[k] = args_v
 
         setattr(args, k, v)
+
+    frequency_input = Input([], [], print_msg=False)
+    frequency_input.detectors = model_args["detectors"]
+    frequency_input.sampling_frequency = args.sampling_frequency
+    frequency_input.minimum_frequency = args.minimum_frequency
+    frequency_input.maximum_frequency = args.maximum_frequency
+    check_frequency_updates(
+        model_metadata,
+        frequency_input.minimum_frequency_dict,
+        frequency_input.maximum_frequency_dict,
+    )
 
     # TODO: Also check consistency between model and init_model settings.
 
@@ -132,8 +172,6 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
     if args.asd_dataset:
         asd_dataset = ASDDataset(file_name=args.asd_dataset)
         domain_dict = copy.deepcopy(domain.domain_dict)
-        if "window_factor" in domain_dict:
-            del domain_dict["window_factor"]
         asd_dataset.update_domain(domain_dict)
         psd_dict = {}
         rng = np.random.default_rng(args.generation_seed)
@@ -180,6 +218,8 @@ class MainInput(BilbyMainInput):
         self.scitoken_issuer = args.scitoken_issuer
         self.container = args.container
 
+        # self.cosmology = args.cosmology
+
         self.outdir = args.outdir
         self.label = args.label
         self.log_directory = args.log_directory
@@ -205,6 +245,7 @@ class MainInput(BilbyMainInput):
         )  # Dummy variable so bilby_pipe doesn't complain.
         self.cpu_desired_sites = args.cpu_desired_sites
         self.gpu_desired_sites = args.gpu_desired_sites
+        self.generation_desired_sites = args.generation_desired_sites
         # self.analysis_executable = args.analysis_executable
         # self.analysis_executable_parser = args.analysis_executable_parser
         self.result_format = "hdf5"
@@ -268,6 +309,9 @@ class MainInput(BilbyMainInput):
         # self.injection_frequency_domain_source_model = (
         #     args.injection_frequency_domain_source_model
         # )
+        # self.injection_waveform_generator_class_ctor_args = (
+        #     args.injection_waveform_generator_constructor_dict
+        # )
         self.generation_seed = args.generation_seed
         if self.importance_sampling_updates and self.gaussian_noise:
             raise ValueError(
@@ -279,8 +323,9 @@ class MainInput(BilbyMainInput):
         self.importance_sample = args.importance_sample
 
         self.request_disk = args.request_disk
-        self.request_memory = args.request_memory
         self.request_memory_generation = args.request_memory_generation
+        self.request_memory = args.request_memory
+        self.request_memory_importance_sampling = args.request_memory_importance_sampling
         self.request_cpus = args.request_cpus
         self.request_cpus_importance_sampling = args.request_cpus_importance_sampling
         # self.sampler_kwargs = args.sampler_kwargs
