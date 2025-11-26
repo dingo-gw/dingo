@@ -34,7 +34,7 @@ class Tokenizer(nn.Module):
         batch_norm: bool = True,
         layer_norm: bool = False,
         individual_token_embedding: bool = False,
-        context_in_initial_layer: bool = True,
+        context_in_initial_layer: bool = False,
     ):
         """
         Parameters
