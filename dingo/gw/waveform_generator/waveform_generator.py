@@ -1072,12 +1072,12 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
 
             eccentricity = 10**log_ecc if log_ecc is not None else p.get("eccentricity", 0.0)
             longitude_ascending_nodes = p.get("long_asc_nodes", 0.0)
-            if "relativistic_anomaly" in p and "mean_anomaly" in p:
+            if "relativistic_anomaly" in p and "mean_per_ano" in p:
                 raise ValueError(
-                    "Cannot specify both relativistic_anomaly and mean_anomaly."
+                    "Cannot specify both relativistic_anomaly and mean_per_ano."
                 )
             else:
-                mean_per_ano = p.get("mean_anomaly", p.get("relativistic_anomaly", 0.0))
+                mean_per_ano = p.get("mean_per_ano", p.get("relativistic_anomaly", 0.0))
 
             params_gwsignal.update({
                 'eccentricity' : eccentricity * u.dimensionless_unscaled,
