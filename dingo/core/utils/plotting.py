@@ -1,5 +1,5 @@
 from itertools import zip_longest
-
+from typing import Optional
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import corner
@@ -39,7 +39,8 @@ LATEX_PARAM_DICT = {
 def plot_corner_multi(
     samples,
     weights=None,
-    labels=None,
+    labels: Optional[list[str]] = None,
+    colors: Optional[list[str]] = None,
     filename: str = "corner.pdf",
     latex_labels_dict: dict = None,
     **kwargs,
@@ -56,6 +57,8 @@ def plot_corner_multi(
         the corresponding samples.
     labels : list[str or None] or None
         Labels for the posteriors.
+    colors: list[str or None] or None
+        Colors for the posteriors.
     filename : str
         Where to save samples.
     latex_labels_dict : dict
@@ -63,8 +66,8 @@ def plot_corner_multi(
 
     Other Parameters
     ----------------
-    legend_font_size: int
-        Font size used in legend. Defaults to 50.
+    legend_kwargs: dict
+        Parameters passed to `fig.legend()`.
     Also contains additional parameters forwarded to corner.corner.
     """
     # Define plot properties
@@ -86,6 +89,12 @@ def plot_corner_multi(
     mpl.rcParams["font.family"] = "serif"
     linewidth_old = mpl.rcParams["lines.linewidth"]
     mpl.rcParams["lines.linewidth"] = 2.5
+
+    # Set default fontsize for x- and y-labels
+    if "label_kwargs" not in kwargs:
+        kwargs["label_kwargs"] = {"fontsize": 16}
+    elif "fontsize" not in kwargs["label_kwargs"]:
+        kwargs["label_kwargs"]["fontsize"] = 16
 
     # In case a single corner plot is desired, convert to lists to iterate.
     if not isinstance(samples, list):
@@ -113,7 +122,10 @@ def plot_corner_multi(
     fig = None
     handles = []
     for i, (s, w, l) in enumerate(zip_longest(samples, weights, labels)):
-        color = mpl.colors.rgb2hex(plt.get_cmap(cmap)(i))
+        if colors is not None:
+            color = colors[i]
+        else:
+            color = mpl.colors.rgb2hex(plt.get_cmap(cmap)(i))
         fig = corner.corner(
             s[common_parameters].to_numpy(),
             labels=parameter_labels,
@@ -137,24 +149,32 @@ def plot_corner_multi(
     fig.legend(
         handles=handles,
         loc="upper right",
-        fontsize=kwargs.get("legend_font_size", 50),
         labelcolor="linecolor",
+        **kwargs["legend_kwargs"],
     )
 
-    # Customize tick and label properties for each axis
+    # Customize tick properties for each axis (corner doesn't allow this)
     for i, ax in enumerate(fig.get_axes()):
+        if "label_kwargs" in kwargs and "fontsize" in kwargs["label_kwargs"]:
+            fontsize = kwargs["label_kwargs"]["fontsize"]
+            # Scale factors (empirically chosen)
+            label_size = fontsize * 0.875
+            tick_length = fontsize * 0.375
+            tick_width = fontsize * 0.01
+        else:
+            label_size = 14
+            tick_length = 6
+            tick_width = 1.5
         if ax.get_xlabel():
             ax.tick_params(
-                axis="x", labelsize=14, length=6, width=1.5
+                axis="x", labelsize=label_size, length=tick_length, width=tick_width
             )  # Adjust labelsize, length, and width
-            ax.xaxis.label.set_size(16)  # Adjust x-axis label font size
         else:
             ax.tick_params(axis="x", which="both", bottom=False)
         if ax.get_ylabel():
             ax.tick_params(
-                axis="y", labelsize=14, length=6, width=1.5
+                axis="y", labelsize=label_size, length=tick_length, width=tick_width
             )  # Adjust labelsize, length, and width
-            ax.yaxis.label.set_size(16)  # Adjust x-axis label font size
         else:
             ax.tick_params(axis="y", which="both", left=False)
 
