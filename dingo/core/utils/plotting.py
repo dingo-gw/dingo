@@ -95,6 +95,8 @@ def plot_corner_multi(
         kwargs["label_kwargs"] = {"fontsize": 16}
     elif "fontsize" not in kwargs["label_kwargs"]:
         kwargs["label_kwargs"]["fontsize"] = 16
+    if "legend_kwargs" not in kwargs:
+        kwargs["legend_kwargs"] = {"fontsize": 50}
 
     # In case a single corner plot is desired, convert to lists to iterate.
     if not isinstance(samples, list):
