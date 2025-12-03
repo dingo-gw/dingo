@@ -554,12 +554,18 @@ class pm1m2_prob(object):
         return self.prior.log_pdf(mass_1_source,mass_2_source)
 
 class massprior_PowerLawPeak(pm_prob):
-    def __init__(self):
+    def __init__(self, truncation=False):
         self.population_parameters=['alpha','mmin','mmax','mu_g','sigma_g','lambda_peak']
+        self.truncation = truncation
     def update(self,**kwargs):
+        if self.truncation:
+            upper_bound_gaussian = kwargs['mmax']
+        else:
+            upper_bound_gaussian = kwargs['mu_g']+5*kwargs['sigma_g']
+
         self.prior=PowerLawGaussian(
             kwargs['mmin'],kwargs['mmax'],-kwargs['alpha'],kwargs['lambda_peak'],kwargs['mu_g'],
-            kwargs['sigma_g'],kwargs['mmin'],kwargs['mu_g']+5*kwargs['sigma_g']
+            kwargs['sigma_g'],kwargs['mmin'],upper_bound_gaussian
         )
 
 class m1m2_conditioned_lowpass(pm1m2_prob):
@@ -572,7 +578,7 @@ class m1m2_conditioned_lowpass(pm1m2_prob):
         p2 = LowpassSmoothedProb(PowerLaw(kwargs['mmin'],kwargs['mmax'],kwargs['beta']),kwargs['delta_m'])
         self.prior=conditional_2dimpdf(p1,p2)
 
-def build_massprior_PowerLawPeak(params_in):
+def build_massprior_PowerLawPeak(params_in, truncation=False):
 
     params = copy.deepcopy(params_in)
 
@@ -584,7 +590,7 @@ def build_massprior_PowerLawPeak(params_in):
 
     p = {key: params[key] for key in list_params if key in params}
 
-    mw = massprior_PowerLawPeak()
+    mw = massprior_PowerLawPeak(truncation=truncation)
     mw = m1m2_conditioned_lowpass(mw)
     mw.update(**p)
 

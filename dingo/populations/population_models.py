@@ -119,14 +119,15 @@ class PowerLawPeakPopulation(object):
     model_type = "power_law_peak"
     event_parameters = ["mass_1", "mass_2", "luminosity_distance"]
 
-    def __init__(self, prior, minimum_distance, maximum_distance):
+    def __init__(self, prior, minimum_distance, maximum_distance, truncation=False):
         self.prior = PriorDict(copy.deepcopy(prior))
         self.minimum_distance = minimum_distance
         self.maximum_distance = maximum_distance
+        self.truncation = truncation
 
     def get_event_generator(self, p, kwargs_selection_cut={}):
         cosmology = FlatLambdaCDM(Om0=0.3, H0=p["hubble_constant"])
-        prior_mass = build_massprior_PowerLawPeak(p)
+        prior_mass = build_massprior_PowerLawPeak(p, truncation=self.truncation)
 
         prior_luminosity_distance = PriorDict({
             "luminosity_distance": UniformSourceFrame(
@@ -210,6 +211,15 @@ def build_population_model(population_model, population_prior, event_model_prior
             population_prior,
             minimum_distance=minimum_distance,
             maximum_distance=maximum_distance,
+        )
+    elif population_model == "power_law_peak_truncated":
+        minimum_distance = event_model_prior["luminosity_distance"].minimum
+        maximum_distance = event_model_prior["luminosity_distance"].maximum
+        return PowerLawPeakPopulation(
+            population_prior,
+            minimum_distance=minimum_distance,
+            maximum_distance=maximum_distance,
+            truncation=True
         )
     else:
         raise NotImplementedError(
