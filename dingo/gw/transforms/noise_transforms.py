@@ -185,32 +185,6 @@ class AddWhiteNoiseComplex(object):
         sample["waveform"] = noisy_strains
         return sample
 
-class BatchedAddRandomNoiseComplex(object):
-    """
-    Adds N random noise realisations to the
-    complex strain data.
-    """
-
-    def __init__(self, batch_size):
-        self.batch_size = batch_size
-
-    def __call__(self, input_sample):
-        sample = input_sample.copy()
-        ifos = sample['waveform'].keys()
-
-        #duplicate waveforms over the batch
-        for ifo in ifos:
-            sample['waveform'][ifo] = np.tile(sample['waveform'][ifo], (self.batch_size, 1))
-            asd = sample['asds'][ifo]
-            noise = (
-                (np.random.randn(self.batch_size, len(sample['waveform'][ifo][0])) + 1j * np.random.randn(self.batch_size, len(sample['waveform'][ifo][0])))
-                * np.tile(asd, (self.batch_size, 1))
-                # * self.data_domain.noise_std
-            )
-            sample['waveform'][ifo] += noise
-        
-        # add noise realisation
-        return sample
 class DuplicateSamples(object):
     """
     Tile the sample waveforms and asds according to the given batch size
