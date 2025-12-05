@@ -53,7 +53,7 @@ class ImportanceSamplingInput(Input):
         self.prior_dict_updates = args.prior_dict_updates
 
         # Choices for running
-        # self.detectors = args.detectors
+        self.detectors = args.detectors
 
         # self.sampler = args.sampler
         # self.sampler_kwargs = args.sampler_kwargs
@@ -106,6 +106,10 @@ class ImportanceSamplingInput(Input):
         self._load_proposal()
         self._load_event()  # Must be called after _load_proposal().
         self.importance_sampling_settings = args.importance_sampling_settings
+
+    @property
+    def request_memory(self):
+        return self.inputs.request_memory_importance_sampling
 
     def _load_proposal(self):
         self.result = Result(file_name=self.proposal_samples_file)

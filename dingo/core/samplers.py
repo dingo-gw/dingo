@@ -68,6 +68,7 @@ class Sampler(object):
         model : BasePosteriorModel
         """
         self.model = model
+        self.event_metadata = None
         self.duplicate_samples = kwargs['duplicate_samples']
         self.batch_size = kwargs['batch_size']
 
@@ -79,12 +80,10 @@ class Sampler(object):
             # However, it will not be used when sampling from the model, since it is
             # unconditional.
             self._context = self.model.context
-            self.event_metadata = self.model.event_metadata
             self.base_model_metadata = self.metadata["base"]
         else:
             self.unconditional_model = False
             self._context = None
-            self.event_metadata = None
             self.base_model_metadata = self.metadata
 
         self.inference_parameters = self.metadata["train_settings"]["data"][
@@ -93,6 +92,10 @@ class Sampler(object):
 
         self.samples = None
         self._build_domain()
+
+        if self.unconditional_model:
+            # Must be after _build_domain(), since setter might access domain.
+            self.event_metadata = self.model.event_metadata
 
         # Must be after _build_domain() since transforms can depend on domain.
         self._initialize_transforms()

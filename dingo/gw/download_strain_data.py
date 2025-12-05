@@ -5,7 +5,6 @@ from gwpy.timeseries import TimeSeries
 from dingo.gw.domains import UniformFrequencyDomain
 from dingo.gw.gwutils import (
     get_window,
-    get_window_factor,
 )
 
 
@@ -188,7 +187,6 @@ def download_event_data_in_FD(
         f_min=0,
         f_max=f_s / 2,
         delta_f=1 / time_segment,
-        window_factor=get_window_factor(window),
     )
 
     return data, domain

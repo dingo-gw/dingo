@@ -132,10 +132,10 @@ class WhitenAndScaleStrain(object):
     and scale it with 1/scale_factor.
 
     In uniform frequency domain the scale factor should be
-    np.sqrt(window_factor) / np.sqrt(4.0 * delta_f).
-    It has two purposes:
-        (*) the denominator accounts for frequency binning
-        (*) dividing by window factor accounts for windowing of strain data
+
+    1 / np.sqrt(4.0 * delta_f).
+
+    This accounts for frequency binning 
     """
 
     def __init__(self, scale_factor):
