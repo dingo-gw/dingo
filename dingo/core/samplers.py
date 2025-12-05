@@ -154,9 +154,9 @@ class Sampler(object):
 
             # transforms_pre are expected to transform the data in the same way for each
             # requested sample. We therefore apply pre-processing only once.
-            # breakpoint()
             x = self.transform_pre(context)
-            # Require a batch dimension for the embedding network. Only invoke if not already batched
+            # Require a batch dimension for the embedding network. 
+            # Only invoke if not already batched.
             if len(x.shape) == 3:
                 x = x.unsqueeze(0)
             x = [x]

@@ -32,7 +32,7 @@ from dingo.gw.transforms import (
     GetDetectorTimes,
     DecimateWaveformsAndASDS,
     AddWhiteNoiseComplex,
-    DuplicateSamples
+    DuplicateSamples,
     MaskDataForFrequencyRangeUpdate,
 )
 
@@ -300,15 +300,14 @@ class GWSampler(GWSamplerMixin, Sampler):
             transform_pre.append(
                 DecimateWaveformsAndASDS(self.domain, decimation_mode="whitened")
             )
-
-        transform_pre.append(WhitenAndScaleStrain(self.domain.noise_std))
-        
-        if self.duplicate_samples:
-            transform_pre.append(AddWhiteNoiseComplex())
-        
         #   * whiten and scale strain (since the inference network expects standardized
         #   data)
         transform_pre.append(WhitenAndScaleStrain(self.domain.noise_std))
+        
+        #   * add random noise realisations to whitened data for zero noise injections
+        if self.duplicate_samples:
+            transform_pre.append(AddWhiteNoiseComplex())
+        
         if self.frequency_updates:
             # * update frequency range
             # Needs to happen before RepackageStrainsAndASDs since we might need to apply

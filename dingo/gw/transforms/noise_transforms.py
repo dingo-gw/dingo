@@ -248,7 +248,7 @@ class RepackageStrainsAndASDS(object):
     def __call__(self, input_sample):
         sample = input_sample.copy()
         strains = np.empty(
-            sample["asds"][self.ifos[0]].shape[:-1]  # Possible batch dims, see if swapping for waveform affects training
+            sample["asds"][self.ifos[0]].shape[:-1]  # Possible batch dims
             + (
                 len(self.ifos),
                 3,
