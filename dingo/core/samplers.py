@@ -60,7 +60,8 @@ class Sampler(object):
     def __init__(
         self,
         model: BasePosteriorModel,
-        **kwargs,
+        duplicate_samples: bool = False,
+        batch_size: int = None,
     ):
         """
         Parameters
@@ -69,8 +70,9 @@ class Sampler(object):
         """
         self.model = model
         self.event_metadata = None
-        self.duplicate_samples = kwargs['duplicate_samples']
-        self.batch_size = kwargs['batch_size']
+        # if kwargs['duplicate_samples']:
+        self.duplicate_samples = duplicate_samples
+        self.batch_size = batch_size
 
         self.metadata = self.model.metadata.copy()
         if self.metadata["train_settings"]["data"].get("unconditional", False):
