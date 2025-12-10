@@ -172,7 +172,7 @@ class Sampler(object):
         # have a flag for whether to calculate the log_prob.
         self.model.network.eval()
         with torch.no_grad():
-            if x[0].shape[0] > 1:
+            if len(x) > 0 and x[0].shape[0] > 1: #TODO find a way to make sure this isn't run for unconditional model
                 y, log_prob = self.model.sample_and_log_prob(*x, num_samples=1)
             else:
                 y, log_prob = self.model.sample_and_log_prob(*x, num_samples=num_samples)
