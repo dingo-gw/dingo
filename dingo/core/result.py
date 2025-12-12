@@ -161,7 +161,17 @@ class Result(DingoDataset):
                 print(f"  {k}:  {event_metadata[k]}")
                 self.importance_sampling_metadata["updates"][k] = event_metadata[k]
 
-            self._rebuild_domain(verbose=True)
+            rebuild_domain = False
+            for k in ["minimum_frequency", "maximum_frequency", "T"]:
+                if k in old_minus_new or k in new_minus_old:
+                    print(
+                        f"  Rebuilding domain due to change in {k}: "
+                        f"{self.event_metadata[k]} -> "
+                        f"{event_metadata[k]}"
+                    )
+                    rebuild_domain = True
+            if rebuild_domain:
+                self._rebuild_domain(verbose=True)
         self.event_metadata = event_metadata
 
     def _rebuild_domain(self, verbose=False):
