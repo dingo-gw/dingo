@@ -76,7 +76,11 @@ uv sync
 ```
 
 This installs Dingo in editable mode along with development, documentation, and typing
-dependencies.
+dependencies. To also install optional dependencies, use
+
+```sh
+uv sync --extra wandb --extra pyseobnr
+```
 
 #### Alternative (pip)
 
