@@ -67,6 +67,7 @@ homepage = "https://github.com/dingo-gw/dingo"
 [project.optional-dependencies]
 dev = [
     "black",
+    "ipykernel",
     "linkify-it-py",
     "myst-nb",
     "myst-parser",
@@ -85,6 +86,7 @@ pyseobnr = ["pyseobnr"]
 [dependency-groups]
 dev = [
     "black",
+    "ipykernel",
     "pytest",
 ]
 
