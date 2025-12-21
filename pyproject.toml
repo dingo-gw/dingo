@@ -36,7 +36,6 @@ dependencies = [
     "matplotlib",
     "numpy",
     "pandas",
-    "pesummary",
     "pycbc",
     "pycondor",
     "pyyaml",

@@ -700,7 +700,6 @@ dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pandas" },
-    { name = "pesummary" },
     { name = "pycbc", version = "2.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "pycbc", version = "2.10.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pycondor" },
@@ -782,7 +781,6 @@ requires-dist = [
     { name = "numpy" },
     { name = "pandas" },
     { name = "pandas-stubs", marker = "extra == 'dev'", specifier = ">=2.3.3.251219" },
-    { name = "pesummary" },
     { name = "pycbc" },
     { name = "pycondor" },
     { name = "pyseobnr", marker = "extra == 'pyseobnr'" },
@@ -2459,33 +2457,6 @@ dependencies = [
     { name = "pyyaml" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/d8/83/3b82fa6eed1a057d58d6a50695ad9473d1dd545dc700a1f0e4951f013c06/pegasus_wms_common-5.1.1.tar.gz", hash = "sha256:6bab2202a1485094653f52671affbc806328be5438ab3f56f743b392563e637e", size = 103187, upload-time = "2025-05-29T19:14:08.868Z" }
-
-[[package]]
-name = "pesummary"
-version = "1.5.6"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "astropy", version = "6.1.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "astropy", version = "7.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "corner" },
-    { name = "gwpy" },
-    { name = "h5py" },
-    { name = "lalsuite" },
-    { name = "ligo-gracedb" },
-    { name = "matplotlib" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "pandas" },
-    { name = "pygments" },
-    { name = "python-ligo-lw" },
-    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "scipy", version = "1.16.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "tqdm" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ac/77/82273493ec112dbd20f2b3205ef4d221090eccc5456ac266be18134186be/pesummary-1.5.6.tar.gz", hash = "sha256:1be42b7858b37c21842f4ddc104888cb05b4758674dc38debf834db9018de406", size = 1213548, upload-time = "2025-11-05T15:38:28.875Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/47/25/b7175fe94df87685f75ccd224d22972121ea1c7c4a02263aac91951c4073/pesummary-1.5.6-py3-none-any.whl", hash = "sha256:a4506c7429682b5bbbe1f3b610875bd1e4506773497c05e61340d0da126db544", size = 1095004, upload-time = "2025-11-05T15:38:26.648Z" },
-]
 
 [[package]]
 name = "pexpect"
