@@ -72,7 +72,6 @@ dev = [
     "myst-nb",
     "myst-parser",
     "pandas-stubs>=2.3.3.251219",
-    "pylint",
     "pytest",
     "scipy-stubs>=1.15.3.0",
     "sphinx",
@@ -87,7 +86,6 @@ pyseobnr = ["pyseobnr"]
 [dependency-groups]
 dev = [
     "black",
-    "pylint",
     "pytest",
 ]
 
