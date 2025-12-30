@@ -71,7 +71,12 @@ class GWSignal(object):
             self.waveform_generator = WaveformGenerator(domain=wfg_domain, **wfg_kwargs)
 
         self.t_ref = t_ref
-        self.ifo_list = InterferometerList(ifo_list)
+        if len(ifo_list) == 3 and all(d.startswith('ET') for d in ifo_list):
+            self.ifo_list = InterferometerList(['ET'])
+        elif all(d.startswith('ET') for d in ifo_list[:3]) and len(ifo_list) > 3:
+            self.ifo_list = InterferometerList(['ET'] + ifo_list[3:])
+        else:
+            self.ifo_list = InterferometerList(ifo_list)
 
         # When we set self.whiten, the projection transforms are automatically prepared.
         self._calibration_envelope = None
