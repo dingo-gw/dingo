@@ -60,6 +60,8 @@ class Sampler(object):
     def __init__(
         self,
         model: BasePosteriorModel,
+        duplicate_samples: bool = False,
+        batch_size: int = None,
     ):
         """
         Parameters
@@ -68,6 +70,9 @@ class Sampler(object):
         """
         self.model = model
         self.event_metadata = None
+        # if kwargs['duplicate_samples']:
+        self.duplicate_samples = duplicate_samples
+        self.batch_size = batch_size
 
         self.metadata = self.model.metadata.copy()
         if self.metadata["train_settings"]["data"].get("unconditional", False):
@@ -152,8 +157,10 @@ class Sampler(object):
             # transforms_pre are expected to transform the data in the same way for each
             # requested sample. We therefore apply pre-processing only once.
             x = self.transform_pre(context)
-            # Require a batch dimension for the embedding network.
-            x = x.unsqueeze(0)
+            # Require a batch dimension for the embedding network. 
+            # Only invoke if not already batched.
+            if len(x.shape) == 3:
+                x = x.unsqueeze(0)
             x = [x]
         else:
             if context is not None:
@@ -165,12 +172,19 @@ class Sampler(object):
         # have a flag for whether to calculate the log_prob.
         self.model.network.eval()
         with torch.no_grad():
-            y, log_prob = self.model.sample_and_log_prob(*x, num_samples=num_samples)
+            if len(x) > 0 and x[0].shape[0] > 1: #TODO find a way to make sure this isn't run for unconditional model
+                y, log_prob = self.model.sample_and_log_prob(*x, num_samples=1)
+            else:
+                y, log_prob = self.model.sample_and_log_prob(*x, num_samples=num_samples)
 
         if not self.unconditional_model:
             # Squeeze the batch dimension added earlier.
-            y = y.squeeze(0)
-            log_prob = log_prob.squeeze(0)
+            if y.shape[0] != 1:
+                y = y.squeeze(1)
+                log_prob = log_prob.squeeze(1)
+            else:
+                y = y.squeeze(0)
+                log_prob = log_prob.squeeze(0)
 
         samples = self.transform_post({"parameters": y, "log_prob": log_prob})
         result = samples["parameters"]
@@ -379,6 +393,7 @@ class GNPESampler(Sampler):
         model: BasePosteriorModel,
         init_sampler: Sampler,
         num_iterations: int = 1,
+        **kwargs
     ):
         """
         Parameters
@@ -390,8 +405,10 @@ class GNPESampler(Sampler):
             Number of GNPE iterations to be performed by sampler.
         """
         self.gnpe_parameters = []  # Should be set in subclass _initialize_transform()
+        self.duplicate_samples = kwargs['duplicate_samples']
+        self.batch_size = kwargs['batch_size']
 
-        super().__init__(model)
+        super().__init__(model, duplicate_samples=self.duplicate_samples, batch_size=self.batch_size)
         self.init_sampler = init_sampler
         self.num_iterations = num_iterations
         self.iteration_tracker = None
