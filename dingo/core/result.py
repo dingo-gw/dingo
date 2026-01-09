@@ -74,7 +74,7 @@ class Result(DingoDataset):
 
         self._build_prior()
         self._build_domain()
-        if self.importance_sampling_metadata.get("updates"):
+        if self.check_if_rebuild_domain():
             self._rebuild_domain()
 
     @property
@@ -161,18 +161,30 @@ class Result(DingoDataset):
                 print(f"  {k}:  {event_metadata[k]}")
                 self.importance_sampling_metadata["updates"][k] = event_metadata[k]
 
-            rebuild_domain = False
-            for k in ["minimum_frequency", "maximum_frequency", "T"]:
-                if k in old_minus_new or k in new_minus_old:
-                    print(
-                        f"  Rebuilding domain due to change in {k}: "
-                        f"{self.event_metadata[k]} -> "
-                        f"{event_metadata[k]}"
-                    )
-                    rebuild_domain = True
-            if rebuild_domain:
+            if self.check_if_rebuild_domain():
+                for k in ["minimum_frequency", "maximum_frequency", "T"]:
+                    if k in new_minus_old:
+                        print(
+                            f"  Rebuilding domain due to change in {k}: "
+                            f"{self.event_metadata[k]} -> "
+                            f"{event_metadata[k]}"
+                        )
                 self._rebuild_domain(verbose=True)
         self.event_metadata = event_metadata
+
+    def check_if_rebuild_domain(self):
+        """
+        Check whether the domain needs to be rebuilt based on the importance_sampling_metadata.
+        Only returns True if relevant domain settings (minimum_frequency, maximum_frequency, T)
+        have changed.
+        """
+        updates = self.importance_sampling_metadata.get("updates")
+        if updates:
+            domain_keys = ["minimum_frequency", "maximum_frequency", "T"]
+            for k in domain_keys:
+                if k in updates:
+                    return True
+        return False
 
     def _rebuild_domain(self, verbose=False):
         pass
