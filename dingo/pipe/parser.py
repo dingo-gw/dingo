@@ -58,6 +58,11 @@ def create_parser(top_level=True, usage=None):
         allow_abbrev=False,
         formatter_class=configargparse.ArgumentDefaultsRawHelpFormatter,
     )
+    parser.exclusive_keys = {
+        "Detector arguments": ["--psd-dict", "--asd-dataset"],
+        "Injection arguments": ["--injection-file", "--injection-dict"],
+        "Prior arguments": ["--prior-file", "--prior-dict"],
+    }
     parser.add("ini", type=str, is_config_file=True, help="Configuration ini file")
     parser.add("-v", "--verbose", action="store_true", help="Verbose output")
     # parser.add(
@@ -285,6 +290,16 @@ def create_parser(top_level=True, usage=None):
         ),
     )
     data_gen_pars.add(
+        "--fetch-open-data-kwargs",
+        type=nonestr,
+        default=None,
+        help=(
+            "Dictionary of additional kwargs to pass to `fetch_open_data`. "
+            "By default, bilby_pipe requests `sample_rate=16384`. This can "
+            "be overwritten by passing `sample_rate=4096` to this argument."
+        ),
+    )
+    data_gen_pars.add(
         "--frame-type-dict",
         type=nonestr,
         default=None,
@@ -365,11 +380,10 @@ def create_parser(top_level=True, usage=None):
             "will have their seeds set as {generation_seed = base_seed + job_idx}."
         ),
     )
-    psd_dict_parser = det_parser.add_mutually_exclusive_group()
-    psd_dict_parser.add(
+    det_parser.add(
         "--psd-dict", type=nonestr, default=None, help="Dictionary of PSD files to use"
     )
-    psd_dict_parser.add(
+    det_parser.add(
         "--asd-dataset",
         type=nonestr,
         default=None,
@@ -389,11 +403,7 @@ def create_parser(top_level=True, usage=None):
         default=2.0,
         help=("Time (in s) after the trigger_time to the end of the segment"),
     )
-    det_parser.add(
-        "--sampling-frequency",
-        default=4096,
-        type=nonefloat,
-    )
+    det_parser.add("--sampling-frequency", default=4096, type=float)
 
     det_parser.add(
         "--psd-length",
@@ -473,14 +483,13 @@ def create_parser(top_level=True, usage=None):
         default=False,
         help="Create data from an injection file",
     )
-    injection_parser_input = injection_parser.add_mutually_exclusive_group()
-    injection_parser_input.add(
+    injection_parser.add(
         "--injection-dict",
         type=nonestr,
         default=None,
         help="A single injection dictionary given in the ini file",
     )
-    injection_parser_input.add(
+    injection_parser.add(
         "--injection-file",
         type=nonestr,
         default=None,
@@ -660,7 +669,7 @@ def create_parser(top_level=True, usage=None):
         "--request-memory-importance-sampling",
         type=float,
         default=8.0,
-        help="Memory allocation request (GB) for importance sampling step. Default is 8GB"
+        help="Memory allocation request (GB) for importance sampling step. Default is 8GB",
     )
     submission_parser.add(
         "--request-cpus-importance-sampling",
@@ -1185,11 +1194,8 @@ def create_parser(top_level=True, usage=None):
             "the prior is changed."
         ),
     )
-    prior_parser_main = prior_parser.add_mutually_exclusive_group()
-    prior_parser_main.add(
-        "--prior-file", type=nonestr, default=None, help="The prior file"
-    )
-    prior_parser_main.add(
+    prior_parser.add("--prior-file", type=nonestr, default=None, help="The prior file")
+    prior_parser.add(
         "--prior-dict",
         type=nonestr,
         default=None,
