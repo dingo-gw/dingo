@@ -442,6 +442,38 @@ class MainInput(BilbyMainInput):
         priors.update(PriorDict(self.prior_dict_updates))
         return priors
 
+    def check_accounting(self):
+        if self.accounting is None:
+            logger.warning(
+                "No accounting tag specified. If using IGWN computing resources"
+                " please refer to https://computing.docs.ligo.org/guide/htcondor/accounting/"
+            )
+        else:
+            try:
+                purpose = self.accounting.split(".")[1]
+                if purpose == "prod":
+                    logger.info(
+                        get_colored_string(
+                            "Using a 'prod' accounting tag: please ensure this is intentional"
+                        )
+                    )
+                pipeline = self.accounting.split(".")[-1]
+                if pipeline != "dingo":
+                    logger.info(
+                        get_colored_string(
+                            "Using a non-'dingo' accounting tag: please ensure this is "
+                            "intentional"
+                        )
+                    )
+            except ValueError:
+                logger.debug(
+                    "Accounting tag does not follow the IGWN format. If you are using non-IGWN"
+                    " resources this is fine, otherwise please refer to"
+                    " https://computing.docs.ligo.org/guide/htcondor/accounting/"
+                )
+        logger.info(f"Using accounting tag: {self.accounting}")
+        logger.info(f"Using accounting-user: {self.accounting_user}")
+
     def check_injection(self):
         """Check injection behaviour
 
