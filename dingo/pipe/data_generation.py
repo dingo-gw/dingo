@@ -92,6 +92,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.ignore_gwpy_data_quality_check = args.ignore_gwpy_data_quality_check
         self.detectors = args.detectors
         self.channel_dict = args.channel_dict
+        self.fetch_open_data_kwargs = args.fetch_open_data_kwargs
         self.data_dict = args.data_dict
         self.data_format = args.data_format
         self.allow_tape = args.allow_tape
