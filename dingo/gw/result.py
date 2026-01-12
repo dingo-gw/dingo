@@ -170,13 +170,12 @@ class Result(CoreResult):
         which is expected to be populated by reset_event()."""
         updates = self.importance_sampling_metadata["updates"].copy()
 
-        # check whether any of of the updates affect the domain
+        # Assume that updates can contain T, f_s, roll_off, f_min, f_max, but no other
+        # quantities that define a new domain (e.g., delta_f). Typical event metadata
+        # will be constructed in this way.
+
         domain_keys = ["minimum_frequency", "maximum_frequency", "T"]
         if any(k in updates for k in domain_keys):
-            # Assume that updates can contain T, f_s, roll_off, f_min, f_max, but no other
-            # quantities that define a new domain (e.g., delta_f). Typical event metadata
-            # will be constructed in this way.
-
             # TODO: Make compatible with MultibandedFrequencyDomain.
             if isinstance(self.domain, MultibandedFrequencyDomain):
                 raise NotImplementedError()
@@ -201,7 +200,7 @@ class Result(CoreResult):
             self.domain = build_domain(domain_dict)
         else:
             if verbose:
-                print("No domain updates found. Skipping domain rebuild.")
+                print("No domain updates found; domain not rebuilt.")
 
     def _build_prior(self):
         """Build the prior based on model metadata. Called by __init__()."""
