@@ -36,7 +36,6 @@ dependencies = [
     "matplotlib",
     "numpy",
     "pandas",
-    "pesummary",
     "pycbc",
     "pycondor",
     "pyyaml",
@@ -68,21 +67,43 @@ homepage = "https://github.com/dingo-gw/dingo"
 [project.optional-dependencies]
 dev = [
     "black",
+    "ipykernel",
     "linkify-it-py",
     "myst-nb",
     "myst-parser",
-    "pylint",
+    "pandas-stubs>=2.3.3.251219",
     "pytest",
+    "scipy-stubs>=1.15.3.0",
     "sphinx",
     "sphinx-math-dollar",
     "sphinx-rtd-theme",
     "sphinxcontrib-mermaid",
     "sphinxcontrib-bibtex",
-    "wandb",
+]
+wandb = ["wandb"]
+pyseobnr = ["pyseobnr"]
+
+[dependency-groups]
+dev = [
+    "black",
+    "ipykernel",
+    "pytest",
 ]
 
-pyseobnr = [
-    "pyseobnr",
+docs = [
+    "linkify-it-py",
+    "myst-nb",
+    "myst-parser",
+    "sphinx",
+    "sphinx-math-dollar",
+    "sphinx-rtd-theme",
+    "sphinxcontrib-mermaid",
+    "sphinxcontrib-bibtex",
+]
+
+typing = [
+    "pandas-stubs>=2.3.3.251219",
+    "scipy-stubs>=1.15.3.0",
 ]
 
 [project.scripts]
