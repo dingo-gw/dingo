@@ -174,28 +174,33 @@ class Result(CoreResult):
         # quantities that define a new domain (e.g., delta_f). Typical event metadata
         # will be constructed in this way.
 
-        # TODO: Make compatible with MultibandedFrequencyDomain.
-        if isinstance(self.domain, MultibandedFrequencyDomain):
-            raise NotImplementedError()
+        domain_keys = ["minimum_frequency", "maximum_frequency", "T"]
+        if any(k in updates for k in domain_keys):
+            # TODO: Make compatible with MultibandedFrequencyDomain.
+            if isinstance(self.domain, MultibandedFrequencyDomain):
+                raise NotImplementedError()
 
-        if "T" in updates:
-            updates["delta_f"] = 1.0 / updates["T"]
+            if "T" in updates:
+                updates["delta_f"] = 1.0 / updates["T"]
 
-        domain_dict = self.domain.domain_dict  # Existing settings
-        domain_dict.update(
-            (k, updates[k]) for k in set(domain_dict).intersection(updates)
-        )
-
-        if verbose:
-            print("Rebuilding domain as follows:")
-            print(
-                yaml.dump(
-                    domain_dict,
-                    default_flow_style=False,
-                    sort_keys=False,
-                )
+            domain_dict = self.domain.domain_dict  # Existing settings
+            domain_dict.update(
+                (k, updates[k]) for k in set(domain_dict).intersection(updates)
             )
-        self.domain = build_domain(domain_dict)
+
+            if verbose:
+                print("Rebuilding domain as follows:")
+                print(
+                    yaml.dump(
+                        domain_dict,
+                        default_flow_style=False,
+                        sort_keys=False,
+                    )
+                )
+            self.domain = build_domain(domain_dict)
+        else:
+            if verbose:
+                print("No domain updates found; domain not rebuilt.")
 
     def _build_prior(self):
         """Build the prior based on model metadata. Called by __init__()."""
