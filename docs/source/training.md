@@ -102,6 +102,8 @@ local:
   checkpoint_epochs: 10
   leave_waveforms_on_disk: True
   local_cache_path: tmp
+  # pin_memory: True
+  # prefetch_factor: 1
 #   condor:
 #     bid: 100
 #     num_cpus: 16
@@ -171,6 +173,12 @@ leave_waveforms_on_disk
 
 local_cache_path
 : When training on a cluster and loading waveforms during training (i.e., `leave_waveforms_on_disk=True`), the waveform dataset should be copied to the disk storage of the local node at the beginning of training. This prevents unexpected long data loading times during training due to network traffic. Usually, paths for local storage are `tmp` or `dev/shm`. When submitting the job with `condor`, `request_disk: 50GB` should be included in the `condor` settings with the requested disk space larger than the size of the waveform dataset used for training.
+
+pin_memory
+: If `True` (default), use pinned (page-locked) memory for faster CPU to GPU data transfers. This speeds up training by ~20% but increases memory usage. The memory overhead scales as `num_workers × prefetch_factor × batch_size × sample_size`, and is roughly doubled when using pinned memory (once for the worker prefetch queue, once for the pinned copy). Set to `False` if memory is constrained.
+
+prefetch_factor
+: Number of batches each DataLoader worker prefetches (default 1). Higher values can improve throughput by hiding data loading latency, but increase memory usage proportionally. In testing, `prefetch_factor=1` performs as well as `prefetch_factor=2` while using less memory.
 
 condor
 : Settings for [HTCondor](https://htcondor.readthedocs.io/en/latest/index.html). The condor script will (re)submit itself according to these options.
