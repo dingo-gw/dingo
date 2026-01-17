@@ -9,9 +9,9 @@ import bilby
 
 def fix_random_seeds(_):
     """Utility function to set random seeds when using multiple workers for DataLoader."""
-    np.random.seed(int(torch.initial_seed()) % (2 ** 32 - 1))
+    np.random.seed(int(torch.initial_seed()) % (2**32 - 1))
     try:
-        bilby.core.utils.random.seed(int(torch.initial_seed()) % (2 ** 32 - 1))
+        bilby.core.utils.random.seed(int(torch.initial_seed()) % (2**32 - 1))
     except AttributeError:  # In case using an old version of Bilby.
         pass
 
@@ -190,7 +190,7 @@ def build_train_and_test_loaders(
     dataset: torch.utils.data.Dataset,
     train_fraction: float,
     batch_size: int,
-    num_workers: int,
+    num_workers: int = 0,
     pin_memory: bool = True,
     prefetch_factor: int = 1,
 ):
@@ -206,6 +206,7 @@ def build_train_and_test_loaders(
         Should lie between 0 and 1.
     batch_size : int
     num_workers : int
+        Number of workers. Default 0.
     pin_memory : bool
         If True, use pinned memory for faster GPU transfers. This increases memory
         usage significantly (roughly 2x the prefetch buffer size) but can speed up

@@ -118,5 +118,5 @@ local:
     max_epochs_per_run: 500
     max_time_per_run: 360000
   leave_waveforms_on_disk: True
-  # pin_memory: True  # Set False to reduce memory usage, but slows down GPU transfers
+  # pin_memory: True  # Set False to reduce memory usage, but slows down transfer of batches from CPU to GPU
   # prefetch_factor: 1  # Number of batches each worker prefetches; higher uses more memory

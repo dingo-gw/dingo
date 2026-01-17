@@ -32,7 +32,10 @@ from dingo.core.posterior_models import BasePosteriorModel
 
 
 def copy_files_to_local(
-    file_path: str, local_dir: Optional[str], leave_keys_on_disk: bool, is_condor: bool = False,
+    file_path: str,
+    local_dir: Optional[str],
+    leave_keys_on_disk: bool,
+    is_condor: bool = False,
 ) -> str:
     """
     Copy files to local node if local_dir is provided to minimize network traffic during training.
@@ -270,7 +273,7 @@ def initialize_stage(
         wfd,
         train_settings["data"]["train_fraction"],
         stage["batch_size"],
-        local_settings["num_workers"],
+        num_workers=local_settings.get("num_workers", 0),
         pin_memory=local_settings.get("pin_memory", True),
         prefetch_factor=local_settings.get("prefetch_factor", 1),
     )

@@ -111,7 +111,7 @@ local:
     max_epochs_per_run: 500
   checkpoint_epochs: 10
   leave_waveforms_on_disk: True
-  # pin_memory: True  # Set False to reduce memory usage, but slows down GPU transfers
+  # pin_memory: True  # Set False to reduce memory usage, but slows down transfer of batches from CPU to GPU
   # prefetch_factor: 1  # Number of batches each worker prefetches; higher uses more memory
   # local_cache_path: tmp # uncomment to avoid slow data loading during training due to network traffic on cluster
   # Local settings related to condor, remove if not used on cluster

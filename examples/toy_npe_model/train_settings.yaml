@@ -77,5 +77,5 @@ local:
     max_time_per_run: 3600000
     max_epochs_per_run: 30
   checkpoint_epochs: 15
-  # pin_memory: True  # Set False to reduce memory usage, but slows down GPU transfers
+  # pin_memory: True  # Set False to reduce memory usage, but slows down transfer of batches from CPU to GPU
   # prefetch_factor: 1  # Number of batches each worker prefetches; higher uses more memory
