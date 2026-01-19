@@ -7,6 +7,7 @@ from lal import GreenwichMeanSiderealTime
 from typing import Union
 from bilby.gw.detector import calibration
 from bilby.gw.prior import CalibrationPriorDict
+from bilby_pipe.utils import CALIBRATION_CORRECTION_TYPE_LOOKUP
 
 
 CC = 299792458.0
@@ -316,6 +317,17 @@ class SampleCalibrationParameters(object):
         self.num_calibration_curves = num_calibration_curves
         self.data_domain = data_domain
 
+        if correction_type is None:
+            correction_type_dict = {
+                ifo: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo] for ifo in self.ifo_list
+            }
+        elif correction_type == "data" or correction_type == "template":
+            correction_type_dict = {ifo: correction_type for ifo in self.ifo_list}
+        elif isinstance(correction_type, dict):
+            correction_type_dict = correction_type
+        else:
+            raise Exception(f"{correction_type} not understood")
+
         self.calibration_prior = {}
         if all([s.endswith(".txt") for s in calibration_envelope.values()]):
             self.calibration_envelope = calibration_envelope
@@ -336,7 +348,7 @@ class SampleCalibrationParameters(object):
                     self.data_domain.f_max,
                     num_calibration_nodes,
                     ifo.name,
-                    correction_type=correction_type,
+                    correction_type=correction_type_dict[ifo],
                 )
         else:
             raise Exception("Calibration envelope must be specified in a .txt file!")

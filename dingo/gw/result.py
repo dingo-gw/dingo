@@ -6,6 +6,7 @@ import numpy as np
 import yaml
 from bilby.core.prior import Uniform, Constraint, PriorDict
 from bilby.gw.prior import CalibrationPriorDict
+from bilby_pipe.utils import CALIBRATION_CORRECTION_TYPE_LOOKUP
 
 from dingo.core.density import (
     interpolated_sample_and_log_prob_multi,
@@ -391,9 +392,24 @@ class Result(CoreResult):
                 locations of calibration envelope files (.txt).
             num_calibration_nodes : int
                 Number of log-spaced frequency nodes for the calibration spline model.
-            correction_type : str, default "data"
+            correction_type : str or dict or None, default "data"
                 Whether envelopes are over eta ("data") or alpha ("template").
+                Can be a string (applied to all detectors), a dict mapping ifo names
+                to correction types, or None (uses defaults from CALIBRATION_CORRECTION_TYPE_LOOKUP).
         """
+        # Handle correction_type defaults
+        correction_type = calibration_sampling_kwargs.get("correction_type", "data")
+        if correction_type is None:
+            correction_type_dict = {
+                ifo: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo] for ifo in self.interferometers
+            }
+        elif correction_type == "data" or correction_type == "template":
+            correction_type_dict = {ifo: correction_type for ifo in self.interferometers}
+        elif isinstance(correction_type, dict):
+            correction_type_dict = correction_type
+        else:
+            raise ValueError(f"{correction_type} not understood")
+
         # Build calibration priors for sampling
         calibration_priors = {}
         for ifo in self.interferometers:
@@ -403,7 +419,7 @@ class Result(CoreResult):
                 self.domain.f_max,
                 calibration_sampling_kwargs["num_calibration_nodes"],
                 ifo,
-                correction_type=calibration_sampling_kwargs.get("correction_type", "data"),
+                correction_type=correction_type_dict[ifo],
             )
 
         # Sample calibration parameters for each sample
