@@ -1,11 +1,6 @@
 data:
   waveform_dataset_path: training_data/waveform_dataset.hdf5
   train_fraction: 0.95
-  window:
-    type: tukey
-    f_s: 4096
-    T: 8.0
-    roll_off: 0.4
   domain_update:
     f_min: 20.0
     f_max: 512.0

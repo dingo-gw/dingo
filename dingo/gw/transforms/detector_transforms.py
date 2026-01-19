@@ -9,7 +9,6 @@ from bilby.gw.detector import calibration
 from bilby.gw.prior import CalibrationPriorDict
 from bilby_pipe.utils import CALIBRATION_CORRECTION_TYPE_LOOKUP
 
-
 CC = 299792458.0
 
 
