@@ -91,6 +91,7 @@ class ImportanceSamplingInput(Input):
         #
         # Calibration
         self.calibration_model = args.calibration_model
+        self.calibration_mode = args.calibration_mode
         self.spline_calibration_nodes = args.spline_calibration_nodes
         self.spline_calibration_envelope_dict = args.spline_calibration_envelope_dict
         self.spline_calibration_curves = args.spline_calibration_curves
@@ -125,14 +126,14 @@ class ImportanceSamplingInput(Input):
 
     @property
     def calibration_marginalization_kwargs(self):
-        if self.calibration_model == "CubicSpline":
+        if self.calibration_model == "CubicSpline" and self.calibration_mode == "marginalize":
             return {
                 "calibration_envelope": self.spline_calibration_envelope_dict,
                 "num_calibration_nodes": self.spline_calibration_nodes,
                 "num_calibration_curves": self.spline_calibration_curves,
                 "correction_type": self.calibration_correction_type,
             }
-        elif self.calibration_model == None:
+        elif self.calibration_model is None or self.calibration_mode in ["sample", None]:
             return None
         else:
             raise ValueError(
@@ -173,6 +174,14 @@ class ImportanceSamplingInput(Input):
                 self._importance_sampling_settings.pop("synthetic_phase", None)
         else:
             self._importance_sampling_settings = dict()
+
+        # Add calibration sampling if mode is "sample"
+        if self.calibration_mode == "sample" and self.calibration_model == "CubicSpline":
+            self._importance_sampling_settings["sample_calibration_parameters"] = {
+                "calibration_envelope": self.spline_calibration_envelope_dict,
+                "num_calibration_nodes": self.spline_calibration_nodes,
+                "correction_type": self.calibration_correction_type,
+            }
 
     def run_sampler(self):
         self.result.use_base_domain = self.importance_sampling_settings.get(
