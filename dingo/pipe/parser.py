@@ -81,8 +81,10 @@ def create_parser(top_level=True, usage=None):
 
     calibration_parser = parser.add_argument_group(
         "Calibration arguments",
-        description="Which calibration model and settings to use. Calibration "
-        "uncertainty is marginalizaed over during importance sampling.",
+        description="Settings for handling calibration uncertainty during importance "
+        "sampling. Calibration uncertainty can either be marginalized over (averaging "
+        "likelihoods over multiple calibration draws) or sampled (treating calibration "
+        "parameters as part of the posterior). These modes are mutually exclusive.",
     )
     calibration_parser.add(
         "--calibration-model",
@@ -90,6 +92,20 @@ def create_parser(top_level=True, usage=None):
         default=None,
         choices=["CubicSpline", None],
         help="Choice of calibration model, if None, no calibration is used",
+    )
+
+    calibration_parser.add(
+        "--calibration-mode",
+        type=nonestr,
+        default="marginalize",
+        choices=["marginalize", "sample", None],
+        help=(
+            "How to handle calibration uncertainty. 'marginalize' averages likelihoods "
+            "over multiple calibration draws. 'sample' treats calibration parameters as "
+            "part of the posterior (importance sampling over calibration). If None or "
+            "calibration-model is None, no calibration handling is performed. "
+            "Default is 'marginalize'."
+        ),
     )
 
     calibration_parser.add(
@@ -122,8 +138,8 @@ def create_parser(top_level=True, usage=None):
         type=int,
         default=1000,
         help=(
-            "Number of calibration curves to use in marginalizing over calibration "
-            "uncertainty"
+            "Number of calibration curves to use when marginalizing over calibration "
+            "uncertainty. Only used when calibration-mode='marginalize'."
         ),
     )
     #

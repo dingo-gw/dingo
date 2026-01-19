@@ -5,6 +5,7 @@ from typing import Optional
 import numpy as np
 import yaml
 from bilby.core.prior import Uniform, Constraint, PriorDict
+from bilby.gw.prior import CalibrationPriorDict
 
 from dingo.core.density import (
     interpolated_sample_and_log_prob_multi,
@@ -175,6 +176,9 @@ class Result(CoreResult):
         # will be constructed in this way.
 
         # TODO: Make compatible with MultibandedFrequencyDomain.
+        # NOTE TEMP 
+        return
+        # NOTE TEMP 
         if isinstance(self.domain, MultibandedFrequencyDomain):
             raise NotImplementedError()
 
@@ -366,6 +370,50 @@ class Result(CoreResult):
                 maximum_frequency=self.maximum_frequency,
             ),
         )
+
+    def sample_calibration_parameters(self, calibration_sampling_kwargs: dict):
+        """
+        Sample calibration parameters from the calibration prior and add them to the
+        samples DataFrame. This should be called before importance_sample() when
+        importance sampling over calibration uncertainty.
+
+        After calling this method, each sample will have calibration parameters
+        (e.g., recalib_H1_amplitude_0, recalib_H1_phase_0, etc.) that will be used
+        by the likelihood to apply calibration corrections.
+
+        Parameters
+        ----------
+        calibration_sampling_kwargs : dict
+            Calibration sampling parameters. Keys:
+
+            calibration_envelope : dict
+                Dictionary of the form {"H1": filepath, "L1": filepath, ...} with
+                locations of calibration envelope files (.txt).
+            num_calibration_nodes : int
+                Number of log-spaced frequency nodes for the calibration spline model.
+            correction_type : str, default "data"
+                Whether envelopes are over eta ("data") or alpha ("template").
+        """
+        # Build calibration priors for sampling
+        calibration_priors = {}
+        for ifo in self.interferometers:
+            calibration_priors[ifo] = CalibrationPriorDict.from_envelope_file(
+                calibration_sampling_kwargs["calibration_envelope"][ifo],
+                self.domain.f_min,
+                self.domain.f_max,
+                calibration_sampling_kwargs["num_calibration_nodes"],
+                ifo,
+                correction_type=calibration_sampling_kwargs.get("correction_type", "data"),
+            )
+
+        # Sample calibration parameters for each sample
+        num_samples = len(self.samples)
+        print(f"Sampling calibration parameters for {num_samples} samples.")
+
+        for ifo, prior in calibration_priors.items():
+            draws = prior.sample(num_samples)
+            for param_name, values in draws.items():
+                self.samples[param_name] = np.array(values)
 
     def sample_synthetic_phase(
         self,

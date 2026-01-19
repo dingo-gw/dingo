@@ -198,6 +198,12 @@ class ImportanceSamplingInput(Input):
             }
             self.result.sample_synthetic_phase(synthetic_phase_kwargs)
 
+        if "sample_calibration_parameters" in self.importance_sampling_settings:
+            logger.info("Sampling calibration parameters for importance sampling.")
+            self.result.sample_calibration_parameters(
+                self.importance_sampling_settings["sample_calibration_parameters"]
+            )
+
         self.result.importance_sample(
             num_processes=self.request_cpus,
             time_marginalization_kwargs=self.importance_sampling_settings.get(

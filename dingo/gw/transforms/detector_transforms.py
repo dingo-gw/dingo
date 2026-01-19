@@ -395,6 +395,8 @@ class ApplyCalibrationUncertainty(object):
         for ifo in self.ifo_list:
             calibration_parameter_draws, calibration_draws = {}, {}
             # Sampling from prior
+            # this samples of a set of calibration parameters 
+            # {A_i, phi_i} at the spline node points
             calibration_parameter_draws[ifo.name] = pd.DataFrame(
                 self.calibration_prior[ifo.name].sample(self.num_calibration_curves)
             )
@@ -406,6 +408,9 @@ class ApplyCalibrationUncertainty(object):
                 dtype=complex,
             )
 
+            # Generating calibration curves from sampled parameters.
+            # This is done by evaluating the spline at each frequency
+            #
             for i in range(self.num_calibration_curves):
                 calibration_draws[ifo.name][
                     i, self.data_domain.frequency_mask
@@ -431,6 +436,208 @@ class ApplyCalibrationUncertainty(object):
 
             sample["waveform"][ifo.name] = (
                 sample["waveform"][ifo.name] * calibration_draws[ifo.name]
+            )
+
+        return sample
+
+
+class SampleCalibrationParameters(object):
+    r"""
+    Sample calibration parameters from the calibration prior and add them to
+    extrinsic_parameters. This transform is used for calibration marginalization.
+
+    The calibration parameters are added to sample["extrinsic_parameters"] with keys
+    like "recalib_H1_amplitude_0", "recalib_H1_phase_0", etc. Each value is an array
+    of shape (num_calibration_curves,).
+
+    This transform should be followed by ApplyCalibrationToWaveform to apply the
+    sampled calibration curves to the waveform.
+    """
+
+    def __init__(
+        self,
+        ifo_list,
+        data_domain,
+        calibration_envelope,
+        num_calibration_curves,
+        num_calibration_nodes,
+        correction_type="data",
+    ):
+        r"""
+        Parameters
+        ----------
+        ifo_list : InterferometerList
+            List of Interferometers present in the analysis.
+        data_domain : Domain
+            Domain on which data is defined.
+        calibration_envelope : dict
+            Dictionary of the form ``{"H1": filepath, "L1": filepath}``,
+            where the filepaths are strings pointing to ".txt" files containing
+            calibration envelopes.
+        num_calibration_curves : int
+            Number of calibration curves to sample.
+        num_calibration_nodes : int
+            Number of log-spaced frequency nodes for the spline.
+        correction_type : str = "data"
+            Whether envelopes are over eta ("data") or alpha ("template").
+        """
+        self.ifo_list = ifo_list
+        self.num_calibration_curves = num_calibration_curves
+        self.data_domain = data_domain
+
+        self.calibration_prior = {}
+        if all([s.endswith(".txt") for s in calibration_envelope.values()]):
+            self.calibration_envelope = calibration_envelope
+            for ifo in self.ifo_list:
+                # Set up calibration model on ifo (needed by ApplyCalibrationToWaveform)
+                ifo.calibration_model = calibration.CubicSpline(
+                    f"recalib_{ifo.name}_",
+                    minimum_frequency=data_domain.f_min,
+                    maximum_frequency=data_domain.f_max,
+                    n_points=num_calibration_nodes,
+                )
+
+                # Set up calibration prior
+                self.calibration_prior[
+                    ifo.name
+                ] = CalibrationPriorDict.from_envelope_file(
+                    self.calibration_envelope[ifo.name],
+                    self.data_domain.f_min,
+                    self.data_domain.f_max,
+                    num_calibration_nodes,
+                    ifo.name,
+                    correction_type=correction_type,
+                )
+        else:
+            raise Exception("Calibration envelope must be specified in a .txt file!")
+
+    def __call__(self, input_sample):
+        sample = input_sample.copy()
+
+        if "extrinsic_parameters" not in sample:
+            sample["extrinsic_parameters"] = {}
+
+        for ifo in self.ifo_list:
+            # Sample calibration parameters from prior
+            # Returns dict like {"recalib_H1_amplitude_0": array, ...}
+            draws = self.calibration_prior[ifo.name].sample(self.num_calibration_curves)
+
+            # Add each parameter to extrinsic_parameters
+            for param_name, values in draws.items():
+                sample["extrinsic_parameters"][param_name] = np.array(values)
+
+        return sample
+
+
+class ApplyCalibrationToWaveform(object):
+    r"""
+    Apply calibration correction to the waveform based on calibration parameters
+    in extrinsic_parameters.
+
+    Calibration parameters should be in sample["extrinsic_parameters"] with keys like
+    "recalib_H1_amplitude_0", "recalib_H1_phase_0", etc.
+
+    - If values are arrays of shape (N,), applies N calibration curves, adding a
+      leading dimension to the waveform.
+    - If values are scalars, applies a single calibration curve.
+    - If no calibration parameters found, passes through unchanged.
+
+    The calibration spline model is lazily initialized on the first call, inferring
+    num_calibration_nodes from the number of calibration parameters present.
+    """
+
+    def __init__(
+        self,
+        ifo_list,
+        data_domain,
+    ):
+        r"""
+        Parameters
+        ----------
+        ifo_list : InterferometerList
+            List of Interferometers present in the analysis.
+        data_domain : Domain
+            Domain on which data is defined.
+        """
+        self.ifo_list = ifo_list
+        self.data_domain = data_domain
+
+    def _ensure_calibration_model(self, ifo, num_calibration_nodes):
+        """
+        Ensure the calibration model is set up on the ifo. Creates it if not present
+        or if it has a different number of nodes.
+        """
+        if (
+            not hasattr(ifo, "calibration_model")
+            or ifo.calibration_model is None
+            or ifo.calibration_model.n_points != num_calibration_nodes
+        ):
+            ifo.calibration_model = calibration.CubicSpline(
+                f"recalib_{ifo.name}_",
+                minimum_frequency=self.data_domain.f_min,
+                maximum_frequency=self.data_domain.f_max,
+                n_points=num_calibration_nodes,
+            )
+
+    def __call__(self, input_sample):
+        sample = input_sample.copy()
+
+        if "extrinsic_parameters" not in sample:
+            return sample
+
+        extrinsic = sample["extrinsic_parameters"]
+
+        for ifo in self.ifo_list:
+            prefix = f"recalib_{ifo.name}_"
+
+            # Extract calibration parameters for this ifo
+            calib_params = {
+                k: v for k, v in extrinsic.items() if k.startswith(prefix)
+            }
+
+            if not calib_params:
+                continue
+
+            # Infer num_calibration_nodes from the number of amplitude parameters
+            # Parameters are named like recalib_H1_amplitude_0, recalib_H1_amplitude_1, ...
+            amplitude_params = [k for k in calib_params if "amplitude" in k]
+            num_calibration_nodes = len(amplitude_params)
+
+            # Ensure calibration model is set up (lazy initialization)
+            self._ensure_calibration_model(ifo, num_calibration_nodes)
+
+            # Check if parameters are scalars and promote to arrays if so
+            first_param = next(iter(calib_params.values()))
+            is_scalar = np.isscalar(first_param)
+            if is_scalar:
+                calib_params = {k: np.array([v]) for k, v in calib_params.items()}
+
+            num_curves = len(next(iter(calib_params.values())))
+
+            # Initialize calibration draws array
+            calibration_draws = np.zeros(
+                (num_curves, len(self.data_domain.sample_frequencies)),
+                dtype=complex,
+            )
+
+            # Compute calibration curve for each parameter set
+            for i in range(num_curves):
+                params_i = {k: v[i] for k, v in calib_params.items()}
+                calibration_draws[
+                    i, self.data_domain.frequency_mask
+                ] = ifo.calibration_model.get_calibration_factor(
+                    self.data_domain.sample_frequencies[self.data_domain.frequency_mask],
+                    prefix=prefix,
+                    **params_i,
+                )
+
+            # Apply calibration to waveform
+            # Squeeze out leading dimension if input was scalar
+            if is_scalar:
+                calibration_draws = calibration_draws.squeeze(axis=0)
+
+            sample["waveform"][ifo.name] = (
+                sample["waveform"][ifo.name] * calibration_draws
             )
 
         return sample
