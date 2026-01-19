@@ -177,9 +177,6 @@ class Result(CoreResult):
         # will be constructed in this way.
 
         # TODO: Make compatible with MultibandedFrequencyDomain.
-        # NOTE TEMP 
-        return
-        # NOTE TEMP 
         if isinstance(self.domain, MultibandedFrequencyDomain):
             raise NotImplementedError()
 
