@@ -119,6 +119,8 @@ class SamplingInput(Input):
         model = build_model_from_kwargs(
             filename=self.model, device=self.device, load_training_info=False
         )
+        
+        zero_noise_arguments = {'duplicate_samples': self.zero_noise, 'batch_size': self.batch_size}
 
         if self.model_init is not None:
             self.gnpe = True
@@ -130,12 +132,12 @@ class SamplingInput(Input):
                 model=model,
                 init_sampler=init_sampler,
                 num_iterations=self.num_gnpe_iterations,
-                duplicate_samples=self.zero_noise, batch_size=self.batch_size
+                **zero_noise_arguments
             )
 
         else:
             self.gnpe = False
-            self.dingo_sampler = GWSampler(model=model, duplicate_samples=self.zero_noise, batch_size=self.batch_size)
+            self.dingo_sampler = GWSampler(model=model, **zero_noise_arguments)
 
         self.dingo_sampler.context = self.context
         self.dingo_sampler.event_metadata = self.event_metadata

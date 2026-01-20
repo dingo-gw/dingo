@@ -67,6 +67,11 @@ class GWSamplerMixin(object):
         # Has to be specified before init, because the information is required in _initialize_transforms()
         self._minimum_frequency = None
         self._maximum_frequency = None
+        if 'duplicate_samples' in kwargs:
+            self.duplicate_samples = kwargs['duplicate_samples']
+            self.batch_size = kwargs['batch_size']
+            del kwargs['duplicate_samples']
+            del kwargs['batch_size']
         super().__init__(**kwargs)
         self.t_ref = self.base_model_metadata["train_settings"]["data"]["ref_time"]
         self._pesummary_package = "gw"

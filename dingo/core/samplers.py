@@ -60,8 +60,6 @@ class Sampler(object):
     def __init__(
         self,
         model: BasePosteriorModel,
-        duplicate_samples: bool = False,
-        batch_size: int = None,
     ):
         """
         Parameters
@@ -70,9 +68,6 @@ class Sampler(object):
         """
         self.model = model
         self.event_metadata = None
-        # if kwargs['duplicate_samples']:
-        self.duplicate_samples = duplicate_samples
-        self.batch_size = batch_size
 
         self.metadata = self.model.metadata.copy()
         if self.metadata["train_settings"]["data"].get("unconditional", False):
@@ -150,6 +145,7 @@ class Sampler(object):
         if not self.unconditional_model:
             if context is None:
                 raise ValueError("Context required to run sampler.")
+            breakpoint()
             x = context.copy()
             x["parameters"] = {}
             x["extrinsic_parameters"] = {}
@@ -393,7 +389,6 @@ class GNPESampler(Sampler):
         model: BasePosteriorModel,
         init_sampler: Sampler,
         num_iterations: int = 1,
-        **kwargs
     ):
         """
         Parameters
@@ -405,10 +400,8 @@ class GNPESampler(Sampler):
             Number of GNPE iterations to be performed by sampler.
         """
         self.gnpe_parameters = []  # Should be set in subclass _initialize_transform()
-        self.duplicate_samples = kwargs['duplicate_samples']
-        self.batch_size = kwargs['batch_size']
 
-        super().__init__(model, duplicate_samples=self.duplicate_samples, batch_size=self.batch_size)
+        super().__init__(model)
         self.init_sampler = init_sampler
         self.num_iterations = num_iterations
         self.iteration_tracker = None
