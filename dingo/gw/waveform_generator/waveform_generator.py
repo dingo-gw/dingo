@@ -1255,6 +1255,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 # Step 2: Transform modes to target domain.
                 # This requires tapering of TD modes, and FFT to transform to FD.
                 # TEOB and SEOB have slightly different conditioning routine implementations 
+                # TEOB uses gwsignal routines SEOB uses lal routines
                 if self.approximant_str in ["TEOBResumSDALI"]:
                     wfg_utils.taper_td_modes_in_place_gwsignal(hlm_td)
                     hlm_fd = wfg_utils.td_modes_to_fd_modes_gwsignal(hlm_td, self.domain)
@@ -1262,10 +1263,6 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                     wfg_utils.taper_td_modes_in_place(hlm_td)
                     hlm_fd = wfg_utils.td_modes_to_fd_modes(hlm_td, self.domain)
 
-            # TODO, why are these different? Shouldn't the gwsignal and non-gwsignal be the 
-            # exact same implementation?
-
-                
             elif self.approximant_str in ["SEOBNRv5PHM", "SEOBNRv5HM"]:
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: TD), applying standard conditioning

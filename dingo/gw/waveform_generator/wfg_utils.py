@@ -211,15 +211,15 @@ def td_modes_to_fd_modes_gwsignal(hlm_td, domain):
         hlm_td_cond = cond.resize_gwpy_timeseries(hlm_td[mode], len(hlm_td[mode]) - chirplen, chirplen)
         hlm_fd_cond = hlm_td_cond.fft()
         hlm_fd_cond.epoch = hlm_td_cond.t0
-        hlm_fd_cond = (hlm_fd_cond / (2 * hlm_fd_cond.df)).value
+        delta_f = hlm_fd_cond.df
+        hlm_fd_cond = (hlm_fd_cond / (2 * delta_f)).value
 
         # setting up reflection around boundary to create two-sided FFT
-        hlm_fd_cond = np.concatenate((hlm_fd_cond[::-1], np.conj(hlm_fd_cond[1:])), axis=0)
+        # hlm_fd_cond = np.concatenate((hlm_fd_cond[::-1], np.conj(hlm_fd_cond[1:])), axis=0)
         
-        hlm_fd_cond[-1] = hlm_fd_cond[0]
+        # hlm_fd_cond[-1] = hlm_fd_cond[0]
+        # hlm_fd[mode] = hlm_fd[mode] / (2 * delta_f)
         hlm_fd[mode] = hlm_fd_cond
-
-        hlm_fd[mode] = hlm_fd[mode] / (2 * hlm_fd_cond.df)
 
     return hlm_fd
 
