@@ -432,7 +432,8 @@ class ApplyCalibrationToWaveform(object):
         Ensure the calibration model is set up on the ifo. Creates it if not present
         or if it has a different number of nodes.
         """
-        if not hasattr(ifo, "calibration_model") or ifo.calibration_model is None:
+        if not hasattr(ifo, "calibration_model") or ifo.calibration_model is None or isinstance(ifo.calibration_model, calibration.Recalibrate):
+            # using https://dcc.ligo.org/LIGO-T2300140 
             ifo.calibration_model = calibration.CubicSpline(
                 f"recalib_{ifo.name}_",
                 minimum_frequency=self.data_domain.f_min,
@@ -506,7 +507,6 @@ class ApplyCalibrationToWaveform(object):
             # We take the waveform h(f) and multiply it by C = (1 + \delta A(f))
             # \exp(i \delta \psi) i.e. h_obs(f) = C * h(f)
             # Here C is "calibration_draws"
-
 
             sample["waveform"][ifo.name] = (
                 sample["waveform"][ifo.name] * calibration_draws
