@@ -347,7 +347,7 @@ class SampleCalibrationParameters(object):
                     self.data_domain.f_max,
                     num_calibration_nodes,
                     ifo.name,
-                    correction_type=correction_type_dict[ifo],
+                    correction_type=correction_type_dict[ifo.name],
                 )
         else:
             raise Exception("Calibration envelope must be specified in a .txt file!")
@@ -432,11 +432,7 @@ class ApplyCalibrationToWaveform(object):
         Ensure the calibration model is set up on the ifo. Creates it if not present
         or if it has a different number of nodes.
         """
-        if (
-            not hasattr(ifo, "calibration_model")
-            or ifo.calibration_model is None
-            or ifo.calibration_model.n_points != num_calibration_nodes
-        ):
+        if not hasattr(ifo, "calibration_model") or ifo.calibration_model is None:
             ifo.calibration_model = calibration.CubicSpline(
                 f"recalib_{ifo.name}_",
                 minimum_frequency=self.data_domain.f_min,
@@ -496,7 +492,6 @@ class ApplyCalibrationToWaveform(object):
                     **params_i,
                 )
 
-            
             # Squeeze out leading dimension if input was scalar
             if is_scalar:
                 calibration_draws = calibration_draws.squeeze(axis=0)
