@@ -145,7 +145,7 @@ class Sampler(object):
         if not self.unconditional_model:
             if context is None:
                 raise ValueError("Context required to run sampler.")
-            breakpoint()
+
             x = context.copy()
             x["parameters"] = {}
             x["extrinsic_parameters"] = {}
@@ -505,9 +505,12 @@ class GNPESampler(Sampler):
                 {k: v.cpu().numpy() for k, v in x["extrinsic_parameters"].items()}
             )
 
+            # data should have only one batch sized dimension 
             d = data_.clone()
-            x["data"] = d.expand(num_samples, *d.shape)
-
+            if len(data_.shape) == 3:
+                x["data"] = d.expand(num_samples, *d.shape)
+            elif len(data_.shape) == 4:
+                x["data"] = d
             x = self.transform_pre(x)
 
             time_sample_start = time.time()

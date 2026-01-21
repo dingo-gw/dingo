@@ -127,7 +127,7 @@ class SamplingInput(Input):
             init_model = build_model_from_kwargs(
                 filename=self.model_init, device=self.device, load_training_info=False
             )
-            init_sampler = GWSampler(model=init_model, duplicate_samples=self.zero_noise, batch_size=self.batch_size)
+            init_sampler = GWSampler(model=init_model, **zero_noise_arguments)
             self.dingo_sampler = GWSamplerGNPE(
                 model=model,
                 init_sampler=init_sampler,
@@ -190,6 +190,9 @@ class SamplingInput(Input):
                 "GNPE network does not provide log probability. Generating "
                 "samples and training a new network to recover it."
             )
+            # Trojan horsing zero noise settings into the unconditional model sampler
+            zero_noise_arguments = {'duplicate_samples': self.zero_noise, 'batch_size': self.batch_size}
+            self.density_recovery_settings['nde_settings']['zero_noise_arguments'] = zero_noise_arguments
 
             # Note that this will not save any low latency samples at present.
             prepare_log_prob(
