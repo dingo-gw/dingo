@@ -177,7 +177,7 @@ class ImportanceSamplingInput(Input):
 
         # Add calibration sampling if mode is "sample"
         if self.calibration_mode == "sample" and self.calibration_model == "CubicSpline":
-            self._importance_sampling_settings["sample_calibration_parameters"] = {
+            self._importance_sampling_settings["calibration_sampling_settings"] = {
                 "calibration_envelope": self.spline_calibration_envelope_dict,
                 "num_calibration_nodes": self.spline_calibration_nodes,
                 "correction_type": self.calibration_correction_type,
@@ -207,10 +207,10 @@ class ImportanceSamplingInput(Input):
             }
             self.result.sample_synthetic_phase(synthetic_phase_kwargs)
 
-        if "sample_calibration_parameters" in self.importance_sampling_settings:
+        if "calibration_sampling_settings" in self.importance_sampling_settings:
             logger.info("Sampling calibration parameters for importance sampling.")
-            self.result.sample_calibration_parameters(
-                self.importance_sampling_settings["sample_calibration_parameters"]
+            self.result.calibration_sampling_settings(
+                self.importance_sampling_settings["calibration_sampling_settings"]
             )
 
         self.result.importance_sample(
