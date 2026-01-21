@@ -377,8 +377,13 @@ class Result(CoreResult):
     def sample_calibration_parameters(self, calibration_sampling_kwargs: dict):
         """
         Sample calibration parameters from the calibration prior and add them to the
-        samples DataFrame. This should be called before importance_sample() when
-        importance sampling over calibration uncertainty.
+        samples DataFrame. Also updates self.prior with the calibration priors and
+        adjusts self.samples["log_prob"] accordingly.
+
+        This should be called before importance_sample() when importance sampling
+        over calibration uncertainty. The calibration prior log_prob is added to
+        self.samples["log_prob"] so that it is properly accounted for in the
+        importance sampling weights.
 
         After calling this method, each sample will have calibration parameters
         (e.g., recalib_H1_amplitude_0, recalib_H1_phase_0, etc.) that will be used
@@ -424,14 +429,25 @@ class Result(CoreResult):
                 correction_type=correction_type_dict[ifo],
             )
 
-        # Sample calibration parameters for each sample
+        # Sample calibration parameters and calculate log_prob
         num_samples = len(self.samples)
         print(f"Sampling calibration parameters for {num_samples} samples.")
 
+        delta_log_prob = np.zeros(num_samples)
+
         for ifo, prior in calibration_priors.items():
             draws = prior.sample(num_samples)
+
+            # Calculate log_prob of the calibration draws
+            delta_log_prob += prior.ln_prob(draws, axis=0)
+
+            # Add draws to samples and prior to self.prior
             for param_name, values in draws.items():
                 self.samples[param_name] = np.array(values)
+            self.prior.update(prior)
+
+        # Update log_prob (add the log probability of sampled calibration parameters)
+        self.samples["log_prob"] += delta_log_prob
 
     def sample_synthetic_phase(
         self,
