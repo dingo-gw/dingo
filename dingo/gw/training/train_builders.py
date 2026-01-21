@@ -277,7 +277,7 @@ def build_svd_for_embedding_network(
     loader = DataLoader(
         wfd,
         batch_size=batch_size,
-        num_workers=num_workers,
+        num_workers= 0,
         worker_init_fn=fix_random_seeds,
     )
     with threadpool_limits(limits=1, user_api="blas"):
