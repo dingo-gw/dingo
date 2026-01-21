@@ -318,10 +318,10 @@ class SampleCalibrationParameters(object):
 
         if correction_type is None:
             correction_type_dict = {
-                ifo: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo] for ifo in self.ifo_list
+                ifo.name: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo] for ifo in self.ifo_list
             }
         elif correction_type == "data" or correction_type == "template":
-            correction_type_dict = {ifo: correction_type for ifo in self.ifo_list}
+            correction_type_dict = {ifo.name: correction_type for ifo in self.ifo_list}
         elif isinstance(correction_type, dict):
             correction_type_dict = correction_type
         else:
@@ -443,10 +443,11 @@ class ApplyCalibrationToWaveform(object):
     def __call__(self, input_sample):
         sample = input_sample.copy()
 
-        if "extrinsic_parameters" not in sample:
-            return sample
+        extrinsic = sample.get("extrinsic_parameters", {})
 
-        extrinsic = sample["extrinsic_parameters"]
+        # Check if any recalib parameters are present
+        if not any(k.startswith("recalib_") for k in extrinsic.keys()):
+            return sample
 
         for ifo in self.ifo_list:
             prefix = f"recalib_{ifo.name}_"

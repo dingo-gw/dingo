@@ -209,7 +209,7 @@ class ImportanceSamplingInput(Input):
 
         if "calibration_sampling_settings" in self.importance_sampling_settings:
             logger.info("Sampling calibration parameters for importance sampling.")
-            self.result.calibration_sampling_settings(
+            self.result.sample_calibration_parameters(
                 self.importance_sampling_settings["calibration_sampling_settings"]
             )
 
