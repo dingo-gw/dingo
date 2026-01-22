@@ -4,7 +4,7 @@ from typing import Optional
 
 import numpy as np
 import yaml
-from bilby.core.prior import Uniform, Constraint, PriorDict
+from bilby.core.prior import Uniform, Constraint, PriorDict, DeltaFunction
 from bilby.gw.prior import CalibrationPriorDict
 from bilby_pipe.utils import CALIBRATION_CORRECTION_TYPE_LOOKUP
 
@@ -429,11 +429,23 @@ class Result(CoreResult):
                 correction_type=correction_type_dict[ifo],
             )
 
+        # Removing the delta function priors on the frequency nodes.
+        # This avoids large log probs and log priors, since the density of a delta function
+        # at the sampled point is infinite. The delta functions do not affect the sampling,
+        # since they just fix certain parameters to constant values.
+        for ifo in calibration_priors:
+            for param_name, prior_obj in list(calibration_priors[ifo].items()):
+                if isinstance(prior_obj, DeltaFunction):
+                    calibration_priors[ifo].pop(param_name)
+
         # Sample calibration parameters and calculate log_prob
         num_samples = len(self.samples)
         print(f"Sampling calibration parameters for {num_samples} samples.")
 
         delta_log_prob = np.zeros(num_samples)
+
+        # Get or initialize prior_update dict for persistence
+        prior_update = self.importance_sampling_metadata.get("prior_update", {})
 
         for ifo, prior in calibration_priors.items():
             draws = prior.sample(num_samples)
@@ -441,13 +453,21 @@ class Result(CoreResult):
             # Calculate log_prob of the calibration draws
             delta_log_prob += prior.ln_prob(draws, axis=0)
 
-            # Add draws to samples and prior to self.prior
+            # Add draws to samples
             for param_name, values in draws.items():
                 self.samples[param_name] = np.array(values)
-            self.prior.update(prior)
+
+            for param_name, prior_obj in prior.items():
+                prior_update[param_name] = repr(prior_obj)
+
+        # Store prior_update for persistence on save/reload
+        self.importance_sampling_metadata["prior_update"] = prior_update
 
         # Update log_prob (add the log probability of sampled calibration parameters)
         self.samples["log_prob"] += delta_log_prob
+
+        # Rebuild the prior (which will include calibration priors from prior_update)
+        self._build_prior()
 
     def sample_synthetic_phase(
         self,
