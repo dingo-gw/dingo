@@ -15,7 +15,7 @@ caption: Example `GW150914.ini` file. This is also available in the examples/ di
 ################################################################################
 
 local = True
-accounting = dingo
+# accounting = ligo.dev.o4.cbc.pe.dingo
 request-cpus-importance-sampling = 16
 n-parallel = 4
 sampling-requirements = [TARGET.CUDAGlobalMemoryMb>40000]
