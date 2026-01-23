@@ -1254,14 +1254,8 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
 
                 # Step 2: Transform modes to target domain.
                 # This requires tapering of TD modes, and FFT to transform to FD.
-                # TEOB and SEOB have slightly different conditioning routine implementations 
-                # TEOB uses gwsignal routines SEOB uses lal routines
-                if self.approximant_str in ["TEOBResumSDALI"]:
-                    wfg_utils.taper_td_modes_in_place_gwsignal(hlm_td)
-                    hlm_fd = wfg_utils.td_modes_to_fd_modes_gwsignal(hlm_td, self.domain)
-                else:
-                    wfg_utils.taper_td_modes_in_place(hlm_td)
-                    hlm_fd = wfg_utils.td_modes_to_fd_modes(hlm_td, self.domain)
+                wfg_utils.taper_td_modes_in_place(hlm_td)
+                hlm_fd = wfg_utils.td_modes_to_fd_modes(hlm_td, self.domain)
 
             elif self.approximant_str in ["SEOBNRv5PHM", "SEOBNRv5HM"]:
                 # Step 1: generate waveform modes in L0 frame in native domain of
@@ -1395,10 +1389,6 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             {**parameters, "f_ref": self.f_ref}
         )
 
-        generator = new_interface_get_waveform_generator(self.approximant_str)
-        hlm_td = gws_wfm.GenerateTDModes(parameters_gwsignal, generator)
-        hlms_lal = {}
-
         # TEOBREsumS returns the modes unscaled in the distance version when calling GenerateTDModes
         # therefore, we rescale them here
         if "TEOB" in self.approximant_str:
@@ -1417,6 +1407,11 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             )
         else:
             distance_rescaling = 1.0
+
+        generator = new_interface_get_waveform_generator(self.approximant_str)
+        hlm_td = gws_wfm.GenerateTDModes(parameters_gwsignal, generator)
+        hlms_lal = {}
+
 
         for key, value in hlm_td.items():
             if type(key) != str:
