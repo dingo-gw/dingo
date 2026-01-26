@@ -404,8 +404,10 @@ class Result(CoreResult):
                 Can be a string (applied to all detectors), a dict mapping ifo names
                 to correction types, or None (uses defaults from CALIBRATION_CORRECTION_TYPE_LOOKUP).
         """
+        self.calibration_sampling_kwargs = calibration_sampling_kwargs
+
         # Handle correction_type defaults
-        correction_type = calibration_sampling_kwargs.get("correction_type", "data")
+        correction_type = self.calibration_sampling_kwargs.get("correction_type", "data")
         if correction_type is None:
             correction_type_dict = {
                 ifo: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo] for ifo in self.interferometers
@@ -421,10 +423,10 @@ class Result(CoreResult):
         calibration_priors = {}
         for ifo in self.interferometers:
             calibration_priors[ifo] = CalibrationPriorDict.from_envelope_file(
-                calibration_sampling_kwargs["calibration_envelope"][ifo],
+                self.calibration_sampling_kwargs["calibration_envelope"][ifo],
                 self.domain.f_min,
                 self.domain.f_max,
-                calibration_sampling_kwargs["num_calibration_nodes"],
+                self.calibration_sampling_kwargs["num_calibration_nodes"],
                 ifo,
                 correction_type=correction_type_dict[ifo],
             )
