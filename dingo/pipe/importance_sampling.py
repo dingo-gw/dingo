@@ -182,6 +182,11 @@ class ImportanceSamplingInput(Input):
                 "num_calibration_nodes": self.spline_calibration_nodes,
                 "correction_type": self.calibration_correction_type,
             }
+        else:
+            raise NotImplementedError(
+                "The only calibration model which is supported is 'CubicSpline' "
+                "with calibration_mode set to 'sample'"
+            )
 
     def run_sampler(self):
         self.result.use_base_domain = self.importance_sampling_settings.get(
