@@ -446,9 +446,12 @@ class Result(CoreResult):
 
         delta_log_prob = np.zeros(num_samples)
 
-        # Get or initialize prior_update dict for persistence
+        # Here we will sample the calibration parameters from the prior.
+        # We treat the *prior as the proposal* distribution and 
+        # therefore add the log_prob of the sampled calibration parameters 
+        # to the existing log_prob. We also will update the prior 
+        # to include the calibration priors using the importance_sampling_metadata
         prior_update = self.importance_sampling_metadata.get("prior_update", {})
-
         for ifo, prior in calibration_priors.items():
             draws = prior.sample(num_samples)
 
@@ -459,6 +462,8 @@ class Result(CoreResult):
             for param_name, values in draws.items():
                 self.samples[param_name] = np.array(values)
 
+            # Update prior_update dict with calibration parameters. This is for
+            # persistence when saving to hdf5
             for param_name, prior_obj in prior.items():
                 prior_update[param_name] = repr(prior_obj)
 
