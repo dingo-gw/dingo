@@ -429,7 +429,9 @@ class Result(CoreResult):
                 correction_type=correction_type_dict[ifo],
             )
 
-        # Removing the delta function priors on the frequency nodes.
+        # Removing the delta function priors on the frequency nodes, amplitude and phase.
+        # Usually the frequency nodes are set to delta functions, but we also remove the 
+        # the amplitude and phase delta functions if present.
         # This avoids large log probs and log priors, since the density of a delta function
         # at the sampled point is infinite. The delta functions do not affect the sampling,
         # since they just fix certain parameters to constant values.
