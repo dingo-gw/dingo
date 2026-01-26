@@ -318,7 +318,7 @@ class SampleCalibrationParameters(object):
 
         if correction_type is None:
             correction_type_dict = {
-                ifo.name: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo] for ifo in self.ifo_list
+                ifo.name: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo.name] for ifo in self.ifo_list
             }
         elif correction_type == "data" or correction_type == "template":
             correction_type_dict = {ifo.name: correction_type for ifo in self.ifo_list}
