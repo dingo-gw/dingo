@@ -14,7 +14,8 @@ from dingo.gw.transforms import (
     GetDetectorTimes,
     ProjectOntoDetectors,
     WhitenAndScaleStrain,
-    ApplyCalibrationUncertainty,
+    SampleCalibrationParameters,
+    ApplyCalibrationToWaveform,
 )
 from dingo.gw.waveform_generator.waveform_generator import (
     WaveformGenerator,
@@ -156,13 +157,22 @@ class GWSignal(object):
             ProjectOntoDetectors(self.ifo_list, self.data_domain, self.t_ref),
         ]
         if self.calibration_marginalization_kwargs:
+            # For calibration marginalization: sample parameters from prior
             transforms.append(
-                ApplyCalibrationUncertainty(
+                SampleCalibrationParameters(
                     self.ifo_list,
                     self.data_domain,
                     **self.calibration_marginalization_kwargs,
                 )
             )
+        # Always add ApplyCalibrationToWaveform - it's a no-op if no calibration
+        # parameters are present in the sample
+        transforms.append(
+            ApplyCalibrationToWaveform(
+                self.ifo_list,
+                self.data_domain,
+            )
+        )
         if self.whiten:
             transforms.append(WhitenAndScaleStrain(self.data_domain.noise_std))
         self.projection_transforms = Compose(transforms)

@@ -266,10 +266,114 @@ class TimeShiftStrain(object):
         return sample
 
 
-class ApplyCalibrationUncertainty(object):
+class SampleCalibrationParameters(object):
     r"""
     Expand out a waveform using several detector calibration draws. These multiple
     draws are intended to be used for marginalizing over calibration uncertainty.
+
+    The calibration parameters are not known precisely, rather they are assumed to be
+    normally distributed, with mean 0 and standard deviation  determined by the
+    "calibration envelope", which varies from event to event.
+
+    Therefore, for each detector waveform, this transform draws a collection of $N$
+    calibration curves $\{(\delta A^n(f), \delta \phi^n(f))\}_{n=1}^N$ according to a
+    calibration envelope, and applies them to generate $N$ observed waveforms $\{h^n_{
+    obs}(f)\}$. This is intended to be used for marginalizing over the calibration
+    uncertainty when evaluating the likelihood for importance sampling.
+    
+    This transform should be followed by ApplyCalibrationToWaveform to apply the
+    sampled calibration curves to the waveform.
+    """
+
+    def __init__(
+        self,
+        ifo_list,
+        data_domain,
+        calibration_envelope,
+        num_calibration_curves,
+        num_calibration_nodes,
+        correction_type="data",
+    ):
+        r"""
+        Parameters
+        ----------
+        ifo_list : InterferometerList
+            List of Interferometers present in the analysis.
+        data_domain : Domain
+            Domain on which data is defined.
+        calibration_envelope : dict
+            Dictionary of the form ``{"H1": filepath, "L1": filepath}``,
+            where the filepaths are strings pointing to ".txt" files containing
+            calibration envelopes.
+        num_calibration_curves : int
+            Number of calibration curves to sample.
+        num_calibration_nodes : int
+            Number of log-spaced frequency nodes for the spline.
+        correction_type : str = "data"
+            Whether envelopes are over eta ("data") or alpha ("template").
+        """
+        self.ifo_list = ifo_list
+        self.num_calibration_curves = num_calibration_curves
+        self.data_domain = data_domain
+
+        if correction_type is None:
+            correction_type_dict = {
+                ifo.name: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo.name] for ifo in self.ifo_list
+            }
+        elif correction_type == "data" or correction_type == "template":
+            correction_type_dict = {ifo.name: correction_type for ifo in self.ifo_list}
+        elif isinstance(correction_type, dict):
+            correction_type_dict = correction_type
+        else:
+            raise Exception(f"{correction_type} not understood")
+
+        self.calibration_prior = {}
+        if all([s.endswith(".txt") for s in calibration_envelope.values()]):
+            self.calibration_envelope = calibration_envelope
+            for ifo in self.ifo_list:
+                # Setting a calibration prior. 
+                # Take the calibration envelope and use it to set a spline on
+                # the median and sigma of the amplitude and phase. Then in log
+                # frequency it will setup node points at frequency points, f_i
+                # where i is given from 0...num_calibration_nodes and f_i are log
+                # spaced between f_min and f_max. Then for each node point f_i,
+                # it will create a gaussian prior according to the spline of
+                # the median and sigma found earlier
+                self.calibration_prior[
+                    ifo.name
+                ] = CalibrationPriorDict.from_envelope_file(
+                    self.calibration_envelope[ifo.name],
+                    self.data_domain.f_min,
+                    self.data_domain.f_max,
+                    num_calibration_nodes,
+                    ifo.name,
+                    correction_type=correction_type_dict[ifo.name],
+                )
+        else:
+            raise Exception("Calibration envelope must be specified in a .txt file!")
+
+    def __call__(self, input_sample):
+        sample = input_sample.copy()
+
+        if "extrinsic_parameters" not in sample:
+            sample["extrinsic_parameters"] = {}
+
+        for ifo in self.ifo_list:
+            # Sample calibration parameters from prior
+            # Returns dict like {"recalib_H1_amplitude_0": array, ...}
+            draws = self.calibration_prior[ifo.name].sample(self.num_calibration_curves)
+
+            # Add each parameter to extrinsic_parameters
+            for param_name, values in draws.items():
+                sample["extrinsic_parameters"][param_name] = np.array(values)
+
+        return sample
+
+
+class ApplyCalibrationToWaveform(object):
+    r"""
+    Apply calibration correction to the waveform based on calibration parameters
+    in extrinsic_parameters.
 
     Detector calibration uncertainty is modeled as described in
     https://dcc.ligo.org/LIGO-T1400682/public
@@ -294,142 +398,105 @@ class ApplyCalibrationUncertainty(object):
     \delta \phi(f) &= \mathrm{spline}(f; {f_i, \delta \phi_i}).
     $$
 
-    The calibration parameters are not known precisely, rather they are assumed to be
-    normally distributed, with mean 0 and standard deviation  determined by the
-    "calibration envelope", which varies from event to event.
+    Calibration parameters (\delta A, \delta \phi) should be in
+    sample["extrinsic_parameters"] with keys like "recalib_H1_amplitude_0",
+    "recalib_H1_phase_0", etc.
 
-    For each detector waveform, this transform draws a collection of $N$
-    calibration curves $\{(\delta A^n(f), \delta \phi^n(f))\}_{n=1}^N$ according to a
-    calibration envelope, and applies them to generate $N$ observed waveforms $\{h^n_{
-    obs}(f)\}$. This is intended to be used for marginalizing over the calibration
-    uncertainty when evaluating the likelihood for importance sampling.
+    - If values are arrays of shape (N,), applies N calibration curves, adding a
+      leading dimension to the waveform.
+    - If values are scalars, applies a single calibration curve.
+    - If no calibration parameters found, passes through unchanged.
 
+    The calibration spline model is lazily initialized on the first call, inferring
+    num_calibration_nodes from the number of calibration parameters present.
     """
 
     def __init__(
         self,
         ifo_list,
         data_domain,
-        calibration_envelope,
-        num_calibration_curves,
-        num_calibration_nodes,
-        correction_type=None,
     ):
         r"""
         Parameters
-        ---------
-
+        ----------
         ifo_list : InterferometerList
             List of Interferometers present in the analysis.
         data_domain : Domain
             Domain on which data is defined.
-        calibration_envelope : dict
-            Dictionary of the form ``{"H1": filepath, "L1": filepath}``,
-            where the filepaths are strings pointing to ".txt" files containing
-            calibration envelopes. The calibration envelope depends on the event analyzed,
-            and therefore  remains fixed for all applications of the transform. The
-            calibration envelope is used to define the variances $(\sigma_{\delta A_i},
-            \sigma_{\delta \phi_i})$ of the calibration paramters.
-        num_calibration_curves : int
-            Number of calibration curves $N$ to produce and apply to the
-            waveform. Ultimately, this will translate to the number of samples in the
-            Monte Carlo estimate of the marginalized likelihood integral.
-        num_calibration_nodes : int
-            Number of log-spaced frequency nodes $f_i$ to use in defining the spline.
-        correction_type : dict | str
-            Dictionary of the form ``{"H1": type, "L1": type}``
-            or a string indicating a single correction type applied to all detectors.
-            It was discovered in Oct. 2024 that the calibration envelopes specified by
-            the detchar group were not being used correctly by PE codes. According to
-            the detchar group, envelopes are over $\eta$ which is defined as:
-
-            $$
-            h_{obs}(f) = \frac{1}{\eta} * h(f).
-            $$
-
-            Of course, $\frac{1}{\eta} = \alpha$. Previously, the envelopes were
-            being used as if $\eta = \alpha$ which is wrong. Therefore, there is
-            now an additional option where one can specify correction_type = "data"
-            if the calibration envelopes are over $\eta$ and correction_type = "template"
-            if the calibration envelopes are over $\alpha$.
-            If `None` is passed, {H1:data, L1:data, V1:template, K1:data} is assumed.
         """
-
         self.ifo_list = ifo_list
-        self.num_calibration_curves = num_calibration_curves
-
-        if correction_type is None:
-            correction_type_dict = {
-                ifo: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo] for ifo in self.ifo_list
-            }
-        elif correction_type == "data" or correction_type == "template":
-            correction_type_dict = {ifo: correction_type for ifo in self.ifo_list}
-        elif isinstance(correction_type, dict):
-            correction_type_dict = correction_type
-        else:
-            raise Exception(f"{correction_type} not understood")
-
         self.data_domain = data_domain
-        self.calibration_prior = {}
-        if all([s.endswith((".txt", ".dat")) for s in calibration_envelope.values()]):
-            # Generating .h5 lookup table from priors in .txt file
-            self.calibration_envelope = calibration_envelope
-            for ifo in self.ifo_list:
-                # Setting calibration model to cubic spline
-                ifo.calibration_model = calibration.CubicSpline(
-                    f"recalib_{ifo.name}_",
-                    minimum_frequency=data_domain.f_min,
-                    maximum_frequency=data_domain.f_max,
-                    n_points=num_calibration_nodes,
-                )
 
-                # Setting priors
-                # What this will do is take the the calibration envelope and set
-                # a spline on the median and sigma of the amplitude and phase.
-                # Then in log frequency it will setup node points say at
-                # frequency points, $f_i$.  Then for each node point f_i, it
-                # will create a gaussian prior according to the spline of the
-                # median and sigma found earlier
-                self.calibration_prior[
-                    ifo.name
-                ] = CalibrationPriorDict.from_envelope_file(
-                    self.calibration_envelope[ifo.name],
-                    self.data_domain.f_min,
-                    self.data_domain.f_max,
-                    num_calibration_nodes,
-                    ifo.name,
-                    correction_type=correction_type_dict[ifo.name],
-                )
-
-        else:
-            raise Exception("Calibration envelope must be specified in a .txt file!")
+    def _ensure_calibration_model(self, ifo, num_calibration_nodes):
+        """
+        Ensure the calibration model is set up on the ifo. Creates it if not present
+        or if it has a different number of nodes.
+        """
+        if not hasattr(ifo, "calibration_model") or ifo.calibration_model is None or isinstance(ifo.calibration_model, calibration.Recalibrate):
+            # using https://dcc.ligo.org/LIGO-T2300140 
+            ifo.calibration_model = calibration.CubicSpline(
+                f"recalib_{ifo.name}_",
+                minimum_frequency=self.data_domain.f_min,
+                maximum_frequency=self.data_domain.f_max,
+                n_points=num_calibration_nodes,
+            )
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
+
+        extrinsic = sample.get("extrinsic_parameters", {})
+
+        # Check if any recalib parameters are present
+        if not any(k.startswith("recalib_") for k in extrinsic.keys()):
+            return sample
+
         for ifo in self.ifo_list:
-            calibration_parameter_draws, calibration_draws = {}, {}
-            # Sampling from prior
-            calibration_parameter_draws[ifo.name] = pd.DataFrame(
-                self.calibration_prior[ifo.name].sample(self.num_calibration_curves)
-            )
-            calibration_draws[ifo.name] = np.zeros(
-                (
-                    self.num_calibration_curves,
-                    len(self.data_domain.sample_frequencies),
-                ),
+            prefix = f"recalib_{ifo.name}_"
+
+            # Extract calibration parameters for this ifo
+            calib_params = {
+                k: v for k, v in extrinsic.items() if k.startswith(prefix)
+            }
+
+            if not calib_params:
+                continue
+
+            # Infer num_calibration_nodes from the number of amplitude parameters
+            # Parameters are named like recalib_H1_amplitude_0, recalib_H1_amplitude_1, ...
+            amplitude_params = [k for k in calib_params if "amplitude" in k]
+            num_calibration_nodes = len(amplitude_params)
+
+            # Ensure calibration model is set up (lazy initialization)
+            self._ensure_calibration_model(ifo, num_calibration_nodes)
+
+            # Check if parameters are scalars and promote to arrays if so
+            first_param = next(iter(calib_params.values()))
+            is_scalar = np.isscalar(first_param)
+            if is_scalar:
+                calib_params = {k: np.array([v]) for k, v in calib_params.items()}
+
+            num_curves = len(next(iter(calib_params.values())))
+
+            # Initialize calibration draws array
+            calibration_draws = np.zeros(
+                (num_curves, len(self.data_domain.sample_frequencies)),
                 dtype=complex,
             )
 
-            for i in range(self.num_calibration_curves):
-                calibration_draws[ifo.name][
+            # Compute calibration curve for each parameter set
+            for i in range(num_curves):
+                params_i = {k: v[i] for k, v in calib_params.items()}
+                calibration_draws[
                     i, self.data_domain.frequency_mask
                 ] = ifo.calibration_model.get_calibration_factor(
-                    self.data_domain.sample_frequencies[
-                        self.data_domain.frequency_mask
-                    ],
-                    prefix="recalib_{}_".format(ifo.name),
-                    **calibration_parameter_draws[ifo.name].iloc[i],
+                    self.data_domain.sample_frequencies[self.data_domain.frequency_mask],
+                    prefix=prefix,
+                    **params_i,
                 )
+
+            # Squeeze out leading dimension if input was scalar
+            if is_scalar:
+                calibration_draws = calibration_draws.squeeze(axis=0)
 
             # Multiplying the sample waveform in the interferometer according to
             # the calibration curve.  This is done by following the perscription
@@ -441,10 +508,8 @@ class ApplyCalibrationUncertainty(object):
             # \exp(i \delta \psi) i.e. h_obs(f) = C * h(f)
             # Here C is "calibration_draws"
 
-            # Padding 0's to everything in the calibration array which is below f_min
-
             sample["waveform"][ifo.name] = (
-                sample["waveform"][ifo.name] * calibration_draws[ifo.name]
+                sample["waveform"][ifo.name] * calibration_draws
             )
 
         return sample
