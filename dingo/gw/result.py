@@ -104,6 +104,14 @@ class Result(CoreResult):
         self.importance_sampling_metadata["calibration_marginalization"] = value
 
     @property
+    def calibration_sampling_kwargs(self):
+        return self.importance_sampling_metadata.get("calibration_sampling")
+
+    @calibration_sampling_kwargs.setter
+    def calibration_sampling_kwargs(self, value):
+        self.importance_sampling_metadata["calibration_sampling"] = value
+
+    @property
     def use_base_domain(self) -> bool:
         return self.importance_sampling_metadata.get("use_base_domain", False)
 
