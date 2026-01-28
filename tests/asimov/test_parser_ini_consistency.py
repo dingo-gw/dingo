@@ -10,7 +10,6 @@ in dingo.ini by explicitly adding them to the EXCLUDED_FROM_INI set if needed.
 """
 
 import re
-import sys
 
 import pytest
 
