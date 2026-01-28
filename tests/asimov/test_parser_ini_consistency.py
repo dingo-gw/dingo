@@ -134,6 +134,7 @@ def get_ini_arguments():
     return args
 
 
+@pytest.mark.asimov
 def test_parser_arguments_in_ini_or_excluded():
     """
     Test that all parser arguments are either in dingo.ini or explicitly excluded.
@@ -159,6 +160,7 @@ def test_parser_arguments_in_ini_or_excluded():
         )
 
 
+@pytest.mark.asimov
 def test_excluded_args_exist_in_parser():
     """
     Test that all excluded arguments actually exist in the parser.
@@ -180,6 +182,7 @@ def test_excluded_args_exist_in_parser():
         )
 
 
+@pytest.mark.asimov
 def test_ini_args_exist_in_parser():
     """
     Test that all arguments in dingo.ini exist in the parser.
