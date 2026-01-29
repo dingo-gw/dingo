@@ -37,6 +37,10 @@ jobs:
         run: |
           pytest --junit-xml=pytest-report.xml tests/
 
+      - name: Run Asimov integration tests
+        run: |
+          pytest -m asimov --junit-xml=pytest-asimov-report.xml tests/
+
       - name: Upload Pytest Report
         uses: actions/upload-artifact@v4
         with:

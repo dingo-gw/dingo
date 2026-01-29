@@ -58,7 +58,9 @@ write_to = "dingo/_version.py"
 [tool.pytest.ini_options]
 markers = [
     "slow: marks tests as slow",
+    "asimov: marks tests for Asimov/LIGO pipeline integration",
 ]
+addopts = "-m 'not asimov'"
 
 [project.urls]
 homepage = "https://github.com/dingo-gw/dingo"
