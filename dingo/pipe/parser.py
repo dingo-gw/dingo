@@ -80,6 +80,23 @@ def create_parser(top_level=True, usage=None):
     )
 
     calibration_parser.add(
+<<<<<<< Updated upstream
+=======
+        "--calibration-mode",
+        type=nonestr,
+        default=None,
+        choices=["marginalize", "sample", None],
+        help=(
+            "How to handle calibration uncertainty. 'marginalize' averages likelihoods "
+            "over multiple calibration draws. 'sample' treats calibration parameters as "
+            "part of the posterior (importance sampling over calibration). If None or "
+            "calibration-model is None, no calibration handling is performed. "
+            "Default is 'marginalize'."
+        ),
+    )
+
+    calibration_parser.add(
+>>>>>>> Stashed changes
         "--calibration-correction-type",
         type=nonestr,
         default="data",

@@ -3,6 +3,7 @@ from multiprocessing import Pool
 from math import isclose
 
 import numpy as np
+import astropy.constants as ac
 import astropy.units as u
 import astropy.constants as ac
 from typing import Dict, List, Tuple, Union, Callable
@@ -1058,7 +1059,6 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             "condition": 1,
         }
 
-
         if self.approximant_str in ["SEOBNRv5EHM", "TEOBResumSDALI"]:
             # eccentric parameters
             log_ecc = p.get("log10_eccentricity")
@@ -1085,7 +1085,13 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 'meanPerAno' : mean_per_ano * u.rad,
             })
 
-        params_gwsignal.update(self.extra_wf_kwargs)
+        # TEOBResumSDALI doesn't support lmax_nyquist, so filter it out
+        if "TEOBResum" in self.approximant_str:
+            extra_wf_kwargs_filtered = {k: v for k, v in self.extra_wf_kwargs.items()
+                                       if k != "lmax_nyquist"}
+            params_gwsignal.update(extra_wf_kwargs_filtered)
+        else:
+            params_gwsignal.update(self.extra_wf_kwargs)
 
         if return_target_function:
             # This is a hack to make compatible with LAL version. Target functions for
@@ -1244,8 +1250,8 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
 
         generator = new_interface_get_waveform_generator(self.approximant_str)
         if isinstance(self.domain, UniformFrequencyDomain):
-            # Generate FD modes in for frequencies [-f_max, ..., 0, ..., f_max].
-            if self.approximant_str in ["SEOBNRv5EHM", "TEOBResumSDALI"]:
+            # Generate FD modes for frequencies [-f_max, ..., 0, ..., f_max].
+            if self.approximant_str in ["SEOBNRv5EHM"]:
                 # SEOBNRv5EHM and TEOBResumSDALI use these conditioning routines
                 # assert LS.SimInspiralImplementedTDApproximants(self.approximant)
                 # Step 1: generate waveform modes in L0 frame in native domain of
@@ -1257,6 +1263,11 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 wfg_utils.taper_td_modes_in_place(hlm_td)
                 hlm_fd = wfg_utils.td_modes_to_fd_modes(hlm_td, self.domain)
 
+                # Step 3: Two-sided modes -> polarizations organized by m.
+                pol_m = wfg_utils.get_polarizations_from_fd_modes_m(
+                    hlm_fd, iota, parameters["phase"]
+                )
+
             elif self.approximant_str in ["SEOBNRv5PHM", "SEOBNRv5HM"]:
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: TD), applying standard conditioning
@@ -1267,6 +1278,75 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 # Step 2: Transform modes to target domain.
                 hlm_fd = wfg_utils.td_modes_to_fd_modes(hlm_td, self.domain)
 
+                # Step 3: Two-sided modes -> polarizations organized by m.
+                pol_m = wfg_utils.get_polarizations_from_fd_modes_m(
+                    hlm_fd, iota, parameters["phase"]
+                )
+
+            elif "TEOB" in self.approximant_str:
+                # Step 1: generate waveform modes in L0 frame in native domain of
+                # approximant (here: TD).
+                # TEOB modes from GenerateTDModes are unconditioned (gwsignal's
+                # GenerateTDModes bypasses the conditioning pipeline). Generate
+                # at lower f_start for tapering buffer, then apply conditioning.
+                parameters_gwsignal = self._convert_parameters(
+                    {**parameters, "f_ref": self.f_ref}
+                )
+                f_start, t_extra, f_min, original_f_min, f_isco = (
+                    wfg_utils.get_conditioning_params_for_TEOB(parameters_gwsignal)
+                )
+                parameters_gwsignal["f22_start"] = f_start * u.Hz
+
+                generator = new_interface_get_waveform_generator(
+                    self.approximant_str
+                )
+                hlm_td_gwpy = gws_wfm.GenerateTDModes(
+                    parameters_gwsignal, generator
+                )
+                hlm_td = {
+                    key: value
+                    for key, value in hlm_td_gwpy.items()
+                    if type(key) != str
+                }
+                iota = parameters_gwsignal["inclination"].value
+
+                # GenerateTDModes returns dimensionless strain modes;
+                # rescale by -nu * M_total / distance * (G/c^2) to get
+                # physical units consistent with GenerateFDWaveform.
+                m1 = parameters_gwsignal["mass1"]
+                m2 = parameters_gwsignal["mass2"]
+                nu = m1 * m2 / (m1 + m2) ** 2
+                distance_rescaling = -(
+                    (
+                        nu
+                        * (m1 + m2)
+                        / parameters_gwsignal["distance"]
+                        * ac.G
+                        / ac.c ** 2
+                    )
+                    .to(u.dimensionless_unscaled)
+                    .value
+                )
+                for lm in hlm_td:
+                    hlm_td[lm] = hlm_td[lm] * distance_rescaling
+
+                wfg_utils.condition_td_modes_for_TEOB_in_place(
+                    hlm_td, t_extra, f_min, original_f_min, f_isco
+                )
+
+                # Step 2: Transform modes to target domain.
+                hlm_fd = wfg_utils.td_modes_to_fd_modes_gwpy(
+                    hlm_td, self.domain
+                )
+
+                # Step 3: One-sided modes -> polarizations organized by m.
+                # TEOB modes from gwpy FFT are one-sided (f >= 0 only), so we
+                # use the non-precessing symmetry h_{l,-m}(t) = (-1)^l h*_{lm}(t)
+                # to directly compute h+ and hx from the one-sided modes.
+                pol_m = wfg_utils.get_polarizations_from_onesided_fd_modes_m(
+                    hlm_fd, iota, parameters["phase"]
+                )
+
             elif generator.domain == "freq":
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: FD)
@@ -1275,16 +1355,13 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 # Step 2: Transform modes to target domain.
                 # Not required here, as approximant domain and target domain are both FD.
 
+                # Step 3: Two-sided modes -> polarizations organized by m.
+                pol_m = wfg_utils.get_polarizations_from_fd_modes_m(
+                    hlm_fd, iota, parameters["phase"]
+                )
+
             else:
                 raise NotImplementedError()
-
-
-            # Step 3: Separate negative and positive frequency parts of the modes,
-            # and add contributions according to their transformation behavior under
-            # phase shifts.
-            pol_m = wfg_utils.get_polarizations_from_fd_modes_m(
-                hlm_fd, iota, parameters["phase"]
-            )
 
         else:
             raise NotImplementedError(
