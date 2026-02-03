@@ -42,9 +42,15 @@ email.json should look like:
     "port": 465,
     "authUser": "user",
     "authPass": "mypass",
-    "recipients": ["myfriend@frienddomain.eu"]
+    "recipients": ["myfriend@frienddomain.eu"],
+    "imap": {
+        "server": "domain.eu",
+        "port": 993
+    }
 }
 ```
+
+The `imap` section is optional and only required for [email-triggered CI runs](#email-triggered-ci-runs).
 
 `dingo-ci` will:
 
@@ -134,3 +140,40 @@ systemctl start docker-ci
 ```
 systemctl status docker-ci
 ```
+
+## Email-triggered CI runs
+
+In addition to automatic commit/tag detection, the CI system can be triggered
+by sending an email to the CI account.
+
+### Setup
+
+Add IMAP settings to your `email.json` (see above). The CI system reuses
+`authUser` and `authPass` for IMAP authentication. Port 993 is IMAP over SSL/TLS.
+
+The host machine must have `python3` available (standard library only, no extra packages).
+
+### Triggering a run
+
+Send an email to the CI account (`root` address in the config) with the subject:
+
+```
+commit <commit_hash>
+```
+
+where `<commit_hash>` is a 7-40 character hex SHA (short or full).
+For example: `commit a1b2c3d` or `commit a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2`.
+
+### Behavior
+
+- The CI system checks for trigger emails every 5 minutes (each time `dingo-ci-trigger` runs).
+- Unread emails are checked in chronological order (oldest first).
+- Only one email-triggered job runs per cycle. Remaining emails are processed in subsequent cycles.
+- On finding a matching email:
+  1. An acknowledgment email is sent to the CI account itself.
+  2. Any existing job folder for that commit is deleted.
+  3. The CI job runs via Docker (same as commit/tag triggered runs).
+  4. The trigger email is marked as read.
+- Emails with non-matching subjects are left unread and ignored.
+- After email checking, the normal commit/tag detection continues as usual.
+- Email checking failures are non-fatal: the system falls back to normal commit/tag detection.

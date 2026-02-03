@@ -6,14 +6,14 @@ DINGO_REPO="https://github.com/dingo-gw/dingo.git"
 BRANCH="main"
 CLONE_PATH="/data/dingo/repo-checker"
 JOBS_PATH="/data/dingo"
-EMAIL_CONFIG="/data/dingo/mpi-email.json"
+export EMAIL_CONFIG="/data/dingo/mpi-email.json"
 DOCKER_IMAGE="dingo:toy_npe_model"
 
 # Sunday-night schedule: hour in 24h (23 = 23:00-23:59). Timer will invoke this script every 5 minutes.
 SCHEDULE_DAY_NUM=7   # 1..7 where 7 = Sunday
 SCHEDULE_HOUR=23
 
-for cmd in git docker stat date; do
+for cmd in git docker stat date python3; do
     command -v "$cmd" >/dev/null 2>&1 || { echo "Required command not found: $cmd" >&2; exit 1; }
 done
 
@@ -103,12 +103,220 @@ run_ci_for() {
         "${DOCKER_IMAGE}" --base-dir "${JOBS_PATH}" --checkout "${ref}" --email "${EMAIL_CONFIG}"
 }
 
+# Fetch the first unread email whose subject matches "commit <hex_sha>".
+# Prints "UID COMMIT_HASH" to stdout on match, nothing otherwise.
+# Exit 0 on success (match or no match), exit 1 on IMAP error.
+fetch_matching_email() {
+    python3 - <<'PYEOF'
+import imaplib
+import json
+import re
+import sys
+import email
+import email.header
+import os
+
+config_path = os.environ.get("EMAIL_CONFIG")
+if not config_path:
+    print("EMAIL_CONFIG not set", file=sys.stderr)
+    sys.exit(1)
+
+with open(config_path) as f:
+    config = json.load(f)
+
+imap_server = config["imap"]["server"]
+imap_port = config["imap"]["port"]
+username = config["authUser"]
+password = config["authPass"]
+
+SUBJECT_RE = re.compile(r"^commit\s+([0-9a-fA-F]{7,40})$", re.IGNORECASE)
+
+try:
+    conn = imaplib.IMAP4_SSL(imap_server, imap_port)
+    conn.login(username, password)
+    conn.select("INBOX")
+
+    status, data = conn.uid("SEARCH", None, "UNSEEN")
+    if status != "OK":
+        print("IMAP SEARCH failed", file=sys.stderr)
+        conn.logout()
+        sys.exit(1)
+
+    uid_list = data[0].split()  # ascending order = oldest first
+    if not uid_list:
+        conn.logout()
+        sys.exit(0)
+
+    for uid_bytes in uid_list:
+        uid = uid_bytes.decode()
+        # BODY.PEEK does not set \Seen flag
+        status, msg_data = conn.uid(
+            "FETCH", uid, "(BODY.PEEK[HEADER.FIELDS (SUBJECT)])"
+        )
+        if status != "OK":
+            continue
+        raw_header = msg_data[0][1]
+        msg = email.message_from_bytes(raw_header)
+        subject = msg.get("Subject", "").strip()
+        # Decode if MIME-encoded (e.g. =?utf-8?q?...)
+        decoded_parts = email.header.decode_header(subject)
+        subject = "".join(
+            part.decode(enc or "utf-8") if isinstance(part, bytes) else part
+            for part, enc in decoded_parts
+        )
+
+        m = SUBJECT_RE.match(subject.strip())
+        if m:
+            commit_hash = m.group(1)
+            print(f"{uid} {commit_hash}")
+            conn.logout()
+            sys.exit(0)
+
+    # No matching email found
+    conn.logout()
+    sys.exit(0)
+
+except Exception as e:
+    print(f"IMAP error: {e}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+}
+
+# Mark a single email as \Seen by UID.
+mark_email_seen() {
+    local uid="$1"
+    python3 - "${uid}" <<'PYEOF'
+import imaplib
+import json
+import sys
+import os
+
+uid = sys.argv[1]
+config_path = os.environ.get("EMAIL_CONFIG")
+with open(config_path) as f:
+    config = json.load(f)
+
+try:
+    conn = imaplib.IMAP4_SSL(config["imap"]["server"], config["imap"]["port"])
+    conn.login(config["authUser"], config["authPass"])
+    conn.select("INBOX")
+    conn.uid("STORE", uid, "+FLAGS", r"(\Seen)")
+    conn.logout()
+except Exception as e:
+    print(f"Failed to mark email {uid} as seen: {e}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+}
+
+# Send an acknowledgment email to the CI account (itself).
+# Failure is non-fatal: the CI job still runs even if the ack cannot be sent.
+send_ack_email() {
+    local commit_hash="$1"
+    python3 - "${commit_hash}" <<'PYEOF'
+import smtplib
+import json
+import sys
+import os
+from email.mime.text import MIMEText
+
+commit_hash = sys.argv[1]
+config_path = os.environ.get("EMAIL_CONFIG")
+with open(config_path) as f:
+    config = json.load(f)
+
+smtp_server = config["mailhub"]
+smtp_port = config["port"]
+from_addr = config["root"]
+username = config["authUser"]
+password = config["authPass"]
+
+msg = MIMEText(
+    f"CI job triggered for commit {commit_hash}.\n"
+    f"The job is now running.\n"
+)
+msg["Subject"] = f"dingo-ci: ACK commit {commit_hash}"
+msg["From"] = from_addr
+msg["To"] = from_addr
+
+try:
+    with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
+        server.login(username, password)
+        server.sendmail(from_addr, [from_addr], msg.as_string())
+except Exception as e:
+    print(f"Failed to send ACK email: {e}", file=sys.stderr)
+PYEOF
+}
+
+# Delete existing job folder(s) for a given ref (prefix-match for short SHA).
+delete_job_folder() {
+    local ref="$1"
+    if [[ "$ref" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+        shopt -s nullglob
+        for d in "${JOBS_PATH}"/*/; do
+            d="${d%/}"
+            local name
+            name="$(basename "$d")"
+            if [[ "$name" == "${ref}"* ]]; then
+                echo "Deleting existing job folder: ${d}"
+                rm -rf "$d"
+            fi
+        done
+        shopt -u nullglob
+    else
+        if [ -d "${JOBS_PATH}/${ref}" ]; then
+            echo "Deleting existing job folder: ${JOBS_PATH}/${ref}"
+            rm -rf "${JOBS_PATH}/${ref}"
+        fi
+    fi
+}
+
+# Check for email-triggered CI requests.
+# Returns 0 if a job was triggered, 1 otherwise.
+check_email_trigger() {
+    if [ ! -f "${EMAIL_CONFIG}" ]; then
+        echo "Email config not found, skipping email check" >&2
+        return 1
+    fi
+    if ! jq -e '.imap' "${EMAIL_CONFIG}" >/dev/null 2>&1; then
+        echo "No IMAP config in email.json, skipping email check" >&2
+        return 1
+    fi
+
+    local result
+    if ! result=$(fetch_matching_email); then
+        echo "IMAP check failed, proceeding to commit/tag checks" >&2
+        return 1
+    fi
+
+    if [ -z "$result" ]; then
+        echo "No matching email trigger found"
+        return 1
+    fi
+
+    local uid commit_hash
+    uid=$(echo "$result" | cut -d' ' -f1)
+    commit_hash=$(echo "$result" | cut -d' ' -f2)
+
+    echo "Email trigger found: commit ${commit_hash} (UID ${uid})"
+
+    send_ack_email "${commit_hash}"
+    delete_job_folder "${commit_hash}"
+    mark_email_seen "${uid}"
+    run_ci_for "${commit_hash}"
+
+    return 0
+}
+
 # prepare clone
 rm -rf "${CLONE_PATH}"
 mkdir -p "$(dirname "${CLONE_PATH}")"
 git clone "${DINGO_REPO}" "${CLONE_PATH}"
 git -C "${CLONE_PATH}" fetch --all --tags --prune
 git -C "${CLONE_PATH}" checkout "${BRANCH}"
+
+# email-triggered CI check
+echo "Checking for email triggers..."
+check_email_trigger || true
 
 # latest commit (short)
 latest_commit=$(git -C "${CLONE_PATH}" rev-parse --short=7 HEAD)
