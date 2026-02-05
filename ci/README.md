@@ -54,12 +54,14 @@ The `imap` section is optional and only required for [email-triggered CI runs](#
 
 `dingo-ci` will:
 
-- activate `/tmp/dingo/venv` (create it first if it does not exist)
+- create a dedicated run directory under the base directory (named after the checkout ref or a timestamp)
+- create a virtual environment inside that run directory
 - perform a new clone of dingo
 - optional: perform a checkout (if the `--checkout` argument is used)
 - pip install dingo
 - run the toy npe example
 - optional: send an email
+- delete the virtual environment
 
 ## Using another python/torch
 
@@ -107,38 +109,60 @@ docker run --rm --shm-size=16g --runtime=nvidia --gpus all -v /data/dingo:/data/
 
 This requires the [nvidia container toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit) to be installed on the host machine.
 
-## Set a continous integration server
+## Set a continuous integration server
 
-A continuous integration server will use systemctl services to call the `dingo-ci-trigger` bash script every five minutes. This bash script checks if there are new commits (on the main branch) or new tags added to the dingo repository. If so, it will call `dingo-ci` in docker. It calls also `dingo-ci` in docker every sunday night.
+The CI system consists of two independent services:
+
+- **dingo-ci** -- checks for new commits and tags on the main branch every 5 minutes and runs CI when changes are detected. Also runs every Sunday night.
+- **dingo-ci-email** -- checks for email-triggered CI requests every 5 minutes and runs CI for the requested commit.
+
+Each service has its own systemd unit and timer, making them independently observable and restartable.
 
 To set it up:
 
 - build the dingo:toy_npe_model docker image (see above)
-- copy the `dingo-ci-trigger` script to `/usr/local/bin`.
-- copy the `dingo-ci.service` file to `/etc/systemd/system`
-- copy the `dingo-ci.timer` file to `/etc/systemd/system`
+- copy scripts to `/usr/local/bin`:
+  - `dingo-ci-trigger` (commit/tag checking)
+  - `dingo-ci-email-trigger`, `email_helpers.py`, `fetch_matching_email.py`,
+    `mark_email_seen.py`, `send_ack_email.py` (email-triggered CI)
+- copy service and timer files to `/etc/systemd/system`:
+  - `dingo-ci.service`, `dingo-ci.timer`
+  - `dingo-ci-email.service`, `dingo-ci-email.timer`
 - reload systemctl:
 
 ```bash
 systemctl daemon-reload
 ```
 
-- activate the dingo-ci service (so that it starts at boot):
+- enable both services (so that they start at boot):
 
 ```bash
-systemctl enable dingo-ci
+systemctl enable dingo-ci.timer
+systemctl enable dingo-ci-email.timer
 ```
 
-- start the service
+- start both timers:
 
-```
-systemctl start docker-ci
+```bash
+systemctl start dingo-ci.timer
+systemctl start dingo-ci-email.timer
 ```
 
-- check the status of the service
+- check the status of each service:
 
+```bash
+systemctl status dingo-ci.timer
+systemctl status dingo-ci-email.timer
 ```
-systemctl status docker-ci
+
+- monitor for failures:
+
+```bash
+# check for failed runs
+systemctl --failed | grep dingo-ci
+# view logs
+journalctl -u dingo-ci.service
+journalctl -u dingo-ci-email.service
 ```
 
 ## Email-triggered CI runs
@@ -164,16 +188,33 @@ commit <commit_hash>
 where `<commit_hash>` is a 7-40 character hex SHA (short or full).
 For example: `commit a1b2c3d` or `commit a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2`.
 
+### Debug mode
+
+To test the email trigger without actually running the CI job, add `--debug` to the subject:
+
+```
+commit a1b2c3d --debug
+```
+
+In debug mode, the system performs all steps (ACK email, folder deletion, marking as read) but instead of running Docker, it creates a job folder with `log.txt` and `error.txt` containing the Docker command that would have been executed, plus a copy of the email trigger logs.
+
 ### Behavior
 
-- The CI system checks for trigger emails every 5 minutes (each time `dingo-ci-trigger` runs).
-- Unread emails are checked in chronological order (oldest first).
-- Only one email-triggered job runs per cycle. Remaining emails are processed in subsequent cycles.
+- The `dingo-ci-email` service checks for trigger emails every 5 minutes, independently from the commit/tag service.
+- All unread emails are checked in chronological order (oldest first) and marked as read.
+- Only one email-triggered job runs per cycle. Remaining trigger emails are processed in subsequent cycles.
 - On finding a matching email:
-  1. An acknowledgment email is sent to the CI account itself.
+  1. An acknowledgment email is sent to the recipients list.
   2. Any existing job folder for that commit is deleted.
   3. The CI job runs via Docker (same as commit/tag triggered runs).
-  4. The trigger email is marked as read.
-- Emails with non-matching subjects are left unread and ignored.
-- After email checking, the normal commit/tag detection continues as usual.
-- Email checking failures are non-fatal: the system falls back to normal commit/tag detection.
+- Emails with non-matching subjects are marked as read and skipped.
+- Email failures are visible to systemd and can be monitored via `journalctl -u dingo-ci-email.service`.
+
+### Logging
+
+The email trigger service maintains a log file at `<JOBS_PATH>/logs.txt` with timestamped entries for:
+- Each email checked (with subject and match status)
+- Emails marked as read
+- ACK email failures
+- Jobs started (or debug mode activations)
+- Fetch errors

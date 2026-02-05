@@ -161,7 +161,22 @@ dingo_ci_email() {
     echo "    ${ERROR_FILE}"
     echo ""
 
-    subject="dingo toy-npe-model example: $(if [ "$STATUS" -eq 0 ]; then echo "SUCCEEDED"; else echo "FAILED"; fi)"
+    # Build subject with status and git info
+    status_str=$(if [ "$STATUS" -eq 0 ]; then echo "SUCCEEDED"; else echo "FAILED"; fi)
+    short_commit="${commit:0:7}"
+    subject_info=""
+    if [[ "$tags" != "N/A" ]]; then
+        subject_info="${tags}"
+    elif [[ "$branch" != "N/A" && "$branch" != "(detached)" ]]; then
+        subject_info="${branch} (${short_commit})"
+    elif [[ "$commit" != "N/A" ]]; then
+        subject_info="${short_commit}"
+    fi
+    if [[ -n "$subject_info" ]]; then
+        subject="dingo CI [${subject_info}]: ${status_str}"
+    else
+        subject="dingo CI: ${status_str}"
+    fi
 
     body=$(cat <<EOF
 DINGO Workflow Report
