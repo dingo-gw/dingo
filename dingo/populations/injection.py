@@ -37,7 +37,6 @@ class Injection(object):
         minimum_population_size,
         maximum_population_size,
         event_injection,
-        detection_model=None,
     ):
 
         self.population_prior = build_bilby_prior_dict(population_prior_dict)
@@ -47,13 +46,11 @@ class Injection(object):
         self.maximum_population_size = maximum_population_size
         self.event_injection = event_injection
 
-        if detection_model is None:
-            self.detection_model = "mf_snr"
-
         self.population_model = build_population_model(
             population_model_name, self.population_prior, event_injection.prior
         )
 
+        self.detection_model_name = "mf_snr"
         self.use_embedding_emulator = False
 
     @classmethod
@@ -80,12 +77,7 @@ class Injection(object):
 
         self.event_sampler = GWSampler(model=self.pm_single_event)
 
-    def add_snr_model(self, snr_model_path, device):
-
-        self.snr_model = SNREstimator(snr_model_path, device=device)
-        self.snr_model.model.eval()
-
-    def add_embedding_emulator(self, embedding_emulator):
+    def add_embedding_emulator(self, embedding_emulator, pdet_model):
         
         self.embedding_emulator = embedding_emulator
         self.embedding_emulator.model.eval()
@@ -93,7 +85,8 @@ class Injection(object):
         self.use_embedding_emulator = True
 
         # we have to use the snr model, since the SNR is not known
-        self.detection_model = "snr_model"
+        self.pdet_model = pdet_model
+        self.pdet_model.model.eval()
         
         print('Using embedding emulator')
 
@@ -135,12 +128,21 @@ class Injection(object):
 
             if not self.use_embedding_emulator:
                 event = self.event_injection.injection(p, store_snr=True)
-                if self.is_detected(event=event):
+                if self.is_detected_from_event(event=event):
                     events.append(event)
             else:
+                # do rejection sampling:
+                pdet = self.get_pdet_from_parameters(p)
+                if np.random.rand() > pdet:
+                    tries += 1
+                    continue
+
                 embeddings = self.get_embeddings_from_emulator(p, device=self.embedding_emulator.device)
-                if self.is_detected(embedding=embeddings):
-                    events.append(embeddings)
+                
+                # embeddings are sampled from p(embedding | parameters, detected)
+                # but we still need to sample parameters from p(parameters | detected) ∝ p(parameters) * pdet(parameters)
+                events.append(embeddings)
+
             tries += 1
             if tries / (len(events) + 1) > 50000:
                 print('hyperparameters: ', hyperparameters)
@@ -162,44 +164,16 @@ class Injection(object):
 
         return injection
 
-    def is_detected(self, event=None, embedding=None):
-        """
-        Check whether an event is detected. 
+    def get_pdet_from_parameters(self, parameters):
         
-        Parameters
-        
-        """
-
-        if event is None and embedding is None:
-            raise ValueError("Either event or embedding must be provided.")
-        if event is not None and embedding is not None:
-            raise ValueError("Only one of event or embedding can be provided.")
-
-        if event is not None:
-            return self.is_detected_from_event(event)
-        if embedding is not None:
-            return self.is_detected_from_embedding(embedding)
-
-    def is_detected_from_embedding(self, embedding):
-
-        with torch.no_grad():
-            mf_snr = self.snr_model(embedding).squeeze()
-
-        return mf_snr >= self.mf_snr_threshold
+        return self.pdet_model.get_pdet_from_params(parameters)
 
     def is_detected_from_event(self, event):
 
-        if self.detection_model == "mf_snr":
+        if self.detection_model_name == "mf_snr":
             return event["parameters"]["matched_filter_snr"] >= self.mf_snr_threshold
-        elif self.detection_model == "snr_model":
-            data = self.event_sampler.transform_pre(event)
-
-            with torch.no_grad():
-                emb = self.pm_single_event.model(data.unsqueeze(0))
-                return self.is_detected_from_embedding(embedding=emb)
-
         else:
-            raise ValueError(f"Unknown detection model: {self.detection_model}")
+            raise ValueError(f"Unknown detection model: {self.detection_model_name}")
 
     def get_embeddings_from_emulator(self, params, device='cpu'):
         
