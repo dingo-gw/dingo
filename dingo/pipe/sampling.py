@@ -58,6 +58,8 @@ class SamplingInput(Input):
         self.batch_size = args.batch_size
         self.density_recovery_settings = args.density_recovery_settings
 
+        self.zero_noise = args.zero_noise
+
         # self.sampler = args.sampler
         # self.sampler_kwargs = args.sampler_kwargs
         # self.sampling_seed = args.sampling_seed
@@ -117,22 +119,25 @@ class SamplingInput(Input):
         model = build_model_from_kwargs(
             filename=self.model, device=self.device, load_training_info=False
         )
+        
+        zero_noise_arguments = {'duplicate_samples': self.zero_noise, 'batch_size': self.batch_size}
 
         if self.model_init is not None:
             self.gnpe = True
             init_model = build_model_from_kwargs(
                 filename=self.model_init, device=self.device, load_training_info=False
             )
-            init_sampler = GWSampler(model=init_model)
+            init_sampler = GWSampler(model=init_model, **zero_noise_arguments)
             self.dingo_sampler = GWSamplerGNPE(
                 model=model,
                 init_sampler=init_sampler,
                 num_iterations=self.num_gnpe_iterations,
+                **zero_noise_arguments
             )
 
         else:
             self.gnpe = False
-            self.dingo_sampler = GWSampler(model=model)
+            self.dingo_sampler = GWSampler(model=model, **zero_noise_arguments)
 
         self.dingo_sampler.context = self.context
         self.dingo_sampler.event_metadata = self.event_metadata
@@ -185,6 +190,9 @@ class SamplingInput(Input):
                 "GNPE network does not provide log probability. Generating "
                 "samples and training a new network to recover it."
             )
+            # Trojan horsing zero noise settings into the unconditional model sampler
+            zero_noise_arguments = {'duplicate_samples': self.zero_noise, 'batch_size': self.batch_size}
+            self.density_recovery_settings['nde_settings']['zero_noise_arguments'] = zero_noise_arguments
 
             # Note that this will not save any low latency samples at present.
             prepare_log_prob(
