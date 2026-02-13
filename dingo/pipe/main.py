@@ -14,6 +14,7 @@ from bilby_pipe.input import Input
 from bilby_pipe.main import MainInput as BilbyMainInput
 from bilby_pipe.utils import (
     convert_string_to_dict,
+    get_colored_string,
     get_command_line_arguments,
     logger,
     parse_args,
@@ -325,7 +326,9 @@ class MainInput(BilbyMainInput):
         self.request_disk = args.request_disk
         self.request_memory_generation = args.request_memory_generation
         self.request_memory = args.request_memory
-        self.request_memory_importance_sampling = args.request_memory_importance_sampling
+        self.request_memory_importance_sampling = (
+            args.request_memory_importance_sampling
+        )
         self.request_cpus = args.request_cpus
         self.request_cpus_importance_sampling = args.request_cpus_importance_sampling
         # self.sampler_kwargs = args.sampler_kwargs
@@ -375,6 +378,7 @@ class MainInput(BilbyMainInput):
             # self.check_source_model(args)
             # self.check_calibration_prior_boundary(args)
             # self.check_cpu_parallelisation()
+            self.check_accounting()
             if self.injection:
                 self.check_injection()
 
@@ -437,6 +441,38 @@ class MainInput(BilbyMainInput):
         priors = super()._get_priors(add_time=add_time)
         priors.update(PriorDict(self.prior_dict_updates))
         return priors
+
+    def check_accounting(self):
+        if self.accounting is None:
+            logger.warning(
+                "No accounting tag specified. If using IGWN computing resources"
+                " please refer to https://computing.docs.ligo.org/guide/htcondor/accounting/"
+            )
+        else:
+            try:
+                purpose = self.accounting.split(".")[1]
+                if purpose == "prod":
+                    logger.info(
+                        get_colored_string(
+                            "Using a 'prod' accounting tag: please ensure this is intentional"
+                        )
+                    )
+                pipeline = self.accounting.split(".")[-1]
+                if pipeline != "dingo":
+                    logger.info(
+                        get_colored_string(
+                            "Using a non-'dingo' accounting tag: please ensure this is "
+                            "intentional"
+                        )
+                    )
+            except ValueError:
+                logger.debug(
+                    "Accounting tag does not follow the IGWN format. If you are using non-IGWN"
+                    " resources this is fine, otherwise please refer to"
+                    " https://computing.docs.ligo.org/guide/htcondor/accounting/"
+                )
+        logger.info(f"Using accounting tag: {self.accounting}")
+        logger.info(f"Using accounting-user: {self.accounting_user}")
 
     def check_injection(self):
         """Check injection behaviour
@@ -592,4 +628,5 @@ def main():
     generate_dag(inputs)
 
     if len(unknown_args) > 0:
-        print(f"Unrecognized arguments {unknown_args}")
+        msg = get_colored_string(f"Unrecognized arguments {unknown_args}")
+        logger.warning(msg)

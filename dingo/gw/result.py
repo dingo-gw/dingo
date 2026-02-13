@@ -4,7 +4,9 @@ from typing import Optional
 
 import numpy as np
 import yaml
-from bilby.core.prior import Uniform, Constraint, PriorDict
+from bilby.core.prior import Uniform, Constraint, PriorDict, DeltaFunction
+from bilby.gw.prior import CalibrationPriorDict
+from bilby_pipe.utils import CALIBRATION_CORRECTION_TYPE_LOOKUP
 
 from dingo.core.density import (
     interpolated_sample_and_log_prob_multi,
@@ -102,6 +104,14 @@ class Result(CoreResult):
         self.importance_sampling_metadata["calibration_marginalization"] = value
 
     @property
+    def calibration_sampling_kwargs(self):
+        return self.importance_sampling_metadata.get("calibration_sampling")
+
+    @calibration_sampling_kwargs.setter
+    def calibration_sampling_kwargs(self, value):
+        self.importance_sampling_metadata["calibration_sampling"] = value
+
+    @property
     def use_base_domain(self) -> bool:
         return self.importance_sampling_metadata.get("use_base_domain", False)
 
@@ -174,28 +184,33 @@ class Result(CoreResult):
         # quantities that define a new domain (e.g., delta_f). Typical event metadata
         # will be constructed in this way.
 
-        # TODO: Make compatible with MultibandedFrequencyDomain.
-        if isinstance(self.domain, MultibandedFrequencyDomain):
-            raise NotImplementedError()
+        domain_keys = ["minimum_frequency", "maximum_frequency", "T"]
+        if any(k in updates for k in domain_keys):
+            # TODO: Make compatible with MultibandedFrequencyDomain.
+            if isinstance(self.domain, MultibandedFrequencyDomain):
+                raise NotImplementedError()
 
-        if "T" in updates:
-            updates["delta_f"] = 1.0 / updates["T"]
+            if "T" in updates:
+                updates["delta_f"] = 1.0 / updates["T"]
 
-        domain_dict = self.domain.domain_dict  # Existing settings
-        domain_dict.update(
-            (k, updates[k]) for k in set(domain_dict).intersection(updates)
-        )
-
-        if verbose:
-            print("Rebuilding domain as follows:")
-            print(
-                yaml.dump(
-                    domain_dict,
-                    default_flow_style=False,
-                    sort_keys=False,
-                )
+            domain_dict = self.domain.domain_dict  # Existing settings
+            domain_dict.update(
+                (k, updates[k]) for k in set(domain_dict).intersection(updates)
             )
-        self.domain = build_domain(domain_dict)
+
+            if verbose:
+                print("Rebuilding domain as follows:")
+                print(
+                    yaml.dump(
+                        domain_dict,
+                        default_flow_style=False,
+                        sort_keys=False,
+                    )
+                )
+            self.domain = build_domain(domain_dict)
+        else:
+            if verbose:
+                print("No domain updates found; domain not rebuilt.")
 
     def _build_prior(self):
         """Build the prior based on model metadata. Called by __init__()."""
@@ -366,6 +381,110 @@ class Result(CoreResult):
                 maximum_frequency=self.maximum_frequency,
             ),
         )
+
+    def sample_calibration_parameters(self, calibration_sampling_kwargs: dict):
+        """
+        Sample calibration parameters from the calibration prior and add them to the
+        samples DataFrame. Also updates self.prior with the calibration priors and
+        adjusts self.samples["log_prob"] accordingly.
+
+        This should be called before importance_sample() when importance sampling
+        over calibration uncertainty. The calibration prior log_prob is added to
+        self.samples["log_prob"] so that it is properly accounted for in the
+        importance sampling weights.
+
+        After calling this method, each sample will have calibration parameters
+        (e.g., recalib_H1_amplitude_0, recalib_H1_phase_0, etc.) that will be used
+        by the likelihood to apply calibration corrections.
+
+        Parameters
+        ----------
+        calibration_sampling_kwargs : dict
+            Calibration sampling parameters. Keys:
+
+            calibration_envelope : dict
+                Dictionary of the form {"H1": filepath, "L1": filepath, ...} with
+                locations of calibration envelope files (.txt).
+            num_calibration_nodes : int
+                Number of log-spaced frequency nodes for the calibration spline model.
+            correction_type : str or dict or None, default "data"
+                Whether envelopes are over eta ("data") or alpha ("template").
+                Can be a string (applied to all detectors), a dict mapping ifo names
+                to correction types, or None (uses defaults from CALIBRATION_CORRECTION_TYPE_LOOKUP).
+        """
+        self.calibration_sampling_kwargs = calibration_sampling_kwargs
+
+        # Handle correction_type defaults
+        correction_type = self.calibration_sampling_kwargs.get("correction_type", "data")
+        if correction_type is None:
+            correction_type_dict = {
+                ifo: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo] for ifo in self.interferometers
+            }
+        elif correction_type == "data" or correction_type == "template":
+            correction_type_dict = {ifo: correction_type for ifo in self.interferometers}
+        elif isinstance(correction_type, dict):
+            correction_type_dict = correction_type
+        else:
+            raise ValueError(f"{correction_type} not understood")
+
+        # Build calibration priors for sampling
+        calibration_priors = {}
+        for ifo in self.interferometers:
+            calibration_priors[ifo] = CalibrationPriorDict.from_envelope_file(
+                self.calibration_sampling_kwargs["calibration_envelope"][ifo],
+                self.domain.f_min,
+                self.domain.f_max,
+                self.calibration_sampling_kwargs["num_calibration_nodes"],
+                ifo,
+                correction_type=correction_type_dict[ifo],
+            )
+
+        # Removing the delta function priors on the frequency nodes, amplitude and phase.
+        # Usually the frequency nodes are set to delta functions, but we also remove the 
+        # the amplitude and phase delta functions if present.
+        # This avoids large log probs and log priors, since the density of a delta function
+        # at the sampled point is infinite. The delta functions do not affect the sampling,
+        # since they just fix certain parameters to constant values.
+        for ifo in calibration_priors:
+            for param_name, prior_obj in list(calibration_priors[ifo].items()):
+                if isinstance(prior_obj, DeltaFunction):
+                    calibration_priors[ifo].pop(param_name)
+
+        # Sample calibration parameters and calculate log_prob
+        num_samples = len(self.samples)
+        print(f"Sampling calibration parameters for {num_samples} samples.")
+
+        delta_log_prob = np.zeros(num_samples)
+
+        # Here we will sample the calibration parameters from the prior.
+        # We treat the *prior as the proposal* distribution and 
+        # therefore add the log_prob of the sampled calibration parameters 
+        # to the existing log_prob. We also will update the prior 
+        # to include the calibration priors using the importance_sampling_metadata
+        prior_update = self.importance_sampling_metadata.get("prior_update", {})
+        for ifo, prior in calibration_priors.items():
+            draws = prior.sample(num_samples)
+
+            # Calculate log_prob of the calibration draws
+            delta_log_prob += prior.ln_prob(draws, axis=0)
+
+            # Add draws to samples
+            for param_name, values in draws.items():
+                self.samples[param_name] = np.array(values)
+
+            # Update prior_update dict with calibration parameters. This is for
+            # persistence when saving to hdf5
+            for param_name, prior_obj in prior.items():
+                prior_update[param_name] = repr(prior_obj)
+
+        # Store prior_update for persistence on save/reload
+        self.importance_sampling_metadata["prior_update"] = prior_update
+
+        # Update log_prob (add the log probability of sampled calibration parameters)
+        self.samples["log_prob"] += delta_log_prob
+
+        # Rebuild the prior (which will include calibration priors from prior_update)
+        self._build_prior()
 
     def sample_synthetic_phase(
         self,

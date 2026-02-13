@@ -299,19 +299,6 @@ class Sampler(object):
     def _build_domain(self):
         self.domain = None
 
-    def write_pesummary(self, filename):
-        from pesummary.io import write
-        from pesummary.utils.samples_dict import SamplesDict
-
-        samples_dict = SamplesDict(self.samples)
-        write(
-            samples_dict,
-            package=self._pesummary_package,
-            file_format="hdf5",
-            filename=filename,
-        )
-        # TODO: Save much more information.
-
     def to_result(self) -> Result:
         """
         Export samples, metadata, and context information to a Result instance,
