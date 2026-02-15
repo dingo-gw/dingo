@@ -9,9 +9,9 @@ import bilby
 
 def fix_random_seeds(_):
     """Utility function to set random seeds when using multiple workers for DataLoader."""
-    np.random.seed(int(torch.initial_seed()) % (2 ** 32 - 1))
+    np.random.seed(int(torch.initial_seed()) % (2**32 - 1))
     try:
-        bilby.core.utils.random.seed(int(torch.initial_seed()) % (2 ** 32 - 1))
+        bilby.core.utils.random.seed(int(torch.initial_seed()) % (2**32 - 1))
     except AttributeError:  # In case using an old version of Bilby.
         pass
 
@@ -190,7 +190,9 @@ def build_train_and_test_loaders(
     dataset: torch.utils.data.Dataset,
     train_fraction: float,
     batch_size: int,
-    num_workers: int,
+    num_workers: int = 0,
+    pin_memory: bool = True,
+    prefetch_factor: int = 1,
 ):
     """
     Split the dataset into train and test sets, and build corresponding DataLoaders.
@@ -204,6 +206,14 @@ def build_train_and_test_loaders(
         Should lie between 0 and 1.
     batch_size : int
     num_workers : int
+        Number of workers. Default 0.
+    pin_memory : bool
+        If True, use pinned memory for faster GPU transfers. This increases memory
+        usage significantly (roughly 2x the prefetch buffer size) but can speed up
+        data transfer to GPU. Default is True.
+    prefetch_factor : int
+        Number of batches each worker prefetches. Higher values use more memory
+        but can improve throughput. Default is 1.
 
     Returns
     -------
@@ -215,22 +225,26 @@ def build_train_and_test_loaders(
         dataset, train_fraction
     )
 
-    # Build DataLoaders
-    train_loader = DataLoader(
-        train_dataset,
+    # prefetch_factor is only valid when num_workers > 0
+    loader_kwargs = dict(
         batch_size=batch_size,
-        shuffle=True,
-        pin_memory=True,
+        pin_memory=pin_memory,
         num_workers=num_workers,
         worker_init_fn=fix_random_seeds,
     )
+    if num_workers > 0:
+        loader_kwargs["prefetch_factor"] = prefetch_factor
+
+    # Build DataLoaders
+    train_loader = DataLoader(
+        train_dataset,
+        shuffle=True,
+        **loader_kwargs,
+    )
     test_loader = DataLoader(
         test_dataset,
-        batch_size=batch_size,
         shuffle=False,
-        pin_memory=True,
-        num_workers=num_workers,
-        worker_init_fn=fix_random_seeds,
+        **loader_kwargs,
     )
 
     return train_loader, test_loader
