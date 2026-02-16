@@ -1283,55 +1283,26 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                     hlm_fd, iota, parameters["phase"]
                 )
 
-            elif "TEOB" in self.approximant_str:
-                # Step 1: generate waveform modes in L0 frame in native domain of
-                # approximant (here: TD).
-                # TEOB modes from GenerateTDModes are unconditioned (gwsignal's
-                # GenerateTDModes bypasses the conditioning pipeline). Apply the
-                # same fallback conditioning (sigmoid start taper) that gwsignal
-                # uses for TEOB in generate_conditioned_td_waveform_from_td_fallback.
-                parameters_gwsignal = self._convert_parameters(
-                    {**parameters, "f_ref": self.f_ref}
+            elif self.approximant_str in ["TEOBResumSDALI"]:
+                # Step 1: generate waveform modes in L0 frame in native domain
+                # of approximant (here: TD). Returns gwpy TimeSeries for TEOB.
+                # Then apply sigmoid start taper (TEOB fallback conditioning).
+                hlm_td, iota = self.generate_TD_modes_L0(
+                    parameters, return_lal=False
                 )
-
-                generator = new_interface_get_waveform_generator(
-                    self.approximant_str
-                )
-                hlm_td_gwpy = gws_wfm.GenerateTDModes(
-                    parameters_gwsignal, generator
-                )
-                hlm_td = {
-                    key: value
-                    for key, value in hlm_td_gwpy.items()
-                    if type(key) != str
-                }
-                iota = parameters_gwsignal["inclination"].value
-
-                # GenerateTDModes returns dimensionless strain modes;
-                # rescale by nu * M_total / distance * (G/c^2) to get
-                # physical units consistent with GenerateFDWaveform.
-                m1 = parameters_gwsignal["mass1"]
-                m2 = parameters_gwsignal["mass2"]
-                nu = m1 * m2 / (m1 + m2) ** 2
-                distance_rescaling = (
-                    (
-                        nu
-                        * (m1 + m2)
-                        / parameters_gwsignal["distance"]
-                        * ac.G
-                        / ac.c ** 2
-                    )
-                    .to(u.dimensionless_unscaled)
-                    .value
-                )
-                for lm in hlm_td:
-                    hlm_td[lm] = hlm_td[lm] * distance_rescaling
-
                 wfg_utils.taper_td_gwpy_modes_in_place(hlm_td, iota)
 
                 # Step 2: Transform modes to target domain.
-                hlm_fd = wfg_utils.td_modes_to_fd_modes_gwpy(
-                    hlm_td, self.domain, iota
+                # FFT without time shift, then apply phase-dependent time
+                # shift at spin_conversion_phase (peak at t≈0 for production).
+                hlm_fd_raw, resized_td_modes = (
+                    wfg_utils.td_modes_to_fd_modes_gwpy(hlm_td, self.domain)
+                )
+                hlm_fd, self._deferred_timeshift_data = (
+                    wfg_utils.apply_time_shift_to_fd_modes(
+                        hlm_fd_raw, resized_td_modes, iota,
+                        self.spin_conversion_phase, self.domain,
+                    )
                 )
 
                 # Step 3: One-sided modes -> polarizations organized by m.
@@ -1339,7 +1310,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 # use the non-precessing symmetry h_{l,-m}(t) = (-1)^l h*_{lm}(t)
                 # to directly compute h+ and hx from the one-sided modes.
                 pol_m = wfg_utils.get_polarizations_from_onesided_fd_modes_m(
-                    hlm_fd, iota, parameters["phase"]
+                    hlm_fd, iota, self.spin_conversion_phase
                 )
 
             elif generator.domain == "freq":
@@ -1436,7 +1407,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 f"to test that this works as intended! Ideally, add some unit tests."
             )
 
-    def generate_TD_modes_L0(self, parameters):
+    def generate_TD_modes_L0(self, parameters, return_lal=True):
         """
         Generate TD modes in the L0 frame.
 
@@ -1445,31 +1416,39 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         parameters: dict
             Dictionary of parameters for the waveform.
             For details see see self.generate_hplus_hcross.
+        return_lal: bool
+            If True (default), return modes as LAL COMPLEX16TimeSeries.
+            If False, return modes as gwpy TimeSeries.
 
         Returns
         -------
         hlm_td: dict
-            Dictionary with (l,m) as keys and the corresponding TD modes in lal format as
+            Dictionary with (l,m) as keys and the corresponding TD modes as
             values.
         iota: float
         """
         # TD approximants that are implemented in L0 frame. Currently tested for:
-        #   52: SEOBNRv4PHM
         #       SEOBNRV5EHM
+        #       TEOBResumSDALI
 
         parameters_gwsignal = self._convert_parameters(
             {**parameters, "f_ref": self.f_ref}
         )
 
-        # TEOBREsumS returns the modes unscaled in the distance version when calling GenerateTDModes
-        # therefore, we rescale them here
+        generator = new_interface_get_waveform_generator(self.approximant_str)
+        hlm_td_gwpy = gws_wfm.GenerateTDModes(parameters_gwsignal, generator)
+        iota = parameters_gwsignal["inclination"].value
+
+        # TEOB GenerateTDModes returns dimensionless strain modes;
+        # rescale by nu * M_total / distance * (G/c^2) to get physical units.
         if "TEOB" in self.approximant_str:
-            m1, m2 = parameters_gwsignal["mass1"], parameters_gwsignal["mass2"]
-            nu = m1 * m2 / (m1 + m2) ** 2 
-            distance_rescaling = -(
+            m1 = parameters_gwsignal["mass1"]
+            m2 = parameters_gwsignal["mass2"]
+            nu = m1 * m2 / (m1 + m2) ** 2
+            distance_rescaling = (
                 (
                     nu
-                    * (parameters_gwsignal["mass1"] + parameters_gwsignal["mass2"])
+                    * (m1 + m2)
                     / parameters_gwsignal["distance"]
                     * ac.G
                     / ac.c ** 2
@@ -1477,29 +1456,27 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 .to(u.dimensionless_unscaled)
                 .value
             )
-        else:
-            distance_rescaling = 1.0
 
-        generator = new_interface_get_waveform_generator(self.approximant_str)
-        hlm_td = gws_wfm.GenerateTDModes(parameters_gwsignal, generator)
-        hlms_lal = {}
-
-
-        for key, value in hlm_td.items():
+        hlm_td = {}
+        for key, value in hlm_td_gwpy.items():
             if type(key) != str:
-                hlm_lal = lal.CreateCOMPLEX16TimeSeries(
-                    "hplus",
-                    value.epoch.value,
-                    0,
-                    value.dt.value,
-                    lal.DimensionlessUnit,
-                    len(value),
-                )
-                hlm_lal.data.data = value.value * distance_rescaling
-                hlms_lal[key] = hlm_lal
+                if "TEOB" in self.approximant_str:
+                    value = value * distance_rescaling
+                if return_lal:
+                    hlm_lal = lal.CreateCOMPLEX16TimeSeries(
+                        "hplus",
+                        value.epoch.value,
+                        0,
+                        value.dt.value,
+                        lal.DimensionlessUnit,
+                        len(value),
+                    )
+                    hlm_lal.data.data = value.value
+                    hlm_td[key] = hlm_lal
+                else:
+                    hlm_td[key] = value
 
-
-        return hlms_lal, parameters_gwsignal["inclination"].value
+        return hlm_td, iota
 
     def generate_TD_modes_L0_conditioned_extra_time(self, parameters):
         """
@@ -1680,15 +1657,56 @@ def generate_waveforms_parallel(
     return polarizations
 
 
-def sum_contributions_m(x_m, phase_shift=0.0):
+def sum_contributions_m(x_m, phase_shift=0.0, deferred_timeshift_data=None):
     """
     Sum the contributions over m-components, optionally introducing a phase shift.
+
+    When deferred_timeshift_data is provided and phase_shift != 0, a time shift
+    correction is applied to account for the phase-dependent epoch. The modes in
+    x_m carry a time shift computed at a reference phase; this correction adjusts
+    it to the target phase (phase_ref + phase_shift).
+
+    Parameters
+    ----------
+    x_m: dict
+        Dictionary with integer m keys and dict values containing arrays.
+    phase_shift: float
+        Phase shift to apply via exp(-1j * m * phase_shift).
+    deferred_timeshift_data: dict or None
+        If provided, must contain: resized_td_modes, iota, phase_ref, dt_ref,
+        delta_t, delta_f, frequency_array. Stored on the waveform generator
+        instance as _deferred_timeshift_data after calling
+        generate_hplus_hcross_m for TEOB approximants.
+
+    Returns
+    -------
+    result: dict
+        Dictionary with the same keys as x_m's inner dicts (e.g. "h_plus",
+        "h_cross"), containing the summed arrays.
     """
     keys = next(iter(x_m.values())).keys()
     result = {key: 0.0 for key in keys}
     for key in keys:
         for m, x in x_m.items():
             result[key] += x[key] * np.exp(-1j * m * phase_shift)
+
+    if deferred_timeshift_data is not None and phase_shift != 0.0:
+        target_phase = deferred_timeshift_data["phase_ref"] + phase_shift
+        epoch_target = wfg_utils.compute_epoch_from_resized_td_modes(
+            deferred_timeshift_data["resized_td_modes"],
+            deferred_timeshift_data["iota"],
+            target_phase,
+            deferred_timeshift_data["delta_t"],
+        )
+        dt_target = 1.0 / deferred_timeshift_data["delta_f"] + epoch_target
+        dt_correction = dt_target - deferred_timeshift_data["dt_ref"]
+        correction = np.exp(
+            -1j * 2 * np.pi * dt_correction
+            * deferred_timeshift_data["frequency_array"]
+        )
+        for key in result:
+            result[key] *= correction
+
     return result
 
 

@@ -1,9 +1,8 @@
 import numpy as np
 import lal
 import lalsimulation as LS
-from scipy.signal import butter, sosfiltfilt, find_peaks
+from scipy.signal import find_peaks
 from lalsimulation.gwsignal.core import conditioning_subroutines as cond
-import astropy.units as u
 from gwpy.timeseries import TimeSeries
 
 
@@ -196,46 +195,6 @@ def _compute_sigmoid_window(length, start, n):
     window[start + 1 : start + n - 1] = sigma
     return window
 
-def lalseries_to_gwpy_timeseries_in_place(hlm_td):
-    """
-    Convert lal time series in place to gwpy time series.
-
-    Parameters
-    ----------
-    hlm_td: dict
-        Dictionary with (l,m) keys and the complex lal time series objects for the
-        corresponding modes.
-
-    """
-    from gwpy.timeseries import TimeSeries
-    for mode in hlm_td.keys():
-        times = (
-            hlm_td[mode].epoch.gpsSeconds
-            + hlm_td[mode].epoch.gpsNanoSeconds * 1e-9
-            + np.arange(hlm_td[mode].data.length) * hlm_td[mode].deltaT
-        )
-
-        hlm_td[mode] = TimeSeries(
-            data=hlm_td[mode].data.data,
-            times=times,
-            name=f"h_{mode[0]}_{mode[1]}",
-            unit=u.dimensionless_unscaled,
-        )
-
-def gwpyseries_to_lalseries_in_place(hlm_td):
-    """
-    Convert gwpy time series in place to lal time series.
-
-    Parameters
-    ----------
-    hlm_td: dict
-        Dictionary with (l,m) keys and the complex gwpy time series objects for the
-        corresponding modes.
-
-    """
-    for mode in hlm_td.keys():
-        hlm_td[mode] = hlm_td[mode].to_lal()
-
 def td_modes_to_fd_modes(hlm_td, domain):
     """
     Transform dict of td modes to dict of fd modes via FFT. The td modes are expected
@@ -303,21 +262,23 @@ def td_modes_to_fd_modes(hlm_td, domain):
 
     return hlm_fd
 
-def td_modes_to_fd_modes_gwpy(hlm_td, domain, iota, phase=0.0):
+def td_modes_to_fd_modes_gwpy(hlm_td, domain):
     """
     Transform dict of gwpy TD modes to dict of one-sided FD modes via FFT.
     The td modes are expected to be conditioned (tapered/filtered).
 
     Replicates the FFT pipeline in gwsignal's
     generate_conditioned_fd_waveform_from_td (waveform_conditioning.py:510-522):
-      resize → fft → normalize by 1/(2*df) → set epoch
-    followed by the time shift from generate_FD_waveform
-    (waveform_generator.py:1178-1182):
-      dt = 1/df + epoch; h *= exp(-i*2π*dt*f)
+      resize → fft → normalize by 1/(2*df)
 
-    The epoch is computed by reconstructing the real h+ polarization from
-    the modes after resize and finding its peak with np.argmax, matching
-    the reference path where resize_gwpy_timeseries uses np.argmax(hp).
+    No time shift is applied to the FD modes. The caller is responsible for
+    computing and applying the time shift (which depends on the target phase
+    via np.argmax of the reconstructed hp). This enables the "deferred time
+    shift" approach where modes are FFT'd once (phase-independently) and the
+    phase-dependent time shift is applied at resummation time.
+
+    Also returns the resized TD mode data (numpy arrays) needed for the
+    deferred time shift computation.
 
     Since the modes are complex-valued and gwpy's fft uses rfft (real input
     only), each mode is split into real and imaginary parts which are FFT'd
@@ -330,19 +291,18 @@ def td_modes_to_fd_modes_gwpy(hlm_td, domain, iota, phase=0.0):
         corresponding conditioned modes.
     domain: dingo.gw.domains.UniformFrequencyDomain
         Target domain after FFT.
-    iota: float
-        Inclination angle in radians. Used to reconstruct h+ from modes
-        for peak-finding (epoch computation).
-    phase: float
-        Reference phase for reconstructing h+. Defaults to 0.0.
 
     Returns
     -------
     hlm_fd: dict
         Dictionary with (l,m) keys and numpy arrays with the corresponding
-        one-sided FD modes on [0, df, ..., f_max].
+        one-sided FD modes on [0, df, ..., f_max]. No time shift applied.
+    resized_td_modes: dict
+        Dictionary with (l,m) keys and numpy complex arrays of the resized
+        TD mode data, needed for deferred time shift computation.
     """
     hlm_fd = {}
+    resized_td_modes = {}
 
     delta_f = domain.delta_f
     delta_t = 0.5 / domain.f_max
@@ -350,29 +310,15 @@ def td_modes_to_fd_modes_gwpy(hlm_td, domain, iota, phase=0.0):
     chirplen = int(2 * f_nyquist / delta_f)
     frequency_array = domain()  # [0, df, ..., f_max]
 
-    # Resize modes to chirplen (waveform_conditioning.py:510)
-    resized_modes = {}
     for (l, m), h in hlm_td.items():
-        h_resized = cond.resize_gwpy_timeseries(h, len(h) - chirplen, chirplen)
-        resized_modes[(l, m)] = h_resized
+        # Resize to chirplen (waveform_conditioning.py:510)
+        start_id = len(h) - chirplen
+        h_resized = cond.resize_gwpy_timeseries(h, start_id, chirplen)
+        resized_td_modes[(l, m)] = np.asarray(h_resized).copy()
 
-    # Reconstruct h+ from resized modes to find the peak, matching
-    # the reference path where resize_gwpy_timeseries uses np.argmax(hp)
-    # on the real h+ polarization.
-    hp_reconstructed = np.zeros(chirplen)
-    for (l, m), h in resized_modes.items():
-        ylm = lal.SpinWeightedSphericalHarmonic(iota, np.pi / 2 - phase, -2, l, m)
-        hp_reconstructed += (ylm * np.asarray(h)).real
-    epoch = -np.argmax(hp_reconstructed) * delta_t
-
-    # Precompute time shift (same for all modes)
-    dt_shift = 1.0 / delta_f + epoch
-    time_shift = np.exp(-1j * 2 * np.pi * dt_shift * frequency_array)
-
-    for (l, m), h in resized_modes.items():
         # Split complex mode into real and imaginary TimeSeries for gwpy fft
-        h_re = TimeSeries(np.asarray(h).real, dt=delta_t)
-        h_im = TimeSeries(np.asarray(h).imag, dt=delta_t)
+        h_re = TimeSeries(np.asarray(h_resized).real, dt=delta_t)
+        h_im = TimeSeries(np.asarray(h_resized).imag, dt=delta_t)
 
         # FFT + normalize (waveform_conditioning.py:513-521)
         hf_re = h_re.fft()
@@ -381,12 +327,98 @@ def td_modes_to_fd_modes_gwpy(hlm_td, domain, iota, phase=0.0):
         hf_im = h_im.fft()
         hf_im = hf_im / (2 * hf_im.df)
 
-        # Combine and apply time shift
-        hf_combined = (hf_re.value[:len(frequency_array)]
-                       + 1j * hf_im.value[:len(frequency_array)])
-        hlm_fd[(l, m)] = hf_combined * time_shift
+        hlm_fd[(l, m)] = (hf_re.value[:len(frequency_array)]
+                          + 1j * hf_im.value[:len(frequency_array)])
 
-    return hlm_fd
+    return hlm_fd, resized_td_modes
+
+
+def compute_epoch_from_resized_td_modes(resized_td_modes, iota, phase, delta_t):
+    """Compute the epoch (time of peak) from resized TD modes at a given phase.
+
+    Reconstructs the real h+ polarization from the resized TD mode data using
+    spin-weighted spherical harmonics at the specified phase, then finds the
+    peak via np.argmax. This matches the epoch convention used by gwsignal's
+    resize_gwpy_timeseries (which calls np.argmax on the real hp).
+
+    Parameters
+    ----------
+    resized_td_modes: dict
+        Dictionary with (l,m) keys and numpy complex arrays of resized TD modes.
+    iota: float
+        Inclination angle in radians.
+    phase: float
+        Reference phase for spherical harmonic evaluation.
+    delta_t: float
+        Time step of the TD data.
+
+    Returns
+    -------
+    epoch: float
+        The epoch value (negative of peak index times delta_t).
+    """
+    chirplen = len(next(iter(resized_td_modes.values())))
+    hp = np.zeros(chirplen)
+    for (l, m), h_data in resized_td_modes.items():
+        ylm = lal.SpinWeightedSphericalHarmonic(iota, np.pi / 2 - phase, -2, l, m)
+        hp += (ylm * h_data).real
+    return -np.argmax(hp) * delta_t
+
+
+def apply_time_shift_to_fd_modes(hlm_fd_raw, resized_td_modes, iota, phase, domain):
+    """Apply a phase-dependent time shift to raw (unshifted) FD modes.
+
+    Computes the epoch by reconstructing hp from resized TD modes at the given
+    phase (matching gwsignal's resize_gwpy_timeseries convention), then applies
+    the time shift exp(-i 2pi dt f) to each FD mode.
+
+    Also returns a deferred_timeshift_data dict that can be passed to
+    sum_contributions_m to correct the time shift when a phase_shift is applied.
+
+    Parameters
+    ----------
+    hlm_fd_raw : dict
+        Dictionary with (l,m) keys and numpy arrays of unshifted FD modes.
+    resized_td_modes : dict
+        Dictionary with (l,m) keys and numpy complex arrays of resized TD modes.
+    iota : float
+        Inclination angle in radians.
+    phase : float
+        Reference phase for epoch computation.
+    domain : dingo.gw.domains.UniformFrequencyDomain
+        Frequency domain.
+
+    Returns
+    -------
+    hlm_fd : dict
+        Dictionary with (l,m) keys and time-shifted FD mode arrays.
+    deferred_timeshift_data : dict
+        Data needed by sum_contributions_m for deferred time shift correction.
+    """
+    delta_t = 0.5 / domain.f_max
+    delta_f = domain.delta_f
+    frequency_array = domain()
+
+    epoch = compute_epoch_from_resized_td_modes(
+        resized_td_modes, iota, phase, delta_t
+    )
+    dt = 1.0 / delta_f + epoch
+    time_shift = np.exp(-1j * 2 * np.pi * dt * frequency_array)
+
+    hlm_fd = {lm: hf * time_shift for lm, hf in hlm_fd_raw.items()}
+
+    deferred_timeshift_data = {
+        "resized_td_modes": resized_td_modes,
+        "iota": iota,
+        "phase_ref": phase,
+        "dt_ref": dt,
+        "delta_t": delta_t,
+        "delta_f": delta_f,
+        "frequency_array": frequency_array,
+    }
+
+    return hlm_fd, deferred_timeshift_data
+
 
 def get_polarizations_from_fd_modes_m(hlm_fd, iota, phase):
     pol_m = {}
@@ -603,283 +635,3 @@ def taper_td_modes_for_SEOBRNRv5_extra_time(
     return h_return
 
 
-def get_conditioning_params_for_TEOB(parameters_gwsignal):
-    """
-    Compute conditioning parameters for TEOBResumSDALI waveforms.
-
-    Replicates the parameter computation from gwsignal's
-    generate_conditioned_td_waveform_from_td
-    (lalsimulation/gwsignal/core/waveform_conditioning.py:34-111).
-
-    This is needed because gwsignal's GenerateTDModes
-    (lalsimulation/gwsignal/core/waveform.py:668) returns unconditioned modes,
-    while GenerateFDWaveform routes through the conditioning pipeline. To make
-    mode-decomposed waveforms match the reference, the same conditioning must be
-    applied to each mode individually.
-
-    Parameters
-    ----------
-    parameters_gwsignal: dict
-        Dictionary of gwsignal parameters (from _convert_parameters).
-
-    Returns
-    -------
-    f_start: float
-        Lower starting frequency for generating modes with buffer for tapering.
-    t_extra: float
-        Duration of the extra time to taper at the beginning (for stage 1).
-    f_min: float
-        Effective minimum frequency, possibly lowered to fisco_9
-        (for stage 2 beginning taper).
-    original_f_min: float
-        The originally requested starting frequency (for stage 1 high-pass).
-    f_isco: float
-        ISCO frequency at 6M (for stage 2 end taper).
-    """
-    # waveform_conditioning.py:51-52
-    extra_time_fraction = 0.1
-    extra_cycles = 3.0
-
-    # waveform_conditioning.py:55-61
-    # Masses are stored as astropy Quantities in solar masses; .value gives
-    # solar masses, .si.value gives kg. LAL bound functions expect SI (kg).
-    f_min = parameters_gwsignal["f22_start"].value
-    m1_SI = parameters_gwsignal["mass1"].si.value
-    m2_SI = parameters_gwsignal["mass2"].si.value
-    s1z = parameters_gwsignal["spin1z"].value
-    s2z = parameters_gwsignal["spin2z"].value
-    original_f_min = f_min
-
-    # waveform_conditioning.py:70-72 — clamp f_min to ISCO at 9^1.5
-    fisco_9 = 1.0 / (
-        np.power(9.0, 1.5) * np.pi * (m1_SI + m2_SI) * lal.MTSUN_SI / lal.MSUN_SI
-    )
-    if f_min > fisco_9:
-        f_min = fisco_9
-
-    # waveform_conditioning.py:76 — upper bound on chirp time from f_min
-    tchirp = LS.SimInspiralChirpTimeBound(f_min, m1_SI, m2_SI, s1z, s2z)
-
-    # waveform_conditioning.py:79
-    s = LS.SimInspiralFinalBlackHoleSpinBound(s1z, s2z)
-
-    # waveform_conditioning.py:82 — merger + ringdown time
-    tmerge = (
-        LS.SimInspiralMergeTimeBound(m1_SI, m2_SI)
-        + LS.SimInspiralRingdownTimeBound(m1_SI + m2_SI, s)
-    )
-
-    # waveform_conditioning.py:87 — extra cycles near merger
-    textra = extra_cycles / f_min
-
-    # waveform_conditioning.py:90 — lower starting frequency for tapering buffer
-    f_start = LS.SimInspiralChirpStartFrequencyBound(
-        (1.0 + extra_time_fraction) * tchirp + tmerge + textra, m1_SI, m2_SI
-    )
-
-    # waveform_conditioning.py:106 — t_extra for stage 1 cosine taper
-    t_extra = extra_time_fraction * tchirp + textra
-
-    # waveform_conditioning.py:108 — ISCO at 6M for stage 2 end taper
-    f_isco = 1.0 / (
-        np.power(6.0, 1.5) * np.pi * (m1_SI + m2_SI) * lal.MTSUN_SI / lal.MSUN_SI
-    )
-
-    return f_start, t_extra, f_min, original_f_min, f_isco
-
-
-def _high_pass_complex(data, dt, f_min, attenuation=0.99, order=8):
-    """
-    High-pass filter a complex time series using a Butterworth IIR filter.
-
-    Replicates gwsignal's high_pass_time_series
-    (lalsimulation/gwsignal/core/conditioning_subroutines.py:10-46).
-
-    Parameters
-    ----------
-    data: np.ndarray (complex)
-        Time series data array.
-    dt: float
-        Sampling interval in seconds.
-    f_min: float
-        Minimum frequency for high-pass.
-    attenuation: float
-        Attenuation at the low-frequency cutoff (default 0.99).
-    order: int
-        Order of Butterworth filter (default 8).
-
-    Returns
-    -------
-    filtered: np.ndarray (complex)
-        High-pass filtered data.
-    """
-    # conditioning_subroutines.py:33 — sampling frequency
-    fs = 1.0 / dt
-
-    # conditioning_subroutines.py:37-39 — bilinear transform to compute cutoff
-    w1 = np.tan(np.pi * f_min * dt)
-    wc = w1 * (1.0 / attenuation**0.5 - 1) ** (1.0 / (2.0 * order))
-    fc = fs * np.arctan(wc) / np.pi
-
-    # conditioning_subroutines.py:42-43 — forward-backward Butterworth filter
-    sos = butter(order, fc, btype="highpass", output="sos", fs=fs)
-    filtered_re = sosfiltfilt(sos, data.real)
-    filtered_im = sosfiltfilt(sos, data.imag)
-    return filtered_re + 1j * filtered_im
-
-
-def _condition_stage1_complex(data, dt, t_extra, f_min):
-    """
-    Stage 1 conditioning: cosine taper at the beginning + high-pass filter.
-
-    Replicates gwsignal's time_array_condition_stage1
-    (lalsimulation/gwsignal/core/conditioning_subroutines.py:50-87).
-
-    Parameters
-    ----------
-    data: np.ndarray (complex)
-        Time series data array.
-    dt: float
-        Sampling interval in seconds.
-    t_extra: float
-        Duration of extra time at the beginning to taper.
-    f_min: float
-        Minimum frequency for high-pass filter.
-
-    Returns
-    -------
-    data: np.ndarray (complex)
-        Conditioned data.
-    """
-    # conditioning_subroutines.py:71-77 — cosine (Hann) taper at beginning
-    Ntaper = int(np.round(t_extra / dt))
-    if Ntaper > 0 and Ntaper < len(data):
-        taper_array = np.arange(Ntaper)
-        w = 0.5 - 0.5 * np.cos(taper_array * np.pi / Ntaper)
-        data[:Ntaper] *= w
-
-    # conditioning_subroutines.py:80-81 — high-pass filter
-    data = _high_pass_complex(data, dt, f_min)
-
-    # conditioning_subroutines.py:84-85 — trim trailing zeros
-    data = np.trim_zeros(data, trim='b')
-
-    return data
-
-
-def _condition_stage2_complex(data, dt, f_min, f_isco):
-    """
-    Stage 2 conditioning: end taper (1 cycle at f_isco) + beginning taper
-    (1 cycle at f_min).
-
-    Replicates gwsignal's time_array_condition_stage2
-    (lalsimulation/gwsignal/core/conditioning_subroutines.py:90-144).
-
-    Parameters
-    ----------
-    data: np.ndarray (complex)
-        Time series data array.
-    dt: float
-        Sampling interval in seconds.
-    f_min: float
-        Minimum frequency for beginning taper.
-    f_isco: float
-        ISCO frequency for end taper.
-
-    Returns
-    -------
-    data: np.ndarray (complex)
-        Conditioned data.
-    """
-    # conditioning_subroutines.py:111-114
-    min_taper_samples = 4
-    Nsize = len(data)
-    if Nsize < 2 * min_taper_samples:
-        return data
-
-    # conditioning_subroutines.py:119-129 — end taper: 1 cycle at f_isco
-    ntaper_end = max(int(np.round(1.0 / (f_isco * dt))), min_taper_samples)
-    taper_array = np.arange(1, ntaper_end)
-    w_end = 0.5 - 0.5 * np.cos(taper_array * np.pi / ntaper_end)
-    data[Nsize - ntaper_end + 1 :] *= w_end[::-1]
-
-    # conditioning_subroutines.py:133-142 — beginning taper: 1 cycle at f_min
-    ntaper_begin = max(int(np.round(1.0 / (f_min * dt))), min_taper_samples)
-    taper_array = np.arange(ntaper_begin)
-    w_begin = 0.5 - 0.5 * np.cos(taper_array * np.pi / ntaper_begin)
-    data[:ntaper_begin] *= w_begin
-
-    return data
-
-
-def condition_td_modes_for_TEOB_in_place(hlm_td, t_extra, f_min, original_f_min, f_isco):
-    """
-    Apply gwsignal-style conditioning to TD modes in place.
-
-    This replicates the conditioning that gwsignal's
-    generate_conditioned_td_waveform_from_td
-    (lalsimulation/gwsignal/core/waveform_conditioning.py:34-111) applies to the
-    combined TD polarizations, but applies it to individual complex modes. This
-    is necessary because GenerateTDModes (gwsignal/core/waveform.py:668) returns
-    unconditioned modes — it bypasses the conditioning pipeline entirely.
-
-    The conditioning consists of two stages (following the C implementation at
-    XLALSimInspiralTDConditionStage1 / Stage2):
-
-    Stage 1 (conditioning_subroutines.py:50-87):
-      - Cosine (Hann) taper over t_extra seconds at the beginning
-      - Order-8 Butterworth high-pass filter at original_f_min (attenuation 0.99)
-
-    Stage 2 (conditioning_subroutines.py:90-144):
-      - End taper: 1 cycle at f_isco (ISCO at 6M)
-      - Beginning taper: 1 cycle at f_min
-
-    Usage
-    -----
-    The modes must be generated at the lower starting frequency f_start returned
-    by get_conditioning_params_for_TEOB(), so that there is sufficient buffer
-    for the tapering.
-
-    Example::
-
-        f_start, t_extra, f_min, original_f_min, f_isco = (
-            get_conditioning_params_for_TEOB(parameters_gwsignal)
-        )
-        # Generate modes at f_start (not the original f_min)
-        hlm_td, iota = generate_TD_modes_at_f_start(parameters, f_start)
-        condition_td_modes_for_TEOB_in_place(
-            hlm_td, t_extra, f_min, original_f_min, f_isco
-        )
-        hlm_fd = td_modes_to_fd_modes(hlm_td, domain)
-
-    Parameters
-    ----------
-    hlm_td: dict
-        Dictionary with (l,m) keys and complex LAL COMPLEX16TimeSeries objects.
-    t_extra: float
-        Duration of extra time at the beginning for stage 1 cosine taper.
-        From get_conditioning_params_for_TEOB().
-    f_min: float
-        Effective minimum frequency (possibly lowered to fisco_9).
-        Used for stage 2 beginning taper.
-    original_f_min: float
-        The originally requested starting frequency.
-        Used for stage 1 high-pass filter.
-    f_isco: float
-        ISCO frequency at 6M. Used for stage 2 end taper.
-    """
-    for lm in list(hlm_td.keys()):
-        h = hlm_td[lm]
-        dt = h.dt.value
-        data = h.value.copy()
-
-        # waveform_conditioning.py:106 — stage 1 uses original_f_min for high-pass
-        data = _condition_stage1_complex(data, dt, t_extra, original_f_min)
-
-        # waveform_conditioning.py:109 — stage 2 uses adjusted f_min and f_isco
-        data = _condition_stage2_complex(data, dt, f_min, f_isco)
-
-        # Replace with new TimeSeries (length may have changed due to trim)
-        hlm_td[lm] = TimeSeries(
-            data, t0=h.t0, dt=h.dt, unit=h.unit
-        )
