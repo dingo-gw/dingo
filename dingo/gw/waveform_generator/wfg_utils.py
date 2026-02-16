@@ -1,7 +1,7 @@
 import numpy as np
 import lal
 import lalsimulation as LS
-from scipy.signal import butter, sosfiltfilt
+from scipy.signal import butter, sosfiltfilt, find_peaks
 from lalsimulation.gwsignal.core import conditioning_subroutines as cond
 import astropy.units as u
 from gwpy.timeseries import TimeSeries
@@ -54,7 +54,6 @@ def get_tapering_window_for_complex_time_series(h, tapering_flag: int = 1):
     # FIXME: using eps for numerical stability is not really robust here
     return window
 
-
 def taper_td_modes_in_place(hlm_td, tapering_flag: int = 1):
     """
     Taper the time domain modes in place.
@@ -74,23 +73,128 @@ def taper_td_modes_in_place(hlm_td, tapering_flag: int = 1):
         window = get_tapering_window_for_complex_time_series(h, tapering_flag)
         h.data.data *= window
 
-def taper_td_modes_in_place_gwsignal(hlm_td, tapering_flag: str = 'start'):
+def taper_td_gwpy_modes_in_place(hlm_td, iota, phase=0.0):
     """
-    Taper the time domain modes in place using gwsignal conditioning routines.
-    There are apparently slight differences in the tapering functions 
-    between these two and since some wfs (EG TEOB) uses the gwsignal 
-    routine, we use the gwsignal routine sometimes. 
+    Apply sigmoid start taper to gwpy TimeSeries modes in place.
+
+    This replicates the fallback conditioning used by gwsignal for
+    approximants with f_ref_spin=False (e.g. TEOBResumSDALI).
+    See generate_conditioned_td_waveform_from_td_fallback in
+    lalsimulation/gwsignal/core/waveform_conditioning.py:35-64.
+
+    The gwsignal reference applies taper_gwpy_timeseries to the combined
+    polarizations hp and hc, where find_peaks determines the taper length.
+    Since hp and hc can yield different taper lengths, but we need a single
+    real-valued window to apply to each complex mode, we compute both windows
+    and use the one with shorter taper (preserving more signal). 
 
     Parameters
     ----------
     hlm_td: dict
-        Dictionary with (l,m) keys and the complex lal time series objects for the
-        corresponding modes.
-
+        Dictionary with (l,m) keys and gwpy TimeSeries objects.
+    iota: float
+        Inclination angle in radians.
+    phase: float
+        Reference phase for computing the combined polarizations used to
+        determine the taper window. Defaults to 0.0 since modes should be
+        phase-independent.
     """
-    lalseries_to_gwpy_timeseries_in_place(hlm_td)
-    for mode in hlm_td.keys():
-        hlm_td[mode] = cond.taper_gwpy_timeseries(hlm_td[mode], tapering_flag)
+    max_len = max(len(h) for h in hlm_td.values())
+
+    # Sum modes to get combined hp and hc (unconditioned).
+    # These are needed to compute taper windows that match the reference path,
+    # where taper_gwpy_timeseries uses find_peaks on the combined polarizations.
+    h_complex = np.zeros(max_len, dtype=complex)
+    for (l, m), h in hlm_td.items():
+        data = h.value.copy()
+        if len(data) < max_len:
+            data = np.pad(data, (0, max_len - len(data)))
+        ylm = lal.SpinWeightedSphericalHarmonic(iota, np.pi / 2 - phase, -2, l, m)
+        h_complex += ylm * data
+
+    hp_combined = h_complex.real
+    hc_combined = -h_complex.imag
+
+    # Compute separate taper windows for hp and hc. The reference path
+    # (generate_conditioned_td_waveform_from_td_fallback) applies
+    # taper_gwpy_timeseries independently to hp and hc, which can yield
+    # different taper lengths because find_peaks finds different peaks.
+    # We apply W_hp to Re(h_lm) and W_hc to Im(h_lm) for each mode.
+    # For non-precessing systems the modes are purely real in the co-rotating
+    # frame, so Re(h_lm) and Im(h_lm) map cleanly to the two polarizations,
+    # giving exact agreement with the reference.
+    start_hp, n_hp = _compute_sigmoid_taper_params(hp_combined)
+    start_hc, n_hc = _compute_sigmoid_taper_params(hc_combined)
+
+    if start_hp is None and start_hc is None:
+        return
+
+    # Build windows, falling back to the other if one polarization is empty
+    if start_hp is None:
+        start_hp, n_hp = start_hc, n_hc
+    if start_hc is None:
+        start_hc, n_hc = start_hp, n_hp
+
+    W_hp = _compute_sigmoid_window(max_len, start_hp, n_hp)
+    W_hc = _compute_sigmoid_window(max_len, start_hc, n_hc)
+
+    for (l, m) in hlm_td:
+        data = hlm_td[(l, m)].value.copy()
+        if len(data) < max_len:
+            data = np.pad(data, (0, max_len - len(data)))
+        data = W_hp * data.real + 1j * W_hc * data.imag
+        hlm_td[(l, m)] = TimeSeries(
+            data,
+            t0=hlm_td[(l, m)].t0,
+            dt=hlm_td[(l, m)].dt,
+        )
+
+def _compute_sigmoid_taper_params(signal):
+    """Compute (start, n) for the sigmoid start taper.
+
+    Replicates the peak-finding logic in taper_gwpy_timeseries for
+    taper_kind='start'. Returns (None, None) if the signal is empty
+    or too short.
+    """
+    LALSIMULATION_RINGING_EXTENT = 19
+
+    start = -1
+    for idx, val in enumerate(signal):
+        if val != 0:
+            start = idx
+            break
+    if start == -1:
+        return None, None
+
+    end = -1
+    for idx, val in enumerate(signal[::-1]):
+        if val != 0:
+            end = len(signal) - 1 - idx
+            break
+
+    if (end - start) <= 1:
+        return None, None
+
+    mid = int((start + end) / 2)
+    pks, _ = find_peaks(abs(signal[start + 1 : mid]))
+    pks = pks[pks > LALSIMULATION_RINGING_EXTENT]
+
+    if len(pks) < 2:
+        n = mid - start
+    else:
+        n = pks[1] + 1
+
+    return start, n
+
+def _compute_sigmoid_window(length, start, n):
+    """Compute the sigmoid taper window matching taper_gwpy_timeseries."""
+    window = np.ones(length)
+    window[start] = 0.0
+    realI = np.arange(1, n - 1)
+    z = (n - 1.0) / realI + (n - 1.0) / (realI - (n - 1.0))
+    sigma = 1.0 / (np.exp(z) + 1.0)
+    window[start + 1 : start + n - 1] = sigma
+    return window
 
 def lalseries_to_gwpy_timeseries_in_place(hlm_td):
     """
@@ -199,16 +303,25 @@ def td_modes_to_fd_modes(hlm_td, domain):
 
     return hlm_fd
 
-def td_modes_to_fd_modes_gwpy(hlm_td, domain):
+def td_modes_to_fd_modes_gwpy(hlm_td, domain, iota, phase=0.0):
     """
     Transform dict of gwpy TD modes to dict of one-sided FD modes via FFT.
     The td modes are expected to be conditioned (tapered/filtered).
 
-    Uses numpy's complex FFT (not gwpy's rfft-based .fft()) to correctly
-    handle complex-valued modes, then takes the positive-frequency half.
-    Applies a time shift correction to account for the epoch (physical start
-    time of the resized time series), matching the convention used by the
-    LAL-based td_modes_to_fd_modes and the reference FD waveform path.
+    Replicates the FFT pipeline in gwsignal's
+    generate_conditioned_fd_waveform_from_td (waveform_conditioning.py:510-522):
+      resize → fft → normalize by 1/(2*df) → set epoch
+    followed by the time shift from generate_FD_waveform
+    (waveform_generator.py:1178-1182):
+      dt = 1/df + epoch; h *= exp(-i*2π*dt*f)
+
+    The epoch is computed by reconstructing the real h+ polarization from
+    the modes after resize and finding its peak with np.argmax, matching
+    the reference path where resize_gwpy_timeseries uses np.argmax(hp).
+
+    Since the modes are complex-valued and gwpy's fft uses rfft (real input
+    only), each mode is split into real and imaginary parts which are FFT'd
+    separately and recombined: H_lm(f) = FFT(Re) + i*FFT(Im).
 
     Parameters
     ----------
@@ -217,6 +330,11 @@ def td_modes_to_fd_modes_gwpy(hlm_td, domain):
         corresponding conditioned modes.
     domain: dingo.gw.domains.UniformFrequencyDomain
         Target domain after FFT.
+    iota: float
+        Inclination angle in radians. Used to reconstruct h+ from modes
+        for peak-finding (epoch computation).
+    phase: float
+        Reference phase for reconstructing h+. Defaults to 0.0.
 
     Returns
     -------
@@ -232,31 +350,41 @@ def td_modes_to_fd_modes_gwpy(hlm_td, domain):
     chirplen = int(2 * f_nyquist / delta_f)
     frequency_array = domain()  # [0, df, ..., f_max]
 
-    # Resize all modes and find consistent epoch from (2,2) mode
+    # Resize modes to chirplen (waveform_conditioning.py:510)
     resized_modes = {}
-    epoch = None
     for (l, m), h in hlm_td.items():
         h_resized = cond.resize_gwpy_timeseries(h, len(h) - chirplen, chirplen)
         resized_modes[(l, m)] = h_resized
-        # Use (2,2) mode (or first mode) to determine epoch
-        if (l, m) == (2, 2) or epoch is None:
-            peak_idx = np.argmax(np.abs(np.asarray(h_resized)))
-            epoch = -peak_idx * delta_t
+
+    # Reconstruct h+ from resized modes to find the peak, matching
+    # the reference path where resize_gwpy_timeseries uses np.argmax(hp)
+    # on the real h+ polarization.
+    hp_reconstructed = np.zeros(chirplen)
+    for (l, m), h in resized_modes.items():
+        ylm = lal.SpinWeightedSphericalHarmonic(iota, np.pi / 2 - phase, -2, l, m)
+        hp_reconstructed += (ylm * np.asarray(h)).real
+    epoch = -np.argmax(hp_reconstructed) * delta_t
 
     # Precompute time shift (same for all modes)
     dt_shift = 1.0 / delta_f + epoch
     time_shift = np.exp(-1j * 2 * np.pi * dt_shift * frequency_array)
 
     for (l, m), h in resized_modes.items():
-        data = np.asarray(h, dtype=complex)
-        # Complex FFT -> take positive-frequency half
-        fft_full = np.fft.fft(data, n=chirplen)
-        fft_pos = fft_full[: chirplen // 2 + 1]
-        # Standard continuous FT normalization: H(f) = dt * DFT
-        hf = fft_pos * delta_t
-        # Time shift correction to place merger at t=0
-        hf *= time_shift
-        hlm_fd[(l, m)] = hf
+        # Split complex mode into real and imaginary TimeSeries for gwpy fft
+        h_re = TimeSeries(np.asarray(h).real, dt=delta_t)
+        h_im = TimeSeries(np.asarray(h).imag, dt=delta_t)
+
+        # FFT + normalize (waveform_conditioning.py:513-521)
+        hf_re = h_re.fft()
+        hf_re = hf_re / (2 * hf_re.df)
+
+        hf_im = h_im.fft()
+        hf_im = hf_im / (2 * hf_im.df)
+
+        # Combine and apply time shift
+        hf_combined = (hf_re.value[:len(frequency_array)]
+                       + 1j * hf_im.value[:len(frequency_array)])
+        hlm_fd[(l, m)] = hf_combined * time_shift
 
     return hlm_fd
 

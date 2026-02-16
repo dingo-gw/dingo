@@ -1033,7 +1033,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             f_min = self.domain.f_min
             # for SEOBNRv5EHM, the starting frequency must be the same as the reference frequency
             # note this is the orbit averaged reference frequency
-            if self.approximant_str == "SEOBNRv5EHM":
+            if self.approximant_str == "SEOBNRv5EHM" or self.approximant_str == "TEOBResumSDALI":
                 f_min = self.f_ref
         # parameters needed for TD waveforms
         delta_t = 0.5 / self.domain.f_max
@@ -1287,15 +1287,12 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: TD).
                 # TEOB modes from GenerateTDModes are unconditioned (gwsignal's
-                # GenerateTDModes bypasses the conditioning pipeline). Generate
-                # at lower f_start for tapering buffer, then apply conditioning.
+                # GenerateTDModes bypasses the conditioning pipeline). Apply the
+                # same fallback conditioning (sigmoid start taper) that gwsignal
+                # uses for TEOB in generate_conditioned_td_waveform_from_td_fallback.
                 parameters_gwsignal = self._convert_parameters(
                     {**parameters, "f_ref": self.f_ref}
                 )
-                f_start, t_extra, f_min, original_f_min, f_isco = (
-                    wfg_utils.get_conditioning_params_for_TEOB(parameters_gwsignal)
-                )
-                parameters_gwsignal["f22_start"] = f_start * u.Hz
 
                 generator = new_interface_get_waveform_generator(
                     self.approximant_str
@@ -1311,12 +1308,12 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 iota = parameters_gwsignal["inclination"].value
 
                 # GenerateTDModes returns dimensionless strain modes;
-                # rescale by -nu * M_total / distance * (G/c^2) to get
+                # rescale by nu * M_total / distance * (G/c^2) to get
                 # physical units consistent with GenerateFDWaveform.
                 m1 = parameters_gwsignal["mass1"]
                 m2 = parameters_gwsignal["mass2"]
                 nu = m1 * m2 / (m1 + m2) ** 2
-                distance_rescaling = -(
+                distance_rescaling = (
                     (
                         nu
                         * (m1 + m2)
@@ -1330,13 +1327,11 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 for lm in hlm_td:
                     hlm_td[lm] = hlm_td[lm] * distance_rescaling
 
-                wfg_utils.condition_td_modes_for_TEOB_in_place(
-                    hlm_td, t_extra, f_min, original_f_min, f_isco
-                )
+                wfg_utils.taper_td_gwpy_modes_in_place(hlm_td, iota)
 
                 # Step 2: Transform modes to target domain.
                 hlm_fd = wfg_utils.td_modes_to_fd_modes_gwpy(
-                    hlm_td, self.domain
+                    hlm_td, self.domain, iota
                 )
 
                 # Step 3: One-sided modes -> polarizations organized by m.
