@@ -104,7 +104,12 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
 
     ref_time = data_settings["ref_time"]
     # Build detector objects
-    ifo_list = InterferometerList(data_settings["detectors"])
+    if len(data_settings["detectors"]) == 3 and all(d.startswith('ET') for d in data_settings["detectors"]):
+        ifo_list = InterferometerList(['ET'])
+    elif all(d.startswith('ET') for d in data_settings["detectors"][:3]) and len(data_settings["detectors"]) > 3:
+        ifo_list = InterferometerList(['ET'] + data_settings["detectors"][3:])
+    else:
+        ifo_list = InterferometerList(data_settings["detectors"])
 
     # Build transforms.
     transforms = [
