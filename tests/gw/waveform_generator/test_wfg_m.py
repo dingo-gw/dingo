@@ -171,7 +171,13 @@ def test_generate_hplus_hcross_m(intrinsic_prior, wfg, num_evaluations, toleranc
         phase_shift = np.random.uniform(high=2 * np.pi)
 
         pol_m = wfg.generate_hplus_hcross_m(p)
-        pol = sum_contributions_m(pol_m, phase_shift=phase_shift)
+        pol = sum_contributions_m(
+            pol_m,
+            phase_shift=phase_shift,
+            deferred_timeshift_data=getattr(
+                wfg, "_deferred_timeshift_data", None
+            ),
+        )
         pol_ref = wfg.generate_hplus_hcross({**p, "phase": p["phase"] + phase_shift})
 
         mismatches.append(

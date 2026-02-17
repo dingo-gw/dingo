@@ -1301,7 +1301,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 hlm_fd, self._deferred_timeshift_data = (
                     wfg_utils.apply_time_shift_to_fd_modes(
                         hlm_fd_raw, resized_td_modes, iota,
-                        self.spin_conversion_phase, self.domain,
+                        parameters["phase"], self.domain,
                     )
                 )
 
@@ -1310,7 +1310,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 # use the non-precessing symmetry h_{l,-m}(t) = (-1)^l h*_{lm}(t)
                 # to directly compute h+ and hx from the one-sided modes.
                 pol_m = wfg_utils.get_polarizations_from_onesided_fd_modes_m(
-                    hlm_fd, iota, self.spin_conversion_phase
+                    hlm_fd, iota, parameters["phase"]
                 )
 
             elif generator.domain == "freq":
