@@ -8,6 +8,7 @@ from dingo.core.dataset import DingoDataset, recursive_hdf5_load
 from dingo.gw.SVD import SVDBasis, ApplySVD
 from dingo.gw.domains import build_domain
 from dingo.gw.transforms import WhitenFixedASD
+from dingo.gw.transforms.waveform_transforms import HeterodynePhase
 
 
 class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
@@ -196,6 +197,15 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             svd_basis = SVDBasis(dictionary=self.svd)
             decompression_transform_list.append(ApplySVD(svd_basis, inverse=True))
 
+        if "phase_heterodyning" in self.settings["compression"]:
+            decompression_transform_list.append(
+                HeterodynePhase(
+                    self.domain,
+                    inverse=True,
+                    **self.settings["compression"]["phase_heterodyning"],
+                )
+            )
+
         if "whitening" in self.settings["compression"]:
             decompression_transform_list.append(
                 WhitenFixedASD(
@@ -322,13 +332,12 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                 for pol, waveforms in self.polarizations.items()
             }
 
-        # Decompression transforms are assumed to apply only to the waveform,
-        # and do not involve parameters.
-        if self.decompression_transform is not None:
-            polarizations = self.decompression_transform(polarizations)
-
-        # Main transforms can depend also on parameters.
+        # Decompression transforms operate on sample dicts since some (e.g.,
+        # HeterodynePhase) need access to parameters.
         data = {"parameters": parameters, "waveform": polarizations}
+        if self.decompression_transform is not None:
+            data = self.decompression_transform(data)
+            polarizations = data["waveform"]
         if self.transform is not None:
             data = self.transform(data)
 
