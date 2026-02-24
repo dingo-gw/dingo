@@ -366,6 +366,7 @@ class GNPESampler(Sampler):
         model: BasePosteriorModel,
         init_sampler: Sampler,
         num_iterations: int = 1,
+        fixed_context_parameters: Optional[dict] = None,
     ):
         """
         Parameters
@@ -375,8 +376,16 @@ class GNPESampler(Sampler):
             Used for generating initial samples
         num_iterations : int
             Number of GNPE iterations to be performed by sampler.
+        fixed_context_parameters : dict, optional
+            Dictionary of context parameters to hold fixed (not iterated) during
+            GNPE sampling. Keys are parameter names (e.g., "chirp_mass_proxy"),
+            values are the fixed float values. These are inserted into the
+            extrinsic_parameters at each iteration without being updated by the
+            Gibbs loop. Useful for single-step GNPE where a proxy parameter
+            (e.g., chirp mass) is known ahead of time.
         """
         self.gnpe_parameters = []  # Should be set in subclass _initialize_transform()
+        self.fixed_context_parameters = fixed_context_parameters or {}
 
         super().__init__(model)
         self.init_sampler = init_sampler
@@ -415,6 +424,28 @@ class GNPESampler(Sampler):
     def _kernel_log_prob(self, samples):
         raise NotImplementedError("To be implemented in subclass.")
 
+    def _preprocess_data(self, context):
+        """
+        One-time data preprocessing before the GNPE Gibbs loop. Converts raw
+        context data (e.g., strain, ASDs) into the tensor format expected by the
+        network.
+
+        By default, delegates to init_sampler.transform_pre. Subclasses can
+        override to add additional preprocessing (e.g., heterodyning, decimation)
+        that should happen once rather than every iteration.
+
+        Parameters
+        ----------
+        context : dict
+            Raw context data.
+
+        Returns
+        -------
+        torch.Tensor
+            Preprocessed data tensor.
+        """
+        return self.init_sampler.transform_pre(context)
+
     def _run_sampler(
         self,
         num_samples: int,
@@ -423,7 +454,7 @@ class GNPESampler(Sampler):
         if context is None:
             raise ValueError("self.context must be set to run sampler.")
 
-        data_ = self.init_sampler.transform_pre(context)
+        data_ = self._preprocess_data(context)
 
         # TODO: Reimplement outlier removal in IterationTracker? Save setting somewhere.
         if self.remove_init_outliers == 0.0:
@@ -441,6 +472,14 @@ class GNPESampler(Sampler):
             thr = torch.quantile(init_samples["log_prob"], self.remove_init_outliers)
             inds = torch.where(init_samples["log_prob"] >= thr)[0][:num_samples]
             init_samples = {k: v[inds] for k, v in init_samples.items()}
+
+        # Insert fixed context parameters into initialization samples.
+        init_samples.update(
+            {
+                k: torch.ones(num_samples) * v
+                for k, v in self.fixed_context_parameters.items()
+            }
+        )
 
         # We could be starting with either the GNPE parameters *or* their proxies,
         # depending on the nature of the initialization network.
@@ -473,8 +512,17 @@ class GNPESampler(Sampler):
                 x["extrinsic_parameters"] = proxies.copy()
             else:
                 x["extrinsic_parameters"] = {
-                    k: x["extrinsic_parameters"][k] for k in self.gnpe_parameters
+                    k: x["extrinsic_parameters"][k]
+                    for k in self.gnpe_parameters
+                    if k + "_proxy" not in self.fixed_context_parameters
                 }
+            # Add fixed context parameters (constant across iterations).
+            x["extrinsic_parameters"].update(
+                {
+                    k: torch.ones(num_samples, dtype=torch.float32) * v
+                    for k, v in self.fixed_context_parameters.items()
+                }
+            )
 
             # TODO: Depending on whether start_with_proxies is True, this might end up
             #  comparing proxies vs gnpe_parameters for the first iteration.
@@ -510,10 +558,14 @@ class GNPESampler(Sampler):
             # Extract the proxy parameters from x["extrinsic_parameters"]. These have
             # not been standardized. They are persistent from before sampling took place,
             # since this is when they were placed here and their values should not have
-            # changed.
-            proxies = {
-                p: x["extrinsic_parameters"][p] for p in self.gnpe_proxy_parameters
-            }
+            # changed. Include both iterated proxies and fixed context parameters.
+            proxies = {}
+            for p in self.gnpe_proxy_parameters:
+                if p in x["extrinsic_parameters"]:
+                    proxies[p] = x["extrinsic_parameters"][p]
+            for k in self.fixed_context_parameters:
+                if k in x["extrinsic_parameters"]:
+                    proxies[k] = x["extrinsic_parameters"][k]
 
             print(
                 f"it {i}.\tmin pvalue: {self.iteration_tracker.pvalue_min:.3f}"
@@ -535,7 +587,9 @@ class GNPESampler(Sampler):
             # In this case it makes sense to save the log_prob and the proxy parameters.
 
             samples = x["parameters"]
-            samples["log_prob"] = x["log_prob"] + proxy_log_prob
+            samples["log_prob"] = x["log_prob"] + proxy_log_prob.to(
+                x["log_prob"].device
+            )
 
             # The log_prob returned by gnpe is not just the log_prob over parameters
             # theta, but instead the log_prob in the *joint* space q(theta,theta^|x),
@@ -567,7 +621,39 @@ class GNPESampler(Sampler):
 
         # Safety check for unconditional flows. Make sure the proxies haven't changed.
         if start_with_proxies and self.num_iterations == 1:
-            for k in proxies:
+            for k in init_proxies:
                 assert torch.equal(proxies[k], init_proxies[k])
 
+        return samples
+
+
+class FixedInitSampler:
+    """
+    Lightweight initialization sampler that provides fixed parameter values.
+
+    Used in place of a trained init network when proxy parameters are known
+    ahead of time (e.g., chirp_mass_proxy for single-step GNPE). Returns the
+    same fixed values for every sample.
+
+    Parameters
+    ----------
+    init_parameters : dict
+        Parameter names and their fixed values.
+    log_prob : float
+        Log probability to assign to each sample. Default is 0 (uniform).
+    """
+
+    def __init__(self, init_parameters: dict, log_prob: float = 0.0):
+        self.init_parameters = init_parameters
+        self._log_prob = log_prob
+        self.unconditional_model = False
+        self.metadata = {}
+        self.transform_pre = Compose([])
+
+    def _run_sampler(self, num_samples, *args, **kwargs):
+        samples = {
+            k: torch.ones(num_samples) * v
+            for k, v in self.init_parameters.items()
+        }
+        samples["log_prob"] = torch.ones(num_samples) * self._log_prob
         return samples

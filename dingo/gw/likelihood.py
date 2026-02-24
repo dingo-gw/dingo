@@ -640,7 +640,10 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         return logsumexp(likelihoods) - np.log(len(likelihoods))
 
     def d_inner_h_complex_multi(
-        self, theta: pd.DataFrame, num_processes: int = 1
+        self,
+        theta: pd.DataFrame,
+        num_processes: int = 1,
+        return_rho2opt: bool = False,
     ) -> np.ndarray:
         """
         Calculate the complex inner product (d | h(theta)) between the stored data d
@@ -652,26 +655,31 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             Parameters at which to evaluate h.
         num_processes : int
             Number of parallel processes to use.
+        return_rho2opt : bool
+            If True, also return rho2opt = (h|h) for each sample. Useful for
+            synthetic phase sampling where the full likelihood decomposition
+            log L = log_Zn + Re[(d|h)*exp(2i*phase)] - 0.5*(h|h) is needed.
 
         Returns
         -------
-        complex : Inner product
+        np.ndarray or tuple of np.ndarray
+            Complex inner products. If return_rho2opt is True, returns
+            (d_inner_h_complex, rho2opt).
         """
         with threadpool_limits(limits=1, user_api="blas"):
-            # Generator object for theta rows. For idx this yields row idx of
-            # theta dataframe, converted to dict, ready to be passed to
-            # self.log_likelihood.
             theta_generator = (d[1].to_dict() for d in theta.iterrows())
 
             if num_processes > 1:
                 with Pool(processes=num_processes) as pool:
-                    d_inner_h_complex = pool.map(
-                        self.d_inner_h_complex, theta_generator
-                    )
+                    results = pool.map(self._d_inner_h_complex, theta_generator)
             else:
-                d_inner_h_complex = list(map(self.d_inner_h_complex, theta_generator))
+                results = list(map(self._d_inner_h_complex, theta_generator))
 
-        return np.array(d_inner_h_complex)
+        d_inner_h = np.array([r[0] for r in results])
+        if return_rho2opt:
+            rho2opt = np.array([r[1] for r in results]).real
+            return d_inner_h, rho2opt
+        return d_inner_h
 
     def d_inner_h_complex(self, theta):
         """
@@ -685,20 +693,26 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
         Returns
         -------
-        complex : Inner product
+        complex : Inner product (d|h)
         """
         # TODO: Implement for time marginalization.
-        return self._d_inner_h_complex(theta)
+        return self._d_inner_h_complex(theta)[0]
 
     def _d_inner_h_complex(self, theta):
+        """Return (d|h) and (h|h) as a tuple. Computing both is essentially
+        free since the waveform mu is already generated."""
         mu = self.signal(theta)["waveform"]
         d = self.whitened_strains
-        return sum(
+        d_inner_h = sum(
             [
                 inner_product_complex(d_ifo, mu_ifo)
                 for d_ifo, mu_ifo in zip(d.values(), mu.values())
             ]
         )
+        rho2opt = sum(
+            [inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()]
+        )
+        return d_inner_h, rho2opt
 
 
 def inner_product(a, b, min_idx=0, delta_f=None, psd=None):
