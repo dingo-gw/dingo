@@ -3,6 +3,8 @@ import torch
 from bilby.core.prior import PriorDict
 from abc import ABC, abstractmethod
 
+from dingo.gw.transforms.waveform_transforms import HeterodynePhase
+
 
 class GNPEBase(ABC):
     """
@@ -226,4 +228,112 @@ class GNPECoalescenceTimes(GNPEBase):
 
         extrinsic_parameters.update(new_parameters)
         sample["extrinsic_parameters"] = extrinsic_parameters
+        return sample
+
+
+class GNPEChirp(GNPEBase):
+    """
+    Relative binning / heterodyning GNPE transform, which factors out the overall chirp
+    from the waveform. This is done based on the proxy parameters chirp_mass_proxy and
+    optionally mass_ratio_proxy. These are defined as blurred version of the parameters
+    chirp_mass and mass_ratio.
+
+    At leading order, the data are transformed by dividing by a fiducial waveform of the
+    form
+
+        exp( - 1j * (3/128) * (pi G chirp_mass_proxy f / c**3)**(-5/3) ) ;
+
+    see 2001.11412, eq. (7.2). This is the leading order chirp due to the emission of
+    quadrupole radiation.
+
+    At next to leading order, this transform also optionally implements 1PN corrections
+    involving the mass ratio. We do not include any amplitude in the fiducial waveform,
+    since at inference time this transform will be applied to noisy data. Multiplying
+    the frequency-domain noise by a complex number of unit norm is allowed because it
+    only changes the phase, not the overall amplitude, which would change the noise PSD.
+    """
+
+    def __init__(self, kernel, domain, order: int = 0, inference: bool = False):
+        """
+        Parameters
+        ----------
+        kernel : dict or str
+            Defines a Bilby prior. If a dict, keys should include chirp_mass,
+            and (possibly) mass_ratio.
+        domain : Domain
+            Only works for a FrequencyDomain at present.
+        order : int
+            Twice the post-Newtonian order for the expansion. Valid orders are 0 and 2.
+        inference : bool = False
+            Whether to use inference or training mode.
+        """
+        # We copy the kernel because the PriorDict constructor modifies the argument.
+        kernel = kernel.copy()
+
+        if order == 0:
+            if "chirp_mass" not in kernel:
+                raise KeyError("Kernel must include chirp_mass key.")
+            if "mass_ratio" in kernel:
+                print(
+                    "Warning: mass_ratio kernel provided, but will be ignored for "
+                    "order 0 GNPE."
+                )
+                kernel.pop("mass_ratio")
+        elif order == 2:
+            if "chirp_mass" not in kernel or "mass_ratio" not in kernel:
+                raise KeyError("Kernel must include chirp_mass and mass_ratio keys.")
+            raise NotImplementedError(
+                "Mass ratio conditioning for 2nd order not set up."
+            )
+        else:
+            raise ValueError(f"Order {order} invalid. Acceptable values are 0 and 2.")
+
+        operators = {"chirp_mass": "+", "mass_ratio": "+"}
+        super().__init__(kernel, operators)
+
+        self.inference = inference
+        self.phase_heterodyning_transform = HeterodynePhase(
+            domain, order, inverse=False
+        )
+
+    def __call__(self, input_sample):
+        sample = input_sample.copy()
+
+        extrinsic_parameters = sample["extrinsic_parameters"].copy()
+
+        # If proxies already exist, use them. Otherwise, sample them. Proxies may
+        # already exist if provided by an unconditional initialization network when
+        # attempting to recover the density from GNPE samples, or when using fixed
+        # initialization parameters.
+        if set(self.proxy_list).issubset(extrinsic_parameters.keys()):
+            proxies = {p: extrinsic_parameters[p] for p in self.proxy_list}
+        else:
+            # The relevant parameters could be in either the intrinsic or extrinsic
+            # parameters list. At inference time, we put all GNPE parameters into the
+            # extrinsic parameters list.
+            parameters = {**sample.get("parameters", {}), **extrinsic_parameters}
+            proxies = self.sample_proxies(parameters)
+            extrinsic_parameters.update(proxies)
+            delta_parameters = {
+                "delta_" + p[: -len("_proxy")]: parameters[p[: -len("_proxy")]]
+                - proxies[p]
+                for p in self.proxy_list
+            }
+            extrinsic_parameters.update(delta_parameters)
+            sample["extrinsic_parameters"] = extrinsic_parameters
+
+        # The only situation where we would expect to not have a waveform to transform
+        # would be when calculating parameter standardizations, since we just want to
+        # draw samples of the parameters at that point, and not prepare any data.
+        if "waveform" in sample:
+            sample["waveform"] = self.phase_heterodyning_transform(
+                {
+                    "waveform": sample["waveform"],
+                    "parameters": {
+                        "chirp_mass": proxies["chirp_mass_proxy"],
+                        "mass_ratio": proxies.get("mass_ratio_proxy"),
+                    },
+                }
+            )["waveform"]
+
         return sample
