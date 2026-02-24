@@ -18,6 +18,7 @@ from dingo.gw.domains import build_domain
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.SVD import ApplySVD, SVDBasis
 from dingo.gw.transforms import WhitenFixedASD
+from dingo.gw.transforms.waveform_transforms import HeterodynePhase
 from dingo.gw.waveform_generator import (
     NewInterfaceWaveformGenerator,
     WaveformGenerator,
@@ -180,6 +181,15 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
                     domain,
                     asd_file=settings["compression"]["whitening"],
                     inverse=False,
+                )
+            )
+
+        if "phase_heterodyning" in settings["compression"]:
+            compression_transforms.append(
+                HeterodynePhase(
+                    domain,
+                    inverse=False,
+                    **settings["compression"]["phase_heterodyning"],
                 )
             )
 
