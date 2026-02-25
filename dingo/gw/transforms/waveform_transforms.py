@@ -741,3 +741,58 @@ class HeterodynePhase(object):
             inverse=self.inverse,
         )
         return sample
+
+
+class ApplyChirpFrequencyMasking(object):
+    """Mask away frequencies that are not fully captured by domain.delta_f.
+
+    Computes the 0PN inspiral entry frequency for a given chirp mass proxy and zeros
+    all frequency bins below it. This avoids wasting network capacity on bins where the
+    signal has not yet entered the detector band for the given segment duration.
+    """
+
+    def __init__(
+        self,
+        domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
+        f_buffer: float = 0,
+    ):
+        """
+        Parameters
+        ----------
+        domain: Domain
+            Domain of the waveform data.
+        f_buffer: float
+            Buffer frequency, f_low is determined as f_0PN(duration) + f_buffer
+        """
+        self.frequencies = domain()[domain.min_idx:]
+        self.duration = 1 / getattr(domain, "base_domain", domain).delta_f
+        self.f_buffer = f_buffer
+
+    def __call__(self, input_sample: dict):
+        """
+        Parameters
+        ----------
+        input_sample : dict
+            sample["waveform"]: Dict with values being arrays containing waveforms,
+            or torch Tensor with the waveform.
+            sample["extrinsic_parameters"]["chirp_mass_proxy"]: chirp mass proxy value.
+
+        Returns
+        -------
+        dict of the same form as the input, but with transformed (masked) waveforms.
+        """
+        sample = input_sample.copy()
+
+        # Compute 0PN frequency of the chirp at time = -duration
+        chirp_mass = sample["extrinsic_parameters"]["chirp_mass_proxy"]
+        f_low = (
+            (1 / (8 * np.pi))
+            * (self.duration / 5) ** (-3 / 8)
+            * (chirp_mass * lal.MTSUN_SI) ** (-5 / 8)
+        )
+        f_low += self.f_buffer
+        lower = np.argmin(np.abs(self.frequencies - f_low))
+
+        # Zero-mask the data below f_low
+        sample["waveform"][..., :lower] = 0
+        return sample
