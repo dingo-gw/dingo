@@ -494,6 +494,12 @@ class Result(DingoDataset):
         rng = np.random.default_rng(random_state)
         weights = self.samples["weights"].to_numpy(dtype=float)
 
+        print(
+            f"Rejection sampling: {self.num_samples} samples, "
+            f"ESS = {self.effective_sample_size:.0f} "
+            f"(efficiency = {100 * self.sample_efficiency:.1f}%)"
+        )
+
         if clip_weights:
             num_clip = math.ceil(math.sqrt(len(weights)))
             weights = _clip_weights(weights, num_clip)
@@ -514,7 +520,9 @@ class Result(DingoDataset):
         # Build the output by repeating each row according to its copy count.
         indices = np.repeat(np.arange(len(weights)), n_copies)
         unweighted = self.samples.iloc[indices].reset_index(drop=True)
-        return unweighted.drop(columns=["weights"])
+        unweighted = unweighted.drop(columns=["weights"])
+        print(f"Produced {len(unweighted)} unweighted samples.")
+        return unweighted
 
     def parameter_subset(self, parameters):
         """
