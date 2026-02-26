@@ -69,12 +69,13 @@ def get_mask_from_population_size(number_events_per_batch, maximum_population_si
     Returns
     -------
     torch.Tensor
-        Mask of shape (batch size, maximum_population_size) with True for valid events.
+        Mask of shape (batch size, maximum_population_size) with True for padding
+        positions (to be ignored), following PyTorch's src_key_padding_mask convention.
     """
     
     mask = torch.arange(maximum_population_size, device=number_events_per_batch.device).expand(
         number_events_per_batch.size(0), -1
-    ) < number_events_per_batch.unsqueeze(1)
+    ) >= number_events_per_batch.unsqueeze(1)
 
     return mask
 
