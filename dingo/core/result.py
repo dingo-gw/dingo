@@ -398,6 +398,72 @@ class Result(DingoDataset):
         )
         return unweighted_samples.drop(["weights"], axis=1)
 
+    def rejection_sample(self, max_samples_per_draw: int = 1, random_state=None):
+        """
+        Generate unweighted posterior samples from weighted ones via rejection sampling.
+
+        Each original sample contributes at most ``max_samples_per_draw`` copies to
+        the output, so the result avoids the excessive duplication that
+        :meth:`sampling_importance_resampling` can produce for high-weight samples.
+
+        **Algorithm (unbiased, maximum efficiency)**
+
+        The weights are first scaled so that the largest weight equals
+        ``max_samples_per_draw``.  Each sample ``i`` then contributes
+
+        * ``floor(w_scaled[i])`` copies deterministically (integer part), and
+        * one additional copy with probability ``w_scaled[i] - floor(w_scaled[i])``
+          (fractional part, a single Bernoulli draw).
+
+        The expected number of copies of sample ``i`` is therefore exactly
+        ``w_scaled[i] ∝ w[i]``, which guarantees an unbiased representation of the
+        posterior.  Using the integer part deterministically (rather than rounding
+        stochastically) maximises the expected total number of output samples for a
+        given ``max_samples_per_draw``.
+
+        If the samples DataFrame has no ``weights`` column the samples are already
+        unweighted and are returned unchanged.
+
+        Parameters
+        ----------
+        max_samples_per_draw : int
+            Maximum number of copies any single input sample may contribute to the
+            output.  Default is 1 (standard rejection sampling, no duplicates).
+        random_state : int or None
+            Seed for the random number generator, for reproducibility.
+
+        Returns
+        -------
+        pd.DataFrame
+            Unweighted samples (the ``weights`` column is dropped).
+        """
+        if max_samples_per_draw < 1:
+            raise ValueError("max_samples_per_draw must be >= 1.")
+
+        if "weights" not in self.samples:
+            return self.samples.copy()
+
+        rng = np.random.default_rng(random_state)
+        weights = self.samples["weights"].to_numpy(dtype=float)
+
+        # Scale so the maximum weight maps to max_samples_per_draw.
+        # Expected copies of sample i = w_scaled[i] ∝ w[i]  →  unbiased.
+        w_scaled = weights * (max_samples_per_draw / weights.max())
+
+        # Deterministic part: floor(w_scaled[i]) copies always included.
+        n_det = np.floor(w_scaled).astype(int)
+
+        # Stochastic part: one extra copy with probability = fractional remainder.
+        p_frac = w_scaled - n_det
+        extra = (rng.random(len(weights)) < p_frac).astype(int)
+
+        n_copies = n_det + extra
+
+        # Build the output by repeating each row according to its copy count.
+        indices = np.repeat(np.arange(len(weights)), n_copies)
+        unweighted = self.samples.iloc[indices].reset_index(drop=True)
+        return unweighted.drop(columns=["weights"])
+
     def parameter_subset(self, parameters):
         """
         Return a new object of the same type, with only a subset of parameters. Drops
