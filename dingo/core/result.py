@@ -30,6 +30,31 @@ DATA_KEYS = [
 ]
 
 
+def _clip_weights(weights: np.ndarray, num_clip: int) -> np.ndarray:
+    """Replace the ``num_clip`` largest weights with their mean, then re-normalize.
+
+    Clipping to the mean (rather than the minimum) preserves the total weight of
+    the clipped group, which minimises the bias introduced by the operation.
+
+    Parameters
+    ----------
+    weights : np.ndarray
+        1-D array of non-negative importance weights (need not be normalized).
+    num_clip : int
+        Number of largest weights to clip.
+
+    Returns
+    -------
+    np.ndarray
+        Clipped weights normalized to mean 1.
+    """
+    weights = weights.copy()
+    clip_idx = np.argpartition(-weights, num_clip)[:num_clip]
+    weights[clip_idx] = weights[clip_idx].mean()
+    weights /= weights.mean()
+    return weights
+
+
 class Result(DingoDataset):
     """
     A dataset class to hold a collection of samples, implementing I/O, importance
@@ -398,7 +423,12 @@ class Result(DingoDataset):
         )
         return unweighted_samples.drop(["weights"], axis=1)
 
-    def rejection_sample(self, max_samples_per_draw: int = 1, random_state=None):
+    def rejection_sample(
+        self,
+        max_samples_per_draw: int = 1,
+        clip_weights: bool = False,
+        random_state=None,
+    ):
         """
         Generate unweighted posterior samples from weighted ones via rejection sampling.
 
@@ -421,6 +451,16 @@ class Result(DingoDataset):
         stochastically) maximises the expected total number of output samples for a
         given ``max_samples_per_draw``.
 
+        **Optional weight clipping**
+
+        When ``clip_weights=True``, the ``ceil(sqrt(N))`` largest weights are
+        replaced by their mean and the weights are re-normalized to mean 1 before
+        rejection sampling.  This number of clips is the theoretically optimal
+        choice that yields asymptotically unbiased results [1]_.  Using the mean
+        (rather than the minimum) of the clipped group preserves their total weight,
+        which minimises the bias introduced by clipping.  The net effect is reduced
+        weight variance and a larger expected number of output samples.
+
         If the samples DataFrame has no ``weights`` column the samples are already
         unweighted and are returned unchanged.
 
@@ -429,6 +469,9 @@ class Result(DingoDataset):
         max_samples_per_draw : int
             Maximum number of copies any single input sample may contribute to the
             output.  Default is 1 (standard rejection sampling, no duplicates).
+        clip_weights : bool
+            Whether to clip the ``ceil(sqrt(N))`` largest weights to their mean
+            before rejection sampling.  Default is False.
         random_state : int or None
             Seed for the random number generator, for reproducibility.
 
@@ -436,6 +479,11 @@ class Result(DingoDataset):
         -------
         pd.DataFrame
             Unweighted samples (the ``weights`` column is dropped).
+
+        References
+        ----------
+        .. [1] Elvira et al., "Rethinking the Effective Sample Size", IEEE
+               https://ieeexplore.ieee.org/document/8450722
         """
         if max_samples_per_draw < 1:
             raise ValueError("max_samples_per_draw must be >= 1.")
@@ -445,6 +493,10 @@ class Result(DingoDataset):
 
         rng = np.random.default_rng(random_state)
         weights = self.samples["weights"].to_numpy(dtype=float)
+
+        if clip_weights:
+            num_clip = math.ceil(math.sqrt(len(weights)))
+            weights = _clip_weights(weights, num_clip)
 
         # Scale so the maximum weight maps to max_samples_per_draw.
         # Expected copies of sample i = w_scaled[i] ∝ w[i]  →  unbiased.

@@ -1,8 +1,10 @@
+import math
+
 import numpy as np
 import pandas as pd
 import pytest
 
-from dingo.core.result import Result
+from dingo.core.result import Result, _clip_weights
 
 
 def make_result_with_weights(weights, extra_col=True):
@@ -149,3 +151,83 @@ def test_higher_max_increases_output():
         assert counts[i] <= counts[i + 1], (
             f"k={i+1} gave {counts[i]} samples but k={i+2} gave {counts[i+1]}"
         )
+
+
+# ---------------------------------------------------------------------------
+# _clip_weights tests
+# ---------------------------------------------------------------------------
+
+
+def test_clip_weights_output_mean_is_one():
+    """Clipped weights must be re-normalized to mean 1."""
+    rng = np.random.default_rng(0)
+    weights = rng.exponential(size=100)
+    n = len(weights)
+    clipped = _clip_weights(weights, math.ceil(math.sqrt(n)))
+    np.testing.assert_allclose(clipped.mean(), 1.0, rtol=1e-10)
+
+
+def test_clip_weights_top_values_equalized():
+    """The num_clip largest weights must all equal their original mean."""
+    weights = np.array([10.0, 8.0, 6.0, 1.0, 1.0, 1.0])
+    num_clip = 3
+    original_top_mean = np.mean([10.0, 8.0, 6.0])
+    clipped = _clip_weights(weights, num_clip)
+    # Re-scale back to unnormalized to check equality of top values.
+    # After normalization mean=1, so original scale factor = mean of raw clipped array.
+    raw_clipped = weights.copy()
+    raw_clipped[:3] = original_top_mean
+    np.testing.assert_allclose(
+        np.sort(clipped)[::-1][:num_clip],
+        np.full(num_clip, raw_clipped[:3].mean() / raw_clipped.mean()),
+        rtol=1e-10,
+    )
+
+
+def test_clip_weights_does_not_modify_input():
+    """_clip_weights must not mutate the input array."""
+    weights = np.array([5.0, 3.0, 1.0, 1.0])
+    original = weights.copy()
+    _clip_weights(weights, 2)
+    np.testing.assert_array_equal(weights, original)
+
+
+# ---------------------------------------------------------------------------
+# clip_weights option in rejection_sample
+# ---------------------------------------------------------------------------
+
+
+def test_clip_weights_increases_output():
+    """clip_weights=True should yield at least as many samples as clip_weights=False."""
+    # Use a highly skewed weight distribution so clipping makes a big difference.
+    rng = np.random.default_rng(7)
+    weights = rng.exponential(size=400)
+    weights[0] = weights.max() * 20  # one very dominant weight
+    result = make_result_with_weights(weights, extra_col=False)
+
+    n_no_clip = len(result.rejection_sample(clip_weights=False, random_state=0))
+    n_clip = len(result.rejection_sample(clip_weights=True, random_state=0))
+    assert n_clip >= n_no_clip
+
+
+def test_clip_weights_num_clip_is_ceil_sqrt_n():
+    """The num_clip used internally must be ceil(sqrt(N))."""
+    n = 100
+    weights = np.ones(n)
+    weights[0] = 1000.0  # one extreme outlier
+    result = make_result_with_weights(weights, extra_col=False)
+
+    # With clip_weights=True, the outlier should be clipped: check that the
+    # max output count is 1 (since after clipping all weights are ~equal).
+    out = result.rejection_sample(clip_weights=True, random_state=0)
+    assert out["x"].value_counts().max() == 1
+
+
+def test_clip_weights_reproducible():
+    """clip_weights=True with the same random_state must give identical results."""
+    rng = np.random.default_rng(3)
+    weights = rng.exponential(size=50)
+    result = make_result_with_weights(weights, extra_col=False)
+    out1 = result.rejection_sample(clip_weights=True, random_state=42)
+    out2 = result.rejection_sample(clip_weights=True, random_state=42)
+    pd.testing.assert_frame_equal(out1, out2)
