@@ -76,16 +76,29 @@ def plot_corner_multi(
     else:
         parameter_labels = common_parameters
 
+    # Compute a common parameter range across all sample sets. This ensures
+    # every corner call uses identical bins, so the 1D marginal densities are
+    # on a consistent scale regardless of sample size or weight distribution.
+    all_data = pd.concat([s[common_parameters] for s in samples], ignore_index=True)
+    common_range = [
+        (all_data[p].min(), all_data[p].max()) for p in common_parameters
+    ]
+
     fig = None
     handles = []
     for i, (s, w, l) in enumerate(zip_longest(samples, weights, labels)):
         color = mpl.colors.rgb2hex(plt.get_cmap(cmap)(i))
+        # Normalize weights to sum to 1 so that smoothed 1D marginals are
+        # comparable across sample sets with different sizes or total weights.
+        n = len(s)
+        w_normalized = np.ones(n) / n if w is None else np.asarray(w) / np.sum(w)
         fig = corner.corner(
             s[common_parameters].to_numpy(),
             labels=parameter_labels,
-            weights=w,
+            weights=w_normalized,
             color=color,
             no_fill_contours=True,
+            range=common_range,
             fig=fig,
             **corner_params,
         )
