@@ -46,22 +46,32 @@ def train(
     if resume:
 
         pm = PopulationModel(model_filename=checkpoint, device=local_settings["device"])    
-        train_settings = pm.metadata["train_settings"]
+        train_settings_original = pm.metadata["train_settings"]
 
         # overwrite settings if provided
         if train_settings is not None:
             print('Overwriting settings from file.')
             train_settings_potential_ow = train_settings.copy()
 
-            if train_settings_potential_ow["data"].get("embedding_emulator_path"):
-                print('Overwriting embedding emulator path from train settings.')
-                print('This is intended when resuming a model with a new embedding emulator.')
-                train_settings['data']['embedding_emulator_path'] = train_settings_potential_ow["data"]["embedding_emulator_path"]
+            overwrite_args = [
+                'embedding_emulator_path', 'pdet_model_path',
+                'kwargs_selection_cut', 'factor_event_generation',
+                'population_model_name', 'minimum_population_size',
+                'maximum_population_size', 'mf_snr_threshold'
+            ]
 
-            if train_settings_potential_ow["data"].get("pdet_model_path"):
-                print('Overwriting pdet model path from train settings.')
-                print('This is intended when resuming a model with a new pdet model.')
-                train_settings['data']['pdet_model_path'] = train_settings_potential_ow["data"]["pdet_model_path"]
+            for k in overwrite_args:
+                if train_settings_potential_ow["data"].get(k) is not None:
+                    print(f'Overwriting {k} from train settings.')
+                    train_settings_original['data'][k] = train_settings_potential_ow["data"][k]
+
+            for k in ['batch_size']:
+                if train_settings_potential_ow["training"].get(k) is not None:
+                    print(f'Overwriting {k} from train settings.')
+
+                    train_settings_original['training'][k] = train_settings_potential_ow["training"][k]
+
+        train_settings = train_settings_original.copy()
 
         embedding_emulator_path = train_settings["data"]["embedding_emulator_path"] 
         pdet_model_path = train_settings["data"]["pdet_model_path"]
