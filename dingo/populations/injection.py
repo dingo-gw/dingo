@@ -122,7 +122,8 @@ class Injection(object):
             # Sample event parameters from the population likelihood, and fall back to
             # the usual GW event prior for the remaining parameters.
             p = self.event_injection.prior.sample()
-            new_p = generate_event_func(size=1, train=train)
+            # since we do not apply the no-hope cut, we can set buffer_factor to 1
+            new_p = generate_event_func(size=1, train=train, buffer_factor=1)
             p.update(new_p)
             p = {k: float(v) for k, v in p.items()}
 
@@ -139,8 +140,8 @@ class Injection(object):
 
                 embeddings = self.get_embeddings_from_emulator(p, device=self.embedding_emulator.device)
                 
-                # embeddings are sampled from p(embedding | parameters, detected)
-                # but we still need to sample parameters from p(parameters | detected) ∝ p(parameters) * pdet(parameters)
+                # embeddings are emulated from p(embedding | parameters, detected)
+                # so true parameters need to account already for selection
                 events.append(embeddings)
 
             tries += 1
