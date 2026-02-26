@@ -38,12 +38,14 @@ def test_weights_column_dropped():
     assert "weights" not in out.columns
 
 
-def test_other_columns_preserved():
-    """Non-weight columns (e.g., log_prob) must appear in the output."""
+def test_columns_dropped_and_preserved():
+    """Parameter columns must appear in the output; weights, log_prob, and
+    delta_log_prob_target must be dropped as they are no longer meaningful."""
     result = make_result_with_weights([1.0, 2.0, 0.5])
     out = result.rejection_sample()
     assert "x" in out.columns
-    assert "log_prob" in out.columns
+    assert "weights" not in out.columns
+    assert "log_prob" not in out.columns
 
 
 def test_max_one_copy_per_sample_default():

@@ -520,7 +520,12 @@ class Result(DingoDataset):
         # Build the output by repeating each row according to its copy count.
         indices = np.repeat(np.arange(len(weights)), n_copies)
         unweighted = self.samples.iloc[indices].reset_index(drop=True)
-        unweighted = unweighted.drop(columns=["weights"])
+        # Drop columns that are only meaningful for weighted samples: weights and
+        # log_prob are tied to the proposal distribution, and delta_log_prob_target
+        # is an auxiliary correction term used during importance sampling.
+        unweighted = unweighted.drop(
+            columns=["weights", "log_prob", "delta_log_prob_target"], errors="ignore"
+        )
         print(f"Produced {len(unweighted)} unweighted samples.")
         return unweighted
 
