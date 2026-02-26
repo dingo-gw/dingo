@@ -1,32 +1,32 @@
-from typing import List, Optional
 import copy
+from typing import List, Optional
 
+import numpy as np
 import torch.multiprocessing
 import torchvision
-from threadpoolctl import threadpool_limits
 from bilby.gw.detector import InterferometerList
+from threadpoolctl import threadpool_limits
 
-from dingo.gw.SVD import SVDBasis
-
+from dingo.core.utils import *
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.gw.domains import build_domain
-from dingo.gw.transforms import (
-    ProjectOntoDetectors,
-    SampleNoiseASD,
-    WhitenAndScaleStrain,
-    AddWhiteNoiseComplex,
-    SelectStandardizeRepackageParameters,
-    RepackageStrainsAndASDS,
-    UnpackDict,
-    GNPECoalescenceTimes,
-    SampleExtrinsicParameters,
-    GetDetectorTimes,
-    CropMaskStrainRandom,
-)
+from dingo.gw.gwutils import *
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.prior import default_inference_parameters
-from dingo.gw.gwutils import *
-from dingo.core.utils import *
+from dingo.gw.SVD import SVDBasis
+from dingo.gw.transforms import (
+    AddWhiteNoiseComplex,
+    CropMaskStrainRandom,
+    GetDetectorTimes,
+    GNPECoalescenceTimes,
+    ProjectOntoDetectors,
+    RepackageStrainsAndASDS,
+    SampleExtrinsicParameters,
+    SampleNoiseASD,
+    SelectStandardizeRepackageParameters,
+    UnpackDict,
+    WhitenAndScaleStrain,
+)
 
 
 def build_dataset(
@@ -63,7 +63,13 @@ def build_dataset(
     return wfd
 
 
-def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=None):
+def set_train_transforms(
+    wfd: WaveformDataset,
+    data_settings: dict,
+    asd_dataset_path: str,
+    omit_transforms: Optional[List[type]] = None,
+    print_output: bool = True,
+) -> None:
     """
     Set the transform attribute of a waveform dataset based on a settings dictionary.
     The transform takes waveform polarizations, samples random extrinsic parameters,
@@ -80,11 +86,15 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         Path corresponding to the ASD dataset used to generate noise.
     omit_transforms :
         List of sub-transforms to omit from the full composition.
+    print_output : bool
+        Whether to write informational messages to stdout.  Set to False for
+        non-primary DDP ranks.
     """
 
-    print(f"Setting train transforms.")
-    if omit_transforms is not None:
-        print("Omitting \n\t" + "\n\t".join([t.__name__ for t in omit_transforms]))
+    if print_output:
+        print(f"Setting train transforms.")
+        if omit_transforms is not None:
+            print("Omitting \n\t" + "\n\t".join([t.__name__ for t in omit_transforms]))
 
     # By passing the wfd domain when instantiating the noise dataset, this ensures the
     # domains will match. In particular, it truncates the ASD dataset beyond the new
@@ -142,9 +152,11 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     # parameters.
     try:
         standardization_dict = data_settings["standardization"]
-        print("Using previously-calculated parameter standardizations.")
+        if print_output:
+            print("Using previously-calculated parameter standardizations.")
     except KeyError:
-        print("Calculating new parameter standardizations.")
+        if print_output:
+            print("Calculating new parameter standardizations.")
         standardization_dict = get_standardization_dict(
             extrinsic_prior_dict,
             wfd,
@@ -201,7 +213,7 @@ def build_svd_for_embedding_network(
     num_workers: int = 0,
     batch_size: int = 1000,
     out_dir: Optional[str] = None,
-) -> List:
+) -> List[np.ndarray]:
     """
     Construct SVD matrices V based on clean waveforms in each interferometer. These
     will be used to seed the weights of the initial projection part of the embedding
@@ -277,7 +289,7 @@ def build_svd_for_embedding_network(
     loader = DataLoader(
         wfd,
         batch_size=batch_size,
-        num_workers= 0,
+        num_workers=0,
         worker_init_fn=fix_random_seeds,
     )
     with threadpool_limits(limits=1, user_api="blas"):
