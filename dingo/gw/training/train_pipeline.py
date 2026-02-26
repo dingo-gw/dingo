@@ -457,7 +457,6 @@ def train_stages(
         if local_settings.get("test_only", False):
             return True, False
 
-        # Only rank-0 writes stage checkpoints.
         if pm.epoch == end_epochs[n] and print_primary:
             save_file = os.path.join(train_dir, f"model_stage_{n}.pt")
             print(f"Training stage complete. Saving to {save_file}.")
@@ -659,7 +658,6 @@ def run_training_ddp(
         else:
             pm, wfd = prepare_training_resume(ckpt_file, local_settings, train_dir)
 
-        # Replace BN with SyncBN and wrap with DDP.
         pm.network = replace_BatchNorm_with_SyncBatchNorm(pm.network)
         pm.network = DDP(pm.network, device_ids=[rank])
 
@@ -731,7 +729,6 @@ def run_multi_gpu_training(
             world_size=world_size,
         )
     else:
-        # Load the waveform dataset from the checkpoint settings.
         d = torch.load(ckpt_file, map_location="cpu")
         train_settings = d["metadata"]["train_settings"]
         data_settings = deepcopy(train_settings["data"])

@@ -40,12 +40,10 @@ def create_submission_file(
     if "memory_cpus" in condor_settings:
         lines.append(f'request_memory = {condor_settings["memory_cpus"]}\n')
 
-    # Build requirements string
     requirements = condor_settings.get("requirements", "")
     if "memory_gpus" in condor_settings:
         gpu_req = f"TARGET.CUDAGlobalMemoryMb > {condor_settings['memory_gpus']}"
         if requirements:
-            # Combine with existing requirements
             if ")" not in requirements:
                 requirements = f"({requirements})"
             requirements = f"{requirements} && ({gpu_req})"
@@ -142,7 +140,6 @@ def train_condor():
             with open(os.path.join(args.train_dir, "local_settings.yaml"), "r") as f:
                 local_settings = yaml.safe_load(f)
 
-        # Dispatch to single-GPU or multi-GPU training.
         num_gpus = get_num_gpus(local_settings)
         if local_settings.get("device") == "cuda" and num_gpus > 1:
             complete, _, pm_epoch = run_multi_gpu_training(

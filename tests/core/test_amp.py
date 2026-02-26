@@ -1,7 +1,6 @@
 """Tests for automatic mixed precision (AMP) and gradient accumulation."""
 
 import types
-from unittest.mock import MagicMock, patch
 
 import pytest
 import torch

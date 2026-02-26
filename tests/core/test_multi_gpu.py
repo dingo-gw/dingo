@@ -7,7 +7,6 @@ Most tests run without a real GPU by:
 """
 
 import os
-import types
 import warnings
 
 import numpy as np
@@ -17,12 +16,11 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import TensorDataset
 
 from dingo.core.utils.torchutils import (
     build_train_and_test_loaders,
     get_cuda_info,
-    print_number_of_model_parameters,
     replace_BatchNorm_with_SyncBatchNorm,
     set_seed_based_on_rank,
 )

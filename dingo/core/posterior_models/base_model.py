@@ -66,7 +66,7 @@ class BasePosteriorModel(ABC):
         self.version = f"dingo={get_version()}"  # dingo version
 
         self.device = None
-        self.rank = None  # GPU rank in DDP; None for single-GPU / CPU training
+        self.rank = None
         self.optimizer_kwargs = None
         self.network_kwargs = None
         self.scheduler_kwargs = None
@@ -79,7 +79,7 @@ class BasePosteriorModel(ABC):
             # separately, and before calling initialize_optimizer_and_scheduler().
 
         self.epoch = 0
-        self.iteration = 0  # cumulative number of optimizer steps
+        self.iteration = 0
         self.network = None
         self.optimizer = None
         self.scheduler = None
@@ -424,7 +424,6 @@ class BasePosteriorModel(ABC):
             Shared counter updated so that the WaveformDataset can query the
             current epoch from any worker process.
         """
-        # Only rank-0 (or single-GPU) writes to stdout.
         is_primary = self.rank is None or self.rank == 0
 
         if test_only:
@@ -488,10 +487,8 @@ class BasePosteriorModel(ABC):
                         )
                     )
 
-            # Scheduler step (epoch-level).
             utils.perform_scheduler_step(self.scheduler, test_loss)
 
-            # Only rank-0 writes history and checkpoints.
             if is_primary:
                 utils.write_history(train_dir, self.epoch, train_loss, test_loss, lr)
                 utils.save_model(self, train_dir, checkpoint_epochs=checkpoint_epochs)
@@ -577,7 +574,6 @@ def train_epoch(
     """
     pm.network.train()
 
-    # Effective batch size for progress reporting.
     if pm.rank is None:
         effective_bs = dataloader.batch_size
     else:

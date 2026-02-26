@@ -112,7 +112,6 @@ def print_number_of_model_parameters(network: nn.Module) -> None:
     Print the number of fixed and learnable parameters of *network*.
     Handles DDP-wrapped networks transparently.
     """
-    # Unwrap DDP if needed to inspect sub-networks.
     bare = network.module if isinstance(network, DDP) else network
 
     n_grad = get_number_of_model_parameters(network, (True,))

@@ -110,7 +110,6 @@ class LossInfo:
     ):
         # data for print statements
         self.epoch = epoch
-        # iteration = number of optimizer steps
         self.iteration = 0
         self.len_dataset = len_dataset
         self.batch_size_per_grad_update = batch_size_per_grad_update
@@ -183,7 +182,6 @@ class LossInfo:
     def get_iteration(self) -> int:
         """Return the number of optimizer steps performed this epoch."""
         if self.is_ddp:
-            # Verify that all ranks performed the same number of steps.
             dist.barrier()
             iteration = torch.tensor(
                 self.iteration, device=self.device, dtype=torch.int64
@@ -319,7 +317,6 @@ class RuntimeLimits:
                 exceeded = True
 
         if self.is_ddp:
-            # Broadcast the flag: if *any* rank exceeded a limit, all stop.
             flag = torch.tensor(exceeded, device=self.device, dtype=torch.bool)
             dist.barrier()
             dist.all_reduce(flag, op=dist.ReduceOp.MAX)
