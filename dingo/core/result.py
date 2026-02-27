@@ -1,5 +1,6 @@
 import copy
 import math
+import re
 import tempfile
 import time
 from collections import namedtuple
@@ -961,10 +962,53 @@ def freeze(d):
     return d
 
 
+def _sanitize_latex_label(label: str) -> str:
+    """Fix common LaTeX label issues for matplotlib mathtext rendering.
+
+    When calibration priors are serialized via repr() and reconstructed via
+    PriorDict, backslashes in latex_label strings can get double-escaped
+    (e.g., ``$\\phi^H1_0$`` becomes ``$\\\\phi^H1_0$``). Matplotlib's mathtext
+    parser cannot parse the double backslash as a LaTeX command.
+
+    Additionally, bilby's CalibrationPriorDict generates superscripts without
+    braces for multi-character detector names (``^H1`` instead of ``^{H1}``).
+
+    Parameters
+    ----------
+    label : str
+        A LaTeX label string, typically in math mode.
+
+    Returns
+    -------
+    str
+        The sanitized label.
+    """
+    if not isinstance(label, str):
+        return label
+    if not (label.startswith("$") and label.endswith("$")):
+        return label
+
+    inner = label[1:-1]
+
+    # Fix double backslashes before LaTeX command names
+    inner = re.sub(r"\\\\([a-zA-Z])", r"\\\1", inner)
+
+    # Fix missing braces around multi-character superscripts: ^H1 -> ^{H1}
+    inner = re.sub(r"\^([A-Za-z0-9]{2,})(?![}])", r"^{\1}", inner)
+
+    # Fix missing braces around multi-character subscripts: _10 -> _{10}
+    inner = re.sub(r"_([A-Za-z0-9]{2,})(?![}])", r"_{\1}", inner)
+
+    return "$" + inner + "$"
+
+
 def get_latex_labels(prior: PriorDict) -> dict:
     """
     Get the latex labels for prior parameters. If no latex label exists within the
     prior object, try to choose based on parameter key. Finally, return the parameter key.
+
+    Labels are sanitized to fix double-backslash escaping and missing braces that
+    can occur with calibration parameters after prior serialization roundtrips.
 
     Parameters
     ----------
@@ -979,5 +1023,5 @@ def get_latex_labels(prior: PriorDict) -> dict:
         l = v.latex_label
         if l is None:
             l = Prior._default_latex_labels.get(k, k)
-        labels[k] = l
+        labels[k] = _sanitize_latex_label(l)
     return labels
