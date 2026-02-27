@@ -563,7 +563,7 @@ class Result(CoreResult):
         log_prior = self.prior.ln_prob(theta, axis=0)
         constraints = self.prior.evaluate_constraints(theta)
         np.putmask(log_prior, constraints == 0, -np.inf)
-        within_prior = log_prior != -np.inf
+        within_prior = np.isfinite(log_prior)
 
         # Put a cap on the number of processes to avoid overhead:
         num_valid_samples = np.sum(within_prior)

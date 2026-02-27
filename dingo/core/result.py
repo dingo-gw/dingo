@@ -284,7 +284,7 @@ class Result(DingoDataset):
         # For these, we do not want to evaluate the likelihood, in particular because
         # it may not even be possible to generate signals outside the prior (e.g.,
         # for BH spins > 1).
-        valid_samples = (log_prior + delta_log_prob_target) != -np.inf
+        valid_samples = np.isfinite(log_prior + delta_log_prob_target)
         theta = theta.iloc[valid_samples]
 
         print(f"Calculating {len(theta)} likelihoods.")
