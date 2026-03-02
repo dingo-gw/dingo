@@ -220,6 +220,11 @@ batch size. Increasing `num_gpus` does not change the effective batch size or
 require adjusting any other hyperparameters.
 ```
 
+```note
+`freeze_rb_layer = True` is currently not allowed since additional changes 
+would be required to exclude the frozen RB layer from the DDP model wrapper.
+```
+
 ### Gradient accumulation
 
 For very large effective batch sizes that do not fit in GPU memory, use gradient
