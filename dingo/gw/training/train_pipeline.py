@@ -635,11 +635,9 @@ def run_training_ddp(
         local_settings["world_size"] = world_size
 
         if not resume:
-            is_gnpe = "gnpe_time_shifts" in train_settings["data"]
             autocomplete_model_kwargs(
                 model_kwargs=train_settings["model"],
                 data_sample=wfd[0],
-                gnpe=is_gnpe,
             )
             full_settings = {
                 "dataset_settings": wfd.settings,
