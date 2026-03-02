@@ -37,19 +37,11 @@ def _make_dataloader(n_samples=16, batch_size=8, input_dim=4):
 
 
 class TestAmpImports:
-<<<<<<< Updated upstream
-    def test_gradscaler_importable(self):
-        from torch.amp import GradScaler
-
-=======
-    """Verify that the new torch.amp API is importable and used."""
-
     def test_gradscaler_importable(self):
         try:
             from torch.amp import GradScaler
         except ImportError:
             from torch.cuda.amp import GradScaler
->>>>>>> Stashed changes
         assert GradScaler is not None
 
     def test_autocast_importable(self):
@@ -58,10 +50,6 @@ class TestAmpImports:
         assert autocast is not None
 
     def test_base_model_uses_torch_amp(self):
-<<<<<<< Updated upstream
-=======
-        """Verify that base_model prefers torch.amp and falls back gracefully."""
->>>>>>> Stashed changes
         import inspect
 
         from dingo.core.posterior_models import base_model
@@ -137,35 +125,4 @@ class TestTrainEpochWithAmp:
             gradient_updates_per_optimizer_step=2,
             automatic_mixed_precision=True,
         )
-<<<<<<< Updated upstream
         assert n_iter == 1
-=======
-        assert isinstance(avg_loss, float)
-        assert iteration == 1
-
-
-class TestGradScalerDeviceArg:
-    """Test that GradScaler is called with the 'cuda' device argument."""
-
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
-    def test_gradscaler_accepts_cuda_device(self):
-        try:
-            from torch.amp import GradScaler
-        except ImportError:
-            from torch.cuda.amp import GradScaler as _CudaGradScaler
-
-            class GradScaler:
-                def __new__(cls, device="cuda", **kwargs):
-                    return _CudaGradScaler(**kwargs)
-
-        scaler = GradScaler("cuda")
-        assert scaler is not None
-
-    def test_autocast_accepts_device_type(self):
-        from torch.amp import autocast
-
-        # autocast with "cpu" should work without CUDA
-        with autocast("cpu"):
-            x = torch.randn(2, 2)
-            _ = x @ x
->>>>>>> Stashed changes

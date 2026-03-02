@@ -12,19 +12,16 @@ from collections import OrderedDict
 from multiprocessing import Value
 from collections.abc import Sized
 from os.path import join
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple
 
 import h5py
 import numpy as np
 import torch
 import torch.distributed as dist
-<<<<<<< Updated upstream
 from threadpoolctl import threadpool_limits
-from torch.amp import GradScaler, autocast
+from torch.amp import autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import Dataset
-=======
-from torch.amp import autocast
 
 try:
     from torch.amp import GradScaler
@@ -37,7 +34,6 @@ except ImportError:
         def __new__(cls, device="cuda", **kwargs):
             return _CudaGradScaler(**kwargs)
 
->>>>>>> Stashed changes
 
 import dingo.core.utils as utils
 import dingo.core.utils.trainutils
