@@ -18,10 +18,26 @@ import h5py
 import numpy as np
 import torch
 import torch.distributed as dist
+<<<<<<< Updated upstream
 from threadpoolctl import threadpool_limits
 from torch.amp import GradScaler, autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import Dataset
+=======
+from torch.amp import autocast
+
+try:
+    from torch.amp import GradScaler
+except ImportError:
+    # PyTorch < 2.3: GradScaler is not yet in torch.amp; use torch.cuda.amp.
+    # Wrap it to accept the same device-string call signature as the new API.
+    from torch.cuda.amp import GradScaler as _CudaGradScaler
+
+    class GradScaler:  # type: ignore[no-redef]
+        def __new__(cls, device="cuda", **kwargs):
+            return _CudaGradScaler(**kwargs)
+
+>>>>>>> Stashed changes
 
 import dingo.core.utils as utils
 import dingo.core.utils.trainutils
