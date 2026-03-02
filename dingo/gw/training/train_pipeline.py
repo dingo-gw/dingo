@@ -616,6 +616,18 @@ def run_training_ddp(
                 device=local_settings["device"],
                 print_output=print_output,
             )
+
+            if rank == 0 and local_settings.get("wandb", False):
+                try:
+                    import wandb
+
+                    wandb.init(
+                        config=full_settings,
+                        dir=train_dir,
+                        **local_settings["wandb"],
+                    )
+                except ImportError:
+                    print("WandB is enabled but not installed.")
         else:
             pm, wfd = prepare_training_resume(ckpt_file, local_settings, train_dir)
 
