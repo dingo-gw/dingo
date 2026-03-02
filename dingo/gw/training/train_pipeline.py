@@ -98,7 +98,7 @@ def prepare_training_new(
     """
     Based on a settings dictionary, initialize a WaveformDataset and PosteriorModel.
 
-    For model type 'nsf+embedding' (the only acceptable type at this point) this also
+    For the standard DenseResNet embedding network type (the only acceptable type at this point) this also
     initializes the embedding network projection stage with SVD V matrices based on
     clean detector waveforms.
 
@@ -115,47 +115,10 @@ def prepare_training_new(
     -------
     (BasePosteriorModel, WaveformDataset)
     """
-    data_settings = deepcopy(train_settings["data"])
-    # Optionally copy files to local and update path
-    data_settings["waveform_dataset_path"] = copy_files_to_local(
-        file_path=data_settings["waveform_dataset_path"],
-        local_dir=local_settings.get("local_cache_path", None),
-        leave_keys_on_disk=local_settings.get("leave_waveforms_on_disk", True),
-        is_condor=True if "condor" in local_settings else False,
-    )
-    wfd = build_dataset(
-        data_settings=data_settings,
-        leave_waveforms_on_disk=local_settings.get("leave_waveforms_on_disk", True),
-    )  # No transforms yet
-    initial_weights = {}
-
-    # The embedding network is assumed to have an SVD projection layer. If other types
-    # of embedding networks are added in the future, update this code.
-
-    if train_settings["model"].get("embedding_kwargs", None):
-        # First, build the SVD for seeding the embedding network.
-        print("\nBuilding SVD for initialization of embedding network.")
-        initial_weights["V_rb_list"] = build_svd_for_embedding_network(
-            wfd,
-            train_settings["data"],
-            train_settings["training"]["stage_0"]["asd_dataset_path"],
-            num_workers=local_settings["num_workers"],
-            batch_size=train_settings["training"]["stage_0"]["batch_size"],
-            out_dir=train_dir,
-            **train_settings["model"]["embedding_kwargs"]["svd"],
-        )
-
-    # Now set the transforms for training. We need to do this here so that we can (a)
-    # get the data dimensions to configure the network, and (b) save the
-    # parameter standardization dict in the PosteriorModel. In principle, (a) could
-    # be done without generating data (by careful calculation) and (b) could also
-    # be done outside the transform setup. But for now, this is convenient. The
-    # transforms will be reset later by initialize_stage().
-
-    set_train_transforms(
-        wfd,
-        train_settings["data"],
-        train_settings["training"]["stage_0"]["asd_dataset_path"],
+    wfd, initial_weights = _prepare_wfd_and_initial_weights(
+        train_settings=train_settings,
+        train_dir=train_dir,
+        local_settings=local_settings,
     )
 
     # This modifies the model settings in-place.
@@ -724,7 +687,6 @@ def run_multi_gpu_training(
             train_settings=train_settings,
             train_dir=train_dir,
             local_settings=local_settings,
-            world_size=world_size,
         )
     else:
         d = torch.load(ckpt_file, map_location="cpu")
@@ -810,7 +772,6 @@ def _prepare_wfd_and_initial_weights(
     train_settings: dict,
     train_dir: str,
     local_settings: dict,
-    world_size: int = 1,
 ) -> Tuple[WaveformDataset, Optional[dict]]:
     """
     Build the WaveformDataset and, if applicable, compute SVD-based initial
@@ -840,32 +801,27 @@ def _prepare_wfd_and_initial_weights(
 
     if (
         model_kwargs.get("embedding_kwargs")
-        and model_kwargs.get("posterior_model_type") == "normalizing_flow"
-        and model_kwargs.get("embedding_type") == "DenseResidualNet"
-        and not model_kwargs["embedding_kwargs"].get("svd", {}).get("no_init", False)
+        and "svd" in model_kwargs["embedding_kwargs"]
+        and not model_kwargs["embedding_kwargs"]["svd"].get("no_init", False)
     ):
-        # Divide total batch size by number of GPUs for the SVD DataLoader.
         batch_size = train_settings["training"]["stage_0"]["batch_size"]
-        if world_size > 1:
-            if batch_size % world_size != 0:
-                raise ValueError(
-                    f"Total batch size {batch_size} is not divisible by "
-                    f"world_size={world_size}."
-                )
-            batch_size = batch_size // world_size
-
-        print("\nBuilding SVD for initialisation of ResNet embedding network.")
+        print("\nBuilding SVD for initialization of embedding network.")
         initial_weights["V_rb_list"] = build_svd_for_embedding_network(
             wfd=wfd,
             data_settings=train_settings["data"],
             asd_dataset_path=train_settings["training"]["stage_0"]["asd_dataset_path"],
-            num_workers=local_settings["num_workers"],
             batch_size=batch_size,
             out_dir=train_dir,
             **model_kwargs["embedding_kwargs"]["svd"],
         )
     else:
         initial_weights = None
+
+    set_train_transforms(
+        wfd,
+        train_settings["data"],
+        train_settings["training"]["stage_0"]["asd_dataset_path"],
+    )
 
     return wfd, initial_weights
 
