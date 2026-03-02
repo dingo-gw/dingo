@@ -5,7 +5,7 @@ from typing import Dict
 
 import numpy as np
 import yaml
-from pycondor import Job, Dagman
+from pycondor import Dagman, Job
 
 
 def create_args_string(args_dict: Dict):
@@ -122,8 +122,11 @@ def create_dag(data_dir, settings_file, time_segments, out_name):
         "data_dir": data_dir,
         "settings_file": settings_file,
         "time_segments_file": join(
-            data_dir, "tmp", settings["dataset_settings"]["observing_run"], "psd_time_segments.pkl"
-        )
+            data_dir,
+            "tmp",
+            settings["dataset_settings"]["observing_run"],
+            "psd_time_segments.pkl",
+        ),
     }
     if out_name is not None:
         args_dict["out_name"] = out_name

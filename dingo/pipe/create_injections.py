@@ -1,10 +1,9 @@
 import functools
 
-import numpy as np
-
 import bilby
-import bilby_pipe.input as input_mod
 import bilby_pipe.create_injections as ci
+import bilby_pipe.input as input_mod
+import numpy as np
 
 _bilby_pipe_create_injection_file = ci.create_injection_file
 

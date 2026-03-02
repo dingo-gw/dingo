@@ -3,25 +3,25 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
+from bilby.gw.utils import ln_i0
 from scipy.fft import fft
 from scipy.special import logsumexp
-from bilby.gw.utils import ln_i0
 from threadpoolctl import threadpool_limits
 
 from dingo.core.likelihood import Likelihood
+from dingo.gw.data.data_preparation import get_event_data_and_domain
+from dingo.gw.domains import (
+    Domain,
+    MultibandedFrequencyDomain,
+    UniformFrequencyDomain,
+    build_domain,
+)
 from dingo.gw.injection import GWSignal
 from dingo.gw.transforms import (
     DecimateWaveformsAndASDS,
     create_mask_based_on_frequency_update,
 )
 from dingo.gw.waveform_generator import WaveformGenerator
-from dingo.gw.domains import (
-    Domain,
-    UniformFrequencyDomain,
-    MultibandedFrequencyDomain,
-)
-from dingo.gw.domains import build_domain
-from dingo.gw.data.data_preparation import get_event_data_and_domain
 
 
 class StationaryGaussianGWLikelihood(GWSignal, Likelihood):

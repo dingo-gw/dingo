@@ -1,15 +1,16 @@
 import argparse
 import os
-from os.path import join
 import pickle
-import wandb
+from os.path import join
+
 import torch
+import wandb
 
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
-from dingo.gw.result import Result
+from dingo.gw import injection
 from dingo.gw.inference.gw_samplers import GWSampler
 from dingo.gw.noise.asd_dataset import ASDDataset
-from dingo.gw import injection
+from dingo.gw.result import Result
 
 BATCH_SIZE = 10000
 

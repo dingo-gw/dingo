@@ -11,18 +11,19 @@ spins to cartesian spins. This means that phi_12 and phi_jl have different defin
 which needs to be accounted for in postprocessing. The tests below all use
 wfg.spin_conversion_phase = 0.0.
 """
-import pytest
+
 import numpy as np
+import pytest
 from matplotlib import pyplot as plt
 
+from dingo.gw.domains import build_domain
+from dingo.gw.gwutils import get_mismatch
+from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.waveform_generator import (
+    NewInterfaceWaveformGenerator,
     WaveformGenerator,
     sum_contributions_m,
-    NewInterfaceWaveformGenerator,
 )
-from dingo.gw.gwutils import get_mismatch
-from dingo.gw.domains import build_domain
-from dingo.gw.prior import build_prior_with_defaults
 
 
 @pytest.fixture

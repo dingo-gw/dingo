@@ -1,7 +1,8 @@
-import pytest
 import numpy as np
 import pandas as pd
-from dingo.gw.conversion import cartesian_spins, pe_spins, change_spin_conversion_phase
+import pytest
+
+from dingo.gw.conversion import cartesian_spins, change_spin_conversion_phase, pe_spins
 
 
 @pytest.fixture

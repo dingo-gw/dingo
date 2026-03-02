@@ -6,31 +6,29 @@ import json
 import os
 
 import numpy as np
-
-import dingo.pipe.create_injections
-
 from bilby.core.prior import PriorDict
 from bilby_pipe.input import Input
 from bilby_pipe.main import MainInput as BilbyMainInput
 from bilby_pipe.utils import (
+    BilbyPipeError,
+    convert_prior_string_input,
     convert_string_to_dict,
     get_colored_string,
     get_command_line_arguments,
     logger,
     parse_args,
-    convert_prior_string_input,
-    BilbyPipeError,
 )
 
-from .dag_creator import generate_dag
-from .parser import create_parser
-from .utils import dict_to_string
+import dingo.pipe.create_injections
+from dingo.core.posterior_models.build_model import build_model_from_kwargs
 
 from ..gw.domains.build_domain import build_domain_from_model_metadata
-from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from ..gw.inference.gw_samplers import check_frequency_updates
 from ..gw.injection import Injection
 from ..gw.noise.asd_dataset import ASDDataset
+from .dag_creator import generate_dag
+from .parser import create_parser
+from .utils import dict_to_string
 
 logger.name = "dingo_pipe"
 

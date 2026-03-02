@@ -1,17 +1,16 @@
 import argparse
+import copy
+import glob
 import os.path
 import pickle
 from io import StringIO
-from os.path import join
-from os.path import isfile
-import glob
-import copy
+from os.path import isfile, join
 
 import numpy as np
 import requests
 import yaml
-
 from gwpy.table import EventTable
+
 from dingo.gw.noise.asd_dataset import ASDDataset
 
 """
@@ -232,7 +231,11 @@ def merge_datasets_cli():
             ]
         else:  # if no time_segments are specified, use the first 'num_parts' ASD datasets
             filenames = sorted(glob.glob(join(file_dir, f"asd_*.hdf5")))
-            num_parts = min(args.num_parts, len(filenames)) if args.num_parts > 0 else len(filenames)
+            num_parts = (
+                min(args.num_parts, len(filenames))
+                if args.num_parts > 0
+                else len(filenames)
+            )
             filenames = filenames[:num_parts]
 
         asd_dataset_list[det] = [ASDDataset(filename) for filename in filenames]

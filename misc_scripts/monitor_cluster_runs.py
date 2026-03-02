@@ -1,13 +1,18 @@
-from os.path import join, getmtime, commonpath, relpath, getsize
+import argparse
+import subprocess
 import time
 from datetime import timedelta
+from os.path import commonpath, getmtime, getsize, join, relpath
+
 from tabulate import tabulate
-import subprocess
-import argparse
 
 parser = argparse.ArgumentParser(description="Monitor cluster runs for dingo")
-parser.add_argument("--condor_name", type=str, default=None,
-                    help="If set, job IDs are fetched via condor_q args.condor_name.")
+parser.add_argument(
+    "--condor_name",
+    type=str,
+    default=None,
+    help="If set, job IDs are fetched via condor_q args.condor_name.",
+)
 args = parser.parse_args()
 
 
@@ -68,7 +73,7 @@ def get_info(train_dir, common_path="", condor_processes=None):
             lines = f.readlines()
         for idx, line in enumerate(reversed(lines)):
             if line.startswith("Start testing epoch"):
-                mins, secs = lines[-idx-2].strip("Done. This took min.\n").split(":")
+                mins, secs = lines[-idx - 2].strip("Done. This took min.\n").split(":")
                 time_epoch = timedelta(minutes=int(mins), seconds=int(secs))
                 break
     except:
@@ -92,13 +97,13 @@ common_path = commonpath(runs)
 print(f"Absolute path: {common_path}\n")
 
 if args.condor_name is not None:
-    condor_processes = subprocess.run(
-        ["condor_q", args.condor_name], stdout=subprocess.PIPE
-    ).stdout.decode("utf-8").split("\n")
+    condor_processes = (
+        subprocess.run(["condor_q", args.condor_name], stdout=subprocess.PIPE)
+        .stdout.decode("utf-8")
+        .split("\n")
+    )
     condor_processes = [pr.split() for pr in condor_processes]
-    condor_processes = [
-        pr for pr in condor_processes if is_condor_process(pr)
-    ]
+    condor_processes = [pr for pr in condor_processes if is_condor_process(pr)]
 else:
     condor_processes = None
 

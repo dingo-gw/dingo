@@ -1,16 +1,17 @@
-import pytest
 import os.path
+
 import numpy as np
+import pytest
 from bilby.gw.detector import InterferometerList
 
+from dingo.gw.domains import build_domain
+from dingo.gw.prior import default_extrinsic_dict
 from dingo.gw.transforms import (
     GetDetectorTimes,
     ProjectOntoDetectors,
     SampleExtrinsicParameters,
     time_delay_from_geocenter,
 )
-from dingo.gw.prior import default_extrinsic_dict
-from dingo.gw.domains import build_domain
 
 
 @pytest.fixture

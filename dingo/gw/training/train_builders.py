@@ -1,32 +1,31 @@
-from typing import List, Optional
 import copy
+from typing import List, Optional
 
 import torch.multiprocessing
 import torchvision
-from threadpoolctl import threadpool_limits
 from bilby.gw.detector import InterferometerList
+from threadpoolctl import threadpool_limits
 
-from dingo.gw.SVD import SVDBasis
-
+from dingo.core.utils import *
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.gw.domains import build_domain
-from dingo.gw.transforms import (
-    ProjectOntoDetectors,
-    SampleNoiseASD,
-    WhitenAndScaleStrain,
-    AddWhiteNoiseComplex,
-    SelectStandardizeRepackageParameters,
-    RepackageStrainsAndASDS,
-    UnpackDict,
-    GNPECoalescenceTimes,
-    SampleExtrinsicParameters,
-    GetDetectorTimes,
-    CropMaskStrainRandom,
-)
+from dingo.gw.gwutils import *
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.prior import default_inference_parameters
-from dingo.gw.gwutils import *
-from dingo.core.utils import *
+from dingo.gw.SVD import SVDBasis
+from dingo.gw.transforms import (
+    AddWhiteNoiseComplex,
+    CropMaskStrainRandom,
+    GetDetectorTimes,
+    GNPECoalescenceTimes,
+    ProjectOntoDetectors,
+    RepackageStrainsAndASDS,
+    SampleExtrinsicParameters,
+    SampleNoiseASD,
+    SelectStandardizeRepackageParameters,
+    UnpackDict,
+    WhitenAndScaleStrain,
+)
 
 
 def build_dataset(
@@ -277,7 +276,7 @@ def build_svd_for_embedding_network(
     loader = DataLoader(
         wfd,
         batch_size=batch_size,
-        num_workers= 0,
+        num_workers=0,
         worker_init_fn=fix_random_seeds,
     )
     with threadpool_limits(limits=1, user_api="blas"):

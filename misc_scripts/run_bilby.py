@@ -12,14 +12,15 @@ the LIGO Data Grid instead.
 [1] https://gwpy.github.io/docs/stable/timeseries/remote-access.html
 """
 import argparse
-import bilby
 from os.path import join
-from gwpy.timeseries import TimeSeries
-import pycbc.psd
-from scipy.signal.windows import tukey
-import numpy as np
-import yaml
 from shutil import copyfile
+
+import bilby
+import numpy as np
+import pycbc.psd
+import yaml
+from gwpy.timeseries import TimeSeries
+from scipy.signal.windows import tukey
 
 default_extrinsic_dict = {
     "dec": "bilby.core.prior.Cosine(minimum=-np.pi/2, maximum=np.pi/2)",
@@ -132,9 +133,11 @@ if __name__ == "__main__":
     # You can overwrite this using the syntax below in the file,
     # or choose a fixed value by just providing a float value as the prior.
     prior = {
-        k: {**default_intrinsic_dict, **default_extrinsic_dict}[k]
-        if v == "default"
-        else v
+        k: (
+            {**default_intrinsic_dict, **default_extrinsic_dict}[k]
+            if v == "default"
+            else v
+        )
         for k, v in settings["prior"].items()
     }
     prior = bilby.gw.prior.BBHPriorDict(prior)

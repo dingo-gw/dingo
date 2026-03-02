@@ -1,5 +1,6 @@
-from typing import List, Optional, Union
 import ast
+from typing import List, Optional, Union
+
 import h5py
 import numpy as np
 import pandas as pd

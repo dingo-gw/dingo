@@ -1,7 +1,8 @@
 from multiprocessing import Pool
-from threadpoolctl import threadpool_limits
+
 import numpy as np
 import pandas as pd
+from threadpoolctl import threadpool_limits
 
 
 def apply_func_with_multiprocessing(

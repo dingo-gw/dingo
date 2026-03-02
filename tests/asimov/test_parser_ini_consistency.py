@@ -10,12 +10,11 @@ in dingo.ini by explicitly adding them to the EXCLUDED_FROM_INI set if needed.
 """
 
 import re
+from importlib.resources import files
 
 import pytest
 
-from importlib.resources import files
 from dingo.pipe.parser import create_parser
-
 
 # Arguments that do NOT need to be in dingo.ini template.
 # When adding a new parser argument that shouldn't be in dingo.ini, add it here.

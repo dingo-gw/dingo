@@ -13,17 +13,18 @@
 import os
 import sys
 from importlib.metadata import version as _version
-sys.path.insert(0, os.path.abspath('../../dingo'))
+
+sys.path.insert(0, os.path.abspath("../../dingo"))
 
 
 # -- Project information -----------------------------------------------------
 
-project = 'dingo-gw'
-copyright = '2022-2023, Stephen Green'
-author = 'Stephen Green'
+project = "dingo-gw"
+copyright = "2022-2023, Stephen Green"
+author = "Stephen Green"
 
 # The full version, including alpha/beta/rc tags
-version = _version('dingo-gw')
+version = _version("dingo-gw")
 
 
 # -- General configuration ---------------------------------------------------
@@ -32,13 +33,13 @@ version = _version('dingo-gw')
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    'sphinx.ext.autodoc',
-    'sphinx.ext.mathjax',
-    'sphinx.ext.napoleon',
-    'myst_nb',
-    'sphinxcontrib.mermaid',
-    'sphinxcontrib.bibtex',
-    'sphinx_math_dollar',
+    "sphinx.ext.autodoc",
+    "sphinx.ext.mathjax",
+    "sphinx.ext.napoleon",
+    "myst_nb",
+    "sphinxcontrib.mermaid",
+    "sphinxcontrib.bibtex",
+    "sphinx_math_dollar",
 ]
 
 myst_enable_extensions = [
@@ -58,32 +59,32 @@ myst_enable_extensions = [
 ]
 
 mathjax_config = {
-    'tex2jax': {
-        'inlineMath': [ ["\\(","\\)"] ],
-        'displayMath': [["\\[","\\]"] ],
+    "tex2jax": {
+        "inlineMath": [["\\(", "\\)"]],
+        "displayMath": [["\\[", "\\]"]],
     },
 }
 
 mathjax3_config = {
-  "tex": {
-    "inlineMath": [['\\(', '\\)']],
-    "displayMath": [["\\[", "\\]"]],
-  }
+    "tex": {
+        "inlineMath": [["\\(", "\\)"]],
+        "displayMath": [["\\[", "\\]"]],
+    }
 }
 
 myst_heading_anchors = 2
 
-bibtex_bibfiles = ['refs.bib']
-bibtex_default_style = 'unsrt'
+bibtex_bibfiles = ["refs.bib"]
+bibtex_default_style = "unsrt"
 
 # Include the __init__ docstring with the autoclass
-autoclass_content = 'both'
+autoclass_content = "both"
 
 # Napolean Settings
 napoleon_google_docstring = False
 
 # Add any paths that contain templates here, relative to this directory.
-templates_path = ['_templates']
+templates_path = ["_templates"]
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -96,7 +97,7 @@ exclude_patterns = []
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = 'sphinx_rtd_theme'
+html_theme = "sphinx_rtd_theme"
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,

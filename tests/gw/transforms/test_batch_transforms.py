@@ -1,25 +1,24 @@
 import numpy as np
-import torchvision
 import pytest
-
-from bilby.gw.detector import InterferometerList
+import torchvision
 from bilby.core.prior import Uniform
+from bilby.gw.detector import InterferometerList
 
+from dingo.gw.domains import UniformFrequencyDomain
+from dingo.gw.noise.asd_dataset import ASDDataset
+from dingo.gw.prior import default_extrinsic_dict
 from dingo.gw.transforms import (
-    SampleExtrinsicParameters,
+    AddWhiteNoiseComplex,
     GetDetectorTimes,
     GNPECoalescenceTimes,
     ProjectOntoDetectors,
-    SampleNoiseASD,
-    WhitenAndScaleStrain,
-    AddWhiteNoiseComplex,
-    SelectStandardizeRepackageParameters,
     RepackageStrainsAndASDS,
+    SampleExtrinsicParameters,
+    SampleNoiseASD,
+    SelectStandardizeRepackageParameters,
     UnpackDict,
+    WhitenAndScaleStrain,
 )
-from dingo.gw.prior import default_extrinsic_dict
-from dingo.gw.domains import UniformFrequencyDomain
-from dingo.gw.noise.asd_dataset import ASDDataset
 
 
 @pytest.fixture
@@ -63,8 +62,7 @@ def input_sample_batched(batch_size, input_domain):
 
 @pytest.fixture
 def input_sample_unbatched(domain):
-    rand = np.random.rand(len(domain)) + 1j * np.random.rand(len(domain)
-    )
+    rand = np.random.rand(len(domain)) + 1j * np.random.rand(len(domain))
     d = {
         "parameters": {
             "chirp_mass": 12.3,
@@ -72,10 +70,7 @@ def input_sample_unbatched(domain):
             "luminosity_distance": 100.0,
             "geocent_time": 0.0,
         },
-        "waveform": {
-            "h_plus": rand,
-            "h_cross": rand
-        },
+        "waveform": {"h_plus": rand, "h_cross": rand},
     }
 
     return d
@@ -117,6 +112,8 @@ def transform_list(standardization_dict, asd_dataset, domain):
 
 # test that the transforms work for batched and for unbatched data
 batch_sizes = [1, 2]
+
+
 @pytest.mark.parametrize("batch_size", batch_sizes)
 def test_batched_training_transforms(transform_list, batch_size, domain):
     input_sample = input_sample_batched(batch_size, domain)
@@ -124,6 +121,7 @@ def test_batched_training_transforms(transform_list, batch_size, domain):
     output = transforms(input_sample)
     assert output[0].shape[0] == batch_size
     assert output[1].shape[0] == batch_size
+
 
 def test_unbatched_training_transforms(transform_list, input_sample_unbatched):
     transforms = torchvision.transforms.Compose(transform_list)

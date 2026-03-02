@@ -1,9 +1,8 @@
+import numpy as np
+import pytest
 import torch
 
-from dingo.gw.domains import UniformFrequencyDomain, TimeDomain
-from dingo.gw.domains import build_domain
-import pytest
-import numpy as np
+from dingo.gw.domains import TimeDomain, UniformFrequencyDomain, build_domain
 
 
 @pytest.fixture
@@ -163,4 +162,3 @@ def test_FD_caching(uniform_FD_params):
     # after clearing the cache, the __call__ method should return the correct
     # result
     assert len(domain()) < len(domain_ref())
-

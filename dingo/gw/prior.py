@@ -1,18 +1,16 @@
-from copy import deepcopy
-
-from bilby.gw.prior import BBHPriorDict
-from bilby.gw.conversion import (
-    fill_from_fixed_priors,
-    convert_to_lal_binary_black_hole_parameters,
-)
-from bilby.core.prior import Uniform, Sine, Cosine
-
-import numpy as np
-from typing import Dict, Set, Any
-import warnings
-
 # Silence INFO and WARNING messages from bilby
 import logging
+import warnings
+from copy import deepcopy
+from typing import Any, Dict, Set
+
+import numpy as np
+from bilby.core.prior import Cosine, Sine, Uniform
+from bilby.gw.conversion import (
+    convert_to_lal_binary_black_hole_parameters,
+    fill_from_fixed_priors,
+)
+from bilby.gw.prior import BBHPriorDict
 
 logging.getLogger("bilby").setLevel("ERROR")
 

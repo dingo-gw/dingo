@@ -3,16 +3,16 @@ import tempfile
 import uuid
 from pathlib import Path
 from typing import Generator
-import yaml
 
+import bilby
 import numpy as np
 import pytest
-import bilby
+import yaml
 
+from dingo.gw.dataset import generate_dataset
 from dingo.gw.dataset.generate_dataset import _generate_dataset_main
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.gw.domains import Domain
-from dingo.gw.dataset import generate_dataset
 
 SETTINGS_YAML_SMALL = """\
 # settings for domain of waveforms

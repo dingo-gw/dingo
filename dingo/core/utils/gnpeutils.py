@@ -1,5 +1,5 @@
-from scipy.stats import kstest, gaussian_kde
 import numpy as np
+from scipy.stats import gaussian_kde, kstest
 
 
 class IterationTracker:
@@ -40,9 +40,9 @@ class IterationTracker:
                 self.data = {k: v.copy()[None, :] for k, v in y.items()}
             else:
                 self.data = {
-                k: np.concatenate((v, y[k][None, :]), axis=0)
-                for k, v in self.data.items()
-            }
+                    k: np.concatenate((v, y[k][None, :]), axis=0)
+                    for k, v in self.data.items()
+                }
 
     @property
     def pvalue_min(self):

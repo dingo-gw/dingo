@@ -1,6 +1,6 @@
 import numpy as np
-import scipy
 import pandas as pd
+import scipy
 
 
 def generate_cornerplot(*sample_sets, filename=None):
@@ -56,7 +56,7 @@ def load_ref_samples(ref_samples_file, drop_geocent_time=True):
         "ra",
         "dec",
     ]
-    samples = np.load(ref_samples_file, allow_pickle=True)["samples"][:,:15]
+    samples = np.load(ref_samples_file, allow_pickle=True)["samples"][:, :15]
     samples = pd.DataFrame(data=samples, columns=columns)
     # add chirp mass and mass ratio.
     Mc = component_masses_to_chirp_mass(samples["mass_1"], samples["mass_2"])
