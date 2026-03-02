@@ -614,7 +614,6 @@ def run_training_ddp(
                 settings=full_settings,
                 initial_weights=initial_weights,
                 device=local_settings["device"],
-                print_output=print_output,
             )
 
             if rank == 0 and local_settings.get("wandb", False):
