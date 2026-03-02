@@ -609,6 +609,10 @@ def run_training_ddp(
             print_output = rank == 0
             if print_output:
                 print("\nInitializing new posterior model.")
+                print("Complete settings:")
+                print(
+                    yaml.dump(full_settings, default_flow_style=False, sort_keys=False)
+                )
 
             pm = build_model_from_kwargs(
                 settings=full_settings,
@@ -628,7 +632,20 @@ def run_training_ddp(
                 except ImportError:
                     print("WandB is enabled but not installed.")
         else:
-            pm, wfd = prepare_training_resume(ckpt_file, local_settings, train_dir)
+            pm = build_model_from_kwargs(
+                filename=ckpt_file, device=local_settings["device"]
+            )
+            if rank == 0 and local_settings.get("wandb", False):
+                try:
+                    import wandb
+
+                    wandb.init(
+                        resume="must",
+                        dir=train_dir,
+                        **local_settings["wandb"],
+                    )
+                except ImportError:
+                    print("WandB is enabled but not installed.")
 
         pm.network = replace_BatchNorm_with_SyncBatchNorm(pm.network)
         pm.network = DDP(pm.network, device_ids=[rank])
