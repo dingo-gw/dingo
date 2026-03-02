@@ -108,10 +108,10 @@ local:
     max_epochs_per_run: 500
   checkpoint_epochs: 50
   leave_waveforms_on_disk: True
-  # local_cache_path: tmp # uncomment to avoid slow data loading during training due to network traffic on cluster
+  # local_cache_path: /tmp # uncomment to avoid slow data loading during training due to network traffic on cluster
   # Settings for HTCondor job submission (remove if not running on a Condor cluster).
   condor:
-    num_cpus: 16
+    num_cpus: 32
     memory_cpus: 128000
     memory_gpus: 8000
     request_disk: 50GB
