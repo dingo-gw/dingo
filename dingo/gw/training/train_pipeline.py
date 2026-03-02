@@ -637,13 +637,14 @@ def run_training_ddp(
         global_epoch.value = pm.epoch
         wfd.epoch = global_epoch
 
-        complete, resume_flag = train_stages(
-            pm=pm,
-            wfd=wfd,
-            train_dir=train_dir,
-            local_settings=local_settings,
-            global_epoch=global_epoch,
-        )
+        with threadpool_limits(limits=1, user_api="blas"):
+            complete, resume_flag = train_stages(
+                pm=pm,
+                wfd=wfd,
+                train_dir=train_dir,
+                local_settings=local_settings,
+                global_epoch=global_epoch,
+            )
 
         if complete and local_settings.get("wandb", False) and rank == 0:
             try:
