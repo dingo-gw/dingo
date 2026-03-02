@@ -75,6 +75,23 @@ Optional user-facing features can be enabled via extras, for example:
 pip install -e ".[dev,wandb]"
 ```
 
+### Code style
+
+Dingo uses [black](https://black.readthedocs.io) for formatting and
+[isort](https://pycqa.github.io/isort/) for import ordering. After installing
+the development dependencies, activate the pre-commit hooks once:
+
+```sh
+pre-commit install
+```
+
+The hooks will then run automatically on every `git commit`. To check all
+files manually without committing:
+
+```sh
+pre-commit run --all-files
+```
+
 ### Documentation
 
 To build the documentation, first generate the API documentation using [autodoc](https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html):
