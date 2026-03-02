@@ -456,7 +456,7 @@ class BasePosteriorModel(ABC):
 
                 if is_primary:
                     print(f"\nStart training epoch {self.epoch} with lr {lr}")
-                time_start = torch.tensor(time.time(), device=self.device)
+                time_start = torch.tensor(time.time(), device=self.device, dtype=torch.float64)
 
                 train_loss, n_iter = train_epoch(
                     self,
@@ -480,7 +480,7 @@ class BasePosteriorModel(ABC):
                     )
                     print(f"Start testing epoch {self.epoch}")
 
-                time_start = torch.tensor(time.time(), device=self.device)
+                time_start = torch.tensor(time.time(), device=self.device, dtype=torch.float64)
                 test_loss = test_epoch(
                     self,
                     dataloader=test_loader,
