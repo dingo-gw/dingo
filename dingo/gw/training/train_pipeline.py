@@ -765,7 +765,6 @@ def run_multi_gpu_training(
             for proc in processes:
                 if proc.is_alive():
                     proc.terminate()
-            break
 
     results = []
     try:
