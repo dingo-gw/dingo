@@ -598,10 +598,6 @@ def run_training_ddp(
         local_settings["world_size"] = world_size
 
         if not resume:
-            autocomplete_model_kwargs(
-                model_kwargs=train_settings["model"],
-                data_sample=wfd[0],
-            )
             full_settings = {
                 "dataset_settings": wfd.settings,
                 "train_settings": train_settings,
@@ -716,6 +712,10 @@ def run_multi_gpu_training(
             train_settings=train_settings,
             train_dir=train_dir,
             local_settings=local_settings,
+        )
+        autocomplete_model_kwargs(
+            model_kwargs=train_settings["model"],
+            data_sample=wfd[0],
         )
     else:
         d = torch.load(ckpt_file, map_location="cpu")
