@@ -558,7 +558,7 @@ def _dataset_len(dataloader: torch.utils.data.DataLoader) -> int:
 
 
 def train_epoch(
-    pm: "BasePosteriorModel",
+    pm: BasePosteriorModel,
     dataloader: torch.utils.data.DataLoader,
     gradient_updates_per_optimizer_step: int = 1,
     automatic_mixed_precision: bool = False,
@@ -637,7 +637,7 @@ def train_epoch(
 
 
 def test_epoch(
-    pm: "BasePosteriorModel",
+    pm: BasePosteriorModel,
     dataloader: torch.utils.data.DataLoader,
     gradient_updates_per_optimizer_step: int = 1,
     world_size: int = 1,
