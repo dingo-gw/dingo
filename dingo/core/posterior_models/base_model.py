@@ -598,7 +598,6 @@ def train_epoch(
         mode="Train",
         print_freq=1,
         device=pm.device,
-        timing_freq=10,  # TODO: make configurable; reduces DDP timing barriers for testing
     )
 
     scaler = GradScaler("cuda") if automatic_mixed_precision else None
@@ -686,7 +685,6 @@ def test_epoch(
             mode="Test",
             print_freq=1,
             device=pm.device,
-            timing_freq=10,  # TODO: make configurable; reduces DDP timing barriers for testing
         )
 
         for batch_idx, data in enumerate(dataloader):

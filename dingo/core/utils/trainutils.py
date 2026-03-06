@@ -107,7 +107,6 @@ class LossInfo:
         mode: str = "Train",
         print_freq: int = 1,
         device: torch.device = torch.device("cuda"),
-        timing_freq: int = 1,
     ):
         # data for print statements
         self.epoch = epoch
@@ -116,7 +115,6 @@ class LossInfo:
         self.batch_size_per_grad_update = batch_size_per_grad_update
         self.mode = mode
         self.print_freq = print_freq
-        self.timing_freq = timing_freq
         self.device = device
         # track loss
         self.loss_tracker = AvgTracker()
@@ -148,12 +146,13 @@ class LossInfo:
         self.cached_n = []
 
     def update_timer(self, timer_mode: str = "Dataloader") -> None:
-        dt = time.time() - self.t
-        if self.is_ddp and (self.iteration % self.timing_freq == 0):
-            dt_tensor = torch.tensor(dt, device=self.device)
+        if self.is_ddp:
+            dt = torch.tensor(time.time() - self.t, device=self.device)
             dist.barrier()
-            dist.reduce(dt_tensor, dst=0, op=dist.ReduceOp.MAX)
-            dt = dt_tensor.item()
+            dist.reduce(dt, dst=0, op=dist.ReduceOp.MAX)
+            dt = dt.item()
+        else:
+            dt = time.time() - self.t
         self.times[timer_mode].update(dt)
         self.t = time.time()
 
