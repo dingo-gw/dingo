@@ -561,7 +561,11 @@ class Result(CoreResult):
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
         theta = self.samples[param_keys]
         log_prior = self.prior.ln_prob(theta, axis=0)
-        constraints = self.prior.evaluate_constraints(theta)
+        # Convert DataFrame to dict of arrays to avoid bilby 2.8+
+        # issue where evaluate_constraints does np.ones_like(DataFrame)
+        # then tries DataFrame *= Series, which fails with pandas >= 2.
+        theta_dict = {k: theta[k].values for k in theta.columns}
+        constraints = self.prior.evaluate_constraints(theta_dict)
         np.putmask(log_prior, constraints == 0, -np.inf)
         within_prior = log_prior != -np.inf
 

@@ -299,3 +299,45 @@ def taper_td_modes_for_SEOBRNRv5_extra_time(
 
     # return timeseries
     return h_return
+
+
+def recover_pol_m_from_multi_phase(hpc_fd_list, phi_c_values, m_max):
+    """
+    Recover m-decomposed FD polarizations via DFT over phi_c evaluations.
+
+    Since h_+(f; phi_c) = sum_m h_{+,m}(f) exp(-i*m*phi_c), we recover:
+        h_{+,m}(f) = (1/N) sum_k h_+(f; phi_c_k) exp(+i*m*phi_c_k)
+
+    Parameters
+    ----------
+    hpc_fd_list: list of dict
+        List of {"h_plus": array, "h_cross": array} for each phi_c evaluation.
+    phi_c_values: np.ndarray
+        Array of phi_c values at which the polarizations were evaluated.
+    m_max: int
+        Maximum |m| value (= l_max).
+
+    Returns
+    -------
+    pol_m: dict
+        {m: {"h_plus": hp_m, "h_cross": hc_m}} for m in [-m_max, ..., m_max].
+        Each pol_m[m] transforms as exp(-i*m*phase) under phase shifts.
+    """
+    N = len(phi_c_values)
+    m_indices = np.arange(-m_max, m_max + 1)
+
+    # Phase matrix: shape (2*m_max+1, N) — single batch of exp() calls
+    phase_matrix = np.exp(1j * np.outer(m_indices, phi_c_values)) / N
+
+    # Stack all polarizations into arrays: shape (N, n_freq)
+    hp_stack = np.stack([d["h_plus"] for d in hpc_fd_list])
+    hc_stack = np.stack([d["h_cross"] for d in hpc_fd_list])
+
+    # DFT via matrix multiply: (2*m_max+1, n_freq)
+    hp_m_all = phase_matrix @ hp_stack
+    hc_m_all = phase_matrix @ hc_stack
+
+    pol_m = {}
+    for i, m in enumerate(m_indices):
+        pol_m[m] = {"h_plus": hp_m_all[i], "h_cross": hc_m_all[i]}
+    return pol_m
