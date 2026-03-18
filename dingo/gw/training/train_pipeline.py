@@ -1,38 +1,39 @@
-from typing import Optional, Tuple
-import os
-
-import numpy as np
-import yaml
 import argparse
+import os
 import shutil
 import textwrap
 import time
 from copy import deepcopy
+from typing import Optional, Tuple
 
+import numpy as np
+import yaml
 from threadpoolctl import threadpool_limits
 
+from dingo.core.posterior_models import BasePosteriorModel
 from dingo.core.posterior_models.build_model import (
     autocomplete_model_kwargs,
     build_model_from_kwargs,
 )
+from dingo.core.utils import (
+    build_train_and_test_loaders,
+    get_number_of_model_parameters,
+    set_requires_grad_flag,
+)
+from dingo.core.utils.trainutils import EarlyStopping, RuntimeLimits
+from dingo.gw.dataset import WaveformDataset
 from dingo.gw.training.train_builders import (
     build_dataset,
-    set_train_transforms,
     build_svd_for_embedding_network,
+    set_train_transforms,
 )
-from dingo.core.utils.trainutils import RuntimeLimits
-from dingo.core.utils import (
-    set_requires_grad_flag,
-    get_number_of_model_parameters,
-    build_train_and_test_loaders,
-)
-from dingo.core.utils.trainutils import EarlyStopping
-from dingo.gw.dataset import WaveformDataset
-from dingo.core.posterior_models import BasePosteriorModel
 
 
 def copy_files_to_local(
-    file_path: str, local_dir: Optional[str], leave_keys_on_disk: bool, is_condor: bool = False,
+    file_path: str,
+    local_dir: Optional[str],
+    leave_keys_on_disk: bool,
+    is_condor: bool = False,
 ) -> str:
     """
     Copy files to local node if local_dir is provided to minimize network traffic during training.

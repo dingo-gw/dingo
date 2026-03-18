@@ -4,15 +4,16 @@ from the uci.py example from https://github.com/bayesiains/nsf.
 """
 
 import copy
+from typing import Callable, Tuple, Union
 
+import glasflow.nflows as nflows  # nflows not maintained, so use this maintained fork
+import glasflow.nflows.nn.nets as nflows_nets
 import torch
 import torch.nn as nn
-import glasflow.nflows as nflows  # nflows not maintained, so use this maintained fork
 from glasflow.nflows import distributions, flows, transforms
-import glasflow.nflows.nn.nets as nflows_nets
-from dingo.core.utils import torchutils
+
 from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
-from typing import Union, Callable, Tuple
+from dingo.core.utils import torchutils
 
 
 def create_linear_transform(param_dim: int):

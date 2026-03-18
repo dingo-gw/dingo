@@ -1,13 +1,12 @@
-from typing import Optional
-import numpy as np
 from copy import deepcopy
-from scipy.signal.windows import tukey
-from scipy.interpolate import interp1d
+from typing import Optional
 
+import numpy as np
 from bilby.gw.detector import PowerSpectralDensity
+from scipy.interpolate import interp1d
+from scipy.signal.windows import tukey
 
-from dingo.gw.prior import default_extrinsic_dict
-from dingo.gw.prior import BBHExtrinsicPriorDict
+from dingo.gw.prior import BBHExtrinsicPriorDict, default_extrinsic_dict
 
 
 def get_window(window_kwargs):

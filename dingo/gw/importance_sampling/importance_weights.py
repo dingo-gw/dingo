@@ -2,17 +2,18 @@
 Step 1: Train unconditional nde
 Step 2: Set up likelihood and prior
 """
+
+import argparse
+from os import makedirs, rename
+from os.path import dirname, exists, isfile, join
 from pathlib import Path
 
 import yaml
-from os import rename, makedirs
-from os.path import dirname, join, isfile, exists
-import argparse
 
 from dingo.core.posterior_models import NormalizingFlowPosteriorModel
-from dingo.gw.result import Result
-from dingo.gw.inference.gw_samplers import GWSampler
 from dingo.gw.importance_sampling.diagnostics import plot_diagnostics
+from dingo.gw.inference.gw_samplers import GWSampler
+from dingo.gw.result import Result
 
 
 def parse_args():

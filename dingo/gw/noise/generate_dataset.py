@@ -1,17 +1,15 @@
 import argparse
+import os
+import pickle
 import textwrap
 from os.path import join
 
-import os
 import yaml
-import pickle
 
-from dingo.gw.noise.asd_estimation import (
-    download_and_estimate_psds,
-)
 from dingo.gw.noise.asd_dataset import ASDDataset
+from dingo.gw.noise.asd_estimation import download_and_estimate_psds
 from dingo.gw.noise.generate_dataset_dag import create_dag
-from dingo.gw.noise.utils import merge_datasets, get_time_segments
+from dingo.gw.noise.utils import get_time_segments, merge_datasets
 
 
 def parse_args():

@@ -1,13 +1,13 @@
-import torch
-import numpy as np
 from abc import abstractmethod
 
-from torchdiffeq import odeint
+import numpy as np
+import torch
 from glasflow.nflows.utils.torchutils import repeat_rows, split_leading_dim
-
-from .base_model import BasePosteriorModel
+from torchdiffeq import odeint
 
 from dingo.core.nn.cfnets import create_cf
+
+from .base_model import BasePosteriorModel
 
 
 class ContinuousFlowPosteriorModel(BasePosteriorModel):

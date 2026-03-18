@@ -3,9 +3,7 @@ import pycbc.psd
 from gwpy.timeseries import TimeSeries
 
 from dingo.gw.domains import UniformFrequencyDomain
-from dingo.gw.gwutils import (
-    get_window,
-)
+from dingo.gw.gwutils import get_window
 
 
 def estimate_single_psd(
@@ -176,7 +174,7 @@ def download_event_data_in_FD(
                 time_segment,
                 window,
                 num_segments_psd,
-                det=det
+                det=det,
             )
             ** 0.5
         )

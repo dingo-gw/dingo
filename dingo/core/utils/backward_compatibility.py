@@ -1,9 +1,10 @@
 import logging
 from typing import Dict, List, Literal, Tuple
-from dingo.core.utils.misc import get_version
-import packaging.version as pv
 
+import packaging.version as pv
 import torch
+
+from dingo.core.utils.misc import get_version
 
 _logger = logging.getLogger(__name__)
 WINDOW_FACTOR_FIX_VERSION = pv.parse("0.9.0")

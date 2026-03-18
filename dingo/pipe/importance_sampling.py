@@ -1,24 +1,24 @@
 #!/usr/bin/env python
-""" Script to importance sample based on Dingo samples. Based on bilby_pipe data
-analysis script. """
+"""Script to importance sample based on Dingo samples. Based on bilby_pipe data
+analysis script."""
 import os
 import sys
 
 import yaml
 from bilby_pipe.input import Input
 from bilby_pipe.utils import (
-    parse_args,
-    logger,
-    convert_string_to_dict,
-    convert_prior_string_input,
     BilbyPipeError,
+    convert_prior_string_input,
+    convert_string_to_dict,
+    logger,
+    parse_args,
 )
 
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import MultibandedFrequencyDomain
+from dingo.gw.result import Result
 from dingo.pipe.default_settings import IMPORTANCE_SAMPLING_SETTINGS
 from dingo.pipe.parser import create_parser
-from dingo.gw.result import Result
 
 logger.name = "dingo_pipe"
 
@@ -126,14 +126,20 @@ class ImportanceSamplingInput(Input):
 
     @property
     def calibration_marginalization_kwargs(self):
-        if self.calibration_model == "CubicSpline" and self.calibration_mode == "marginalize":
+        if (
+            self.calibration_model == "CubicSpline"
+            and self.calibration_mode == "marginalize"
+        ):
             return {
                 "calibration_envelope": self.spline_calibration_envelope_dict,
                 "num_calibration_nodes": self.spline_calibration_nodes,
                 "num_calibration_curves": self.spline_calibration_curves,
                 "correction_type": self.calibration_correction_type,
             }
-        elif self.calibration_model is None or self.calibration_mode in ["sample", None]:
+        elif self.calibration_model is None or self.calibration_mode in [
+            "sample",
+            None,
+        ]:
             return None
         else:
             raise ValueError(

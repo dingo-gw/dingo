@@ -1,6 +1,6 @@
-import pytest
 import h5py
 import numpy as np
+import pytest
 
 from dingo.gw.domains import build_domain
 from dingo.gw.noise.asd_dataset import ASDDataset

@@ -7,8 +7,9 @@ import copy
 from bilby_pipe.job_creation.dag import Dag
 from bilby_pipe.utils import BilbyPipeError, logger
 
-from dingo.pipe.utils import _strip_unwanted_submission_keys
 from dingo.pipe.nodes.generation_node import GenerationNode
+from dingo.pipe.utils import _strip_unwanted_submission_keys
+
 from .nodes.importance_sampling_node import ImportanceSamplingNode
 from .nodes.merge_node import MergeNode
 from .nodes.pe_summary_node import PESummaryNode

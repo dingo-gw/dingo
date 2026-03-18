@@ -32,4 +32,5 @@ def get_batch_size_of_input_sample(input_sample: dict) -> Tuple[bool, int]:
         raise NotImplementedError(
             """The parameter key is used to determine the batch size of the
             input sample. If you want to determine the batch size a different
-            way, you can implement it here.""" )
+            way, you can implement it here."""
+        )

@@ -1,9 +1,9 @@
 import argparse
 import copy
 import textwrap
-import numpy as np
 from typing import Dict
 
+import numpy as np
 import yaml
 
 from dingo.gw.noise.asd_dataset import ASDDataset
@@ -59,7 +59,9 @@ def parse_args():
     return parser.parse_args()
 
 
-def generate_dataset(real_dataset, settings: Dict, num_samples, num_processes: int, verbose: bool):
+def generate_dataset(
+    real_dataset, settings: Dict, num_samples, num_processes: int, verbose: bool
+):
     """
     Generate a synthetic ASD dataset from an existing dataset of real ASDs.
 
@@ -98,7 +100,9 @@ def generate_dataset(real_dataset, settings: Dict, num_samples, num_processes: i
                 settings["parameterization_settings"],
             )
         parameters_dict = kde.sample(num_samples, rescaling_params)
-        synthetic_dataset_dict["settings"]["sampling_settings"] = settings["sampling_settings"]
+        synthetic_dataset_dict["settings"]["sampling_settings"] = settings[
+            "sampling_settings"
+        ]
 
     asds_dict = {}
     for det, params in parameters_dict.items():
@@ -115,9 +119,7 @@ def generate_dataset(real_dataset, settings: Dict, num_samples, num_processes: i
     synthetic_dataset_dict["asd_parameterizations"] = parameters_dict
     synthetic_dataset_dict["asds"] = asds_dict
 
-    return ASDDataset(
-        dictionary=synthetic_dataset_dict
-    )
+    return ASDDataset(dictionary=synthetic_dataset_dict)
 
 
 def main():

@@ -2,24 +2,25 @@ import numpy as np
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 
-from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.domains import (
-    UniformFrequencyDomain,
     MultibandedFrequencyDomain,
+    UniformFrequencyDomain,
+    build_domain,
+    build_domain_from_model_metadata,
 )
-from dingo.gw.domains import build_domain, build_domain_from_model_metadata
 from dingo.gw.gwutils import get_extrinsic_prior_dict
+from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.prior import build_prior_with_defaults, split_off_extrinsic_parameters
 from dingo.gw.transforms import (
+    ApplyCalibrationToWaveform,
     GetDetectorTimes,
     ProjectOntoDetectors,
-    WhitenAndScaleStrain,
     SampleCalibrationParameters,
-    ApplyCalibrationToWaveform,
+    WhitenAndScaleStrain,
 )
 from dingo.gw.waveform_generator.waveform_generator import (
-    WaveformGenerator,
     NewInterfaceWaveformGenerator,
+    WaveformGenerator,
 )
 
 

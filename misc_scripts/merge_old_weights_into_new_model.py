@@ -1,7 +1,8 @@
-import torch
-import h5py
-from os.path import join, dirname
 import argparse
+from os.path import dirname, join
+
+import h5py
+import torch
 
 DEFAULT_PARAMS = [
     "mass_1",
@@ -25,7 +26,7 @@ DEFAULT_PARAMS = [
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Load weights of PRL model and settings of dingo model, "
-                    "and save these to a new model.",
+        "and save these to a new model.",
     )
     parser.add_argument(
         "--model_PRL",
@@ -61,8 +62,8 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    model_PRL = torch.load(args.model_PRL, map_location=torch.device('cpu'))
-    model_dingo = torch.load(args.model_dingo, map_location=torch.device('cpu'))
+    model_PRL = torch.load(args.model_PRL, map_location=torch.device("cpu"))
+    model_dingo = torch.load(args.model_dingo, map_location=torch.device("cpu"))
     keys_PRL = model_dingo["model_state_dict"].keys()
     keys_dingo = model_PRL["model_state_dict"].keys()
     assert len(keys_PRL) == len(keys_dingo)

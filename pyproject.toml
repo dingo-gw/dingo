@@ -55,6 +55,14 @@ namespaces = false
 [tool.setuptools_scm]
 write_to = "dingo/_version.py"
 
+[tool.black]
+line-length = 88
+target-version = ["py310", "py311"]
+
+[tool.isort]
+profile = "black"
+known_first_party = ["dingo"]
+
 [tool.pytest.ini_options]
 markers = [
     "slow: marks tests as slow",
@@ -69,10 +77,12 @@ homepage = "https://github.com/dingo-gw/dingo"
 dev = [
     "black",
     "ipykernel",
+    "isort",
     "linkify-it-py",
     "myst-nb",
     "myst-parser",
     "pandas-stubs>=2.3.3.251219",
+    "pre-commit",
     "pytest",
     "scipy-stubs>=1.15.3.0",
     "sphinx",
@@ -88,6 +98,8 @@ pyseobnr = ["pyseobnr"]
 dev = [
     "black",
     "ipykernel",
+    "isort",
+    "pre-commit",
     "pytest",
 ]
 

@@ -1,14 +1,15 @@
 import argparse
-import textwrap
 import copy
-import pandas as pd
-import numpy as np
-import yaml
+import textwrap
 from typing import List
 
-from dingo.gw.SVD import SVDBasis
+import numpy as np
+import pandas as pd
+import yaml
+
 from dingo.gw.dataset.generate_dataset import train_svd_basis
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
+from dingo.gw.SVD import SVDBasis
 
 
 def merge_datasets(dataset_list: List[WaveformDataset]) -> WaveformDataset:

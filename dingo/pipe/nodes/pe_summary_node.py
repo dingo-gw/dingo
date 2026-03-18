@@ -1,4 +1,5 @@
-import os 
+import os
+
 from bilby_pipe.job_creation.nodes import PESummaryNode as BilbyPESummaryNode
 from bilby_pipe.utils import BilbyPipeError, logger
 
@@ -8,7 +9,7 @@ logger.name = "dingo_pipe"
 class PESummaryNode(BilbyPESummaryNode):
 
     run_node_on_osg = False
-    
+
     def __init__(self, inputs, merged_node_list, generation_node_list, dag):
         super(BilbyPESummaryNode, self).__init__(inputs)
         self.dag = dag
@@ -71,7 +72,12 @@ class PESummaryNode(BilbyPESummaryNode):
 
         # adding the psds which were output as part of the data generation
         self.arguments.append("--psd")
-        psd_str = " ".join([f"{det}:{os.path.join(self.inputs.outdir, 'data', f'{det}_psd.txt')}" for det in self.inputs.detectors])
+        psd_str = " ".join(
+            [
+                f"{det}:{os.path.join(self.inputs.outdir, 'data', f'{det}_psd.txt')}"
+                for det in self.inputs.detectors
+            ]
+        )
         self.arguments.append(psd_str)
 
         # if len(generation_node_list) == 1:

@@ -1,9 +1,9 @@
-from .base_model import BasePosteriorModel
-
 from dingo.core.nn.nsf import (
     create_nsf_with_rb_projection_embedding_net,
     create_nsf_wrapped,
 )
+
+from .base_model import BasePosteriorModel
 
 
 class NormalizingFlowPosteriorModel(BasePosteriorModel):

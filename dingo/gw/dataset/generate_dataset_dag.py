@@ -1,9 +1,10 @@
-import os
 import argparse
-from typing import Dict
-from pycondor import Job, Dagman
-import yaml
 import copy
+import os
+from typing import Dict
+
+import yaml
+from pycondor import Dagman, Job
 
 # Fixed file names
 svd_fn = "svd.hdf5"
@@ -54,10 +55,13 @@ def parse_args():
         "--request_memory", type=int, default=None, help="Memory per job."
     )
     parser.add_argument(
-        "--request_memory_high", type=int, default=None, help="Memory per job, "
-                                                              "used only for "
-                                                              "aggregating data and "
-                                                              "building SVD."
+        "--request_memory_high",
+        type=int,
+        default=None,
+        help="Memory per job, "
+        "used only for "
+        "aggregating data and "
+        "building SVD.",
     )
     parser.add_argument("--error", type=str, default="condor/error")
     parser.add_argument("--output", type=str, default="condor/output")

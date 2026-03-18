@@ -1,8 +1,8 @@
 from itertools import zip_longest
 
+import corner
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import corner
 import numpy as np
 import pandas as pd
 

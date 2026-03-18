@@ -1,8 +1,8 @@
 from dingo.gw.domains import (
     Domain,
-    UniformFrequencyDomain,
     MultibandedFrequencyDomain,
     TimeDomain,
+    UniformFrequencyDomain,
 )
 
 

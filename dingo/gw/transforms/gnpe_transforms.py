@@ -1,7 +1,8 @@
+from abc import ABC, abstractmethod
+
 import numpy as np
 import torch
 from bilby.core.prior import PriorDict
-from abc import ABC, abstractmethod
 
 
 class GNPEBase(ABC):
