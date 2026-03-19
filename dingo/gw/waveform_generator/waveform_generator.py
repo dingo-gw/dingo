@@ -739,27 +739,23 @@ class WaveformGenerator:
                 and self.use_dft_phase_decomposition
             ):
                 # DFT approach: evaluate FD polarizations at N phi_c values
-                # and recover m-components via DFT inversion.
+                # centred on the reference phase, and recover m-components via
+                # DFT inversion.
                 m_max = self._get_m_max()
                 n_phases = 2 * m_max + 1
-                phi_c_values = np.linspace(0, 2 * np.pi, n_phases, endpoint=False)
+                phase_ref = parameters["phase"]
+                phi_c_offsets = np.linspace(0, 2 * np.pi, n_phases, endpoint=False)
 
                 hpc_fd_list = []
-                for phi_c in phi_c_values:
-                    params_k = {**parameters, "phase": phi_c}
+                for phi_c in phi_c_offsets:
+                    params_k = {**parameters, "phase": phase_ref + phi_c}
                     hpc_fd_list.append(
                         self.generate_hplus_hcross(params_k, catch_waveform_errors=False)
                     )
 
                 pol_m = wfg_utils.recover_pol_m_from_multi_phase(
-                    hpc_fd_list, phi_c_values, m_max
+                    hpc_fd_list, phi_c_offsets, m_max
                 )
-                # Apply phase factor so that sum_m pol_m[m] * exp(-im*delta) = h(phase+delta)
-                phase = parameters["phase"]
-                for m, h in pol_m.items():
-                    pf = np.exp(-1j * m * phase)
-                    h["h_plus"] = h["h_plus"] * pf
-                    h["h_cross"] = h["h_cross"] * pf
 
                 if self._domain_transform is not None:
                     return self._domain_transform(pol_m)
@@ -1267,26 +1263,23 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             # Generate FD modes in for frequencies [-f_max, ..., 0, ..., f_max].
             if generator.domain == "freq" and self.use_dft_phase_decomposition:
                 # DFT approach: evaluate FD polarizations at N phi_c values
-                # and recover m-components via DFT inversion.
+                # centred on the reference phase, and recover m-components via
+                # DFT inversion.
                 m_max = self._get_m_max()
                 n_phases = 2 * m_max + 1
-                phi_c_values = np.linspace(0, 2 * np.pi, n_phases, endpoint=False)
+                phase_ref = parameters["phase"]
+                phi_c_offsets = np.linspace(0, 2 * np.pi, n_phases, endpoint=False)
 
                 hpc_fd_list = []
-                for phi_c in phi_c_values:
-                    params_k = {**parameters, "phase": phi_c}
+                for phi_c in phi_c_offsets:
+                    params_k = {**parameters, "phase": phase_ref + phi_c}
                     hpc_fd_list.append(
                         self.generate_hplus_hcross(params_k, catch_waveform_errors=False)
                     )
 
                 pol_m = wfg_utils.recover_pol_m_from_multi_phase(
-                    hpc_fd_list, phi_c_values, m_max
+                    hpc_fd_list, phi_c_offsets, m_max
                 )
-                phase = parameters["phase"]
-                for m, h in pol_m.items():
-                    pf = np.exp(-1j * m * phase)
-                    h["h_plus"] = h["h_plus"] * pf
-                    h["h_cross"] = h["h_cross"] * pf
 
                 if self._domain_transform is not None:
                     return self._domain_transform(pol_m)
@@ -1312,20 +1305,12 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                     # Evaluates polarizations from co-precessing modes 
                     # at N equally-spaced phi_c values
                     # then recovers m-components via DFT inversion.
-                    hpc_fd_list, m_max, phi_c_values = (
+                    hpc_fd_list, m_max, phi_c_offsets = (
                         self._generate_multi_phase_fd_pols(parameters)
                     )
                     pol_m = wfg_utils.recover_pol_m_from_multi_phase(
-                        hpc_fd_list, phi_c_values, m_max
+                        hpc_fd_list, phi_c_offsets, m_max
                     )
-                    # Apply phase factor: DFT recovers "bare" m-components
-                    # but pol_m[m] must include exp(-im * phase) so that
-                    # sum_m pol_m[m] * exp(-im * delta) = h(phase + delta)
-                    phase = parameters["phase"]
-                    for m, h in pol_m.items():
-                        pf = np.exp(-1j * m * phase)
-                        h["h_plus"] = h["h_plus"] * pf
-                        h["h_cross"] = h["h_cross"] * pf
                     # Truncate to domain length if needed
                     for h in pol_m.values():
                         for key in ("h_plus", "h_cross"):

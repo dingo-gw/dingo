@@ -2,7 +2,6 @@ from multiprocessing import Pool
 from threadpoolctl import threadpool_limits
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
 
 
 def apply_func_with_multiprocessing(
@@ -32,17 +31,10 @@ def apply_func_with_multiprocessing(
         # self.log_likelihood.
         theta_generator = (d[1].to_dict() for d in theta.iterrows())
 
-        n_samples = len(theta)
         if num_processes > 1:
             with Pool(processes=num_processes) as pool:
-                result = list(tqdm(
-                    pool.imap(func, theta_generator),
-                    total=n_samples,
-                ))
+                result = pool.map(func, theta_generator)
         else:
-            result = list(tqdm(
-                map(func, theta_generator),
-                total=n_samples,
-            ))
+            result = list(map(func, theta_generator))
 
     return np.array(result)
