@@ -1311,11 +1311,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                     pol_m = wfg_utils.recover_pol_m_from_multi_phase(
                         hpc_fd_list, phi_c_offsets, ell_max
                     )
-                    # Truncate to domain length if needed
-                    for h in pol_m.values():
-                        for key in ("h_plus", "h_cross"):
-                            if len(h[key]) > len(self.domain):
-                                h[key] = h[key][: len(self.domain)]
+
                     if self._domain_transform is not None:
                         return self._domain_transform(pol_m)
                     return pol_m
@@ -1538,7 +1534,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         Parameters
         ----------
         parameters: dict
-            Bilby-style parameter dictionary.
+            Parameter dictionary.
 
         Returns
         -------
