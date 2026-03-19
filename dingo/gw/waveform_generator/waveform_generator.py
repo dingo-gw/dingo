@@ -109,7 +109,7 @@ class WaveformGenerator:
         self.spin_conversion_phase = spin_conversion_phase
         self.mode_list = mode_list
         self.use_dft_phase_decomposition = kwargs.get(
-            "use_dft_phase_decomposition", True
+            "use_dft_phase_decomposition", False
         )
 
     @property
@@ -157,8 +157,8 @@ class WaveformGenerator:
             )
         self._spin_conversion_phase = value
 
-    def _get_m_max(self):
-        """Derive m_max from mode_list. Falls back to 4 if mode_list is None."""
+    def _get_ell_max(self):
+        """Derive ell_max from mode_list. Falls back to 4 if mode_list is None."""
         if self.mode_list is not None:
             return max(l for l, m in self.mode_list)
         return 4
@@ -741,8 +741,8 @@ class WaveformGenerator:
                 # DFT approach: evaluate FD polarizations at N phi_c values
                 # centred on the reference phase, and recover m-components via
                 # DFT inversion.
-                m_max = self._get_m_max()
-                n_phases = 2 * m_max + 1
+                ell_max = self._get_ell_max()
+                n_phases = 2 * ell_max + 1
                 phase_ref = parameters["phase"]
                 phi_c_offsets = np.linspace(0, 2 * np.pi, n_phases, endpoint=False)
 
@@ -754,7 +754,7 @@ class WaveformGenerator:
                     )
 
                 pol_m = wfg_utils.recover_pol_m_from_multi_phase(
-                    hpc_fd_list, phi_c_offsets, m_max
+                    hpc_fd_list, phi_c_offsets, ell_max
                 )
 
                 if self._domain_transform is not None:
@@ -1005,7 +1005,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         extra_wf_kwargs["lmax_nyquist"] = kwargs.get("lmax_nyquist", 2)
         self.extra_wf_kwargs = extra_wf_kwargs
         self.use_dft_phase_decomposition = kwargs.get(
-            "use_dft_phase_decomposition", True
+            "use_dft_phase_decomposition", False
         )
 
     @property
@@ -1265,8 +1265,8 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 # DFT approach: evaluate FD polarizations at N phi_c values
                 # centred on the reference phase, and recover m-components via
                 # DFT inversion.
-                m_max = self._get_m_max()
-                n_phases = 2 * m_max + 1
+                ell_max = self._get_ell_max()
+                n_phases = 2 * ell_max + 1
                 phase_ref = parameters["phase"]
                 phi_c_offsets = np.linspace(0, 2 * np.pi, n_phases, endpoint=False)
 
@@ -1278,7 +1278,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                     )
 
                 pol_m = wfg_utils.recover_pol_m_from_multi_phase(
-                    hpc_fd_list, phi_c_offsets, m_max
+                    hpc_fd_list, phi_c_offsets, ell_max
                 )
 
                 if self._domain_transform is not None:
@@ -1305,11 +1305,11 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                     # Evaluates polarizations from co-precessing modes 
                     # at N equally-spaced phi_c values
                     # then recovers m-components via DFT inversion.
-                    hpc_fd_list, m_max, phi_c_offsets = (
+                    hpc_fd_list, ell_max, phi_c_offsets = (
                         self._generate_multi_phase_fd_pols(parameters)
                     )
                     pol_m = wfg_utils.recover_pol_m_from_multi_phase(
-                        hpc_fd_list, phi_c_offsets, m_max
+                        hpc_fd_list, phi_c_offsets, ell_max
                     )
                     # Truncate to domain length if needed
                     for h in pol_m.values():
@@ -1532,7 +1532,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
 
         This is a thin wrapper that converts DINGO parameters to pyseobnr
         format and calls the waveform model's multi-phase method. Any waveform
-        model implementing the same interface (returning hpc_fd_list, m_max,
+        model implementing the same interface (returning hpc_fd_list, ell_max,
         phi_c_values) can be used here.
 
         Parameters
@@ -1545,7 +1545,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         hpc_fd_list: list of dict
             List of {"h_plus": array, "h_cross": array} on domain frequencies
             [0, f_max], one per phi_c value.
-        m_max: int
+        ell_max: int
             Maximum |m| value (= l_max from the model).
         phi_c_values: np.ndarray
             The phi_c grid used.
