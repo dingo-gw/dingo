@@ -101,7 +101,7 @@ local:
                 # dingo_train_condor, request_gpus is set automatically.
 #  wandb:
 #    project: dingo
-#    group: O4
+#    group: my_project
   runtime_limits:
     max_time_per_run: 36000
     max_epochs_per_run: 500
@@ -109,7 +109,6 @@ local:
   leave_waveforms_on_disk: True
   local_cache_path: tmp
 #   condor:
-#     bid: 100
 #     num_cpus: 16
 #     memory_cpus: 128000
 #     memory_gpus: 8000
@@ -137,7 +136,7 @@ asd_dataset_path
 : Points to an `ASDDataset` file. Each stage can have its own ASD dataset, which is useful for implementing a pre-training stage with fixed ASD and a fine-tuning stage with variable ASD.
 
 freeze_rb_layer
-: Whether to freeze the first layer of the embedding network in `nsf+embedding` models. This layer is seeded with reduced (SVD) basis vectors, so freezing this layer during pre-training simply projects data onto the basis coefficients. In the fine-tuning stage, when other weights are more stable, unfreezing this can be useful.
+: Whether to freeze the first layer of the embedding network. This layer is seeded with reduced (SVD) basis vectors, so freezing this layer during pre-training simply projects data onto the basis coefficients. In the fine-tuning stage, when other weights are more stable, unfreezing this can be useful.
 
 optimizer
 : Specify [optimizer](https://pytorch.org/docs/stable/optim.html) type and parameters such as initial learning rate.
@@ -146,10 +145,10 @@ scheduler
 : Use a [learning rate scheduler](https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate) to reduce the learning rate over time. This can improve overall optimization.
 
 batch_size
-: Total number of training samples per optimizer step. For a training dataset of size $N$, each epoch consists of $N / \text{batch\_size}$ optimizer steps. When using multiple GPUs, this is the *effective* batch size across all GPUs; each GPU processes $\text{batch\_size} / \text{num\_gpus}$ samples per step.
+: Total number of training samples per optimizer step. For a training dataset of size $N$, each epoch consists of $N /$ `batch_size` optimizer steps. When using multiple GPUs, this is the *effective* batch size across all GPUs; each GPU processes `batch_size` / `num_gpus` samples per step.
 
 gradient_updates_per_optimizer_step
-: (Optional, default 1) Number of forward–backward passes to accumulate before calling the optimizer. Setting this to $k$ simulates an effective batch size of $k \times \text{batch\_size}$ without increasing GPU memory usage. This is useful when the desired batch size does not fit in GPU memory.
+: (Optional, default 1) Number of forward–backward passes to accumulate before calling the optimizer. Setting this to $k$ simulates an effective batch size of $k \times$ `batch_size` without increasing GPU memory usage. This is useful when the desired batch size does not fit in GPU memory.
 
 automatic_mixed_precision
 : (Optional, default `False`) Enable automatic mixed precision (AMP) training. With AMP, the forward pass runs in FP16, while optimizer state and parameter updates remain in FP32. This can roughly halve GPU memory usage and increase throughput on GPUs with Tensor Core hardware (e.g. NVIDIA A100, V100). Requires PyTorch >= 2.0 and a CUDA device.
@@ -195,6 +194,10 @@ Dingo supports data-parallel training across multiple GPUs using
 [PyTorch DDP](https://pytorch.org/docs/stable/notes/ddp.html) (DistributedDataParallel).
 Each GPU processes a different shard of the mini-batch simultaneously, effectively
 scaling throughput with the number of GPUs.
+
+For a detailed practical guide — including how to scale `batch_size` and learning
+rate for actual speedup, how to interpret the training log, and troubleshooting
+tips — see [](training_multi_gpu.md).
 
 ### Enabling multi-GPU training
 
