@@ -237,8 +237,12 @@ class WaveformGenerator:
             if not catch_waveform_errors:
                 raise
             else:
-                EDOM = e.args[0] == "Internal function call failed: Input domain error"
-                if EDOM:
+                EDOM = (
+                    len(e.args) > 0
+                    and e.args[0] == "Internal function call failed: Input domain error"
+                )
+                recoverable = EDOM or isinstance(e, RuntimeError)
+                if recoverable:
                     warnings.warn(
                         f"Evaluating the waveform failed with error: {e}\n"
                         f"The parameters were {parameters_generator}\n"
@@ -1163,14 +1167,17 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         frequency_array = self.domain()
         h_plus = np.zeros_like(frequency_array, dtype=complex)
         h_cross = np.zeros_like(frequency_array, dtype=complex)
-        # Ensure that length of wf agrees with length of domain. Enforce by truncating frequencies beyond f_max
+        # Ensure that length of wf agrees with length of domain.
         if len(hp) > len(frequency_array):
             warnings.warn(
                 "GWSignal waveform longer than domain's `frequency_array`"
                 f"({len(hp)} vs {len(frequency_array)}). Truncating gwsignal array."
             )
-            h_plus = hp[: len(h_plus)].value
-            h_cross = hc[: len(h_cross)].value
+            h_plus[:] = hp[: len(h_plus)].value
+            h_cross[:] = hc[: len(h_cross)].value
+        elif len(hp) < len(frequency_array):
+            h_plus[: len(hp)] = hp.value
+            h_cross[: len(hc)] = hc.value
         else:
             h_plus = hp.value
             h_cross = hc.value
