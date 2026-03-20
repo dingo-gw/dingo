@@ -1,7 +1,9 @@
 import numpy as np
 from functools import lru_cache
 
-from .base import Domain
+from .base import Domain, DomainParameters
+
+_module_import_path = "dingo.gw.domains.time_domain"
 
 
 class TimeDomain(Domain):
@@ -53,6 +55,9 @@ class TimeDomain(Domain):
     def time_translate_data(self, data, dt) -> np.ndarray:
         raise NotImplementedError
 
+    def update(self, new_settings: dict):
+        raise NotImplementedError("TimeDomain does not support update")
+
     @property
     def f_max(self) -> float:
         """The maximum frequency [Hz] is typically set to half the sampling
@@ -84,3 +89,31 @@ class TimeDomain(Domain):
             "time_duration": self._time_duration,
             "sampling_rate": self._sampling_rate,
         }
+
+    def get_parameters(self) -> DomainParameters:
+        """
+        Returns the corresponding instance of DomainParameters.
+        """
+        return DomainParameters(
+            delta_t=self.delta_t,
+            f_max=self.f_max,
+            time_duration=self._time_duration,
+            sampling_rate=self._sampling_rate,
+            type=f"{_module_import_path}.TimeDomain",
+        )
+
+    @classmethod
+    def from_parameters(cls, domain_parameters: DomainParameters) -> "TimeDomain":
+        """
+        Construct an instance of TimeDomain from the parameters.
+        """
+        for attr in ("time_duration", "sampling_rate"):
+            if getattr(domain_parameters, attr) is None:
+                raise ValueError(
+                    "Can not construct TimeDomain from "
+                    f"{domain_parameters}: {attr} should not be None"
+                )
+        return cls(
+            domain_parameters.time_duration,
+            domain_parameters.sampling_rate,
+        )

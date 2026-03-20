@@ -3,8 +3,17 @@ import numpy as np
 import torch
 from copy import copy
 
+from .base import DomainParameters
 from .base_frequency_domain import BaseFrequencyDomain
 from .uniform_frequency_domain import UniformFrequencyDomain
+from .binning.adaptive_binning import (
+    BinningParameters,
+    Band,
+    compute_adaptive_binning,
+    decimate_uniform as _new_decimate_uniform,
+)
+
+_module_import_path = "dingo.gw.domains.multibanded_frequency_domain"
 
 
 class MultibandedFrequencyDomain(BaseFrequencyDomain):
@@ -32,6 +41,10 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
     * Quantities such as delta_f, noise_std, etc., are represented as arrays rather than
     scalars, as they vary depending on f.
 
+    The MultibandedFrequencyDomain can be constructed either with:
+    - base_domain: a UniformFrequencyDomain object (or dict) — legacy API
+    - base_delta_f: a float scalar — new API from dingo-waveform
+
     The MultibandedFrequencyDomain furthermore has an attribute base_domain,
     which holds an underlying UniformFrequencyDomain object. The decimate() method
     decimates data in the base_domain to the multi-banded domain.
@@ -41,7 +54,9 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
         self,
         nodes: Iterable[float],
         delta_f_initial: float,
-        base_domain: Union[UniformFrequencyDomain, dict],
+        base_domain: Union[UniformFrequencyDomain, dict, None] = None,
+        base_delta_f: Optional[float] = None,
+        window_factor: Optional[float] = None,
     ):
         """
         Parameters
@@ -53,83 +68,82 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
         delta_f_initial: float
             delta_f of band 0. The decimation factor doubles between adjacent bands,
             so delta_f is doubled as well.
-        base_domain: Union[UniformFrequencyDomain, dict]
+        base_domain: Union[UniformFrequencyDomain, dict, None]
             Original (uniform frequency) domain of data, which is the starting point
-            for the decimation. This determines the decimation details and the noise_std.
-            Either provided as dict for build_domain, or as domain_object.
+            for the decimation. Either provided as dict for build_domain, or as domain object.
+        base_delta_f: Optional[float]
+            Base uniform frequency spacing. Alternative to base_domain — if provided
+            without base_domain, a base_domain will not be created.
+        window_factor: Optional[float]
+            Window factor, preserved for narrowing and parameter serialization.
         """
         super().__init__()
-        if isinstance(base_domain, dict):
-            from .build_domain import build_domain
 
-            base_domain = build_domain(base_domain)
-
-        self.nodes = np.array(nodes, dtype=np.float32)
-        self.base_domain = base_domain
-        self._initialize_bands(delta_f_initial)
-        if not isinstance(self.base_domain, UniformFrequencyDomain):
+        # Resolve base_delta_f from either base_domain or base_delta_f parameter
+        if base_domain is not None and base_delta_f is not None:
             raise ValueError(
-                f"Expected domain type UniformFrequencyDomain, got {type(base_domain)}."
+                "Provide either base_domain or base_delta_f, not both."
             )
+        if base_domain is None and base_delta_f is None:
+            raise ValueError(
+                "Must provide either base_domain or base_delta_f."
+            )
+
+        if base_domain is not None:
+            if isinstance(base_domain, dict):
+                from .build_domain import build_domain
+                base_domain = build_domain(base_domain)
+            if not isinstance(base_domain, UniformFrequencyDomain):
+                raise ValueError(
+                    f"Expected domain type UniformFrequencyDomain, got {type(base_domain)}."
+                )
+            self.base_domain = base_domain
+            self._base_delta_f = float(base_domain.delta_f)
+        else:
+            self._base_delta_f = float(base_delta_f)
+            self.base_domain = None
+
+        self.window_factor = window_factor
+        self.nodes = np.array(nodes, dtype=np.float32)
+
+        # Build binning parameters using the new adaptive binning system
+        self._binning: BinningParameters = compute_adaptive_binning(
+            nodes=list(self.nodes),
+            delta_f_initial=float(delta_f_initial),
+            base_delta_f=self._base_delta_f,
+        )
+        self.num_bands = int(self._binning.num_bands)
+
+        # Legacy arrays (kept for backward compatibility with existing code that
+        # accesses these directly)
+        self._nodes_indices = self._binning.nodes_indices
+        self._delta_f_bands = self._binning.delta_f_bands
+        self._decimation_factors_bands = self._binning.decimation_factors_bands
+        self._num_bins_bands = self._binning.num_bins_bands
+        self._band_assignment = self._binning.band_assignment
+        self._delta_f = self._binning.delta_f
+        self._f_base_lower = self._binning.f_base_lower
+        self._f_base_upper = self._binning.f_base_upper
+
+        # Set sample frequencies as mean of decimation range.
+        self._sample_frequencies = (
+            (self._f_base_upper + self._f_base_lower) / 2
+        ).astype(np.float32)
+        self._sample_frequencies_torch = None
+        self._sample_frequencies_torch_cuda = None
+
+        # Validate endpoints against base_domain if it exists
+        if self.base_domain is not None:
+            if self.f_min not in self.base_domain() or self.f_max not in self.base_domain():
+                raise ValueError(
+                    f"Endpoints ({self.f_min}, {self.f_max}) not in base "
+                    f"domain, {self.base_domain.domain_dict}"
+                )
+
         # truncation indices for domain update
         self._range_update_idx_lower = None
         self._range_update_idx_upper = None
         self._range_update_initial_length = None
-
-    def _initialize_bands(self, delta_f_initial: float):
-        if len(self.nodes.shape) != 1:
-            raise ValueError(
-                f"Expected format [num_bands + 1] for nodes, "
-                f"got {self.nodes.shape}."
-            )
-        self.num_bands = len(self.nodes) - 1
-        self._nodes_indices = (self.nodes / self.base_domain.delta_f).astype(int)
-
-        self._delta_f_bands = (
-            delta_f_initial * (2 ** np.arange(self.num_bands))
-        ).astype(np.float32)
-        self._decimation_factors_bands = (
-            self._delta_f_bands / self.base_domain.delta_f
-        ).astype(int)
-        self._num_bins_bands = (
-            (self._nodes_indices[1:] - self._nodes_indices[:-1])
-            / self._decimation_factors_bands
-        ).astype(int)
-
-        self._band_assignment = np.concatenate(
-            [
-                np.ones(num_bins_band, dtype=int) * idx
-                for idx, num_bins_band in enumerate(self._num_bins_bands)
-            ]
-        )
-        self._delta_f = self._delta_f_bands[self._band_assignment]
-
-        # For each bin, [self._f_base_lower, self._f_base_upper] describes the
-        # frequency range in the base domain which is used for truncation.
-        self._f_base_lower = np.concatenate(
-            (self.nodes[:1], self.nodes[0] + np.cumsum(self._delta_f[:-1]))
-        )
-        self._f_base_upper = (
-            self.nodes[0] + np.cumsum(self._delta_f) - self.base_domain.delta_f
-        )
-
-        # Set sample frequencies as mean of decimation range.
-        self._sample_frequencies = (self._f_base_upper + self._f_base_lower) / 2
-        self._sample_frequencies_torch = None
-        self._sample_frequencies_torch_cuda = None
-        # sample_frequencies should always be the decimation of the base domain
-        # frequencies.
-
-        if self.f_min not in self.base_domain() or self.f_max not in self.base_domain():
-            raise ValueError(
-                f"Endpoints ({self.f_min}, {self.f_max}) not in base "
-                f"domain, {self.base_domain.domain_dict}"
-            )
-
-        # Note that f_max from the base domain can differ from that of the multi-banded
-        # domain. This occurs as a boundary effect, since a fixed number of bins in the
-        # base domain are averaged to obtain a bin in the multi-banded domain. When
-        # decimating, any extra bins in the base domain are dropped.
 
     def decimate(self, data: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
         """
@@ -146,41 +160,85 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
         -------
         Decimated array of the same type as the input.
         """
-        if data.shape[-1] == len(self.base_domain):
-            offset_idx = 0
-        elif data.shape[-1] == len(self.base_domain) - self.base_domain.min_idx:
-            offset_idx = -self.base_domain.min_idx
+        if self.base_domain is not None:
+            # Legacy behavior: detect offset from base_domain
+            if data.shape[-1] == len(self.base_domain):
+                offset_idx = 0
+            elif data.shape[-1] == len(self.base_domain) - self.base_domain.min_idx:
+                offset_idx = -self.base_domain.min_idx
+            else:
+                raise ValueError(
+                    f"Provided data has {data.shape[-1]} bins, which is incompatible with "
+                    f"the expected domain of length {len(self.base_domain)}"
+                )
+            return self._binning.decimate(
+                data, base_offset_idx=offset_idx, mode="explicit", policy="mean"
+            )
         else:
-            raise ValueError(
-                f"Provided data has {data.shape[-1]} bins, which is incompatible with "
-                f"the expected domain of length {len(self.base_domain)}"
-            )
-        if isinstance(data, np.ndarray):
-            data_decimated = np.empty((*data.shape[:-1], len(self)), dtype=data.dtype)
-        elif isinstance(data, torch.Tensor):
-            data_decimated = torch.empty(
-                (*data.shape[:-1], len(self)), dtype=data.dtype
-            )
-        else:
-            raise NotImplementedError(
-                f"Decimation not implemented for data of type {data}."
+            # New API: use auto mode to infer offset
+            return self._binning.decimate(
+                data, mode="auto", base_offset_idx=0, policy="pick"
             )
 
-        lower_out = 0  # running index for decimated band data
-        for idx_band in range(self.num_bands):
-            lower_in = self._nodes_indices[idx_band] + offset_idx
-            upper_in = self._nodes_indices[idx_band + 1] + offset_idx
-            decimation_factor = self._decimation_factors_bands[idx_band]
-            num_bins = self._num_bins_bands[idx_band]
+    def narrowed(
+        self,
+        f_min: Optional[float] = None,
+        f_max: Optional[float] = None,
+    ) -> "MultibandedFrequencyDomain":
+        """
+        Return a new MultibandedFrequencyDomain narrowed to [f_min, f_max] within this domain.
+        The current instance is not modified.
 
-            data_decimated[..., lower_out : lower_out + num_bins] = decimate_uniform(
-                data[..., lower_in:upper_in], decimation_factor
-            )
-            lower_out += num_bins
+        Parameters
+        ----------
+        f_min : Optional[float]
+            New minimum frequency (None to keep current).
+        f_max : Optional[float]
+            New maximum frequency (None to keep current).
 
-        assert lower_out == len(self)
+        Returns
+        -------
+        MultibandedFrequencyDomain
+            A new narrowed instance.
+        """
+        if self._binning.total_bins == 0:
+            raise ValueError("Domain has no bins; cannot narrow.")
 
-        return data_decimated
+        f_min_req = self.f_min if f_min is None else float(f_min)
+        f_max_req = self.f_max if f_max is None else float(f_max)
+        if f_min_req >= f_max_req:
+            raise ValueError("f_min must be strictly smaller than f_max.")
+
+        if not (self.f_min <= f_min_req <= self.f_max):
+            raise ValueError(f"Requested f_min={f_min_req} not in [{self.f_min}, {self.f_max}].")
+        if not (self.f_min <= f_max_req <= self.f_max):
+            raise ValueError(f"Requested f_max={f_max_req} not in [{self.f_min}, {self.f_max}].")
+
+        # Identify surviving bin range in the old domain
+        try:
+            lower_idx = int(np.where(self._binning.f_base_lower >= f_min_req)[0][0])
+            upper_idx = int(np.where(self._binning.f_base_upper <= f_max_req)[0][-1])
+        except IndexError:
+            raise ValueError("Requested range does not align with bin boundaries.")
+
+        lower_band = int(self._binning.band_assignment[lower_idx])
+        upper_band = int(self._binning.band_assignment[upper_idx])
+
+        # Build new nodes covering [lower_band : upper_band], adjust endpoints
+        nodes_old = self.nodes.copy()
+        nodes_new = nodes_old[lower_band : upper_band + 2]
+        nodes_new[0] = float(self._binning.f_base_lower[lower_idx])
+        nodes_new[-1] = float(self._binning.f_base_upper[upper_idx] + self._base_delta_f)
+
+        # New delta_f_initial derived from the band that becomes the new first band
+        new_delta_f_initial = float(self._binning.delta_f_bands[lower_band])
+
+        return MultibandedFrequencyDomain(
+            nodes=nodes_new,
+            delta_f_initial=new_delta_f_initial,
+            base_delta_f=self._base_delta_f,
+            window_factor=self.window_factor,
+        )
 
     def update(self, new_settings: dict):
         """
@@ -268,26 +326,51 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
         # and +1, as we have num_bands + 1 elements in nodes
         nodes_new = copy(self.nodes)[lower_band : upper_band + 2]
         nodes_new[0] = self._f_base_lower[lower_bin]
-        nodes_new[-1] = self._f_base_upper[upper_bin] + self.base_domain.delta_f
+        nodes_new[-1] = self._f_base_upper[upper_bin] + self._base_delta_f
 
-        # Update base_domain f_min and f_max. These values might differ slightly from
-        # the final values for the multi-banded domain due to edge effects. Note that
-        # we do this update *after* all of our validation checks but *before* changing
-        # the state of the class.
-        self.base_domain.update({"f_min": f_min, "f_max": f_max})
+        # Update base_domain f_min and f_max if it exists.
+        if self.base_domain is not None:
+            self.base_domain.update({"f_min": f_min, "f_max": f_max})
 
         self._range_update_initial_length = len(self)
         self._range_update_idx_lower = lower_bin
         self._range_update_idx_upper = upper_bin
 
         self.nodes = nodes_new
-        self._initialize_bands(self._delta_f_bands[lower_band])
+        self._reinitialize_bands(self._delta_f_bands[lower_band])
         assert self._range_update_idx_upper - self._range_update_idx_lower + 1 == len(
             self
         )
 
-        assert self.base_domain.f_min <= self.f_min
-        assert self.base_domain.f_max >= self.f_max
+        if self.base_domain is not None:
+            assert self.base_domain.f_min <= self.f_min
+            assert self.base_domain.f_max >= self.f_max
+
+    def _reinitialize_bands(self, delta_f_initial: float):
+        """Reinitialize binning after a range update."""
+        self._binning = compute_adaptive_binning(
+            nodes=list(self.nodes),
+            delta_f_initial=float(delta_f_initial),
+            base_delta_f=self._base_delta_f,
+        )
+        self.num_bands = int(self._binning.num_bands)
+
+        # Update legacy arrays
+        self._nodes_indices = self._binning.nodes_indices
+        self._delta_f_bands = self._binning.delta_f_bands
+        self._decimation_factors_bands = self._binning.decimation_factors_bands
+        self._num_bins_bands = self._binning.num_bins_bands
+        self._band_assignment = self._binning.band_assignment
+        self._delta_f = self._binning.delta_f
+        self._f_base_lower = self._binning.f_base_lower
+        self._f_base_upper = self._binning.f_base_upper
+
+        # Recalculate sample frequencies
+        self._sample_frequencies = (
+            (self._f_base_upper + self._f_base_lower) / 2
+        ).astype(np.float32)
+        self._sample_frequencies_torch = None
+        self._sample_frequencies_torch_cuda = None
 
     def update_data(
         self, data: np.ndarray | torch.Tensor, axis: int = -1, **kwargs
@@ -332,6 +415,21 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
             )
 
     @property
+    def base_delta_f(self) -> float:
+        """Base uniform frequency spacing."""
+        return self._base_delta_f
+
+    @property
+    def fbase(self):
+        """Tuple of (f_base_lower, f_base_upper) arrays from binning."""
+        return self._f_base_lower, self._f_base_upper
+
+    @property
+    def bands(self):
+        """Tuple of per-band metadata objects from binning."""
+        return self._binning.bands
+
+    @property
     def sample_frequencies(self) -> np.ndarray:
         return self._sample_frequencies
 
@@ -357,10 +455,14 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
 
     @property
     def f_max(self) -> float:
+        if self._f_base_upper.size == 0:
+            return 0.0
         return float(self._f_base_upper[-1])
 
     @property
     def f_min(self) -> float:
+        if self._f_base_lower.size == 0:
+            return 0.0
         return float(self._f_base_lower[0])
 
     @property
@@ -374,13 +476,104 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
     @property
     def domain_dict(self) -> dict:
         """Enables to rebuild the domain via calling build_domain(domain_dict)."""
-        # Call tolist() on self.bands, such that it can be saved as str for metadata.
-        return {
+        # Call tolist() on self.nodes, such that it can be saved as str for metadata.
+        d = {
             "type": "MultibandedFrequencyDomain",
             "nodes": self.nodes.tolist(),
             "delta_f_initial": self._delta_f_bands[0].item(),
-            "base_domain": self.base_domain.domain_dict,
         }
+        if self.base_domain is not None:
+            d["base_domain"] = self.base_domain.domain_dict
+        else:
+            d["base_delta_f"] = self._base_delta_f
+        return d
+
+    def get_parameters(self) -> DomainParameters:
+        """
+        Get the parameters of the multibanded frequency domain.
+
+        Returns
+        -------
+        DomainParameters
+        """
+        return DomainParameters(
+            f_max=self.f_max,
+            f_min=self.f_min,
+            delta_t=0.5 / self.f_max if self.f_max > 0 else None,
+            nodes=self.nodes.tolist(),
+            delta_f_initial=float(self._delta_f_bands[0]) if self.num_bands > 0 else None,
+            base_delta_f=self._base_delta_f,
+            window_factor=self.window_factor,
+            type=f"{_module_import_path}.MultibandedFrequencyDomain",
+        )
+
+    @classmethod
+    def from_parameters(
+        cls, domain_parameters: DomainParameters
+    ) -> "MultibandedFrequencyDomain":
+        """
+        Create a MultibandedFrequencyDomain from DomainParameters.
+        """
+        for attr in ("nodes", "delta_f_initial", "base_delta_f"):
+            if getattr(domain_parameters, attr) is None:
+                raise ValueError(
+                    "Can not construct MultibandedFrequencyDomain from "
+                    f"{domain_parameters}: {attr} should not be None"
+                )
+
+        return cls(
+            nodes=domain_parameters.nodes,
+            delta_f_initial=domain_parameters.delta_f_initial,
+            base_delta_f=domain_parameters.base_delta_f,
+            window_factor=domain_parameters.window_factor,
+        )
+
+
+def adapt_data(
+    former_domain: MultibandedFrequencyDomain,
+    new_domain: MultibandedFrequencyDomain,
+    data: Union[np.ndarray, torch.Tensor],
+    axis: int = -1,
+) -> Union[np.ndarray, torch.Tensor]:
+    """
+    Slice data from a former MultibandedFrequencyDomain to a narrowed one.
+
+    Parameters
+    ----------
+    former_domain : MultibandedFrequencyDomain
+        The original domain that the data was generated on.
+    new_domain : MultibandedFrequencyDomain
+        The narrowed domain (must be a subrange of former_domain).
+    data : np.ndarray | torch.Tensor
+        Data array compatible with former_domain along the specified axis.
+    axis : int
+        Axis along which to slice.
+
+    Returns
+    -------
+    Sliced data matching new_domain.
+    """
+    if data.shape[axis] != len(former_domain):
+        raise ValueError(
+            f"Data trailing length {data.shape[axis]} does not match source domain length {len(former_domain)}."
+        )
+
+    # Map new domain's [f_min, f_max] into indices on the old domain
+    try:
+        lower_idx = int(np.where(former_domain.fbase[0] >= new_domain.f_min)[0][0])
+        upper_idx = int(np.where(former_domain.fbase[1] <= new_domain.f_max)[0][-1])
+    except IndexError:
+        raise ValueError("New domain range is not a subrange of the old domain.")
+
+    # Safety: ensure number of bins aligns exactly
+    if (upper_idx - lower_idx + 1) != len(new_domain):
+        raise ValueError(
+            "Inconsistent bin mapping between domains; cannot slice data safely."
+        )
+
+    sl = [slice(None)] * data.ndim
+    sl[axis] = slice(lower_idx, upper_idx + 1)
+    return data[tuple(sl)]
 
 
 ######################

@@ -4,7 +4,10 @@ import numpy as np
 import torch
 
 from dingo.gw.gwutils import *
+from .base import DomainParameters
 from .base_frequency_domain import BaseFrequencyDomain
+
+_module_import_path = "dingo.gw.domains.uniform_frequency_domain"
 
 
 class UniformFrequencyDomain(BaseFrequencyDomain):
@@ -25,6 +28,7 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
         f_min: float,
         f_max: float,
         delta_f: float,
+        window_factor: Optional[float] = None,
     ):
         """
         Parameters
@@ -32,11 +36,14 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
         f_min : float
         f_max : float
         delta_f : float
+        window_factor : Optional[float]
+            Window factor for noise calculations.
         """
         super().__init__()
         self._f_min = f_min
         self._f_max = f_max
         self._delta_f = delta_f
+        self._window_factor = window_factor
         self._frequency_mask = None
 
     def update(self, new_settings: dict):
@@ -233,6 +240,30 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
         self._reset_caches()
 
     @property
+    def window_factor(self):
+        """Get the window factor for noise calculations."""
+        return self._window_factor
+
+    @window_factor.setter
+    def window_factor(self, value: float):
+        """Set the window factor for noise calculations."""
+        self._window_factor = value
+
+    @property
+    def noise_std(self) -> float:
+        r"""
+        Standard deviation per bin for white noise.
+
+        When window_factor is set:
+            noise_std = sqrt(window_factor) / sqrt(4 * delta_f)
+        Otherwise falls back to the base class formula:
+            noise_std = 1 / sqrt(4 * delta_f)
+        """
+        if self._window_factor is not None:
+            return np.sqrt(self._window_factor) / np.sqrt(4.0 * self._delta_f)
+        return 1 / np.sqrt(4.0 * self._delta_f)
+
+    @property
     def duration(self) -> float:
         """Waveform duration in seconds."""
         return 1.0 / self.delta_f
@@ -250,3 +281,39 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
             "f_max": self.f_max,
             "delta_f": self.delta_f,
         }
+
+    def get_parameters(self) -> DomainParameters:
+        """
+        Get the parameters of the frequency domain.
+
+        Returns
+        -------
+        DomainParameters
+            The parameters of the frequency domain.
+        """
+        return DomainParameters(
+            f_max=self._f_max,
+            f_min=self._f_min,
+            delta_t=0.5 / self._f_max,
+            delta_f=self._delta_f,
+            window_factor=self._window_factor,
+            type=f"{_module_import_path}.UniformFrequencyDomain",
+        )
+
+    @classmethod
+    def from_parameters(cls, domain_parameters: DomainParameters) -> "UniformFrequencyDomain":
+        """
+        Create a UniformFrequencyDomain instance from given parameters.
+        """
+        for attr in ("f_min", "f_max", "delta_f"):
+            if getattr(domain_parameters, attr) is None:
+                raise ValueError(
+                    "Can not construct UniformFrequencyDomain from "
+                    f"{domain_parameters}: {attr} should not be None"
+                )
+        return cls(
+            f_min=domain_parameters.f_min,
+            f_max=domain_parameters.f_max,
+            delta_f=domain_parameters.delta_f,
+            window_factor=domain_parameters.window_factor,
+        )
