@@ -13,12 +13,12 @@ import scipy
 from matplotlib import pyplot as plt
 from scipy.constants import golden
 from scipy.special import logsumexp
-from bilby.core.prior import Constraint, DeltaFunction, PriorDict, Prior
+from bilby.core.prior import Constraint, DeltaFunction, PriorDict
 
 from dingo.core.dataset import DingoDataset
 from dingo.core.density import train_unconditional_density_estimator
 from dingo.core.utils.misc import recursive_check_dicts_are_equal
-from dingo.core.utils.plotting import plot_corner_multi
+from dingo.core.utils.plotting import get_latex_labels, plot_corner_multi
 
 DATA_KEYS = [
     "samples",
@@ -284,7 +284,7 @@ class Result(DingoDataset):
         # For these, we do not want to evaluate the likelihood, in particular because
         # it may not even be possible to generate signals outside the prior (e.g.,
         # for BH spins > 1).
-        valid_samples = (log_prior + delta_log_prob_target) != -np.inf
+        valid_samples = np.isfinite(log_prior + delta_log_prob_target)
         theta = theta.iloc[valid_samples]
 
         print(f"Calculating {len(theta)} likelihoods.")
@@ -961,23 +961,3 @@ def freeze(d):
     return d
 
 
-def get_latex_labels(prior: PriorDict) -> dict:
-    """
-    Get the latex labels for prior parameters. If no latex label exists within the
-    prior object, try to choose based on parameter key. Finally, return the parameter key.
-
-    Parameters
-    ----------
-    prior : PriorDict
-
-    Returns
-    -------
-    dict of latex labels
-    """
-    labels = {}
-    for k, v in prior.items():
-        l = v.latex_label
-        if l is None:
-            l = Prior._default_latex_labels.get(k, k)
-        labels[k] = l
-    return labels
