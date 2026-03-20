@@ -106,11 +106,13 @@ local:
     max_epochs_per_run: 500
   checkpoint_epochs: 10
   leave_waveforms_on_disk: True
-  # local_cache_path: tmp # uncomment to avoid slow data loading during training due to network traffic on cluster
-  # Local settings related to condor, remove if not used on cluster
+  # num_gpus: 1  # Set to >1 to enable multi-GPU (DDP) training. batch_size above is the
+                 # total effective batch size; it is divided equally across GPUs.
+                 # When using Condor, request_gpus in the submission file is set automatically.
+  # local_cache_path: /tmp # uncomment to avoid slow data loading during training due to network traffic on cluster
+  # Settings for HTCondor job submission (remove if not running on a Condor cluster).
   condor:
-    num_cpus: 16
+    num_cpus: 32
     memory_cpus: 128000
-    num_gpus: 1
     memory_gpus: 8000
     request_disk: 50GB

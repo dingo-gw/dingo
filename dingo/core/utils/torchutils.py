@@ -1,18 +1,132 @@
+import os
+from socket import gethostname
+from typing import Any, Iterable, Optional, Tuple, Union
+
+import bilby
 import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from torch.nn import functional as F
-from torch.utils.data import DataLoader
-from typing import Union, Tuple, Iterable
-import bilby
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data import DataLoader, DistributedSampler
 
 
 def fix_random_seeds(_):
     """Utility function to set random seeds when using multiple workers for DataLoader."""
-    np.random.seed(int(torch.initial_seed()) % (2 ** 32 - 1))
+    np.random.seed(int(torch.initial_seed()) % (2**32 - 1))
     try:
-        bilby.core.utils.random.seed(int(torch.initial_seed()) % (2 ** 32 - 1))
+        bilby.core.utils.random.seed(int(torch.initial_seed()) % (2**32 - 1))
     except AttributeError:  # In case using an old version of Bilby.
+        pass
+
+
+def get_cuda_info() -> dict[str, Any]:
+    """Get information about the CUDA devices available in the system."""
+    if not torch.cuda.is_available():
+        return {}
+    return {
+        "cuDNN version": torch.backends.cudnn.version(),
+        "CUDA version": torch.version.cuda,
+        "device count": torch.cuda.device_count(),
+        "device name": torch.cuda.get_device_name(0),
+        "memory (GB)": round(
+            torch.cuda.get_device_properties(0).total_memory / 1024**3, 1
+        ),
+    }
+
+
+def document_gpus(target_dir: str) -> None:
+    """
+    Document the current GPU resources to an ``info_gpus.txt`` file inside
+    *target_dir*.
+    """
+    cuda_info = get_cuda_info()
+    with open(os.path.join(target_dir, "info_gpus.txt"), "w") as f:
+        f.write(f"# Running on host:\n{gethostname()}\n")
+        f.write("# CUDA information:\n")
+        for k, v in cuda_info.items():
+            f.write(f"{k}: {v}\n")
+
+
+def set_seed_based_on_rank(rank: int) -> None:
+    """
+    Set NumPy and Torch seeds for a DDP worker process based on *rank* so that
+    each process draws different random samples.
+    """
+    initial_torch_seed = torch.initial_seed()
+    torch.manual_seed(initial_torch_seed + rank)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(initial_torch_seed + rank)
+        torch.backends.cudnn.deterministic = True
+    # NumPy expects seeds in [0, 2**32).
+    reduced_seed = int(initial_torch_seed) % (2**32 - 1)
+    np.random.seed(reduced_seed + rank)
+
+
+def setup_ddp(rank: int, world_size: int, port: int = 12355) -> None:
+    """
+    Initialise the NCCL process group for DDP training.
+
+    Parameters
+    ----------
+    rank : int
+        Rank of this process within the group.
+    world_size : int
+        Total number of processes (= number of GPUs).
+    port : int
+        Port used for the ``MASTER_ADDR`` rendezvous.  When running multiple
+        experiments on the same node, choose a different port for each to avoid
+        collisions.
+    """
+    os.environ["MASTER_ADDR"] = "localhost"
+    os.environ["MASTER_PORT"] = str(port)
+
+    if dist.is_nccl_available():
+        dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
+    else:
+        raise RuntimeError(
+            "NCCL backend is not available. "
+            "Fall back to single-GPU training or install a CUDA-enabled PyTorch build."
+        )
+    torch.cuda.set_device(rank)
+    print(
+        f"Process group initialised: backend={dist.get_backend()}, "
+        f"rank={dist.get_rank()}, world_size={dist.get_world_size()}."
+    )
+
+
+def cleanup_ddp() -> None:
+    """Tear down the distributed process group."""
+    dist.destroy_process_group()
+    print("Destroyed process group.")
+
+
+def replace_BatchNorm_with_SyncBatchNorm(network: nn.Module) -> nn.Module:
+    """Replace all BatchNorm layers with SyncBatchNorm for DDP training."""
+    return nn.SyncBatchNorm.convert_sync_batchnorm(network)
+
+
+def print_number_of_model_parameters(network: nn.Module) -> None:
+    """
+    Print the number of fixed and learnable parameters of *network*.
+    Handles DDP-wrapped networks transparently.
+    """
+    bare = network.module if isinstance(network, DDP) else network
+
+    n_grad = get_number_of_model_parameters(network, (True,))
+    n_nograd = get_number_of_model_parameters(network, (False,))
+    print(f"Fixed parameters: {n_nograd}\nLearnable parameters: {n_grad}")
+
+    try:
+        if bare.name == "FlowWrapper":
+            n_emb = get_number_of_model_parameters(bare.embedding_net, (True,))
+            n_flow = get_number_of_model_parameters(bare.flow, (True,))
+            print(
+                f"   - learnable embedding network parameters: {n_emb} ({n_emb / n_grad * 100:.2f}%)\n"
+                f"   - learnable flow parameters: {n_flow} ({n_flow / n_grad * 100:.2f}%)"
+            )
+    except Exception:
         pass
 
 
@@ -191,10 +305,15 @@ def build_train_and_test_loaders(
     train_fraction: float,
     batch_size: int,
     num_workers: int,
-):
+    world_size: Optional[int] = None,
+    rank: Optional[int] = None,
+) -> Tuple[DataLoader, DataLoader, Optional[DistributedSampler]]:
     """
     Split the dataset into train and test sets, and build corresponding DataLoaders.
     The random split uses a fixed seed for reproducibility.
+
+    When *world_size* and *rank* are given, ``DistributedSampler`` instances are
+    created so that each GPU processes a non-overlapping shard of the data.
 
     Parameters
     ----------
@@ -203,11 +322,17 @@ def build_train_and_test_loaders(
         Fraction of dataset to use for training. The remainder is used for testing.
         Should lie between 0 and 1.
     batch_size : int
+        Batch size *per GPU*.
     num_workers : int
+    world_size : int, optional
+        Total number of DDP processes (GPUs).
+    rank : int, optional
+        Rank of the current DDP process.
 
     Returns
     -------
-    (train_loader, test_loader)
+    (train_loader, test_loader, train_sampler)
+        *train_sampler* is ``None`` for single-GPU training.
     """
 
     # Split the dataset. This function uses a fixed seed for reproducibility.
@@ -215,25 +340,56 @@ def build_train_and_test_loaders(
         dataset, train_fraction
     )
 
-    # Build DataLoaders
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        pin_memory=True,
-        num_workers=num_workers,
-        worker_init_fn=fix_random_seeds,
-    )
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        pin_memory=True,
-        num_workers=num_workers,
-        worker_init_fn=fix_random_seeds,
-    )
+    persistent_workers = num_workers > 0
 
-    return train_loader, test_loader
+    if rank is not None and world_size is not None:
+        # DDP path: shuffle is handled by the sampler.
+        train_sampler = DistributedSampler(
+            train_dataset, shuffle=True, num_replicas=world_size, rank=rank
+        )
+        test_sampler = DistributedSampler(
+            test_dataset, shuffle=False, num_replicas=world_size, rank=rank
+        )
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            sampler=train_sampler,
+            pin_memory=False,
+            num_workers=num_workers,
+            worker_init_fn=fix_random_seeds,
+            persistent_workers=persistent_workers,
+        )
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=batch_size,
+            sampler=test_sampler,
+            pin_memory=False,
+            num_workers=num_workers,
+            worker_init_fn=fix_random_seeds,
+            persistent_workers=persistent_workers,
+        )
+    else:
+        train_sampler = None
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            pin_memory=True,
+            num_workers=num_workers,
+            worker_init_fn=fix_random_seeds,
+            persistent_workers=persistent_workers,
+        )
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            pin_memory=True,
+            num_workers=num_workers,
+            worker_init_fn=fix_random_seeds,
+            persistent_workers=persistent_workers,
+        )
+
+    return train_loader, test_loader, train_sampler
 
 
 def set_requires_grad_flag(

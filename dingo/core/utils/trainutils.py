@@ -1,9 +1,12 @@
-import time
-import os
-import numpy as np
-from os.path import join, isfile
 import csv
-from typing import Literal
+import os
+import time
+from os.path import isfile, join
+from typing import Literal, Optional
+
+import numpy as np
+import torch
+import torch.distributed as dist
 
 
 class AvgTracker:
@@ -96,57 +99,147 @@ class EarlyStopping:
 
 
 class LossInfo:
-    def __init__(self, epoch, len_dataset, batch_size, mode="Train", print_freq=1):
+    def __init__(
+        self,
+        epoch: int,
+        len_dataset: int,
+        batch_size_per_grad_update: int,
+        mode: str = "Train",
+        print_freq: int = 1,
+        device: torch.device = torch.device("cuda"),
+    ):
         # data for print statements
         self.epoch = epoch
+        self.iteration = 0
         self.len_dataset = len_dataset
-        self.batch_size = batch_size
+        self.batch_size_per_grad_update = batch_size_per_grad_update
         self.mode = mode
         self.print_freq = print_freq
+        self.device = device
         # track loss
         self.loss_tracker = AvgTracker()
         self.loss = None
-        # track computation times
-        self.times = {"Dataloader": AvgTracker(), "Network": AvgTracker()}
+        self.cached_losses: list = []
+        self.cached_n: list = []
+        # Use dist.is_initialized() so that LossInfo is DDP-aware only when a
+        # process group has actually been set up.
+        self.is_ddp = dist.is_initialized()
+        if self.is_ddp:
+            self.num_gpus = dist.get_world_size()
+            self.times = {
+                "Dataloader": AvgTracker(),
+                "Network": AvgTracker(),
+                "Aggregation": AvgTracker(),
+            }
+        else:
+            self.times = {"Dataloader": AvgTracker(), "Network": AvgTracker()}
         self.t = time.time()
 
-    def update_timer(self, timer_mode="Dataloader"):
-        self.times[timer_mode].update(time.time() - self.t)
-        self.t = time.time()
-
-    def update(self, loss, n):
-        self.loss = loss
-        self.loss_tracker.update(loss * n, n)
+    def cache_loss(self, loss: torch.Tensor, n: int) -> None:
+        """Cache *loss* from one gradient-accumulation step."""
+        self.cached_losses.append(loss.detach())
+        self.cached_n.append(n)
         self.update_timer(timer_mode="Network")
 
-    def get_avg(self):
+    def _reset_cached_losses(self) -> None:
+        self.cached_losses = []
+        self.cached_n = []
+
+    def update_timer(self, timer_mode: str = "Dataloader") -> None:
+        if self.is_ddp:
+            dt = torch.tensor(time.time() - self.t, device=self.device)
+            dist.barrier()
+            dist.reduce(dt, dst=0, op=dist.ReduceOp.MAX)
+            dt = dt.item()
+        else:
+            dt = time.time() - self.t
+        self.times[timer_mode].update(dt)
+        self.t = time.time()
+
+    def update(self) -> None:
+        """Aggregate cached losses across gradient-accumulation steps (and across GPUs in DDP)."""
+        self.iteration += 1
+        loss = torch.mean(torch.tensor(self.cached_losses, device=self.device))
+        n = torch.tensor(sum(self.cached_n), device=self.device, dtype=torch.float32)
+
+        if self.is_ddp:
+            # Reduce absolute loss across GPUs so that normalization is correct
+            # even when GPUs process different numbers of samples.
+            abs_loss = loss * n
+            dist.barrier()
+            dist.reduce(abs_loss, dst=0)
+            dist.reduce(n, dst=0)
+            loss = abs_loss / n
+            self.update_timer(timer_mode="Aggregation")
+
+        self.loss = loss.item()
+        self.loss_tracker.update(self.loss * n.item(), n.item())
+        self._reset_cached_losses()
+
+    def get_avg(self) -> float:
         return self.loss_tracker.get_avg()
 
-    def print_info(self, batch_idx):
+    def get_iteration(self) -> int:
+        """Return the number of optimizer steps performed this epoch."""
+        if self.is_ddp:
+            dist.barrier()
+            iteration = torch.tensor(
+                self.iteration, device=self.device, dtype=torch.int64
+            )
+            # all_gather requires output tensors to match the shape of the input.
+            gathered = [torch.zeros_like(iteration) for _ in range(self.num_gpus)]
+            dist.all_gather(gathered, iteration)
+            if not all(torch.equal(gathered[0], t) for t in gathered):
+                raise ValueError(
+                    f"DDP ranks disagree on iteration count: "
+                    f"{[t.item() for t in gathered]}"
+                )
+        return self.iteration
+
+    def print_info(self, batch_idx: int) -> None:
         if batch_idx % self.print_freq == 0:
             print(
                 "{} Epoch: {} [{}/{} ({:.0f}%)]".format(
                     self.mode,
                     self.epoch,
-                    min(batch_idx * self.batch_size, self.len_dataset),
+                    min(
+                        (batch_idx + 1) * self.batch_size_per_grad_update,
+                        self.len_dataset,
+                    ),
                     self.len_dataset,
-                    100.0 * batch_idx * self.batch_size / self.len_dataset,
+                    min(
+                        100.0
+                        * (batch_idx + 1)
+                        * self.batch_size_per_grad_update
+                        / self.len_dataset,
+                        100,
+                    ),
                 ),
                 end="\t\t",
             )
-            # print loss
             print(f"Loss: {self.loss:.3f} ({self.get_avg():.3f})", end="\t\t")
-            # print computation times
             td, td_avg = self.times["Dataloader"].x, self.times["Dataloader"].get_avg()
             tn, tn_avg = self.times["Network"].x, self.times["Network"].get_avg()
             print(f"Time Dataloader: {td:.3f} ({td_avg:.3f})", end="\t\t")
-            print(f"Time Network: {tn:.3f} ({tn_avg:.3f})")
+            if self.is_ddp:
+                ta, ta_avg = (
+                    self.times["Aggregation"].x,
+                    self.times["Aggregation"].get_avg(),
+                )
+                print(f"Time Network: {tn:.3f} ({tn_avg:.3f})", end="\t\t")
+                print(f"Time Loss Aggregation: {ta:.3f} ({ta_avg:.3f})")
+            else:
+                print(f"Time Network: {tn:.3f} ({tn_avg:.3f})")
 
 
 class RuntimeLimits:
     """
     Keeps track of the runtime limits (time limit, epoch limit, max. number
     of epochs for model).
+
+    In DDP training, ``limits_exceeded`` broadcasts the result across all ranks
+    so that every process stops at the same epoch even when only one rank (e.g.
+    rank 0) detects that the wall-clock limit has been reached.
     """
 
     def __init__(
@@ -155,6 +248,7 @@ class RuntimeLimits:
         max_epochs_per_run: int = None,
         max_epochs_total: int = None,
         epoch_start: int = None,
+        device: torch.device = torch.device("cuda"),
     ):
         """
 
@@ -169,18 +263,25 @@ class RuntimeLimits:
             maximum total number of epochs for model
         epoch_start: int = None
             start epoch of run
+        device: torch.device
+            Device used for the DDP all-reduce broadcast.
         """
         self.max_time_per_run = max_time_per_run
         self.max_epochs_per_run = max_epochs_per_run
         self.max_epochs_total = max_epochs_total
         self.epoch_start = epoch_start
         self.time_start = time.time()
+        self.device = device
+        self.is_ddp = dist.is_initialized()
         if max_epochs_per_run is not None and epoch_start is None:
-            raise ValueError("epoch_start required to check " "max_epochs_per_run.")
+            raise ValueError("epoch_start required to check max_epochs_per_run.")
 
-    def limits_exceeded(self, epoch: int = None):
+    def limits_exceeded(self, epoch: Optional[int] = None) -> bool:
         """
         Check whether any of the runtime limits are exceeded.
+
+        In DDP mode the boolean is broadcast via ``all_reduce`` so all ranks
+        agree on whether to stop.
 
         Parameters
         ----------
@@ -192,13 +293,12 @@ class RuntimeLimits:
             flag whether runtime limits are exceeded and run should be stopped;
             if limits_exceeded = True, this prints a message for the reason
         """
+        exceeded = False
         # check time limit for run
         if self.max_time_per_run is not None:
             if time.time() - self.time_start >= self.max_time_per_run:
-                print(
-                    f"Stop run: Time limit of {self.max_time_per_run} s " f"exceeded."
-                )
-                return True
+                print(f"Stop run: Time limit of {self.max_time_per_run} s exceeded.")
+                exceeded = True
         # check epoch limit for run
         if self.max_epochs_per_run is not None:
             if epoch is None:
@@ -207,18 +307,24 @@ class RuntimeLimits:
                 print(
                     f"Stop run: Epoch limit of {self.max_epochs_per_run} per run reached."
                 )
-                return True
+                exceeded = True
         # check total epoch limit
         if self.max_epochs_total is not None:
             if epoch >= self.max_epochs_total:
                 print(
                     f"Stop run: Total epoch limit of {self.max_epochs_total} reached."
                 )
-                return True
-        # return False if none of the limits is exceeded
-        return False
+                exceeded = True
 
-    def local_limits_exceeded(self, epoch: int = None):
+        if self.is_ddp:
+            flag = torch.tensor(exceeded, device=self.device, dtype=torch.bool)
+            dist.barrier()
+            dist.all_reduce(flag, op=dist.ReduceOp.MAX)
+            exceeded = flag.item()
+
+        return exceeded
+
+    def local_limits_exceeded(self, epoch: Optional[int] = None) -> bool:
         """
         Check whether any of the local runtime limits are exceeded. Local runtime
         limits include max_epochs_per_run and max_time_per_run, but not max_epochs_total.
