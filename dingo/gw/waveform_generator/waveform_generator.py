@@ -1176,6 +1176,11 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             h_plus[:] = hp[: len(h_plus)].value
             h_cross[:] = hc[: len(h_cross)].value
         elif len(hp) < len(frequency_array):
+            # For TD models (e.g. TEOBResumS), GenerateFDWaveform chooses the TD
+            # sampling rate based on the waveform's frequency content, not the
+            # requested f_max. High-mass systems merge at lower frequencies, so
+            # the FFT can have fewer bins than the domain. Zero-padding is correct
+            # since there is no signal power above that frequency.
             h_plus[: len(hp)] = hp.value
             h_cross[: len(hc)] = hc.value
         else:
