@@ -482,7 +482,7 @@ class Result(DingoDataset):
 
         References
         ----------
-        .. [1] Elvira et al., "Rethinking the Effective Sample Size", IEEE
+        .. [1] Elvira et al., "A Comparison Of Clipping Strategies For Importance Sampling"
                https://ieeexplore.ieee.org/document/8450722
         """
         if max_samples_per_draw < 1:
