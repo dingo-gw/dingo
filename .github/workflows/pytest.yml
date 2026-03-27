@@ -1,6 +1,6 @@
 # Running pytest upon push to main or upon merge request in main
 
-name: Pytest for Dingo-GW on Python 3.10
+name: Pytest for Dingo-GW
 
 on:
   push:
@@ -12,6 +12,12 @@ on:
 
 jobs:
   pytest:
+    name: Pytest for Dingo-GW on Python ${{ matrix.python-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.10"
     runs-on: ubuntu-latest
     env:
       OPENBLAS_NUM_THREADS: 1
@@ -21,10 +27,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Set up Python 3.10
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "${{ matrix.python-version }}"
           cache: 'pip'
           cache-dependency-path: 'pyproject.toml'
 
@@ -44,6 +50,6 @@ jobs:
       - name: Upload Pytest Report
         uses: actions/upload-artifact@v4
         with:
-          name: pytest-report.xml
+          name: pytest-report-${{ matrix.python-version }}.xml
           path: pytest-report.xml
           retention-days: 30
