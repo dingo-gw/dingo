@@ -1,13 +1,15 @@
+import argparse
 import os
 import sys
-from os.path import join, isfile
-import yaml
-import argparse
+from os.path import isfile, join
 
-from dingo.gw.training import (
-    prepare_training_new,
-    prepare_training_resume,
-    train_stages,
+import yaml
+
+from dingo.core.utils.torchutils import document_gpus
+from dingo.gw.training.train_pipeline import (
+    get_num_gpus,
+    run_multi_gpu_training,
+    run_training,
 )
 
 
@@ -30,16 +32,39 @@ def create_submission_file(
     # getenv required for GPU training because wandb needs $HOME to be defined
     lines.append(f"getenv = True\n")
     lines.append(f'executable = {condor_settings["executable"]}\n')
-    lines.append(f'request_cpus = {condor_settings["num_cpus"]}\n')
-    lines.append(f'request_memory = {condor_settings["memory_cpus"]}\n')
-    lines.append(f'request_gpus = {condor_settings["num_gpus"]}\n')
-    lines.append(
-        f"requirements = TARGET.CUDAGlobalMemoryMb > "
-        f'{condor_settings["memory_gpus"]}\n\n'
-    )
+
     if "request_disk" in condor_settings:
         lines.append(f'request_disk = {condor_settings["request_disk"]}\n')
-    lines.append(f'arguments = "{condor_settings["arguments"]}"\n')
+    if "num_cpus" in condor_settings:
+        lines.append(f'request_cpus = {condor_settings["num_cpus"]}\n')
+    if "memory_cpus" in condor_settings:
+        lines.append(f'request_memory = {condor_settings["memory_cpus"]}\n')
+
+    requirements = condor_settings.get("requirements", "")
+    if "memory_gpus" in condor_settings:
+        gpu_req = f"TARGET.CUDAGlobalMemoryMb > {condor_settings['memory_gpus']}"
+        if requirements:
+            if ")" not in requirements:
+                requirements = f"({requirements})"
+            requirements = f"{requirements} && ({gpu_req})"
+        else:
+            requirements = gpu_req
+    if requirements:
+        lines.append(f"requirements = {requirements}\n")
+
+    if "num_gpus" in condor_settings:
+        num_gpus = condor_settings["num_gpus"]
+        lines.append(f"request_gpus = {num_gpus}\n")
+        # Cluster-specific full-node templates (MPI-IS).
+        if num_gpus == 8:
+            lines.append("use template : FullNode\n")
+        elif num_gpus >= 6:
+            lines.append(f"use template : FullNode({num_gpus})\n")
+
+    if "arguments" in condor_settings:
+        lines.append(f'arguments = "{condor_settings["arguments"]}"\n')
+
+    lines.append("\n")
     lines.append(f'error = {join(train_dir, "info.err")}\n')
     lines.append(f'output = {join(train_dir, "info.out")}\n')
     lines.append(f'log = {join(train_dir, "info.log")}\n')
@@ -79,20 +104,16 @@ def train_condor():
     )
     args = parser.parse_args()
 
-    # For condor settings, first try looking for a local settings file. Otherwise,
-    # defer to train_settings.yaml.
-    # if isfile(join(args.train_dir, 'local_settings.yaml')):
-    #     with open(join(args.train_dir, 'local_settings.yaml')) as f:
-    #         condor_settings = yaml.safe_load(f)['condor']
-    # else:
-
     if not args.start_submission:
 
         #
         # TRAIN
         #
 
-        if not isfile(join(args.train_dir, args.checkpoint)):
+        ckpt_path = join(args.train_dir, args.checkpoint)
+        resume = isfile(ckpt_path)
+
+        if not resume:
             print("Beginning new training run.")
             with open(join(args.train_dir, "train_settings.yaml"), "r") as f:
                 train_settings = yaml.safe_load(f)
@@ -100,7 +121,6 @@ def train_condor():
             # Extract the local settings from train settings file, save it separately.
             # This file can later be modified, and the settings take effect immediately
             # upon resuming.
-
             local_settings = train_settings.pop("local")
             with open(os.path.join(args.train_dir, "local_settings.yaml"), "w") as f:
                 if (
@@ -114,25 +134,35 @@ def train_condor():
                     except ImportError:
                         print("wandb not installed, cannot generate run id.")
                 yaml.dump(local_settings, f, default_flow_style=False, sort_keys=False)
-
-            pm, wfd = prepare_training_new(
-                train_settings, args.train_dir, local_settings
-            )
-
         else:
             print("Resuming training run.")
+            train_settings = None
             with open(os.path.join(args.train_dir, "local_settings.yaml"), "r") as f:
                 local_settings = yaml.safe_load(f)
-            pm, wfd = prepare_training_resume(
-                join(args.train_dir, args.checkpoint),
-                local_settings,
+
+        num_gpus = get_num_gpus(local_settings)
+        if local_settings.get("device") == "cuda" and num_gpus > 1:
+            complete, _, pm_epoch = run_multi_gpu_training(
+                world_size=num_gpus,
+                train_settings=train_settings,
+                local_settings=local_settings,
                 train_dir=args.train_dir,
+                ckpt_file=ckpt_path,
+                resume=resume,
+            )
+        else:
+            if local_settings.get("device") == "cuda":
+                document_gpus(args.train_dir)
+            complete, _, pm_epoch = run_training(
+                train_settings=train_settings,
+                local_settings=local_settings,
+                train_dir=args.train_dir,
+                ckpt_file=ckpt_path,
+                resume=resume,
             )
 
-        complete = train_stages(pm, wfd, args.train_dir, local_settings)
-
         print("Copying log files")
-        copy_logfiles(args.train_dir, epoch=pm.epoch)
+        copy_logfiles(args.train_dir, epoch=pm_epoch)
 
         #
         # PREPARE NEXT SUBMISSION
@@ -140,7 +170,8 @@ def train_condor():
 
         if complete:
             print(
-                f"Training complete, job will not be resubmitted. Executing exit command: {args.exit_command}."
+                f"Training complete, job will not be resubmitted. "
+                f"Executing exit command: {args.exit_command}."
             )
             if args.exit_command:
                 os.system(args.exit_command)
@@ -164,7 +195,11 @@ def train_condor():
 
     submission_file = "submission_file.sub"
     with open(join(args.train_dir, "train_settings.yaml"), "r") as f:
-        condor_settings = yaml.safe_load(f)["local"]["condor"]
+        local_settings_from_file = yaml.safe_load(f)["local"]
+    condor_settings = local_settings_from_file.get("condor", {})
+    # Inject num_gpus from local.num_gpus so the submission file requests the
+    # correct number of GPUs without the user having to duplicate it under condor:.
+    condor_settings["num_gpus"] = get_num_gpus(local_settings_from_file)
     condor_settings["arguments"] = condor_arguments
     condor_settings["executable"] = join(
         os.path.dirname(sys.executable), "dingo_train_condor"

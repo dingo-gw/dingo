@@ -75,7 +75,9 @@ training:
     scheduler:
       type: cosine
       T_max: 300
-    batch_size: 64
+    batch_size: 512          # Total effective batch size across all GPUs.
+#   gradient_updates_per_optimizer_step: 1
+#   automatic_mixed_precision: False
 
   stage_1:
     epochs: 150
@@ -87,15 +89,19 @@ training:
     scheduler:
       type: cosine
       T_max: 150
-    batch_size: 64
+    batch_size: 512
+#   gradient_updates_per_optimizer_step: 1
+#   automatic_mixed_precision: False
 
 # Local settings that have no impact on the final trained network.
 local:
-  device: cpu  # Change this to 'cuda' for training on a GPU.
+  device: cuda  # Change this to 'cpu' for training without a GPU.
   num_workers: 6
+# num_gpus: 1   # Set to >1 to enable multi-GPU (DDP) training. When using
+                # dingo_train_condor, request_gpus is set automatically.
 #  wandb:
 #    project: dingo
-#    group: O4
+#    group: my_project
   runtime_limits:
     max_time_per_run: 36000
     max_epochs_per_run: 500
@@ -103,10 +109,8 @@ local:
   leave_waveforms_on_disk: True
   local_cache_path: tmp
 #   condor:
-#     bid: 100
 #     num_cpus: 16
 #     memory_cpus: 128000
-#     num_gpus: 1
 #     memory_gpus: 8000
 #     request_disk: 50GB
 ```
@@ -132,7 +136,7 @@ asd_dataset_path
 : Points to an `ASDDataset` file. Each stage can have its own ASD dataset, which is useful for implementing a pre-training stage with fixed ASD and a fine-tuning stage with variable ASD.
 
 freeze_rb_layer
-: Whether to freeze the first layer of the embedding network in `nsf+embedding` models. This layer is seeded with reduced (SVD) basis vectors, so freezing this layer during pre-training simply projects data onto the basis coefficients. In the fine-tuning stage, when other weights are more stable, unfreezing this can be useful.
+: Whether to freeze the first layer of the embedding network. This layer is seeded with reduced (SVD) basis vectors, so freezing this layer during pre-training simply projects data onto the basis coefficients. In the fine-tuning stage, when other weights are more stable, unfreezing this can be useful.
 
 optimizer
 : Specify [optimizer](https://pytorch.org/docs/stable/optim.html) type and parameters such as initial learning rate.
@@ -141,7 +145,13 @@ scheduler
 : Use a [learning rate scheduler](https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate) to reduce the learning rate over time. This can improve overall optimization.
 
 batch_size
-: Number of training samples per mini-batch. For a training dataset of size $N$, then each epoch will consist of $N / \text{batch_size}$ batches. Generally training will be faster for a larger batch size, but will require additional iterations.
+: Total number of training samples per optimizer step. For a training dataset of size $N$, each epoch consists of $N /$ `batch_size` optimizer steps. When using multiple GPUs, this is the *effective* batch size across all GPUs; each GPU processes `batch_size` / `num_gpus` samples per step.
+
+gradient_updates_per_optimizer_step
+: (Optional, default 1) Number of forward–backward passes to accumulate before calling the optimizer. Setting this to $k$ simulates an effective batch size of $k \times$ `batch_size` without increasing GPU memory usage. This is useful when the desired batch size does not fit in GPU memory.
+
+automatic_mixed_precision
+: (Optional, default `False`) Enable automatic mixed precision (AMP) training. With AMP, the forward pass runs in FP16, while optimizer state and parameter updates remain in FP32. This can roughly halve GPU memory usage and increase throughput on GPUs with Tensor Core hardware (e.g. NVIDIA A100, V100). Requires PyTorch >= 2.0 and a CUDA device.
 
 ```{important}
 The stage-training framework allows for separate pre-training and fine-tuning stages. We found that having a pre-training stage where we freeze certain network weights and fix the noise ASD improves overall training results.
@@ -156,6 +166,9 @@ device
 
 num_workers
 : Number of CPU worker processes to use for pre-processing training data before copying to the GPU. Data pre-processing (inluding decompression, projection to detectors, and noise generation) is quite expensive, so using 16 or 32 processes is recommended, otherwise this can become a bottleneck. We recommend monitoring the GPU utilization percentage as well as time spent on pre-processing (output during training) to fine-tune this number.
+
+num_gpus
+: (Optional, default 1) Number of GPUs to use for training. Setting this to more than 1 enables data-parallel multi-GPU training (PyTorch DDP). The `batch_size` specified in each training stage is the total effective batch size; it is divided equally across GPUs. When using `dingo_train_condor`, the HTCondor `request_gpus` directive is set automatically from this value. See [](#multi-gpu-training) for details.
 
 wandb
 : Settings for [Weights & Biases](https://wandb.ai/site). If you have an account, you can use this to track your training progress and compare different runs.
@@ -173,7 +186,104 @@ local_cache_path
 : When training on a cluster and loading waveforms during training (i.e., `leave_waveforms_on_disk=True`), the waveform dataset should be copied to the disk storage of the local node at the beginning of training. This prevents unexpected long data loading times during training due to network traffic. Usually, paths for local storage are `tmp` or `dev/shm`. When submitting the job with `condor`, `request_disk: 50GB` should be included in the `condor` settings with the requested disk space larger than the size of the waveform dataset used for training.
 
 condor
-: Settings for [HTCondor](https://htcondor.readthedocs.io/en/latest/index.html). The condor script will (re)submit itself according to these options.
+: Settings for [HTCondor](https://htcondor.readthedocs.io/en/latest/index.html). The condor script will (re)submit itself according to these options. Available keys are `bid`, `num_cpus`, `memory_cpus`, `memory_gpus`, `request_disk`, and `requirements`. The number of requested GPUs (`request_gpus`) is derived automatically from `num_gpus` above and does not need to be specified here.
+
+## Multi-GPU training
+
+Dingo supports data-parallel training across multiple GPUs using
+[PyTorch DDP](https://pytorch.org/docs/stable/notes/ddp.html) (DistributedDataParallel).
+Each GPU processes a different shard of the mini-batch simultaneously, effectively
+scaling throughput with the number of GPUs.
+
+For a detailed practical guide — including how to scale `batch_size` and learning
+rate for actual speedup, how to interpret the training log, and troubleshooting
+tips — see [](training_multi_gpu.md).
+
+### Enabling multi-GPU training
+
+Set `num_gpus` in the `local` section of your settings file:
+
+```yaml
+local:
+  device: cuda
+  num_gpus: 4
+  num_workers: 8   # Recommended: num_workers per GPU, e.g. 2–8
+  ...
+```
+
+The `batch_size` in each training stage is always the **total effective batch size**
+across all GPUs. Dingo divides it equally, so `batch_size` must be divisible by
+`num_gpus`. Each GPU therefore processes `batch_size / num_gpus` samples per step,
+which keeps the gradient statistics and learning dynamics identical to single-GPU
+training with the same `batch_size`.
+
+```{important}
+`batch_size` is the total effective batch size across all GPUs, not the per-GPU
+batch size. Increasing `num_gpus` does not change the effective batch size or
+require adjusting any other hyperparameters.
+```
+
+```note
+`freeze_rb_layer = True` is currently not allowed since additional changes 
+would be required to exclude the frozen RB layer from the DDP model wrapper.
+```
+
+### Gradient accumulation
+
+For very large effective batch sizes that do not fit in GPU memory, use gradient
+accumulation alongside multi-GPU training:
+
+```yaml
+training:
+  stage_0:
+    batch_size: 4096
+    gradient_updates_per_optimizer_step: 4  # effective batch = 4096 * 4 = 16384
+```
+
+Each optimizer step accumulates gradients over `gradient_updates_per_optimizer_step`
+forward–backward passes. Multi-GPU and gradient accumulation can be combined freely.
+
+### Automatic mixed precision
+
+Enable AMP to reduce GPU memory usage and increase throughput on modern GPUs:
+
+```yaml
+training:
+  stage_0:
+    batch_size: 4096
+    automatic_mixed_precision: True
+```
+
+AMP runs the forward pass in FP16 and the optimizer step in FP32, typically halving
+memory usage with negligible impact on model quality. It requires a CUDA device and
+PyTorch >= 2.0.
+
+### Using multiple GPUs with `dingo_train_condor`
+
+When submitting via HTCondor, the `request_gpus` directive is set automatically from
+`local.num_gpus`. No changes to the `condor:` block are needed:
+
+```yaml
+local:
+  device: cuda
+  num_gpus: 4
+  condor:
+    num_cpus: 64
+    memory_cpus: 256000
+    memory_gpus: 24000   # Memory per GPU in MB — used for node selection only.
+    request_disk: 50GB
+```
+
+```{note}
+On clusters with full-node GPU allocations (e.g., MPI-IS), requesting 6 or more
+GPUs automatically applies the appropriate FullNode HTCondor template.
+```
+
+### Requirements
+
+- PyTorch >= 2.0 (required for `torch.amp`)
+- An NCCL-capable build of PyTorch (standard for CUDA-enabled installations)
+- One CUDA GPU per process
 
 ## Command-line scripts
 

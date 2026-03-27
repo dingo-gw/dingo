@@ -77,7 +77,7 @@ training:
 # Local settings for training that have no impact on the final trained network.
 local:
   device: cpu  # Change this to 'cuda' for training on a GPU.
-  num_workers: 6  # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
+  num_workers: 16  # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
   use_wandb: True
   wandb_api_key:  # insert_here for monitoring many runs. Can be obtained from https://wandb.ai/settings
   runtime_limits:
@@ -85,10 +85,13 @@ local:
     max_epochs_per_run: 500
   checkpoint_epochs: 10
   leave_waveforms_on_disk: True
-  # local_cache_path: tmp # uncomment to avoid slow data loading during training due to network traffic on cluster
+  # num_gpus: 1  # Set to >1 to enable multi-GPU (DDP) training. batch_size above is the
+                 # total effective batch size; it is divided equally across GPUs.
+                 # When using Condor, request_gpus in the submission file is set automatically.
+  # local_cache_path: /tmp # uncomment to avoid slow data loading during training due to network traffic on cluster
+  # Settings for HTCondor job submission (remove if not running on a Condor cluster).
   condor:
     num_cpus: 16
     memory_cpus: 128000
-    num_gpus: 1
     memory_gpus: 8000
     request_disk: 50GB

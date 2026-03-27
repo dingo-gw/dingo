@@ -3,25 +3,43 @@ This module contains the abstract base class for representing posterior models,
 as well as functions for training and testing across an epoch.
 """
 
-from abc import abstractmethod, ABC
-import os
-from os.path import join
-import h5py
-
-import torch
-import dingo.core.utils as utils
-from torch.utils.data import Dataset
-import time
-import numpy as np
-from threadpoolctl import threadpool_limits
-import dingo.core.utils.trainutils
+import ctypes
 import json
+import os
+import time
+from abc import ABC, abstractmethod
 from collections import OrderedDict
-from typing import Optional
+from multiprocessing import Value
+from collections.abc import Sized
+from os.path import join
+from typing import Optional, Tuple
+
+import h5py
+import numpy as np
+import torch
+import torch.distributed as dist
+from threadpoolctl import threadpool_limits
+from torch.amp import autocast
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data import Dataset
+
+try:
+    from torch.amp import GradScaler
+except ImportError:
+    # PyTorch < 2.3: GradScaler is not yet in torch.amp; use torch.cuda.amp.
+    # Wrap it to accept the same device-string call signature as the new API.
+    from torch.cuda.amp import GradScaler as _CudaGradScaler
+
+    class GradScaler:  # type: ignore[no-redef]
+        def __new__(cls, device="cuda", **kwargs):
+            return _CudaGradScaler(**kwargs)
+
+
+import dingo.core.utils as utils
+import dingo.core.utils.trainutils
 from dingo.core.utils.backward_compatibility import update_model_config
 from dingo.core.utils.misc import get_version
-
-from dingo.core.utils.trainutils import EarlyStopping
+from dingo.core.utils.trainutils import EarlyStopping, RuntimeLimits
 
 
 class BasePosteriorModel(ABC):
@@ -60,6 +78,7 @@ class BasePosteriorModel(ABC):
         self.version = f"dingo={get_version()}"  # dingo version
 
         self.device = None
+        self.rank = None
         self.optimizer_kwargs = None
         self.network_kwargs = None
         self.scheduler_kwargs = None
@@ -72,6 +91,7 @@ class BasePosteriorModel(ABC):
             # separately, and before calling initialize_optimizer_and_scheduler().
 
         self.epoch = 0
+        self.iteration = 0
         self.network = None
         self.optimizer = None
         self.scheduler = None
@@ -185,19 +205,19 @@ class BasePosteriorModel(ABC):
         """
         pass
 
-    def network_to_device(self, device):
+    def network_to_device(self, device: str) -> None:
         """
-        Put model to device, and set self.device accordingly.
+        Put model to device and set ``self.device`` accordingly.
+
+        Accepts plain device strings (``"cpu"``, ``"cuda"``) as well as
+        rank-qualified CUDA strings (``"cuda:0"``, ``"cuda:1"``, …).  In the
+        latter case ``self.rank`` is set to the integer rank index.
         """
-        if device not in ("cpu", "cuda"):
-            raise ValueError(f"Device should be either cpu or cuda, got {device}.")
+        if "cpu" not in device and "cuda" not in device:
+            raise ValueError(f"Device should contain 'cpu' or 'cuda', got {device}.")
+        if ":" in device:
+            self.rank = int(device.split(":")[1])
         self.device = torch.device(device)
-        # Commented below so that code runs on first cuda device in the case of multiple.
-        # if device == 'cuda' and torch.cuda.device_count() > 1:
-        #     print("Using", torch.cuda.device_count(), "GPUs.")
-        #     raise NotImplementedError('This needs testing!')
-        #     # dim = 0 [512, ...] -> [256, ...], [256, ...] on 2 GPUs
-        #     self.network = torch.nn.DataParallel(self.network)
         print(f"Putting posterior model to device {self.device}.")
         self.network.to(self.device)
 
@@ -232,10 +252,17 @@ class BasePosteriorModel(ABC):
             saved, e.g. optimizer state dict
 
         """
+        # Strip the DDP wrapper so the checkpoint can be loaded on any number of GPUs.
+        if isinstance(self.network, DDP):
+            model_state_dict = self.network.module.state_dict()
+        else:
+            model_state_dict = self.network.state_dict()
+
         model_dict = {
             "model_kwargs": self.model_kwargs,
-            "model_state_dict": self.network.state_dict(),
+            "model_state_dict": model_state_dict,
             "epoch": self.epoch,
+            "iteration": self.iteration,
             "version": self.version,
         }
 
@@ -328,9 +355,9 @@ class BasePosteriorModel(ABC):
 
         self.model_kwargs = d["model_kwargs"]
         update_model_config(self.model_kwargs)  # For backward compatibility
-        self.initialize_network()
 
         self.epoch = d["epoch"]
+        self.iteration = d.get("iteration", 0)
 
         self.metadata = d["metadata"]
 
@@ -341,6 +368,7 @@ class BasePosteriorModel(ABC):
             self.event_metadata = d["event_metadata"]
 
         if device != "meta":
+            self.initialize_network()
             self.network.load_state_dict(d["model_state_dict"])
 
             self.network_to_device(device)
@@ -366,70 +394,114 @@ class BasePosteriorModel(ABC):
         train_loader: torch.utils.data.DataLoader,
         test_loader: torch.utils.data.DataLoader,
         train_dir: str,
-        runtime_limits: object = None,
-        checkpoint_epochs: int = None,
-        use_wandb=False,
-        test_only=False,
+        train_sampler: Optional[torch.utils.data.DistributedSampler] = None,
+        runtime_limits: Optional[RuntimeLimits] = None,
+        checkpoint_epochs: Optional[int] = None,
+        use_wandb: bool = False,
+        test_only: bool = False,
         early_stopping: Optional[EarlyStopping] = None,
+        gradient_updates_per_optimizer_step: int = 1,
+        automatic_mixed_precision: bool = False,
+        world_size: int = 1,
+        global_epoch: ctypes.c_int = Value(ctypes.c_int, 1),
     ):
         """
+        Train the network for one or more epochs.
 
         Parameters
         ----------
-        train_loader
-        test_loader
-        train_dir
-        runtime_limits
-        checkpoint_epochs
-        use_wandb
-        test_only: bool = False
-            if True, training is skipped
-        early_stopping: EarlyStopping
-            Optional EarlyStopping instance.
-
-        Returns
-        -------
-
+        train_loader : DataLoader
+        test_loader : DataLoader
+        train_dir : str
+            Directory for saving models and history.
+        train_sampler : DistributedSampler, optional
+            Required for DDP training to re-shuffle data each epoch.
+        runtime_limits : RuntimeLimits, optional
+        checkpoint_epochs : int, optional
+            Save a named checkpoint every this many epochs.
+        use_wandb : bool
+        test_only : bool
+            If True, skip training and only evaluate on the test set.
+        early_stopping : EarlyStopping, optional
+        gradient_updates_per_optimizer_step : int
+            Accumulate gradients over this many batches before calling
+            ``optimizer.step()``.  Use >1 to simulate a larger effective batch
+            size without increasing per-GPU memory usage.
+        automatic_mixed_precision : bool
+            Train with ``torch.amp`` mixed precision (FP16/BF16 forward pass,
+            FP32 parameter updates).
+        world_size : int
+            Number of GPUs (used only for logging the effective batch size).
+        global_epoch : multiprocessing.Value
+            Shared counter updated so that the WaveformDataset can query the
+            current epoch from any worker process.
         """
+        is_primary = self.rank is None or self.rank == 0
 
         if test_only:
-            test_loss = test_epoch(self, test_loader)
-            print(f"test loss: {test_loss:.3f}")
+            test_loss = test_epoch(self, dataloader=test_loader)
+            if is_primary:
+                print(f"test loss: {test_loss:.3f}")
+            return
 
-        else:
-            while not runtime_limits.limits_exceeded(self.epoch):
-                self.epoch += 1
+        while not runtime_limits.limits_exceeded(self.epoch):
+            self.epoch += 1
+            global_epoch.value = self.epoch
 
-                # Training
-                lr = utils.get_lr(self.optimizer)
-                with threadpool_limits(limits=1, user_api="blas"):
+            lr = utils.get_lr(self.optimizer)
+            with threadpool_limits(limits=1, user_api="blas"):
+                if train_sampler is not None:
+                    # Ensure each epoch sees a different random shuffle.
+                    train_sampler.set_epoch(self.epoch)
+
+                if is_primary:
                     print(f"\nStart training epoch {self.epoch} with lr {lr}")
-                    time_start = time.time()
-                    train_loss = train_epoch(self, train_loader)
-                    train_time = time.time() - time_start
+                time_start = torch.tensor(time.time(), device=self.device, dtype=torch.float64)
 
+                train_loss, n_iter = train_epoch(
+                    self,
+                    dataloader=train_loader,
+                    gradient_updates_per_optimizer_step=gradient_updates_per_optimizer_step,
+                    automatic_mixed_precision=automatic_mixed_precision,
+                    world_size=world_size,
+                )
+                self.iteration += n_iter
+
+                if self.rank is not None:
+                    dist.barrier()
+                    dist.all_reduce(time_start, op=dist.ReduceOp.MIN)
+                train_time = time.time() - time_start.item()
+
+                if is_primary:
                     print(
                         "Done. This took {:2.0f}:{:2.0f} min.".format(
                             *divmod(train_time, 60)
                         )
                     )
-
-                    # Testing
                     print(f"Start testing epoch {self.epoch}")
-                    time_start = time.time()
-                    test_loss = test_epoch(self, test_loader)
-                    test_time = time.time() - time_start
 
+                time_start = torch.tensor(time.time(), device=self.device, dtype=torch.float64)
+                test_loss = test_epoch(
+                    self,
+                    dataloader=test_loader,
+                    gradient_updates_per_optimizer_step=gradient_updates_per_optimizer_step,
+                    world_size=world_size,
+                )
+                if self.rank is not None:
+                    dist.barrier()
+                    dist.all_reduce(time_start, op=dist.ReduceOp.MIN)
+                test_time = time.time() - time_start.item()
+
+                if is_primary:
                     print(
                         "Done. This took {:2.0f}:{:2.0f} min.".format(
-                            *divmod(time.time() - time_start, 60)
+                            *divmod(test_time, 60)
                         )
                     )
 
-                # scheduler step for learning rate
-                utils.perform_scheduler_step(self.scheduler, test_loss)
+            utils.perform_scheduler_step(self.scheduler, test_loss)
 
-                # write history and save model
+            if is_primary:
                 utils.write_history(train_dir, self.epoch, train_loss, test_loss, lr)
                 utils.save_model(self, train_dir, checkpoint_epochs=checkpoint_epochs)
                 if use_wandb:
@@ -451,70 +523,179 @@ class BasePosteriorModel(ABC):
                     except ImportError:
                         print("wandb not installed. Skipping logging to wandb.")
 
-                if early_stopping is not None:
-                    # Whether to use train or test loss
-                    early_stopping_loss = (
-                        test_loss
-                        if early_stopping.metric == "validation"
-                        else train_loss
+            if early_stopping is not None:
+                early_stopping_loss = (
+                    test_loss if early_stopping.metric == "validation" else train_loss
+                )
+                is_best_model = early_stopping(early_stopping_loss)
+                if is_best_model and is_primary:
+                    self.save_model(
+                        join(train_dir, "best_model.pt"), save_training_info=False
                     )
-                    is_best_model = early_stopping(early_stopping_loss)
-                    if is_best_model:
-                        self.save_model(
-                            join(train_dir, "best_model.pt"), save_training_info=False
-                        )
-                    if early_stopping.early_stop:
+                if early_stopping.early_stop:
+                    if is_primary:
                         print("Early stopping")
-                        break
+                    break
+
+            if is_primary:
                 print(f"Finished training epoch {self.epoch}.\n")
 
 
-def train_epoch(pm, dataloader):
+def _dataset_len(dataloader: torch.utils.data.DataLoader) -> int:
+    """Return the number of samples in a DataLoader's dataset.
+
+    ``DataLoader.dataset`` is typed as ``Dataset``, which does not inherit from
+    ``Sized`` in PyTorch's stubs even though all concrete datasets implement
+    ``__len__``.  This helper asserts the contract and returns the length.
+    """
+    dataset = dataloader.dataset
+    if not isinstance(dataset, Sized):
+        raise TypeError(
+            f"DataLoader dataset of type {type(dataset).__name__} does not "
+            "implement __len__. Cannot determine dataset length."
+        )
+    return len(dataset)
+
+
+def train_epoch(
+    pm: BasePosteriorModel,
+    dataloader: torch.utils.data.DataLoader,
+    gradient_updates_per_optimizer_step: int = 1,
+    automatic_mixed_precision: bool = False,
+    world_size: int = 1,
+) -> Tuple[float, int]:
+    """
+    Train the network for one epoch.
+
+    Parameters
+    ----------
+    pm : BasePosteriorModel
+    dataloader : DataLoader
+    gradient_updates_per_optimizer_step : int
+        Accumulate gradients over this many mini-batches before stepping.
+        Values >1 simulate a larger effective batch without extra GPU memory.
+    automatic_mixed_precision : bool
+        Use ``torch.amp`` (FP16 forward pass, FP32 updates).
+    world_size : int
+        Number of GPUs, used only for logging the effective batch size.
+
+    Returns
+    -------
+    Tuple[float, int]
+        Average loss over the epoch and number of optimizer steps performed.
+    """
     pm.network.train()
+
+    if pm.rank is None:
+        effective_bs = dataloader.batch_size
+    else:
+        effective_bs = dataloader.batch_size * world_size
+
     loss_info = dingo.core.utils.trainutils.LossInfo(
-        pm.epoch,
-        len(dataloader.dataset),
-        dataloader.batch_size,
+        epoch=pm.epoch,
+        len_dataset=_dataset_len(dataloader),
+        batch_size_per_grad_update=effective_bs,
         mode="Train",
         print_freq=1,
+        device=pm.device,
     )
 
+    scaler = GradScaler("cuda") if automatic_mixed_precision else None
+
     for batch_idx, data in enumerate(dataloader):
-        loss_info.update_timer()
-        pm.optimizer.zero_grad()
-        # data to device
+        loss_info.update_timer("Dataloader")
+
+        if batch_idx % gradient_updates_per_optimizer_step == 0:
+            pm.optimizer.zero_grad(set_to_none=True)
+
         data = [d.to(pm.device, non_blocking=True) for d in data]
-        # compute loss
-        loss = pm.loss(data[0], *data[1:])
-        # backward pass and optimizer step
-        loss.backward()
-        pm.optimizer.step()
-        # update loss for history and logging
-        loss_info.update(loss.detach().item(), len(data[0]))
-        loss_info.print_info(batch_idx)
 
-    return loss_info.get_avg()
+        if automatic_mixed_precision:
+            with autocast("cuda"):
+                result = pm.loss(data[0], *data[1:])
+            loss = result[0] if isinstance(result, tuple) else result
+            scaler.scale(loss).backward()
+        else:
+            result = pm.loss(data[0], *data[1:])
+            loss = result[0] if isinstance(result, tuple) else result
+            loss.backward()
+
+        loss_info.cache_loss(loss=loss, n=len(data[0]))
+
+        if (batch_idx + 1) % gradient_updates_per_optimizer_step == 0:
+            if automatic_mixed_precision:
+                scaler.step(pm.optimizer)
+                scaler.update()
+            else:
+                pm.optimizer.step()
+
+            loss_info.update()
+            if pm.rank is None or pm.rank == 0:
+                loss_info.print_info(batch_idx)
+
+    return loss_info.get_avg(), loss_info.get_iteration()
 
 
-def test_epoch(pm, dataloader):
+def test_epoch(
+    pm: BasePosteriorModel,
+    dataloader: torch.utils.data.DataLoader,
+    gradient_updates_per_optimizer_step: int = 1,
+    world_size: int = 1,
+) -> float:
+    """
+    Evaluate the network on the test set.
+
+    Parameters
+    ----------
+    pm : BasePosteriorModel
+    dataloader : DataLoader
+    gradient_updates_per_optimizer_step : int
+        Used to match the effective batch size of the training loop for
+        comparable loss values.
+    world_size : int
+        Number of GPUs, used only for logging.
+
+    Returns
+    -------
+    float
+        Average loss over the test set.
+    """
     with torch.no_grad():
         pm.network.eval()
+
+        if pm.rank is None:
+            effective_bs = dataloader.batch_size
+        else:
+            effective_bs = dataloader.batch_size * world_size
+
+        if _dataset_len(dataloader) < effective_bs:
+            if pm.rank is None or pm.rank == 0:
+                print(
+                    f"Warning: test dataset (len {_dataset_len(dataloader)}) is smaller "
+                    f"than effective_batch_size={effective_bs}. "
+                    "Test loss computed over full dataset; may not be comparable to train loss."
+                )
+            effective_bs = _dataset_len(dataloader)
+            gradient_updates_per_optimizer_step = 1
+
         loss_info = dingo.core.utils.trainutils.LossInfo(
-            pm.epoch,
-            len(dataloader.dataset),
-            dataloader.batch_size,
+            epoch=pm.epoch,
+            len_dataset=_dataset_len(dataloader),
+            batch_size_per_grad_update=effective_bs,
             mode="Test",
             print_freq=1,
+            device=pm.device,
         )
 
         for batch_idx, data in enumerate(dataloader):
             loss_info.update_timer()
-            # data to device
             data = [d.to(pm.device, non_blocking=True) for d in data]
-            # compute loss
-            loss = pm.loss(data[0], *data[1:])
-            # update loss for history and logging
-            loss_info.update(loss.item(), len(data[0]))
-            loss_info.print_info(batch_idx)
+            result = pm.loss(data[0], *data[1:])
+            loss = result[0] if isinstance(result, tuple) else result
+            loss_info.cache_loss(loss, len(data[0]))
+            if (batch_idx + 1) % gradient_updates_per_optimizer_step == 0:
+                loss_info.update()
+                if pm.rank is None or pm.rank == 0:
+                    loss_info.print_info(batch_idx)
 
         return loss_info.get_avg()
