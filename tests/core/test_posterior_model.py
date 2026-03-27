@@ -1,9 +1,11 @@
-import pytest
-import types
 import os
+import types
 from os.path import join
+
 import numpy as np
+import pytest
 import torch
+
 from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
 from dingo.core.utils import torchutils
 

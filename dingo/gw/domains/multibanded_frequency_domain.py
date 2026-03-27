@@ -1,7 +1,8 @@
-from typing import Iterable, Union, Optional
+from copy import copy
+from typing import Iterable, Optional, Union
+
 import numpy as np
 import torch
-from copy import copy
 
 from .base_frequency_domain import BaseFrequencyDomain
 from .uniform_frequency_domain import UniformFrequencyDomain

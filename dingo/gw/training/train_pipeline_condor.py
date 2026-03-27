@@ -1,8 +1,9 @@
+import argparse
 import os
 import sys
-from os.path import join, isfile
+from os.path import isfile, join
+
 import yaml
-import argparse
 
 from dingo.gw.training import (
     prepare_training_new,

@@ -2,12 +2,11 @@
 from functools import partial
 from multiprocessing import Pool
 
-import numpy as np
-import pandas as pd
 import lal
 import lalsimulation as LS
+import numpy as np
+import pandas as pd
 from threadpoolctl import threadpool_limits
-
 
 DINGO_PE_SPIN_PARAMETERS = (
     "theta_jn",

@@ -1,5 +1,6 @@
 import os
 from os.path import join
+
 import yaml
 
 
@@ -11,20 +12,21 @@ def resubmit_condor_job(train_dir, train_settings, epoch):
     :param epoch:
     :return:
     """
-    if 'condor_settings' in train_settings:
-        print('Copying log files')
+    if "condor_settings" in train_settings:
+        print("Copying log files")
         copy_logfiles(train_dir, epoch=epoch)
 
-        if epoch >= train_settings['train_settings']['runtime_limits'][
-            'max_epochs_total']:
-            print('Training complete, job will not be resubmitted')
+        if (
+            epoch
+            >= train_settings["train_settings"]["runtime_limits"]["max_epochs_total"]
+        ):
+            print("Training complete, job will not be resubmitted")
         else:
-            print('Training incomplete, resubmitting job.')
+            print("Training incomplete, resubmitting job.")
             create_submission_file_and_submit_job(train_dir)
 
 
-def create_submission_file_and_submit_job(train_dir,
-                                          filename='submission_file.sub'):
+def create_submission_file_and_submit_job(train_dir, filename="submission_file.sub"):
     """
     TODO: documentation
     :param train_dir:
@@ -32,55 +34,58 @@ def create_submission_file_and_submit_job(train_dir,
     :return:
     """
     create_submission_file(train_dir, filename)
-    with open(join(train_dir, 'train_settings.yaml'), 'r') as fp:
-        bid = yaml.safe_load(fp)['condor_settings']['bid']
-    os.system(f'condor_submit_bid {bid} {join(train_dir, filename)}')
+    with open(join(train_dir, "train_settings.yaml"), "r") as fp:
+        bid = yaml.safe_load(fp)["condor_settings"]["bid"]
+    os.system(f"condor_submit_bid {bid} {join(train_dir, filename)}")
 
 
-def create_submission_file(train_dir, filename='submission_file.sub'):
+def create_submission_file(train_dir, filename="submission_file.sub"):
     """
     TODO: documentation
     :param train_dir:
     :param filename:
     :return:
     """
-    with open(join(train_dir, 'train_settings.yaml'), 'r') as fp:
-        d = yaml.safe_load(fp)['condor_settings']
+    with open(join(train_dir, "train_settings.yaml"), "r") as fp:
+        d = yaml.safe_load(fp)["condor_settings"]
     lines = []
     lines.append(f'executable = {d["python"]}\n')
     lines.append(f'request_cpus = {d["num_cpus"]}\n')
     lines.append(f'request_memory = {d["memory_cpus"]}\n')
     lines.append(f'request_gpus = {d["num_gpus"]}\n')
-    lines.append(f'requirements = TARGET.CUDAGlobalMemoryMb > '
-                 f'{d["memory_gpus"]}\n\n')
+    lines.append(
+        f"requirements = TARGET.CUDAGlobalMemoryMb > " f'{d["memory_gpus"]}\n\n'
+    )
 
     lines.append(f'arguments = {d["train_script"]} --train_dir {train_dir}\n')
     lines.append(f'error = {join(train_dir, "info.err")}\n')
     lines.append(f'output = {join(train_dir, "info.out")}\n')
     lines.append(f'log = {join(train_dir, "info.log")}\n')
-    lines.append('queue')
+    lines.append("queue")
 
-    with open(join(train_dir, filename), 'w') as f:
+    with open(join(train_dir, filename), "w") as f:
         for line in lines:
             f.write(line)
 
 
 def copyfile(src, dst):
-    os.system('cp -p %s %s' % (src, dst))
+    os.system("cp -p %s %s" % (src, dst))
 
 
-def copy_logfiles(log_dir, epoch, name='info', suffixes=('.err','.log','.out')):
+def copy_logfiles(log_dir, epoch, name="info", suffixes=(".err", ".log", ".out")):
     for suffix in suffixes:
         src = join(log_dir, name + suffix)
-        dest = join(log_dir, name + '_{:03d}'.format(epoch) + suffix)
+        dest = join(log_dir, name + "_{:03d}".format(epoch) + suffix)
         try:
             copyfile(src, dest)
         except:
-            print('Could not copy ' + src)
+            print("Could not copy " + src)
 
 
-if __name__ == '__main__':
-    train_dir = '/Users/mdax/Documents/dingo/devel/dingo-devel/tutorials/02_gwpe/train_dir/'
+if __name__ == "__main__":
+    train_dir = (
+        "/Users/mdax/Documents/dingo/devel/dingo-devel/tutorials/02_gwpe/train_dir/"
+    )
     create_submission_file(train_dir)
 
     # epoch = pm.epoch - 1

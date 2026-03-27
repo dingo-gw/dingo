@@ -1,7 +1,8 @@
-import numpy as np
-from types import SimpleNamespace
-from os.path import join, dirname
 import argparse
+from os.path import dirname, join
+from types import SimpleNamespace
+
+import numpy as np
 
 from dingo.core.dataset import DingoDataset
 from dingo.core.result import Result

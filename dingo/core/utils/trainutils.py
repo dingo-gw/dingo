@@ -1,9 +1,10 @@
-import time
-import os
-import numpy as np
-from os.path import join, isfile
 import csv
+import os
+import time
+from os.path import isfile, join
 from typing import Literal
+
+import numpy as np
 
 
 class AvgTracker:

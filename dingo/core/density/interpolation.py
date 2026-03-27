@@ -1,6 +1,6 @@
 from functools import partial
-from multiprocessing import Pool
 from itertools import starmap
+from multiprocessing import Pool
 
 import numpy as np
 from bilby.core.prior import Interped

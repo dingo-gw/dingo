@@ -7,14 +7,12 @@ import re
 import subprocess
 import time
 
-
 from asimov import config, logger
-
 from asimov.pipeline import (
+    PESummaryPipeline,
     Pipeline,
     PipelineException,
     PipelineLogger,
-    PESummaryPipeline,
 )
 
 

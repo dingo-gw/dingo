@@ -1,13 +1,12 @@
+import argparse
 import copy
 
+import numpy as np
 import torch
 
+from dingo.core.posterior_models import NormalizingFlowPosteriorModel
 from dingo.core.utils import build_train_and_test_loaders
 from dingo.core.utils.trainutils import RuntimeLimits
-import numpy as np
-import argparse
-
-from dingo.core.posterior_models import NormalizingFlowPosteriorModel
 
 
 class SampleDataset(torch.utils.data.Dataset):

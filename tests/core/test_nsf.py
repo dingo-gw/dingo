@@ -1,13 +1,15 @@
-import pytest
 import types
+
+import pytest
 import torch
 import torch.optim as optim
+
+from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
 from dingo.core.nn.nsf import (
-    create_nsf_model,
     FlowWrapper,
+    create_nsf_model,
     create_nsf_with_rb_projection_embedding_net,
 )
-from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
 from dingo.core.utils import torchutils
 
 

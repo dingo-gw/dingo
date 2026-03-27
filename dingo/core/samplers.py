@@ -1,9 +1,9 @@
 import copy
 import math
+import sys
 import time
 from pathlib import Path
 from typing import Optional, Union
-import sys
 
 import numpy as np
 import pandas as pd
@@ -11,9 +11,9 @@ import torch
 from torchvision.transforms import Compose
 
 from dingo.core.posterior_models import BasePosteriorModel
-from dingo.core.result import Result
 from dingo.core.result import DATA_KEYS as RESULT_DATA_KEYS
-from dingo.core.utils import torch_detach_to_cpu, IterationTracker
+from dingo.core.result import Result
+from dingo.core.utils import IterationTracker, torch_detach_to_cpu
 
 # FIXME: transform below should be in core
 from dingo.gw.transforms import SelectStandardizeRepackageParameters

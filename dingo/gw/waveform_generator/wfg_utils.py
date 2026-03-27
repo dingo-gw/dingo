@@ -1,6 +1,6 @@
-import numpy as np
 import lal
 import lalsimulation as LS
+import numpy as np
 
 
 def linked_list_modes_to_dict_modes(hlm_ll):

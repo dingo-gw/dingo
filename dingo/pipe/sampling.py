@@ -1,11 +1,11 @@
 #!/usr/bin/env python
-""" Script to sample from a Dingo model. Based on bilby_pipe data analysis script. """
+"""Script to sample from a Dingo model. Based on bilby_pipe data analysis script."""
+import os
 import sys
 from pathlib import Path
-import os
 
 from bilby_pipe.input import Input
-from bilby_pipe.utils import parse_args, logger, convert_string_to_dict
+from bilby_pipe.utils import convert_string_to_dict, logger, parse_args
 
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset

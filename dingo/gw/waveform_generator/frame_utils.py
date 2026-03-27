@@ -1,6 +1,8 @@
 """These functions are used for transforming between J and L0 frames."""
-import numpy as np
+
 import lal
+import numpy as np
+
 
 def rotate_z(angle, vx, vy, vz):
     vx_new = vx * np.cos(angle) - vy * np.sin(angle)
@@ -32,7 +34,7 @@ def get_JL0_euler_angles(p, wfg, spin_conversion_phase=None):
     m2 = m2 / lal.MSUN_SI
 
     m = m1 + m2
-    eta = m1 * m2 / m ** 2
+    eta = m1 * m2 / m**2
     v0 = (m * lal.MTSUN_SI * np.pi * wfg.f_ref) ** (1 / 3)
 
     # All quantities in L0 frame, unless indicated.
@@ -46,7 +48,7 @@ def get_JL0_euler_angles(p, wfg, spin_conversion_phase=None):
     delta = np.sqrt(1 - 4 * eta)
     m1_prime = (1 + delta) / 2
     m2_prime = (1 - delta) / 2
-    Sl = m1_prime ** 2 * chi1z + m2_prime ** 2 * chi2z
+    Sl = m1_prime**2 * chi1z + m2_prime**2 * chi2z
     Sigmal = chi2z * m2_prime - chi1z * m1_prime
 
     # This calculation of the orbital angular momentum is taken from Appendix G.2 of PRD 103, 104056 (2021).
@@ -54,31 +56,31 @@ def get_JL0_euler_angles(p, wfg, spin_conversion_phase=None):
     Lmag = (m * m * eta / v0) * (
         1
         + v0 * v0 * (1.5 + eta / 6)
-        + (27 / 8 - 19 * eta / 8 + eta ** 2 / 24) * v0 ** 4
+        + (27 / 8 - 19 * eta / 8 + eta**2 / 24) * v0**4
         + (
-            7 * eta ** 3 / 1296
-            + 31 * eta ** 2 / 24
-            + (41 * np.pi ** 2 / 24 - 6889 / 144) * eta
+            7 * eta**3 / 1296
+            + 31 * eta**2 / 24
+            + (41 * np.pi**2 / 24 - 6889 / 144) * eta
             + 135 / 16
         )
-        * v0 ** 6
+        * v0**6
         + (
-            -55 * eta ** 4 / 31104
-            - 215 * eta ** 3 / 1728
-            + (356035 / 3456 - 2255 * np.pi ** 2 / 576) * eta ** 2
+            -55 * eta**4 / 31104
+            - 215 * eta**3 / 1728
+            + (356035 / 3456 - 2255 * np.pi**2 / 576) * eta**2
             + eta
             * (
-                -64 * np.log(16 * v0 ** 2) / 3
-                - 6455 * np.pi ** 2 / 1536
+                -64 * np.log(16 * v0**2) / 3
+                - 6455 * np.pi**2 / 1536
                 - 128 * lal.GAMMA / 3
                 + 98869 / 5760
             )
             + 2835 / 128
         )
-        * v0 ** 8
-        + (-35 * Sl / 6 - 5 * delta * Sigmal / 2) * v0 ** 3
+        * v0**8
+        + (-35 * Sl / 6 - 5 * delta * Sigmal / 2) * v0**3
         + ((-77 / 8 + 427 * eta / 72) * Sl + delta * (-21 / 8 + 35 * eta / 12) * Sigmal)
-        * v0 ** 5
+        * v0**5
     )
 
     Jx = s1x + s2x

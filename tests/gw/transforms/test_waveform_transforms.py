@@ -1,10 +1,9 @@
-import pytest
 import numpy as np
+import pytest
 from scipy.stats import binom
 
-from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain
+from dingo.gw.domains import MultibandedFrequencyDomain, UniformFrequencyDomain
 from dingo.gw.transforms import CropMaskStrainRandom, MaskDataForFrequencyRangeUpdate
-
 
 TOLERANCE = 1e-4  # probability with which we allow confidence tests to fail
 

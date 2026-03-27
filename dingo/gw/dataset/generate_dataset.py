@@ -1,10 +1,10 @@
 import argparse
 import copy
 import textwrap
+from functools import partial
 from multiprocessing import Pool
 from pathlib import Path
 from typing import Dict, Tuple
-from functools import partial
 
 import numpy as np
 import pandas as pd
@@ -13,6 +13,7 @@ from bilby.gw.prior import BBHPriorDict
 from threadpoolctl import threadpool_limits
 from torchvision.transforms import Compose
 
+from dingo.core.utils.misc import call_func_strict_output_dim
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.gw.domains import build_domain
 from dingo.gw.prior import build_prior_with_defaults
@@ -23,7 +24,6 @@ from dingo.gw.waveform_generator import (
     WaveformGenerator,
     generate_waveforms_parallel,
 )
-from dingo.core.utils.misc import call_func_strict_output_dim
 
 
 def generate_parameters_and_polarizations(

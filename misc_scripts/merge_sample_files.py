@@ -1,15 +1,24 @@
-import os
-from os.path import dirname, basename, join
 import argparse
-import pandas as pd
-import numpy as np
+import os
 import pdb
+from os.path import basename, dirname, join
+
+import numpy as np
+import pandas as pd
 
 parser = argparse.ArgumentParser(description="Merge dingo smaple files")
-parser.add_argument("--prefix", type=str, required=True,
-                    help="Prefix for sample files. Includes dirname + local prefix.")
-parser.add_argument("--log_probs_target_min", type=float, default=None,
-                    help="Save only samples with log_probs_target >= log_probs_target_min.")
+parser.add_argument(
+    "--prefix",
+    type=str,
+    required=True,
+    help="Prefix for sample files. Includes dirname + local prefix.",
+)
+parser.add_argument(
+    "--log_probs_target_min",
+    type=float,
+    default=None,
+    help="Save only samples with log_probs_target >= log_probs_target_min.",
+)
 args = parser.parse_args()
 
 directory = dirname(args.prefix)
@@ -33,7 +42,9 @@ new_frame.attrs = frames[0].attrs
 if args.log_probs_target_min is not None:
     log_probs_target_offset = np.max(new_frame.log_probs_target)
     n0 = len(new_frame)
-    new_frame = new_frame[new_frame.log_probs_target - log_probs_target_offset > args.log_probs_target_min]
+    new_frame = new_frame[
+        new_frame.log_probs_target - log_probs_target_offset > args.log_probs_target_min
+    ]
     n1 = len(new_frame)
     new_frame.attrs["filter"] = {
         "log_probs_target_min": args.log_probs_target_min,
@@ -43,7 +54,7 @@ if args.log_probs_target_min is not None:
     }
     print(
         f"Filtered samples for log_prob > {args.log_probs_target_min}.",
-        f"Kept {n1} out of {n0} samples ({n1/n0 * 100:.1f}%)."
+        f"Kept {n1} out of {n0} samples ({n1/n0 * 100:.1f}%).",
     )
     # drop log probs
     new_frame.drop(columns="log_probs_target", inplace=True)

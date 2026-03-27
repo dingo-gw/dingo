@@ -1,5 +1,5 @@
-import pytest
 import numpy as np
+import pytest
 import torch
 from bilby.core.prior import PriorDict
 from bilby.gw.detector import InterferometerList

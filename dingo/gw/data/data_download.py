@@ -1,7 +1,8 @@
-import numpy as np
-from gwpy.timeseries import TimeSeries
-import pycbc.psd
 import math
+
+import numpy as np
+import pycbc.psd
+from gwpy.timeseries import TimeSeries
 
 from dingo.gw.gwutils import get_window
 

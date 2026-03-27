@@ -1,8 +1,10 @@
-from os.path import join
-import numpy as np
 import math
-import pandas as pd
+from os.path import join
+
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
 from dingo.core.utils.plotting import plot_corner_multi
 from dingo.gw.result import Result
 

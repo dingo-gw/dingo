@@ -4,16 +4,15 @@ import tempfile
 import time
 from collections import namedtuple
 from itertools import product
-
-import numpy as np
 from typing import Optional
 
+import numpy as np
 import pandas as pd
 import scipy
+from bilby.core.prior import Constraint, DeltaFunction, Prior, PriorDict
 from matplotlib import pyplot as plt
 from scipy.constants import golden
 from scipy.special import logsumexp
-from bilby.core.prior import Constraint, DeltaFunction, PriorDict
 
 from dingo.core.dataset import DingoDataset
 from dingo.core.density import train_unconditional_density_estimator
@@ -1090,5 +1089,3 @@ def freeze(d):
     elif isinstance(d, list):
         return tuple(freeze(value) for value in d)
     return d
-
-

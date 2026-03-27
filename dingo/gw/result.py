@@ -4,24 +4,22 @@ from typing import Optional
 
 import numpy as np
 import yaml
-from bilby.core.prior import Uniform, Constraint, PriorDict, DeltaFunction
+from bilby.core.prior import Constraint, DeltaFunction, PriorDict, Uniform
 from bilby.gw.prior import CalibrationPriorDict
 from bilby_pipe.utils import CALIBRATION_CORRECTION_TYPE_LOOKUP
 
 from dingo.core.density import (
-    interpolated_sample_and_log_prob_multi,
     interpolated_log_prob_multi,
+    interpolated_sample_and_log_prob_multi,
 )
 from dingo.core.multiprocessing import apply_func_with_multiprocessing
 from dingo.core.result import Result as CoreResult
+from dingo.core.utils.backward_compatibility import check_minimum_version
 from dingo.gw.conversion import change_spin_conversion_phase
-from dingo.gw.domains import MultibandedFrequencyDomain
-from dingo.gw.domains import build_domain
+from dingo.gw.domains import MultibandedFrequencyDomain, build_domain
 from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 from dingo.gw.prior import build_prior_with_defaults
-from dingo.core.utils.backward_compatibility import check_minimum_version
-
 
 RANDOM_STATE = 150914
 
@@ -415,13 +413,18 @@ class Result(CoreResult):
         self.calibration_sampling_kwargs = calibration_sampling_kwargs
 
         # Handle correction_type defaults
-        correction_type = self.calibration_sampling_kwargs.get("correction_type", "data")
+        correction_type = self.calibration_sampling_kwargs.get(
+            "correction_type", "data"
+        )
         if correction_type is None:
             correction_type_dict = {
-                ifo: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo] for ifo in self.interferometers
+                ifo: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo]
+                for ifo in self.interferometers
             }
         elif correction_type == "data" or correction_type == "template":
-            correction_type_dict = {ifo: correction_type for ifo in self.interferometers}
+            correction_type_dict = {
+                ifo: correction_type for ifo in self.interferometers
+            }
         elif isinstance(correction_type, dict):
             correction_type_dict = correction_type
         else:
@@ -440,7 +443,7 @@ class Result(CoreResult):
             )
 
         # Removing the delta function priors on the frequency nodes, amplitude and phase.
-        # Usually the frequency nodes are set to delta functions, but we also remove the 
+        # Usually the frequency nodes are set to delta functions, but we also remove the
         # the amplitude and phase delta functions if present.
         # This avoids large log probs and log priors, since the density of a delta function
         # at the sampled point is infinite. The delta functions do not affect the sampling,
@@ -457,9 +460,9 @@ class Result(CoreResult):
         delta_log_prob = np.zeros(num_samples)
 
         # Here we will sample the calibration parameters from the prior.
-        # We treat the *prior as the proposal* distribution and 
-        # therefore add the log_prob of the sampled calibration parameters 
-        # to the existing log_prob. We also will update the prior 
+        # We treat the *prior as the proposal* distribution and
+        # therefore add the log_prob of the sampled calibration parameters
+        # to the existing log_prob. We also will update the prior
         # to include the calibration priors using the importance_sampling_metadata
         prior_update = self.importance_sampling_metadata.get("prior_update", {})
         for ifo, prior in calibration_priors.items():
@@ -690,7 +693,9 @@ class Result(CoreResult):
             num_processes=num_processes,
         )
 
-    def get_pesummary_samples(self, num_processes=1, resampling_method="clip+rejection"):
+    def get_pesummary_samples(
+        self, num_processes=1, resampling_method="clip+rejection"
+    ):
         """Samples in a form suitable for PESummary.
 
         These samples are adjusted to undo certain conventions used internally by

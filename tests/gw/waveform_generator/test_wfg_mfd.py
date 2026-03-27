@@ -5,7 +5,7 @@ from scipy.interpolate import interp1d
 from dingo.gw.domains import MultibandedFrequencyDomain
 from dingo.gw.gwutils import get_mismatch
 from dingo.gw.prior import build_prior_with_defaults
-from dingo.gw.waveform_generator import WaveformGenerator, NewInterfaceWaveformGenerator
+from dingo.gw.waveform_generator import NewInterfaceWaveformGenerator, WaveformGenerator
 
 
 @pytest.fixture

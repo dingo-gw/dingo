@@ -4,6 +4,7 @@ from bilby.gw.detector import PowerSpectralDensity
 from scipy.interpolate import interp1d
 
 from dingo.gw.domains import UniformFrequencyDomain
+
 from .utils import get_batch_size_of_input_sample
 
 
@@ -134,7 +135,7 @@ class WhitenAndScaleStrain(object):
 
     1 / np.sqrt(4.0 * delta_f).
 
-    This accounts for frequency binning 
+    This accounts for frequency binning
     """
 
     def __init__(self, scale_factor):

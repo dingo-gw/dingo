@@ -4,6 +4,7 @@ import numpy as np
 import torch
 
 from dingo.gw.gwutils import *
+
 from .base_frequency_domain import BaseFrequencyDomain
 
 

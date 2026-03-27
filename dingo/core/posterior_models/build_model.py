@@ -3,9 +3,9 @@ from dingo.core.posterior_models.flow_matching import FlowMatchingPosteriorModel
 from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
 from dingo.core.posterior_models.score_matching import ScoreDiffusionPosteriorModel
 from dingo.core.utils.backward_compatibility import (
+    check_minimum_version,
     torch_load_with_fallback,
     update_model_config,
-    check_minimum_version,
 )
 
 

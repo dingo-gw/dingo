@@ -5,7 +5,7 @@ import yaml
 from scipy.interpolate import interp1d
 
 from dingo.gw.dataset import generate_parameters_and_polarizations
-from dingo.gw.domains import build_domain, MultibandedFrequencyDomain
+from dingo.gw.domains import MultibandedFrequencyDomain, build_domain
 from dingo.gw.gwutils import get_mismatch
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.waveform_generator import (

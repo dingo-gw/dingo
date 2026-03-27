@@ -1,5 +1,5 @@
-import pytest
 import numpy as np
+import pytest
 
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_mismatch

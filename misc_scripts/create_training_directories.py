@@ -1,8 +1,9 @@
+import argparse
+import copy
 import os
 from os.path import join
-import copy
+
 import yaml
-import argparse
 
 
 def none_or_str(value):

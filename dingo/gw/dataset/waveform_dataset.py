@@ -1,12 +1,13 @@
 from typing import Dict, List, Optional, Union
+
 import h5py
 import numpy as np
 import torch.utils.data
 from torchvision.transforms import Compose
 
 from dingo.core.dataset import DingoDataset, recursive_hdf5_load
-from dingo.gw.SVD import SVDBasis, ApplySVD
 from dingo.gw.domains import build_domain
+from dingo.gw.SVD import ApplySVD, SVDBasis
 from dingo.gw.transforms import WhitenFixedASD
 
 

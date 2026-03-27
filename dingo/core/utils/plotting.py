@@ -1,12 +1,12 @@
 import re
 from itertools import zip_longest
 
+import corner
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import corner
 import numpy as np
 import pandas as pd
-from bilby.core.prior import PriorDict, Prior
+from bilby.core.prior import Prior, PriorDict
 
 
 def _sanitize_latex_label(label: str) -> str:
@@ -147,9 +147,7 @@ def plot_corner_multi(
     # every corner call uses identical bins, so the 1D marginal densities are
     # on a consistent scale regardless of sample size or weight distribution.
     all_data = pd.concat([s[common_parameters] for s in samples], ignore_index=True)
-    common_range = [
-        (all_data[p].min(), all_data[p].max()) for p in common_parameters
-    ]
+    common_range = [(all_data[p].min(), all_data[p].max()) for p in common_parameters]
 
     fig = None
     handles = []

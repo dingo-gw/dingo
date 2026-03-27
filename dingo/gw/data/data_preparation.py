@@ -6,9 +6,8 @@ from gwpy.timeseries import TimeSeries
 from dingo.core.dataset import DingoDataset
 from dingo.core.utils.misc import recursive_check_dicts_are_equal
 from dingo.gw.data.data_download import download_raw_data
+from dingo.gw.domains import UniformFrequencyDomain, build_domain_from_model_metadata
 from dingo.gw.gwutils import get_window
-from dingo.gw.domains import UniformFrequencyDomain
-from dingo.gw.domains import build_domain_from_model_metadata
 
 
 def load_raw_data(time_event, settings, event_dataset=None):
