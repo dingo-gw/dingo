@@ -150,9 +150,9 @@ def test_higher_max_increases_output():
     ]
     # Expected output grows monotonically with k (stochastically, but very reliably).
     for i in range(len(counts) - 1):
-        assert counts[i] <= counts[i + 1], (
-            f"k={i+1} gave {counts[i]} samples but k={i+2} gave {counts[i+1]}"
-        )
+        assert (
+            counts[i] <= counts[i + 1]
+        ), f"k={i+1} gave {counts[i]} samples but k={i+2} gave {counts[i+1]}"
 
 
 # ---------------------------------------------------------------------------
