@@ -32,7 +32,10 @@ from dingo.core.posterior_models import BasePosteriorModel
 
 
 def copy_files_to_local(
-    file_path: str, local_dir: Optional[str], leave_keys_on_disk: bool, is_condor: bool = False,
+    file_path: str,
+    local_dir: Optional[str],
+    leave_keys_on_disk: bool,
+    is_condor: bool = False,
 ) -> str:
     """
     Copy files to local node if local_dir is provided to minimize network traffic during training.
@@ -232,7 +235,7 @@ def initialize_stage(
     pm: BasePosteriorModel,
     wfd: WaveformDataset,
     stage: dict,
-    num_workers: int,
+    local_settings: dict,
     resume: bool = False,
 ):
     """
@@ -249,7 +252,8 @@ def initialize_stage(
     wfd : WaveformDataset
     stage : dict
         Settings specific to current stage of training
-    num_workers : int
+    local_settings : dict
+        Local settings for training (num_workers, pin_memory, prefetch_factor, etc.)
     resume : bool
         Whether training is resuming mid-stage. This controls whether the optimizer and
         scheduler should be re-initialized based on contents of stage dict.
@@ -269,7 +273,9 @@ def initialize_stage(
         wfd,
         train_settings["data"]["train_fraction"],
         stage["batch_size"],
-        num_workers,
+        num_workers=local_settings.get("num_workers", 0),
+        pin_memory=local_settings.get("pin_memory", True),
+        prefetch_factor=local_settings.get("prefetch_factor", 1),
     )
 
     if not resume:
@@ -343,13 +349,13 @@ def train_stages(
             print(f"\nBeginning training stage {n}. Settings:")
             print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
             train_loader, test_loader = initialize_stage(
-                pm, wfd, stage, local_settings["num_workers"], resume=False
+                pm, wfd, stage, local_settings, resume=False
             )
         else:
             print(f"\nResuming training in stage {n}. Settings:")
             print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
             train_loader, test_loader = initialize_stage(
-                pm, wfd, stage, local_settings["num_workers"], resume=True
+                pm, wfd, stage, local_settings, resume=True
             )
         early_stopping = None
         if stage.get("early_stopping"):
