@@ -5,7 +5,7 @@ from pathlib import Path
 import os
 
 from bilby_pipe.input import Input
-from bilby_pipe.utils import parse_args, logger, convert_string_to_dict
+from bilby_pipe.utils import parse_args, logger, convert_string_to_dict, resolve_filename_with_transfer_fallback
 
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset
@@ -43,14 +43,8 @@ class SamplingInput(Input):
         # Choices for running
         self.detectors = args.detectors
 
-        # if running on the OSG, the network has been transferred to
-        # the local directory, replace osdf string
-        if args.osg:
-            self.model = os.path.basename(args.model)
-            self.model_init = os.path.basename(args.model_init)
-        else:
-            self.model = args.model
-            self.model_init = args.model_init
+        self.model = resolve_filename_with_transfer_fallback(args.model) or args.model
+        self.model_init = resolve_filename_with_transfer_fallback(args.model_init) or args.model_init
         self.recover_log_prob = args.recover_log_prob
         self.device = args.device
         self.num_gnpe_iterations = args.num_gnpe_iterations
