@@ -54,6 +54,8 @@ def prepare_log_prob(
     if low_latency_label is not None:
         sampler.to_hdf5(label=low_latency_label, outdir=outdir)
     result = sampler.to_result()
+    zero_noise_arguments = nde_settings['zero_noise_arguments']
+    del nde_settings['zero_noise_arguments']
     nde_settings["training"]["device"] = str(sampler.model.device)
     unconditional_model = result.train_unconditional_flow(
         sampler.gnpe_proxy_parameters,
@@ -63,6 +65,6 @@ def prepare_log_prob(
 
     # Prepare sampler with unconditional model as initialization. This should only use
     # one iteration and also not remove any outliers.
-    sampler.init_sampler = GWSampler(model=unconditional_model)
+    sampler.init_sampler = GWSampler(model=unconditional_model, **zero_noise_arguments)
     sampler.num_iterations = 1
     sampler.remove_init_outliers = 0.0  # Turn off for final sampler.
