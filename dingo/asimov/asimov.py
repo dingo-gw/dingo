@@ -7,6 +7,7 @@ import re
 import subprocess
 import time
 
+import torch
 
 from asimov import config, logger
 
@@ -193,6 +194,108 @@ class Dingo(Pipeline):
                     "There was a problem opening this log file."
                 )
         return messages
+
+    def fmin_max_are_compatible(self, prod_meta, net_meta):
+        """
+        Check if the network min/max frequencies are compatible with the data.
+
+        Take possible domain updates and random frequency masking into account.
+        """
+        f_min = prod_meta["quality"]['minimum frequency'].values()
+        f_max = prod_meta["quality"]['maximum frequency'].values()
+
+        # Get network values
+        domain = net_meta["dataset_settings"]["domain"]["base_domain"]
+        domain_update = net_meta["train_settings"]["data"].get("domain_update", {})
+
+        # Network f_min and f_max (with possible updates)
+        net_f_min = domain_update.get("f_min", domain["f_min"])
+        net_f_max = domain_update.get("f_max", domain["f_max"])
+
+        # Random strain cropping bounds (if they exist)
+        net_f_min_upper = net_meta["train_settings"]["data"]["random_strain_cropping"].get(
+            "f_min_upper", None
+        ) if "random_strain_cropping" in net_meta["train_settings"]["data"] else None
+        net_f_max_lower = net_meta["train_settings"]["data"]["random_strain_cropping"].get(
+            "f_max_lower", None
+        ) if "random_strain_cropping" in net_meta["train_settings"]["data"] else None
+
+        # Check f_min
+        if net_f_min_upper is None:
+            f_min_match = (min(f_min) == max(f_min) == net_f_min)
+        else:
+            f_min_match = (min(f_min) >= net_f_min) and (max(f_min) <= net_f_min_upper)
+
+        # Check f_max
+        if net_f_max_lower is None:
+            f_max_match = (min(f_max) == max(f_max) == net_f_max)
+        else:
+            f_max_match = (min(f_max) >= net_f_max_lower) and (max(f_max) <= net_f_max)
+
+        return f_min_match and f_max_match
+
+    def network_is_compatible(self, prod_meta, net_meta, net_maximum_luminosity_distance=None):
+        """Check if a network's metadata is compatible with the production in prod_meta."""
+        maximum_luminosity_distance = prod_meta["priors"]["luminosity distance"]["maximum"]
+        duration = prod_meta["data"]["segment length"]
+        ifos = prod_meta["interferometers"]
+
+        net_duration = round(1 / net_meta["dataset_settings"]["domain"]["base_domain"]["delta_f"])
+        net_ifos = net_meta["train_settings"]["data"]["detectors"]
+
+        if (
+            net_duration == duration
+            and sorted(net_ifos) == sorted(ifos)
+            and (
+                net_maximum_luminosity_distance is None
+                or net_maximum_luminosity_distance <= maximum_luminosity_distance
+            )
+            and self.fmin_max_are_compatible(prod_meta, net_meta)
+        ):
+            return True
+        return False
+
+    def before_config(self, dryrun=False):
+        """Parse available networks before building the ini."""
+        meta = self.production.meta
+        if "networks" in meta:  # Set networks as override
+            return
+        assert "available networks" in meta
+
+        # Placeholder in case of error
+        meta["networks"] = {"model": "", "model init": ""}
+        has_match = False
+        for networks in meta["available networks"]:
+            try:
+                f = torch.load(networks["model"], map_location="meta", weights_only=False)
+                metadata = f["metadata"]
+            except FileNotFoundError:
+                self.logger.error(f"Could not find network: '{networks['model']}'..")
+                continue
+            except KeyError:
+                self.logger.error(f"Could not load metadata from network: '{networks['model']}'..")
+                continue
+
+            net_has_match = self.network_is_compatible(
+                meta,
+                metadata,
+                networks.get("maximum luminosity distance", None),
+            )
+
+            if net_has_match and has_match:
+                self.logger.error("Production matches more than one available DINGO network.")
+                meta["networks"] = {"model": "", "model init": ""}
+                break
+
+            elif net_has_match and not has_match:
+                has_match = True
+                meta["networks"] = networks
+
+        if not has_match:
+            self.logger.error("No compatible DINGO network found for this production..")
+
+        # Update the ledger
+        self.production.meta.update(meta)
 
     def submit_dag(self, dryrun=False):
         """
