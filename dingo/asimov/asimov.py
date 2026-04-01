@@ -295,7 +295,8 @@ class Dingo(Pipeline):
             self.logger.error("No compatible DINGO network found for this production..")
 
         # Update the ledger
-        self.production.meta.update(meta)
+        if not dryrun:
+            self.production.meta.update(meta)
 
     def submit_dag(self, dryrun=False):
         """
