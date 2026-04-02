@@ -234,9 +234,15 @@ class Dingo(Pipeline):
 
         return f_min_match and f_max_match
 
-    def network_is_compatible(self, prod_meta, net_meta, net_maximum_luminosity_distance=None):
+    @staticmethod
+    def _net_max_luminosity_distance(metadata):
+        prior = metadata["train_settings"]["data"]["extrinsic_prior"]["luminosity_distance"]
+        match = re.findall(r"maximum=[\d]+", prior)
+        assert match
+        return int(match[0].split("=")[-1])
+
+    def network_is_compatible(self, prod_meta, net_meta):
         """Check if a network's metadata is compatible with the production in prod_meta."""
-        maximum_luminosity_distance = prod_meta["priors"]["luminosity distance"]["maximum"]
         duration = prod_meta["data"]["segment length"]
         ifos = prod_meta["interferometers"]
 
@@ -246,10 +252,6 @@ class Dingo(Pipeline):
         if (
             net_duration == duration
             and sorted(net_ifos) == sorted(ifos)
-            and (
-                net_maximum_luminosity_distance is None
-                or net_maximum_luminosity_distance >= maximum_luminosity_distance
-            )
             and self.fmin_max_are_compatible(prod_meta, net_meta)
         ):
             return True
@@ -264,7 +266,7 @@ class Dingo(Pipeline):
 
         # Placeholder in case of error
         meta["networks"] = {"model": "", "model init": ""}
-        has_match = False
+        compatible_networks = []
         has_error = False
         for networks in meta["available networks"]:
             try:
@@ -279,24 +281,36 @@ class Dingo(Pipeline):
                 has_error = True
                 continue
 
-            net_has_match = self.network_is_compatible(
-                meta,
-                metadata,
-                networks.get("maximum luminosity distance", None),
-            )
+            if self.network_is_compatible(meta, metadata):
+                compatible_networks.append((networks, metadata))
 
-            if net_has_match and has_match:
-                self.logger.error("Production matches more than one available DINGO network.")
-                has_error = True
-                break
-
-            elif net_has_match and not has_match:
-                has_match = True
-                meta["networks"] = networks
-
-        if not has_match:
+        if not compatible_networks:
             self.logger.error("No compatible DINGO network found for this production..")
             has_error = True
+
+        distances = [self._net_max_luminosity_distance(x[1]) for x in compatible_networks]
+
+        if len(compatible_networks) == 1:
+            meta["networks"] = compatible_networks[0][0]
+        elif len(distances) > len(set(distances)):
+                self.logger.error("Multiple DINGO networks match this production..")
+                has_error = True
+        else:
+            # Now choose the network with the most compatible upper luminosity distance bound
+            # Use the network with the lowest bound that is >= the production prior
+            # If none are available, use the network with the highest bound
+            prod_max_luminosity_distance = meta["priors"]["luminosity distance"]["maximum"]
+            compatible_networks = sorted(
+                compatible_networks,
+                key=lambda x: self._net_max_luminosity_distance(x[1])
+            )
+            for networks, metadata in compatible_networks:
+                net_max_luminosity_distance = self._net_max_luminosity_distance(metadata)
+                if net_max_luminosity_distance >= prod_max_luminosity_distance:
+                    meta["networks"] = networks
+                    break
+            else:
+                meta["networks"] = compatible_networks[-1][0]
 
         # Update the ledger
         if not has_error and not dryrun:
