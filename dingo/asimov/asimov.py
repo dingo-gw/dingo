@@ -248,7 +248,7 @@ class Dingo(Pipeline):
             and sorted(net_ifos) == sorted(ifos)
             and (
                 net_maximum_luminosity_distance is None
-                or net_maximum_luminosity_distance <= maximum_luminosity_distance
+                or net_maximum_luminosity_distance >= maximum_luminosity_distance
             )
             and self.fmin_max_are_compatible(prod_meta, net_meta)
         ):
