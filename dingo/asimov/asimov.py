@@ -265,15 +265,18 @@ class Dingo(Pipeline):
         # Placeholder in case of error
         meta["networks"] = {"model": "", "model init": ""}
         has_match = False
+        has_error = False
         for networks in meta["available networks"]:
             try:
                 f = torch.load(networks["model"], map_location="meta", weights_only=False)
                 metadata = f["metadata"]
             except FileNotFoundError:
                 self.logger.error(f"Could not find network: '{networks['model']}'..")
+                has_error = True
                 continue
             except KeyError:
                 self.logger.error(f"Could not load metadata from network: '{networks['model']}'..")
+                has_error = True
                 continue
 
             net_has_match = self.network_is_compatible(
@@ -284,7 +287,7 @@ class Dingo(Pipeline):
 
             if net_has_match and has_match:
                 self.logger.error("Production matches more than one available DINGO network.")
-                meta["networks"] = {"model": "", "model init": ""}
+                has_error = True
                 break
 
             elif net_has_match and not has_match:
@@ -293,9 +296,10 @@ class Dingo(Pipeline):
 
         if not has_match:
             self.logger.error("No compatible DINGO network found for this production..")
+            has_error = True
 
         # Update the ledger
-        if not dryrun:
+        if not has_error and not dryrun:
             self.production.meta.update(meta)
 
     def submit_dag(self, dryrun=False):
