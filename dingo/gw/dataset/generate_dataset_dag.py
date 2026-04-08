@@ -147,7 +147,7 @@ def create_dag(args, settings):
         "error": args.error,
         "output": args.output,
         "log": args.log,
-        "getenv": True,
+        "getenv": False,
     }
     kwargs_high_memory = kwargs.copy()
     if args.request_memory_high is not None:
