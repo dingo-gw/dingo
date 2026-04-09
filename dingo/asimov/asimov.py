@@ -260,32 +260,34 @@ class Dingo(Pipeline):
     def _filter_compatible_networks(self, prod_meta):
         """Load available networks and return those compatible with the production.
 
-        Returns (compatible_networks, has_error) where compatible_networks is a
-        list of (network_config, net_meta) tuples.
+        Returns a list of (network_config, net_meta) tuples.
         """
         compatible_networks = []
-        has_error = False
         for networks in prod_meta["available networks"]:
             try:
                 f = torch.load(networks["model"], map_location="meta", weights_only=False)
                 net_meta = f["metadata"]
             except FileNotFoundError:
-                self.logger.error(f"Could not find network: '{networks['model']}'..")
-                has_error = True
-                continue
+                raise PipelineException(
+                    f"Could not find network: '{networks['model']}'..",
+                    production=self.production.name,
+                )
             except KeyError:
-                self.logger.error(f"Could not load metadata from network: '{networks['model']}'..")
-                has_error = True
-                continue
+                raise PipelineException(
+                    f"Could not load metadata from network: '{networks['model']}'..",
+                    production=self.production.name,
+                )
 
             if self.network_is_compatible(prod_meta, net_meta):
                 compatible_networks.append((networks, net_meta))
 
         if not compatible_networks:
-            self.logger.error("No compatible DINGO network found for this production..")
-            has_error = True
+            raise PipelineException(
+                "No compatible DINGO network found for this production..",
+                production=self.production.name,
+            )
 
-        return compatible_networks, has_error
+        return compatible_networks
 
     def _select_preferred_network(self, prod_meta, compatible_networks):
         """Select the best network from compatible candidates by luminosity distance.
@@ -293,15 +295,17 @@ class Dingo(Pipeline):
         Prefers the network with the tightest max luminosity distance that still
         covers the production prior. Falls back to the largest if none fully cover it.
 
-        Returns (network_config, has_error).
+        Returns the selected network config.
         """
         if len(compatible_networks) == 1:
-            return compatible_networks[0][0], False
+            return compatible_networks[0][0]
 
         distances = [self._net_max_luminosity_distance(x[1]) for x in compatible_networks]
         if len(distances) > len(set(distances)):
-            self.logger.error("Multiple DINGO networks match this production..")
-            return None, True
+            raise PipelineException(
+                "Multiple DINGO networks match this production..",
+                production=self.production.name,
+            )
 
         prod_max_luminosity_distance = prod_meta["priors"]["luminosity distance"]["maximum"]
         compatible_networks = sorted(
@@ -311,8 +315,8 @@ class Dingo(Pipeline):
         for networks, net_meta in compatible_networks:
             net_max_luminosity_distance = self._net_max_luminosity_distance(net_meta)
             if net_max_luminosity_distance >= prod_max_luminosity_distance:
-                return networks, False
-        return compatible_networks[-1][0], False
+                return networks
+        return compatible_networks[-1][0]
 
     def before_config(self, dryrun=False):
         """Parse available networks before building the ini."""
@@ -328,18 +332,11 @@ class Dingo(Pipeline):
         # Placeholder in case of error
         meta["networks"] = {"model": "", "model init": ""}
 
-        compatible_networks, has_error = self._filter_compatible_networks(meta)
-
-        if compatible_networks:
-            selected, select_error = self._select_preferred_network(
-                meta, compatible_networks
-            )
-            has_error = has_error or select_error
-            if selected is not None:
-                meta["networks"] = selected
+        compatible_networks = self._filter_compatible_networks(meta)
+        meta["networks"] = self._select_preferred_network(meta, compatible_networks)
 
         # Update the ledger
-        if not has_error and not dryrun:
+        if not dryrun:
             self.production.meta.update(meta)
 
     def submit_dag(self, dryrun=False):
