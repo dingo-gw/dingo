@@ -3,6 +3,7 @@ from itertools import zip_longest
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 import corner
 import numpy as np
 import pandas as pd
@@ -274,32 +275,45 @@ def plot_corner_multi(
         truth_lw = None
 
     tick_pad = 4 * scale if scale else 2
+    
     for ax in fig.get_axes():
+        # 1. Create a fresh locator for each axis to avoid shared state issues
+        # 2. Reduce pruning or remove it entirely
+        n_ticks = corner_params.get("max_n_ticks", 4)
+        
+        # We use prune=None or prune="lower" to avoid the "empty axis" look
+        # "lower" is usually enough to prevent label overlap in corner plots
+        x_locator = MaxNLocator(n_ticks, prune="lower")
+        y_locator = MaxNLocator(n_ticks, prune="lower")
+        
         if ax.get_xlabel():
+            ax.xaxis.set_major_locator(x_locator)
             ax.tick_params(
                 axis="x", labelsize=tick_ls, length=tick_len, width=tick_w,
                 pad=tick_pad,
             )
             ax.xaxis.label.set_size(label_fs)
         else:
-            ax.tick_params(axis="x", which="both", bottom=False)
+            # Important: Ensure we don't just hide labels, but also the ticks if desired
+            ax.tick_params(axis="x", which="both", bottom=False, labelbottom=False)
+
         if ax.get_ylabel():
+            ax.yaxis.set_major_locator(y_locator)
             ax.tick_params(
                 axis="y", labelsize=tick_ls, length=tick_len, width=tick_w,
                 pad=tick_pad,
             )
             ax.yaxis.label.set_size(label_fs)
         else:
-            ax.tick_params(axis="y", which="both", left=False)
+            ax.tick_params(axis="y", which="both", left=False, labelleft=False)
 
-        # Style truth lines if present
+        # Style truth lines
         if truth_lw is not None:
             for line in ax.get_lines():
-                if line.get_linestyle() == "--":
+                if line.get_linestyle() in ["--", "dashed"]:
                     line.set_linewidth(truth_lw)
 
-        # Turn off grid
-        ax.grid()
+        ax.grid(False)
 
     # Save the figure
     plt.savefig(filename, bbox_inches="tight")
