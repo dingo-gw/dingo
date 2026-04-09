@@ -74,12 +74,38 @@ def get_latex_labels(prior: PriorDict) -> dict:
     return labels
 
 
+# Target widths in inches for PRL figures.
+_TARGET_WIDTHS = {
+    "column": 3.375,
+    "full": 7.0,
+}
+
+# Reference apparent sizes (points) that look good at the final rendered width.
+# These are multiplied by (fig_width / target_width) to get actual sizes in the
+# figure, so that after the PDF is scaled to target_width they appear at these
+# reference values.
+_PUB_REF = {
+    "label_size": 9,
+    "tick_label_size": 8,
+    "linewidth": 0.8,
+    "contour_linewidth": 1.0,
+    "tick_length": 3.5,
+    "tick_width": 0.6,
+    "legend_size": 10,
+    "legend_linewidth": 3,
+    "legend_markersize": 8,
+    "truth_linewidth": 0.6,
+}
+
+
 def plot_corner_multi(
     samples,
     weights=None,
     labels=None,
     filename: str = "corner.pdf",
     latex_labels_dict: dict = None,
+    target_width=None,
+    truths=None,
     **kwargs,
 ):
     """
@@ -98,15 +124,22 @@ def plot_corner_multi(
         Where to save samples.
     latex_labels_dict : dict
         Dictionary of latex labels.
+    target_width : str or float or None
+        If set, scale fonts, linewidths, and tick sizes so the figure looks good
+        when rendered at this width. Accepts "column" (~3.4 in), "full" (~7 in),
+        or a width in inches. If None, use legacy (unscaled) sizes.
+    truths : dict or None
+        Dictionary mapping parameter names to true values. If provided, truth
+        lines are drawn on the corner plot.
 
     Other Parameters
     ----------------
     legend_font_size: int
-        Font size used in legend. Defaults to 50.
+        Font size used in legend (only used when target_width is None).
     Also contains additional parameters forwarded to corner.corner.
     """
     # Define plot properties
-    cmap = "Dark2"
+    cmap = "tab10"
     corner_params = {
         "smooth": 1.0,
         "smooth1d": 1.0,
@@ -115,13 +148,14 @@ def plot_corner_multi(
         "plot_contours": True,
         "levels": [0.5, 0.9],
         "bins": 30,
+        "max_n_ticks": 4,
+        "labelpad": 0.07 if target_width is not None else 0.0,
     }
     corner_params.update(kwargs)
 
     serif_old = mpl.rcParams["font.family"]
     mpl.rcParams["font.family"] = "serif"
     linewidth_old = mpl.rcParams["lines.linewidth"]
-    mpl.rcParams["lines.linewidth"] = 2.5
 
     # In case a single corner plot is desired, convert to lists to iterate.
     if not isinstance(samples, list):
@@ -138,10 +172,29 @@ def plot_corner_multi(
         for p in samples[0].columns
         if p in set.intersection(*(set(s.columns) for s in samples))
     ]
+    ndim = len(common_parameters)
+
     if latex_labels_dict:
         parameter_labels = [latex_labels_dict.get(p, p) for p in common_parameters]
     else:
         parameter_labels = common_parameters
+
+    # Resolve target width and compute scale factor.
+    if target_width is not None:
+        if isinstance(target_width, str):
+            target_width_in = _TARGET_WIDTHS[target_width]
+        else:
+            target_width_in = float(target_width)
+        # corner uses ~2 inches per panel by default
+        fig_width = ndim * 2.0
+        scale = fig_width / target_width_in
+    else:
+        scale = None
+
+    if scale is not None:
+        mpl.rcParams["lines.linewidth"] = _PUB_REF["contour_linewidth"] * scale
+    else:
+        mpl.rcParams["lines.linewidth"] = 2.5
 
     # Compute a common parameter range across all sample sets. This ensures
     # every corner call uses identical bins, so the 1D marginal densities are
@@ -151,8 +204,20 @@ def plot_corner_multi(
         (all_data[p].min(), all_data[p].max()) for p in common_parameters
     ]
 
+    # Resolve truth values: accept dict (explicit param) or list (via kwargs).
+    # Pop from corner_params so truths are only drawn once (on the first call).
+    kwargs_truths = corner_params.pop("truths", None)
+    if truths is not None:
+        truth_values = [truths.get(p) for p in common_parameters]
+    elif kwargs_truths is not None:
+        truth_values = kwargs_truths
+    else:
+        truth_values = None
+
     fig = None
     handles = []
+    legend_lw = _PUB_REF["legend_linewidth"] * scale if scale else 5
+    legend_ms = _PUB_REF["legend_markersize"] * scale if scale else 20
     for i, (s, w, l) in enumerate(zip_longest(samples, weights, labels)):
         color = mpl.colors.rgb2hex(plt.get_cmap(cmap)(i))
         # Normalize weights to sum to 1 so that smoothed 1D marginals are
@@ -166,49 +231,78 @@ def plot_corner_multi(
             color=color,
             no_fill_contours=True,
             range=common_range,
+            truths=truth_values if i == 0 else None,
+            truth_color="0.3",
             fig=fig,
             **corner_params,
         )
         handles.append(
-            plt.Line2D([], [], color=color, label=l, linewidth=5, markersize=20)
+            plt.Line2D(
+                [], [], color=color, label=l, linewidth=legend_lw, markersize=legend_ms
+            )
         )
 
     # Eliminate spacing between the 2D plots
-    if len(common_parameters) > 8:
+    if ndim > 8:
         fig.subplots_adjust(wspace=0, hspace=0)
     else:
-        space = 1 / (4 * len(common_parameters))
+        space = 1 / (4 * ndim)
         fig.subplots_adjust(wspace=space, hspace=space)
+
+    if scale is not None:
+        legend_fs = _PUB_REF["legend_size"] * scale
+    else:
+        legend_fs = kwargs.get("legend_font_size", ndim * 5)
 
     fig.legend(
         handles=handles,
         loc="upper right",
-        fontsize=kwargs.get("legend_font_size", 50),
+        fontsize=legend_fs,
         labelcolor="linecolor",
     )
 
     # Customize tick and label properties for each axis
-    for i, ax in enumerate(fig.get_axes()):
+    if scale is not None:
+        tick_ls = _PUB_REF["tick_label_size"] * scale
+        tick_len = _PUB_REF["tick_length"] * scale
+        tick_w = _PUB_REF["tick_width"] * scale
+        label_fs = _PUB_REF["label_size"] * scale
+        truth_lw = _PUB_REF["truth_linewidth"] * scale
+    else:
+        tick_ls, tick_len, tick_w = 14, 6, 1.5
+        label_fs = 16
+        truth_lw = None
+
+    tick_pad = 4 * scale if scale else 2
+    for ax in fig.get_axes():
         if ax.get_xlabel():
             ax.tick_params(
-                axis="x", labelsize=14, length=6, width=1.5
-            )  # Adjust labelsize, length, and width
-            ax.xaxis.label.set_size(16)  # Adjust x-axis label font size
+                axis="x", labelsize=tick_ls, length=tick_len, width=tick_w,
+                pad=tick_pad,
+            )
+            ax.xaxis.label.set_size(label_fs)
         else:
             ax.tick_params(axis="x", which="both", bottom=False)
         if ax.get_ylabel():
             ax.tick_params(
-                axis="y", labelsize=14, length=6, width=1.5
-            )  # Adjust labelsize, length, and width
-            ax.yaxis.label.set_size(16)  # Adjust x-axis label font size
+                axis="y", labelsize=tick_ls, length=tick_len, width=tick_w,
+                pad=tick_pad,
+            )
+            ax.yaxis.label.set_size(label_fs)
         else:
             ax.tick_params(axis="y", which="both", left=False)
+
+        # Style truth lines if present
+        if truth_lw is not None:
+            for line in ax.get_lines():
+                if line.get_linestyle() == "--":
+                    line.set_linewidth(truth_lw)
 
         # Turn off grid
         ax.grid()
 
     # Save the figure
-    plt.savefig(filename)
+    plt.savefig(filename, bbox_inches="tight")
 
     # Reset rcParams to original values
     mpl.rcParams["font.family"] = serif_old
