@@ -149,7 +149,7 @@ def test_valid_networks(valid_and_invalid_paths):
         pipe.before_config()
         assert path["model"] == pipe.production.meta["networks"]["model"], \
             f"Network {path['model']} should be valid and have 'network' key"
-
+@pytest.mark.asimov
 def test_invalid_networks(valid_and_invalid_paths):
     _, invalid_paths = valid_and_invalid_paths
 
