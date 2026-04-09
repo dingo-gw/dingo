@@ -136,9 +136,9 @@ def create_test_network_files(test_dir):
 
 
 @pytest.fixture
-def valid_and_invalid_paths():
-    valid_paths, invalid_paths = create_test_network_files(".")
-    return valid_paths, invalid_paths
+def valid_and_invalid_paths(tmp_path):
+    valid_paths, invalid_paths = create_test_network_files(str(tmp_path))
+    yield valid_paths, invalid_paths
 
 
 def test_valid_networks(valid_and_invalid_paths):
