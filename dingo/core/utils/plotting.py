@@ -243,7 +243,7 @@ def plot_corner_multi(
         )
 
     # Eliminate spacing between the 2D plots
-    if ndim > 8:
+    if target_width is not None or ndim > 8:
         fig.subplots_adjust(wspace=0, hspace=0)
     else:
         space = 1 / (4 * ndim)
