@@ -67,6 +67,7 @@ homepage = "https://github.com/dingo-gw/dingo"
 
 [project.optional-dependencies]
 dev = [
+    "asimov",
     "black",
     "ipykernel",
     "linkify-it-py",

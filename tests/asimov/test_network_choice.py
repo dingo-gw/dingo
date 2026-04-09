@@ -140,6 +140,7 @@ def valid_and_invalid_paths(tmp_path):
     valid_paths, invalid_paths = create_test_network_files(str(tmp_path))
     yield valid_paths, invalid_paths
 
+
 @pytest.mark.asimov
 def test_valid_networks(valid_and_invalid_paths):
     valid_paths, _ = valid_and_invalid_paths
@@ -149,6 +150,7 @@ def test_valid_networks(valid_and_invalid_paths):
         pipe.before_config()
         assert path["model"] == pipe.production.meta["networks"]["model"], \
             f"Network {path['model']} should be valid and have 'network' key"
+
 @pytest.mark.asimov
 def test_invalid_networks(valid_and_invalid_paths):
     _, invalid_paths = valid_and_invalid_paths
@@ -157,6 +159,7 @@ def test_invalid_networks(valid_and_invalid_paths):
         pipe = known_pipelines["dingo"](DummyProduction(available_networks=[path]))
         with pytest.raises(PipelineException):
             pipe.before_config()
+
 @pytest.mark.asimov
 def test_network_preference(valid_and_invalid_paths):
     valid_paths, _ = valid_and_invalid_paths
