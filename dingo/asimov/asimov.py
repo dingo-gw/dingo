@@ -257,21 +257,18 @@ class Dingo(Pipeline):
             return True
         return False
 
-    def before_config(self, dryrun=False):
-        """Parse available networks before building the ini."""
-        meta = self.production.meta
-        if "networks" in meta:  # Set networks as override
-            return
-        assert "available networks" in meta
+    def _filter_compatible_networks(self, prod_meta):
+        """Load available networks and return those compatible with the production.
 
-        # Placeholder in case of error
-        meta["networks"] = {"model": "", "model init": ""}
+        Returns (compatible_networks, has_error) where compatible_networks is a
+        list of (network_config, net_meta) tuples.
+        """
         compatible_networks = []
         has_error = False
-        for networks in meta["available networks"]:
+        for networks in prod_meta["available networks"]:
             try:
                 f = torch.load(networks["model"], map_location="meta", weights_only=False)
-                metadata = f["metadata"]
+                net_meta = f["metadata"]
             except FileNotFoundError:
                 self.logger.error(f"Could not find network: '{networks['model']}'..")
                 has_error = True
@@ -281,36 +278,65 @@ class Dingo(Pipeline):
                 has_error = True
                 continue
 
-            if self.network_is_compatible(meta, metadata):
-                compatible_networks.append((networks, metadata))
+            if self.network_is_compatible(prod_meta, net_meta):
+                compatible_networks.append((networks, net_meta))
 
         if not compatible_networks:
             self.logger.error("No compatible DINGO network found for this production..")
             has_error = True
 
-        distances = [self._net_max_luminosity_distance(x[1]) for x in compatible_networks]
+        return compatible_networks, has_error
 
+    def _select_preferred_network(self, prod_meta, compatible_networks):
+        """Select the best network from compatible candidates by luminosity distance.
+
+        Prefers the network with the tightest max luminosity distance that still
+        covers the production prior. Falls back to the largest if none fully cover it.
+
+        Returns (network_config, has_error).
+        """
         if len(compatible_networks) == 1:
-            meta["networks"] = compatible_networks[0][0]
-        elif len(distances) > len(set(distances)):
-                self.logger.error("Multiple DINGO networks match this production..")
-                has_error = True
-        else:
-            # Now choose the network with the most compatible upper luminosity distance bound
-            # Use the network with the lowest bound that is >= the production prior
-            # If none are available, use the network with the highest bound
-            prod_max_luminosity_distance = meta["priors"]["luminosity distance"]["maximum"]
-            compatible_networks = sorted(
-                compatible_networks,
-                key=lambda x: self._net_max_luminosity_distance(x[1])
+            return compatible_networks[0][0], False
+
+        distances = [self._net_max_luminosity_distance(x[1]) for x in compatible_networks]
+        if len(distances) > len(set(distances)):
+            self.logger.error("Multiple DINGO networks match this production..")
+            return None, True
+
+        prod_max_luminosity_distance = prod_meta["priors"]["luminosity distance"]["maximum"]
+        compatible_networks = sorted(
+            compatible_networks,
+            key=lambda x: self._net_max_luminosity_distance(x[1])
+        )
+        for networks, net_meta in compatible_networks:
+            net_max_luminosity_distance = self._net_max_luminosity_distance(net_meta)
+            if net_max_luminosity_distance >= prod_max_luminosity_distance:
+                return networks, False
+        return compatible_networks[-1][0], False
+
+    def before_config(self, dryrun=False):
+        """Parse available networks before building the ini."""
+        meta = self.production.meta
+        if "networks" in meta:  # Set networks as override
+            return
+        if "available networks" not in meta:
+            raise ValueError(
+                "Neither 'networks' nor 'available networks' found in production "
+                "metadata. Set one of these in the analysis or configuration blueprint."
             )
-            for networks, metadata in compatible_networks:
-                net_max_luminosity_distance = self._net_max_luminosity_distance(metadata)
-                if net_max_luminosity_distance >= prod_max_luminosity_distance:
-                    meta["networks"] = networks
-                    break
-            else:
-                meta["networks"] = compatible_networks[-1][0]
+
+        # Placeholder in case of error
+        meta["networks"] = {"model": "", "model init": ""}
+
+        compatible_networks, has_error = self._filter_compatible_networks(meta)
+
+        if compatible_networks:
+            selected, select_error = self._select_preferred_network(
+                meta, compatible_networks
+            )
+            has_error = has_error or select_error
+            if selected is not None:
+                meta["networks"] = selected
 
         # Update the ledger
         if not has_error and not dryrun:
