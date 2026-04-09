@@ -277,15 +277,12 @@ def plot_corner_multi(
     tick_pad = 4 * scale if scale else 2
     
     for ax in fig.get_axes():
-        # 1. Create a fresh locator for each axis to avoid shared state issues
-        # 2. Reduce pruning or remove it entirely
         n_ticks = corner_params.get("max_n_ticks", 4)
-        
-        # We use prune=None or prune="lower" to avoid the "empty axis" look
-        # "lower" is usually enough to prevent label overlap in corner plots
-        x_locator = MaxNLocator(n_ticks, prune="lower")
-        y_locator = MaxNLocator(n_ticks, prune="lower")
-        
+        tick_margin = corner_params.get("tick_margin_frac", 0.05)
+
+        x_locator = MaxNLocator(nbins=n_ticks, min_n_ticks=2, prune="lower")
+        y_locator = MaxNLocator(nbins=n_ticks, min_n_ticks=2, prune="lower")
+
         if ax.get_xlabel():
             ax.xaxis.set_major_locator(x_locator)
             ax.tick_params(
@@ -293,8 +290,17 @@ def plot_corner_multi(
                 pad=tick_pad,
             )
             ax.xaxis.label.set_size(label_fs)
+            ax.xaxis.labelpad = 10
+
+            # Remove ticks too close to the axis boundaries
+            xlim = ax.get_xlim()
+            xrange = xlim[1] - xlim[0]
+            margin = xrange * tick_margin
+            ax.set_xticks([
+                t for t in ax.get_xticks()
+                if (t - xlim[0]) > margin and (xlim[1] - t) > margin
+            ])
         else:
-            # Important: Ensure we don't just hide labels, but also the ticks if desired
             ax.tick_params(axis="x", which="both", bottom=False, labelbottom=False)
 
         if ax.get_ylabel():
@@ -304,6 +310,16 @@ def plot_corner_multi(
                 pad=tick_pad,
             )
             ax.yaxis.label.set_size(label_fs)
+            ax.yaxis.labelpad = 10
+
+            # Remove ticks too close to the axis boundaries
+            ylim = ax.get_ylim()
+            yrange = ylim[1] - ylim[0]
+            margin = yrange * tick_margin
+            ax.set_yticks([
+                t for t in ax.get_yticks()
+                if (t - ylim[0]) > margin and (ylim[1] - t) > margin
+            ])
         else:
             ax.tick_params(axis="y", which="both", left=False, labelleft=False)
 
