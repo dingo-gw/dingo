@@ -32,10 +32,11 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install .[dev]
+          pip install -U "htcondor<23"
 
       - name: Run Pytest
         run: |
-          pytest --junit-xml=pytest-report.xml tests/
+          python -m pytest --junit-xml=pytest-report.xml --ignore tests/asimov tests/
 
       - name: Run Asimov integration tests
         run: |

@@ -7,6 +7,7 @@ import re
 import subprocess
 import time
 
+import torch
 
 from asimov import config, logger
 
@@ -193,6 +194,150 @@ class Dingo(Pipeline):
                     "There was a problem opening this log file."
                 )
         return messages
+
+    def fmin_max_are_compatible(self, prod_meta, net_meta):
+        """
+        Check if the network min/max frequencies are compatible with the data.
+
+        Take possible domain updates and random frequency masking into account.
+        """
+        f_min = prod_meta["quality"]['minimum frequency'].values()
+        f_max = prod_meta["quality"]['maximum frequency'].values()
+
+        # Get network values
+        domain = net_meta["dataset_settings"]["domain"]["base_domain"]
+        domain_update = net_meta["train_settings"]["data"].get("domain_update", {})
+
+        # Network f_min and f_max (with possible updates)
+        net_f_min = domain_update.get("f_min", domain["f_min"])
+        net_f_max = domain_update.get("f_max", domain["f_max"])
+
+        # Random strain cropping bounds (if they exist)
+        net_f_min_upper = net_meta["train_settings"]["data"]["random_strain_cropping"].get(
+            "f_min_upper", None
+        ) if "random_strain_cropping" in net_meta["train_settings"]["data"] else None
+        net_f_max_lower = net_meta["train_settings"]["data"]["random_strain_cropping"].get(
+            "f_max_lower", None
+        ) if "random_strain_cropping" in net_meta["train_settings"]["data"] else None
+
+        # Check f_min
+        if net_f_min_upper is None:
+            f_min_match = (min(f_min) == max(f_min) == net_f_min)
+        else:
+            f_min_match = (min(f_min) >= net_f_min) and (max(f_min) <= net_f_min_upper)
+
+        # Check f_max
+        if net_f_max_lower is None:
+            f_max_match = (min(f_max) == max(f_max) == net_f_max)
+        else:
+            f_max_match = (min(f_max) >= net_f_max_lower) and (max(f_max) <= net_f_max)
+
+        return f_min_match and f_max_match
+
+    @staticmethod
+    def _net_max_luminosity_distance(metadata):
+        prior = metadata["train_settings"]["data"]["extrinsic_prior"]["luminosity_distance"]
+        match = re.findall(r"maximum=[\d]+", prior)
+        assert match
+        return int(match[0].split("=")[-1])
+
+    def network_is_compatible(self, prod_meta, net_meta):
+        """Check if a network's metadata is compatible with the production in prod_meta."""
+        duration = prod_meta["data"]["segment length"]
+        ifos = prod_meta["interferometers"]
+
+        net_duration = round(1 / net_meta["dataset_settings"]["domain"]["base_domain"]["delta_f"])
+        net_ifos = net_meta["train_settings"]["data"]["detectors"]
+
+        if (
+            net_duration == duration
+            and sorted(net_ifos) == sorted(ifos)
+            and self.fmin_max_are_compatible(prod_meta, net_meta)
+        ):
+            return True
+        return False
+
+    def _filter_compatible_networks(self, prod_meta):
+        """Load available networks and return those compatible with the production.
+
+        Returns a list of (network_config, net_meta) tuples.
+        """
+        compatible_networks = []
+        for networks in prod_meta["available networks"]:
+            try:
+                f = torch.load(networks["model"], map_location="meta", weights_only=False)
+                net_meta = f["metadata"]
+            except FileNotFoundError:
+                raise PipelineException(
+                    f"Could not find network: '{networks['model']}'..",
+                    production=self.production.name,
+                )
+            except KeyError:
+                raise PipelineException(
+                    f"Could not load metadata from network: '{networks['model']}'..",
+                    production=self.production.name,
+                )
+
+            if self.network_is_compatible(prod_meta, net_meta):
+                compatible_networks.append((networks, net_meta))
+
+        if not compatible_networks:
+            raise PipelineException(
+                "No compatible DINGO network found for this production..",
+                production=self.production.name,
+            )
+
+        return compatible_networks
+
+    def _select_preferred_network(self, prod_meta, compatible_networks):
+        """Select the best network from compatible candidates by luminosity distance.
+
+        Prefers the network with the tightest max luminosity distance that still
+        covers the production prior. Falls back to the largest if none fully cover it.
+
+        Returns the selected network config.
+        """
+        if len(compatible_networks) == 1:
+            return compatible_networks[0][0]
+
+        distances = [self._net_max_luminosity_distance(x[1]) for x in compatible_networks]
+        if len(distances) > len(set(distances)):
+            raise PipelineException(
+                "Multiple DINGO networks match this production..",
+                production=self.production.name,
+            )
+
+        prod_max_luminosity_distance = prod_meta["priors"]["luminosity distance"]["maximum"]
+        compatible_networks = sorted(
+            compatible_networks,
+            key=lambda x: self._net_max_luminosity_distance(x[1])
+        )
+        for networks, net_meta in compatible_networks:
+            net_max_luminosity_distance = self._net_max_luminosity_distance(net_meta)
+            if net_max_luminosity_distance >= prod_max_luminosity_distance:
+                return networks
+        return compatible_networks[-1][0]
+
+    def before_config(self, dryrun=False):
+        """Parse available networks before building the ini."""
+        meta = self.production.meta
+        if "networks" in meta:  # Set networks as override
+            return
+        if "available networks" not in meta:
+            raise ValueError(
+                "Neither 'networks' nor 'available networks' found in production "
+                "metadata. Set one of these in the analysis or configuration blueprint."
+            )
+
+        # Placeholder in case of error
+        meta["networks"] = {"model": "", "model init": ""}
+
+        compatible_networks = self._filter_compatible_networks(meta)
+        meta["networks"] = self._select_preferred_network(meta, compatible_networks)
+
+        # Update the ledger
+        if not dryrun:
+            self.production.meta.update(meta)
 
     def submit_dag(self, dryrun=False):
         """
