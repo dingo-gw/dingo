@@ -69,6 +69,7 @@ homepage = "https://github.com/dingo-gw/dingo"
 dev = [
     "asimov",
     "black",
+    "htcondor",
     "ipykernel",
     "linkify-it-py",
     "myst-nb",
