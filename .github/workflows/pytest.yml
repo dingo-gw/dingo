@@ -35,8 +35,7 @@ jobs:
 
       - name: Run Pytest
         run: |
-          pip install htcondor
-          pytest --junit-xml=pytest-report.xml tests/
+          python -m pytest --junit-xml=pytest-report.xml tests/
 
       - name: Run Asimov integration tests
         run: |
