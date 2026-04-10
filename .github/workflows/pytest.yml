@@ -33,6 +33,9 @@ jobs:
           pip install --upgrade pip
           pip install .[dev]
 
+      - name: Verify htcondor is installed
+        run: pip show htcondor || echo "htcondor not installed"
+
       - name: Run Pytest
         run: |
           pytest --junit-xml=pytest-report.xml tests/
