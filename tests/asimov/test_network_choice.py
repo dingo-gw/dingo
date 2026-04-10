@@ -5,8 +5,11 @@ import pytest
 
 import torch
 
-from asimov.pipelines import known_pipelines
-from asimov.pipeline import PipelineException
+try:
+    from asimov.pipelines import known_pipelines
+    from asimov.pipeline import PipelineException
+except ModuleNotFoundError:
+    pytest.skip("Could not import Asimov.")
 
 
 class DummyEvent:
