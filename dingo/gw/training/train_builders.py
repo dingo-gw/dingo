@@ -86,12 +86,16 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     if omit_transforms is not None:
         print("Omitting \n\t" + "\n\t".join([t.__name__ for t in omit_transforms]))
 
+    # Build detector objects
+    ifo_list = InterferometerList(data_settings["detectors"])
+    ifo_names = [ifo.name for ifo in ifo_list]
+    
     # By passing the wfd domain when instantiating the noise dataset, this ensures the
     # domains will match. In particular, it truncates the ASD dataset beyond the new
     # f_max, and sets it to 1 below f_min.
     asd_dataset = ASDDataset(
         asd_dataset_path,
-        ifos=data_settings["detectors"],
+        ifos=ifo_names,
         precision="single",
         domain_update=wfd.domain.domain_dict,
     )
@@ -103,13 +107,6 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         data_settings["inference_parameters"] = default_inference_parameters
 
     ref_time = data_settings["ref_time"]
-    # Build detector objects
-    if len(data_settings["detectors"]) == 3 and all(d.startswith('ET') for d in data_settings["detectors"]):
-        ifo_list = InterferometerList(['ET'])
-    elif all(d.startswith('ET') for d in data_settings["detectors"][:3]) and len(data_settings["detectors"]) > 3:
-        ifo_list = InterferometerList(['ET'] + data_settings["detectors"][3:])
-    else:
-        ifo_list = InterferometerList(data_settings["detectors"])
 
     # Build transforms.
     transforms = [
@@ -175,7 +172,7 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         )
     )
     transforms.append(
-        RepackageStrainsAndASDS(data_settings["detectors"], first_index=domain.min_idx)
+        RepackageStrainsAndASDS(ifo_names, first_index=domain.min_idx)
     )
     if "random_strain_cropping" in data_settings:
         transforms.append(
@@ -336,7 +333,7 @@ def build_svd_for_embedding_network(
     print(f"Truncating SVD matrices below index {wfd.domain.min_idx}.")
     print("...V matrix shapes:")
     V_rb_list = []
-    for ifo in data_settings["detectors"]:
+    for ifo in ifo_names:
         V = basis_dict[ifo].V
         assert np.allclose(V[: wfd.domain.min_idx], 0)
         V = V[wfd.domain.min_idx :]
