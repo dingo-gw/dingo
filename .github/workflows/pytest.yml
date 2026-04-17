@@ -1,6 +1,6 @@
 # Running pytest upon push to main or upon merge request in main
 
-name: Pytest for Dingo-GW on Python 3.10
+name: Pytest for Dingo-GW
 
 on:
   push:
@@ -12,6 +12,15 @@ on:
 
 jobs:
   pytest:
+    name: Pytest for Dingo-GW on Python ${{ matrix.python-version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
     runs-on: ubuntu-latest
     env:
       OPENBLAS_NUM_THREADS: 1
@@ -21,30 +30,25 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Set up Python 3.10
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
         with:
-          python-version: '3.10'
-          cache: 'pip'
-          cache-dependency-path: 'pyproject.toml'
+          python-version: ${{ matrix.python-version }}
 
-      - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          pip install .[dev]
-          pip install -U "htcondor<23"
+      - name: Install the project
+        run: uv sync --extra dev
 
       - name: Run Pytest
         run: |
-          python -m pytest --junit-xml=pytest-report.xml --ignore tests/asimov tests/
+          uv run pytest --junit-xml=pytest-report.xml tests/
 
       - name: Run Asimov integration tests
         run: |
-          pytest -m asimov --junit-xml=pytest-asimov-report.xml tests/
+          uv run pytest -m asimov --junit-xml=pytest-asimov-report.xml tests/
 
       - name: Upload Pytest Report
         uses: actions/upload-artifact@v4
         with:
-          name: pytest-report.xml
+          name: pytest-report-${{ matrix.python-version }}.xml
           path: pytest-report.xml
           retention-days: 30
