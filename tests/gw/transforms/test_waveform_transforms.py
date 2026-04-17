@@ -220,11 +220,14 @@ def test_cropping_bounds_independence(cropping_setup):
     example_batch_single = dict(waveform=strain_in[0])
 
     for independent_detectors in [False, True]:
+        # cropping_probability=1.0: the probabilistic skip is covered by
+        # test_cropping_probability; here we only assert bounds independence,
+        # which is unambiguous when every sample is cropped.
         cropping_transform = CropMaskStrainRandom(
             domain,
             f_min_upper=32,
             f_max_lower=512,
-            cropping_probability=0.8,
+            cropping_probability=1.0,
             independent_detectors=independent_detectors,
             independent_lower_upper=False,
         )
