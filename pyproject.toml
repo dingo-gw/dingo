@@ -111,6 +111,10 @@ typing = [
     "scipy-stubs>=1.15.3.0",
 ]
 
+teobresums = [
+    "teobresums",
+]
+
 [project.scripts]
 dingo_append_training_stage = "dingo.gw.training:append_stage"
 dingo_build_svd = "dingo.gw.dataset.utils:build_svd_cli"

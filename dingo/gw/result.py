@@ -751,14 +751,16 @@ class Result(CoreResult):
             "waveform_generator"
         ].get("spin_conversion_phase")
 
-        # Redefine phase parameter to be consistent with Bilby. COMMENTED BECAUSE SLOW
-        samples = change_spin_conversion_phase(
-            samples,
-            self.f_ref,
-            spin_conversion_phase_old,
-            None,
-            num_processes=num_processes,
-        )
+        # Redefine phase parameter to be consistent with Bilby.
+        # Only apply spin conversion when precessing spin parameters are present.
+        if "phi_jl" in samples.columns:
+            samples = change_spin_conversion_phase(
+                samples,
+                self.f_ref,
+                spin_conversion_phase_old,
+                None,
+                num_processes=num_processes,
+            )
 
         self._pesummary_samples = samples
 
