@@ -79,13 +79,6 @@ def train_condor():
     )
     args = parser.parse_args()
 
-    # For condor settings, first try looking for a local settings file. Otherwise,
-    # defer to train_settings.yaml.
-    # if isfile(join(args.train_dir, 'local_settings.yaml')):
-    #     with open(join(args.train_dir, 'local_settings.yaml')) as f:
-    #         condor_settings = yaml.safe_load(f)['condor']
-    # else:
-
     if not args.start_submission:
 
         #
@@ -159,12 +152,20 @@ def train_condor():
         if args.checkpoint != "model_latest.pt":
             condor_arguments += f" --checkpoint {args.checkpoint}"
 
+        if isfile(join(args.train_dir, "local_settings.yaml")):
+            with open(join(args.train_dir, "local_settings.yaml"), "r") as f:
+                local_settings = yaml.safe_load(f)
+        else:
+            local_settings = {}
+
     if args.exit_command:
         condor_arguments += f" --exit_command '{args.exit_command}'"
 
     submission_file = "submission_file.sub"
-    with open(join(args.train_dir, "train_settings.yaml"), "r") as f:
-        condor_settings = yaml.safe_load(f)["local"]["condor"]
+    condor_settings = local_settings.get("condor")
+    if condor_settings is None:
+        with open(join(args.train_dir, "train_settings.yaml"), "r") as f:
+            condor_settings = yaml.safe_load(f)["local"]["condor"]
     condor_settings["arguments"] = condor_arguments
     condor_settings["executable"] = join(
         os.path.dirname(sys.executable), "dingo_train_condor"
