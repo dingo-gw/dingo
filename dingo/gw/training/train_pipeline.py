@@ -218,7 +218,7 @@ def prepare_training_resume(
             import wandb
 
             wandb.init(
-                resume="must",
+                resume="allow",
                 dir=train_dir,
                 **local_settings["wandb"],
             )
