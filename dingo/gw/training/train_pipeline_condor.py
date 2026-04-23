@@ -93,6 +93,10 @@ def train_condor():
         #
 
         if not isfile(join(args.train_dir, args.checkpoint)):
+            if args.checkpoint != "model_latest.pt":
+                raise FileNotFoundError(
+                    f"Checkpoint not found: {join(args.train_dir, args.checkpoint)}"
+                )
             print("Beginning new training run.")
             with open(join(args.train_dir, "train_settings.yaml"), "r") as f:
                 train_settings = yaml.safe_load(f)

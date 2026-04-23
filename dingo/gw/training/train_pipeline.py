@@ -32,7 +32,10 @@ from dingo.core.posterior_models import BasePosteriorModel
 
 
 def copy_files_to_local(
-    file_path: str, local_dir: Optional[str], leave_keys_on_disk: bool, is_condor: bool = False,
+    file_path: str,
+    local_dir: Optional[str],
+    leave_keys_on_disk: bool,
+    is_condor: bool = False,
 ) -> str:
     """
     Copy files to local node if local_dir is provided to minimize network traffic during training.
@@ -465,6 +468,8 @@ def train_local():
         pm, wfd = prepare_training_new(train_settings, args.train_dir, local_settings)
 
     else:
+        if not os.path.isfile(args.checkpoint):
+            raise FileNotFoundError(f"Checkpoint not found: {args.checkpoint}")
         print("Resuming training run.")
         with open(os.path.join(args.train_dir, "local_settings.yaml"), "r") as f:
             local_settings = yaml.safe_load(f)
