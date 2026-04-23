@@ -339,5 +339,5 @@ def recover_pol_m_from_multi_phase(hpc_fd_list, phi_c_values, m_max):
 
     pol_m = {}
     for i, m in enumerate(m_indices):
-        pol_m[m] = {"h_plus": hp_m_all[i], "h_cross": hc_m_all[i]}
+        pol_m[int(m)] = {"h_plus": hp_m_all[i], "h_cross": hc_m_all[i]}
     return pol_m
