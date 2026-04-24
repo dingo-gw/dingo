@@ -415,13 +415,18 @@ class Result(CoreResult):
         self.calibration_sampling_kwargs = calibration_sampling_kwargs
 
         # Handle correction_type defaults
-        correction_type = self.calibration_sampling_kwargs.get("correction_type", "data")
+        correction_type = self.calibration_sampling_kwargs.get(
+            "correction_type", "data"
+        )
         if correction_type is None:
             correction_type_dict = {
-                ifo: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo] for ifo in self.interferometers
+                ifo: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo]
+                for ifo in self.interferometers
             }
         elif correction_type == "data" or correction_type == "template":
-            correction_type_dict = {ifo: correction_type for ifo in self.interferometers}
+            correction_type_dict = {
+                ifo: correction_type for ifo in self.interferometers
+            }
         elif isinstance(correction_type, dict):
             correction_type_dict = correction_type
         else:
@@ -440,7 +445,7 @@ class Result(CoreResult):
             )
 
         # Removing the delta function priors on the frequency nodes, amplitude and phase.
-        # Usually the frequency nodes are set to delta functions, but we also remove the 
+        # Usually the frequency nodes are set to delta functions, but we also remove the
         # the amplitude and phase delta functions if present.
         # This avoids large log probs and log priors, since the density of a delta function
         # at the sampled point is infinite. The delta functions do not affect the sampling,
@@ -457,9 +462,9 @@ class Result(CoreResult):
         delta_log_prob = np.zeros(num_samples)
 
         # Here we will sample the calibration parameters from the prior.
-        # We treat the *prior as the proposal* distribution and 
-        # therefore add the log_prob of the sampled calibration parameters 
-        # to the existing log_prob. We also will update the prior 
+        # We treat the *prior as the proposal* distribution and
+        # therefore add the log_prob of the sampled calibration parameters
+        # to the existing log_prob. We also will update the prior
         # to include the calibration priors using the importance_sampling_metadata
         prior_update = self.importance_sampling_metadata.get("prior_update", {})
         for ifo, prior in calibration_priors.items():
@@ -561,7 +566,11 @@ class Result(CoreResult):
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
         theta = self.samples[param_keys]
         log_prior = self.prior.ln_prob(theta, axis=0)
-        constraints = self.prior.evaluate_constraints(theta)
+        # bilby >= 2.8.0: evaluate_constraints breaks on DataFrames because
+        # DataFrame.values is a property (not callable), causing the prob
+        # initialisation to fall back to a 2D shape instead of (N,).
+        theta_dict = {k: theta[k].to_numpy() for k in param_keys}
+        constraints = self.prior.evaluate_constraints(theta_dict)
         np.putmask(log_prior, constraints == 0, -np.inf)
         within_prior = np.isfinite(log_prior)
 
@@ -690,7 +699,9 @@ class Result(CoreResult):
             num_processes=num_processes,
         )
 
-    def get_pesummary_samples(self, num_processes=1, resampling_method="clip+rejection"):
+    def get_pesummary_samples(
+        self, num_processes=1, resampling_method="clip+rejection"
+    ):
         """Samples in a form suitable for PESummary.
 
         These samples are adjusted to undo certain conventions used internally by
