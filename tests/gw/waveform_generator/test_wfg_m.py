@@ -151,16 +151,21 @@ def tolerances(approximant):
         return 1e-5, 1e-5
 
 
-# Uncomment to test only one approximant.
-try:
-    # import pyseobnr
-    import EOBRun_module
+approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM"]
 
-    # approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM", "TEOBResumSDALI"]
-    approximant_list = ["TEOBResumSDALI"]
+try:
+    import pyseobnr  # noqa: F401
+
+    approximant_list += ["SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM"]
 except ImportError:
-    raise ValueError("TMP")
-    approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM"]
+    pass
+
+try:
+    import EOBRun_module  # noqa: F401
+
+    approximant_list += ["TEOBResumSDALI"]
+except ImportError:
+    pass
 
 
 @pytest.mark.parametrize("approximant", approximant_list)
