@@ -197,7 +197,7 @@ def test_generate_hplus_hcross_m(intrinsic_prior, wfg, num_evaluations, toleranc
             ]
         )
 
-        debug = True
+        debug = False
         if debug:
             maxval = max(mismatches[-1])
             idx = mismatches[-1].index(maxval)
@@ -212,7 +212,6 @@ def test_generate_hplus_hcross_m(intrinsic_prior, wfg, num_evaluations, toleranc
             plt.xscale("log")
             plt.xlim((5, 128))
             plt.title(f"{p}, mismatch={maxval}")
-            plt.savefig("/work/nihargupte/src/dingo/tests/gw/mm.png")
             plt.show()
 
     mismatches = np.array(mismatches)
