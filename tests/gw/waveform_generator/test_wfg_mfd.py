@@ -24,36 +24,70 @@ def mfd():
     return domain
 
 
-@pytest.fixture(params=["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM"])
+@pytest.fixture(params=["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM", "TEOBResumSDALI"])
 def approximant(request):
     return request.param
 
 
 @pytest.fixture
 def intrinsic_prior(approximant):
-    intrinsic_dict = {
-        "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
-        "mass_2": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
-        "mass_ratio": "bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.125, maximum=1.0)",
-        "chirp_mass": "bilby.gw.prior.UniformInComponentsChirpMass(minimum=25.0, maximum=100.0)",
-        "luminosity_distance": 1000.0,
-        "theta_jn": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
-        "phase": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
-        "a_1": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.99)",
-        "a_2": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.99)",
-        "tilt_1": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
-        "tilt_2": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
-        "phi_12": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
-        "phi_jl": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
-        "geocent_time": "bilby.core.prior.Uniform(minimum=-0.1, maximum=0.1)",
-    }
+    if approximant in ["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM"]:
+        # quasi-circular precessing-spin 
+        intrinsic_dict = {
+            "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
+            "mass_2": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
+            "mass_ratio": "bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.125, maximum=1.0)",
+            "chirp_mass": "bilby.gw.prior.UniformInComponentsChirpMass(minimum=25.0, maximum=100.0)",
+            "luminosity_distance": 1000.0,
+            "theta_jn": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
+            "phase": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
+            "a_1": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.99)",
+            "a_2": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.99)",
+            "tilt_1": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
+            "tilt_2": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
+            "phi_12": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
+            "phi_jl": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
+            "geocent_time": 0.0,
+        }
+    elif approximant in ["SEOBNRv5HM"]:
+        # quasi-circular aligned-spin
+        intrinsic_dict = {
+            "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
+            "mass_2": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
+            "mass_ratio": "bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.125, maximum=1.0)",
+            "chirp_mass": "bilby.gw.prior.UniformInComponentsChirpMass(minimum=25.0, maximum=100.0)",
+            "luminosity_distance": 1000.0,
+            "theta_jn": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
+            "phase": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
+            "chi_1": 'bilby.gw.prior.AlignedSpin(name="chi_1", a_prior=Uniform(minimum=0, maximum=0.99))',
+            "chi_2": 'bilby.gw.prior.AlignedSpin(name="chi_2", a_prior=Uniform(minimum=0, maximum=0.99))',
+            "geocent_time": 0.0,
+        }
+    elif approximant in ["SEOBNRv5EHM", "TEOBResumSDALI"]:
+        intrinsic_dict = {
+            "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
+            "mass_2": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
+            "mass_ratio": "bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.125, maximum=1.0)",
+            "chirp_mass": "bilby.gw.prior.UniformInComponentsChirpMass(minimum=25.0, maximum=100.0)",
+            "luminosity_distance": 1000.0,
+            "theta_jn": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
+            "phase": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
+            "chi_1": 'bilby.gw.prior.AlignedSpin(name="chi_1", a_prior=Uniform(minimum=0, maximum=0.99))',
+            "chi_2": 'bilby.gw.prior.AlignedSpin(name="chi_2", a_prior=Uniform(minimum=0, maximum=0.99))',
+            "eccentricity": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.3)",
+            "relativistic_anomaly": "bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi)",
+            "geocent_time": 0.0,
+        }
+    else:
+        raise ValueError(f"Unimplemented approximant {approximant}")
+
     prior = build_prior_with_defaults(intrinsic_dict)
     return prior
 
 
 @pytest.fixture
 def wfg_mfd(mfd, approximant):
-    if approximant in ["SEOBNRv5PHM", "SEOBNRv5HM"]:
+    if approximant in ["SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM", "TEOBResumSDALI"]:
         wfg_class = NewInterfaceWaveformGenerator
     else:
         wfg_class = WaveformGenerator
@@ -68,7 +102,7 @@ def wfg_mfd(mfd, approximant):
 
 @pytest.fixture
 def wfg_ufd(mfd, approximant):
-    if approximant in ["SEOBNRv5PHM", "SEOBNRv5HM"]:
+    if approximant in ["SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM", "TEOBResumSDALI"]:
         wfg_class = NewInterfaceWaveformGenerator
     else:
         wfg_class = WaveformGenerator
@@ -100,9 +134,11 @@ def tolerances(approximant):
 
 # Uncomment to test only one approximant.
 try:
-    import pyseobnr
+    # import pyseobnr
+    import EOBRun_module
 
-    approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM"]
+    # approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM", "TEOBResumSDALI"]
+    approximant_list = ["TEOBResumSDALI"]
 except ImportError:
     approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM"]
 
