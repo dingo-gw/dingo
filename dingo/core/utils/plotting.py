@@ -96,6 +96,7 @@ _PUB_REF = {
     "legend_linewidth": 3,
     "legend_markersize": 8,
     "truth_linewidth": 0.6,
+    "spine_linewidth": 1.3,
 }
 
 
@@ -269,10 +270,13 @@ def plot_corner_multi(
         tick_w = _PUB_REF["tick_width"] * scale
         label_fs = _PUB_REF["label_size"] * scale
         truth_lw = _PUB_REF["truth_linewidth"] * scale
+        spine_lw = _PUB_REF.get("spine_linewidth", 1.0) * scale
     else:
         tick_ls, tick_len, tick_w = 14, 6, 1.5
         label_fs = 16
         truth_lw = None
+        spine_lw = 1.5
+
 
     tick_pad = 4 * scale if scale else 2
     
@@ -328,6 +332,12 @@ def plot_corner_multi(
             for line in ax.get_lines():
                 if line.get_linestyle() in ["--", "dashed"]:
                     line.set_linewidth(truth_lw)
+                else:
+                    line.set_linestyle("--")
+                    line.set_linewidth(truth_lw)
+
+        for spine in ax.spines.values():
+            spine.set_linewidth(spine_lw)
 
         ax.grid(False)
 
