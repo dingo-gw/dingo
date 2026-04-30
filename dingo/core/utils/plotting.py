@@ -99,7 +99,6 @@ _PUB_REF = {
     "spine_linewidth": 1.3,
 }
 
-
 def plot_corner_multi(
     samples,
     weights=None,
@@ -148,7 +147,7 @@ def plot_corner_multi(
         "plot_datapoints": False,
         "plot_density": False,
         "plot_contours": True,
-        "levels": [0.5, 0.9],
+        "levels": kwargs.get("levels", [0.5, 0.9]),
         "bins": 30,
         "max_n_ticks": 4,
         "labelpad": 0.07 if target_width is not None else 0.0,
@@ -240,9 +239,27 @@ def plot_corner_multi(
         )
         handles.append(
             plt.Line2D(
-                [], [], color=color, label=l, linewidth=legend_lw, markersize=legend_ms
+                [], [], color=color, label=l, linewidth=legend_lw, markersize=legend_ms,
             )
         )
+
+    # Reshape axes into an (ndim, ndim) grid so we can index diagonals.
+    axs = np.array(fig.axes).reshape((ndim, ndim))
+
+    # Rescale the y-axis of each 1D marginal (diagonal) panel so the tallest
+    # curve is not clipped. Skip truth lines (color "0.3") when computing the
+    # maximum.
+    truth_hex = mpl.colors.to_hex("0.3")
+    for i in range(ndim):
+        marginal_lines = [
+            line for line in axs[i, i].lines
+            if mpl.colors.to_hex(line.get_color()) != truth_hex
+            and len(line.get_ydata()) > 0
+        ]
+        if marginal_lines:
+            lim = max(np.max(line.get_ydata()) for line in marginal_lines)
+            if np.isfinite(lim) and lim > 0:
+                axs[i, i].set_ylim(0, lim * 1.1)
 
     # Eliminate spacing between the 2D plots
     if target_width is not None or ndim > 8:
@@ -261,6 +278,7 @@ def plot_corner_multi(
         loc="upper right",
         fontsize=legend_fs,
         labelcolor="linecolor",
+        frameon=False,
     )
 
     # Customize tick and label properties for each axis
@@ -330,14 +348,14 @@ def plot_corner_multi(
         # Style truth lines
         if truth_lw is not None:
             for line in ax.get_lines():
-                if line.get_linestyle() in ["--", "dashed"]:
-                    line.set_linewidth(truth_lw)
-                else:
+                if mpl.colors.to_hex(line.get_color()) == mpl.colors.to_hex("0.3"):
                     line.set_linestyle("--")
-                    line.set_linewidth(truth_lw)
+                    if truth_lw is not None:
+                        line.set_linewidth(truth_lw)
 
         for spine in ax.spines.values():
             spine.set_linewidth(spine_lw)
+            spine.set_edgecolor("0.7")
 
         ax.grid(False)
 
