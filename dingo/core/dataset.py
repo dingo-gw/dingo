@@ -29,6 +29,8 @@ def recursive_hdf5_load(
     group,
     keys: Optional[List[str]] = None,
     idx: Optional[Union[int, List[int]]] = None,
+    dtype_map: Optional[dict] = None,
+    _inherited_dtype=None,
 ):
     """This is a generic helper function to recursively load data from an HDF5 file.
 
@@ -40,31 +42,75 @@ def recursive_hdf5_load(
         List of keys to load. If None, load all keys.
     idx: int or list[int] or None
         If idx is provided, only the datapoints corresponding to the given indices are loaded.
+    dtype_map: dict or None
+        Mapping from group/dataset names to target numpy dtypes or nested dicts.
+        This enables direct dtype conversion during HDF5 read, avoiding intermediate
+        memory allocation when changing precision. Values can be:
+        - A numpy dtype: applies to all arrays within that group (recursively)
+        - A nested dict: specifies dtypes for children of that group
+        E.g., {"polarizations": np.complex64} converts all arrays under "polarizations"
+        to complex64.
+        E.g., {"svd": {"V": np.complex64, "s": np.float32}} converts V and s separately.
+    _inherited_dtype:
+        Internal parameter for propagating dtype through recursive calls.
     """
     d = {}
     for k, v in group.items():
         if keys is None or k in keys:
+            # Check if this key has a dtype or nested map specified
+            dtype_spec = dtype_map.get(k) if dtype_map else None
+
             if isinstance(v, h5py.Group):
-                d[k] = recursive_hdf5_load(v, idx=idx)
+                if isinstance(dtype_spec, dict):
+                    # Nested dict: use as dtype_map for this subgroup
+                    d[k] = recursive_hdf5_load(v, idx=idx, dtype_map=dtype_spec)
+                else:
+                    # dtype or None: use as inherited_dtype for children
+                    effective_dtype = dtype_spec if dtype_spec is not None else _inherited_dtype
+                    d[k] = recursive_hdf5_load(
+                        v, idx=idx, dtype_map=dtype_map, _inherited_dtype=effective_dtype
+                    )
             else:
+                # For datasets, dtype_spec should be a dtype (not a dict)
+                effective_dtype = dtype_spec if dtype_spec is not None else _inherited_dtype
+                if isinstance(effective_dtype, dict):
+                    raise TypeError(
+                        f"dtype_map specifies a dict for dataset '{k}', but dicts are "
+                        f"only valid for groups. Use a numpy dtype instead."
+                    )
+
+                # Use astype view for direct dtype conversion during load if specified.
+                # Skip for structured arrays (they're converted to DataFrames later).
+                if (
+                    effective_dtype is not None
+                    and v.dtype != effective_dtype
+                    and v.dtype.names is None
+                ):
+                    view = v.astype(effective_dtype)
+                else:
+                    view = v
+
                 # Load values from hdf5 file as np.ndarray
                 if idx is None:
                     # Load all values
-                    d[k] = v[...]
+                    d[k] = view[...]
                 elif isinstance(idx, list) and len(idx) > 1:
                     # Load batch of indices: hdf5 load requires index list to be sorted
                     sorting = np.argsort(idx)
                     sorted_idx = np.array(idx)[sorting]
                     reverse_sorting = np.zeros_like(sorting)
                     reverse_sorting[sorting] = np.arange(len(sorting))
-                    d[k] = v[sorted_idx][reverse_sorting]
+                    d[k] = view[sorted_idx][reverse_sorting]
                 else:
                     # Load specific idx
-                    d[k] = v[idx]
+                    d[k] = view[idx]
                 # Update data types
                 # If the array has column names, load it as a pandas DataFrame
                 if d[k].dtype.names is not None:
                     d[k] = pd.DataFrame(d[k])
+                    # Apply dtype conversion to DataFrame if specified
+                    if effective_dtype is not None:
+                        d[k] = d[k].astype(effective_dtype, copy=False)
                 # Convert 0-dimensional arrays to scalars
                 elif d[k].ndim == 0:
                     d[k] = d[k].item()
@@ -97,6 +143,7 @@ class DingoDataset:
         dictionary: Optional[dict] = None,
         data_keys: Optional[List] = None,
         leave_on_disk_keys: Optional[list] = None,
+        dtype_map: Optional[dict] = None,
     ):
         """
         For constructing, provide either file_name, or dictionary containing data and
@@ -117,6 +164,10 @@ class DingoDataset:
             Keys for which the values are not loaded into RAM when initializing the dataset.
             This reduces the memory footprint during training. Instead, the values are
             loaded from the HDF5 file during training.
+        dtype_map: Optional[dict]
+            Mapping from group names to target numpy dtypes for loading. Passed to
+            recursive_hdf5_load to enable direct dtype conversion during HDF5 read,
+            avoiding intermediate memory allocation.
         """
         self._data_keys = list(data_keys)  # Make a copy before modifying.
         self._data_keys.append("version")
@@ -131,7 +182,7 @@ class DingoDataset:
 
         # If data provided, load it
         if file_name is not None:
-            self.from_file(file_name)
+            self.from_file(file_name, dtype_map=dtype_map)
         elif dictionary is not None:
             self.from_dictionary(dictionary)
 
@@ -149,7 +200,7 @@ class DingoDataset:
             if self.dataset_type:
                 f.attrs["dataset_type"] = self.dataset_type
 
-    def from_file(self, file_name: str):
+    def from_file(self, file_name: str, dtype_map: Optional[dict] = None):
         print(f"Loading dataset from {str(file_name)}.")
         if self._leave_on_disk_keys:
             print(f"Omitting data keys {self._leave_on_disk_keys}.")
@@ -158,6 +209,7 @@ class DingoDataset:
             loaded_dict = recursive_hdf5_load(
                 f,
                 keys=[k for k in self._data_keys if k not in self._leave_on_disk_keys],
+                dtype_map=dtype_map,
             )
             # Set the keys that the class expects
             for k, v in loaded_dict.items():

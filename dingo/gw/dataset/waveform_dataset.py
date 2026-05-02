@@ -76,6 +76,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             dictionary=dictionary,
             data_keys=["parameters", "polarizations", "svd"],
             leave_on_disk_keys=leave_on_disk_keys,
+            dtype_map=self.dtype_map,
         )
         self.file_name = file_name
 
@@ -107,20 +108,8 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         # particular, this zeroes the waveforms for f < f_min.
         self.update_domain(domain_update)
 
-        # Update dtypes if necessary
-        if self.precision is not None:
-            if self.parameters is not None:
-                self.parameters = self.parameters.astype(self.real_type, copy=False)
-            if self.polarizations is not None:
-                for k, v in self.polarizations.items():
-                    self.polarizations[k] = v.astype(self.complex_type, copy=False)
-
-            # This should probably be moved to the SVDBasis class.
-            if self.svd is not None:
-                self.svd["V"] = self.svd["V"].astype(self.complex_type, copy=False)
-                # For backward compatibility; in future, this will be there.
-                if "s" in self.svd:
-                    self.svd["s"] = self.svd["s"].astype(self.real_type, copy=False)
+        # Note: dtype conversion for parameters, polarizations, and svd is now handled
+        # during HDF5 loading via dtype_map, avoiding intermediate memory allocation.
 
         if self.settings.get("compression", None) is not None:
             self.initialize_decompression(svd_size_update)
@@ -209,30 +198,24 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         self.decompression_transform = Compose(decompression_transform_list)
 
     @property
-    def real_type(self):
-        if self.precision is not None:
-            if self.precision == "single":
-                return np.float32
-            elif self.precision == "double":
-                return np.float64
-            else:
-                raise TypeError(
-                    "Precision can only be changed to 'single' or 'double'."
-                )
-        else:
-            return None
+    def dtype_map(self):
+        """Mapping from group names to target dtypes for HDF5 loading.
 
-    @property
-    def complex_type(self):
-        if self.precision is not None:
-            if self.precision == "single":
-                return np.complex64
-            elif self.precision == "double":
-                return np.complex128
-            else:
-                raise TypeError(
-                    "Precision can only be changed to 'single' or 'double'."
-                )
+        This enables direct dtype conversion during HDF5 read, avoiding
+        intermediate memory allocation when changing precision.
+        """
+        if self.precision == "single":
+            return {
+                "parameters": np.float32,
+                "polarizations": np.complex64,
+                "svd": {"V": np.complex64, "s": np.float32},
+            }
+        elif self.precision == "double":
+            return {
+                "parameters": np.float64,
+                "polarizations": np.complex128,
+                "svd": {"V": np.complex128, "s": np.float64},
+            }
         else:
             return None
 
@@ -285,7 +268,10 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                 self.file_handle = h5py.File(self.file_name, "r")
 
             polarizations = recursive_hdf5_load(
-                self.file_handle, keys=self._leave_on_disk_keys, idx=batched_idx
+                self.file_handle,
+                keys=self._leave_on_disk_keys,
+                idx=batched_idx,
+                dtype_map=self.dtype_map,
             )["polarizations"]
             # Apply domain update to set waveform to zero for f < f_min
             if self.svd is None:
@@ -300,12 +286,6 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
             # Convert parameters to dict
             if not isinstance(parameters, dict):
                 parameters = parameters.to_dict()
-            # Update precision
-            if self.precision is not None:
-                polarizations = {
-                    k: v.astype(self.complex_type, copy=False)
-                    for k, v in polarizations.items()
-                }
             # Perform SVD size update on waveform
             if self.svd is not None and self.svd_size_update is not None:
                 for k, v in polarizations.items():
