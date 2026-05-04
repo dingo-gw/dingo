@@ -158,9 +158,15 @@ class WaveformGenerator:
         self._spin_conversion_phase = value
 
     def _get_ell_max(self):
-        """Derive ell_max from mode_list. Falls back to 4 if mode_list is None."""
+        """Get ell_max from mode_list. Falls back to 4 with a warning if
+        mode_list is None."""
         if self.mode_list is not None:
             return max(l for l, m in self.mode_list)
+        warnings.warn(
+            "mode_list not provided; falling back to ell_max=4 for the DFT "
+            "phase grid. Pass mode_list to the WaveformGenerator if this is "
+            "not correct."
+        )
         return 4
 
     def generate_hplus_hcross(
@@ -1523,13 +1529,8 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         parameters: Dict[str, float],
     ) -> tuple:
         """
-        Generate FD polarizations for multiple phi_c values by delegating to
-        pyseobnr's GenerateWaveform.generate_multi_phase_fd_polarizations().
-
-        This is a thin wrapper that converts DINGO parameters to pyseobnr
-        format and calls the waveform model's multi-phase method. Any waveform
-        model implementing the same interface (returning hpc_fd_list, ell_max,
-        phi_c_values) can be used here.
+        Generate FD polarizations at an equally-spaced grid of phi_c values
+        for a DFT-based phase decomposition.
 
         Parameters
         ----------
@@ -1542,9 +1543,9 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             List of {"h_plus": array, "h_cross": array} on domain frequencies
             [0, f_max], one per phi_c value.
         ell_max: int
-            Maximum |m| value (= l_max from the model).
+            Maximum |m| value used to build the phi_c grid.
         phi_c_values: np.ndarray
-            The phi_c grid used.
+            The equally-spaced phi_c grid that was used.
         """
         from pyseobnr.generate_waveform import GenerateWaveform
 
@@ -1567,7 +1568,33 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             pyseobnr_params[k] = v
 
         gen_wf = GenerateWaveform(pyseobnr_params)
-        return gen_wf.generate_multi_phase_fd_polarizations()
+
+        ell_max = self._get_ell_max_for_multi_phase(gen_wf)
+        phi_c_offsets = np.linspace(
+            0, 2 * np.pi, 2 * ell_max + 1, endpoint=False
+        )
+        hpc_fd_list = gen_wf.generate_multi_phase_fd_polarizations(phi_c_offsets)
+        return hpc_fd_list, ell_max, phi_c_offsets
+
+    def _get_ell_max_for_multi_phase(self, gen_wf):
+        """Get ell_max for the DFT phase grid.
+
+        Preference order:
+          1. ``self.mode_list`` if set, via ``_get_ell_max()``.
+          2. ``gen_wf.model.max_ell_returned`` (only for pyseobnr models).
+          3. Fall back to 4 with a warning.
+        """
+        if self.mode_list is not None:
+            return self._get_ell_max()
+        try:
+            return gen_wf.model.max_ell_returned
+        except (ValueError, AttributeError):
+            warnings.warn(
+                "mode_list not provided and model.max_ell_returned not "
+                "available; falling back to ell_max=4 for the DFT phase "
+                "grid."
+            )
+            return 4
 
     def generate_TD_waveform(self, parameters_gwsignal: Dict) -> Dict[str, np.ndarray]:
         """
