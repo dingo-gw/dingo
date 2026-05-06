@@ -11,14 +11,10 @@ import json
 import os
 import subprocess
 
-import numpy as np
-
 from bilby_pipe.gracedb import (
     CHANNEL_DICTS,
     _read_cbc_candidate,
-    _read_distance_upper_bound_from_fits,
     calibration_dict_lookup,
-    download_bayestar_skymap,
     extract_psds_from_xml,
     read_from_gracedb,
     read_from_json,
@@ -30,34 +26,6 @@ from bilby_pipe.utils import (
 )
 
 GRACEDB_URL = "https://gracedb.ligo.org/api/"
-
-# Distance prior bounds (Mpc) keyed by analysis duration (seconds).
-# Chosen to encompass typical source distances for each chirp-mass range.
-_DEFAULT_DISTANCE_BOUNDS = {
-    4: (10, 10000),
-    8: (10, 5000),
-    16: (10, 4000),
-    32: (10, 3000),
-    64: (5, 2000),
-    128: (1, 500),
-}
-
-_PRIOR_TEMPLATE = """\
-chirp_mass = bilby.gw.prior.UniformInComponentsChirpMass(name='chirp_mass', minimum={mc_min:.4f}, maximum={mc_max:.4f}, unit='$M_{{\\odot}}$')
-mass_ratio = bilby.gw.prior.UniformInComponentsMassRatio(name='mass_ratio', minimum=0.125, maximum=1)
-a_1 = Uniform(name='a_1', minimum=0, maximum=0.99)
-a_2 = Uniform(name='a_2', minimum=0, maximum=0.99)
-tilt_1 = Sine(name='tilt_1')
-tilt_2 = Sine(name='tilt_2')
-phi_jl = Uniform(name='phi_jl', minimum=0, maximum=6.283185307179586, boundary='periodic')
-phi_12 = Uniform(name='phi_12', minimum=0, maximum=6.283185307179586, boundary='periodic')
-luminosity_distance = bilby.gw.prior.UniformSourceFrame(name='luminosity_distance', minimum={d_min:.1f}, maximum={d_max:.1f}, unit='Mpc')
-dec = Cosine(name='dec')
-ra = Uniform(name='ra', minimum=0, maximum=6.283185307179586, boundary='periodic')
-theta_jn = Sine(name='theta_jn', boundary='periodic')
-psi = Uniform(name='psi', minimum=0, maximum=3.141592653589793, boundary='periodic')
-phase = Uniform(name='phase', minimum=0, maximum=6.283185307179586, boundary='periodic')
-"""
 
 
 def _get_analysis_duration(chirp_mass):
@@ -79,33 +47,42 @@ def _get_analysis_duration(chirp_mass):
     return 128
 
 
-def _generate_prior(chirp_mass, outdir, recommended_distance_max=None):
-    """Write a precessing-spin prior file and return its path.
+def _extract_prior_from_model(model_path):
+    """Extract prior specifications from a dingo model checkpoint.
 
-    Chirp mass bounds are set to a narrow window around the trigger value.
-    Distance bounds are taken from _DEFAULT_DISTANCE_BOUNDS and optionally
-    extended when a skymap-derived maximum is provided.
+    Reads the model metadata and merges the intrinsic and extrinsic prior
+    specifications stored there. Entries in the intrinsic prior that are
+    fixed scalar values (parameters not sampled during training) are
+    excluded. Extrinsic prior entries override intrinsic ones for shared
+    parameters (e.g. luminosity_distance, geocent_time).
+
+    Parameters
+    ----------
+    model_path : str
+        Path to the trained dingo model checkpoint (.pt file).
+
+    Returns
+    -------
+    dict
+        Mapping parameter_name -> prior_string (or "default").
     """
-    if chirp_mass < 2:
-        mc_min, mc_max = chirp_mass - 0.01, chirp_mass + 0.01
-    elif chirp_mass < 4:
-        mc_min, mc_max = chirp_mass - 0.1, chirp_mass + 0.1
-    else:
-        mc_min, mc_max = chirp_mass * 0.9, chirp_mass * 1.1
+    import torch
 
-    duration = _get_analysis_duration(chirp_mass)
-    d_min, d_max = _DEFAULT_DISTANCE_BOUNDS.get(duration, (10, 10000))
-    if recommended_distance_max is not None and d_max < recommended_distance_max:
-        d_max = float(np.ceil(recommended_distance_max / d_max) * d_max)
+    d = torch.load(model_path, map_location="cpu", weights_only=False)
+    metadata = d["metadata"]
 
-    prior_file = os.path.join(outdir, "online.prior")
-    with open(prior_file, "w") as f:
-        f.write(
-            _PRIOR_TEMPLATE.format(
-                mc_min=mc_min, mc_max=mc_max, d_min=d_min, d_max=d_max
-            )
-        )
-    return prior_file
+    intrinsic_prior = metadata["dataset_settings"]["intrinsic_prior"]
+    extrinsic_prior = metadata["train_settings"]["data"]["extrinsic_prior"]
+
+    # Keep only string entries from the intrinsic prior; fixed scalar values
+    # (e.g. luminosity_distance = 100.0) are not priors and must be excluded.
+    prior = {k: v for k, v in intrinsic_prior.items() if isinstance(v, str)}
+
+    # Extrinsic prior entries take precedence over intrinsic ones for shared
+    # parameters (e.g. luminosity_distance has a proper range in extrinsic_prior).
+    prior.update(extrinsic_prior)
+
+    return prior
 
 
 def _write_config_file(config_dict, filename, comment=None):
@@ -132,7 +109,6 @@ def prepare_dingo_config(
     importance_sample=True,
     channel_dict=None,
     psd_cut=0.95,
-    recommended_distance_max=None,
     settings=None,
     webdir=None,
 ):
@@ -148,7 +124,8 @@ def prepare_dingo_config(
     outdir : str
         Directory where the INI file and all outputs are written.
     model : str
-        Path to the trained dingo model (.pt file).
+        Path to the trained dingo model (.pt file). The prior is extracted
+        directly from this checkpoint, so no separate prior file is needed.
     device : str
         Device for the neural network forward pass ('cuda' or 'cpu').
     num_samples : int
@@ -159,14 +136,10 @@ def prepare_dingo_config(
         Whether to run the importance sampling second stage.
     channel_dict : dict, optional
         Mapping from detector name to channel name. If None, the config
-        omits a channel specification (use together with data_dict or
-        provide via --settings).
+        omits a channel specification (provide via --settings or data_dict).
     psd_cut : float
         Maximum frequency is capped at this fraction of the pipeline PSD's
         maximum frequency to avoid likelihood overflow from the low-pass roll-off.
-    recommended_distance_max : float, optional
-        Skymap-derived distance upper bound (Mpc). Expands the distance
-        prior if larger than the default maximum.
     settings : dict, optional
         Additional key-value pairs that override any computed defaults.
         Applied last, so they take precedence over all other settings.
@@ -214,10 +187,9 @@ def prepare_dingo_config(
     # Calibration lookup (gracefully returns (None, None) off-cluster)
     calibration_model, calib_dict = calibration_dict_lookup(trigger_time, ifos)
 
-    # Prior file
-    prior_file = _generate_prior(
-        chirp_mass, outdir, recommended_distance_max=recommended_distance_max
-    )
+    # Extract the prior from the model checkpoint so that inference uses
+    # exactly the prior the model was trained on.
+    prior_dict = _extract_prior_from_model(model)
 
     if webdir is None:
         webdir = os.path.join(outdir, "results_page")
@@ -237,8 +209,8 @@ def prepare_dingo_config(
         "deltaT": 0.2,
         "reference_frame": reference_frame,
         "time_reference": time_reference,
-        # Prior
-        "prior_file": prior_file,
+        # Prior extracted from model
+        "prior_dict": prior_dict,
         # Dingo model
         "model": model,
         "device": device,
@@ -307,14 +279,6 @@ def create_parser():
     parser.add_argument(
         "--psd-file", type=str, default=None,
         help="Path to ligolw-xml file containing PSDs (overrides coinc.xml download)",
-    )
-    parser.add_argument(
-        "--skymap-file", type=str, default=None,
-        help="Path to FITS skymap for distance prior (skips GraceDB download)",
-    )
-    parser.add_argument(
-        "--disable-skymap-download", action="store_true",
-        help="Skip automatic BAYESTAR skymap download",
     )
     parser.add_argument(
         "--outdir", type=str, default=None,
@@ -402,22 +366,6 @@ def main(args=None):
     if args.psd_file is not None and os.path.isfile(args.psd_file):
         candidate["coinc_file"] = args.psd_file
 
-    if args.skymap_file is not None:
-        skymap_file = args.skymap_file
-    elif not args.disable_skymap_download and args.gracedb:
-        skymap_file = download_bayestar_skymap(gracedb, gracedb_url, outdir)
-    else:
-        skymap_file = None
-
-    if skymap_file is not None:
-        recommended_distance_max = _read_distance_upper_bound_from_fits(
-            skymap_file, level=0.95
-        )
-        if recommended_distance_max is not None:
-            recommended_distance_max *= 2
-    else:
-        recommended_distance_max = None
-
     extra_settings = {}
     if args.settings is not None:
         with open(args.settings) as f:
@@ -436,7 +384,6 @@ def main(args=None):
         importance_sample=args.importance_sample,
         channel_dict=channel_dict,
         psd_cut=args.psd_cut,
-        recommended_distance_max=recommended_distance_max,
         settings=extra_settings,
         webdir=args.webdir,
     )
