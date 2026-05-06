@@ -701,6 +701,10 @@ class Result(CoreResult):
             * The spin angles phi_jl and theta_jn are transformed to account for a
             difference in phase definition.
             * Some columns are dropped: delta_log_prob_target, log_prob
+            * Aligned-spin columns ``chi_1``/``chi_2`` are renamed to
+            ``spin_1z``/``spin_2z`` so that PESummary's standard-name
+            dictionary recognises them and derives ``a_1``, ``a_2``,
+            ``chi_eff``, etc.
         """
         if hasattr(self, "_pesummary_samples"):
             return self._pesummary_samples
@@ -727,6 +731,13 @@ class Result(CoreResult):
             if "time" in col:
                 samples.loc[:, col] += self.t_ref
 
+        # Rename aligned-spin columns to match PESummary's standard names.
+        # PESummary's standard_names.py maps spin_1z/spin_2z but not chi_1/chi_2,
+        # so without this rename pesummary cannot derive a_1, chi_eff, chi_p, etc.
+        samples.rename(
+            columns={"chi_1": "spin_1z", "chi_2": "spin_2z"}, inplace=True
+        )
+
         spin_conversion_phase_old = self.base_metadata["dataset_settings"][
             "waveform_generator"
         ].get("spin_conversion_phase")
@@ -752,7 +763,9 @@ class Result(CoreResult):
 
         By convention, Dingo stores all times *relative* to a reference time, typically
         the trigger time for an event. The prior returned here corrects for that offset to
-        be consistent with other codes.
+        be consistent with other codes. Aligned-spin keys ``chi_1``/``chi_2`` are
+        renamed to ``spin_1z``/``spin_2z`` to match the renaming applied in
+        :meth:`get_pesummary_samples`.
         """
         prior = copy.deepcopy(self.prior)
         for p in prior:
@@ -762,4 +775,7 @@ class Result(CoreResult):
                     prior[p].minimum += self.t_ref
                 except AttributeError:
                     continue
+        for old, new in (("chi_1", "spin_1z"), ("chi_2", "spin_2z")):
+            if old in prior and new not in prior:
+                prior[new] = prior.pop(old)
         return prior
