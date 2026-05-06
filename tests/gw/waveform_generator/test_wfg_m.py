@@ -151,16 +151,21 @@ def tolerances(approximant):
         return 1e-5, 1e-5
 
 
-# Uncomment to test only one approximant.
-try:
-    # import pyseobnr
-    import EOBRun_module
+approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM"]
 
-    # approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM", "TEOBResumSDALI"]
-    approximant_list = ["TEOBResumSDALI"]
+try:
+    import pyseobnr  # noqa: F401
+
+    approximant_list += ["SEOBNRv5PHM", "SEOBNRv5HM", "SEOBNRv5EHM"]
 except ImportError:
-    raise ValueError("TMP")
-    approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM"]
+    pass
+
+try:
+    import EOBRun_module  # noqa: F401
+
+    approximant_list += ["TEOBResumSDALI"]
+except ImportError:
+    pass
 
 
 @pytest.mark.parametrize("approximant", approximant_list)
@@ -192,7 +197,7 @@ def test_generate_hplus_hcross_m(intrinsic_prior, wfg, num_evaluations, toleranc
             ]
         )
 
-        debug = True
+        debug = False
         if debug:
             maxval = max(mismatches[-1])
             idx = mismatches[-1].index(maxval)
@@ -207,7 +212,6 @@ def test_generate_hplus_hcross_m(intrinsic_prior, wfg, num_evaluations, toleranc
             plt.xscale("log")
             plt.xlim((5, 128))
             plt.title(f"{p}, mismatch={maxval}")
-            plt.savefig("/work/nihargupte/src/dingo/tests/gw/mm.png")
             plt.show()
 
     mismatches = np.array(mismatches)

@@ -14,7 +14,7 @@ from dingo.gw.transforms import (
     DecimateWaveformsAndASDS,
     create_mask_based_on_frequency_update,
 )
-from dingo.gw.waveform_generator import WaveformGenerator
+from dingo.gw.waveform_generator import WaveformGenerator, wfg_utils
 from dingo.gw.domains import (
     Domain,
     UniformFrequencyDomain,
@@ -382,6 +382,18 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         pol_m = self.signal_m({**theta, "phase": 0})
         pol_m = {k: pol["waveform"] for k, pol in pol_m.items()}
 
+        # For TEOB, generate_hplus_hcross_m applies a phase-dependent time shift
+        # bookkept in wfg._deferred_timeshift_data. The analytical precomputation
+        # below assumes mu(phi) = sum_m mu_m(0) * exp(-i m phi), which is only
+        # valid when that timeshift is absent. When it's present we fall back to
+        # a per-phase resum so the phase-grid likelihood stays consistent with
+        # the full direct likelihood.
+        dts = getattr(self.waveform_generator, "_deferred_timeshift_data", None)
+        if dts is not None:
+            return self._log_likelihood_phase_grid_mode_decomposed_with_dts(
+                pol_m, d, phases, dts
+            )
+
         # Step 2: Precompute complex inner products (mu, mu) and (d, mu) for the
         # individual modes m.
         min_idx = self.data_domain.min_idx
@@ -473,6 +485,56 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         # log_likelihood_ref = self.log_likelihood({**theta, "phase": phase})
         # print(log_likelihoods[idx] - log_likelihood_ref)
 
+        return log_likelihoods
+
+    def _log_likelihood_phase_grid_mode_decomposed_with_dts(
+        self, pol_m, d, phases, dts
+    ):
+        """Variant of _log_likelihood_phase_grid_mode_decomposed for approximants
+        (currently TEOB) whose mode decomposition carries a phase-dependent time
+        shift recorded in `dts` (= wfg._deferred_timeshift_data).
+
+        We cannot use the analytical precomputation trick because the timeshift
+        depends on the argmax of the TD-resummed h+, which varies with phase.
+        Instead we resum modes per phase and apply the exp(-2 pi i f dt(phi))
+        correction before computing inner products. The geocenter-level time
+        shift commutes with detector projection, so we can apply it directly to
+        the per-detector signals returned by signal_m.
+        """
+        m_vals = sorted(pol_m.keys())
+        ifos = list(d.keys())
+        freqs = self.data_domain()
+
+        log_likelihoods = np.empty(len(phases))
+        for idx, phi in enumerate(phases):
+            # Analytical resum of per-detector mode contributions.
+            mu = {
+                ifo: sum(
+                    pol_m[m][ifo] * np.exp(-1j * m * phi) for m in m_vals
+                )
+                for ifo in ifos
+            }
+            # Deferred-timeshift correction (no-op when phi == 0.0).
+            if phi != 0.0:
+                target_phase = dts["phase_ref"] + phi
+                epoch_target = wfg_utils.compute_epoch_from_resized_td_modes(
+                    dts["resized_td_modes"], dts["iota"], target_phase,
+                    dts["delta_t"],
+                )
+                dt_target = 1.0 / dts["delta_f"] + epoch_target
+                dt_correction = dt_target - dts["dt_ref"]
+                shift = np.exp(-2j * np.pi * dt_correction * freqs)
+                for ifo in ifos:
+                    mu[ifo] = mu[ifo] * shift
+
+            rho2opt = sum(
+                inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()
+            )
+            kappa2 = sum(
+                inner_product(d_ifo, mu_ifo)
+                for d_ifo, mu_ifo in zip(d.values(), mu.values())
+            )
+            log_likelihoods[idx] = self.log_Zn + kappa2 - 0.5 * rho2opt
         return log_likelihoods
 
     def _log_likelihood_phase_marginalized(self, theta):

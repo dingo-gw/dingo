@@ -1,7 +1,6 @@
 import numpy as np
 import lal
 import lalsimulation as LS
-from scipy.signal import find_peaks
 from lalsimulation.gwsignal.core import conditioning_subroutines as cond
 from gwpy.timeseries import TimeSeries
 
@@ -72,6 +71,36 @@ def taper_td_modes_in_place(hlm_td, tapering_flag: int = 1):
         window = get_tapering_window_for_complex_time_series(h, tapering_flag)
         h.data.data *= window
 
+def get_tapering_window_for_real_array(signal, taper_kind="start"):
+    """Recover the multiplicative gwsignal taper window for a real signal.
+
+    Mirrors `get_tapering_window_for_complex_time_series` (LAL path) for the
+    gwsignal/TEOB path: runs `cond.taper_gwpy_timeseries` on a copy and
+    derives the window as |tapered| / |original| with an eps regularizer.
+    Returning the window (instead of the tapered signal) lets the caller
+    apply it independently to the real and imaginary parts of complex modes.
+
+    Parameters
+    ----------
+    signal: np.ndarray
+        Real-valued 1D array to derive the window from.
+    taper_kind: str
+        Forwarded to `cond.taper_gwpy_timeseries`. Default "start".
+
+    Returns
+    -------
+    window: np.ndarray
+        Real-valued window of the same length as `signal`. All ones if the
+        signal is too short or all-zero (matching gwsignal's no-op behavior).
+    """
+    ts = TimeSeries(signal.copy(), dt=1.0)
+    ts_tapered = cond.taper_gwpy_timeseries(ts, taper_kind)
+    abs_signal = np.abs(signal)
+    max_abs = np.max(abs_signal) if abs_signal.size else 0.0
+    eps = 1e-20 * max_abs if max_abs > 0 else 1e-20
+    return (np.abs(ts_tapered.value) + eps) / (abs_signal + eps)
+
+
 def taper_td_gwpy_modes_in_place(hlm_td, iota, phase=0.0):
     """
     Apply sigmoid start taper to gwpy TimeSeries modes in place.
@@ -81,11 +110,14 @@ def taper_td_gwpy_modes_in_place(hlm_td, iota, phase=0.0):
     See generate_conditioned_td_waveform_from_td_fallback in
     lalsimulation/gwsignal/core/waveform_conditioning.py:35-64.
 
-    The gwsignal reference applies taper_gwpy_timeseries to the combined
-    polarizations hp and hc, where find_peaks determines the taper length.
-    Since hp and hc can yield different taper lengths, but we need a single
-    real-valued window to apply to each complex mode, we compute both windows
-    and use the one with shorter taper (preserving more signal). 
+    The gwsignal reference applies `taper_gwpy_timeseries` to the combined
+    polarizations hp and hc, which can yield different windows because
+    find_peaks finds different peaks. We therefore derive `W_hp` and `W_hc`
+    separately via `get_tapering_window_for_real_array` and apply `W_hp` to
+    Re(h_lm) and `W_hc` to Im(h_lm) for each mode. For non-precessing
+    systems the modes are purely real in the co-rotating frame, so Re(h_lm)
+    and Im(h_lm) map cleanly to the two polarizations, giving agreement with
+    the reference.
 
     Parameters
     ----------
@@ -100,9 +132,8 @@ def taper_td_gwpy_modes_in_place(hlm_td, iota, phase=0.0):
     """
     max_len = max(len(h) for h in hlm_td.values())
 
-    # Sum modes to get combined hp and hc (unconditioned).
-    # These are needed to compute taper windows that match the reference path,
-    # where taper_gwpy_timeseries uses find_peaks on the combined polarizations.
+    # Sum modes to get combined hp and hc (unconditioned). The reference
+    # path runs the taper on these summed polarizations.
     h_complex = np.zeros(max_len, dtype=complex)
     for (l, m), h in hlm_td.items():
         data = h.value.copy()
@@ -111,31 +142,8 @@ def taper_td_gwpy_modes_in_place(hlm_td, iota, phase=0.0):
         ylm = lal.SpinWeightedSphericalHarmonic(iota, np.pi / 2 - phase, -2, l, m)
         h_complex += ylm * data
 
-    hp_combined = h_complex.real
-    hc_combined = -h_complex.imag
-
-    # Compute separate taper windows for hp and hc. The reference path
-    # (generate_conditioned_td_waveform_from_td_fallback) applies
-    # taper_gwpy_timeseries independently to hp and hc, which can yield
-    # different taper lengths because find_peaks finds different peaks.
-    # We apply W_hp to Re(h_lm) and W_hc to Im(h_lm) for each mode.
-    # For non-precessing systems the modes are purely real in the co-rotating
-    # frame, so Re(h_lm) and Im(h_lm) map cleanly to the two polarizations,
-    # giving exact agreement with the reference.
-    start_hp, n_hp = _compute_sigmoid_taper_params(hp_combined)
-    start_hc, n_hc = _compute_sigmoid_taper_params(hc_combined)
-
-    if start_hp is None and start_hc is None:
-        return
-
-    # Build windows, falling back to the other if one polarization is empty
-    if start_hp is None:
-        start_hp, n_hp = start_hc, n_hc
-    if start_hc is None:
-        start_hc, n_hc = start_hp, n_hp
-
-    W_hp = _compute_sigmoid_window(max_len, start_hp, n_hp)
-    W_hc = _compute_sigmoid_window(max_len, start_hc, n_hc)
+    W_hp = get_tapering_window_for_real_array(h_complex.real)
+    W_hc = get_tapering_window_for_real_array(-h_complex.imag)
 
     for (l, m) in hlm_td:
         data = hlm_td[(l, m)].value.copy()
@@ -147,53 +155,6 @@ def taper_td_gwpy_modes_in_place(hlm_td, iota, phase=0.0):
             t0=hlm_td[(l, m)].t0,
             dt=hlm_td[(l, m)].dt,
         )
-
-def _compute_sigmoid_taper_params(signal):
-    """Compute (start, n) for the sigmoid start taper.
-
-    Replicates the peak-finding logic in taper_gwpy_timeseries for
-    taper_kind='start'. Returns (None, None) if the signal is empty
-    or too short.
-    """
-    LALSIMULATION_RINGING_EXTENT = 19
-
-    start = -1
-    for idx, val in enumerate(signal):
-        if val != 0:
-            start = idx
-            break
-    if start == -1:
-        return None, None
-
-    end = -1
-    for idx, val in enumerate(signal[::-1]):
-        if val != 0:
-            end = len(signal) - 1 - idx
-            break
-
-    if (end - start) <= 1:
-        return None, None
-
-    mid = int((start + end) / 2)
-    pks, _ = find_peaks(abs(signal[start + 1 : mid]))
-    pks = pks[pks > LALSIMULATION_RINGING_EXTENT]
-
-    if len(pks) < 2:
-        n = mid - start
-    else:
-        n = pks[1] + 1
-
-    return start, n
-
-def _compute_sigmoid_window(length, start, n):
-    """Compute the sigmoid taper window matching taper_gwpy_timeseries."""
-    window = np.ones(length)
-    window[start] = 0.0
-    realI = np.arange(1, n - 1)
-    z = (n - 1.0) / realI + (n - 1.0) / (realI - (n - 1.0))
-    sigma = 1.0 / (np.exp(z) + 1.0)
-    window[start + 1 : start + n - 1] = sigma
-    return window
 
 def td_modes_to_fd_modes(hlm_td, domain):
     """
