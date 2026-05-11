@@ -9,6 +9,7 @@ and data utilities.
 import argparse
 import json
 import os
+import re
 import subprocess
 
 from bilby_pipe.gracedb import (
@@ -47,30 +48,33 @@ def _get_analysis_duration(chirp_mass):
     return 128
 
 
-def _extract_prior_from_model(model_path):
-    """Extract prior specifications from a dingo model checkpoint.
+def _load_model_metadata(model_path):
+    """Load and return the metadata dict from a dingo model checkpoint."""
+    import torch
 
-    Reads the model metadata and merges the intrinsic and extrinsic prior
-    specifications stored there. Entries in the intrinsic prior that are
-    fixed scalar values (parameters not sampled during training) are
-    excluded. Extrinsic prior entries override intrinsic ones for shared
-    parameters (e.g. luminosity_distance, geocent_time).
+    d = torch.load(model_path, map_location="cpu", weights_only=False)
+    return d["metadata"]
+
+
+def _extract_prior_from_metadata(metadata):
+    """Extract prior specifications from model metadata.
+
+    Merges the intrinsic and extrinsic prior specifications stored in the
+    metadata. Entries in the intrinsic prior that are fixed scalar values
+    (parameters not sampled during training) are excluded. Extrinsic prior
+    entries override intrinsic ones for shared parameters (e.g.
+    luminosity_distance, geocent_time).
 
     Parameters
     ----------
-    model_path : str
-        Path to the trained dingo model checkpoint (.pt file).
+    metadata : dict
+        Model metadata as stored in the checkpoint under 'metadata'.
 
     Returns
     -------
     dict
         Mapping parameter_name -> prior_string (or "default").
     """
-    import torch
-
-    d = torch.load(model_path, map_location="cpu", weights_only=False)
-    metadata = d["metadata"]
-
     intrinsic_prior = metadata["dataset_settings"]["intrinsic_prior"]
     extrinsic_prior = metadata["train_settings"]["data"]["extrinsic_prior"]
 
@@ -83,6 +87,60 @@ def _extract_prior_from_model(model_path):
     prior.update(extrinsic_prior)
 
     return prior
+
+
+def _extract_prior_from_model(model_path):
+    """Extract prior specifications from a dingo model checkpoint.
+
+    Convenience wrapper around _load_model_metadata + _extract_prior_from_metadata.
+    """
+    return _extract_prior_from_metadata(_load_model_metadata(model_path))
+
+
+def _check_model_compatibility(trigger_chirp_mass, metadata):
+    """Raise ValueError if the trigger requires longer segments than the model.
+
+    Dingo models are trained on a fixed segment length determined by their
+    frequency domain (duration = 1 / delta_f). If the trigger's chirp mass
+    implies a longer required segment (e.g. BNS or NSBH), the model cannot
+    produce valid posteriors and the run should not start.
+
+    Parameters
+    ----------
+    trigger_chirp_mass : float
+        Chirp mass estimated from the GraceDB trigger (solar masses).
+    metadata : dict
+        Model metadata as stored in the checkpoint under 'metadata'.
+
+    Raises
+    ------
+    ValueError
+        If the required analysis duration exceeds the model's training duration.
+    """
+    domain = metadata["dataset_settings"]["domain"]
+    model_duration = round(1.0 / domain["delta_f"])
+    required_duration = _get_analysis_duration(trigger_chirp_mass)
+
+    if required_duration > model_duration:
+        # Parse the model's chirp mass prior range for the error message.
+        chirp_mass_prior_str = metadata["dataset_settings"]["intrinsic_prior"].get(
+            "chirp_mass", ""
+        )
+        mc_min_match = re.search(r"minimum=([0-9.eE+\-]+)", chirp_mass_prior_str)
+        mc_min = float(mc_min_match.group(1)) if mc_min_match else None
+
+        detail = (
+            f" The model's chirp mass prior minimum is {mc_min} Msun."
+            if mc_min is not None
+            else ""
+        )
+        raise ValueError(
+            f"Trigger chirp mass {trigger_chirp_mass:.2f} Msun requires "
+            f"{required_duration}s segments, but the model was trained on "
+            f"{model_duration}s segments.{detail} "
+            f"This is likely a BNS or NSBH event incompatible with this model. "
+            f"Use a model trained for longer segments or do not run dingo_pipe_gracedb."
+        )
 
 
 def _write_config_file(config_dict, filename, comment=None):
@@ -125,7 +183,8 @@ def prepare_dingo_config(
         Directory where the INI file and all outputs are written.
     model : str
         Path to the trained dingo model (.pt file). The prior is extracted
-        directly from this checkpoint, so no separate prior file is needed.
+        directly from this checkpoint; the trigger is also checked for
+        compatibility with the model's training duration.
     device : str
         Device for the neural network forward pass ('cuda' or 'cpu').
     num_samples : int
@@ -150,6 +209,12 @@ def prepare_dingo_config(
     -------
     str
         Path to the written dingo_config.ini.
+
+    Raises
+    ------
+    ValueError
+        If the trigger's required analysis duration exceeds the model's
+        training duration (e.g. a BNS event queried against a BBH model).
     """
     if settings is None:
         settings = {}
@@ -165,9 +230,16 @@ def prepare_dingo_config(
     ) = _read_cbc_candidate(candidate)
 
     chirp_mass = trigger_values["chirp_mass"]
-    duration = _get_analysis_duration(chirp_mass)
     minimum_frequency = 20.0
     maximum_frequency = 1024.0
+
+    # Load model metadata once — used for both compatibility check and prior.
+    model_metadata = _load_model_metadata(model)
+
+    # Raise early if the trigger requires a longer analysis than the model supports.
+    _check_model_compatibility(chirp_mass, model_metadata)
+
+    duration = _get_analysis_duration(chirp_mass)
 
     # Extract PSDs from coinc.xml when available
     psd_dict = {}
@@ -187,9 +259,8 @@ def prepare_dingo_config(
     # Calibration lookup (gracefully returns (None, None) off-cluster)
     calibration_model, calib_dict = calibration_dict_lookup(trigger_time, ifos)
 
-    # Extract the prior from the model checkpoint so that inference uses
-    # exactly the prior the model was trained on.
-    prior_dict = _extract_prior_from_model(model)
+    # Prior taken from the model checkpoint — not generated from trigger parameters.
+    prior_dict = _extract_prior_from_metadata(model_metadata)
 
     if webdir is None:
         webdir = os.path.join(outdir, "results_page")
