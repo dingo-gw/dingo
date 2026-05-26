@@ -356,27 +356,47 @@ def interpolated_2d_log_prob(phases, psis, values, phase_eval, psi_eval):
     return log_prob_phase + log_prob_psi
 
 
+def _bilinear_interp(phases, psis, values, phase, psi):
+    """Bilinearly interpolate ``values`` (n_phase, n_psi) at scalar ``(phase, psi)``."""
+    slice_psi = _interp_slice_along_phase(phases, values, phase)
+    return float(np.interp(psi, psis, slice_psi))
+
+
 # ---------------------------------------------------------------------------
 # Synthetic (phase, psi) sampling for a Result
 # ---------------------------------------------------------------------------
-def _build_grid_density(likelihood, theta, phases, psis, uniform_weight):
-    """Grid posterior over (phase, psi) for one sample, with a mass-covering floor."""
+def _grid_log_l_and_density(likelihood, theta, phases, psis, uniform_weight):
+    """Raw grid log-likelihood and the floored proposal density over (phase, psi)."""
     log_l = phase_psi_grid_log_likelihood(likelihood, theta, phases, psis)
     density = np.exp(log_l - np.max(log_l))
     density += density.mean() * uniform_weight
-    return density
+    return log_l, density
 
 
 def _sample_for_theta(theta, likelihood, phases, psis, uniform_weight):
-    density = _build_grid_density(likelihood, theta, phases, psis, uniform_weight)
-    return interpolated_2d_sample_and_log_prob(phases, psis, density)
+    """Returns (phase, psi, delta_log_prob, log_l_at_sample, log_l_marg)."""
+    log_l, density = _grid_log_l_and_density(
+        likelihood, theta, phases, psis, uniform_weight
+    )
+    phase, psi, delta_log_prob = interpolated_2d_sample_and_log_prob(
+        phases, psis, density
+    )
+    log_l_at_sample = _bilinear_interp(phases, psis, log_l, phase, psi)
+    log_l_marg = logsumexp(log_l) - np.log(log_l.size)
+    return phase, psi, delta_log_prob, log_l_at_sample, log_l_marg
 
 
 def _log_prob_for_theta(theta, likelihood, phases, psis, uniform_weight):
+    """Returns (log_prob, log_l_at_sample, log_l_marg) for the existing (phase, psi)."""
     phase_eval = theta["phase"]
     psi_eval = theta["psi"]
-    density = _build_grid_density(likelihood, theta, phases, psis, uniform_weight)
-    return interpolated_2d_log_prob(phases, psis, density, phase_eval, psi_eval)
+    log_l, density = _grid_log_l_and_density(
+        likelihood, theta, phases, psis, uniform_weight
+    )
+    log_prob = interpolated_2d_log_prob(phases, psis, density, phase_eval, psi_eval)
+    log_l_at_sample = _bilinear_interp(phases, psis, log_l, phase_eval, psi_eval)
+    log_l_marg = logsumexp(log_l) - np.log(log_l.size)
+    return log_prob, log_l_at_sample, log_l_marg
 
 
 def _map_over_theta(func, theta, num_processes):
@@ -404,6 +424,18 @@ def sample_synthetic_phase_psi(result, synthetic_kwargs, inverse=False):
 
     Inverse (``inverse=True``): evaluates the synthetic ``(phase, psi)`` log-prob at
     the existing sample values and stores it in ``result.samples['log_prob']``.
+
+    In addition to ``phase``/``psi``, the following diagnostic columns are written to
+    ``result.samples`` (for assessing the mode-decomposition error against the exact
+    likelihood computed later by ``importance_sample``):
+
+    * ``log_likelihood_synthetic`` -- the mode-decomposed grid log-likelihood at the
+      sampled ``(phase, psi)`` (directly comparable to the exact ``log_likelihood``).
+    * ``log_likelihood_phase_psi_marg`` -- the phase-psi-marginalized log-likelihood
+      (``logsumexp`` over the grid), i.e. the reduced-space target.
+    * ``delta_log_prob_synthetic`` -- the synthetic proposal log-density
+      ``log q(phase, psi | theta)`` that was added to ``log_prob`` (so the reduced-
+      space flow proposal density can be recovered as ``log_prob - this``).
 
     Parameters
     ----------
@@ -476,19 +508,27 @@ def sample_synthetic_phase_psi(result, synthetic_kwargs, inverse=False):
             uniform_weight=uniform_weight,
         )
         results = _map_over_theta(func, theta.iloc[within_prior], num_processes)
-        results = np.asarray(results)  # (num_valid, 3): phase, psi, delta_log_prob
-        new_phase, new_psi, delta_log_prob = results.T
+        # (num_valid, 5): phase, psi, delta_log_prob, log_l_at_sample, log_l_marg
+        results = np.asarray(results)
+        new_phase, new_psi, delta_log_prob, ll_synth, ll_marg = results.T
 
         phase_array = np.full(len(theta), 0.0)
         psi_array = np.full(len(theta), 0.0)
         delta_log_prob_array = np.full(len(theta), -np.nan)
+        ll_synth_array = np.full(len(theta), np.nan)
+        ll_marg_array = np.full(len(theta), np.nan)
         phase_array[within_prior] = new_phase
         psi_array[within_prior] = new_psi
         delta_log_prob_array[within_prior] = delta_log_prob
+        ll_synth_array[within_prior] = ll_synth
+        ll_marg_array[within_prior] = ll_marg
 
         result.samples["phase"] = phase_array
         result.samples["psi"] = psi_array
         result.samples["log_prob"] += delta_log_prob_array
+        result.samples["delta_log_prob_synthetic"] = delta_log_prob_array
+        result.samples["log_likelihood_synthetic"] = ll_synth_array
+        result.samples["log_likelihood_phase_psi_marg"] = ll_marg_array
 
         # phase was split off at Result init; psi stayed in the prior. Restore phase.
         result.prior["phase"] = phase_prior
@@ -504,9 +544,17 @@ def sample_synthetic_phase_psi(result, synthetic_kwargs, inverse=False):
             psis=psis,
             uniform_weight=uniform_weight,
         )
-        log_prob = np.asarray(
+        results = np.asarray(
             _map_over_theta(func, theta_eval.iloc[within_prior], num_processes)
-        )
+        )  # (num_valid, 3): log_prob, log_l_at_sample, log_l_marg
+        log_prob, ll_synth, ll_marg = results.T
+
         log_prob_array = np.full(len(theta), -np.nan)
+        ll_synth_array = np.full(len(theta), np.nan)
+        ll_marg_array = np.full(len(theta), np.nan)
         log_prob_array[within_prior] = log_prob
+        ll_synth_array[within_prior] = ll_synth
+        ll_marg_array[within_prior] = ll_marg
         result.samples["log_prob"] = log_prob_array
+        result.samples["log_likelihood_synthetic"] = ll_synth_array
+        result.samples["log_likelihood_phase_psi_marg"] = ll_marg_array
