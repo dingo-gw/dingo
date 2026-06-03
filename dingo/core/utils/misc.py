@@ -1,3 +1,4 @@
+import re
 from typing import Callable, Iterable
 
 import numpy as np
@@ -13,7 +14,7 @@ def get_version():
         return None
 
 
-def recursive_check_dicts_are_equal(dict_a, dict_b):
+def recursive_check_dicts_are_equal(dict_a, dict_b, rtol=1e-5):
     if dict_a.keys() != dict_b.keys():
         return False
     else:
@@ -21,8 +22,27 @@ def recursive_check_dicts_are_equal(dict_a, dict_b):
             v_b = dict_b[k]
             if type(v_a) != type(v_b):
                 return False
-            if type(v_a) == dict:
+            if isinstance(v_a, dict):
                 if not recursive_check_dicts_are_equal(v_a, v_b):
+                    return False
+            elif isinstance(v_a, str):
+                # Numbers in prior strings can vary due to float precision errors
+                # This happens when the importance_sampling jobs were run on different machines
+                # To counteract this, check numbers with allclose, then check the other chars
+                pattern = r"-?\d+\.\d+"
+                numbers_a = re.findall(pattern, v_a)
+                numbers_b = re.findall(pattern, v_b)
+                if len(numbers_a) != len(numbers_b):
+                    return False
+                if numbers_a:
+                    numbers_a = list(map(float, numbers_a))
+                    numbers_b = list(map(float, numbers_b))
+                    if not np.allclose(numbers_a, numbers_b, rtol=rtol):
+                        return False
+
+                remnant_a = re.sub(pattern, "", v_a)
+                remnant_b = re.sub(pattern, "", v_b)
+                if remnant_a != remnant_b:
                     return False
             elif not np.all(v_a == v_b):
                 return False
