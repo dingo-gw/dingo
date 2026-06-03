@@ -92,8 +92,6 @@ class Dingo(Pipeline):
         dryrun: bool
            If set to true the commands will not be run, but will be printed to standard output. Defaults to False.
 
-
-
         Raises
         ------
         PipelineException
@@ -110,13 +108,6 @@ class Dingo(Pipeline):
             ini = os.path.join(cwd, ini)
         else:
             ini = f"{self.production.name}.ini"
-
-        rundir = self.production.rundir
-
-        if "job label" in self.production.meta:
-            job_label = self.production.meta["job label"]
-        else:
-            job_label = self.production.name
 
         command = [
             os.path.join(config.get("pipelines", "environment"), "bin", "dingo_pipe"),
@@ -144,16 +135,21 @@ class Dingo(Pipeline):
                 time.sleep(10)
                 return PipelineLogger(message=out, production=self.production.name)
 
-    def samples(self):
+    def samples(self, absolute=False):
         """
         Collect the combined samples files for PESummary.
         """
 
-        results_dir = os.path.join(self.production.rundir, "result")
-        results_filenames = glob.glob(
-            os.path.join(results_dir, f"*importance_sampling.hdf5")
+        if absolute:
+            rundir = os.path.abspath(self.production.rundir)
+        else:
+            rundir = self.production.rundir
+        self.logger.info(f"Rundir for samples: {rundir}")
+        result_files = glob.glob(
+            os.path.join(rundir, "result", f"*importance_sampling.hdf5")
         )
-        return os.path.join(results_dir, results_filenames[0])
+        assert len(result_files) == 1
+        return result_files
 
     def upload_assets(self):
         """
