@@ -1,4 +1,5 @@
 import copy
+import os
 import time
 from typing import Optional
 
@@ -690,7 +691,7 @@ class Result(CoreResult):
             num_processes=num_processes,
         )
 
-    def get_pesummary_samples(self, num_processes=1):
+    def get_pesummary_samples(self, num_processes=1, resampling_method=None):
         """Samples in a form suitable for PESummary.
 
         These samples are adjusted to undo certain conventions used internally by
@@ -705,13 +706,42 @@ class Result(CoreResult):
             ``spin_1z``/``spin_2z`` so that PESummary's standard-name
             dictionary recognises them and derives ``a_1``, ``a_2``,
             ``chi_eff``, etc.
+
+        Parameters
+        ----------
+        num_processes : int
+            Number of processes for spin conversion.
+        resampling_method : str, optional
+            Method for producing unweighted samples from weighted ones.
+            'clip+rejection': clip extreme weights then rejection sample.
+            'sir': sampling importance resampling (old behavior).
+            If None (default), the value of the ``DINGO_RESAMPLING_METHOD``
+            environment variable is used, falling back to 'clip+rejection'.
+            The env-var hook lets callers that cannot pass this argument
+            through (e.g. PESummary's dingo reader) still select the method.
         """
+        if resampling_method is None:
+            resampling_method = os.environ.get(
+                "DINGO_RESAMPLING_METHOD", "clip+rejection"
+            )
+
         if hasattr(self, "_pesummary_samples"):
             return self._pesummary_samples
 
         # Unweighted samples.
         if "weights" in self.samples:
-            samples = self.sampling_importance_resampling(random_state=RANDOM_STATE)
+            if resampling_method == "clip+rejection":
+                samples = self.rejection_sample(
+                    clip_weights=True,
+                    random_state=RANDOM_STATE,
+                )
+            elif resampling_method == "sir":
+                samples = self.sampling_importance_resampling(random_state=RANDOM_STATE)
+            else:
+                raise ValueError(
+                    f"Unknown resampling_method '{resampling_method}'. "
+                    "Use 'clip+rejection' or 'sir'."
+                )
         else:
             samples = self.samples.copy()
 
