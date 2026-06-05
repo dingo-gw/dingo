@@ -18,6 +18,8 @@ from asimov.pipeline import (
     PESummaryPipeline,
 )
 
+from dingo.gw.result import Result
+
 
 class Dingo(Pipeline):
     """
@@ -149,6 +151,22 @@ class Dingo(Pipeline):
             os.path.join(rundir, "result", f"*importance_sampling.hdf5")
         )
         assert len(result_files) == 1
+
+        # pesummary can't presently read a result file containing MultibandedFrequencyDomain
+        # This is a hotfix to create a copy of the result file with UniformFrequencyDomain
+        result = Result(file_name=result_files[0])
+        settings = result.settings["dataset_settings"]["domain"]
+        if settings["type"] == "MultibandedFrequencyDomain":
+            result.settings["dataset_settings"]["domain"] = {
+                "type": "UniformFrequencyDomain",
+                "delta_f": settings["delta_f_initial"],
+                "f_min": settings["base_domain"]["f_min"],
+                "f_max": settings["base_domain"]["f_max"],
+            }
+            filename, ext = os.path.splitext(result_files[0])
+            result_files[0] = f"{filename}_pesummary{ext}"
+            result.to_file(result_files[0])
+
         return result_files
 
     def upload_assets(self):
