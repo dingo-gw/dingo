@@ -18,6 +18,8 @@ from asimov.pipeline import (
     PESummaryPipeline,
 )
 
+from dingo.gw.result import Result
+
 
 class Dingo(Pipeline):
     """
@@ -92,8 +94,6 @@ class Dingo(Pipeline):
         dryrun: bool
            If set to true the commands will not be run, but will be printed to standard output. Defaults to False.
 
-
-
         Raises
         ------
         PipelineException
@@ -110,13 +110,6 @@ class Dingo(Pipeline):
             ini = os.path.join(cwd, ini)
         else:
             ini = f"{self.production.name}.ini"
-
-        rundir = self.production.rundir
-
-        if "job label" in self.production.meta:
-            job_label = self.production.meta["job label"]
-        else:
-            job_label = self.production.name
 
         command = [
             os.path.join(config.get("pipelines", "environment"), "bin", "dingo_pipe"),
@@ -144,16 +137,40 @@ class Dingo(Pipeline):
                 time.sleep(10)
                 return PipelineLogger(message=out, production=self.production.name)
 
-    def samples(self):
+    def samples(self, absolute=False):
         """
         Collect the combined samples files for PESummary.
         """
 
-        results_dir = os.path.join(self.production.rundir, "result")
-        results_filenames = glob.glob(
-            os.path.join(results_dir, f"*importance_sampling.hdf5")
+        if absolute:
+            rundir = os.path.abspath(self.production.rundir)
+        else:
+            rundir = self.production.rundir
+        self.logger.info(f"Rundir for samples: {rundir}")
+        result_files = glob.glob(
+            os.path.join(rundir, "result", f"*importance_sampling.hdf5")
         )
-        return os.path.join(results_dir, results_filenames[0])
+        if len(result_files) == 0: 
+            raise ValueError("Importance sampling result file not found")
+        elif len(result_files) > 1: 
+            raise ValueError("Multiple importance sampling result files found")
+
+        # pesummary can't presently read a result file containing MultibandedFrequencyDomain
+        # This is a hotfix to create a copy of the result file with UniformFrequencyDomain
+        result = Result(file_name=result_files[0])
+        settings = result.settings["dataset_settings"]["domain"]
+        if settings["type"] == "MultibandedFrequencyDomain":
+            result.settings["dataset_settings"]["domain"] = {
+                "type": "UniformFrequencyDomain",
+                "delta_f": settings["delta_f_initial"],
+                "f_min": settings["base_domain"]["f_min"],
+                "f_max": settings["base_domain"]["f_max"],
+            }
+            filename, ext = os.path.splitext(result_files[0])
+            result_files[0] = f"{filename}_pesummary{ext}"
+            result.to_file(result_files[0])
+
+        return result_files
 
     def upload_assets(self):
         """
