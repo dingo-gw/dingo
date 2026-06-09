@@ -150,10 +150,10 @@ class Dingo(Pipeline):
         result_files = glob.glob(
             os.path.join(rundir, "result", f"*importance_sampling.hdf5")
         )
-    if len(result_files) == 0: 
-        raise ValueError("Importance sampling result file not found")
-    elif len(result_files) > 1: 
-        raise ValueError("multiple importance sampling result files found")
+        if len(result_files) == 0: 
+            raise ValueError("Importance sampling result file not found")
+        elif len(result_files) > 1: 
+            raise ValueError("Multiple importance sampling result files found")
 
         # pesummary can't presently read a result file containing MultibandedFrequencyDomain
         # This is a hotfix to create a copy of the result file with UniformFrequencyDomain
