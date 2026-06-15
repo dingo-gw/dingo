@@ -224,6 +224,27 @@ class TestCheckModelCompatibility:
         m["dataset_settings"]["domain"]["delta_f"] = delta_f
         return m
 
+    def _mfd_metadata(self, base_delta_f):
+        """Build metadata for a MultibandedFrequencyDomain model.
+
+        Production models use an MFD whose delta_f lives under base_domain, not
+        at the top level (duration = 1 / base_domain.delta_f).
+        """
+        import copy
+        m = copy.deepcopy(MOCK_MODEL_METADATA)
+        m["dataset_settings"]["domain"] = {
+            "type": "MultibandedFrequencyDomain",
+            "base_domain": {
+                "type": "FrequencyDomain",
+                "f_min": 20.0,
+                "f_max": 1024.0,
+                "delta_f": base_delta_f,
+            },
+            "nodes": [20.0, 35.0, 63.5, 97.5, 1023.5],
+            "delta_f_initial": base_delta_f,
+        }
+        return m
+
     def test_compatible_bbh_within_model_duration(self):
         # chirp_mass=28.3 → 4s required; model is 8s → OK
         _check_model_compatibility(28.3, self._metadata(0.125))
@@ -253,6 +274,15 @@ class TestCheckModelCompatibility:
     def test_compatible_with_long_duration_model(self):
         # chirp_mass=1.2 → 128s required; model is also 128s → OK
         _check_model_compatibility(1.2, self._metadata(1.0 / 128))
+
+    def test_compatible_multibanded_domain(self):
+        # MFD model with base delta_f=0.25 → 4s; chirp_mass=28.3 → 4s → OK
+        _check_model_compatibility(28.3, self._mfd_metadata(0.25))
+
+    def test_incompatible_multibanded_domain_bns_raises(self):
+        # MFD model is 4s; chirp_mass=1.2 → 128s required → error
+        with pytest.raises(ValueError, match="4s"):
+            _check_model_compatibility(1.2, self._mfd_metadata(0.25))
 
 
 # ---------------------------------------------------------------------------

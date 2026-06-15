@@ -101,9 +101,9 @@ def _check_model_compatibility(trigger_chirp_mass, metadata):
     """Raise ValueError if the trigger requires longer segments than the model.
 
     Dingo models are trained on a fixed segment length determined by their
-    frequency domain (duration = 1 / delta_f). If the trigger's chirp mass
-    implies a longer required segment (e.g. BNS or NSBH), the model cannot
-    produce valid posteriors and the run should not start.
+    frequency domain. If the trigger's chirp mass implies a longer required
+    segment (e.g. BNS or NSBH), the model cannot produce valid posteriors and
+    the run should not start.
 
     Parameters
     ----------
@@ -117,8 +117,13 @@ def _check_model_compatibility(trigger_chirp_mass, metadata):
     ValueError
         If the required analysis duration exceeds the model's training duration.
     """
-    domain = metadata["dataset_settings"]["domain"]
-    model_duration = round(1.0 / domain["delta_f"])
+    # Use the domain builder so this works for both UniformFrequencyDomain and
+    # MultibandedFrequencyDomain models. base=True returns the underlying
+    # uniform domain, whose duration is the model's training segment length.
+    from ..gw.domains.build_domain import build_domain_from_model_metadata
+
+    domain = build_domain_from_model_metadata(metadata, base=True)
+    model_duration = round(domain.duration)
     required_duration = _get_analysis_duration(trigger_chirp_mass)
 
     if required_duration > model_duration:
