@@ -280,7 +280,6 @@ def prepare_dingo_config(
         "maximum_frequency": maximum_frequency,
         "reference_frequency": 20.0,
         "deltaT": 0.2,
-        "reference_frame": reference_frame,
         "time_reference": time_reference,
         # Prior comes from the model; override via prior-dict-updates.
         # Dingo model
