@@ -405,14 +405,11 @@ class TestPrepareDingoConfig:
         assert "duration=" in content
         assert "label=T123456a" in content
 
-    def test_prior_dict_from_model_not_prior_file(self, tmp_path, mock_model, mock_metadata):
+    def test_no_prior_dict_in_config(self, tmp_path, mock_model, mock_metadata):
         fname = prepare_dingo_config(MOCK_CANDIDATE_BBH, "T123456a", str(tmp_path), mock_model)
         content = open(fname).read()
-        assert "prior-dict=" in content
+        assert "prior-dict=" not in content
         assert "prior-file=" not in content
-        # Model's chirp mass range must be present
-        assert "20.0" in content
-        assert "120.0" in content
 
     def test_incompatible_bns_event_raises(self, tmp_path, mock_model, mock_metadata):
         """BNS event against an 8s BBH model must raise ValueError before writing."""

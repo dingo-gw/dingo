@@ -264,9 +264,6 @@ def prepare_dingo_config(
     # Calibration lookup (gracefully returns (None, None) off-cluster)
     calibration_model, calib_dict = calibration_dict_lookup(trigger_time, ifos)
 
-    # Prior taken from the model checkpoint — not generated from trigger parameters.
-    prior_dict = _extract_prior_from_metadata(model_metadata)
-
     if webdir is None:
         webdir = os.path.join(outdir, "results_page")
 
@@ -285,8 +282,7 @@ def prepare_dingo_config(
         "deltaT": 0.2,
         "reference_frame": reference_frame,
         "time_reference": time_reference,
-        # Prior extracted from model
-        "prior_dict": prior_dict,
+        # Prior comes from the model; override via prior-dict-updates.
         # Dingo model
         "model": model,
         "device": device,
