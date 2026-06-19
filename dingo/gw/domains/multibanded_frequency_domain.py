@@ -337,11 +337,12 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
 
     @property
     def frequency_mask(self) -> np.ndarray:
-        """Array of len(self) consisting of ones.
+        """Boolean array of len(self) consisting of True values.
 
         As the MultibandedFrequencyDomain starts from f_min, no masking is generally
-        required."""
-        return np.ones_like(self.sample_frequencies)
+        required. The mask is boolean so it can be used directly for index selection
+        (e.g. ``frequencies[domain.frequency_mask]``)."""
+        return np.ones_like(self.sample_frequencies, dtype=bool)
 
     @property
     def frequency_mask_length(self) -> int:

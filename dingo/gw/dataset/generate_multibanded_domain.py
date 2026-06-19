@@ -10,9 +10,10 @@ waveform difference threshold until the desired mismatch level is reached.
 CLI usage::
 
     python -m dingo.gw.dataset.generate_multibanded_domain \\
-        --settings-file path/to/settings_wfd_ufd.yaml \\
-        --num-samples 1000 \\
-        --target-median-mismatch 0.001
+        --settings_file path/to/settings_wfd_ufd.yaml \\
+        --num_samples 1000 \\
+        --target_median_mismatch 0.001 \\
+        --token_size 16   # for the Dingo-T1 transformer; omit for standard NPE
 """
 
 import argparse
@@ -34,7 +35,8 @@ from dingo.gw.dataset.generate_dataset import \
 from dingo.gw.domains import (MultibandedFrequencyDomain,
                               UniformFrequencyDomain, build_domain)
 from dingo.gw.gwutils import get_mismatch
-from dingo.gw.waveform_generator import NewInterfaceWaveformGenerator
+from dingo.gw.waveform_generator import (NewInterfaceWaveformGenerator,
+                                          WaveformGenerator)
 
 
 def floor_to_power_of_2(x: float) -> float:
@@ -212,12 +214,22 @@ def compute_max_decimation_factor(
 def get_band_nodes_for_adaptive_decimation(
     max_dec_factor_array: np.ndarray,
     max_dec_factor_global: int = np.inf,
+    min_mfd_bins_per_band: int = 1,
 ) -> Tuple[int, List[int]]:
     """Convert a per-bin maximum decimation factor array into MFD band nodes.
 
     Iterates over the domain using the largest power-of-2 decimation factor permitted
     by ``max_dec_factor_array``, doubling the decimation factor each time the remaining
     bins allow it, until the entire domain is partitioned.
+
+    ``min_mfd_bins_per_band`` controls the granularity of the bands. Each band is grown
+    in steps of ``dec_factor * min_mfd_bins_per_band`` base-domain bins, so every band
+    spans an integer number of ``min_mfd_bins_per_band``-bin *tokens*. This is required
+    by the transformer (Dingo-T1) tokenizer, which partitions the multibanded data into
+    fixed-size token segments and therefore needs each band to contain a whole number of
+    tokens. Set ``min_mfd_bins_per_band=16`` to reproduce the T1 banding. The default of
+    ``1`` recovers the original one-decimated-bin-per-step behaviour used by the standard
+    (ResNet-embedding) NPE pipeline.
 
     Parameters
     ----------
@@ -226,6 +238,10 @@ def get_band_nodes_for_adaptive_decimation(
         non-decreasing.
     max_dec_factor_global : int
         Global upper bound on the decimation factor. Default: ``np.inf`` (no bound).
+    min_mfd_bins_per_band : int
+        Minimum number of multibanded bins per band, i.e. the transformer token size.
+        Every band width is constrained to be an integer multiple of this value.
+        Default: ``1`` (no token-alignment constraint).
 
     Returns
     -------
@@ -239,21 +255,27 @@ def get_band_nodes_for_adaptive_decimation(
         raise ValueError("max_dec_factor_array needs to be 1D array.")
     if not (max_dec_factor_array[1:] >= max_dec_factor_array[:-1]).all():
         raise ValueError("max_dec_factor_array needs to increase monotonically.")
+    if min_mfd_bins_per_band < 1:
+        raise ValueError("min_mfd_bins_per_band must be a positive integer.")
 
     max_dec_factor_array = np.clip(max_dec_factor_array, None, max_dec_factor_global)
     N = len(max_dec_factor_array)
     dec_factor = int(max(1.0, floor_to_power_of_2(float(max_dec_factor_array[0]))))
     band_nodes = [0]
-    upper = dec_factor
     initial_downsampling = dec_factor
+    # Advance by whole tokens. With min_mfd_bins_per_band=1 each step is a single
+    # decimated bin and this loop is identical to the original implementation.
+    upper = dec_factor * min_mfd_bins_per_band
 
     while upper - 1 < N:
-        if upper - 1 + dec_factor >= N:
+        if upper - 1 + dec_factor * min_mfd_bins_per_band >= N:
             band_nodes.append(upper)
         elif dec_factor * 2 <= max_dec_factor_array[upper]:
             band_nodes.append(upper)
+            # Each band must contain a whole number of tokens.
+            assert (band_nodes[-1] - band_nodes[-2]) % min_mfd_bins_per_band == 0
             dec_factor *= 2
-        upper += dec_factor
+        upper += dec_factor * min_mfd_bins_per_band
 
     return initial_downsampling, band_nodes
 
@@ -373,9 +395,19 @@ def _generate_whitened_waveforms(
     ufd = build_domain(settings["domain"])
     ufd_2x = build_domain({**ufd.domain_dict, **{"delta_f": ufd.delta_f / 2}})
 
-    waveform_generator = NewInterfaceWaveformGenerator(
-        domain=ufd_2x, **settings["waveform_generator"]
-    )
+    # Select the waveform generator from the settings, mirroring generate_dataset.py, so
+    # the domain is built with the same generator the dataset will use. The standard
+    # WaveformGenerator is the default (Dingo-T1 / IMRPhenomXPHM); only EOB-style models
+    # set new_interface: true. (For Phenom approximants the two interfaces are expected to
+    # agree; honouring the flag keeps this script consistent with generate_dataset.py.)
+    if settings["waveform_generator"].get("new_interface", False):
+        waveform_generator = NewInterfaceWaveformGenerator(
+            domain=ufd_2x, **settings["waveform_generator"]
+        )
+    else:
+        waveform_generator = WaveformGenerator(
+            domain=ufd_2x, **settings["waveform_generator"]
+        )
     parameters, polarizations_2x = generate_parameters_and_polarizations(
         waveform_generator=waveform_generator,
         prior=prior,
@@ -402,6 +434,7 @@ def _build_mfd_for_threshold(
     ufd: UniformFrequencyDomain,
     threshold: float,
     delta_f_max_time_shift: float,
+    min_mfd_bins_per_band: int = 1,
 ) -> MultibandedFrequencyDomain:
     """Construct a MultibandedFrequencyDomain from pre-computed differences and a threshold.
 
@@ -422,6 +455,9 @@ def _build_mfd_for_threshold(
     delta_f_max_time_shift : float
         Maximum permitted frequency bin width (Hz) imposed by time-shift considerations.
         Sets ``max_dec_factor_global = delta_f_max_time_shift / ufd.delta_f``.
+    min_mfd_bins_per_band : int
+        Transformer token size; constrains each band to an integer number of tokens.
+        Default: ``1`` (no token-alignment constraint).
 
     Returns
     -------
@@ -434,6 +470,7 @@ def _build_mfd_for_threshold(
     initial_downsampling, band_nodes_indices = get_band_nodes_for_adaptive_decimation(
         max_dec_factor[ufd.min_idx :],
         max_dec_factor_global=int(delta_f_max_time_shift / ufd.delta_f),
+        min_mfd_bins_per_band=min_mfd_bins_per_band,
     )
     delta_f_initial = ufd.delta_f * initial_downsampling
     mfd_nodes = ufd()[ufd.min_idx :][np.array(band_nodes_indices)]
@@ -533,6 +570,7 @@ def generate_multibanded_domain_settings(
     decimation_factors: Optional[np.ndarray] = None,
     initial_threshold: float = 5e-3,
     max_iterations: int = 20,
+    token_size: Optional[int] = None,
 ) -> str:
     """Generate a MultibandedFrequencyDomain settings file targeting a given median mismatch.
 
@@ -576,6 +614,11 @@ def generate_multibanded_domain_settings(
         the search walks outward from here. Default: 5e-3.
     max_iterations : int
         Maximum number of iterations for each search phase. Default: 20.
+    token_size : int, optional
+        Transformer token size (multibanded bins per token). When set, every band is
+        constrained to contain a whole number of tokens, as required by the Dingo-T1
+        transformer tokenizer; use ``16`` to reproduce T1. When ``None`` (default), bands
+        are not token-aligned, matching the standard ResNet-embedding NPE pipeline.
 
     Returns
     -------
@@ -590,6 +633,15 @@ def generate_multibanded_domain_settings(
     """
     if decimation_factors is None:
         decimation_factors = 2 ** np.arange(8)
+
+    min_mfd_bins_per_band = token_size if token_size is not None else 1
+    if min_mfd_bins_per_band < 1:
+        raise ValueError("token_size must be a positive integer.")
+    if token_size is not None:
+        print(
+            f"Token-aligned banding enabled: bands constrained to multiples of "
+            f"{token_size} multibanded bins (transformer token size)."
+        )
 
     with open(settings_file, "r") as f:
         settings = yaml.safe_load(f)
@@ -635,7 +687,13 @@ def generate_multibanded_domain_settings(
 
     def _eval(t: float) -> Tuple[MultibandedFrequencyDomain, np.ndarray, float]:
         m = _build_mfd_for_threshold(
-            diffs, freqs, decimation_factors, ufd, t, delta_f_max_time_shift
+            diffs,
+            freqs,
+            decimation_factors,
+            ufd,
+            t,
+            delta_f_max_time_shift,
+            min_mfd_bins_per_band=min_mfd_bins_per_band,
         )
         mis = _compute_mismatches(polarizations, ufd, m, asd)
         return m, mis, float(np.median(mis))
@@ -705,7 +763,13 @@ def generate_multibanded_domain_settings(
     # Phase 2: bisection within [threshold_low, threshold_high]
     if threshold_low is not None and threshold_high is not None:
         lo_nodes = _build_mfd_for_threshold(
-            diffs, freqs, decimation_factors, ufd, threshold_low, delta_f_max_time_shift
+            diffs,
+            freqs,
+            decimation_factors,
+            ufd,
+            threshold_low,
+            delta_f_max_time_shift,
+            min_mfd_bins_per_band=min_mfd_bins_per_band,
         ).nodes
         hi_nodes = _build_mfd_for_threshold(
             diffs,
@@ -714,6 +778,7 @@ def generate_multibanded_domain_settings(
             ufd,
             threshold_high,
             delta_f_max_time_shift,
+            min_mfd_bins_per_band=min_mfd_bins_per_band,
         ).nodes
         if np.allclose(lo_nodes, hi_nodes):
             print("\n  Bracket maps to identical MFD nodes; no bisection needed.")
@@ -801,6 +866,13 @@ def parse_args():
         default=1,
         help="Number of parallel processes for waveform generation.",
     )
+    parser.add_argument(
+        "--token_size",
+        type=int,
+        default=None,
+        help="Transformer token size (multibanded bins per token). Set to 16 for "
+        "Dingo-T1 token-aligned banding; omit for standard NPE.",
+    )
     return parser.parse_args()
 
 
@@ -812,6 +884,7 @@ def main() -> None:
         num_samples=args.num_samples,
         target_median_mismatch=args.target_median_mismatch,
         num_processes=args.num_processes,
+        token_size=args.token_size,
     )
 
 
