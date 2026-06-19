@@ -28,7 +28,15 @@ def build_extreme_prior(settings: dict):
     nominal_prior = build_prior_with_defaults(settings["intrinsic_prior"])
     extreme_settings = deepcopy(settings["intrinsic_prior"])
     extreme_settings["geocent_time"] = 0.12
-    extreme_settings["chirp_mass"] = nominal_prior["chirp_mass"].minimum
+    # Pin the chirp mass to (essentially) its minimum -- the longest, hardest-to-decimate
+    # signal. A bare scalar would become a bilby DeltaFunction, which breaks the
+    # *constrained* sampling required by the mass_1/mass_2 Constraint priors (it raises
+    # "non-broadcastable output operand with shape ()" in PriorDict.sample). A
+    # negligibly narrow Uniform samples cleanly while keeping every draw at the minimum.
+    mc_min = nominal_prior["chirp_mass"].minimum
+    extreme_settings["chirp_mass"] = (
+        f"bilby.core.prior.Uniform(minimum={mc_min}, maximum={mc_min * (1 + 1e-9)})"
+    )
     return build_prior_with_defaults(extreme_settings)
 
 
