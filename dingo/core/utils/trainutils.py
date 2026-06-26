@@ -56,7 +56,7 @@ class EarlyStopping:
         self.counter = 0
         self.best_score = None
         self.early_stop = False
-        self.val_loss_min = np.Inf
+        self.val_loss_min = np.inf
         self.delta = delta
         if metric not in ["training", "validation"]:
             raise ValueError(
@@ -289,12 +289,7 @@ def write_history(
 
 
 def copyfile(src, dst):
-    """
-    copy src to dst.
-    :param src:
-    :param dst:
-    :return:
-    """
+    """Copy src to dst."""
     os.system("cp -p %s %s" % (src, dst))
 
 

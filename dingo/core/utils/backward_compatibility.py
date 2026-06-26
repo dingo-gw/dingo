@@ -147,3 +147,6 @@ def update_model_config(model_settings: dict):
         del model_settings["nsf_kwargs"]
         model_settings["embedding_kwargs"] = model_settings["embedding_net_kwargs"]
         del model_settings["embedding_net_kwargs"]
+
+    if "embedding_kwargs" in model_settings and "embedding_type" not in model_settings:
+        model_settings["embedding_type"] = "resnet"

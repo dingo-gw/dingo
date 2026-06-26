@@ -1,8 +1,21 @@
 import pytest
 import torch
+from torch.nn import functional as F
 
-from dingo.core.nn.resnet import DenseResidualNet, MyResidualBlock
+from dingo.core.nn.resnet import DenseResidualNet, LinearLayer, MyResidualBlock
 from testutils_enets import check_model_forward_pass, check_model_backward_pass
+
+
+def test_forward_pass_of_LinearLayer():
+    batch_size, input_dim, output_dim = 10, 16, 4
+    layer = LinearLayer(input_dim=input_dim, output_dim=output_dim, activation=F.elu)
+    check_model_forward_pass(layer, [output_dim], [input_dim], batch_size)
+
+
+def test_backward_pass_of_LinearLayer():
+    batch_size, input_dim, output_dim = 10, 16, 4
+    layer = LinearLayer(input_dim=input_dim, output_dim=output_dim, activation=F.elu)
+    check_model_backward_pass(layer, [input_dim], batch_size)
 
 
 def test_forward_pass_of_DenseResidualNet():
