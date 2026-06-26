@@ -102,11 +102,22 @@ class DenseResidualNet(nn.Module):
     resizing layers are used for resizing the input and output to match the
     first and last hidden dimension, respectively.
 
-    glasflow.nflows.nn.nets.resnet.ResidualBlock, which the residual blocks here are
-    based on, only supports batch normalization and 2D [batch, features] inputs. This
-    implementation adds layer normalization and support for inputs with an arbitrary
-    number of leading batch dimensions (e.g., [batch, tokens, features]), as needed by
-    the transformer tokenizer.
+    Compared to glasflow.nflows.nn.nets.ResidualNet, which the residual blocks here are
+    based on, this implementation differs in two important ways:
+
+    1. **Context conditioning**: glasflow's ResidualNet concatenates the context vector
+       with the input once at the start of the network. Here, context is injected into
+       every residual block via a gated linear unit (GLU), giving the network repeated
+       access to the conditioning information at each layer.
+
+    2. **Normalization and input shape**: glasflow's ResidualNet only supports batch
+       normalization and 2D [batch, features] inputs. This implementation adds layer
+       normalization and supports inputs with an arbitrary number of leading batch
+       dimensions (e.g., [batch, tokens, features]), as needed by the transformer
+       tokenizer.
+
+    Because of difference (1), the two classes are not interchangeable: a checkpoint
+    trained with glasflow's ResidualNet cannot be loaded into DenseResidualNet.
 
     Module specs
     --------
@@ -184,3 +195,15 @@ class DenseResidualNet(nn.Module):
             x = block(x, context=context)
             x = resize_layer(x)
         return x
+
+
+class LinearLayer(nn.Module):
+    """A single linear layer followed by an activation function."""
+
+    def __init__(self, input_dim: int, output_dim: int, activation: Callable):
+        super().__init__()
+        self.linear = nn.Linear(input_dim, output_dim)
+        self.activation = activation
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.activation(self.linear(x))

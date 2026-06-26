@@ -4,6 +4,7 @@ import os
 from os.path import join
 import numpy as np
 import torch
+from dingo.core.nn.transformer import TransformerModel
 from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
 from dingo.core.utils import torchutils
 
@@ -222,3 +223,89 @@ def test_pm_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler):
         factors.append(lr / pm.optimizer.defaults["lr"])
         torchutils.perform_scheduler_step(pm.scheduler, loss)
     assert np.allclose(factors, e.cosine_factors), "Scheduler does not load correctly."
+
+
+# ---------------------------------------------------------------------------
+# NormalizingFlowPosteriorModel — embedding_type dispatch
+# ---------------------------------------------------------------------------
+
+_T_TOKENS = 6
+_T_FEATURES = 12
+_T_BLOCKS = 2
+_T_PARAMS = 4
+_T_CONTEXT = 8
+_T_D_MODEL = 16
+
+
+def _make_transformer_model_kwargs():
+    return {
+        "posterior_model_type": "normalizing_flow",
+        "embedding_type": "transformer",
+        "posterior_kwargs": {
+            "input_dim": _T_PARAMS,
+            "context_dim": _T_CONTEXT,
+            "num_flow_steps": 5,
+            "base_transform_kwargs": {
+                "hidden_dim": 32,
+                "num_transform_blocks": 2,
+                "activation": "elu",
+                "dropout_probability": 0.0,
+                "batch_norm": False,
+                "num_bins": 4,
+                "base_transform_type": "rq-coupling",
+            },
+        },
+        "embedding_kwargs": {
+            "tokenizer_kwargs": {
+                "input_dims": [_T_TOKENS, _T_FEATURES],
+                "num_blocks": _T_BLOCKS,
+                "hidden_dims": [16],
+                "activation": "elu",
+                "batch_norm": False,
+                "layer_norm": False,
+            },
+            "transformer_kwargs": {
+                "d_model": _T_D_MODEL,
+                "dim_feedforward": 32,
+                "nhead": 4,
+                "dropout": 0.0,
+                "num_layers": 2,
+                "norm_first": True,
+            },
+            "pooling": "cls",
+            "final_net_kwargs": {
+                "activation": "elu",
+                "output_dim": _T_CONTEXT,
+            },
+        },
+    }
+
+
+def test_pm_initializes_with_embedding_type_transformer():
+    """embedding_type: transformer builds a TransformerModel as the embedding net."""
+    model_kwargs = _make_transformer_model_kwargs()
+    pm = NormalizingFlowPosteriorModel(
+        metadata={"train_settings": {"model": model_kwargs}}, device="cpu"
+    )
+    assert isinstance(pm.network.embedding_net, TransformerModel)
+
+
+def test_pm_transformer_embedding_type_not_passed_to_builder():
+    """embedding_type must be filtered before calling the network builder
+    (would cause a TypeError if leaked)."""
+    model_kwargs = _make_transformer_model_kwargs()
+    # This must not raise TypeError: unexpected keyword argument 'embedding_type'
+    pm = NormalizingFlowPosteriorModel(
+        metadata={"train_settings": {"model": model_kwargs}}, device="cpu"
+    )
+    assert pm.network is not None
+
+
+def test_pm_initializes_with_explicit_embedding_type_resnet(data_setup_pm_1):
+    """embedding_type: resnet is now explicit in settings; existing resnet path must
+    still work unchanged."""
+    d = data_setup_pm_1
+    d.model_kwargs["embedding_type"] = "resnet"
+    pm = NormalizingFlowPosteriorModel(metadata=d.metadata, device="cpu")
+    assert pm.network is not None
+    assert not isinstance(pm.network.embedding_net, TransformerModel)

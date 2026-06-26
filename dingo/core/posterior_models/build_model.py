@@ -73,7 +73,7 @@ def autocomplete_model_kwargs(model_kwargs: dict, data_sample: list):
 
     * set input dimension of embedding net to shape of data_sample[1]
     * set dimension of parameter space to len(data_sample[0])
-    * set added_context flag of embedding net if required for gnpe proxies
+    * set added_context flag of embedding net if required for gnpe proxies (resnet only)
     * set context dim of posterior model to output dim of embedding net + gnpe proxy dim
 
     Parameters
@@ -85,21 +85,34 @@ def autocomplete_model_kwargs(model_kwargs: dict, data_sample: list):
         Should be of format [parameters, GW data, gnpe_proxies], where the
         last element is only there is GNPE proxies are required.
     """
-
-    # set input dims from ifo_list and domain information
-    model_kwargs["embedding_kwargs"]["input_dims"] = list(data_sample[1].shape)
-    # set dimension of parameter space of posterior model
     model_kwargs["posterior_kwargs"]["input_dim"] = len(data_sample[0])
-    # set added_context flag of embedding net if GNPE proxies are required
-    # set context dim of nsf to output dim of embedding net + GNPE proxy dim
-    try:
-        gnpe_proxy_dim = len(data_sample[2])
-        model_kwargs["embedding_kwargs"]["added_context"] = True
-        model_kwargs["posterior_kwargs"]["context_dim"] = (
-            model_kwargs["embedding_kwargs"]["output_dim"] + gnpe_proxy_dim
-        )
-    except IndexError:
-        model_kwargs["embedding_kwargs"]["added_context"] = False
-        model_kwargs["posterior_kwargs"]["context_dim"] = model_kwargs[
-            "embedding_kwargs"
-        ]["output_dim"]
+
+    embedding_type = model_kwargs.get("embedding_type", "resnet").lower()
+
+    if embedding_type == "transformer":
+        tokenizer_kwargs = model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]
+        tokenizer_kwargs["input_dims"] = list(data_sample[1].shape)
+        if "num_blocks" not in tokenizer_kwargs:
+            # position tensor is data_sample[2], shape [num_tokens, 3];
+            # column 2 holds integer detector indices 0..num_blocks-1
+            tokenizer_kwargs["num_blocks"] = int(data_sample[2][:, 2].max().item()) + 1
+        embedding_kwargs = model_kwargs["embedding_kwargs"]
+        if embedding_kwargs.get("final_net_kwargs"):
+            context_dim = embedding_kwargs["final_net_kwargs"]["output_dim"]
+        else:
+            context_dim = embedding_kwargs["transformer_kwargs"]["d_model"]
+        model_kwargs["posterior_kwargs"]["context_dim"] = context_dim
+    else:
+        # resnet: set input dims and handle optional GNPE proxies
+        model_kwargs["embedding_kwargs"]["input_dims"] = list(data_sample[1].shape)
+        try:
+            gnpe_proxy_dim = len(data_sample[2])
+            model_kwargs["embedding_kwargs"]["added_context"] = True
+            model_kwargs["posterior_kwargs"]["context_dim"] = (
+                model_kwargs["embedding_kwargs"]["output_dim"] + gnpe_proxy_dim
+            )
+        except IndexError:
+            model_kwargs["embedding_kwargs"]["added_context"] = False
+            model_kwargs["posterior_kwargs"]["context_dim"] = model_kwargs[
+                "embedding_kwargs"
+            ]["output_dim"]

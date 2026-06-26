@@ -60,6 +60,7 @@ model:
     theta_with_glu: true
     time_prior_exponent: 1
     type: DenseResidualNet
+  embedding_type: resnet
   embedding_kwargs:
     activation: gelu
     batch_norm: true

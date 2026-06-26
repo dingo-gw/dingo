@@ -117,11 +117,13 @@ def prepare_training_new(
     )  # No transforms yet
     initial_weights = {}
 
-    # The embedding network is assumed to have an SVD projection layer. If other types
-    # of embedding networks are added in the future, update this code.
-
-    if train_settings["model"].get("embedding_kwargs", None):
-        # First, build the SVD for seeding the embedding network.
+    embedding_type = train_settings["model"].get("embedding_type", "resnet").lower()
+    if (
+        embedding_type == "resnet"
+        and train_settings["model"].get("embedding_kwargs", None)
+        and "svd" in train_settings["model"]["embedding_kwargs"]
+    ):
+        # Build the SVD for seeding the embedding network.
         print("\nBuilding SVD for initialization of embedding network.")
         initial_weights["V_rb_list"] = build_svd_for_embedding_network(
             wfd,

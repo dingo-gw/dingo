@@ -18,6 +18,7 @@ nde:
   # nde architecture
   model:
     posterior_model_type: normalizing_flow
+    embedding_type: resnet
     posterior_kwargs:
       num_flow_steps: 10
       base_transform_kwargs:

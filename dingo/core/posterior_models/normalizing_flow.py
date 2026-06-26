@@ -2,6 +2,7 @@ from .base_model import BasePosteriorModel
 
 from dingo.core.nn.nsf import (
     create_nsf_with_rb_projection_embedding_net,
+    create_nsf_with_transformer_embedding_net,
     create_nsf_wrapped,
 )
 
@@ -38,13 +39,16 @@ class NormalizingFlowPosteriorModel(BasePosteriorModel):
         super().__init__(**kwargs)
 
     def initialize_network(self):
-        model_kwargs = {
-            k: v for k, v in self.model_kwargs.items() if k != "posterior_model_type"
-        }
+        """Instantiate the NSF network, dispatching on embedding_type."""
+        _skip = {"posterior_model_type", "embedding_type"}
+        model_kwargs = {k: v for k, v in self.model_kwargs.items() if k not in _skip}
         if self.initial_weights is not None:
             model_kwargs["initial_weights"] = self.initial_weights
 
-        if self.model_kwargs.get("embedding_kwargs", False):
+        embedding_type = self.model_kwargs.get("embedding_type", "").lower()
+        if embedding_type == "transformer":
+            self.network = create_nsf_with_transformer_embedding_net(**model_kwargs)
+        elif self.model_kwargs.get("embedding_kwargs", False):
             self.network = create_nsf_with_rb_projection_embedding_net(**model_kwargs)
         else:
             self.network = create_nsf_wrapped(**model_kwargs["posterior_kwargs"])

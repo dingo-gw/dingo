@@ -12,6 +12,7 @@ from glasflow.nflows import distributions, flows, transforms
 import glasflow.nflows.nn.nets as nflows_nets
 from dingo.core.utils import torchutils
 from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
+from dingo.core.nn.resnet import DenseResidualNet
 from typing import Union, Callable, Tuple
 
 
@@ -42,6 +43,7 @@ def create_base_transform(
     activation: str = "relu",
     dropout_probability: float = 0.0,
     batch_norm: bool = False,
+    layer_norm: bool = False,
     num_bins: int = 8,
     tail_bound: float = 1.0,
     apply_unconditional_transform: bool = False,
@@ -66,32 +68,41 @@ def create_base_transform(
     by a residual neural network that depends on y_fixed and x. The residual
     network consists of a sequence of two-layer fully-connected blocks.
 
-    :param i: int
-        index of transform in sequence
-    :param param_dim: int
-        dimensionality of y
-    :param context_dim: int = None
-        dimensionality of x
-    :param hidden_dim: int = 512
-        number of hidden units per layer
-    :param num_transform_blocks: int = 2
-        number of transform blocks comprising the transform
-    :param activation: str = 'relu'
-        activation function
-    :param dropout_probability: float = 0.0
-        dropout probability for regularization
-    :param batch_norm: bool = False
-        whether to use batch normalization
-    :param num_bins: int = 8
-        number of bins for the spline
-    :param tail_bound: float = 1.
-    :param apply_unconditional_transform: bool = False
-        whether to apply an unconditional transform to fixed components
-    :param base_transform_type: str = 'rq-coupling'
-        type of base transform, one of {rq-coupling, rq-autoregressive}
+    Parameters
+    ----------
+    i : int
+        Index of transform in sequence.
+    param_dim : int
+        Dimensionality of y.
+    context_dim : int, optional
+        Dimensionality of x.
+    hidden_dim : int
+        Number of hidden units per layer.
+    num_transform_blocks : int
+        Number of transform blocks comprising the transform.
+    activation : str
+        Activation function.
+    dropout_probability : float
+        Dropout probability for regularization.
+    batch_norm : bool
+        Whether to use batch normalization.
+    layer_norm : bool
+        Whether to use layer normalization in the conditioner network
+        (rq-coupling only; uses DenseResidualNet instead of glasflow's
+        ResidualNet when True).
+    num_bins : int
+        Number of bins for the spline.
+    tail_bound : float
+        Tail bound for the spline.
+    apply_unconditional_transform : bool
+        Whether to apply an unconditional transform to fixed components.
+    base_transform_type : str
+        Type of base transform, one of {rq-coupling, rq-autoregressive}.
 
-    :return: Transform
-        the NSF transform
+    Returns
+    -------
+    Transform
+        The NSF transform.
     """
 
     activation_fn = torchutils.get_activation_function_from_string(activation)
@@ -103,9 +114,28 @@ def create_base_transform(
             mask = nflows.utils.create_alternating_binary_mask(
                 param_dim, even=(i % 2 == 0)
             )
-        return transforms.PiecewiseRationalQuadraticCouplingTransform(
-            mask=mask,
-            transform_net_create_fn=(
+
+        if layer_norm:
+            # DenseResidualNet supports layer_norm and injects context via GLU gating
+            # in each residual block, rather than concatenating it to the input once.
+            _hidden_dims = tuple([hidden_dim] * num_transform_blocks)
+            _ctx = context_dim
+            transform_net_create_fn = lambda in_f, out_f: DenseResidualNet(
+                input_dim=in_f,
+                output_dim=out_f,
+                hidden_dims=_hidden_dims,
+                activation=activation_fn,
+                dropout=dropout_probability,
+                batch_norm=batch_norm,
+                layer_norm=True,
+                context_features=_ctx,
+            )
+        else:
+            # glasflow's ResidualNet is kept here for backward compatibility: it
+            # concatenates context with the input rather than using GLU gating, so the
+            # two are architecturally incompatible and old checkpoints cannot be loaded
+            # into DenseResidualNet. See DenseResidualNet docstring for details.
+            transform_net_create_fn = (
                 lambda in_features, out_features: nflows_nets.ResidualNet(
                     in_features=in_features,
                     out_features=out_features,
@@ -116,7 +146,11 @@ def create_base_transform(
                     dropout_probability=dropout_probability,
                     use_batch_norm=batch_norm,
                 )
-            ),
+            )
+
+        return transforms.PiecewiseRationalQuadraticCouplingTransform(
+            mask=mask,
+            transform_net_create_fn=transform_net_create_fn,
             num_bins=num_bins,
             tails="linear",
             tail_bound=tail_bound,
@@ -157,16 +191,21 @@ def create_transform(
         * A NSF transform of y, conditioned on x.
     There is one final linear transform at the end.
 
-    :param num_flow_steps: int,
-        number of transforms in sequence
-    :param param_dim: int,
-        dimensionality of parameter space (y)
-    :param context_dim: int,
-        dimensionality of context (x)
-    :param base_transform_kwargs: int
-        hyperparameters for NSF step
-    :return: Transform
-        the NSF transform sequence
+    Parameters
+    ----------
+    num_flow_steps : int
+        Number of transforms in sequence.
+    param_dim : int
+        Dimensionality of parameter space (y).
+    context_dim : int
+        Dimensionality of context (x).
+    base_transform_kwargs : dict
+        Hyperparameters for each NSF step.
+
+    Returns
+    -------
+    Transform
+        The NSF transform sequence.
     """
 
     transform = transforms.CompositeTransform(
@@ -295,6 +334,30 @@ def create_nsf_wrapped(**kwargs):
     """
     flow = create_nsf_model(**kwargs)
     return FlowWrapper(flow)
+
+
+def create_nsf_with_transformer_embedding_net(
+    posterior_kwargs: dict,
+    embedding_kwargs: dict,
+    **kwargs,
+):
+    """Builds a neural spline flow with a transformer embedding network.
+
+    Parameters
+    ----------
+    posterior_kwargs : dict
+        kwargs for neural spline flow
+    embedding_kwargs : dict
+        kwargs for transformer embedding network (tokenizer_kwargs, transformer_kwargs,
+        pooling, final_net_kwargs)
+    """
+    from dingo.core.nn.transformer import create_transformer_enet
+
+    embedding_kwargs = copy.deepcopy(embedding_kwargs)
+    embedding_kwargs.pop("allow_tf32", None)
+    embedding_net = create_transformer_enet(**embedding_kwargs)
+    flow = create_nsf_model(**posterior_kwargs)
+    return FlowWrapper(flow, embedding_net)
 
 
 def create_nsf_with_rb_projection_embedding_net(

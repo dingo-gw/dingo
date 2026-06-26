@@ -1,11 +1,14 @@
+import copy
 import pytest
 import types
 import torch
 import torch.optim as optim
 from dingo.core.nn.nsf import (
     create_nsf_model,
-    FlowWrapper,
     create_nsf_with_rb_projection_embedding_net,
+    create_nsf_with_transformer_embedding_net,
+    create_transform,
+    FlowWrapper,
 )
 from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
 from dingo.core.utils import torchutils
@@ -254,3 +257,191 @@ def test_model_builder_for_nsf_with_rb_embedding_net(data_setup_nsf_small):
         model(d.y, d.x, d.z, d.z)
     with pytest.raises(RuntimeError):
         model(d.y, d.x, d.x)
+
+
+# ---------------------------------------------------------------------------
+# create_nsf_with_transformer_embedding_net
+# ---------------------------------------------------------------------------
+
+_NUM_TOKENS = 6
+_NUM_FEATURES = 12
+_NUM_BLOCKS = 2
+_NUM_PARAMS = 4
+_CONTEXT_DIM = 8
+_D_MODEL = 16
+_BATCH_SIZE = 10
+
+
+def _make_transformer_posterior_kwargs():
+    return {
+        "input_dim": _NUM_PARAMS,
+        "context_dim": _CONTEXT_DIM,
+        "num_flow_steps": 5,
+        "base_transform_kwargs": {
+            "hidden_dim": 32,
+            "num_transform_blocks": 2,
+            "activation": "elu",
+            "dropout_probability": 0.0,
+            "batch_norm": False,
+            "num_bins": 4,
+            "base_transform_type": "rq-coupling",
+        },
+    }
+
+
+def _make_transformer_embedding_kwargs():
+    return {
+        "tokenizer_kwargs": {
+            "input_dims": [_NUM_TOKENS, _NUM_FEATURES],
+            "num_blocks": _NUM_BLOCKS,
+            "hidden_dims": [16],
+            "activation": "elu",
+            "batch_norm": False,
+            "layer_norm": False,
+        },
+        "transformer_kwargs": {
+            "d_model": _D_MODEL,
+            "dim_feedforward": 32,
+            "nhead": 4,
+            "dropout": 0.0,
+            "num_layers": 2,
+            "norm_first": True,
+        },
+        "pooling": "cls",
+        "final_net_kwargs": {
+            "activation": "elu",
+            "output_dim": _CONTEXT_DIM,
+        },
+    }
+
+
+def _make_transformer_inputs(batch_size=_BATCH_SIZE):
+    waveform = torch.rand(batch_size, _NUM_TOKENS, _NUM_FEATURES)
+    f_min = torch.rand(batch_size, _NUM_TOKENS)
+    f_max = f_min + torch.rand(batch_size, _NUM_TOKENS)
+    detector = torch.randint(0, _NUM_BLOCKS, (batch_size, _NUM_TOKENS)).float()
+    position = torch.stack([f_min, f_max, detector], dim=-1)
+    theta = torch.randn(batch_size, _NUM_PARAMS)
+    return theta, waveform, position
+
+
+def test_nsf_with_transformer_enet_output_shape():
+    model = create_nsf_with_transformer_embedding_net(
+        posterior_kwargs=_make_transformer_posterior_kwargs(),
+        embedding_kwargs=_make_transformer_embedding_kwargs(),
+    )
+    theta, waveform, position = _make_transformer_inputs()
+    log_prob = model(theta, waveform, position)
+    assert log_prob.shape == (_BATCH_SIZE,), "Unexpected log_prob shape."
+
+
+def test_nsf_with_transformer_enet_backward_pass():
+    model = create_nsf_with_transformer_embedding_net(
+        posterior_kwargs=_make_transformer_posterior_kwargs(),
+        embedding_kwargs=_make_transformer_embedding_kwargs(),
+    )
+    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    theta, waveform, position = _make_transformer_inputs(batch_size=32)
+
+    losses = []
+    for _ in range(10):
+        loss = -model(theta, waveform, position).mean()
+        losses.append(loss.item())
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+
+    assert losses[-1] < losses[0], "Loss did not decrease during training."
+
+
+def test_nsf_with_transformer_enet_ignores_allow_tf32():
+    """allow_tf32 is a legacy key that must be silently dropped."""
+    embedding_kwargs = _make_transformer_embedding_kwargs()
+    embedding_kwargs["allow_tf32"] = False
+    model = create_nsf_with_transformer_embedding_net(
+        posterior_kwargs=_make_transformer_posterior_kwargs(),
+        embedding_kwargs=embedding_kwargs,
+    )
+    theta, waveform, position = _make_transformer_inputs()
+    assert model(theta, waveform, position).shape == (_BATCH_SIZE,)
+
+
+def test_nsf_with_transformer_enet_does_not_mutate_kwargs():
+    posterior_kwargs = _make_transformer_posterior_kwargs()
+    embedding_kwargs = _make_transformer_embedding_kwargs()
+    posterior_kwargs_ref = copy.deepcopy(posterior_kwargs)
+    embedding_kwargs_ref = copy.deepcopy(embedding_kwargs)
+
+    create_nsf_with_transformer_embedding_net(
+        posterior_kwargs=posterior_kwargs,
+        embedding_kwargs=embedding_kwargs,
+    )
+
+    assert posterior_kwargs == posterior_kwargs_ref
+    assert embedding_kwargs == embedding_kwargs_ref
+
+
+# ---------------------------------------------------------------------------
+# create_base_transform / create_transform — layer_norm=True path
+# ---------------------------------------------------------------------------
+
+
+def test_create_transform_layer_norm_output_shape():
+    """create_transform with layer_norm=True in base_transform_kwargs must produce
+    log-probs of the same shape as without layer_norm."""
+    param_dim = 6
+    context_dim = 8
+    batch_size = 10
+
+    base_transform_kwargs = {
+        "hidden_dim": 16,
+        "num_transform_blocks": 2,
+        "activation": "elu",
+        "dropout_probability": 0.0,
+        "batch_norm": False,
+        "layer_norm": True,
+        "num_bins": 4,
+        "base_transform_type": "rq-coupling",
+    }
+    transform = create_transform(
+        num_flow_steps=3,
+        param_dim=param_dim,
+        context_dim=context_dim,
+        base_transform_kwargs=base_transform_kwargs,
+    )
+
+    y = torch.randn(batch_size, param_dim)
+    context = torch.randn(batch_size, context_dim)
+    y_transformed, log_det = transform(y, context=context)
+
+    assert y_transformed.shape == (batch_size, param_dim)
+    assert log_det.shape == (batch_size,)
+
+
+def test_create_transform_layer_norm_backward_pass():
+    """Backward pass through a coupling flow with layer_norm=True must not error."""
+    param_dim = 4
+    context_dim = 6
+
+    base_transform_kwargs = {
+        "hidden_dim": 16,
+        "num_transform_blocks": 2,
+        "activation": "elu",
+        "dropout_probability": 0.0,
+        "batch_norm": False,
+        "layer_norm": True,
+        "num_bins": 4,
+        "base_transform_type": "rq-coupling",
+    }
+    transform = create_transform(
+        num_flow_steps=2,
+        param_dim=param_dim,
+        context_dim=context_dim,
+        base_transform_kwargs=base_transform_kwargs,
+    )
+
+    y = torch.randn(8, param_dim, requires_grad=True)
+    context = torch.randn(8, context_dim)
+    _, log_det = transform(y, context=context)
+    log_det.sum().backward()
+    assert y.grad is not None
