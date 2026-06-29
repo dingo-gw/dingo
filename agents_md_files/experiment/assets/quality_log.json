@@ -1,0 +1,16 @@
+{
+  "_comment": "Blind quality ratings (1-10) per run from independent reviewer agents.",
+  "quality": {
+    "00": {"correctness": 8, "completeness": 7, "style": 8, "adherence": 8, "overall": 8, "justification": "Metadata serialization (base64+JSON) and network exclusion correctly implemented with round-trip robustness and backward-compatible fallback, but lacks JSON-serialization error handling and tests."},
+    "01": {"correctness": 6, "completeness": 7, "style": 8, "adherence": 6, "overall": 6, "justification": "Correct metadata extraction/consumption via pickle sidecar, but breaks backward compatibility by removing model transfer with no fallback for old configs lacking the metadata file."},
+    "02": {"correctness": 6, "completeness": 5, "style": 8, "adherence": 7, "overall": 6, "justification": "Sound core JSON design but critical missing test update (EXCLUDED_FROM_INI) causes a test failure that would block merge."},
+    "03": {"correctness": 8, "completeness": 9, "style": 9, "adherence": 9, "overall": 8, "justification": "Correct JSON-in-config fix with backward-compatible fallback; minor concern is no error handling if metadata is not JSON-serializable."},
+    "04": {"correctness": 9, "completeness": 9, "style": 8, "adherence": 9, "overall": 9, "justification": "Comprehensive fix: extracts metadata to JSON, writes to config, consumes in generation, stops network transfer, with solid backward-compatible fallback."},
+    "05": {"correctness": 9, "completeness": 9, "style": 8, "adherence": 9, "overall": 8, "justification": "Well-implemented torch.save sidecar carrying metadata through config; removes network transfer and keeps backward compatibility; minor style/robustness refinements."},
+    "06": {"correctness": 9, "completeness": 9, "style": 9, "adherence": 9, "overall": 9, "justification": "Well-executed compact-JSON fix; properly integrates with bilby_pipe parser, clean fallback, minimally invasive."},
+    "07": {"correctness": 8, "completeness": 9, "style": 9, "adherence": 8, "overall": 8, "justification": "Correctly embeds JSON metadata in the complete config, eliminating the network transfer while keeping backward compatibility; edge-case handling for missing metadata could be more defensive."},
+    "08": {"correctness": 9, "completeness": 9, "style": 9, "adherence": 9, "overall": 9, "justification": "High-quality fix using str(dict)+ast.literal_eval with robust round-trip, backward-compatible fallback, and correct titled-group placement; not verified in integration."},
+    "09": {"correctness": 7, "completeness": 9, "style": 8, "adherence": 7, "overall": 7, "justification": "Core fix correct and complete, but no error handling for missing metadata and no backward-compatibility fallback; JSON safety claimed but unverified."},
+    "10": {"correctness": 7, "completeness": 4, "style": 8, "adherence": 4, "overall": 5, "justification": "Core fix correct and avoids network transfer, but critically omits updating EXCLUDED_FROM_INI in test_parser_ini_consistency.py, causing a test failure."}
+  }
+}

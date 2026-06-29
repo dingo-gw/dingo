@@ -1,0 +1,16 @@
+{
+  "_comment": "Maps fix-agent agentId -> run. Used to attribute subagent_tokens/tool_uses/duration_ms from completion notifications to each AGENTS.md variant.",
+  "runs": [
+    {"nn": "00", "name": "control",              "agentId": "af08b5bd5e811b9d6", "variant_lines": 0,   "worktree": "/home/n/.claude/jobs/aca26e59/tmp/worktrees/00-control"},
+    {"nn": "01", "name": "minimal",              "agentId": "a035630766c229287", "variant_lines": 11,  "worktree": "/home/n/.claude/jobs/aca26e59/tmp/worktrees/01-minimal"},
+    {"nn": "02", "name": "lean",                 "agentId": "a2fcdcf79780e2ff7", "variant_lines": 23,  "worktree": "/home/n/.claude/jobs/aca26e59/tmp/worktrees/02-lean"},
+    {"nn": "03", "name": "commands_first",       "agentId": "a8a2764ffe2a4e183", "variant_lines": 33,  "worktree": "/home/n/.claude/jobs/aca26e59/tmp/worktrees/03-commands_first"},
+    {"nn": "04", "name": "core_standards",       "agentId": "ad248b73829174530", "variant_lines": 41,  "worktree": "/home/n/.claude/jobs/aca26e59/tmp/worktrees/04-core_standards"},
+    {"nn": "05", "name": "workflow_discipline",  "agentId": "a45e387dbac8ae2a6", "variant_lines": 31,  "worktree": "/home/n/.claude/jobs/aca26e59/tmp/worktrees/05-workflow_discipline"},
+    {"nn": "06", "name": "technical_reference",  "agentId": "a3708b5403b49ca69", "variant_lines": 42,  "worktree": "/home/n/.claude/jobs/aca26e59/tmp/worktrees/06-technical_reference"},
+    {"nn": "07", "name": "pipe_focused",         "agentId": "aae8e173d85d0be00", "variant_lines": 36,  "worktree": "/home/n/.claude/jobs/aca26e59/tmp/worktrees/07-pipe_focused"},
+    {"nn": "08", "name": "audit_strategy",       "agentId": "ae832b1e113748c7a", "variant_lines": 38,  "worktree": "/home/n/.claude/jobs/aca26e59/tmp/worktrees/08-audit_strategy"},
+    {"nn": "09", "name": "comprehensive",        "agentId": "ac5d7d729c88ee991", "variant_lines": 177, "worktree": "/home/n/.claude/jobs/aca26e59/tmp/worktrees/09-comprehensive"},
+    {"nn": "10", "name": "cedric",               "agentId": "aa410eb731f4fe5ae", "variant_lines": 141, "worktree": "/home/n/.claude/jobs/aca26e59/tmp/worktrees/10-cedric"}
+  ]
+}

@@ -1,0 +1,229 @@
+diff --git a/dingo/pipe/data_generation.py b/dingo/pipe/data_generation.py
+index c8117027..3296550d 100644
+--- a/dingo/pipe/data_generation.py
++++ b/dingo/pipe/data_generation.py
+@@ -1,3 +1,4 @@
++import json
+ import os
+ import sys
+ 
+@@ -35,6 +36,24 @@ class DataGenerationInput(BilbyDataGenerationInput):
+             resolve_filename_with_transfer_fallback(args.model_init) or args.model_init
+         )
+ 
++        # Data generation only needs the network metadata, not the full network.
++        # dingo_pipe extracts this and writes it to the complete config file, so the
++        # large network file does not need to be transferred to generation nodes
++        # (see dingo-gw#327). Fall back to loading it from the network if absent.
++        if args.model_metadata is not None:
++            self.model_metadata = json.loads(args.model_metadata)
++        else:
++            try:
++                model = build_model_from_kwargs(
++                    filename=self.model, device="meta", load_training_info=False
++                )
++            except RuntimeError:
++                # 'meta' is not supported by older versions of python / torch.
++                model = build_model_from_kwargs(
++                    filename=self.model, device="cpu", load_training_info=False
++                )
++            self.model_metadata = model.metadata
++
+         Input.__init__(self, args, unknown_args)
+         # Generic initialisation
+         self.meta_data = dict(
+@@ -271,17 +290,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
+     def _inject_dingo_signal(self, args):
+         """Generate a GW signal using the dingo.gw.injection class and add it to the
+         interferometer strain data. Also compute SNRs and store them."""
+-        try:
+-            model = build_model_from_kwargs(
+-                filename=args.model, device="meta", load_training_info=False
+-            )
+-        except RuntimeError:
+-            # 'meta' is not supported by older version of python / torch
+-            model = build_model_from_kwargs(
+-                filename=args.model, device="cpu", load_training_info=False
+-            )
+-
+-        injection = Injection.from_posterior_model_metadata(model.metadata)
++        injection = Injection.from_posterior_model_metadata(self.model_metadata)
+         injection.use_base_domain = True  # Do not generate MFD signals.
+         injection.t_ref = self.trigger_time
+         injection._initialize_transform()
+@@ -340,16 +349,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
+         for easy reading by pesummary and Bilby.
+         """
+ 
+-        try:
+-            model = build_model_from_kwargs(
+-                filename=self.model, device="meta", load_training_info=False
+-            )
+-        except RuntimeError:
+-            # 'meta' is not supported by older version of python / torch
+-            model = build_model_from_kwargs(
+-                filename=self.model, device="cpu", load_training_info=False
+-            )
+-        domain = build_domain_from_model_metadata(model.metadata, base=True)
++        domain = build_domain_from_model_metadata(self.model_metadata, base=True)
+         assert isinstance(domain, UniformFrequencyDomain)
+ 
+         if self.save_bilby_data_dump:
+diff --git a/dingo/pipe/main.py b/dingo/pipe/main.py
+index 1c52cedc..b0ed30ab 100644
+--- a/dingo/pipe/main.py
++++ b/dingo/pipe/main.py
+@@ -48,6 +48,11 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
+                 "Do not specify model-reference-time in INI file. This is obtained from the "
+                 "DINGO model."
+             )
++        if args.model_metadata is not None:
++            raise ValueError(
++                "Do not specify model-metadata in INI file. This is extracted "
++                "automatically from the DINGO model."
++            )
+ 
+     logger.info(f"Loading dingo model from {args.model} in order to access settings.")
+ 
+@@ -63,6 +68,11 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
+ 
+     model_metadata = model.metadata
+ 
++    # Store the network metadata in the (completed) config file. The data-generation
++    # and plotting steps only need this metadata, not the full network, so this avoids
++    # transferring the large network file to those nodes (see dingo-gw#327).
++    args.model_metadata = json.dumps(model_metadata)
++
+     domain = build_domain_from_model_metadata(model_metadata, base=True)
+ 
+     prior = Injection.from_posterior_model_metadata(model_metadata).prior
+diff --git a/dingo/pipe/nodes/generation_node.py b/dingo/pipe/nodes/generation_node.py
+index edbd4d9b..8597caf1 100644
+--- a/dingo/pipe/nodes/generation_node.py
++++ b/dingo/pipe/nodes/generation_node.py
+@@ -8,15 +8,17 @@ from dingo.pipe.utils import _strip_unwanted_submission_keys
+ 
+ class GenerationNode(BilbyGenerationNode):
+ 
+-    def __init__(self, inputs, trigger_time, idx, dag, parent=None, importance_sampling=False):
++    def __init__(
++        self, inputs, trigger_time, idx, dag, parent=None, importance_sampling=False
++    ):
+         """
+         Node for data generation jobs with DINGO-specific customizations
+         """
+         self.importance_sampling = importance_sampling
+-        
++
+         # Call Node.__init__ directly, skipping BilbyGenerationNode.__init__
+         super(BilbyGenerationNode, self).__init__(inputs, retry=3)
+-        
++
+         # Copy all the BilbyGenerationNode logic but add DINGO customizations
+         if not inputs.osg and inputs.generation_pool == "igwn-pool":
+             raise BilbyPipeError(
+@@ -56,18 +58,9 @@ class GenerationNode(BilbyGenerationNode):
+                 if (value := getattr(self.inputs, attr)) is not None:
+                     input_files_to_transfer.append(os.path.abspath(str(value)))
+ 
+-            # modifying the paths for OSDF networks
+-            network_files = []
+-            for s in [self.inputs.model, self.inputs.model_init]:
+-                if s is None:
+-                    continue
+-                if "osdf" in s:
+-                    # stripping osdf prefix as it is not needed
+-                    network_files.append(f"igwn+osdf://{s.replace('/osdf', '')}")
+-                else:
+-                    network_files.append(s)
+-
+-            input_files_to_transfer.extend(network_files)
++            # The network itself is NOT transferred to generation nodes: data
++            # generation only needs the network metadata, which is stored in the
++            # complete config file by dingo_pipe (see dingo-gw#327).
+ 
+             if self.transfer_container:
+                 input_files_to_transfer.append(self.inputs.container)
+@@ -102,6 +95,7 @@ class GenerationNode(BilbyGenerationNode):
+             if fname.startswith(self.inputs.data_find_urltype)
+         ]:
+             from bilby_pipe.utils import logger
++
+             logger.warning(
+                 "The following frame files were identified by gwdatafind for this analysis. "
+                 "These frames may not be found by the data generation stage as file "
+@@ -114,7 +108,7 @@ class GenerationNode(BilbyGenerationNode):
+ 
+         # DINGO-specific customization: Add site selection
+         if self.inputs.generation_pool == "igwn-pool":
+-            sites = getattr(self.inputs, 'generation_desired_sites', None)
++            sites = getattr(self.inputs, "generation_desired_sites", None)
+             if sites is not None:
+                 self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
+ 
+diff --git a/dingo/pipe/parser.py b/dingo/pipe/parser.py
+index ed65da6c..9e0932bd 100644
+--- a/dingo/pipe/parser.py
++++ b/dingo/pipe/parser.py
+@@ -407,7 +407,10 @@ def create_parser(top_level=True, usage=None):
+     # Mutually exclusive: --psd-dict / --asd-dataset
+     if _BILBY_PIPE_V1_8:
+         det_parser.add(
+-            "--psd-dict", type=nonestr, default=None, help="Dictionary of PSD files to use"
++            "--psd-dict",
++            type=nonestr,
++            default=None,
++            help="Dictionary of PSD files to use",
+         )
+         det_parser.add(
+             "--asd-dataset",
+@@ -419,7 +422,10 @@ def create_parser(top_level=True, usage=None):
+     else:
+         psd_dict_parser = det_parser.add_mutually_exclusive_group()
+         psd_dict_parser.add(
+-            "--psd-dict", type=nonestr, default=None, help="Dictionary of PSD files to use"
++            "--psd-dict",
++            type=nonestr,
++            default=None,
++            help="Dictionary of PSD files to use",
+         )
+         psd_dict_parser.add(
+             "--asd-dataset",
+@@ -1253,7 +1259,9 @@ def create_parser(top_level=True, usage=None):
+     )
+     # Mutually exclusive: --prior-file / --prior-dict
+     if _BILBY_PIPE_V1_8:
+-        prior_parser.add("--prior-file", type=nonestr, default=None, help="The prior file")
++        prior_parser.add(
++            "--prior-file", type=nonestr, default=None, help="The prior file"
++        )
+         prior_parser.add(
+             "--prior-dict",
+             type=nonestr,
+@@ -1268,7 +1276,9 @@ def create_parser(top_level=True, usage=None):
+         )
+     else:
+         prior_parser_main = prior_parser.add_mutually_exclusive_group()
+-        prior_parser_main.add("--prior-file", type=nonestr, default=None, help="The prior file")
++        prior_parser_main.add(
++            "--prior-file", type=nonestr, default=None, help="The prior file"
++        )
+         prior_parser_main.add(
+             "--prior-dict",
+             type=nonestr,
+@@ -1522,6 +1532,15 @@ def create_parser(top_level=True, usage=None):
+         help="Reference time for neural network. Do not add this manually as it is "
+         "specified by the network.",
+     )
++    sampler_parser.add(
++        "--model-metadata",
++        type=nonestr,
++        default=None,
++        help="JSON-encoded metadata extracted from the DINGO network. Do not set this "
++        "manually; it is populated automatically by dingo_pipe and written to the "
++        "complete config file so that data-generation and plotting can run without "
++        "transferring the full network.",
++    )
+     sampler_parser.add(
+         "--recover-log-prob",
+         action=StoreBoolean,

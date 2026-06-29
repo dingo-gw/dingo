@@ -1,0 +1,13 @@
+[
+  {"nn":"00","name":"control","loc_added":64,"loc_removed":33,"loc_total":97,"files_changed":4,"diff_file":"diffs/00.diff"},
+  {"nn":"01","name":"minimal","loc_added":59,"loc_removed":28,"loc_total":87,"files_changed":4,"diff_file":"diffs/01.diff"},
+  {"nn":"02","name":"lean","loc_added":85,"loc_removed":36,"loc_total":121,"files_changed":4,"diff_file":"diffs/02.diff"},
+  {"nn":"03","name":"commands_first","loc_added":47,"loc_removed":33,"loc_total":80,"files_changed":4,"diff_file":"diffs/03.diff"},
+  {"nn":"04","name":"core_standards","loc_added":64,"loc_removed":41,"loc_total":105,"files_changed":4,"diff_file":"diffs/04.diff"},
+  {"nn":"05","name":"workflow_discipline","loc_added":51,"loc_removed":29,"loc_total":80,"files_changed":4,"diff_file":"diffs/05.diff"},
+  {"nn":"06","name":"technical_reference","loc_added":66,"loc_removed":28,"loc_total":94,"files_changed":4,"diff_file":"diffs/06.diff"},
+  {"nn":"07","name":"pipe_focused","loc_added":43,"loc_removed":33,"loc_total":76,"files_changed":4,"diff_file":"diffs/07.diff"},
+  {"nn":"08","name":"audit_strategy","loc_added":73,"loc_removed":36,"loc_total":109,"files_changed":4,"diff_file":"diffs/08.diff"},
+  {"nn":"09","name":"comprehensive","loc_added":51,"loc_removed":42,"loc_total":93,"files_changed":4,"diff_file":"diffs/09.diff"},
+  {"nn":"10","name":"cedric","loc_added":78,"loc_removed":41,"loc_total":119,"files_changed":4,"diff_file":"diffs/10.diff"}
+]

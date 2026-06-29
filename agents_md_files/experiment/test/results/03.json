@@ -1,0 +1,15 @@
+{
+  "repo": "/home/n/.claude/jobs/aca26e59/tmp/worktrees/03-commands_first",
+  "passed": true,
+  "coverage": 1.0,
+  "num_tokens": 87,
+  "num_present": 87,
+  "present_top_level": [
+    "dataset_settings",
+    "train_settings"
+  ],
+  "missing_top_level": [],
+  "complete_ini_written": true,
+  "dingo_main_file": "/home/n/.claude/jobs/aca26e59/tmp/worktrees/03-commands_first/dingo/pipe/main.py",
+  "error": null
+}

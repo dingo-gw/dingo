@@ -1,0 +1,221 @@
+{
+  "dataset_settings": {
+    "compression": {
+      "svd": {
+        "num_training_samples": 200000,
+        "num_validation_samples": 20000,
+        "size": 1000
+      }
+    },
+    "domain": {
+      "type": "MultibandedFrequencyDomain",
+      "delta_f_initial": 0.0625,
+      "nodes": [
+        20.0,
+        69.3125,
+        89.8125,
+        116.5625,
+        151.0625,
+        196.0625,
+        1792.0625
+      ],
+      "base_domain": {
+        "type": "UniformFrequencyDomain",
+        "f_min": 20.0,
+        "f_max": 2048.0,
+        "delta_f": 0.0625
+      }
+    },
+    "intrinsic_prior": {
+      "mass_1": "bilby.core.prior.Constraint(minimum=1.0, maximum=1000.0)",
+      "mass_2": "bilby.core.prior.Constraint(minimum=1.0, maximum=1000.0)",
+      "chi_1": "bilby.gw.prior.AlignedSpin(name='chi_1', a_prior=Uniform(minimum=0, maximum=0.9))",
+      "chi_2": "bilby.gw.prior.AlignedSpin(name='chi_2', a_prior=Uniform(minimum=0, maximum=0.9))",
+      "chirp_mass": "bilby.gw.prior.UniformInComponentsChirpMass(minimum=6.0, maximum=20.0)",
+      "geocent_time": 0.0,
+      "luminosity_distance": 100.0,
+      "eccentricity": "LogUniform(minimum=1e-3, maximum=0.4)",
+      "mean_per_ano": "bilby.core.prior.Uniform(minimum=0., maximum=2*np.pi, boundary=\"periodic\")",
+      "mass_ratio": "bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.05, maximum=1.0)",
+      "phase": "default",
+      "theta_jn": "default"
+    },
+    "num_samples": 10000000,
+    "waveform_generator": {
+      "approximant": "SEOBNRv5EHM",
+      "new_interface": true,
+      "f_ref": 10.0,
+      "f_start": 10.0,
+      "spin_conversion_phase": 0
+    }
+  },
+  "train_settings": {
+    "data": {
+      "detectors": [
+        "H1",
+        "L1",
+        "V1"
+      ],
+      "domain_update": {
+        "f_max": 1792.0,
+        "f_min": 20.0
+      },
+      "extrinsic_prior": {
+        "dec": "default",
+        "geocent_time": "bilby.core.prior.Uniform(minimum=-0.10, maximum=0.10)",
+        "luminosity_distance": "bilby.core.prior.Uniform(minimum=100.0, maximum=500.0)",
+        "psi": "default",
+        "ra": "default"
+      },
+      "gnpe_time_shifts": {
+        "exact_equiv": true,
+        "kernel": "bilby.core.prior.Uniform(minimum=-0.001, maximum=0.001)"
+      },
+      "inference_parameters": [
+        "chirp_mass",
+        "mass_ratio",
+        "eccentricity",
+        "mean_per_ano",
+        "chi_1",
+        "chi_2",
+        "theta_jn",
+        "luminosity_distance",
+        "geocent_time",
+        "ra",
+        "dec",
+        "psi"
+      ],
+      "ref_time": 1126259462.391,
+      "train_fraction": 0.95,
+      "svd_size_update": 550,
+      "waveform_dataset_path": "/work/nihargupte/datasets/waveforms/epetf_SEOBNRv5EHM_lower_mass/SEOBNRv5EHM.hdf5",
+      "context_parameters": [
+        "L1_time_proxy_relative",
+        "V1_time_proxy_relative"
+      ],
+      "standardization": {
+        "mean": {
+          "chirp_mass": 14.255960464477539,
+          "mass_ratio": 0.29414770007133484,
+          "eccentricity": 0.06657072901725769,
+          "mean_per_ano": 3.1411654949188232,
+          "chi_1": 9.775328362593427e-05,
+          "chi_2": -0.0002693407004699111,
+          "theta_jn": 1.5712310075759888,
+          "luminosity_distance": 300.0,
+          "geocent_time": 0.0,
+          "ra": 3.141592653589793,
+          "dec": 0.0,
+          "psi": 1.5707963267948966,
+          "L1_time_proxy_relative": -1.5300145226804184e-05,
+          "V1_time_proxy_relative": 2.7565083150483533e-05
+        },
+        "std": {
+          "chirp_mass": 3.840836763381958,
+          "mass_ratio": 0.2505173981189728,
+          "eccentricity": 0.09437409788370132,
+          "mean_per_ano": 1.813768744468689,
+          "chi_1": 0.30009734630584717,
+          "chi_2": 0.30005398392677307,
+          "theta_jn": 0.6837913393974304,
+          "luminosity_distance": 115.47005383792515,
+          "geocent_time": 0.05773502691896258,
+          "ra": 1.8137993642342178,
+          "dec": 0.683667390089903,
+          "psi": 0.9068996821171089,
+          "L1_time_proxy_relative": 0.005839585209379175,
+          "V1_time_proxy_relative": 0.01578797144828534
+        }
+      }
+    },
+    "model": {
+      "embedding_kwargs": {
+        "batch_norm": true,
+        "dropout": 0.0,
+        "hidden_dims": [
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          512,
+          512,
+          512,
+          512,
+          512,
+          512,
+          256,
+          256,
+          256,
+          256,
+          256,
+          256,
+          128,
+          128,
+          128,
+          128,
+          128,
+          128
+        ],
+        "output_dim": 128,
+        "svd": {
+          "num_training_samples": 100000,
+          "num_validation_samples": 10000,
+          "size": 250
+        },
+        "input_dims": [
+          3,
+          3,
+          1972
+        ],
+        "added_context": true
+      },
+      "posterior_kwargs": {
+        "base_transform_kwargs": {
+          "activation": "elu",
+          "base_transform_type": "rq-coupling",
+          "batch_norm": true,
+          "dropout_probability": 0.0,
+          "hidden_dim": 1024,
+          "num_bins": 8,
+          "num_transform_blocks": 5
+        },
+        "num_flow_steps": 30,
+        "input_dim": 12,
+        "context_dim": 130
+      },
+      "posterior_model_type": "normalizing_flow"
+    },
+    "training": {
+      "stage_0": {
+        "asd_dataset_path": "/work/nihargupte/datasets/ASDs/O4/high_sensitivity/asds_o4_high_sensitivity_duration_16.hdf5",
+        "batch_size": 4096,
+        "epochs": 150,
+        "freeze_rb_layer": true,
+        "optimizer": {
+          "lr": 0.0001,
+          "type": "adam"
+        },
+        "scheduler": {
+          "T_max": 150,
+          "type": "cosine"
+        }
+      },
+      "stage_1": {
+        "asd_dataset_path": "/work/nihargupte/datasets/ASDs/O4/high_sensitivity/asds_o4_high_sensitivity_duration_16.hdf5",
+        "batch_size": 4096,
+        "epochs": 125,
+        "freeze_rb_layer": false,
+        "optimizer": {
+          "lr": 2e-05,
+          "type": "adam"
+        },
+        "scheduler": {
+          "T_max": 125,
+          "type": "cosine"
+        }
+      }
+    }
+  }
+}
