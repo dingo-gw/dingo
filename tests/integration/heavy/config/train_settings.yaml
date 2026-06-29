@@ -1,0 +1,61 @@
+data:
+  waveform_dataset_path: waveform_dataset.hdf5
+  train_fraction: 0.95
+  detectors:
+    - H1
+    - L1
+  # All extrinsic parameters fixed (delta) so only chirp_mass/mass_ratio vary.
+  extrinsic_prior:
+    dec: 0.0
+    ra: 0.0
+    geocent_time: 0.0
+    psi: 0.0
+    luminosity_distance: 400.0
+  ref_time: 1126259462.391
+  inference_parameters:
+    - chirp_mass
+    - mass_ratio
+
+model:
+  posterior_model_type: normalizing_flow
+  posterior_kwargs:
+    num_flow_steps: 3            # SEARCH-TUNED
+    base_transform_kwargs:
+      hidden_dim: 32             # SEARCH-TUNED
+      num_transform_blocks: 3
+      activation: elu
+      dropout_probability: 0.0
+      batch_norm: True
+      num_bins: 8
+      base_transform_type: rq-coupling
+  embedding_kwargs:
+    output_dim: 64
+    hidden_dims: [256, 128, 64]  # SEARCH-TUNED
+    activation: elu
+    dropout: 0.0
+    batch_norm: True
+    svd:
+      num_training_samples: 1000
+      num_validation_samples: 100
+      size: 50                   # SEARCH-TUNED
+
+training:
+  stage_0:
+    epochs: 10                   # SEARCH-TUNED
+    asd_dataset_path: asds_O1.hdf5
+    freeze_rb_layer: True
+    optimizer:
+      type: adam
+      lr: 0.0001
+    scheduler:
+      type: cosine
+      T_max: 10                  # keep equal to epochs
+    batch_size: 64
+
+local:
+  device: cuda
+  num_workers: 8
+  runtime_limits:
+    max_time_per_run: 3600000
+    max_epochs_per_run: 1000
+  checkpoint_epochs: 1000

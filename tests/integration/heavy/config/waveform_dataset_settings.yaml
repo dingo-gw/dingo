@@ -1,0 +1,29 @@
+domain:
+  type: UniformFrequencyDomain
+  f_min: 20.0
+  f_max: 1024.0
+  delta_f: 0.25
+
+waveform_generator:
+  approximant: IMRPhenomXPHM
+  f_ref: 20.0
+
+# Only chirp_mass, mass_ratio and phase vary. Spins zero; everything else fixed (delta).
+intrinsic_prior:
+  mass_1: bilby.core.prior.Constraint(minimum=5.0, maximum=100.0, name='mass_1')
+  mass_2: bilby.core.prior.Constraint(minimum=5.0, maximum=100.0, name='mass_2')
+  chirp_mass: bilby.gw.prior.UniformInComponentsChirpMass(minimum=20.0, maximum=40.0, name='chirp_mass')
+  mass_ratio: bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.5, maximum=1.0, name='mass_ratio')
+  phase: default
+  a_1: 0.0
+  a_2: 0.0
+  tilt_1: 0.0
+  tilt_2: 0.0
+  phi_12: 0.0
+  phi_jl: 0.0
+  theta_jn: 0.5
+  luminosity_distance: 400.0
+  geocent_time: 0.0
+
+num_samples: 50000   # SEARCH-TUNED
+compression: None
