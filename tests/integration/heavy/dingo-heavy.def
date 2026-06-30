@@ -1,5 +1,24 @@
+# DINGO heavy-test container definition.
+#
+# Base image: python:3.11 (Debian bookworm-based; includes Python 3.11, pip, gcc,
+# and all standard C libraries required by manylinux wheels).  No apt-get calls
+# are made, so the build does not touch the _apt user and is compatible with
+# single-uid fakeroot environments where switching UIDs is forbidden.
+#
+# Subuid-enabled hosts (e.g. CI with /etc/subuid):
+#   apptainer build --fakeroot dingo-heavy.sif dingo-heavy.def
+#
+# No-subuid hosts (e.g. shared HPC clusters — the %post user-namespace mapping
+# fails entirely):
+#   The test wrapper (test_heavy_container.py) uses a three-step sandbox workflow:
+#     1. apptainer build --sandbox sandbox docker://python:3.11
+#     2. apptainer exec --writable sandbox pip install /opt/dingo   (+ copy files)
+#     3. apptainer build sif sandbox
+#   This def file documents the intended recipe; the wrapper replicates it without
+#   requiring user namespace support.
+
 Bootstrap: docker
-From: nvidia/cuda:12.4.1-runtime-ubuntu22.04
+From: python:3.11
 
 %files
     dingo-src.tar /opt/dingo-src.tar
@@ -7,16 +26,18 @@ From: nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
 %post
     set -e
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update -y
-    apt-get install -y --no-install-recommends \
-        python3 python3-pip python3-venv git build-essential libgsl-dev
-    rm -rf /var/lib/apt/lists/*
-
+    # python:3.11 already provides python3, pip, gcc — no apt-get needed.
     mkdir -p /opt/dingo
     tar -xf /opt/dingo-src.tar -C /opt/dingo
-    # Versions come solely from pyproject.toml — no extra pins here.
-    python3 -m pip install --no-cache-dir /opt/dingo
+
+    # setuptools_scm derives version from git tags; git archive omits .git,
+    # so the build directory has no version information.  Supply a pretend
+    # version to satisfy setuptools_scm without failing the install.
+    export SETUPTOOLS_SCM_PRETEND_VERSION=0.9.9
+    pip install --no-cache-dir /opt/dingo
+
+    # Clean up the source archive to keep the image lean.
+    rm /opt/dingo-src.tar
 
 %environment
     export LANG=C.UTF-8
