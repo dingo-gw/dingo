@@ -1,22 +1,16 @@
 """
-Factorized sampler core.
+Factorized sampler core: the domain-agnostic spine of the factorized-sampler design
+(see vault/Hackathon/Factorized_Sampler_Design.md).
 
-This module implements the domain-agnostic spine of the factorized-sampler design
-(see vault/Hackathon/Factorized_Sampler_Design.md): the posterior is represented as
-an ordered product of conditional factors
+The posterior is an ordered product of conditional factors,
 
     q(theta_1, ..., theta_n | d) = prod_i q_i(theta_i | f_i(theta_<i, d)),
 
-where each ``Factor`` samples one block of parameters and returns its own log-prob,
-and a composer drives them. The ``ChainComposer`` runs the factors autoregressively
-(exact, importance-sampling-friendly); a Gibbs composer for multi-iteration GNPE is
-added separately.
+where each ``Factor`` samples one parameter block and returns its own log-prob, and a
+composer evaluates them. ``ChainComposer`` runs the factors autoregressively.
 
-Key invariant -- *physical in, physical out*: factors expose only physical-space
-parameters. Standardized values exist transiently inside a factor's forward pass; the
-``Standardization`` helper below is the per-factor adapter between a network's internal
-standardized space and physical space. Nothing we store, pass, or serialize is ever
-standardized.
+Factors work in physical parameter space; a network's standardized space exists only
+inside its forward pass, mediated by ``Standardization``.
 """
 
 from __future__ import annotations
@@ -34,25 +28,13 @@ from dingo.core.posterior_models import BasePosteriorModel
 
 class Standardization:
     """
-    Per-factor parameter standardization: the affine map between a network's internal
-    standardized space and physical space.
+    Affine map between a network's standardized space (``z = (theta - mean) / std``) and
+    physical parameter space.
 
-    A network is trained on standardized parameters ``z = (theta - mean) / std``. This
-    object holds that network's ``mean``/``std`` (read from its training metadata) and
-    is used in *both* directions -- de-standardizing samples on the way out and
-    standardizing parameters on the way in for ``log_prob`` -- so there is a single
-    source of truth and no "inverted twice" drift.
-
-    Standardization is a property of the *network*, not the event: different factors
-    (e.g. a GNPE init network and the main network) carry different standardizations,
-    and physical space is the shared interchange between them.
-
-    Notes
-    -----
-    The eventual design stores ``mean``/``std`` as registered buffers inside the network
-    module (for NSF, as a fixed affine transform at the flow boundary so its log-Jacobian
-    folds into the density automatically). This pure-Python version is the equivalent
-    seam; moving it into buffers is a follow-up that does not change the interface.
+    Holds one network's ``mean`` and ``std`` and applies them in both directions:
+    de-standardizing network outputs to physical samples, and standardizing physical
+    parameters for ``log_prob``. Different factors (e.g. a GNPE init and main network)
+    carry different instances.
     """
 
     def __init__(self, mean: dict[str, float], std: dict[str, float]):
@@ -83,18 +65,17 @@ class Standardization:
 @runtime_checkable
 class SamplerContext(Protocol):
     """
-    Per-event shared state referenced by every factor: the data ``d`` and everything
-    derived from it (the one-time prepared data representation, the likelihood, event
-    metadata). Concrete implementations are domain-specific (see
-    ``dingo.gw.inference.factors.GWSamplerContext``). Serialized as the transport state
-    between pipe stages.
+    Per-event shared state referenced by every factor: the data ``d`` and quantities
+    derived from it (the prepared-data representation, the likelihood, event metadata).
+    Concrete implementations are domain-specific; see
+    ``dingo.gw.inference.factors.GWSamplerContext``.
     """
 
     event_metadata: Optional[dict]
 
     def prepared_data(self) -> torch.Tensor:
-        """The one-time data representation (whiten/decimate/repackage/...), computed
-        once and cached. The conditioning input shared by data-conditioned factors."""
+        """The data representation the factors condition on
+        (whiten/decimate/repackage/...), computed once and cached."""
         ...
 
     def likelihood(self):
@@ -105,9 +86,8 @@ class SamplerContext(Protocol):
 @dataclass
 class Conditioning:
     """
-    What the composer hands a factor: the shared ``context`` (-> prepared data,
-    likelihood, domain) plus the physical values of the earlier-block parameters this
-    factor conditions on.
+    The conditioning passed to a factor: the shared ``context``, and ``given``, the
+    physical values of the earlier-block parameters the factor conditions on.
     """
 
     context: SamplerContext
@@ -126,18 +106,12 @@ def chunk_and_concat(
     batch_size: Optional[int],
     run_once: Callable[[int], tuple[dict[str, torch.Tensor], Optional[torch.Tensor]]],
 ) -> tuple[dict[str, torch.Tensor], Optional[torch.Tensor]]:
-    """The vertical (depth-first) batching primitive, shared by the chain and Gibbs
-    composers.
+    """Run ``run_once`` over batches of ``total`` and concatenate the results.
 
-    Split ``total`` base samples into chunks of ``batch_size``, run ``run_once(n)`` -- a
-    full pass through the *whole* pipeline (the entire chain, or the entire Gibbs loop) --
-    per chunk, and concatenate. Working memory is bounded to one chunk carried through the
-    pipeline; only the output buffer grows to ``total`` (a real run streams it to CPU per
-    chunk). This is the order the old ``Sampler.run_sampler`` batches in, so parity is
-    exact when ``batch_size`` matches. ``batch_size=None`` runs everything in one pass.
-
-    ``run_once`` returns ``(samples, log_prob)``; ``log_prob`` may be ``None`` (the Gibbs
-    path has no tractable density)."""
+    Splits ``total`` into chunks of ``batch_size``, calls ``run_once(n) -> (samples,
+    log_prob)`` per chunk, and concatenates the sample dicts and log-probs. Caps peak
+    memory at one chunk. ``batch_size=None`` runs ``total`` in a single call. ``log_prob``
+    may be ``None`` (for a composer without a tractable density, i.e. Gibbs)."""
     bs = batch_size or total
     sample_parts: list[dict[str, torch.Tensor]] = []
     lp_parts: list[Optional[torch.Tensor]] = []
@@ -152,27 +126,20 @@ def chunk_and_concat(
 
 class Factor(ABC):
     """
-    A conditional distribution ``q_i(theta_i | f_i(theta_<i, d))`` over one block of
-    parameters. Emits physical-space samples and a physical-space log-prob (its
-    standardization Jacobian already applied), so the chain product ``sum_i log q_i`` is
-    directly the physical posterior log-density.
+    A conditional distribution ``q_i(theta_i | f_i(theta_<i, d))`` over one parameter
+    block, emitting physical-space samples and a physical-space log-prob.
 
-    *Physical in, physical out*, and a **single forward pass per call** -- batching is not
-    a factor concern; the composer drives it (``chunk_and_concat``).
-
-    Contract the composer relies on (this is what makes fan-out work): a call draws
-    ``num_samples`` samples **per conditioning row** and returns ``n_rows * num_samples``
-    rows, flattened row-major, where ``n_rows`` is the number of rows in ``cond.given``
-    (or 1 if unconditioned). This mirrors the network's own
-    ``sample_and_log_prob(*context, num_samples=n) -> (B, n, dim)`` with ``B = n_rows``.
+    A call draws ``num_samples`` samples per conditioning row and returns ``n_rows *
+    num_samples`` rows in row-major order, where ``n_rows`` is the number of rows in
+    ``cond.given`` (1 if unconditioned). This mirrors the network's
+    ``sample_and_log_prob(*context, num_samples=n) -> (n_rows, n, dim)``.
 
     Attributes
     ----------
     parameters : list[str]
-        The block ``theta_i`` this factor produces.
+        The parameter block this factor produces.
     conditioning : list[str]
-        Earlier-block parameter names this factor conditions on. Data dependence is
-        implicit via the shared context.
+        Earlier-block parameters it conditions on (data dependence is via the context).
     """
 
     parameters: list[str]
@@ -182,16 +149,16 @@ class Factor(ABC):
     def sample_and_log_prob(
         self, num_samples: int, cond: Conditioning
     ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
-        """Draw ``num_samples`` per conditioning row from ``q_i``; return ``(physical
-        samples, physical-space log q_i)``. The returned dict may carry extra named
-        side-channel columns (e.g. an IS kernel correction) alongside ``parameters``."""
+        """Draw ``num_samples`` samples per conditioning row; return ``(samples,
+        log_prob)`` in physical space. The samples dict may include named columns beyond
+        ``parameters``."""
 
     @abstractmethod
     def log_prob(
         self, theta_i: dict[str, torch.Tensor], cond: Conditioning
     ) -> torch.Tensor:
-        """Evaluate ``log q_i(theta_i | f_i)`` at given physical ``theta_i`` (for IS /
-        re-plug). One conditioning row per ``theta_i`` row (no fan-out)."""
+        """Evaluate ``log q_i`` at given physical ``theta_i`` (one conditioning row per
+        row)."""
 
 
 def _base_model_metadata(model: BasePosteriorModel) -> dict:
@@ -206,15 +173,12 @@ def _base_model_metadata(model: BasePosteriorModel) -> dict:
 
 class FlowFactor(Factor):
     """
-    A factor wrapping a posterior model (NPE flow, FMPE, ...). Domain-agnostic: it reaches
-    data only through the ``SamplerContext.prepared_data()`` protocol, so the GW-specific
-    conditioning map ``f_i`` (the data preprocessing) lives entirely on the context.
+    Factor wrapping a posterior model (NPE flow, FMPE, ...). Reaches data only through
+    ``SamplerContext.prepared_data()`` and encapsulates the network's standardization, so
+    its interface is in physical parameter space.
 
-    Encapsulates the network's own standardization: the public interface is physical-in /
-    physical-out -- standardized values never leave the factor.
-
-    The cheap *parameter-dependent* part of ``f_i`` (time-shift / heterodyne for GNPE) is
-    a no-op here; a domain subclass overrides ``_apply_param_transforms`` to add it.
+    An unconditioned model draws from the shared data context; a model with
+    ``context_parameters`` conditions on the values in ``cond.given``.
     """
 
     def __init__(
@@ -234,8 +198,8 @@ class FlowFactor(Factor):
 
     @classmethod
     def from_model(cls, model: BasePosteriorModel) -> "FlowFactor":
-        """Build a factor from a model: ``parameters`` and ``context_parameters`` come from
-        the model's training metadata (first-class conditioning)."""
+        """Build a factor from a model, reading ``parameters`` and ``context_parameters``
+        from its training metadata."""
         data_settings = _base_model_metadata(model)["train_settings"]["data"]
         context_parameters = data_settings.get("context_parameters") or []
         return cls(
@@ -246,10 +210,9 @@ class FlowFactor(Factor):
         )
 
     def sample_and_log_prob(self, num_samples, cond):
-        """Draw ``num_samples`` per conditioning row. Unconditioned (plain NPE): one
-        shared data context, ``num_samples`` draws. Conditioned: ``N`` context rows in
-        (one embedding pass each), ``num_samples`` draws per row -> ``N * num_samples``
-        rows, flattened row-major to align with the composer's ``repeat_interleave``."""
+        """Draw ``num_samples`` samples per conditioning row. Unconditioned: ``num_samples``
+        draws from the shared data context. Conditioned: ``num_samples`` per context row,
+        returning ``n_rows * num_samples`` rows in row-major order."""
         data = cond.context.prepared_data()
         self.model.network.eval()
         if not self.context_parameters:
@@ -296,10 +259,8 @@ class FlowFactor(Factor):
 
 @dataclass
 class Stage:
-    """One factor in the chain plus its **fan-out**: how many samples it draws per
-    incoming conditioning row. The root (first) stage ignores ``fan_out`` -- it draws the
-    base count directly; a 1:1 chain link uses ``fan_out=1``; an intrinsic/extrinsic
-    expansion uses ``fan_out=K`` (``K`` extrinsic draws per intrinsic sample)."""
+    """A chain factor and its fan-out: the number of samples drawn per incoming
+    conditioning row. The root stage draws the base count and ignores ``fan_out``."""
 
     factor: Factor
     fan_out: int = 1
@@ -307,21 +268,14 @@ class Stage:
 
 class ChainComposer:
     """
-    Autoregressive composer **and vertical (depth-first) executor**: sample the stages in
-    declared order (a topological order of the dependency DAG), expanding by each stage's
-    fan-out, and sum their log-probs. Exact and importance-sampling-friendly. Covers plain
-    NPE, single-step GNPE, prior conditioning, synthetic phase, and intrinsic/extrinsic
-    splits.
+    Autoregressive composer over an ordered list of ``Stage``s.
 
-    Vertical execution carries a chunk of base samples all the way down the chain, emits
-    it, and discards -- bounding working memory to one chunk (the only way to draw ``M``
-    intrinsic x ``K`` extrinsic without materializing ``M*K`` intermediates) and
-    reproducing the old sampler's batching order (bit-exact when ``batch_size`` matches).
-    Batching lives in ``chunk_and_concat``; the factors are single-pass.
+    Draws the stages in declared order -- a topological order of the conditioning DAG --
+    expanding each stage by its fan-out and summing the log-probs. Covers plain NPE,
+    single-step GNPE, prior conditioning, synthetic phase, and intrinsic/extrinsic splits.
+    Multi-iteration (cyclic) GNPE uses the GW ``GNPEGibbsComposer`` instead.
 
-    Multi-iteration (cyclic) GNPE is *not* expressible here and uses the GW
-    ``GNPEGibbsComposer``. Accepts bare factors (wrapped as ``Stage(factor, fan_out=1)``) or
-    explicit ``Stage``s.
+    Accepts bare factors (wrapped as ``Stage(factor, fan_out=1)``) or explicit ``Stage``s.
     """
 
     def __init__(self, stages: list[Union["Stage", Factor]]):
@@ -343,13 +297,13 @@ class ChainComposer:
 
     @property
     def factors(self) -> list[Factor]:
-        """The factors in order (without fan-out), for callers that only need them."""
+        """The stage factors, in order."""
         return [stage.factor for stage in self.stages]
 
     @property
     def expansion(self) -> int:
-        """Product of the non-root fan-outs; total rows returned = num_samples *
-        expansion (e.g. M intrinsic x K extrinsic for an extrinsic fan-out of K)."""
+        """Product of the non-root fan-outs; ``sample`` returns ``num_samples *
+        expansion`` rows."""
         return math.prod(stage.fan_out for stage in self.stages[1:])
 
     def sample_and_log_prob(
@@ -358,11 +312,9 @@ class ChainComposer:
         context: SamplerContext,
         batch_size: Optional[int] = None,
     ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
-        """``num_samples`` is the **base (root) count** -- e.g. ``M`` intrinsic samples.
-        Each fan-out stage multiplies it, so the result has ``num_samples * expansion``
-        rows (``M * K`` for an extrinsic ``fan_out=K``); for a plain chain (no fan-out)
-        that is just ``num_samples``. ``batch_size`` chunks the base count, in the same
-        (root) unit as ``num_samples``."""
+        """Draw samples. ``num_samples`` is the base (root) count; the result has
+        ``num_samples * expansion`` rows. ``batch_size`` chunks the base count (``None``
+        draws in one pass)."""
         return chunk_and_concat(
             num_samples, batch_size, lambda n: self._run_chain_once(n, context)
         )
@@ -370,7 +322,7 @@ class ChainComposer:
     def _run_chain_once(
         self, base: int, context: SamplerContext
     ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
-        """One depth-first pass of the whole chain for ``base`` root samples."""
+        """One pass of the whole chain for ``base`` root samples."""
         samples: dict[str, torch.Tensor] = {}
         total: torch.Tensor | float = 0.0
         for i, stage in enumerate(self.stages):
@@ -406,18 +358,16 @@ class ChainComposer:
         context: SamplerContext,
         batch_size: Optional[int] = None,
     ) -> dict[str, torch.Tensor]:
-        """Full per-sample dict (parameters + ``log_prob``), for the sampler façade."""
+        """Per-sample dict of parameters plus ``log_prob``."""
         samples, log_prob = self.sample_and_log_prob(num_samples, context, batch_size)
         return {**samples, "log_prob": log_prob}
 
 
 @runtime_checkable
 class Composer(Protocol):
-    """The minimal interface ``ComposedSampler`` drives: draw a per-sample dict
-    (parameters, plus ``log_prob`` for density-preserving composers). ``ChainComposer``
-    (here, domain-agnostic) satisfies it, as does the GW ``GNPEGibbsComposer`` (multi-iteration
-    GNPE) -- which lives in ``dingo.gw.inference.factors`` because it is built entirely
-    around the GNPE step (its proxies, detector times, time-shift), not in core."""
+    """Interface required by ``ComposedSampler``: ``sample`` returns a per-sample dict of
+    parameters (plus ``log_prob`` for density-preserving composers). Satisfied by
+    ``ChainComposer`` and the GW ``GNPEGibbsComposer``."""
 
     def sample(
         self,
@@ -429,12 +379,8 @@ class Composer(Protocol):
 
 class ComposedSampler:
     """
-    Thin user-facing façade over a ``Composer`` (e.g. ``ChainComposer``, or the GW
-    ``GNPEGibbsComposer``) and a ``SamplerContext``: runs the composer (which bounds memory via
-    vertical batching), applies domain-specific post-processing, and returns samples as a
-    DataFrame. The per-factor compute lives in the composer (which need only expose
-    ``sample(num_samples, context, batch_size) -> dict``); this class only handles
-    consolidation and post-processing -- the role the monolithic ``Sampler`` plays today.
+    Façade over a ``Composer`` and a ``SamplerContext``. Runs the composer, applies
+    domain-specific post-processing, and returns the samples as a DataFrame.
     """
 
     def __init__(self, composer: Composer, context: SamplerContext):
@@ -443,17 +389,15 @@ class ComposedSampler:
         self.samples: Optional[pd.DataFrame] = None
 
     def _post_process(self, samples: dict, inverse: bool = False):
-        """Hook for domain-specific post-processing (e.g. GW fixed-parameter injection
-        and reference-time correction). No-op by default."""
+        """Hook for domain-specific post-processing; no-op by default."""
         pass
 
     def run_sampler(
         self, num_samples: int, batch_size: Optional[int] = None
     ) -> pd.DataFrame:
-        """Run the composer (vertically batched by ``batch_size``) and return samples as a
-        DataFrame. ``ChainComposer.sample`` adds ``log_prob``; ``GNPEGibbsComposer``
-        (multi-iteration GNPE) returns parameters + proxies with no ``log_prob``.
-        ``batch_size=None`` runs in a single pass."""
+        """Draw ``num_samples`` samples (chunked by ``batch_size``), post-process, and
+        return them as a DataFrame. ``ChainComposer`` includes ``log_prob``;
+        ``GNPEGibbsComposer`` does not."""
         merged = self.composer.sample(num_samples, self.context, batch_size)
         merged = {k: v.cpu().numpy() for k, v in merged.items()}
         self._post_process(merged)
