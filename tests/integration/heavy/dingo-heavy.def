@@ -30,6 +30,13 @@ From: python:3.11
     mkdir -p /opt/dingo
     tar -xf /opt/dingo-src.tar -C /opt/dingo
 
+    # Install PyTorch for CUDA 12.8 (host driver 570 / CUDA 12.8 max).
+    # The default PyPI torch wheel targets CUDA 13.0 which requires a newer
+    # driver; pinning to the cu128 index keeps us within CUDA 12.8 limits.
+    pip install --no-cache-dir \
+        torch torchvision \
+        --index-url https://download.pytorch.org/whl/cu128
+
     # setuptools_scm derives version from git tags; git archive omits .git,
     # so the build directory has no version information.  Supply a pretend
     # version to satisfy setuptools_scm without failing the install.

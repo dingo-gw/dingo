@@ -81,10 +81,24 @@ def test_heavy_container_e2e():
         os.chmod(runscript_path, 0o755)
 
         # ------------------------------------------------------------------
-        # Step 2d: install DINGO and all deps inside the writable sandbox.
-        # apptainer exec --writable runs as the calling user; because the
-        # sandbox directory is owned by that user pip can write to site-packages.
-        # SETUPTOOLS_SCM_PRETEND_VERSION avoids the "no git" version error.
+        # Step 2d: install PyTorch for the host's CUDA driver (12.8 / 570.x).
+        # The default PyPI torch wheel targets CUDA 13.0 which requires a newer
+        # driver; pinning to cu128 keeps the wheel within the installed driver.
+        # ------------------------------------------------------------------
+        subprocess.run(
+            [APPTAINER_CMD, "exec", "--writable", sandbox,
+             "pip3", "install", "--no-cache-dir",
+             "torch", "torchvision",
+             "--index-url", "https://download.pytorch.org/whl/cu128"],
+            check=True,
+        )
+
+        # ------------------------------------------------------------------
+        # Step 2e: install DINGO and all remaining deps inside the writable
+        # sandbox.  apptainer exec --writable runs as the calling user; because
+        # the sandbox directory is owned by that user pip can write to
+        # site-packages.  SETUPTOOLS_SCM_PRETEND_VERSION avoids the "no git"
+        # version error.
         # ------------------------------------------------------------------
         build_env = dict(
             os.environ,
