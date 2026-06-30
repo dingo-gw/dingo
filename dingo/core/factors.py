@@ -273,7 +273,7 @@ class ChainComposer:
     Draws the stages in declared order -- a topological order of the conditioning DAG --
     expanding each stage by its fan-out and summing the log-probs. Covers plain NPE,
     single-step GNPE, prior conditioning, synthetic phase, and intrinsic/extrinsic splits.
-    Multi-iteration (cyclic) GNPE uses the GW ``GNPEGibbsComposer`` instead.
+    Multi-iteration (cyclic) GNPE uses ``GibbsComposer`` instead.
 
     Accepts bare factors (wrapped as ``Stage(factor, fan_out=1)``) or explicit ``Stage``s.
     """
@@ -363,11 +363,61 @@ class ChainComposer:
         return {**samples, "log_prob": log_prob}
 
 
-@runtime_checkable
+class GibbsComposer:
+    """
+    Blocked Gibbs composer over a cyclic conditioning dependency.
+
+    Seeds the chain with an init factor, then sweeps the factor list in order for
+    ``num_iterations`` iterations; each factor conditions on the current state and
+    overwrites its own block. The cyclic dependency has no tractable marginal, so
+    ``sample`` returns parameters without a ``log_prob`` (recoverable by fitting an
+    unconditional density to the samples and taking one ``ChainComposer`` step). Dingo uses
+    this only for multi-iteration GNPE (the GNPE factors in ``dingo.gw.inference.factors``),
+    but the loop is generic.
+
+    Batching is vertical, via ``chunk_and_concat``: chunk the walkers and run the whole
+    loop per chunk.
+    """
+
+    def __init__(self, init_factor: Factor, factors: list[Factor], num_iterations: int):
+        self.init_factor = init_factor
+        self.factors = list(factors)
+        self.num_iterations = num_iterations
+
+    def sample(
+        self,
+        num_samples: int,
+        context: SamplerContext,
+        batch_size: Optional[int] = None,
+    ) -> dict[str, torch.Tensor]:
+        samples, _ = chunk_and_concat(
+            num_samples, batch_size, lambda n: (self._run_once(n, context), None)
+        )
+        return samples
+
+    def _run_once(
+        self, num_samples: int, context: SamplerContext
+    ) -> dict[str, torch.Tensor]:
+        # Seed the chain (e.g. an init network's detector times); the walkers are the rows.
+        seed, _ = self.init_factor.sample_and_log_prob(
+            num_samples, Conditioning(context)
+        )
+        state = dict(seed)
+        for _ in range(self.num_iterations):
+            for factor in self.factors:
+                cond = Conditioning(context, {k: state[k] for k in factor.conditioning})
+                # One sample per walker (Gibbs is 1:1); walkers are the conditioning rows.
+                block, _ = factor.sample_and_log_prob(1, cond)
+                state.update(block)
+        # Each factor's parameter block (e.g. proxies + inference parameters), dropping
+        # side-channel columns such as the recomputed detector times.
+        return {p: state[p] for factor in self.factors for p in factor.parameters}
+
+
 class Composer(Protocol):
     """Interface required by ``ComposedSampler``: ``sample`` returns a per-sample dict of
     parameters (plus ``log_prob`` for density-preserving composers). Satisfied by
-    ``ChainComposer`` and the GW ``GNPEGibbsComposer``."""
+    ``ChainComposer`` and ``GibbsComposer``."""
 
     def sample(
         self,
@@ -397,7 +447,7 @@ class ComposedSampler:
     ) -> pd.DataFrame:
         """Draw ``num_samples`` samples (chunked by ``batch_size``), post-process, and
         return them as a DataFrame. ``ChainComposer`` includes ``log_prob``;
-        ``GNPEGibbsComposer`` does not."""
+        ``GibbsComposer`` does not."""
         merged = self.composer.sample(num_samples, self.context, batch_size)
         merged = {k: v.cpu().numpy() for k, v in merged.items()}
         self._post_process(merged)
