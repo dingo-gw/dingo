@@ -27,18 +27,17 @@ import pytest
 
 from tests.integration.conftest import APPTAINER_CMD, HAS_APPTAINER, HAS_GPU
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-HEAVY_DIR = os.path.join(os.path.dirname(__file__), "heavy")
-EFFICIENCY_FLOOR_PCT = 3.0  # asserted floor sits below the 5% search target
+INTEGRATION_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.abspath(os.path.join(INTEGRATION_DIR, "..", ".."))
+EFFICIENCY_FLOOR_PCT = 3.0  # loose smoke floor; the scaled-down config is not tuned for high efficiency
 
 # Version fed to setuptools_scm so pip install succeeds without a .git directory.
 # ``git archive`` omits .git, so SETUPTOOLS_SCM_PRETEND_VERSION must be set.
 _DINGO_VERSION = "0.9.9"
 
-# Per-stage ceiling guards (seconds).  These are loose smoke guards tied to the
-# untuned scaled-down config (Task 6).  Each is ~3x the observed container
-# baseline so a stuck/hung stage will fail rather than quietly eat the 60-min
-# budget.  Revisit these ceilings once Task 7 config tuning lands.
+# Per-stage ceiling guards (seconds).  Loose smoke guards for the scaled-down
+# config: each is ~3x the observed container baseline so a stuck/hung stage
+# fails fast rather than quietly eating the 60-min budget.
 #
 # Observed inside container (A100, apptainer --nv, untuned config):
 #   waveform_dataset ~82 s   -> ceiling 250 s
@@ -131,16 +130,22 @@ def test_heavy_container_e2e():
             check=True,
         )
 
-        # Step 2b: stage the heavy pipeline scripts.
+        # Step 2b: stage the pipeline driver + its config into the sandbox.
+        pipeline_dst = os.path.join(sandbox, "opt", "pipeline")
+        os.makedirs(pipeline_dst, exist_ok=True)
         subprocess.run(
-            ["cp", "-r", HEAVY_DIR, os.path.join(sandbox, "opt", "heavy")],
+            ["cp", os.path.join(INTEGRATION_DIR, "run_pipeline.py"), pipeline_dst],
+            check=True,
+        )
+        subprocess.run(
+            ["cp", "-r", os.path.join(INTEGRATION_DIR, "config"), pipeline_dst],
             check=True,
         )
 
         # Step 2c: set the runscript (replace the docker CMD default).
         runscript_path = os.path.join(sandbox, ".singularity.d", "runscript")
         with open(runscript_path, "w") as fh:
-            fh.write("#!/bin/sh\nexec python3 /opt/heavy/run_pipeline.py \"$@\"\n")
+            fh.write("#!/bin/sh\nexec python3 /opt/pipeline/run_pipeline.py \"$@\"\n")
         os.chmod(runscript_path, 0o755)
 
         # ------------------------------------------------------------------

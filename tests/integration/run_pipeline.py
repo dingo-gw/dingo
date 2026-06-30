@@ -7,6 +7,7 @@ result file and prints it for the pytest wrapper to parse.
 import argparse
 import glob
 import os
+import pickle
 import shutil
 import subprocess
 import time
@@ -92,8 +93,13 @@ def main():
 
     # 2. ASD dataset at a fixed GPS time (GWOSC, no auth)
     def _stage_asd():
+        # Deterministic time segments: one fixed O1 segment (GWOSC open data),
+        # clear of GW150914 (GPS 1126259462.4); length >= asd time_psd.
         ts_path = os.path.join(workdir, "time_segments.pkl")
-        run(["python", os.path.join(HERE, "make_time_segments.py"), "--out", ts_path], cwd=workdir)
+        gps_start, seg_len = 1126257000, 1024
+        segments = {det: [(gps_start, gps_start + seg_len)] for det in ("H1", "L1")}
+        with open(ts_path, "wb") as f:
+            pickle.dump(segments, f)
         run(
             ["dingo_generate_asd_dataset", "--settings_file", "asd_dataset_settings.yaml",
              "--data_dir", workdir, "--time_segments_file", ts_path,
