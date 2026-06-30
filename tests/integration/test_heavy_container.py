@@ -33,20 +33,20 @@ EFFICIENCY_FLOOR_PCT = 3.0  # asserted floor sits below the 5% search target
 _DINGO_VERSION = "0.9.9"
 
 # Per-stage ceiling guards (seconds).  These are loose smoke guards tied to the
-# untuned scaled-down config (Task 6).  Each is ~2.5-3x the observed on-host
+# untuned scaled-down config (Task 6).  Each is ~3x the observed container
 # baseline so a stuck/hung stage will fail rather than quietly eat the 60-min
 # budget.  Revisit these ceilings once Task 7 config tuning lands.
 #
-# Observed on-host baseline (A100, untuned config):
-#   waveform_dataset ~63 s  -> ceiling 190 s
-#   asd_dataset      ~41 s  -> ceiling 125 s
-#   train            ~1769 s -> ceiling 5300 s
-#   inference        ~120 s  -> ceiling 360 s
+# Observed inside container (A100, apptainer --nv, untuned config):
+#   waveform_dataset ~82 s   -> ceiling 250 s
+#   asd_dataset      ~30 s   -> ceiling 125 s  (generous; download-bound)
+#   train            ~324 s  -> ceiling 1000 s
+#   inference        ~548 s  -> ceiling 1650 s (includes synthetic-phase grid)
 _STAGE_CEILINGS = {
-    "waveform_dataset": 190,
+    "waveform_dataset": 250,
     "asd_dataset": 125,
-    "train": 5300,
-    "inference": 360,
+    "train": 1000,
+    "inference": 1650,
 }
 
 
