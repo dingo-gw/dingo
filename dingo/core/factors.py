@@ -29,6 +29,8 @@ from typing import Optional, Protocol, runtime_checkable
 import pandas as pd
 import torch
 
+from dingo.core.posterior_models import BasePosteriorModel
+
 
 class Standardization:
     """
@@ -143,6 +145,98 @@ class Factor(ABC):
     ) -> torch.Tensor:
         """Evaluate ``log q_i(theta_i | f_i)`` at given physical ``theta_i`` (for IS /
         re-plug)."""
+
+
+def _base_model_metadata(model: BasePosteriorModel) -> dict:
+    """The training metadata describing the parameter standardization / data settings.
+    For an unconditional (density-recovery) model this lives under ``metadata["base"]``.
+    """
+    metadata = model.metadata
+    if metadata["train_settings"]["data"].get("unconditional", False):
+        return metadata["base"]
+    return metadata
+
+
+class FlowFactor(Factor):
+    """
+    A factor wrapping a posterior model (NPE flow, FMPE, ...). Domain-agnostic: it reaches
+    data only through the ``SamplerContext.prepared_data()`` protocol, so the GW-specific
+    conditioning map ``f_i`` (the data preprocessing) lives entirely on the context.
+
+    Encapsulates the network's own standardization: the public interface is physical-in /
+    physical-out -- standardized values never leave the factor.
+
+    The cheap *parameter-dependent* part of ``f_i`` (time-shift / heterodyne for GNPE) is
+    a no-op here; a domain subclass overrides ``_apply_param_transforms`` to add it.
+    """
+
+    def __init__(
+        self,
+        model: BasePosteriorModel,
+        parameters: list[str],
+        conditioning: Optional[list[str]] = None,
+        context_parameters: Optional[list[str]] = None,
+    ):
+        self.model = model
+        self.parameters = parameters
+        self.conditioning = conditioning or []
+        # Network conditioning inputs (GNPE proxies). Empty for plain NPE.
+        self.context_parameters = context_parameters or []
+        std = _base_model_metadata(model)["train_settings"]["data"]["standardization"]
+        self.standardization = Standardization(std["mean"], std["std"])
+
+    @classmethod
+    def from_model(cls, model: BasePosteriorModel) -> "FlowFactor":
+        """Build a factor from a model: ``parameters`` and ``context_parameters`` come from
+        the model's training metadata (first-class conditioning)."""
+        data_settings = _base_model_metadata(model)["train_settings"]["data"]
+        context_parameters = data_settings.get("context_parameters") or []
+        return cls(
+            model=model,
+            parameters=data_settings["inference_parameters"],
+            conditioning=list(context_parameters),
+            context_parameters=list(context_parameters),
+        )
+
+    def _network_context(self, cond: Conditioning) -> tuple[torch.Tensor, ...]:
+        """Assemble the model's positional context: the prepared data, plus standardized
+        context parameters when the network conditions on proxies."""
+        data = cond.context.prepared_data()
+        if not self.context_parameters:
+            return (data.unsqueeze(0),)
+        # Standardize the (physical) conditioning values the network was trained on.
+        ctx = self.standardization.standardize(cond.given, self.context_parameters)
+        return data.unsqueeze(0), ctx.unsqueeze(0)
+
+    def sample_and_log_prob(self, num_samples, cond):
+        net_context = self._network_context(cond)
+        self.model.network.eval()
+        with torch.no_grad():
+            z, log_prob = self.model.sample_and_log_prob(
+                *net_context, num_samples=num_samples
+            )
+        # Squeeze the batch dimension added for the (single) context.
+        z = z.squeeze(0)
+        log_prob = log_prob.squeeze(0)
+        theta = self.standardization.destandardize(z, self.parameters)
+        log_prob = log_prob + self.standardization.log_det(self.parameters)
+        return theta, log_prob
+
+    def log_prob(self, theta_i, cond):
+        num_samples = next(iter(theta_i.values())).shape[0]
+        z = self.standardization.standardize(theta_i, self.parameters)
+        data = cond.context.prepared_data()
+        data = data.expand(num_samples, *data.shape)
+        net_context: tuple[torch.Tensor, ...]
+        if not self.context_parameters:
+            net_context = (data,)
+        else:
+            ctx = self.standardization.standardize(cond.given, self.context_parameters)
+            net_context = (data, ctx)
+        self.model.network.eval()
+        with torch.no_grad():
+            log_prob = self.model.log_prob(z, *net_context)
+        return log_prob + self.standardization.log_det(self.parameters)
 
 
 class ChainComposer:
