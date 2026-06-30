@@ -6,11 +6,11 @@ data:
     - L1
   # All extrinsic parameters fixed (delta) so only chirp_mass/mass_ratio vary.
   extrinsic_prior:
-    dec: 0.0
-    ra: 0.0
+    dec: -1.21
+    ra: 1.68
     geocent_time: 0.0
     psi: 0.0
-    luminosity_distance: 400.0
+    luminosity_distance: 439.0
   ref_time: 1126259462.391
   inference_parameters:
     - chirp_mass

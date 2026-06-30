@@ -21,8 +21,8 @@ intrinsic_prior:
   tilt_2: 0.0
   phi_12: 0.0
   phi_jl: 0.0
-  theta_jn: 0.5
-  luminosity_distance: 400.0
+  theta_jn: 2.68
+  luminosity_distance: 439.0
   geocent_time: 0.0
 
 num_samples: 50000   # SEARCH-TUNED

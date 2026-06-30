@@ -66,6 +66,7 @@ def main():
         "asd_dataset_settings.yaml",
         "train_settings.yaml",
         "injection.ini",
+        "gw150914.ini",
     ):
         shutil.copy(os.path.join(args.config_dir, name), os.path.join(workdir, name))
 
@@ -111,11 +112,36 @@ def main():
 
     stage_times["inference"], _ = timed_stage("inference", _stage_inference)
 
+    # 5. GW150914 real-data inference + importance sampling via dingo_pipe.
+    # Downloads O1 open data from GWOSC (trigger-time = GW150914 resolves GPS).
+    def _stage_gw150914():
+        run(["dingo_pipe", "gw150914.ini"], cwd=workdir)
+        bash_script = os.path.join(
+            workdir, "gw150914_out", "submit", "bash_gw150914.sh"
+        )
+        run(["bash", bash_script], cwd=workdir)
+
+    stage_times["gw150914"], _ = timed_stage("gw150914", _stage_gw150914)
+
     total_seconds = time.time() - pipeline_start
 
+    # --- injection result ---
     eff, path = find_is_efficiency(os.path.join(workdir, "inference_out"))
     print(f"Sample efficiency = {100 * eff:.2f}%", flush=True)
     print(f"RESULT_FILE = {path}", flush=True)
+
+    # --- GW150914 real-event result ---
+    from dingo.gw.result import Result as _Result
+
+    gw_eff, gw_path = find_is_efficiency(os.path.join(workdir, "gw150914_out"))
+    gw_result = _Result(file_name=gw_path)
+    gw_chirp_mass = float(gw_result.samples["chirp_mass"].median())
+    gw_mass_ratio = float(gw_result.samples["mass_ratio"].median())
+    print(f"GW150914_EFFICIENCY = {100 * gw_eff:.2f}%", flush=True)
+    print(f"GW150914_CHIRP_MASS = {gw_chirp_mass:.3f}", flush=True)
+    print(f"GW150914_MASS_RATIO = {gw_mass_ratio:.4f}", flush=True)
+    print(f"GW150914_RESULT_FILE = {gw_path}", flush=True)
+
     for stage_name, secs in stage_times.items():
         print(f"STAGE_SECONDS {stage_name} = {secs:.1f}", flush=True)
     print(f"TOTAL_SECONDS = {total_seconds:.1f}", flush=True)

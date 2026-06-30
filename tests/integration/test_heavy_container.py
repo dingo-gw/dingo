@@ -15,6 +15,7 @@ Build strategy (no-subuid fakeroot):
     3. ``apptainer build dingo-heavy.sif sandbox``
        Pack the sandbox into a read-only SIF.  No user-ns required.
 """
+import math
 import os
 import re
 import subprocess
@@ -42,12 +43,24 @@ _DINGO_VERSION = "0.9.9"
 #   asd_dataset      ~30 s   -> ceiling 125 s  (generous; download-bound)
 #   train            ~324 s  -> ceiling 1000 s
 #   inference        ~548 s  -> ceiling 1650 s (includes synthetic-phase grid)
+#   gw150914         ~736 s  -> ceiling 2200 s (~3x observed; includes GWOSC download + IS)
 _STAGE_CEILINGS = {
     "waveform_dataset": 250,
     "asd_dataset": 125,
     "train": 1000,
     "inference": 1650,
+    "gw150914": 2200,
 }
+
+# GW150914 reference values (GWTC-1 medians).
+_GW150914_CHIRP_MASS_TRUTH = 31.2   # Msun, detector-frame
+_GW150914_MASS_RATIO_TRUTH = 0.864
+
+# Loose recovery window for chirp_mass: ±8 Msun of the truth.
+# This is a smoke guard only — the scaled-down network is not expected to give
+# publication-quality posteriors.  A failure here indicates a gross problem
+# (wrong data, wrong model, unit error) rather than just sub-optimal training.
+_GW150914_CHIRP_MASS_WINDOW = 8.0
 
 
 def _parse_stage_times(output: str) -> dict:
@@ -200,3 +213,44 @@ def test_heavy_container_e2e():
                 f"stage '{stage}' took {stage_times[stage]:.1f}s, "
                 f"exceeding ceiling {ceiling}s — check for hangs or config regressions"
             )
+
+    # --- GW150914 real-event assertions ---
+
+    # Hard assert: GW150914 stage must have completed and produced finite results.
+    gw_eff_match = re.search(r"GW150914_EFFICIENCY = ([0-9.]+)%", output)
+    assert gw_eff_match, f"no GW150914_EFFICIENCY line in output:\n{output[-3000:]}"
+    gw_eff = float(gw_eff_match.group(1))
+    print(f"GW150914 sample efficiency: {gw_eff:.2f}%")
+    assert math.isfinite(gw_eff) and gw_eff > 0.0, (
+        f"GW150914 efficiency {gw_eff}% is not positive-finite"
+    )
+
+    gw_cm_match = re.search(r"GW150914_CHIRP_MASS = ([0-9.]+)", output)
+    assert gw_cm_match, f"no GW150914_CHIRP_MASS line in output:\n{output[-3000:]}"
+    gw_cm = float(gw_cm_match.group(1))
+    print(f"GW150914 recovered chirp_mass median: {gw_cm:.3f} Msun  (truth ~{_GW150914_CHIRP_MASS_TRUTH})")
+    assert math.isfinite(gw_cm), f"GW150914 chirp_mass median is not finite: {gw_cm}"
+    # Loose smoke guard: must lie within the training prior [20, 40] Msun.
+    assert 20.0 <= gw_cm <= 40.0, (
+        f"GW150914 chirp_mass median {gw_cm:.3f} Msun outside training prior [20, 40]"
+    )
+    # Loose smoke guard: within ±{_GW150914_CHIRP_MASS_WINDOW} Msun of GWTC-1 median.
+    # This is a very broad window — purely a gross-error check, not a precision test.
+    assert abs(gw_cm - _GW150914_CHIRP_MASS_TRUTH) <= _GW150914_CHIRP_MASS_WINDOW, (
+        f"GW150914 chirp_mass median {gw_cm:.3f} Msun deviates more than "
+        f"±{_GW150914_CHIRP_MASS_WINDOW} Msun from truth {_GW150914_CHIRP_MASS_TRUTH}"
+    )
+
+    gw_mr_match = re.search(r"GW150914_MASS_RATIO = ([0-9.]+)", output)
+    assert gw_mr_match, f"no GW150914_MASS_RATIO line in output:\n{output[-3000:]}"
+    gw_mr = float(gw_mr_match.group(1))
+    print(f"GW150914 recovered mass_ratio median: {gw_mr:.4f}  (truth ~{_GW150914_MASS_RATIO_TRUTH})")
+    assert math.isfinite(gw_mr), f"GW150914 mass_ratio median is not finite: {gw_mr}"
+    # Loose smoke guard: must lie within the training prior [0.5, 1.0].
+    assert 0.5 <= gw_mr <= 1.0, (
+        f"GW150914 mass_ratio median {gw_mr:.4f} outside training prior [0.5, 1.0]"
+    )
+
+    gw_rf_match = re.search(r"GW150914_RESULT_FILE = (.+)", output)
+    if gw_rf_match:
+        print(f"GW150914 result file: {gw_rf_match.group(1).strip()}")
