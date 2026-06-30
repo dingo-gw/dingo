@@ -46,7 +46,9 @@ def main():
     parser.add_argument("--workdir", default=None)
     args = parser.parse_args()
 
-    workdir = args.workdir or os.path.join(HERE, "_run")
+    # Default to /tmp so the script works inside a read-only SIF container.
+    # /tmp is always writable (apptainer mounts a tmpfs there).
+    workdir = args.workdir or os.path.join("/tmp", "dingo_run")
     os.makedirs(workdir, exist_ok=True)
     for name in (
         "waveform_dataset_settings.yaml",
