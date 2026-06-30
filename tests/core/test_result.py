@@ -3,7 +3,7 @@ import math
 import numpy as np
 import pandas as pd
 import pytest
-from bilby.core.prior import DeltaFunction, PriorDict, Uniform
+from bilby.core.prior import Constraint, DeltaFunction, PriorDict, Uniform
 from scipy.special import logsumexp
 
 from dingo.core.result import Result, _clip_weights
@@ -152,9 +152,9 @@ def test_higher_max_increases_output():
     ]
     # Expected output grows monotonically with k (stochastically, but very reliably).
     for i in range(len(counts) - 1):
-        assert counts[i] <= counts[i + 1], (
-            f"k={i+1} gave {counts[i]} samples but k={i+2} gave {counts[i+1]}"
-        )
+        assert (
+            counts[i] <= counts[i + 1]
+        ), f"k={i+1} gave {counts[i]} samples but k={i+2} gave {counts[i+1]}"
 
 
 # ---------------------------------------------------------------------------
@@ -333,9 +333,7 @@ def test_base_metadata_unconditional_returns_base():
 
 
 def test_parameter_subset_keeps_only_requested_columns():
-    samples = pd.DataFrame(
-        {"a": [1.0, 2.0], "b": [3.0, 4.0], "log_prob": [0.0, 0.0]}
-    )
+    samples = pd.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0], "log_prob": [0.0, 0.0]})
     result = make_result(samples)
     subset = result.parameter_subset(["a"])
     assert list(subset.samples.columns) == ["a"]
@@ -360,9 +358,7 @@ def test_calculate_evidence_matches_logsumexp():
     result = make_result(samples)
     result._calculate_evidence()
 
-    log_weights = (
-        samples["log_prior"] + samples["log_likelihood"] - samples["log_prob"]
-    )
+    log_weights = samples["log_prior"] + samples["log_likelihood"] - samples["log_prob"]
     expected = logsumexp(log_weights) - np.log(n)
     assert result.log_evidence == pytest.approx(expected)
     # Stored weights are normalized to mean 1.
@@ -445,3 +441,97 @@ def test_importance_sample_requires_log_prob():
     result = _StubResult(dictionary={"samples": _stub_samples(with_log_prob=False)})
     with pytest.raises(KeyError, match="log probability"):
         result.importance_sample()
+
+
+# ---------------------------------------------------------------------------
+# split / merge
+# ---------------------------------------------------------------------------
+
+
+def _result_with_evidence_columns(n=10):
+    samples = pd.DataFrame(
+        {
+            "x": np.arange(n, dtype=float),
+            "log_prob": np.zeros(n),
+            "log_prior": np.zeros(n),
+            "log_likelihood": np.zeros(n),
+        }
+    )
+    return Result(
+        dictionary={"samples": samples, "settings": {"train_settings": {"data": {}}}}
+    )
+
+
+def test_split_partitions_samples():
+    result = _result_with_evidence_columns(10)
+    parts = result.split(3)
+    assert len(parts) == 3
+    assert sum(p.num_samples for p in parts) == 10
+    assert all(isinstance(p, Result) for p in parts)
+
+
+def test_split_then_merge_round_trips():
+    result = _result_with_evidence_columns(10)
+    merged = Result.merge(result.split(3))
+    np.testing.assert_array_equal(
+        merged.samples["x"].to_numpy(), result.samples["x"].to_numpy()
+    )
+
+
+def test_merge_incompatible_metadata_raises():
+    result = _result_with_evidence_columns(10)
+    parts = result.split(2)
+    parts[1].settings = {"train_settings": {"data": {"changed": True}}}
+    with pytest.raises(ValueError, match="same metadata"):
+        Result.merge(parts)
+
+
+# ---------------------------------------------------------------------------
+# sampling_importance_resampling
+# ---------------------------------------------------------------------------
+
+
+def test_sampling_importance_resampling_count_and_drops_weights():
+    result = make_result_with_weights([1.0, 2.0, 3.0, 0.5, 4.0], extra_col=False)
+    out = result.sampling_importance_resampling(num_samples=3, random_state=0)
+    assert len(out) == 3
+    assert "weights" not in out.columns
+
+
+def test_sampling_importance_resampling_too_many_raises():
+    result = make_result_with_weights([1.0, 2.0, 3.0])
+    with pytest.raises(ValueError, match="Cannot sample more"):
+        result.sampling_importance_resampling(num_samples=100)
+
+
+# ---------------------------------------------------------------------------
+# prior-derived parameter-key properties
+# ---------------------------------------------------------------------------
+
+
+def test_parameter_key_properties_partition_the_prior():
+    result = Result(dictionary={"samples": pd.DataFrame({"a": [0.5]})})
+    # core Result._build_prior leaves prior=None; set a prior with one of each kind.
+    result.prior = PriorDict(
+        {
+            "a": Uniform(0.0, 1.0, name="a"),  # search parameter
+            "b": Constraint(0.0, 1.0, name="b"),  # constraint
+            "c": DeltaFunction(0.5, name="c"),  # fixed parameter
+        }
+    )
+    assert result.search_parameter_keys == ["a"]
+    assert result.constraint_parameter_keys == ["b"]
+    assert result.fixed_parameter_keys == ["c"]
+
+
+# ---------------------------------------------------------------------------
+# print_summary (smoke)
+# ---------------------------------------------------------------------------
+
+
+def test_print_summary_runs_with_and_without_evidence(capsys):
+    result = make_result_with_weights([1.0, 2.0, 3.0])
+    result.print_summary()  # no log_evidence yet
+    result.log_evidence = -3.0
+    result.print_summary()  # with evidence / n_eff / efficiency
+    assert "Number of samples" in capsys.readouterr().out

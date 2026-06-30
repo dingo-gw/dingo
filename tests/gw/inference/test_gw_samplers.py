@@ -88,7 +88,9 @@ def test_frequency_validator_rejects_value_beyond_hard_bound(
     "validate, valid_change",
     [(_validate_minimum_frequency, 40.0), (_validate_maximum_frequency, 512.0)],
 )
-def test_frequency_validator_rejects_detector_key_mismatch(domain, validate, valid_change):
+def test_frequency_validator_rejects_detector_key_mismatch(
+    domain, validate, valid_change
+):
     crop = {"cropping_probability": 0.5}
     with pytest.raises(ValueError, match="exactly detectors"):
         validate({"H1": valid_change}, DETECTORS, domain, crop)
@@ -123,7 +125,9 @@ def test_validate_maximum_frequency_rejects_value_below_floor(domain):
         _validate_maximum_frequency(300.0, DETECTORS, domain, crop)
 
 
-def test_validate_minimum_frequency_rejects_differing_values_when_not_independent(domain):
+def test_validate_minimum_frequency_rejects_differing_values_when_not_independent(
+    domain,
+):
     crop = {
         "cropping_probability": 0.5,
         "independent_detectors": False,
@@ -258,24 +262,23 @@ def test_correct_reference_time_round_trip(gw_sampler):
 
 
 def test_correct_reference_time_matches_sidereal_shift(gw_sampler):
-    """The RA shift must equal the difference in apparent sidereal time.
-    """
+    """The RA shift must equal the difference in apparent sidereal time."""
     t_event = gw_sampler.t_ref + 3600.0
     gw_sampler._event_metadata = {"time_event": t_event}
     samples = {"ra": np.array([0.5, 1.5, 2.5])}
     original_ra = samples["ra"].copy()
 
     ra_correction = (
-        Time(t_event, format="gps", scale="utc").sidereal_time(
-            "apparent", "greenwich"
-        )
+        Time(t_event, format="gps", scale="utc").sidereal_time("apparent", "greenwich")
         - Time(gw_sampler.t_ref, format="gps", scale="utc").sidereal_time(
             "apparent", "greenwich"
         )
     ).rad
 
     gw_sampler._correct_reference_time(samples, inverse=False)
-    np.testing.assert_allclose(samples["ra"], (original_ra + ra_correction) % (2 * np.pi))
+    np.testing.assert_allclose(
+        samples["ra"], (original_ra + ra_correction) % (2 * np.pi)
+    )
 
 
 def test_correct_reference_time_noop_when_time_matches_reference(gw_sampler):

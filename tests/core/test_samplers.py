@@ -164,9 +164,10 @@ def test_log_prob_round_trip_matches_sampling_log_prob(unconditional_sampler):
     unconditional_sampler.run_sampler(num_samples=20)
     samples = unconditional_sampler.samples
     recomputed = unconditional_sampler.log_prob(samples.drop(columns="log_prob"))
-    np.testing.assert_allclose(
-        recomputed, samples["log_prob"].to_numpy(), atol=1e-5
-    )
+    # The network runs in float32, and sampling vs. log_prob use the flow's forward
+    # vs. inverse transforms, which round-trip only to the float32 floor (observed
+    # ~1e-6); atol=1e-5 leaves ~10x margin.
+    np.testing.assert_allclose(recomputed, samples["log_prob"].to_numpy(), atol=1e-5)
 
 
 def test_log_prob_adds_existing_log_prob_column(unconditional_sampler):
@@ -180,6 +181,7 @@ def test_log_prob_adds_existing_log_prob_column(unconditional_sampler):
     stored = samples["log_prob"].to_numpy()
     recomputed = unconditional_sampler.log_prob(samples.drop(columns="log_prob"))
     combined = unconditional_sampler.log_prob(samples)
+    # float32 round-trip floor, as in test_log_prob_round_trip_matches_sampling_log_prob.
     np.testing.assert_allclose(combined, recomputed + stored, atol=1e-5)
 
 

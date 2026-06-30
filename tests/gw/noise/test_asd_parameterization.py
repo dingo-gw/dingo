@@ -7,7 +7,11 @@ from dingo.gw.noise.synthetic.asd_parameterization import (
     fit_broadband_noise,
     parameterize_single_psd,
 )
-from dingo.gw.noise.synthetic.utils import get_index_for_elem, lorentzian_eval
+from dingo.gw.noise.synthetic.utils import (
+    get_index_for_elem,
+    lorentzian_eval,
+    reconstruct_psds_from_parameters,
+)
 
 
 @pytest.fixture()
@@ -30,7 +34,9 @@ def test_get_index_for_elem_returns_nearest():
 def test_lorentzian_eval_returns_zeros_for_degenerate_params(domain):
     x = domain.sample_frequencies
     np.testing.assert_array_equal(lorentzian_eval(x, 0.0, 5.0, 100.0), np.zeros_like(x))
-    np.testing.assert_array_equal(lorentzian_eval(x, 200.0, -1.0, 100.0), np.zeros_like(x))
+    np.testing.assert_array_equal(
+        lorentzian_eval(x, 200.0, -1.0, 100.0), np.zeros_like(x)
+    )
 
 
 def test_lorentzian_eval_peaks_at_f0(domain):
@@ -119,3 +125,26 @@ def test_parameterize_single_psd_shapes(domain):
     assert len(out["y_values"]) == settings["num_spline_positions"]
     assert len(out["x_positions"]) == settings["num_spline_positions"]
     assert out["spectral_features"].shape == (settings["num_spectral_segments"], 3)
+
+
+# ---------------------------------------------------------------------------
+# reconstruct_psds_from_parameters
+# ---------------------------------------------------------------------------
+
+
+def test_reconstruct_psds_from_parameters_shape_and_positivity(domain):
+    num_spline, num_segments = 8, 5
+    parameters = {
+        "x_positions": np.linspace(20.0, domain.f_max, num_spline),
+        "y_values": np.full(num_spline, np.log(1e-40)),
+        "spectral_features": np.zeros((num_segments, 3)),  # no spectral lines
+    }
+    # smoothen=True -> deterministic exp(base_noise) reconstruction (no added noise).
+    psds = reconstruct_psds_from_parameters(
+        parameters, domain, {"sigma": 1.0, "smoothen": True}
+    )
+    assert psds.shape == (1, len(domain))
+    assert np.all(psds > 0)
+    # A cubic spline through a constant is exactly that constant, so exp(base_noise)
+    # reconstructs 1e-40 to (float64) machine precision (observed rel. error ~1e-15).
+    np.testing.assert_allclose(psds[0], 1e-40, rtol=1e-12)

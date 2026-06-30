@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
-from scipy.special import logsumexp
+from bilby.core.prior import Uniform
+from scipy.integrate import trapezoid
 
 from dingo.gw.domains import UniformFrequencyDomain
 from dingo.gw.likelihood import (
@@ -143,3 +144,70 @@ def test_multiple_marginalizations_raise(domain, event_data):
     )
     with pytest.raises(NotImplementedError):
         likelihood.log_likelihood(dict(THETA))
+
+
+def _brute_force_marginal_log_likelihood(plain_likelihood, key, prior, n=1000):
+    """Numerically marginalize the non-marginalized likelihood over ``key``.
+
+    Direct adaptation of bilby's marginalization-correctness check
+    (bilby/test/gw/likelihood/marginalization_test.py::TestMarginalizations._template):
+    evaluate the non-marginalized likelihood on a grid of the marginalized parameter
+    and integrate it against the parameter's prior with the trapezoidal rule.
+    """
+    values = np.linspace(prior.minimum, prior.maximum, n)
+    prior_values = prior.prob(values)
+    ln_likes = np.array(
+        [plain_likelihood._log_likelihood({**THETA, key: float(v)}) for v in values]
+    )
+    like = np.exp(ln_likes - ln_likes.max())
+    return np.log(trapezoid(like * prior_values, values)) + ln_likes.max()
+
+
+def test_phase_marginalization_matches_brute_force_integral(domain, event_data):
+    """Analytic phase-marginalized likelihood matches the brute-force integral.
+
+    Same comparison as bilby's marginalization test (``_template``), specialized to
+    the phase parameter with a uniform [0, 2*pi) prior.
+    """
+    marginalized = make_likelihood(
+        domain, event_data, phase_marginalization_kwargs={"approximation_22_mode": True}
+    )._log_likelihood_phase_marginalized(dict(THETA))
+
+    brute_force = _brute_force_marginal_log_likelihood(
+        make_likelihood(domain, event_data),
+        key="phase",
+        prior=Uniform(minimum=0.0, maximum=2 * np.pi, name="phase"),
+    )
+    # The analytic (Bessel) form is exact for a (2,2)-dominated waveform, and the
+    # brute-force integrand is smooth and periodic on [0, 2*pi), so the trapezoidal
+    # rule is spectrally accurate -> the two agree to the integration floor
+    # (observed residual ~0). (bilby's own test uses a much looser delta=0.5.)
+    assert marginalized == pytest.approx(brute_force, abs=1e-3)
+
+
+def test_time_marginalization_matches_brute_force_integral(domain, event_data):
+    """FFT-based time-marginalized likelihood matches the brute-force integral.
+
+    Same comparison as bilby's marginalization test (``_template``), specialized to
+    the geocent_time parameter with a uniform prior over [t_lower, t_upper].
+    """
+    t_lower, t_upper = -0.02, 0.02
+    marginalized = make_likelihood(
+        domain,
+        event_data,
+        time_marginalization_kwargs={
+            "t_lower": t_lower,
+            "t_upper": t_upper,
+            "n_fft": 5,
+        },
+    )._log_likelihood_time_marginalized(dict(THETA))
+
+    brute_force = _brute_force_marginal_log_likelihood(
+        make_likelihood(domain, event_data),
+        key="geocent_time",
+        prior=Uniform(minimum=t_lower, maximum=t_upper, name="geocent_time"),
+    )
+    # The residual is dominated by the FFT time-grid discretization (resolution
+    # delta_t / n_fft = 1 / (f_max * n_fft)); observed ~0.019 for n_fft=5. The
+    # tolerance is set just above that. (bilby's own test uses a looser delta=0.5.)
+    assert marginalized == pytest.approx(brute_force, abs=0.05)

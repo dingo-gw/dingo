@@ -273,9 +273,7 @@ def test_sample_calibration_parameters_adds_recalib_columns(tmp_path):
     recalib_cols = [c for c in result.samples.columns if c.startswith("recalib_")]
     assert len(recalib_cols) == 2 * n_nodes * len(DETECTORS)
     # The calibration prior log_prob is folded into the proposal log_prob.
-    assert not np.array_equal(
-        result.samples["log_prob"].to_numpy(), log_prob_before
-    )
+    assert not np.array_equal(result.samples["log_prob"].to_numpy(), log_prob_before)
     # The calibration priors are recorded for persistence and added to the prior.
     assert len(result.importance_sampling_metadata["prior_update"]) == len(recalib_cols)
     assert any("recalib" in key for key in result.prior.keys())
