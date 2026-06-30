@@ -24,7 +24,7 @@ from __future__ import annotations
 import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Optional, Protocol, Union, runtime_checkable
+from typing import Callable, Optional, Protocol, Union, runtime_checkable
 
 import pandas as pd
 import torch
@@ -121,17 +121,33 @@ def _cat_dict(
     return {k: torch.cat([b[k] for b in batches]) for k in batches[0]}
 
 
-def _slice_given(cond: Conditioning, start: int, stop: int) -> Conditioning:
-    """A view of ``cond`` whose conditioning values are restricted to rows
-    ``[start:stop]``, so a factor's batch sees the conditioning aligned with the samples
-    it produces. The shared context is unchanged (the prepared data is one event)."""
-    return Conditioning(cond.context, {k: v[start:stop] for k, v in cond.given.items()})
+def chunk_and_concat(
+    total: int,
+    batch_size: Optional[int],
+    run_once: Callable[[int], tuple[dict[str, torch.Tensor], Optional[torch.Tensor]]],
+) -> tuple[dict[str, torch.Tensor], Optional[torch.Tensor]]:
+    """The vertical (depth-first) batching primitive, shared by the chain and Gibbs
+    composers.
 
+    Split ``total`` base samples into chunks of ``batch_size``, run ``run_once(n)`` -- a
+    full pass through the *whole* pipeline (the entire chain, or the entire Gibbs loop) --
+    per chunk, and concatenate. Working memory is bounded to one chunk carried through the
+    pipeline; only the output buffer grows to ``total`` (a real run streams it to CPU per
+    chunk). This is the order the old ``Sampler.run_sampler`` batches in, so parity is
+    exact when ``batch_size`` matches. ``batch_size=None`` runs everything in one pass.
 
-def _batch_bounds(num_samples: int, batch_size: int):
-    """Yield ``(start, stop)`` chunks covering ``range(num_samples)``."""
-    for start in range(0, num_samples, batch_size):
-        yield start, min(start + batch_size, num_samples)
+    ``run_once`` returns ``(samples, log_prob)``; ``log_prob`` may be ``None`` (the Gibbs
+    path has no tractable density)."""
+    bs = batch_size or total
+    sample_parts: list[dict[str, torch.Tensor]] = []
+    lp_parts: list[Optional[torch.Tensor]] = []
+    for start in range(0, total, bs):
+        block, lp = run_once(min(bs, total - start))
+        sample_parts.append(block)
+        lp_parts.append(lp)
+    samples = _cat_dict(sample_parts)
+    log_prob = None if lp_parts[0] is None else torch.cat(lp_parts)
+    return samples, log_prob
 
 
 class Factor(ABC):
@@ -141,14 +157,14 @@ class Factor(ABC):
     standardization Jacobian already applied), so the chain product ``sum_i log q_i`` is
     directly the physical posterior log-density.
 
-    Batching is a per-factor concern: ``sample_and_log_prob`` / ``log_prob`` are
-    batching wrappers that split ``num_samples`` into chunks of ``batch_size`` (slicing
-    the conditioning to match), call the subclass hooks ``_sample_and_log_prob`` /
-    ``_log_prob`` per chunk, and concatenate. Because the chain composer already
-    materializes the full sample set between factors, each factor batches independently
-    at the size that fits *its own* memory footprint -- the peak is the single most
-    expensive factor at its own ``batch_size``, not the whole chain at one size.
-    ``batch_size = None`` runs the whole request in one pass (identical to no batching).
+    *Physical in, physical out*, and a **single forward pass per call** -- batching is not
+    a factor concern; the composer drives it (``chunk_and_concat``).
+
+    Contract the composer relies on (this is what makes fan-out work): a call draws
+    ``num_samples`` samples **per conditioning row** and returns ``n_rows * num_samples``
+    rows, flattened row-major, where ``n_rows`` is the number of rows in ``cond.given``
+    (or 1 if unconditioned). This mirrors the network's own
+    ``sample_and_log_prob(*context, num_samples=n) -> (B, n, dim)`` with ``B = n_rows``.
 
     Attributes
     ----------
@@ -157,56 +173,25 @@ class Factor(ABC):
     conditioning : list[str]
         Earlier-block parameter names this factor conditions on. Data dependence is
         implicit via the shared context.
-    batch_size : int, optional
-        Max number of samples processed in a single forward pass. ``None`` -> no
-        internal batching.
     """
 
     parameters: list[str]
     conditioning: list[str]
-    batch_size: Optional[int] = None
 
+    @abstractmethod
     def sample_and_log_prob(
         self, num_samples: int, cond: Conditioning
     ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
-        """Draw ``theta_i ~ q_i`` (internally batched by ``batch_size``); return
-        ``(physical samples, physical-space log q_i)``."""
-        if not self.batch_size or self.batch_size >= num_samples:
-            return self._sample_and_log_prob(num_samples, cond)
-        sample_batches, lp_batches = [], []
-        for start, stop in _batch_bounds(num_samples, self.batch_size):
-            block, lp = self._sample_and_log_prob(
-                stop - start, _slice_given(cond, start, stop)
-            )
-            sample_batches.append(block)
-            lp_batches.append(lp)
-        return _cat_dict(sample_batches), torch.cat(lp_batches)
+        """Draw ``num_samples`` per conditioning row from ``q_i``; return ``(physical
+        samples, physical-space log q_i)``. The returned dict may carry extra named
+        side-channel columns (e.g. an IS kernel correction) alongside ``parameters``."""
 
+    @abstractmethod
     def log_prob(
         self, theta_i: dict[str, torch.Tensor], cond: Conditioning
     ) -> torch.Tensor:
         """Evaluate ``log q_i(theta_i | f_i)`` at given physical ``theta_i`` (for IS /
-        re-plug), internally batched by ``batch_size``."""
-        num_samples = next(iter(theta_i.values())).shape[0]
-        if not self.batch_size or self.batch_size >= num_samples:
-            return self._log_prob(theta_i, cond)
-        lp_batches = []
-        for start, stop in _batch_bounds(num_samples, self.batch_size):
-            chunk = {k: v[start:stop] for k, v in theta_i.items()}
-            lp_batches.append(self._log_prob(chunk, _slice_given(cond, start, stop)))
-        return torch.cat(lp_batches)
-
-    @abstractmethod
-    def _sample_and_log_prob(
-        self, num_samples: int, cond: Conditioning
-    ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
-        """Single-pass draw of ``num_samples`` from ``q_i`` (no internal batching)."""
-
-    @abstractmethod
-    def _log_prob(
-        self, theta_i: dict[str, torch.Tensor], cond: Conditioning
-    ) -> torch.Tensor:
-        """Single-pass evaluation of ``log q_i`` at given physical ``theta_i``."""
+        re-plug). One conditioning row per ``theta_i`` row (no fan-out)."""
 
 
 def _base_model_metadata(model: BasePosteriorModel) -> dict:
@@ -238,21 +223,17 @@ class FlowFactor(Factor):
         parameters: list[str],
         conditioning: Optional[list[str]] = None,
         context_parameters: Optional[list[str]] = None,
-        batch_size: Optional[int] = None,
     ):
         self.model = model
         self.parameters = parameters
         self.conditioning = conditioning or []
         # Network conditioning inputs (GNPE proxies). Empty for plain NPE.
         self.context_parameters = context_parameters or []
-        self.batch_size = batch_size
         std = _base_model_metadata(model)["train_settings"]["data"]["standardization"]
         self.standardization = Standardization(std["mean"], std["std"])
 
     @classmethod
-    def from_model(
-        cls, model: BasePosteriorModel, batch_size: Optional[int] = None
-    ) -> "FlowFactor":
+    def from_model(cls, model: BasePosteriorModel) -> "FlowFactor":
         """Build a factor from a model: ``parameters`` and ``context_parameters`` come from
         the model's training metadata (first-class conditioning)."""
         data_settings = _base_model_metadata(model)["train_settings"]["data"]
@@ -262,34 +243,41 @@ class FlowFactor(Factor):
             parameters=data_settings["inference_parameters"],
             conditioning=list(context_parameters),
             context_parameters=list(context_parameters),
-            batch_size=batch_size,
         )
 
-    def _network_context(self, cond: Conditioning) -> tuple[torch.Tensor, ...]:
-        """Assemble the model's positional context: the prepared data, plus standardized
-        context parameters when the network conditions on proxies."""
+    def sample_and_log_prob(self, num_samples, cond):
+        """Draw ``num_samples`` per conditioning row. Unconditioned (plain NPE): one
+        shared data context, ``num_samples`` draws. Conditioned: ``N`` context rows in
+        (one embedding pass each), ``num_samples`` draws per row -> ``N * num_samples``
+        rows, flattened row-major to align with the composer's ``repeat_interleave``."""
         data = cond.context.prepared_data()
-        if not self.context_parameters:
-            return (data.unsqueeze(0),)
-        # Standardize the (physical) conditioning values the network was trained on.
-        ctx = self.standardization.standardize(cond.given, self.context_parameters)
-        return data.unsqueeze(0), ctx.unsqueeze(0)
-
-    def _sample_and_log_prob(self, num_samples, cond):
-        net_context = self._network_context(cond)
         self.model.network.eval()
-        with torch.no_grad():
-            z, log_prob = self.model.sample_and_log_prob(
-                *net_context, num_samples=num_samples
-            )
-        # Squeeze the batch dimension added for the (single) context.
-        z = z.squeeze(0)
-        log_prob = log_prob.squeeze(0)
+        if not self.context_parameters:
+            with torch.no_grad():
+                z, log_prob = self.model.sample_and_log_prob(
+                    data.unsqueeze(0), num_samples=num_samples
+                )
+            # Squeeze the batch dimension added for the single shared context.
+            z = z.squeeze(0)
+            log_prob = log_prob.squeeze(0)
+        else:
+            # Standardize the (physical) conditioning the network was trained on, giving
+            # B = N context rows; expand the shared data to match. The network draws
+            # num_samples per row -> (N, num_samples, dim).
+            ctx = self.standardization.standardize(cond.given, self.context_parameters)
+            n_rows = ctx.shape[0]
+            data = data.expand(n_rows, *data.shape)
+            with torch.no_grad():
+                z, log_prob = self.model.sample_and_log_prob(
+                    data, ctx, num_samples=num_samples
+                )
+            z = z.reshape(n_rows * num_samples, z.shape[-1])
+            log_prob = log_prob.reshape(n_rows * num_samples)
         theta = self.standardization.destandardize(z, self.parameters)
         log_prob = log_prob + self.standardization.log_det(self.parameters)
         return theta, log_prob
 
-    def _log_prob(self, theta_i, cond):
+    def log_prob(self, theta_i, cond):
         num_samples = next(iter(theta_i.values())).shape[0]
         z = self.standardization.standardize(theta_i, self.parameters)
         data = cond.context.prepared_data()
@@ -306,19 +294,37 @@ class FlowFactor(Factor):
         return log_prob + self.standardization.log_det(self.parameters)
 
 
+@dataclass
+class Stage:
+    """One factor in the chain plus its **fan-out**: how many samples it draws per
+    incoming conditioning row. The root (first) stage ignores ``fan_out`` -- it draws the
+    base count directly; a 1:1 chain link uses ``fan_out=1``; an intrinsic/extrinsic
+    expansion uses ``fan_out=K`` (``K`` extrinsic draws per intrinsic sample)."""
+
+    factor: Factor
+    fan_out: int = 1
+
+
 class ChainComposer:
     """
-    Autoregressive composer: sample (or evaluate) the factors in declared order, which
-    must be a topological order of the dependency DAG, and sum their log-probs. Exact
-    and importance-sampling-friendly. Covers plain NPE, single-step GNPE, prior
-    conditioning, synthetic phase, and intrinsic/extrinsic splits.
+    Autoregressive composer **and vertical (depth-first) executor**: sample the stages in
+    declared order (a topological order of the dependency DAG), expanding by each stage's
+    fan-out, and sum their log-probs. Exact and importance-sampling-friendly. Covers plain
+    NPE, single-step GNPE, prior conditioning, synthetic phase, and intrinsic/extrinsic
+    splits.
 
-    Multi-iteration (cyclic) GNPE is *not* expressible here and uses a separate Gibbs
-    composer.
+    Vertical execution carries a chunk of base samples all the way down the chain, emits
+    it, and discards -- bounding working memory to one chunk (the only way to draw ``M``
+    intrinsic x ``K`` extrinsic without materializing ``M*K`` intermediates) and
+    reproducing the old sampler's batching order (bit-exact when ``batch_size`` matches).
+    Batching lives in ``chunk_and_concat``; the factors are single-pass.
+
+    Multi-iteration (cyclic) GNPE is *not* expressible here and uses ``GibbsComposer``.
+    Accepts bare factors (wrapped as ``Stage(factor, fan_out=1)``) or explicit ``Stage``s.
     """
 
-    def __init__(self, factors: list[Factor]):
-        self.factors = factors
+    def __init__(self, stages: list[Union["Stage", Factor]]):
+        self.stages = [s if isinstance(s, Stage) else Stage(s) for s in stages]
         self._validate()
 
     def _validate(self):
@@ -334,14 +340,51 @@ class ChainComposer:
                 )
             produced.update(factor.parameters)
 
+    @property
+    def factors(self) -> list[Factor]:
+        """The factors in order (without fan-out), for callers that only need them."""
+        return [stage.factor for stage in self.stages]
+
+    @property
+    def expansion(self) -> int:
+        """Product of the non-root fan-outs; total rows returned = num_samples *
+        expansion (e.g. M intrinsic x K extrinsic for an extrinsic fan-out of K)."""
+        return math.prod(stage.fan_out for stage in self.stages[1:])
+
     def sample_and_log_prob(
-        self, num_samples: int, context: SamplerContext
+        self,
+        num_samples: int,
+        context: SamplerContext,
+        batch_size: Optional[int] = None,
     ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
+        """``num_samples`` is the **base (root) count** -- e.g. ``M`` intrinsic samples.
+        Each fan-out stage multiplies it, so the result has ``num_samples * expansion``
+        rows (``M * K`` for an extrinsic ``fan_out=K``); for a plain chain (no fan-out)
+        that is just ``num_samples``. ``batch_size`` chunks the base count, in the same
+        (root) unit as ``num_samples``."""
+        return chunk_and_concat(
+            num_samples, batch_size, lambda n: self._run_chain_once(n, context)
+        )
+
+    def _run_chain_once(
+        self, base: int, context: SamplerContext
+    ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
+        """One depth-first pass of the whole chain for ``base`` root samples."""
         samples: dict[str, torch.Tensor] = {}
         total: torch.Tensor | float = 0.0
-        for factor in self.factors:
+        for i, stage in enumerate(self.stages):
+            factor = stage.factor
+            n = base if i == 0 else stage.fan_out
             cond = Conditioning(context, {k: samples[k] for k in factor.conditioning})
-            block, lp = factor.sample_and_log_prob(num_samples, cond)
+            block, lp = factor.sample_and_log_prob(n, cond)
+            # The factor returned (rows_so_far * n) rows. Expand the carried columns to
+            # match -- each upstream row repeated n times (the block is flattened in the
+            # same row-major order). The root has no carried rows, and fan_out=1 stages
+            # are a no-op, so 1:1 chains are untouched.
+            if i > 0 and n > 1:
+                samples = {k: v.repeat_interleave(n, 0) for k, v in samples.items()}
+                if torch.is_tensor(total):
+                    total = total.repeat_interleave(n, 0)
             samples.update(block)
             total = total + lp
         return samples, total
@@ -357,19 +400,14 @@ class ChainComposer:
         return total
 
     def sample(
-        self, num_samples: int, context: SamplerContext
+        self,
+        num_samples: int,
+        context: SamplerContext,
+        batch_size: Optional[int] = None,
     ) -> dict[str, torch.Tensor]:
         """Full per-sample dict (parameters + ``log_prob``), for the sampler façade."""
-        samples, log_prob = self.sample_and_log_prob(num_samples, context)
+        samples, log_prob = self.sample_and_log_prob(num_samples, context, batch_size)
         return {**samples, "log_prob": log_prob}
-
-    def set_default_batch_size(self, batch_size: Optional[int]):
-        """Apply ``batch_size`` as the default to every factor that has not set its own
-        (per-factor ``batch_size`` takes precedence). The façade calls this to honour a
-        single ``run_sampler(batch_size=...)`` request across the whole chain."""
-        for factor in self.factors:
-            if factor.batch_size is None:
-                factor.batch_size = batch_size
 
 
 class GibbsComposer:
@@ -379,7 +417,10 @@ class GibbsComposer:
     (``gnpe_factor.gibbs_step``) to a fixed point. The dependency is cyclic
     (theta <-> proxies), so this breaks density access: ``sample`` returns parameters
     WITHOUT a ``log_prob``. (Single-step GNPE that *does* preserve log_prob is a
-    two-factor ``ChainComposer`` instead.)
+    two-stage ``ChainComposer`` instead.)
+
+    Batching is vertical, via ``chunk_and_concat``: chunk the Gibbs walkers and run the
+    whole loop per chunk -- the old ``GWSamplerGNPE.run_sampler`` order.
     """
 
     def __init__(self, init_factor: Factor, gnpe_factor, num_iterations: int):
@@ -388,6 +429,17 @@ class GibbsComposer:
         self.num_iterations = num_iterations
 
     def sample(
+        self,
+        num_samples: int,
+        context: SamplerContext,
+        batch_size: Optional[int] = None,
+    ) -> dict[str, torch.Tensor]:
+        samples, _ = chunk_and_concat(
+            num_samples, batch_size, lambda n: (self._run_once(n, context), None)
+        )
+        return samples
+
+    def _run_once(
         self, num_samples: int, context: SamplerContext
     ) -> dict[str, torch.Tensor]:
         # Seed the Gibbs chain with the init factor's parameters (e.g. detector times).
@@ -405,22 +457,15 @@ class GibbsComposer:
         }
         return {**parameters, **proxies}
 
-    def set_default_batch_size(self, batch_size: Optional[int]):
-        """Apply ``batch_size`` as the default to the init and GNPE factors that have not
-        set their own (per-factor ``batch_size`` takes precedence)."""
-        for factor in (self.init_factor, self.gnpe_factor):
-            if getattr(factor, "batch_size", None) is None:
-                factor.batch_size = batch_size
-
 
 class ComposedSampler:
     """
     Thin user-facing façade over a composer (``ChainComposer`` or ``GibbsComposer``) and
-    a ``SamplerContext``: runs the composer with optional batching, applies domain-specific
-    post-processing, and returns samples as a DataFrame. The per-factor compute lives in
-    the composer (which need only expose ``sample(num_samples, context) -> dict``); this
-    class only handles batching, consolidation, and post-processing -- the role the
-    monolithic ``Sampler`` plays today.
+    a ``SamplerContext``: runs the composer (which bounds memory via vertical batching),
+    applies domain-specific post-processing, and returns samples as a DataFrame. The
+    per-factor compute lives in the composer (which need only expose
+    ``sample(num_samples, context, batch_size) -> dict``); this class only handles
+    consolidation and post-processing -- the role the monolithic ``Sampler`` plays today.
     """
 
     def __init__(
@@ -435,23 +480,14 @@ class ComposedSampler:
         and reference-time correction). No-op by default."""
         pass
 
-    def _run_batch(self, num_samples: int) -> dict[str, torch.Tensor]:
-        # Uniform across composers: ChainComposer.sample adds log_prob; GibbsComposer
-        # (multi-iteration GNPE) returns parameters + proxies with no log_prob.
-        return self.composer.sample(num_samples, self.context)
-
     def run_sampler(
         self, num_samples: int, batch_size: Optional[int] = None
     ) -> pd.DataFrame:
-        """Run the chain and return samples as a DataFrame.
-
-        Batching is per-factor (each factor splits its own ``num_samples`` by its
-        ``batch_size``); ``batch_size`` here is a convenience that broadcasts a single
-        default across every factor without its own, reproducing one global batch size.
-        ``None`` -> no batching."""
-        if batch_size is not None:
-            self.composer.set_default_batch_size(batch_size)
-        merged = self._run_batch(num_samples)
+        """Run the composer (vertically batched by ``batch_size``) and return samples as a
+        DataFrame. ``ChainComposer.sample`` adds ``log_prob``; ``GibbsComposer``
+        (multi-iteration GNPE) returns parameters + proxies with no ``log_prob``.
+        ``batch_size=None`` runs in a single pass."""
+        merged = self.composer.sample(num_samples, self.context, batch_size)
         merged = {k: v.cpu().numpy() for k, v in merged.items()}
         self._post_process(merged)
         self.samples = pd.DataFrame(merged)

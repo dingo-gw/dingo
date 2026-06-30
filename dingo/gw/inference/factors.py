@@ -29,7 +29,6 @@ from dingo.core.factors import (
     FlowFactor,
     GibbsComposer,
     _base_model_metadata,
-    _cat_dict,
 )
 from dingo.core.posterior_models import BasePosteriorModel
 from dingo.core.transforms import GetItem, RenameKey
@@ -154,13 +153,13 @@ class FixedFactor(Factor):
         self.parameters = list(values)
         self.conditioning = []
 
-    def _sample_and_log_prob(self, num_samples, cond):
+    def sample_and_log_prob(self, num_samples, cond):
         samples = {
             p: torch.full((num_samples,), float(v)) for p, v in self.values.items()
         }
         return samples, torch.zeros(num_samples)
 
-    def _log_prob(self, theta_i, cond):
+    def log_prob(self, theta_i, cond):
         raise NotImplementedError("FixedFactor.log_prob -- later step.")
 
 
@@ -173,10 +172,10 @@ class SyntheticPhaseFactor(Factor):
         self.parameters = ["phase"]
         self.conditioning = []  # conditions on all preceding params via the likelihood
 
-    def _sample_and_log_prob(self, num_samples, cond):
+    def sample_and_log_prob(self, num_samples, cond):
         raise NotImplementedError("SyntheticPhaseFactor -- later step.")
 
-    def _log_prob(self, theta_i, cond):
+    def log_prob(self, theta_i, cond):
         raise NotImplementedError("SyntheticPhaseFactor -- later step.")
 
 
@@ -199,7 +198,6 @@ class GNPEFlowFactor:
         transform_post: Compose,
         gnpe_parameters: list[str],
         parameters: list[str],
-        batch_size: Optional[int] = None,
     ):
         self.model = model
         self.transform_pre = transform_pre
@@ -207,12 +205,9 @@ class GNPEFlowFactor:
         self.gnpe_parameters = gnpe_parameters
         self.proxy_parameters = [p + "_proxy" for p in gnpe_parameters]
         self.parameters = parameters
-        self.batch_size = batch_size
 
     @classmethod
-    def from_model(
-        cls, model: BasePosteriorModel, batch_size: Optional[int] = None
-    ) -> "GNPEFlowFactor":
+    def from_model(cls, model: BasePosteriorModel) -> "GNPEFlowFactor":
         """Build the GNPE per-iteration transforms from the main model's metadata,
         replicating ``GWSamplerGNPE._initialize_transforms`` (time-shift GNPE)."""
         meta = _base_model_metadata(model)
@@ -270,31 +265,14 @@ class GNPEFlowFactor:
             Compose(transform_post),
             gnpe_parameters,
             inference_parameters,
-            batch_size=batch_size,
         )
 
     def gibbs_step(
         self, num_samples: int, context, extrinsic: dict
     ) -> tuple[dict, dict]:
-        """One GNPE Gibbs iteration, internally batched by ``batch_size`` over the Gibbs
-        walkers (independent across the batch dimension), to bound the per-pass memory.
-        ``batch_size = None`` runs all walkers in one pass."""
-        if not self.batch_size or self.batch_size >= num_samples:
-            return self._gibbs_step(num_samples, context, extrinsic)
-        param_batches, extrinsic_batches = [], []
-        for start in range(0, num_samples, self.batch_size):
-            stop = min(start + self.batch_size, num_samples)
-            chunk = {k: v[start:stop] for k, v in extrinsic.items()}
-            params, extr = self._gibbs_step(stop - start, context, chunk)
-            param_batches.append(params)
-            extrinsic_batches.append(extr)
-        return _cat_dict(param_batches), _cat_dict(extrinsic_batches)
-
-    def _gibbs_step(
-        self, num_samples: int, context, extrinsic: dict
-    ) -> tuple[dict, dict]:
         """One GNPE Gibbs iteration (single pass): returns (sampled parameters, updated
         extrinsic state -- recomputed detector times + proxies for the next iteration).
+        Batching over the Gibbs walkers is the composer's job (``chunk_and_concat``).
         """
         x = {
             "extrinsic_parameters": {k: extrinsic[k] for k in self.gnpe_parameters},
