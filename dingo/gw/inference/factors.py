@@ -11,6 +11,7 @@ path; the fixed, synthetic-phase, and GNPE-proxy factors are stubbed for later s
 
 from __future__ import annotations
 
+import copy
 from typing import Optional, Union
 
 import numpy as np
@@ -426,3 +427,24 @@ class GWComposedSampler(ComposedSampler):
                     samples.pop(k, None)
 
         self._correct_reference_time(samples, inverse)
+
+    def to_result(self):
+        """Export to a gw ``Result`` (samples + raw event data + metadata), so the
+        existing post-processing pipeline -- synthetic phase, importance sampling,
+        evidence, plotting -- runs on the factorized sampler's output unchanged.
+
+        ``context`` is the *raw* event-data dict (``GWSamplerContext.raw_context``, what
+        ``Result`` needs to rebuild the likelihood), not the ``SamplerContext`` object.
+        """
+        from dingo.gw.result import Result
+
+        data_dict = {
+            "samples": self.samples,
+            "context": self.context.raw_context,
+            "event_metadata": self.context.event_metadata,
+            "importance_sampling_metadata": None,
+            "log_evidence": None,
+            "log_noise_evidence": None,
+            "settings": copy.deepcopy(self.metadata),
+        }
+        return Result(dictionary=data_dict)
