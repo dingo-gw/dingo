@@ -319,8 +319,9 @@ class ChainComposer:
     reproducing the old sampler's batching order (bit-exact when ``batch_size`` matches).
     Batching lives in ``chunk_and_concat``; the factors are single-pass.
 
-    Multi-iteration (cyclic) GNPE is *not* expressible here and uses ``GibbsComposer``.
-    Accepts bare factors (wrapped as ``Stage(factor, fan_out=1)``) or explicit ``Stage``s.
+    Multi-iteration (cyclic) GNPE is *not* expressible here and uses the GW
+    ``GNPEGibbsComposer``. Accepts bare factors (wrapped as ``Stage(factor, fan_out=1)``) or
+    explicit ``Stage``s.
     """
 
     def __init__(self, stages: list[Union["Stage", Factor]]):
@@ -410,67 +411,33 @@ class ChainComposer:
         return {**samples, "log_prob": log_prob}
 
 
-class GibbsComposer:
-    """
-    Multi-iteration GNPE composition. Seeds the Gibbs chain from an ``init_factor`` (e.g.
-    a network predicting detector coalescence times), then iterates a GNPE step
-    (``gnpe_factor.gibbs_step``) to a fixed point. The dependency is cyclic
-    (theta <-> proxies), so this breaks density access: ``sample`` returns parameters
-    WITHOUT a ``log_prob``. (Single-step GNPE that *does* preserve log_prob is a
-    two-stage ``ChainComposer`` instead.)
-
-    Batching is vertical, via ``chunk_and_concat``: chunk the Gibbs walkers and run the
-    whole loop per chunk -- the old ``GWSamplerGNPE.run_sampler`` order.
-    """
-
-    def __init__(self, init_factor: Factor, gnpe_factor, num_iterations: int):
-        self.init_factor = init_factor
-        self.gnpe_factor = gnpe_factor
-        self.num_iterations = num_iterations
+@runtime_checkable
+class Composer(Protocol):
+    """The minimal interface ``ComposedSampler`` drives: draw a per-sample dict
+    (parameters, plus ``log_prob`` for density-preserving composers). ``ChainComposer``
+    (here, domain-agnostic) satisfies it, as does the GW ``GNPEGibbsComposer`` (multi-iteration
+    GNPE) -- which lives in ``dingo.gw.inference.factors`` because it is built entirely
+    around the GNPE step (its proxies, detector times, time-shift), not in core."""
 
     def sample(
         self,
         num_samples: int,
         context: SamplerContext,
         batch_size: Optional[int] = None,
-    ) -> dict[str, torch.Tensor]:
-        samples, _ = chunk_and_concat(
-            num_samples, batch_size, lambda n: (self._run_once(n, context), None)
-        )
-        return samples
-
-    def _run_once(
-        self, num_samples: int, context: SamplerContext
-    ) -> dict[str, torch.Tensor]:
-        # Seed the Gibbs chain with the init factor's parameters (e.g. detector times).
-        seed, _ = self.init_factor.sample_and_log_prob(
-            num_samples, Conditioning(context)
-        )
-        extrinsic = dict(seed)
-        parameters: dict[str, torch.Tensor] = {}
-        for _ in range(self.num_iterations):
-            parameters, extrinsic = self.gnpe_factor.gibbs_step(
-                num_samples, context, extrinsic
-            )
-        proxies = {
-            p: extrinsic[p] for p in self.gnpe_factor.proxy_parameters if p in extrinsic
-        }
-        return {**parameters, **proxies}
+    ) -> dict[str, torch.Tensor]: ...
 
 
 class ComposedSampler:
     """
-    Thin user-facing façade over a composer (``ChainComposer`` or ``GibbsComposer``) and
-    a ``SamplerContext``: runs the composer (which bounds memory via vertical batching),
-    applies domain-specific post-processing, and returns samples as a DataFrame. The
-    per-factor compute lives in the composer (which need only expose
+    Thin user-facing façade over a ``Composer`` (e.g. ``ChainComposer``, or the GW
+    ``GNPEGibbsComposer``) and a ``SamplerContext``: runs the composer (which bounds memory via
+    vertical batching), applies domain-specific post-processing, and returns samples as a
+    DataFrame. The per-factor compute lives in the composer (which need only expose
     ``sample(num_samples, context, batch_size) -> dict``); this class only handles
     consolidation and post-processing -- the role the monolithic ``Sampler`` plays today.
     """
 
-    def __init__(
-        self, composer: Union[ChainComposer, GibbsComposer], context: SamplerContext
-    ):
+    def __init__(self, composer: Composer, context: SamplerContext):
         self.composer = composer
         self.context = context
         self.samples: Optional[pd.DataFrame] = None
@@ -484,7 +451,7 @@ class ComposedSampler:
         self, num_samples: int, batch_size: Optional[int] = None
     ) -> pd.DataFrame:
         """Run the composer (vertically batched by ``batch_size``) and return samples as a
-        DataFrame. ``ChainComposer.sample`` adds ``log_prob``; ``GibbsComposer``
+        DataFrame. ``ChainComposer.sample`` adds ``log_prob``; ``GNPEGibbsComposer``
         (multi-iteration GNPE) returns parameters + proxies with no ``log_prob``.
         ``batch_size=None`` runs in a single pass."""
         merged = self.composer.sample(num_samples, self.context, batch_size)

@@ -25,10 +25,12 @@ from torchvision.transforms import Compose
 from dingo.core.factors import (
     ChainComposer,
     ComposedSampler,
+    Conditioning,
     Factor,
     FlowFactor,
-    GibbsComposer,
+    SamplerContext,
     _base_model_metadata,
+    chunk_and_concat,
 )
 from dingo.core.posterior_models import BasePosteriorModel
 from dingo.core.transforms import GetItem, RenameKey
@@ -297,6 +299,62 @@ class GNPEFlowFactor:
         return x["parameters"], x["extrinsic_parameters"]
 
 
+class GNPEGibbsComposer:
+    """
+    The Gibbs sampler for multi-iteration GNPE -- GNPE-specific by name and by guts (it
+    drives the GNPE step: proxies, detector times, time-shift). Gibbs sampling in general
+    is broader than this, but Dingo only ever uses it for GNPE, so the class owns that
+    specificity rather than posing as a general Gibbs facility. The genuinely generic
+    pieces live in core: ``ChainComposer``, the ``chunk_and_concat`` batching primitive,
+    and the ``Composer`` protocol this satisfies.
+
+    Each iteration is a 2-block Gibbs sweep on the joint q(theta, theta_hat | d): blur the
+    detector times into proxies (theta_hat ~ kernel(.|theta)), then sample the network
+    (theta ~ q(.|theta_hat, d)). Both blocks are bundled in ``gnpe_factor.gibbs_step``;
+    the ``init_factor`` seeds the chain and ``num_iterations`` is burn-in. The dependency
+    is cyclic, so this breaks density access: ``sample`` returns parameters WITHOUT a
+    ``log_prob``. (Single-step GNPE that *does* preserve log_prob is a two-stage
+    ``ChainComposer`` instead.)
+
+    Batching is vertical, via ``chunk_and_concat``: chunk the Gibbs walkers and run the
+    whole loop per chunk -- the old ``GWSamplerGNPE.run_sampler`` order.
+    """
+
+    def __init__(self, init_factor: Factor, gnpe_factor, num_iterations: int):
+        self.init_factor = init_factor
+        self.gnpe_factor = gnpe_factor
+        self.num_iterations = num_iterations
+
+    def sample(
+        self,
+        num_samples: int,
+        context: SamplerContext,
+        batch_size: Optional[int] = None,
+    ) -> dict[str, torch.Tensor]:
+        samples, _ = chunk_and_concat(
+            num_samples, batch_size, lambda n: (self._run_once(n, context), None)
+        )
+        return samples
+
+    def _run_once(
+        self, num_samples: int, context: SamplerContext
+    ) -> dict[str, torch.Tensor]:
+        # Seed the Gibbs chain with the init factor's parameters (e.g. detector times).
+        seed, _ = self.init_factor.sample_and_log_prob(
+            num_samples, Conditioning(context)
+        )
+        extrinsic = dict(seed)
+        parameters: dict[str, torch.Tensor] = {}
+        for _ in range(self.num_iterations):
+            parameters, extrinsic = self.gnpe_factor.gibbs_step(
+                num_samples, context, extrinsic
+            )
+        proxies = {
+            p: extrinsic[p] for p in self.gnpe_factor.proxy_parameters if p in extrinsic
+        }
+        return {**parameters, **proxies}
+
+
 class GWComposedSampler(ComposedSampler):
     """
     GW façade: a ``ComposedSampler`` that adds the gravitational-wave post-processing --
@@ -308,7 +366,7 @@ class GWComposedSampler(ComposedSampler):
 
     def __init__(
         self,
-        composer: Union[ChainComposer, GibbsComposer],
+        composer: Union[ChainComposer, GNPEGibbsComposer],
         context: GWSamplerContext,
         metadata: dict,
         inference_parameters: list[str],
@@ -345,12 +403,12 @@ class GWComposedSampler(ComposedSampler):
     ) -> "GWComposedSampler":
         """Build a multi-iteration time-GNPE sampler from an init + main model pair: the
         init model's data preprocessing, an init ``FlowFactor`` to seed, and a
-        ``GNPEFlowFactor`` driven by a ``GibbsComposer``. Returns samples without a
+        ``GNPEFlowFactor`` driven by a ``GNPEGibbsComposer``. Returns samples without a
         log_prob (Gibbs breaks density access)."""
         context = GWSamplerContext.from_model(init_model, raw_context, event_metadata)
         init_factor = FlowFactor.from_model(init_model)
         gnpe_factor = GNPEFlowFactor.from_model(main_model)
-        composer = GibbsComposer(init_factor, gnpe_factor, num_iterations)
+        composer = GNPEGibbsComposer(init_factor, gnpe_factor, num_iterations)
         return cls(
             composer,
             context,
