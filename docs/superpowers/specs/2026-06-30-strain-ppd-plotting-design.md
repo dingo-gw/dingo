@@ -16,18 +16,31 @@ script.
 
 ## Deliverable
 
-`dingo/gw/inference/ppd.py` — importable functions plus an `argparse` CLI:
+Two plotting **methods on the GW `Result` class** (`dingo/gw/result.py`),
+mirroring the existing `result.plot_corner` API:
 
+```python
+result.plot_ppd_td(filename="ppd_td.png", num_waveforms=1000,
+                   num_processes=1, central_time=8.0, zoom=None, ppd=None)
+result.plot_ppd_fd(filename="ppd_fd.png", num_waveforms=1000,
+                   num_processes=1, ppd=None)
 ```
-python -m dingo.gw.inference.ppd <result.hdf5> \
-    --outdir <dir> --num-waveforms 1000 --num-processes 32 \
-    --central-time 8 --zoom -0.7 0.1
-```
+
+They live on the GW `Result` (subclass of `CoreResult`), **not** `core/`,
+because they need the GW likelihood, detector projection, and ASD whitening —
+`core/` stays domain-agnostic.
+
+Shared expensive computation lives in a private
+`_compute_ppd(self, num_waveforms, num_processes, seed)` (used by both methods,
+so extraction is justified) returning `{domain, ifos, wf_fd, data_fd}`. Each
+public method accepts an optional precomputed `ppd=` dict so a caller can
+generate the draws once and render both plots without regenerating waveforms.
 
 Demo run target: GW230709_122727 EAS importance-sampling result
 (`prod_o4a/working/S230709bi/Exp19_more_points_1/result/
-Exp19_more_points_1_data0_1372940865-2_importance_sampling.hdf5`), producing
-`<event>_ppd_td.png` and `<event>_ppd_fd.png`.
+Exp19_more_points_1_data0_1372940865-2_importance_sampling.hdf5`). A few-line
+script loads the `Result` and calls both methods, producing
+`GW230709_ppd_td.png` and `GW230709_ppd_fd.png`.
 
 ## Pipeline (per detector)
 
@@ -68,10 +81,11 @@ Exp19_more_points_1_data0_1372940865-2_importance_sampling.hdf5`), producing
 
 ## Reused logic
 
-`one_sided_fd_to_td(fd, domain)` is reused verbatim from the notebook: it builds
-the full Hermitian two-sided spectrum (DC zeroed), `np.fft.ifft(...) * sqrt(N)`
-(normalization tied to the whitening so noise has unit variance),
-`dt = 1/(2·f_max)`, output length `2n-1`. Correct and whitening-consistent.
+`one_sided_fd_to_td(fd, domain)` is reused verbatim from the notebook (added as
+a module-level function in `dingo/gw/result.py`): it builds the full Hermitian
+two-sided spectrum (DC zeroed), `np.fft.ifft(...) * sqrt(N)` (normalization tied
+to the whitening so noise has unit variance), `dt = 1/(2·f_max)`, output length
+`2n-1`. Correct and whitening-consistent.
 
 ## Testing / determinism
 
@@ -83,7 +97,7 @@ the full Hermitian two-sided spectrum (DC zeroed), `np.fft.ifft(...) * sqrt(N)`
 
 ## Boundaries / conventions
 
-- Lives in `gw/`, imports `gw/` + `core/` (allowed direction). No new classes,
-  no new dependencies.
+- Methods on the GW `Result` in `gw/result.py`; imports `gw/` + `core/`
+  (allowed direction). No new classes, no new dependencies.
 - Whitening conventions for data (`√(4Δf)/asd`) and model (likelihood's
   `/asd/noise_std`, `noise_std = 1/√(4Δf)`) are identical and must be preserved.
