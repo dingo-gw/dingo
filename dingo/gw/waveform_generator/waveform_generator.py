@@ -1,4 +1,5 @@
 from functools import partial
+import logging
 from multiprocessing import Pool
 from math import isclose
 
@@ -30,6 +31,8 @@ from dingo.gw.domains import (
     TimeDomain,
 )
 from dingo.gw.transforms.waveform_transforms import DecimateAll
+
+log = logging.getLogger(__name__)
 
 
 class WaveformGenerator:
@@ -142,12 +145,12 @@ class WaveformGenerator:
     @spin_conversion_phase.setter
     def spin_conversion_phase(self, value):
         if value is None:
-            print(
+            log.info(
                 "Setting spin_conversion_phase = None. Using phase parameter for "
                 "conversion to cartesian spins."
             )
         else:
-            print(
+            log.info(
                 f"Setting spin_conversion_phase = {value}. Using this value for the "
                 f"phase parameter for conversion to cartesian spins."
             )

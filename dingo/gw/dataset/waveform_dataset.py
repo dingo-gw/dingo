@@ -2,6 +2,7 @@ from typing import Dict, List, Optional, Union
 import h5py
 import numpy as np
 import torch.utils.data
+from hydra.utils import instantiate
 from torchvision.transforms import Compose
 
 from dingo.core.dataset import DingoDataset, recursive_hdf5_load
@@ -100,7 +101,11 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         svd_size_update : int
             If provided, reduces the SVD size when decompressing (for speed).
         """
-        self.domain = build_domain(self.settings["domain"])
+        domain_settings = self.settings["domain"]
+        if "_target_" in domain_settings:
+            self.domain = instantiate(domain_settings)
+        else:
+            self.domain = build_domain(domain_settings)
 
         # We always call update_domain() (even if domain_update is None) because we
         # want to be sure that the data are consistent with the saved settings. In

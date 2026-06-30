@@ -1,29 +1,29 @@
-import argparse
 import copy
-import textwrap
+import logging
 from multiprocessing import Pool
 from pathlib import Path
 from typing import Dict, Tuple
 from functools import partial
 
+import hydra
 import numpy as np
 import pandas as pd
-import yaml
 from bilby.gw.prior import BBHPriorDict
+from hydra.utils import instantiate
+from omegaconf import DictConfig, OmegaConf
 from threadpoolctl import threadpool_limits
 from torchvision.transforms import Compose
 
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
-from dingo.gw.domains import build_domain
-from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.SVD import ApplySVD, SVDBasis
 from dingo.gw.transforms import WhitenFixedASD
 from dingo.gw.waveform_generator import (
-    NewInterfaceWaveformGenerator,
     WaveformGenerator,
     generate_waveforms_parallel,
 )
 from dingo.core.utils.misc import call_func_strict_output_dim
+
+log = logging.getLogger(__name__)
 
 
 def generate_parameters_and_polarizations(
@@ -47,7 +47,7 @@ def generate_parameters_and_polarizations(
     pandas DataFrame of parameters
     dictionary of numpy arrays corresponding to waveform polarizations
     """
-    print("Generating dataset of size " + str(num_samples))
+    log.info("Generating dataset of size " + str(num_samples))
     parameters = pd.DataFrame(prior.sample(num_samples))
 
     if num_processes > 1:
@@ -67,12 +67,12 @@ def generate_parameters_and_polarizations(
         polarizations_ok = {k: v[idx_ok] for k, v in polarizations.items()}
         parameters_ok = parameters.iloc[idx_ok]
         failed_percent = 100 * len(idx_failed) / len(parameters)
-        print(
+        log.info(
             f"{len(idx_failed)} out of {len(parameters)} configuration ({failed_percent:.1f}%) failed to generate."
         )
         with pd.option_context("display.max_rows", None, "display.max_columns", None):
-            print(parameters.iloc[idx_failed])
-        print(
+            log.info(parameters.iloc[idx_failed])
+        log.info(
             f"Only returning the {len(idx_ok)} successfully generated configurations."
         )
         return parameters_ok, polarizations_ok
@@ -115,7 +115,7 @@ def train_svd_basis(dataset: WaveformDataset, size: int, n_train: int):
     )
     test_parameters.reset_index(drop=True, inplace=True)
 
-    print("Building SVD basis.")
+    log.info("Building SVD basis.")
     basis = SVDBasis()
     basis.generate_basis(train_data, size)
 
@@ -139,39 +139,36 @@ def train_svd_basis(dataset: WaveformDataset, size: int, n_train: int):
     return basis, n_train, n_test
 
 
-def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
+def _dataset_settings(cfg: DictConfig) -> Dict:
+    settings = OmegaConf.to_container(cfg, resolve=True)
+    settings.pop("out_file", None)
+    settings.pop("num_processes", None)
+    return settings
+
+
+def generate_dataset(cfg: DictConfig) -> WaveformDataset:
     """
     Generate a waveform dataset.
 
     Parameters
     ----------
-    settings : dict
-        Dictionary of settings to configure the dataset
-    num_processes : int
+    cfg : DictConfig
+        Hydra configuration for dataset generation.
 
     Returns
     -------
     A WaveformDataset based on the settings.
     """
 
-    prior = build_prior_with_defaults(settings["intrinsic_prior"])
-    domain = build_domain(settings["domain"])
+    prior = instantiate(cfg.intrinsic_prior, _convert_="all")
+    domain = instantiate(cfg.domain)
+    waveform_generator = instantiate(cfg.waveform_generator, domain=domain)
+    num_processes = cfg.get("num_processes", 1)
 
-    new_interface_flag = settings["waveform_generator"].get("new_interface", False)
-    if new_interface_flag:
-        waveform_generator = NewInterfaceWaveformGenerator(
-            domain=domain,
-            **settings["waveform_generator"],
-        )
-    else:
-        waveform_generator = WaveformGenerator(
-            domain=domain,
-            **settings["waveform_generator"],
-        )
-
+    settings = _dataset_settings(cfg)
     dataset_dict = {"settings": settings}
 
-    if "compression" in settings:
+    if settings.get("compression", None) is not None:
         compression_transforms = []
 
         if "whitening" in settings["compression"]:
@@ -246,62 +243,24 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
     dataset_dict["parameters"] = parameters
     dataset_dict["polarizations"] = polarizations
 
-    dataset_dict[settings["num_samples"]] = len(parameters)
     dataset = WaveformDataset(dictionary=dataset_dict)
     return dataset
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        description=textwrap.dedent(
-            """\
-        Generate a waveform dataset based on a settings file.
-        """
-        ),
-    )
-    parser.add_argument(
-        "--settings_file",
-        type=str,
-        required=True,
-        help="YAML file containing database settings",
-    )
-    parser.add_argument(
-        "--num_processes",
-        type=int,
-        default=1,
-        help="Number of processes to use in pool for parallel waveform generation",
-    )
-    parser.add_argument(
-        "--out_file",
-        type=str,
-        default="waveform_dataset.hdf5",
-        help="Name of file for storing dataset.",
-    )
-    return parser.parse_args()
-
-
-def _generate_dataset_main(
-    settings_file: str, out_file: str, num_processes: int
-) -> None:
-    if not Path(settings_file).is_file():
-        raise FileNotFoundError(f"dataset generation, failed to find {settings_file}")
+@hydra.main(
+    version_base="1.3",
+    config_path="../../../configs/gw/dataset",
+    config_name="generate_dataset",
+)
+def main(cfg: DictConfig) -> None:
+    out_file = cfg.out_file
     if not Path(out_file).parent.is_dir():
         raise FileNotFoundError(
             f"dataset generation: can not create {out_file}: "
             f"{Path(out_file).parent} does not exist"
         )
-    # Load settings
-    with open(settings_file, "r") as f:
-        settings = yaml.safe_load(f)
-
-    dataset = generate_dataset(settings, num_processes)
+    dataset = generate_dataset(cfg)
     dataset.to_file(str(out_file))
-
-
-def main() -> None:
-    args = parse_args()
-    _generate_dataset_main(args.settings_file, args.out_file, args.num_processes)
 
 
 if __name__ == "__main__":
