@@ -165,7 +165,7 @@ def test_log_prob_round_trip_matches_sampling_log_prob(unconditional_sampler):
     samples = unconditional_sampler.samples
     recomputed = unconditional_sampler.log_prob(samples.drop(columns="log_prob"))
     np.testing.assert_allclose(
-        recomputed, samples["log_prob"].to_numpy(), atol=1e-4
+        recomputed, samples["log_prob"].to_numpy(), atol=1e-5
     )
 
 
@@ -180,7 +180,7 @@ def test_log_prob_adds_existing_log_prob_column(unconditional_sampler):
     stored = samples["log_prob"].to_numpy()
     recomputed = unconditional_sampler.log_prob(samples.drop(columns="log_prob"))
     combined = unconditional_sampler.log_prob(samples)
-    np.testing.assert_allclose(combined, recomputed + stored, atol=1e-4)
+    np.testing.assert_allclose(combined, recomputed + stored, atol=1e-5)
 
 
 def test_log_prob_accepts_dataframe_and_dict_inputs(unconditional_sampler):

@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from astropy.time import Time
 from astropy.utils import iers
 
 from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
@@ -28,7 +29,7 @@ DOMAIN_SETTINGS = {
 
 
 # ---------------------------------------------------------------------------
-# Group 1: frequency-range validators (pure functions, only need a domain).
+# Frequency-range validators (pure functions, only need a domain).
 # ---------------------------------------------------------------------------
 
 
@@ -154,7 +155,7 @@ def test_check_frequency_updates_accepts_valid_and_rejects_invalid():
 
 
 # ---------------------------------------------------------------------------
-# Group 2: GWSamplerMixin methods (lightweight GWSampler; network not exercised).
+# GWSamplerMixin methods (lightweight GWSampler; network not exercised).
 # ---------------------------------------------------------------------------
 
 
@@ -254,6 +255,27 @@ def test_correct_reference_time_round_trip(gw_sampler):
 
     gw_sampler._correct_reference_time(samples, inverse=True)
     np.testing.assert_allclose(samples["ra"], original_ra)
+
+
+def test_correct_reference_time_matches_sidereal_shift(gw_sampler):
+    """The RA shift must equal the difference in apparent sidereal time.
+    """
+    t_event = gw_sampler.t_ref + 3600.0
+    gw_sampler._event_metadata = {"time_event": t_event}
+    samples = {"ra": np.array([0.5, 1.5, 2.5])}
+    original_ra = samples["ra"].copy()
+
+    ra_correction = (
+        Time(t_event, format="gps", scale="utc").sidereal_time(
+            "apparent", "greenwich"
+        )
+        - Time(gw_sampler.t_ref, format="gps", scale="utc").sidereal_time(
+            "apparent", "greenwich"
+        )
+    ).rad
+
+    gw_sampler._correct_reference_time(samples, inverse=False)
+    np.testing.assert_allclose(samples["ra"], (original_ra + ra_correction) % (2 * np.pi))
 
 
 def test_correct_reference_time_noop_when_time_matches_reference(gw_sampler):
