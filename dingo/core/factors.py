@@ -289,6 +289,47 @@ class ChainComposer:
             total = total + factor.log_prob(theta_i, cond)
         return total
 
+    def sample(
+        self, num_samples: int, context: SamplerContext
+    ) -> dict[str, torch.Tensor]:
+        """Full per-sample dict (parameters + ``log_prob``), for the sampler façade."""
+        samples, log_prob = self.sample_and_log_prob(num_samples, context)
+        return {**samples, "log_prob": log_prob}
+
+
+class GibbsComposer:
+    """
+    Multi-iteration GNPE composition. Seeds the Gibbs chain from an ``init_factor`` (e.g.
+    a network predicting detector coalescence times), then iterates a GNPE step
+    (``gnpe_factor.gibbs_step``) to a fixed point. The dependency is cyclic
+    (theta <-> proxies), so this breaks density access: ``sample`` returns parameters
+    WITHOUT a ``log_prob``. (Single-step GNPE that *does* preserve log_prob is a
+    two-factor ``ChainComposer`` instead.)
+    """
+
+    def __init__(self, init_factor: Factor, gnpe_factor, num_iterations: int):
+        self.init_factor = init_factor
+        self.gnpe_factor = gnpe_factor
+        self.num_iterations = num_iterations
+
+    def sample(
+        self, num_samples: int, context: SamplerContext
+    ) -> dict[str, torch.Tensor]:
+        # Seed the Gibbs chain with the init factor's parameters (e.g. detector times).
+        seed, _ = self.init_factor.sample_and_log_prob(
+            num_samples, Conditioning(context)
+        )
+        extrinsic = dict(seed)
+        parameters: dict[str, torch.Tensor] = {}
+        for _ in range(self.num_iterations):
+            parameters, extrinsic = self.gnpe_factor.gibbs_step(
+                num_samples, context, extrinsic
+            )
+        proxies = {
+            p: extrinsic[p] for p in self.gnpe_factor.proxy_parameters if p in extrinsic
+        }
+        return {**parameters, **proxies}
+
 
 class ComposedSampler:
     """
@@ -310,10 +351,9 @@ class ComposedSampler:
         pass
 
     def _run_batch(self, num_samples: int) -> dict[str, torch.Tensor]:
-        samples, log_prob = self.composer.sample_and_log_prob(num_samples, self.context)
-        out = dict(samples)
-        out["log_prob"] = log_prob
-        return out
+        # Uniform across composers: ChainComposer.sample adds log_prob; GibbsComposer
+        # (multi-iteration GNPE) returns parameters + proxies with no log_prob.
+        return self.composer.sample(num_samples, self.context)
 
     def run_sampler(
         self, num_samples: int, batch_size: Optional[int] = None

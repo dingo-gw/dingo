@@ -18,6 +18,7 @@ import pandas as pd
 import torch
 from astropy.time import Time
 from bilby.core.prior import DeltaFunction
+from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 
 from dingo.core.factors import (
@@ -25,16 +26,24 @@ from dingo.core.factors import (
     ComposedSampler,
     Factor,
     FlowFactor,
+    GibbsComposer,
     _base_model_metadata,
 )
 from dingo.core.posterior_models import BasePosteriorModel
-from dingo.core.transforms import GetItem
+from dingo.core.transforms import GetItem, RenameKey
 from dingo.gw.domains import build_domain, MultibandedFrequencyDomain
 from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.transforms import (
+    CopyToExtrinsicParameters,
     DecimateWaveformsAndASDS,
+    GetDetectorTimes,
+    GNPEBase,
+    GNPECoalescenceTimes,
+    PostCorrectGeocentTime,
     RepackageStrainsAndASDS,
+    SelectStandardizeRepackageParameters,
+    TimeShiftStrain,
     ToTorch,
     WhitenAndScaleStrain,
 )
@@ -169,6 +178,122 @@ class SyntheticPhaseFactor(Factor):
         raise NotImplementedError("SyntheticPhaseFactor -- later step.")
 
 
+class GNPEFlowFactor:
+    """
+    One iteration of time-shift GNPE for the Gibbs composer. Given the current detector-
+    time estimates, it blurs them into proxies, shifts the strain, standardizes the
+    proxies as network context, samples the main network, then recomputes detector times
+    for the next iteration. Wraps the main model and the per-iteration transforms (the
+    same ones ``GWSamplerGNPE`` builds).
+
+    Not a ``Factor``: the ABC's ``sample_and_log_prob`` does not fit a Gibbs step. It
+    exposes ``gibbs_step(num_samples, context, extrinsic) -> (parameters, extrinsic)``.
+    """
+
+    def __init__(
+        self,
+        model: BasePosteriorModel,
+        transform_pre: Compose,
+        transform_post: Compose,
+        gnpe_parameters: list[str],
+        parameters: list[str],
+    ):
+        self.model = model
+        self.transform_pre = transform_pre
+        self.transform_post = transform_post
+        self.gnpe_parameters = gnpe_parameters
+        self.proxy_parameters = [p + "_proxy" for p in gnpe_parameters]
+        self.parameters = parameters
+
+    @classmethod
+    def from_model(cls, model: BasePosteriorModel) -> "GNPEFlowFactor":
+        """Build the GNPE per-iteration transforms from the main model's metadata,
+        replicating ``GWSamplerGNPE._initialize_transforms`` (time-shift GNPE)."""
+        meta = _base_model_metadata(model)
+        data_settings = meta["train_settings"]["data"]
+        ifo_list = InterferometerList(data_settings["detectors"])
+        domain = build_domain(meta["dataset_settings"]["domain"])
+        if "domain_update" in data_settings:
+            domain.update(data_settings["domain_update"])
+
+        gnpe_time_settings = data_settings.get("gnpe_time_shifts")
+        if not gnpe_time_settings:
+            raise NotImplementedError(
+                "Only time-shift GNPE is supported here so far "
+                "(no gnpe_chirp / gnpe_phase)."
+            )
+
+        transform_pre = [
+            RenameKey("data", "waveform"),
+            GNPECoalescenceTimes(
+                ifo_list,
+                gnpe_time_settings["kernel"],
+                gnpe_time_settings["exact_equiv"],
+                inference=True,
+            ),
+            TimeShiftStrain(ifo_list, domain),
+            SelectStandardizeRepackageParameters(
+                {"context_parameters": data_settings["context_parameters"]},
+                data_settings["standardization"],
+                device=model.device,
+            ),
+            RenameKey("waveform", "data"),
+        ]
+        gnpe_parameters = []
+        for transform in transform_pre:
+            if isinstance(transform, GNPEBase):
+                gnpe_parameters += transform.input_parameter_names
+
+        inference_parameters = data_settings["inference_parameters"]
+        transform_post = [
+            SelectStandardizeRepackageParameters(
+                {"inference_parameters": inference_parameters},
+                data_settings["standardization"],
+                inverse=True,
+                as_type="dict",
+            ),
+            PostCorrectGeocentTime(),
+            CopyToExtrinsicParameters(
+                "ra", "dec", "geocent_time", "chirp_mass", "mass_ratio", "phase"
+            ),
+            GetDetectorTimes(ifo_list, data_settings["ref_time"]),
+        ]
+        return cls(
+            model,
+            Compose(transform_pre),
+            Compose(transform_post),
+            gnpe_parameters,
+            inference_parameters,
+        )
+
+    def gibbs_step(
+        self, num_samples: int, context, extrinsic: dict
+    ) -> tuple[dict, dict]:
+        """One GNPE Gibbs iteration: returns (sampled parameters, updated extrinsic state
+        -- recomputed detector times + proxies for the next iteration)."""
+        x = {
+            "extrinsic_parameters": {k: extrinsic[k] for k in self.gnpe_parameters},
+            "parameters": {},
+        }
+        d = context.prepared_data().clone()
+        x["data"] = d.expand(num_samples, *d.shape)
+        x = self.transform_pre(x)
+        self.model.network.eval()
+        with torch.no_grad():
+            if "context_parameters" in x:
+                y, log_prob = self.model.sample_and_log_prob(
+                    x["data"], x["context_parameters"]
+                )
+            else:
+                y, log_prob = self.model.sample_and_log_prob(x["data"])
+        # sample_and_log_prob(num_samples=1) adds a singleton dim; the batch is the
+        # num_samples Gibbs walkers.
+        x["parameters"] = y.squeeze(1)
+        x["log_prob"] = log_prob.squeeze(1)
+        x = self.transform_post(x)
+        return x["parameters"], x["extrinsic_parameters"]
+
+
 class GWComposedSampler(ComposedSampler):
     """
     GW façade: a ``ComposedSampler`` that adds the gravitational-wave post-processing --
@@ -180,7 +305,7 @@ class GWComposedSampler(ComposedSampler):
 
     def __init__(
         self,
-        composer: ChainComposer,
+        composer: Union[ChainComposer, GibbsComposer],
         context: GWSamplerContext,
         metadata: dict,
         inference_parameters: list[str],
@@ -204,6 +329,30 @@ class GWComposedSampler(ComposedSampler):
             context=context,
             metadata=_base_model_metadata(model),
             inference_parameters=factor.parameters,
+        )
+
+    @classmethod
+    def from_gnpe_models(
+        cls,
+        init_model: BasePosteriorModel,
+        main_model: BasePosteriorModel,
+        raw_context: dict,
+        event_metadata: Optional[dict] = None,
+        num_iterations: int = 30,
+    ) -> "GWComposedSampler":
+        """Build a multi-iteration time-GNPE sampler from an init + main model pair: the
+        init model's data preprocessing, an init ``FlowFactor`` to seed, and a
+        ``GNPEFlowFactor`` driven by a ``GibbsComposer``. Returns samples without a
+        log_prob (Gibbs breaks density access)."""
+        context = GWSamplerContext.from_model(init_model, raw_context, event_metadata)
+        init_factor = FlowFactor.from_model(init_model)
+        gnpe_factor = GNPEFlowFactor.from_model(main_model)
+        composer = GibbsComposer(init_factor, gnpe_factor, num_iterations)
+        return cls(
+            composer,
+            context,
+            _base_model_metadata(main_model),
+            gnpe_factor.parameters,
         )
 
     def _correct_reference_time(
