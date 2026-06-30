@@ -32,6 +32,54 @@ EFFICIENCY_FLOOR_PCT = 3.0  # asserted floor sits below the 5% search target
 # ``git archive`` omits .git, so SETUPTOOLS_SCM_PRETEND_VERSION must be set.
 _DINGO_VERSION = "0.9.9"
 
+# Per-stage ceiling guards (seconds).  These are loose smoke guards tied to the
+# untuned scaled-down config (Task 6).  Each is ~2.5-3x the observed on-host
+# baseline so a stuck/hung stage will fail rather than quietly eat the 60-min
+# budget.  Revisit these ceilings once Task 7 config tuning lands.
+#
+# Observed on-host baseline (A100, untuned config):
+#   waveform_dataset ~63 s  -> ceiling 190 s
+#   asd_dataset      ~41 s  -> ceiling 125 s
+#   train            ~1769 s -> ceiling 5300 s
+#   inference        ~120 s  -> ceiling 360 s
+_STAGE_CEILINGS = {
+    "waveform_dataset": 190,
+    "asd_dataset": 125,
+    "train": 5300,
+    "inference": 360,
+}
+
+
+def _parse_stage_times(output: str) -> dict:
+    """Return {stage_name: seconds} from STAGE_SECONDS lines in output."""
+    times = {}
+    for m in re.finditer(r"STAGE_SECONDS (\w+) = ([0-9.]+)", output):
+        times[m.group(1)] = float(m.group(2))
+    return times
+
+
+def _parse_total_seconds(output: str):
+    """Return total pipeline seconds from TOTAL_SECONDS line, or None."""
+    m = re.search(r"TOTAL_SECONDS = ([0-9.]+)", output)
+    return float(m.group(1)) if m else None
+
+
+def _print_timing_table(stage_times: dict, total: float | None) -> None:
+    """Print a human-readable per-stage timing table to stdout."""
+    header = f"{'Stage':<20} {'Seconds':>10}  {'Ceiling':>10}"
+    print("\n--- pipeline stage timings ---")
+    print(header)
+    print("-" * len(header))
+    for name, secs in stage_times.items():
+        ceiling = _STAGE_CEILINGS.get(name, "?")
+        ceiling_str = f"{ceiling}" if isinstance(ceiling, int) else ceiling
+        print(f"{name:<20} {secs:>10.1f}  {ceiling_str:>10}")
+    if total is not None:
+        print("-" * len(header))
+        print(f"{'TOTAL':<20} {total:>10.1f}")
+    print("------------------------------\n")
+
+
 pytestmark = [
     pytest.mark.heavy,
     pytest.mark.skipif(not HAS_APPTAINER, reason="apptainer/singularity not available"),
@@ -139,3 +187,16 @@ def test_heavy_container_e2e():
     assert efficiency >= EFFICIENCY_FLOOR_PCT, (
         f"sample efficiency {efficiency}% below floor {EFFICIENCY_FLOOR_PCT}%"
     )
+
+    # Parse and display per-stage timings.
+    stage_times = _parse_stage_times(output)
+    total_secs = _parse_total_seconds(output)
+    _print_timing_table(stage_times, total_secs)
+
+    # Guard: each stage must be under its ceiling (loose smoke check).
+    for stage, ceiling in _STAGE_CEILINGS.items():
+        if stage in stage_times:
+            assert stage_times[stage] <= ceiling, (
+                f"stage '{stage}' took {stage_times[stage]:.1f}s, "
+                f"exceeding ceiling {ceiling}s — check for hangs or config regressions"
+            )
