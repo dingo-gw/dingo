@@ -125,9 +125,7 @@ def _slice_given(cond: Conditioning, start: int, stop: int) -> Conditioning:
     """A view of ``cond`` whose conditioning values are restricted to rows
     ``[start:stop]``, so a factor's batch sees the conditioning aligned with the samples
     it produces. The shared context is unchanged (the prepared data is one event)."""
-    return Conditioning(
-        cond.context, {k: v[start:stop] for k, v in cond.given.items()}
-    )
+    return Conditioning(cond.context, {k: v[start:stop] for k, v in cond.given.items()})
 
 
 def _batch_bounds(num_samples: int, batch_size: int):

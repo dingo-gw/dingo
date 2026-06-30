@@ -294,7 +294,8 @@ class GNPEFlowFactor:
         self, num_samples: int, context, extrinsic: dict
     ) -> tuple[dict, dict]:
         """One GNPE Gibbs iteration (single pass): returns (sampled parameters, updated
-        extrinsic state -- recomputed detector times + proxies for the next iteration)."""
+        extrinsic state -- recomputed detector times + proxies for the next iteration).
+        """
         x = {
             "extrinsic_parameters": {k: extrinsic[k] for k in self.gnpe_parameters},
             "parameters": {},
