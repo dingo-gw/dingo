@@ -567,7 +567,6 @@ class Result(CoreResult):
         # np.isfinite(log_prior) would be False for all samples.  Additionally, RA
         # corrections (trigger_time vs model ref_time) can shift fixed parameters by
         # tiny amounts, making DeltaFunction ln_prob = -inf for all samples.
-        from bilby.core.prior import DeltaFunction
         prior_keys_for_lp = [
             k for k, v in self.prior.items()
             if not isinstance(v, Constraint) and not isinstance(v, DeltaFunction)
