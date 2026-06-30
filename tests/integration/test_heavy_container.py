@@ -187,8 +187,11 @@ def test_heavy_container_e2e():
         proc = subprocess.run(
             [APPTAINER_CMD, "run", "--nv", sif],
             cwd=build_dir, env=run_env, capture_output=True, text=True,
-            # generous timeout: train + importance-sample; tighten once config is tuned
-            timeout=60 * 60,
+            # Timeout must exceed the sum of all per-stage ceilings so that a
+            # pathological slow run is caught by the per-stage ceiling assertions
+            # (which report which stage hung) rather than by a bare TimeoutExpired.
+            # _STAGE_CEILINGS sum ~5225 s (~87 min); +30 min for image build overhead.
+            timeout=sum(_STAGE_CEILINGS.values()) + 30 * 60,
         )
 
     output = proc.stdout + "\n" + proc.stderr
@@ -246,7 +249,13 @@ def test_heavy_container_e2e():
     gw_mr = float(gw_mr_match.group(1))
     print(f"GW150914 recovered mass_ratio median: {gw_mr:.4f}  (truth ~{_GW150914_MASS_RATIO_TRUTH})")
     assert math.isfinite(gw_mr), f"GW150914 mass_ratio median is not finite: {gw_mr}"
-    # Loose smoke guard: must lie within the training prior [0.5, 1.0].
+    # SANITY BOUND ONLY — NOT a recovery guard.
+    # mass_ratio is intrinsically poorly constrained with this scaled-down network;
+    # the observed recovery is ~0.61 vs truth ~0.86, so any tight window would be
+    # flaky.  This assertion only guards against values outside the training prior
+    # [0.5, 1.0] (a tautological bound for an NPE).  The meaningful recovery
+    # guard is chirp_mass (±8 Msun window above) — that is what detects gross
+    # problems (wrong data, wrong model, unit error).
     assert 0.5 <= gw_mr <= 1.0, (
         f"GW150914 mass_ratio median {gw_mr:.4f} outside training prior [0.5, 1.0]"
     )

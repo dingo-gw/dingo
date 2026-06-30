@@ -34,17 +34,24 @@ def find_is_efficiency(outdir):
     candidates = sorted(
         glob.glob(os.path.join(outdir, "**", "*.hdf5"), recursive=True)
     )
+    last_exc_info = None  # (path, exception) from the most recent load failure
     for path in candidates:
         try:
             result = Result(file_name=path)
-        except Exception:
+        except Exception as exc:
+            last_exc_info = (path, exc)
             continue
         eff = getattr(result, "sample_efficiency", None)
         if eff is not None:
             return eff, path
+    last_exc_msg = (
+        f"  Last load error: {last_exc_info[0]}: {last_exc_info[1]}"
+        if last_exc_info
+        else "  No files raised a load error (files present but lacked sample_efficiency)."
+    )
     raise RuntimeError(
         f"No importance-sampled result with sample_efficiency found under {outdir}. "
-        f"Scanned: {candidates}"
+        f"Scanned: {candidates}\n{last_exc_msg}"
     )
 
 

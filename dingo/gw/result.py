@@ -572,11 +572,12 @@ class Result(CoreResult):
             if not isinstance(v, Constraint) and not isinstance(v, DeltaFunction)
         ]
         log_prior = self.prior.ln_prob(self.samples[prior_keys_for_lp], axis=0)
-        # Pass a plain dict so bilby's evaluate_constraints can call dict.values()
-        # correctly.  With pandas >= 3.0, DataFrame.values is a property (not
-        # callable), so the try/except in bilby falls through to
-        # ``np.ones_like(out_sample)`` which returns a 2-D array and breaks
-        # the subsequent element-wise multiplication.
+        # Pass a plain dict so bilby's evaluate_constraints handles the argument
+        # correctly.  bilby's evaluate_constraints mishandles a DataFrame argument:
+        # its internal .values() call raises TypeError (DataFrame.values is a
+        # property, not a method), causing the try/except inside bilby to fall
+        # through to ``np.ones_like(out_sample)``, which returns a 2-D array and
+        # causes a shape-broadcast error in the subsequent element-wise multiplication.
         constraints = self.prior.evaluate_constraints(dict(theta))
         np.putmask(log_prior, constraints == 0, -np.inf)
         within_prior = np.isfinite(log_prior)
