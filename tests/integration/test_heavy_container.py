@@ -253,8 +253,7 @@ def test_heavy_container_e2e():
     assert math.isfinite(gw_mr), f"GW150914 mass_ratio median is not finite: {gw_mr}"
     # SANITY BOUND ONLY — NOT a recovery guard.
     # mass_ratio is intrinsically poorly constrained with this scaled-down network;
-    # the observed recovery is ~0.61 vs truth ~0.86, so any tight window would be
-    # flaky.  This assertion only guards against values outside the training prior
+    # This assertion only guards against values outside the training prior
     # [0.5, 1.0] (a tautological bound for an NPE).  The meaningful recovery
     # guard is chirp_mass (±8 Msun window above) — that is what detects gross
     # problems (wrong data, wrong model, unit error).
