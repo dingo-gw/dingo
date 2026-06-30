@@ -3,6 +3,8 @@ import math
 import numpy as np
 import pandas as pd
 import pytest
+from bilby.core.prior import DeltaFunction, PriorDict, Uniform
+from scipy.special import logsumexp
 
 from dingo.core.result import Result, _clip_weights
 
@@ -233,3 +235,213 @@ def test_clip_weights_reproducible():
     out1 = result.rejection_sample(clip_weights=True, random_state=42)
     out2 = result.rejection_sample(clip_weights=True, random_state=42)
     pd.testing.assert_frame_equal(out1, out2)
+
+
+# ---------------------------------------------------------------------------
+# Statistical / metadata properties
+# ---------------------------------------------------------------------------
+
+
+def make_result(samples=None, settings=None, event_metadata=None):
+    """Construct a minimal core Result, optionally with settings/event_metadata."""
+    dictionary = {}
+    if samples is not None:
+        dictionary["samples"] = samples
+    if settings is not None:
+        dictionary["settings"] = settings
+    result = Result(dictionary=dictionary)
+    if event_metadata is not None:
+        result.event_metadata = event_metadata
+    return result
+
+
+def test_num_samples():
+    result = make_result(pd.DataFrame({"x": np.arange(7.0)}))
+    assert result.num_samples == 7
+
+
+def test_num_samples_zero_when_no_samples():
+    result = make_result()
+    assert result.num_samples == 0
+
+
+def test_effective_sample_size_uniform_weights_equals_n():
+    result = make_result_with_weights(np.ones(10))
+    assert result.effective_sample_size == pytest.approx(10.0)
+    assert result.n_eff == result.effective_sample_size
+
+
+def test_effective_sample_size_matches_formula():
+    weights = np.array([1.0, 2.0, 3.0, 4.0])
+    result = make_result_with_weights(weights)
+    expected = np.sum(weights) ** 2 / np.sum(weights**2)
+    assert result.effective_sample_size == pytest.approx(expected)
+
+
+def test_effective_sample_size_none_without_weights():
+    result = make_result(pd.DataFrame({"x": [1.0, 2.0]}))
+    assert result.effective_sample_size is None
+
+
+def test_sample_efficiency():
+    result = make_result_with_weights(np.ones(8))
+    assert result.sample_efficiency == pytest.approx(1.0)  # uniform -> n_eff / N = 1
+
+
+def test_sample_efficiency_none_without_weights():
+    result = make_result(pd.DataFrame({"x": [1.0, 2.0]}))
+    assert result.sample_efficiency is None
+
+
+def test_log_evidence_std_requires_weights_and_log_evidence():
+    result = make_result_with_weights([1.0, 2.0, 3.0])
+    # No log_evidence set yet.
+    assert result.log_evidence_std is None
+    result.log_evidence = -5.0
+    assert result.log_evidence_std is not None
+    assert result.log_evidence_std > 0
+
+
+def test_log_bayes_factor():
+    result = make_result(pd.DataFrame({"x": [1.0]}))
+    assert result.log_bayes_factor is None
+    result.log_evidence = -3.0
+    result.log_noise_evidence = -10.0
+    assert result.log_bayes_factor == pytest.approx(7.0)
+
+
+def test_injection_parameters():
+    result = make_result(pd.DataFrame({"x": [1.0]}))
+    assert result.injection_parameters is None
+    result.event_metadata = {"injection_parameters": {"mass": 30.0}}
+    assert result.injection_parameters == {"mass": 30.0}
+
+
+def test_metadata_and_base_metadata():
+    settings = {"train_settings": {"data": {}}, "value": 1}
+    result = make_result(pd.DataFrame({"x": [1.0]}), settings=settings)
+    assert result.metadata is result.settings
+    # Non-unconditional model: base_metadata is the full metadata.
+    assert result.base_metadata is result.metadata
+
+
+def test_base_metadata_unconditional_returns_base():
+    base = {"some": "precursor"}
+    settings = {"train_settings": {"data": {"unconditional": True}}, "base": base}
+    result = make_result(pd.DataFrame({"x": [1.0]}), settings=settings)
+    assert result.base_metadata is base
+
+
+def test_parameter_subset_keeps_only_requested_columns():
+    samples = pd.DataFrame(
+        {"a": [1.0, 2.0], "b": [3.0, 4.0], "log_prob": [0.0, 0.0]}
+    )
+    result = make_result(samples)
+    subset = result.parameter_subset(["a"])
+    assert list(subset.samples.columns) == ["a"]
+    assert isinstance(subset, Result)
+
+
+# ---------------------------------------------------------------------------
+# _calculate_evidence
+# ---------------------------------------------------------------------------
+
+
+def test_calculate_evidence_matches_logsumexp():
+    n = 6
+    samples = pd.DataFrame(
+        {
+            "x": np.arange(n, dtype=float),
+            "log_prob": np.linspace(0.0, 1.0, n),
+            "log_prior": np.full(n, -2.0),
+            "log_likelihood": np.linspace(-1.0, 1.0, n),
+        }
+    )
+    result = make_result(samples)
+    result._calculate_evidence()
+
+    log_weights = (
+        samples["log_prior"] + samples["log_likelihood"] - samples["log_prob"]
+    )
+    expected = logsumexp(log_weights) - np.log(n)
+    assert result.log_evidence == pytest.approx(expected)
+    # Stored weights are normalized to mean 1.
+    assert result.samples["weights"].mean() == pytest.approx(1.0)
+
+
+def test_calculate_evidence_includes_delta_log_prob_target():
+    n = 4
+    delta = np.array([0.0, 0.5, -0.5, 1.0])
+    samples = pd.DataFrame(
+        {
+            "log_prob": np.zeros(n),
+            "log_prior": np.zeros(n),
+            "log_likelihood": np.zeros(n),
+            "delta_log_prob_target": delta,
+        }
+    )
+    result = make_result(samples)
+    result._calculate_evidence()
+    expected = logsumexp(delta) - np.log(n)
+    assert result.log_evidence == pytest.approx(expected)
+
+
+# ---------------------------------------------------------------------------
+# importance_sample orchestration (stubbed prior + likelihood)
+# ---------------------------------------------------------------------------
+
+
+class _StubResult(Result):
+    """Result with an analytic prior and a trivial likelihood, to exercise the
+    importance_sample orchestration without any GW machinery."""
+
+    def _build_prior(self):
+        self.prior = PriorDict(
+            {
+                "a": Uniform(0.0, 1.0, name="a"),
+                "b": Uniform(0.0, 1.0, name="b"),
+                "c": DeltaFunction(0.5, name="c"),  # fixed parameter
+            }
+        )
+
+    def _build_likelihood(self, **likelihood_kwargs):
+        class _StubLikelihood:
+            log_Zn = -10.0
+
+            def log_likelihood_multi(self, theta, num_processes=1):
+                return np.zeros(len(theta))
+
+        self.likelihood = _StubLikelihood()
+
+
+def _stub_samples(n=5, with_log_prob=True):
+    data = {
+        "a": np.linspace(0.1, 0.9, n),
+        "b": np.linspace(0.1, 0.9, n),
+        "c": np.full(n, 0.5),
+    }
+    if with_log_prob:
+        data["log_prob"] = np.zeros(n)
+    return pd.DataFrame(data)
+
+
+def test_importance_sample_populates_columns_and_evidence():
+    result = _StubResult(dictionary={"samples": _stub_samples()})
+    result.importance_sample(num_processes=1)
+    for col in ("log_prior", "log_likelihood", "weights"):
+        assert col in result.samples.columns
+    assert result.log_evidence is not None
+    assert result.log_noise_evidence == -10.0
+
+
+def test_importance_sample_requires_samples():
+    result = _StubResult(dictionary={"samples": _stub_samples()})
+    result.samples = None
+    with pytest.raises(KeyError):
+        result.importance_sample()
+
+
+def test_importance_sample_requires_log_prob():
+    result = _StubResult(dictionary={"samples": _stub_samples(with_log_prob=False)})
+    with pytest.raises(KeyError, match="log probability"):
+        result.importance_sample()

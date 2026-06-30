@@ -475,6 +475,12 @@ class Result(CoreResult):
             # Update prior_update dict with calibration parameters. This is for
             # persistence when saving to hdf5
             for param_name, prior_obj in prior.items():
+                # bilby's Prior.__repr__ isn't parseable for numpy scalars on numpy>2.0
+                # Upstream fix: https://github.com/bilby-dev/bilby/pull/1108
+                # Can be removed once dingo requires a bilby release that includes it.
+                for attr, value in prior_obj.get_instantiation_dict().items():
+                    if isinstance(value, np.generic):
+                        setattr(prior_obj, attr, value.item())
                 prior_update[param_name] = repr(prior_obj)
 
         # Store prior_update for persistence on save/reload
