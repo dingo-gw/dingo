@@ -104,6 +104,19 @@ pip install -e ".[dev,wandb]"
 
 For instructions on using Dingo, please refer to the [documentation](https://dingo-gw.readthedocs.io/en/latest/).
 
+## Using agents for development
+
+There is a [`CLAUDE.md`](https://github.com/dingo-gw/dingo/blob/claude/CLAUDE.md)
+file in this repository with basic instructions for coding agents. All agents
+read multiple files for instructions that have different scopes.  It is
+recommended to leave the provided `CLAUDE.md` as is and put additional
+instructions into the user-specific files `~/.claude/CLAUDE.md` (systemwide) and
+`CLAUDE.local.md` (repo specific) which should then be added to the `.gitignore`
+file. If you use other agents, please follow the instructions for
+[Codex](https://developers.openai.com/codex/guides/agents-md) or
+[Antigravity](https://antigravity.google/docs/rules-workflows) and again put 
+additional files in the `.gitignore`.
+
 ## References
 
 Dingo is based on the following series of papers:
@@ -128,19 +141,6 @@ many LVK software tools, including [Bilby](https://lscsoft.docs.ligo.org/bilby/)
 [LALSimulation](https://lscsoft.docs.ligo.org/lalsuite/lalsimulation/), as well as third
 party tools such as [PyTorch](https://pytorch.org) and
 [nflows](https://github.com/bayesiains/nflows).
-
-## Using agents for development
-
-There is a [`CLAUDE.md`](https://github.com/dingo-gw/dingo/blob/main/CLAUDE.md)
-file in this repository with basic instructions for coding agents. All agents
-read multiple files for instructions that have different scopes.  It is
-recommended to leave the provided `CLAUDE.md` as is and put additional
-instructions into the user-specific files `~/.claude/CLAUDE.md` (systemwide) and
-`CLAUDE.local.md` (repo specific) which should then be added to the `.gitignore`
-file. If you use other agents, please follow the instructions for
-[Codex](https://developers.openai.com/codex/guides/agents-md) or
-[Antigravity](https://antigravity.google/docs/rules-workflows) and again put 
-additional files in the `.gitignore`.
 
 ## Contact
 
