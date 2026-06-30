@@ -1,11 +1,13 @@
 """Heavy end-to-end test: build an Apptainer image from this checkout and run the
 scaled-down train -> sample -> importance-sample pipeline inside it.
 
-Build strategy (no-subuid fakeroot):
-  On hosts without /etc/subuid support the standard
-  ``apptainer build --fakeroot def_file`` path fails because the kernel blocks the
-  user-namespace uid-map setup that fakeroot needs for %post.  Instead we use a
-  three-step sandbox workflow that works with any non-setuid Apptainer:
+Build strategy:
+  We build the image entirely in Python rather than from an Apptainer .def file.
+  A .def build runs its %post section under ``--fakeroot``, which needs the kernel
+  to set up a user-namespace uid map and therefore an /etc/subuid range for the
+  caller -- unavailable on shared HPC clusters.  The three-step sandbox workflow
+  below never runs %post, so it works with any non-setuid Apptainer, with or
+  without subuid:
 
     1. ``apptainer build --sandbox sandbox docker://python:3.11``
        Pull the base image into an unpacked directory (no %post, no user-ns needed).
