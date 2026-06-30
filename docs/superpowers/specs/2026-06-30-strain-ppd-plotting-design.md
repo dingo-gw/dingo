@@ -20,10 +20,10 @@ Two plotting **methods on the GW `Result` class** (`dingo/gw/result.py`),
 mirroring the existing `result.plot_corner` API:
 
 ```python
-result.plot_ppd_td(filename="ppd_td.png", num_waveforms=1000,
-                   num_processes=1, central_time=8.0, zoom=None, ppd=None)
-result.plot_ppd_fd(filename="ppd_fd.png", num_waveforms=1000,
-                   num_processes=1, ppd=None)
+result.plot_ppd_td(filename="ppd_td.png", credible_interval=0.9,
+                   num_waveforms=1000, num_processes=1, zoom=None, ppd=None)
+result.plot_ppd_fd(filename="ppd_fd.png", credible_interval=0.9,
+                   num_waveforms=1000, num_processes=1, ppd=None)
 ```
 
 They live on the GW `Result` (subclass of `CoreResult`), **not** `core/`,
@@ -31,10 +31,11 @@ because they need the GW likelihood, detector projection, and ASD whitening —
 `core/` stays domain-agnostic.
 
 Shared expensive computation lives in a private
-`_compute_ppd(self, num_waveforms, num_processes, seed)` (used by both methods,
-so extraction is justified) returning `{domain, ifos, wf_fd, data_fd}`. Each
-public method accepts an optional precomputed `ppd=` dict so a caller can
-generate the draws once and render both plots without regenerating waveforms.
+`_compute_ppd(self, credible_interval, num_waveforms, num_processes, seed)`
+(used by both methods, so extraction is justified) returning
+`{domain, ifos, wf_fd, data_fd}`. Each public method accepts an optional
+precomputed `ppd=` dict so a caller can generate the draws once and render both
+plots without regenerating waveforms.
 
 Demo run target: GW230709_122727 EAS importance-sampling result
 (`prod_o4a/working/S230709bi/Exp19_more_points_1/result/
@@ -47,33 +48,45 @@ script loads the `Result` and calls both methods, producing
 1. `result = Result(file_name=...)`; `result._build_likelihood()`.
    `domain = result.domain.base_domain if hasattr(result.domain, "base_domain")
    else result.domain`.
-2. **Sample selection.** Resample `N` parameter rows from `result.samples` with
-   replacement, probability ∝ importance `weights`, using a seeded
-   `np.random.default_rng`. This is a proper posterior-predictive draw and
-   respects the importance weights. (The notebook instead kept the top-90%
-   credible set then truncated to `N`; we deliberately diverge.)
+2. **Sample selection.** Build the `credible_interval` (default 0.9) credible
+   set: normalize the importance/posterior weights, sort descending, and keep
+   the highest-weight samples whose cumulative weight ≤ `credible_interval`
+   (the X% credible region — same definition as the notebook's
+   `select_from_n_percent_interval`). Then draw up to `num_waveforms` rows
+   **uniformly at random** from that set (seeded `np.random.default_rng`) so the
+   envelope represents the whole interval rather than only the peak (the
+   notebook took the top-N highest-weight rows, biasing toward the peak — we
+   diverge here).
 3. Generate whitened FD waveforms:
    `apply_func_with_multiprocessing(result.likelihood.signal, samples_df,
    num_processes)`. Each `wf["waveform"][ifo]` is **already whitened**
    (`/asd/noise_std`), the same convention applied to the data, so model and
    data share one y-scale.
 
+### Time offset (hidden from the user)
+
+The merger always lands at **t = 0**. Internally each waveform is phase-shifted
+by a fixed offset derived from the data segment (`t0 = 1 / domain.delta_f`, the
+segment duration `T`, which places the dingo coalescence at the segment edge),
+via `wf *= exp(2πi·f·t0)`, then the time axis has `t0` subtracted. `t0` is a
+private detail — not a method argument. The implementation verifies the demo
+merger sits at 0 and adjusts the offset derivation if not.
+
 ## Time domain (`<event>_ppd_td.png`, one row per detector)
 
-- Each draw: phase-shift to place merger at `CENTRAL_TIME`
-  (`wf *= exp(2πi·f·CENTRAL_TIME)`), then `one_sided_fd_to_td`, keep real part.
-- Bands across draws via `np.nanpercentile`: **median line + shaded 50%
-  (25–75) + 90% (5–95)**. (Notebook used a min/max envelope; we deliberately
-  diverge to percentile credible bands.)
+- Each draw: phase-shift by `t0`, `one_sided_fd_to_td`, keep real part.
+- Band = pointwise **min/max envelope** across the selected draws
+  (`np.nanmin` / `np.nanmax`, ignoring NaN waveforms), drawn with
+  `fill_between`.
 - Overlay: whitened data trace (`√(4Δf)·context_waveform/asd`, same shift +
   IFFT, light sliding-window average), grey.
-- x-axis: time to merger (s), linear, zoomed via `--zoom` (default
+- x-axis: time to merger (s), linear, zoomed via `zoom=` (default
   `(-0.7, 0.1)` for GW230709). y-axis: whitened strain (dimensionless, σ units).
 
 ## Frequency domain (`<event>_ppd_fd.png`, one row per detector)
 
 - Per draw: `|whitened h(f)|` (magnitude of the complex whitened FD waveform).
-- Bands: median + 50%/90% percentiles vs frequency.
+- Band = min/max envelope of `|whitened h(f)|` across the selected draws.
 - Overlay: `|whitened data|` = `|√(4Δf)·context_waveform/asd|` — the noisy
   ~O(1) floor the signal rises above.
 - x-axis: frequency [Hz], **log scale**. y-axis: dimensionless whitened
