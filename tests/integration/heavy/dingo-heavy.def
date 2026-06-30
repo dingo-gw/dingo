@@ -1,0 +1,26 @@
+Bootstrap: docker
+From: nvidia/cuda:12.4.1-runtime-ubuntu22.04
+
+%files
+    dingo-src.tar /opt/dingo-src.tar
+    heavy /opt/heavy
+
+%post
+    set -e
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -y
+    apt-get install -y --no-install-recommends \
+        python3 python3-pip python3-venv git build-essential libgsl-dev
+    rm -rf /var/lib/apt/lists/*
+
+    mkdir -p /opt/dingo
+    tar -xf /opt/dingo-src.tar -C /opt/dingo
+    # Versions come solely from pyproject.toml — no extra pins here.
+    python3 -m pip install --no-cache-dir /opt/dingo
+
+%environment
+    export LANG=C.UTF-8
+    export LC_ALL=C.UTF-8
+
+%runscript
+    exec python3 /opt/heavy/run_pipeline.py "$@"
