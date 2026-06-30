@@ -24,7 +24,7 @@ from __future__ import annotations
 import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Optional, Protocol, runtime_checkable
+from typing import Optional, Protocol, Union, runtime_checkable
 
 import pandas as pd
 import torch
@@ -333,14 +333,17 @@ class GibbsComposer:
 
 class ComposedSampler:
     """
-    Thin user-facing façade over a ``ChainComposer`` and a ``SamplerContext``: runs the
-    chain with optional batching, applies domain-specific post-processing, and returns
-    samples as a DataFrame. The per-factor compute lives in the composer; this class only
-    handles batching, consolidation, and post-processing -- the role the monolithic
-    ``Sampler`` plays today.
+    Thin user-facing façade over a composer (``ChainComposer`` or ``GibbsComposer``) and
+    a ``SamplerContext``: runs the composer with optional batching, applies domain-specific
+    post-processing, and returns samples as a DataFrame. The per-factor compute lives in
+    the composer (which need only expose ``sample(num_samples, context) -> dict``); this
+    class only handles batching, consolidation, and post-processing -- the role the
+    monolithic ``Sampler`` plays today.
     """
 
-    def __init__(self, composer: ChainComposer, context: SamplerContext):
+    def __init__(
+        self, composer: Union[ChainComposer, GibbsComposer], context: SamplerContext
+    ):
         self.composer = composer
         self.context = context
         self.samples: Optional[pd.DataFrame] = None
