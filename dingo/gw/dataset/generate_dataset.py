@@ -24,6 +24,7 @@ from dingo.gw.waveform_generator import (
     generate_waveforms_parallel,
 )
 from dingo.core.utils.misc import call_func_strict_output_dim
+from dingo.core.utils.logging_utils import logger
 
 
 def generate_parameters_and_polarizations(
@@ -47,7 +48,7 @@ def generate_parameters_and_polarizations(
     pandas DataFrame of parameters
     dictionary of numpy arrays corresponding to waveform polarizations
     """
-    print("Generating dataset of size " + str(num_samples))
+    logger.info("Generating dataset of size " + str(num_samples))
     parameters = pd.DataFrame(prior.sample(num_samples))
 
     if num_processes > 1:
@@ -67,12 +68,12 @@ def generate_parameters_and_polarizations(
         polarizations_ok = {k: v[idx_ok] for k, v in polarizations.items()}
         parameters_ok = parameters.iloc[idx_ok]
         failed_percent = 100 * len(idx_failed) / len(parameters)
-        print(
+        logger.warning(
             f"{len(idx_failed)} out of {len(parameters)} configuration ({failed_percent:.1f}%) failed to generate."
         )
         with pd.option_context("display.max_rows", None, "display.max_columns", None):
-            print(parameters.iloc[idx_failed])
-        print(
+            logger.warning(parameters.iloc[idx_failed].to_string())
+        logger.warning(
             f"Only returning the {len(idx_ok)} successfully generated configurations."
         )
         return parameters_ok, polarizations_ok
@@ -115,7 +116,7 @@ def train_svd_basis(dataset: WaveformDataset, size: int, n_train: int):
     )
     test_parameters.reset_index(drop=True, inplace=True)
 
-    print("Building SVD basis.")
+    logger.info("Building SVD basis.")
     basis = SVDBasis()
     basis.generate_basis(train_data, size)
 

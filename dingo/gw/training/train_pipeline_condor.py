@@ -4,6 +4,7 @@ from os.path import join, isfile
 import yaml
 import argparse
 
+from dingo.core.utils.logging_utils import logger
 from dingo.gw.training import (
     prepare_training_new,
     prepare_training_resume,
@@ -61,7 +62,7 @@ def copy_logfiles(log_dir, epoch, name="info", suffixes=(".err", ".log", ".out")
         try:
             copyfile(src, dest)
         except:
-            print("Could not copy " + src)
+            logger.warning("Could not copy " + src)
 
 
 def train_condor():
@@ -90,7 +91,7 @@ def train_condor():
                 raise FileNotFoundError(
                     f"Checkpoint not found: {join(args.train_dir, args.checkpoint)}"
                 )
-            print("Beginning new training run.")
+            logger.info("Beginning new training run.")
             with open(join(args.train_dir, "train_settings.yaml"), "r") as f:
                 train_settings = yaml.safe_load(f)
 
@@ -109,7 +110,7 @@ def train_condor():
 
                         local_settings["wandb"]["id"] = wandb.util.generate_id()
                     except ImportError:
-                        print("wandb not installed, cannot generate run id.")
+                        logger.warning("wandb not installed, cannot generate run id.")
                 yaml.dump(local_settings, f, default_flow_style=False, sort_keys=False)
 
             pm, wfd = prepare_training_new(
@@ -117,7 +118,7 @@ def train_condor():
             )
 
         else:
-            print("Resuming training run.")
+            logger.info("Resuming training run.")
             with open(os.path.join(args.train_dir, "local_settings.yaml"), "r") as f:
                 local_settings = yaml.safe_load(f)
             pm, wfd = prepare_training_resume(
@@ -128,7 +129,7 @@ def train_condor():
 
         complete = train_stages(pm, wfd, args.train_dir, local_settings)
 
-        print("Copying log files")
+        logger.info("Copying log files")
         copy_logfiles(args.train_dir, epoch=pm.epoch)
 
         #
@@ -136,7 +137,7 @@ def train_condor():
         #
 
         if complete:
-            print(
+            logger.info(
                 f"Training complete, job will not be resubmitted. Executing exit command: {args.exit_command}."
             )
             if args.exit_command:

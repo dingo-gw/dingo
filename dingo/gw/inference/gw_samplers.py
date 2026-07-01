@@ -8,6 +8,7 @@ from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 
 from dingo.core.samplers import Sampler, GNPESampler
+from dingo.core.utils.logging_utils import logger
 from dingo.core.transforms import GetItem, RenameKey
 from dingo.gw.domains import (
     MultibandedFrequencyDomain,
@@ -240,7 +241,7 @@ class GWSamplerMixin(object):
             for k, p in prior.items():
                 if isinstance(p, DeltaFunction) and k not in samples:
                     v = p.peak
-                    print(f"Adding fixed parameter {k} = {v} from prior.")
+                    logger.info(f"Adding fixed parameter {k} = {v} from prior.")
                     samples[k] = p.peak * np.ones(num_samples)
         else:
             # Drop non-inference parameters from samples.
@@ -472,8 +473,8 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 self.gnpe_parameters += transform.input_parameter_names
                 for k, v in transform.kernel.items():
                     self.gnpe_kernel[k] = v
-        print("GNPE parameters: ", self.gnpe_parameters)
-        print("GNPE kernel: ", self.gnpe_kernel)
+        logger.info(f"GNPE parameters: {self.gnpe_parameters}")
+        logger.info(f"GNPE kernel: {self.gnpe_kernel}")
 
         self.transform_pre = Compose(transform_pre)
 

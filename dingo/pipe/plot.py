@@ -1,9 +1,11 @@
 from bilby_pipe.bilbyargparser import BilbyArgParser
-from bilby_pipe.utils import get_command_line_arguments, logger, parse_args
+from bilby_pipe.utils import get_command_line_arguments, parse_args
+
+import logging
 
 from dingo.gw.result import Result
 
-logger.name = "dingo_pipe"
+logger = logging.getLogger("dingo.pipe")
 
 
 def create_parser():

@@ -5,7 +5,9 @@
 import copy
 
 from bilby_pipe.job_creation.dag import Dag
-from bilby_pipe.utils import BilbyPipeError, logger
+import logging
+
+from bilby_pipe.utils import BilbyPipeError
 
 from dingo.pipe.utils import _strip_unwanted_submission_keys
 from dingo.pipe.nodes.generation_node import GenerationNode
@@ -15,7 +17,7 @@ from .nodes.pe_summary_node import PESummaryNode
 from .nodes.plot_node import PlotNode, PlotPPNode
 from .nodes.sampling_node import SamplingNode
 
-logger.name = "dingo_pipe"
+logger = logging.getLogger("dingo.pipe")
 
 
 def get_trigger_time_list(inputs):

@@ -14,6 +14,7 @@ from dingo.core.density import (
 )
 from dingo.core.multiprocessing import apply_func_with_multiprocessing
 from dingo.core.result import Result as CoreResult
+from dingo.core.utils.logging_utils import logger
 from dingo.gw.conversion import change_spin_conversion_phase
 from dingo.gw.domains import MultibandedFrequencyDomain
 from dingo.gw.domains import build_domain
@@ -199,18 +200,14 @@ class Result(CoreResult):
             )
 
             if verbose:
-                print("Rebuilding domain as follows:")
-                print(
-                    yaml.dump(
-                        domain_dict,
-                        default_flow_style=False,
-                        sort_keys=False,
-                    )
+                logger.info(
+                    "Rebuilding domain as follows:\n"
+                    + yaml.dump(domain_dict, default_flow_style=False, sort_keys=False)
                 )
             self.domain = build_domain(domain_dict)
         else:
             if verbose:
-                print("No domain updates found; domain not rebuilt.")
+                logger.info("No domain updates found; domain not rebuilt.")
 
     def _build_prior(self):
         """Build the prior based on model metadata. Called by __init__()."""
@@ -359,7 +356,7 @@ class Result(CoreResult):
         if "updates" in self.importance_sampling_metadata:
             if "T" in self.importance_sampling_metadata["updates"]:
                 delta_f_new = 1 / self.importance_sampling_metadata["updates"]["T"]
-                print(
+                logger.info(
                     f'Updating waveform generation delta_f from {wfg_domain_dict["delta_f"]} to {delta_f_new}.'
                 )
                 wfg_domain_dict["delta_f"] = delta_f_new
@@ -452,7 +449,7 @@ class Result(CoreResult):
 
         # Sample calibration parameters and calculate log_prob
         num_samples = len(self.samples)
-        print(f"Sampling calibration parameters for {num_samples} samples.")
+        logger.info(f"Sampling calibration parameters for {num_samples} samples.")
 
         delta_log_prob = np.zeros(num_samples)
 
@@ -571,7 +568,7 @@ class Result(CoreResult):
             self.synthetic_phase_kwargs.get("num_processes", 1), num_valid_samples // 10
         )
 
-        print(f"Estimating synthetic phase for {num_valid_samples} samples.")
+        logger.info(f"Estimating synthetic phase for {num_valid_samples} samples.")
         t0 = time.time()
 
         if not inverse:
@@ -660,7 +657,7 @@ class Result(CoreResult):
             self.samples["log_prob"] = log_prob_array
             del self.samples["phase"]
 
-        print(f"Done. This took {time.time() - t0:.2f} s.")
+        logger.info(f"Done. This took {time.time() - t0:.2f} s.")
 
     def get_samples_bilby_phase(self, num_processes=1):
         """

@@ -27,6 +27,7 @@ from dingo.core.utils import (
     build_train_and_test_loaders,
 )
 from dingo.core.utils.trainutils import EarlyStopping
+from dingo.core.utils.logging_utils import logger
 from dingo.gw.dataset import WaveformDataset
 from dingo.core.posterior_models import BasePosteriorModel
 
@@ -61,20 +62,20 @@ def copy_files_to_local(
     if local_dir is not None:
         file_name = file_path.split("/")[-1]
         local_file_path = os.path.join(local_dir, file_name)
-        print(f"Copying file to {local_file_path}")
+        logger.info(f"Copying file to {local_file_path}")
         # Copy file
         start_time = time.time()
         shutil.copy(file_path, local_file_path)
         elapsed_time = time.time() - start_time
-        print("Done. This took {:2.0f}:{:2.0f} min.".format(*divmod(elapsed_time, 60)))
+        logger.info("Done. This took {:2.0f}:{:2.0f} min.".format(*divmod(elapsed_time, 60)))
     elif leave_keys_on_disk and is_condor:
-        print(
-            f"Warning: leave_waveforms_on_disk defaults to True, but local_cache_path is not specified. "
-            f"This means that the waveforms will be loaded during training from {local_file_path} ."
+        logger.warning(
+            f"leave_waveforms_on_disk defaults to True, but local_cache_path is not specified. "
+            f"This means that the waveforms will be loaded during training from {local_file_path}. "
             f"This can lead to unexpected long times for data loading during training due to network traffic. "
             f"To prevent this, specify 'local_cache_path = tmp' in the local settings or set "
             f"leave_waveforms_on_disk = False. However, the latter is not recommended for large datasets since "
-            f"it can lead to memory issues when loading the entire dataset into RAM. "
+            f"it can lead to memory issues when loading the entire dataset into RAM."
         )
 
     return local_file_path
@@ -122,7 +123,7 @@ def prepare_training_new(
 
     if train_settings["model"].get("embedding_kwargs", None):
         # First, build the SVD for seeding the embedding network.
-        print("\nBuilding SVD for initialization of embedding network.")
+        logger.info("Building SVD for initialization of embedding network.")
         initial_weights["V_rb_list"] = build_svd_for_embedding_network(
             wfd,
             train_settings["data"],
@@ -153,9 +154,8 @@ def prepare_training_new(
         "train_settings": train_settings,
     }
 
-    print("\nInitializing new posterior model.")
-    print("Complete settings:")
-    print(yaml.dump(full_settings, default_flow_style=False, sort_keys=False))
+    logger.info("Initializing new posterior model.")
+    logger.info("Complete settings:\n" + yaml.dump(full_settings, default_flow_style=False, sort_keys=False))
 
     pm = build_model_from_kwargs(
         settings=full_settings,
@@ -173,7 +173,7 @@ def prepare_training_new(
                 **local_settings["wandb"],
             )
         except ImportError:
-            print("WandB is enabled but not installed.")
+            logger.warning("WandB is enabled but not installed.")
 
     return pm, wfd
 
@@ -226,7 +226,7 @@ def prepare_training_resume(
                 **local_settings["wandb"],
             )
         except ImportError:
-            print("WandB is enabled but not installed.")
+            logger.warning("WandB is enabled but not installed.")
 
     return pm, wfd
 
@@ -278,7 +278,7 @@ def initialize_stage(
     if not resume:
         # New optimizer and scheduler. If we are resuming, these should have been
         # loaded from the checkpoint.
-        print("Initializing new optimizer and scheduler.")
+        logger.info("Initializing new optimizer and scheduler.")
         pm.optimizer_kwargs = stage["optimizer"]
         pm.scheduler_kwargs = stage["scheduler"]
         pm.initialize_optimizer_and_scheduler()
@@ -295,7 +295,7 @@ def initialize_stage(
             )
     n_grad = get_number_of_model_parameters(pm.network, (True,))
     n_nograd = get_number_of_model_parameters(pm.network, (False,))
-    print(f"Fixed parameters: {n_nograd}\nLearnable parameters: {n_grad}\n")
+    logger.info(f"Fixed parameters: {n_nograd}\nLearnable parameters: {n_grad}")
 
     return train_loader, test_loader
 
@@ -343,14 +343,12 @@ def train_stages(
         stage = stages[n]
 
         if pm.epoch == end_epochs[n] - stage["epochs"]:
-            print(f"\nBeginning training stage {n}. Settings:")
-            print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
+            logger.info(f"Beginning training stage {n}. Settings:\n" + yaml.dump(stage, default_flow_style=False, sort_keys=False))
             train_loader, test_loader = initialize_stage(
                 pm, wfd, stage, local_settings["num_workers"], resume=False
             )
         else:
-            print(f"\nResuming training in stage {n}. Settings:")
-            print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
+            logger.info(f"Resuming training in stage {n}. Settings:\n" + yaml.dump(stage, default_flow_style=False, sort_keys=False))
             train_loader, test_loader = initialize_stage(
                 pm, wfd, stage, local_settings["num_workers"], resume=True
             )
@@ -359,7 +357,7 @@ def train_stages(
             try:
                 early_stopping = EarlyStopping(**stage["early_stopping"])
             except Exception:
-                print(
+                logger.warning(
                     "Early stopping settings invalid. Please pass 'patience', 'delta', 'metric'"
                 )
                 raise
@@ -381,10 +379,10 @@ def train_stages(
 
         if pm.epoch == end_epochs[n]:
             save_file = os.path.join(train_dir, f"model_stage_{n}.pt")
-            print(f"Training stage complete. Saving to {save_file}.")
+            logger.info(f"Training stage complete. Saving to {save_file}.")
             pm.save_model(save_file, save_training_info=True)
         if runtime_limits.local_limits_exceeded(pm.epoch):
-            print("Local runtime limits reached. Ending program.")
+            logger.info("Local runtime limits reached. Ending program.")
             break
 
     if pm.epoch == end_epochs[-1]:
@@ -443,7 +441,7 @@ def train_local():
     os.makedirs(args.train_dir, exist_ok=True)
 
     if args.settings_file is not None:
-        print("Beginning new training run.")
+        logger.info("Beginning new training run.")
         with open(args.settings_file, "r") as fp:
             train_settings = yaml.safe_load(fp)
 
@@ -462,7 +460,7 @@ def train_local():
 
                     local_settings["wandb"]["id"] = wandb.util.generate_id()
                 except ImportError:
-                    print("wandb not installed, cannot generate run id.")
+                    logger.warning("wandb not installed, cannot generate run id.")
             yaml.dump(local_settings, f, default_flow_style=False, sort_keys=False)
 
         pm, wfd = prepare_training_new(train_settings, args.train_dir, local_settings)
@@ -470,7 +468,7 @@ def train_local():
     else:
         if not os.path.isfile(args.checkpoint):
             raise FileNotFoundError(f"Checkpoint not found: {args.checkpoint}")
-        print("Resuming training run.")
+        logger.info("Resuming training run.")
         with open(os.path.join(args.train_dir, "local_settings.yaml"), "r") as f:
             local_settings = yaml.safe_load(f)
         pm, wfd = prepare_training_resume(
@@ -482,11 +480,11 @@ def train_local():
 
     if complete:
         if args.exit_command:
-            print(
+            logger.info(
                 f"All training stages complete. Executing exit command: {args.exit_command}."
             )
             os.system(args.exit_command)
         else:
-            print("All training stages complete.")
+            logger.info("All training stages complete.")
     else:
-        print("Program terminated due to runtime limit.")
+        logger.info("Program terminated due to runtime limit.")

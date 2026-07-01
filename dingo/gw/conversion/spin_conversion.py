@@ -8,6 +8,8 @@ import lal
 import lalsimulation as LS
 from threadpoolctl import threadpool_limits
 
+from dingo.core.utils.logging_utils import logger
+
 
 DINGO_PE_SPIN_PARAMETERS = (
     "theta_jn",
@@ -225,5 +227,5 @@ def _convert_phase(f_ref, sc_phase_old, sc_phase_new, sample):
 
         return sample_pe_new
     except RuntimeError:
-        print("Failed to convert spins. Saving sample unchanged.")
+        logger.warning("Failed to convert spins. Saving sample unchanged.")
         return sample

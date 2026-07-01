@@ -4,6 +4,7 @@ import numpy as np
 import yaml
 from scipy.interpolate import interp1d
 
+from dingo.core.utils.logging_utils import logger
 from dingo.gw.dataset import generate_parameters_and_polarizations
 from dingo.gw.domains import build_domain, MultibandedFrequencyDomain
 from dingo.gw.gwutils import get_mismatch
@@ -35,13 +36,13 @@ def _evaluate_multibanding_main(
     settings["intrinsic_prior"]["chirp_mass"] = prior["chirp_mass"].minimum
     # Rebuild prior with updated settings.
     prior = build_prior_with_defaults(settings["intrinsic_prior"])
-    print("Prior")
+    logger.info("Prior")
     for k, v in prior.items():
-        print(f"{k}: {v}")
+        logger.info(f"{k}: {v}")
 
     domain = build_domain(settings["domain"])
-    print("\nDomain")
-    print(domain.domain_dict)
+    logger.info("\nDomain")
+    logger.info(domain.domain_dict)
 
     if not isinstance(domain, MultibandedFrequencyDomain):
         raise ValueError("Waveform dataset domain not a MultibandedFrequencyDomain.")
@@ -88,21 +89,21 @@ def _evaluate_multibanding_main(
                 asd_file="aLIGO_ZERO_DET_high_P_asd.txt",
             )
 
-    print("\nMismatches between UFD waveforms and MFD waveforms interpolated to MFD.")
-    print(
+    logger.info("\nMismatches between UFD waveforms and MFD waveforms interpolated to MFD.")
+    logger.info(
         "This is a conservative estimate of the MFD performance when training "
         "networks."
     )
     mismatches = np.concatenate([v for v in mismatches.values()])
-    print(f"num_samples = {num_samples}")
-    print("  Mean mismatch = {}".format(np.mean(mismatches)))
-    print("  Standard deviation = {}".format(np.std(mismatches)))
-    print("  Max mismatch = {}".format(np.max(mismatches)))
-    print("  Median mismatch = {}".format(np.median(mismatches)))
-    print("  Percentiles:")
-    print("    99    -> {}".format(np.percentile(mismatches, 99)))
-    print("    99.9  -> {}".format(np.percentile(mismatches, 99.9)))
-    print("    99.99 -> {}".format(np.percentile(mismatches, 99.99)))
+    logger.info(f"num_samples = {num_samples}")
+    logger.info("  Mean mismatch = {}".format(np.mean(mismatches)))
+    logger.info("  Standard deviation = {}".format(np.std(mismatches)))
+    logger.info("  Max mismatch = {}".format(np.max(mismatches)))
+    logger.info("  Median mismatch = {}".format(np.median(mismatches)))
+    logger.info("  Percentiles:")
+    logger.info("    99    -> {}".format(np.percentile(mismatches, 99)))
+    logger.info("    99.9  -> {}".format(np.percentile(mismatches, 99.9)))
+    logger.info("    99.99 -> {}".format(np.percentile(mismatches, 99.99)))
 
 
 def parse_args():

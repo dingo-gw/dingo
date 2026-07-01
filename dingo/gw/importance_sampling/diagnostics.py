@@ -3,6 +3,7 @@ import numpy as np
 import math
 import pandas as pd
 import matplotlib.pyplot as plt
+from dingo.core.utils.logging_utils import logger
 from dingo.core.utils.plotting import plot_corner_multi
 from dingo.gw.result import Result
 
@@ -219,7 +220,7 @@ def plot_diagnostics(
     inds = np.where(weights > threshold)[0]
     theta_new = theta.loc[inds]
     weights_new = weights[inds]
-    print(
+    logger.info(
         f"Generating cornerplot with {len(theta_new)} out of {len(theta)} IS samples."
     )
 
