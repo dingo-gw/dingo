@@ -24,7 +24,6 @@ from torchvision.transforms import Compose
 from dingo.core.factors import (
     ChainComposer,
     ComposedSampler,
-    Conditioning,
     Factor,
     FlowFactor,
     GibbsBlock,
@@ -154,13 +153,13 @@ class DeltaFactor(Factor):
         self.parameters = list(values)
         self.conditioning = []
 
-    def sample_and_log_prob(self, num_samples, cond):
+    def sample_and_log_prob(self, num_samples, context, given=None):
         samples = {
             p: torch.full((num_samples,), float(v)) for p, v in self.values.items()
         }
         return samples, torch.zeros(num_samples)
 
-    def log_prob(self, theta_i, cond):
+    def log_prob(self, theta_i, context, given=None):
         raise NotImplementedError("DeltaFactor.log_prob")
 
 
@@ -175,10 +174,10 @@ class SyntheticPhaseFactor(Factor):
         self.parameters = ["phase"]
         self.conditioning = []  # conditions on all preceding params via the likelihood
 
-    def sample_and_log_prob(self, num_samples, cond):
+    def sample_and_log_prob(self, num_samples, context, given=None):
         raise NotImplementedError("SyntheticPhaseFactor")
 
-    def log_prob(self, theta_i, cond):
+    def log_prob(self, theta_i, context, given=None):
         raise NotImplementedError("SyntheticPhaseFactor")
 
 
@@ -284,21 +283,21 @@ class GNPEKernelFactor(Factor):
         _, _, gnpe_parameters, _, _, gnpe_transform = _build_gnpe_transforms(model)
         return cls(gnpe_transform, gnpe_parameters)
 
-    def sample_and_log_prob(self, num_samples, cond):
+    def sample_and_log_prob(self, num_samples, context, given=None):
         """Blur the conditioning detector times into proxies; ``num_samples`` must be 1
         (GNPE is 1:1). Returns the proxies and their kernel log-prob."""
         if num_samples != 1:
             raise ValueError("GNPE proxy is 1:1; use fan_out=1.")
-        times = {k: cond.given[k] for k in self.gnpe_parameters}
+        times = {k: given[k] for k in self.gnpe_parameters}
         proxies = self.gnpe.sample_proxies(times)
-        return proxies, self.log_prob(proxies, cond)
+        return proxies, self.log_prob(proxies, context, given)
 
-    def log_prob(self, theta_i, cond):
+    def log_prob(self, theta_i, context, given=None):
         """``log p(theta_hat | theta)`` from the kernel, at the proxies (``theta_i``) and
-        the detector times (``cond.given``)."""
+        the detector times (``given``)."""
         diffs = {}
         for k in self.kernel.keys():
-            diff = cond.given[k] - theta_i[f"{k}_proxy"]
+            diff = given[k] - theta_i[f"{k}_proxy"]
             if torch.is_tensor(diff):
                 diff = diff.detach().cpu().numpy()
             diffs[k] = np.asarray(diff)
@@ -359,15 +358,15 @@ class GNPEFlowFactor(Factor):
             model, pre, post, gnpe_parameters, inference_parameters, aliases=aliases
         )
 
-    def sample_and_log_prob(self, num_samples, cond):
+    def sample_and_log_prob(self, num_samples, context, given=None):
         """Sample one parameter set per proxy row; ``num_samples`` must be 1 (GNPE is 1:1).
         Returns theta plus the recomputed detector times, and the network log-prob."""
         if num_samples != 1:
             raise ValueError("GNPE is 1:1; draw one sample per proxy (fan_out=1).")
-        proxies = {p: cond.given[p] for p in self.proxy_parameters}
+        proxies = {p: given[p] for p in self.proxy_parameters}
         n_rows = next(iter(proxies.values())).shape[0]
         x = {"extrinsic_parameters": dict(proxies), "parameters": {}}
-        d = cond.context.prepared_data().clone()
+        d = context.prepared_data().clone()
         x["data"] = d.expand(n_rows, *d.shape)
         x = self.transform_pre(x)
         self.model.network.eval()
@@ -392,7 +391,7 @@ class GNPEFlowFactor(Factor):
             params[k] = x["extrinsic_parameters"][k]
         return params, x["log_prob"]
 
-    def log_prob(self, theta_i, cond):
+    def log_prob(self, theta_i, context, given=None):
         raise NotImplementedError("GNPEFlowFactor.log_prob")
 
 
@@ -467,7 +466,7 @@ class GNPEKernelCorrection(TargetCorrection):
     def correction(self, given, context):
         proxies = {p: given[p] for p in self.kernel_factor.parameters}
         times = {k: given[k] for k in self.kernel_factor.gnpe_parameters}
-        correction = self.kernel_factor.log_prob(proxies, Conditioning(context, times))
+        correction = self.kernel_factor.log_prob(proxies, context, times)
         return {"delta_log_prob_target": correction}
 
 

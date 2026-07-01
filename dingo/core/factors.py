@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import math
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Optional, Protocol, Union, runtime_checkable
 
 import pandas as pd
@@ -83,17 +83,6 @@ class SamplerContext(Protocol):
         ...
 
 
-@dataclass
-class Conditioning:
-    """
-    The conditioning passed to a factor: the shared ``context``, and ``given``, the
-    physical values of the earlier-block parameters the factor conditions on.
-    """
-
-    context: SamplerContext
-    given: dict[str, torch.Tensor] = field(default_factory=dict)
-
-
 def _cat_dict(
     batches: list[dict[str, torch.Tensor]],
 ) -> dict[str, torch.Tensor]:
@@ -131,7 +120,7 @@ class Factor(ABC):
 
     A call draws ``num_samples`` samples per conditioning row and returns ``n_rows *
     num_samples`` rows in row-major order, where ``n_rows`` is the number of rows in
-    ``cond.given`` (1 if unconditioned). This mirrors the network's
+    ``given`` (1 if unconditioned). This mirrors the network's
     ``sample_and_log_prob(*context, num_samples=n) -> (n_rows, n, dim)``.
 
     Attributes
@@ -147,7 +136,10 @@ class Factor(ABC):
 
     @abstractmethod
     def sample_and_log_prob(
-        self, num_samples: int, cond: Conditioning
+        self,
+        num_samples: int,
+        context: SamplerContext,
+        given: Optional[dict[str, torch.Tensor]] = None,
     ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
         """Draw ``num_samples`` samples per conditioning row; return ``(samples,
         log_prob)`` in physical space. The samples dict may include named columns beyond
@@ -155,7 +147,10 @@ class Factor(ABC):
 
     @abstractmethod
     def log_prob(
-        self, theta_i: dict[str, torch.Tensor], cond: Conditioning
+        self,
+        theta_i: dict[str, torch.Tensor],
+        context: SamplerContext,
+        given: Optional[dict[str, torch.Tensor]] = None,
     ) -> torch.Tensor:
         """Evaluate ``log q_i`` at given physical ``theta_i`` (one conditioning row per
         row)."""
@@ -178,7 +173,7 @@ class FlowFactor(Factor):
     its interface is in physical parameter space.
 
     An unconditioned model draws from the shared data context; a model with
-    ``context_parameters`` conditions on the values in ``cond.given``.
+    ``context_parameters`` conditions on the values in ``given``.
     """
 
     def __init__(
@@ -219,11 +214,11 @@ class FlowFactor(Factor):
             aliases=aliases,
         )
 
-    def sample_and_log_prob(self, num_samples, cond):
+    def sample_and_log_prob(self, num_samples, context, given=None):
         """Draw ``num_samples`` samples per conditioning row. Unconditioned: ``num_samples``
         draws from the shared data context. Conditioned: ``num_samples`` per context row,
         returning ``n_rows * num_samples`` rows in row-major order."""
-        data = cond.context.prepared_data()
+        data = context.prepared_data()
         self.model.network.eval()
         if not self.context_parameters:
             with torch.no_grad():
@@ -237,7 +232,7 @@ class FlowFactor(Factor):
             # Standardize the (physical) conditioning the network was trained on, giving
             # B = N context rows; expand the shared data to match. The network draws
             # num_samples per row -> (N, num_samples, dim).
-            ctx = self.standardization.standardize(cond.given, self.context_parameters)
+            ctx = self.standardization.standardize(given, self.context_parameters)
             n_rows = ctx.shape[0]
             data = data.expand(n_rows, *data.shape)
             with torch.no_grad():
@@ -252,20 +247,20 @@ class FlowFactor(Factor):
         theta = {self.aliases.get(k, k): v for k, v in theta.items()}
         return theta, log_prob
 
-    def log_prob(self, theta_i, cond):
+    def log_prob(self, theta_i, context, given=None):
         # theta_i uses exposed (aliased) names; map back to the network's trained names.
         theta_net = {
             net: theta_i[self.aliases.get(net, net)] for net in self._net_parameters
         }
         num_samples = next(iter(theta_net.values())).shape[0]
         z = self.standardization.standardize(theta_net, self._net_parameters)
-        data = cond.context.prepared_data()
+        data = context.prepared_data()
         data = data.expand(num_samples, *data.shape)
         net_context: tuple[torch.Tensor, ...]
         if not self.context_parameters:
             net_context = (data,)
         else:
-            ctx = self.standardization.standardize(cond.given, self.context_parameters)
+            ctx = self.standardization.standardize(given, self.context_parameters)
             net_context = (data, ctx)
         self.model.network.eval()
         with torch.no_grad():
@@ -309,22 +304,28 @@ class Reparametrization(ABC):
         return torch.zeros(n)
 
     def sample_and_log_prob(
-        self, num_samples: int, cond: "Conditioning"
+        self,
+        num_samples: int,
+        context: SamplerContext,
+        given: Optional[dict[str, torch.Tensor]] = None,
     ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
         """Apply ``forward`` to the conditioning; contribute ``-log|det J|``. ``num_samples``
         must be 1 (a reparametrization is 1:1)."""
         if num_samples != 1:
             raise ValueError("A reparametrization is 1:1; use fan_out=1.")
-        out = self.forward(cond.given, cond.context)
-        return out, -self.log_det(cond.given, cond.context)
+        out = self.forward(given, context)
+        return out, -self.log_det(given, context)
 
     @property
     def consumes(self) -> list[str]:
-        """Conditioning the bijection replaces with its outputs (dropped after the step)."""
+        """Inputs the bijection replaces with its outputs (dropped after the step)."""
         return [c for c in self.conditioning if c not in self.parameters]
 
     def log_prob(
-        self, theta_i: dict[str, torch.Tensor], cond: "Conditioning"
+        self,
+        theta_i: dict[str, torch.Tensor],
+        context: SamplerContext,
+        given: Optional[dict[str, torch.Tensor]] = None,
     ) -> torch.Tensor:
         raise NotImplementedError("Reparametrization.log_prob")
 
@@ -350,16 +351,22 @@ class TargetCorrection(ABC):
         """The side-channel column(s), one value per conditioning row."""
 
     def sample_and_log_prob(
-        self, num_samples: int, cond: "Conditioning"
+        self,
+        num_samples: int,
+        context: SamplerContext,
+        given: Optional[dict[str, torch.Tensor]] = None,
     ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
         if num_samples != 1:
             raise ValueError("A target correction is 1:1; use fan_out=1.")
-        out = self.correction(cond.given, cond.context)
+        out = self.correction(given, context)
         n = next(iter(out.values())).shape[0]
         return out, torch.zeros(n)
 
     def log_prob(
-        self, theta_i: dict[str, torch.Tensor], cond: "Conditioning"
+        self,
+        theta_i: dict[str, torch.Tensor],
+        context: SamplerContext,
+        given: Optional[dict[str, torch.Tensor]] = None,
     ) -> torch.Tensor:
         raise NotImplementedError("TargetCorrection.log_prob")
 
@@ -378,7 +385,10 @@ class Step(Protocol):
     conditioning: list[str]
 
     def sample_and_log_prob(
-        self, num_samples: int, cond: "Conditioning"
+        self,
+        num_samples: int,
+        context: SamplerContext,
+        given: Optional[dict[str, torch.Tensor]] = None,
     ) -> tuple[dict[str, torch.Tensor], Optional[torch.Tensor]]: ...
 
 
@@ -466,8 +476,8 @@ class ChainComposer:
                 # Unconditioned non-root step (e.g. a fixed/delta factor): draw one value
                 # per current row -- it fills the batch rather than fanning out.
                 n = len(next(iter(samples.values())))
-            cond = Conditioning(context, {k: samples[k] for k in step.conditioning})
-            block, lp = step.sample_and_log_prob(n, cond)
+            given = {k: samples[k] for k in step.conditioning}
+            block, lp = step.sample_and_log_prob(n, context, given)
             # A conditioned fan-out (fan_out > 1) expands the batch: repeat each carried row
             # to align with the step's fan_out sub-rows (the block is flattened row-major).
             # 1:1 stages and unconditioned fillers leave the batch untouched.
@@ -495,9 +505,9 @@ class ChainComposer:
         chain (every step a ``Factor``)."""
         total: torch.Tensor | float = 0.0
         for step in self.steps:
-            cond = Conditioning(context, {k: samples[k] for k in step.conditioning})
+            given = {k: samples[k] for k in step.conditioning}
             theta_i = {k: samples[k] for k in step.parameters}
-            total = total + step.log_prob(theta_i, cond)
+            total = total + step.log_prob(theta_i, context, given)
         return total
 
     def sample(
@@ -540,25 +550,26 @@ class GibbsBlock:
         self.conditioning: list[str] = []
 
     def sample_and_log_prob(
-        self, num_samples: int, cond: Conditioning
+        self,
+        num_samples: int,
+        context: SamplerContext,
+        given: Optional[dict[str, torch.Tensor]] = None,
     ) -> tuple[dict[str, torch.Tensor], None]:
         """Run the Gibbs loop for ``num_samples`` walkers; return ``(samples, None)``.
         ``num_samples`` is the walker (root) count -- Gibbs does not fan out."""
-        return self._run_once(num_samples, cond.context), None
+        return self._run_once(num_samples, context), None
 
     def _run_once(
         self, num_samples: int, context: SamplerContext
     ) -> dict[str, torch.Tensor]:
         # Seed the chain (e.g. an init network's detector times); the walkers are the rows.
-        seed, _ = self.init_factor.sample_and_log_prob(
-            num_samples, Conditioning(context)
-        )
+        seed, _ = self.init_factor.sample_and_log_prob(num_samples, context)
         state = dict(seed)
         for _ in range(self.num_iterations):
             for factor in self.factors:
-                c = Conditioning(context, {k: state[k] for k in factor.conditioning})
+                given = {k: state[k] for k in factor.conditioning}
                 # One sample per walker (Gibbs is 1:1); walkers are the conditioning rows.
-                block, _ = factor.sample_and_log_prob(1, c)
+                block, _ = factor.sample_and_log_prob(1, context, given)
                 state.update(block)
         return {p: state[p] for p in self.parameters}
 

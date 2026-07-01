@@ -13,7 +13,6 @@ import torch
 
 from dingo.core.factors import (
     ChainComposer,
-    Conditioning,
     Factor,
     GibbsBlock,
     Reparametrization,
@@ -34,9 +33,9 @@ class _ConstFactor(Factor):
         self.conditioning = list(conditioning)
         self._name = name
 
-    def sample_and_log_prob(self, n, cond):
+    def sample_and_log_prob(self, n, context, given=None):
         if self.conditioning:
-            base = sum(cond.given[k] for k in self.conditioning)  # (N,)
+            base = sum(given[k] for k in self.conditioning)  # (N,)
             n_rows = base.shape[0]
             # Integer-valued within-row offset: exact in float32 (no cancellation when
             # the test recovers it as b - a), and distinct per fan-out draw.
@@ -48,7 +47,7 @@ class _ConstFactor(Factor):
             lp = torch.full((n,), 0.5)
         return {self._name: vals}, lp
 
-    def log_prob(self, theta_i, cond):
+    def log_prob(self, theta_i, context, given=None):
         return torch.zeros(next(iter(theta_i.values())).shape[0])
 
 
@@ -145,12 +144,6 @@ def test_chunk_and_concat_allows_none_log_prob():
     assert samples["x"].shape == (6,)
 
 
-def test_conditioning_dataclass_defaults():
-    cond = Conditioning(context="ctx")
-    assert cond.context == "ctx"
-    assert cond.given == {}
-
-
 class _NoDensityStep:
     """A density-free step (like ``GibbsBlock``): emits a block but returns ``None`` for the
     log-prob. Honors the per-row fan-out contract so it composes like any step."""
@@ -160,9 +153,9 @@ class _NoDensityStep:
         self.conditioning = list(conditioning)
         self._name = name
 
-    def sample_and_log_prob(self, n, cond):
+    def sample_and_log_prob(self, n, context, given=None):
         if self.conditioning:
-            base = sum(cond.given[k] for k in self.conditioning)
+            base = sum(given[k] for k in self.conditioning)
             within = torch.arange(n, dtype=base.dtype)
             vals = (base.unsqueeze(1) + within).reshape(-1)
         else:
@@ -242,9 +235,7 @@ def test_reparam_step_consumes_input_and_contributes_neg_logdet():
 def test_reparam_rejects_fan_out():
     rp = _MockReparam()
     with pytest.raises(ValueError, match="1:1"):
-        rp.sample_and_log_prob(
-            2, Conditioning(context=None, given={"u": torch.zeros(3)})
-        )
+        rp.sample_and_log_prob(2, None, {"u": torch.zeros(3)})
 
 
 def test_reparam_forward_inverse_round_trip():
@@ -264,10 +255,10 @@ class _ConstFillFactor(Factor):
         self.conditioning = []
         self._name, self._v = name, value
 
-    def sample_and_log_prob(self, n, cond):
+    def sample_and_log_prob(self, n, context, given=None):
         return {self._name: torch.full((n,), self._v)}, torch.zeros(n)
 
-    def log_prob(self, theta_i, cond):
+    def log_prob(self, theta_i, context, given=None):
         return torch.zeros(next(iter(theta_i.values())).shape[0])
 
 
@@ -335,9 +326,7 @@ def test_target_correction_emits_side_channel_and_contributes_zero():
 def test_target_correction_rejects_fan_out():
     tc = _MockTargetCorrection()
     with pytest.raises(ValueError, match="1:1"):
-        tc.sample_and_log_prob(
-            2, Conditioning(context=None, given={"x": torch.zeros(3)})
-        )
+        tc.sample_and_log_prob(2, None, {"x": torch.zeros(3)})
 
 
 class _SideChannelFactor(Factor):
@@ -354,14 +343,14 @@ class _SideChannelFactor(Factor):
     def produces(self):
         return self.parameters + [self._side]
 
-    def sample_and_log_prob(self, n, cond):
+    def sample_and_log_prob(self, n, context, given=None):
         block = {
             self._name: torch.arange(n, dtype=torch.float32),
             self._side: torch.zeros(n),
         }
         return block, torch.zeros(n)
 
-    def log_prob(self, theta_i, cond):
+    def log_prob(self, theta_i, context, given=None):
         return torch.zeros(next(iter(theta_i.values())).shape[0])
 
 
