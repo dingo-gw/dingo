@@ -256,7 +256,7 @@ def test_reparam_forward_inverse_round_trip():
 
 
 class _ConstFillFactor(Factor):
-    """An unconditioned factor emitting a constant (like a ``FixedFactor``). As the root it
+    """An unconditioned factor emitting a constant (like a ``DeltaFactor``). As the root it
     draws the base count; as a non-root step it fills one value per current row."""
 
     def __init__(self, name, value=3.0):
@@ -298,7 +298,7 @@ def test_unconditioned_filler_fills_after_fan_out():
 
 
 def test_unconditioned_factor_as_root_draws_base_count():
-    # As the chain root (prior-conditioning / FixedFactor proxy), an unconditioned factor
+    # As the chain root (prior-conditioning / DeltaFactor proxy), an unconditioned factor
     # draws the base count; a downstream factor conditions on the pinned values.
     comp = ChainComposer(
         [_ConstFillFactor("c", 2.0), _ConstFactor("d", conditioning=["c"])]

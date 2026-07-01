@@ -140,9 +140,9 @@ class GWSamplerContext:
         raise NotImplementedError("GWSamplerContext.likelihood")
 
 
-class FixedFactor(Factor):
-    """``q_i = delta(theta_i - c)``: pins parameters to fixed values, contributing 0 to the
-    proposal log-prob.
+class DeltaFactor(Factor):
+    """``q_i = delta(theta_i - c)``: a point mass pinning parameters to fixed values,
+    contributing 0 to the proposal log-prob.
 
     Used as the chain root for prior-conditioning or known proxies (single-step GNPE, where
     later factors condition on the pinned values), and as a non-root filler for delta-prior
@@ -161,7 +161,7 @@ class FixedFactor(Factor):
         return samples, torch.zeros(num_samples)
 
     def log_prob(self, theta_i, cond):
-        raise NotImplementedError("FixedFactor.log_prob")
+        raise NotImplementedError("DeltaFactor.log_prob")
 
 
 # --- Stubs for later steps -------------------------------------------------------------
@@ -482,8 +482,8 @@ def _ra_reparam_steps(inference_parameters: list[str]) -> list:
     return [RAReparam()] if "ra" in inference_parameters else []
 
 
-def _fixed_prior_steps(metadata: dict, inference_parameters: list[str]) -> list:
-    """Delta-prior parameters the chain does not produce, as a single ``FixedFactor`` step
+def _delta_prior_steps(metadata: dict, inference_parameters: list[str]) -> list:
+    """Delta-prior parameters the chain does not produce, as a single ``DeltaFactor`` step
     (or none). These are pinned constants (e.g. an aligned-spin component fixed to 0).
     """
     intrinsic_prior = metadata["dataset_settings"]["intrinsic_prior"]
@@ -496,7 +496,7 @@ def _fixed_prior_steps(metadata: dict, inference_parameters: list[str]) -> list:
         for k, p in prior.items()
         if isinstance(p, DeltaFunction) and k not in inference_parameters
     }
-    return [FixedFactor(fixed)] if fixed else []
+    return [DeltaFactor(fixed)] if fixed else []
 
 
 class GWComposedSampler(ComposedSampler):
@@ -536,7 +536,7 @@ class GWComposedSampler(ComposedSampler):
         steps = (
             [factor]
             + _ra_reparam_steps(inference_parameters)
-            + _fixed_prior_steps(metadata, inference_parameters)
+            + _delta_prior_steps(metadata, inference_parameters)
         )
         return cls(
             composer=ChainComposer(steps),
@@ -573,7 +573,7 @@ class GWComposedSampler(ComposedSampler):
         steps = (
             [gibbs]
             + _ra_reparam_steps(inference_parameters)
-            + _fixed_prior_steps(metadata, inference_parameters)
+            + _delta_prior_steps(metadata, inference_parameters)
         )
         return cls(
             ChainComposer(steps),
@@ -592,7 +592,7 @@ class GWComposedSampler(ComposedSampler):
     ) -> "GWComposedSampler":
         """Build a single-step (density-preserving) time-GNPE sampler: a ``ChainComposer``
         of ``[proxy_source, GNPEFlowFactor, GNPEKernelCorrection, RAReparam]``.
-        ``proxy_source`` supplies the detector-time proxies -- a ``FixedFactor`` for prior
+        ``proxy_source`` supplies the detector-time proxies -- a ``DeltaFactor`` for prior
         conditioning (BNS), or an unconditional NDE for density recovery. The chain is
         autoregressive, so log_prob is preserved, and ``GNPEKernelCorrection`` emits the
         ``delta_log_prob_target`` correction that importance sampling adds to the target.
@@ -609,7 +609,7 @@ class GWComposedSampler(ComposedSampler):
         steps = (
             [proxy_source, flow_factor, GNPEKernelCorrection(kernel_factor)]
             + _ra_reparam_steps(inference_parameters)
-            + _fixed_prior_steps(metadata, inference_parameters)
+            + _delta_prior_steps(metadata, inference_parameters)
         )
         return cls(ChainComposer(steps), context, metadata, inference_parameters)
 
