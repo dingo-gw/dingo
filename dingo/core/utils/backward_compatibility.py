@@ -69,7 +69,10 @@ def torch_load_with_fallback(
         )
         _logger.debug(f"loaded model {filename} to {preferred_map_location}")
         return r
-    except RuntimeError:
+    except (RuntimeError, AttributeError):
+        # AttributeError can occur due to PyTorch bug: when CUDA is requested
+        # on Mac, PyTorch's internal fallback tries torch.mps.current_device()
+        # which doesn't exist (torch.mps lacks feature parity with torch.cuda)
         pass
 
     devices = torch_available_devices()
@@ -82,7 +85,7 @@ def torch_load_with_fallback(
                 f"(preferred device was {preferred_map_location})"
             )
             return r
-        except RuntimeError:
+        except (RuntimeError, AttributeError):
             pass
 
     raise RuntimeError(

@@ -11,6 +11,7 @@ from bilby_pipe.utils import (
     logger,
     convert_string_to_dict,
     convert_prior_string_input,
+    resolve_filename_with_transfer_fallback,
     BilbyPipeError,
 )
 
@@ -91,6 +92,7 @@ class ImportanceSamplingInput(Input):
         #
         # Calibration
         self.calibration_model = args.calibration_model
+        self.calibration_mode = args.calibration_mode
         self.spline_calibration_nodes = args.spline_calibration_nodes
         self.spline_calibration_envelope_dict = args.spline_calibration_envelope_dict
         self.spline_calibration_curves = args.spline_calibration_curves
@@ -125,14 +127,17 @@ class ImportanceSamplingInput(Input):
 
     @property
     def calibration_marginalization_kwargs(self):
-        if self.calibration_model == "CubicSpline":
+        if self.calibration_model == "CubicSpline" and self.calibration_mode == "marginalize":
             return {
-                "calibration_envelope": self.spline_calibration_envelope_dict,
+                "calibration_envelope": {
+                    ifo: resolve_filename_with_transfer_fallback(path)
+                    for ifo, path in self.spline_calibration_envelope_dict.items()
+                },
                 "num_calibration_nodes": self.spline_calibration_nodes,
                 "num_calibration_curves": self.spline_calibration_curves,
                 "correction_type": self.calibration_correction_type,
             }
-        elif self.calibration_model == None:
+        elif self.calibration_model is None or self.calibration_mode in ["sample", None]:
             return None
         else:
             raise ValueError(
@@ -174,6 +179,23 @@ class ImportanceSamplingInput(Input):
         else:
             self._importance_sampling_settings = dict()
 
+        # Add calibration sampling if mode is "sample"
+        if self.calibration_mode == "sample":
+            if self.calibration_model == "CubicSpline":
+                self._importance_sampling_settings["calibration_sampling_settings"] = {
+                    "calibration_envelope": {
+                        ifo: resolve_filename_with_transfer_fallback(path)
+                        for ifo, path in self.spline_calibration_envelope_dict.items()
+                    },
+                    "num_calibration_nodes": self.spline_calibration_nodes,
+                    "correction_type": self.calibration_correction_type,
+                }
+            else:
+                raise NotImplementedError(
+                    "The only calibration model which is supported is 'CubicSpline' "
+                    "with calibration_mode set to 'sample'"
+                )
+
     def run_sampler(self):
         self.result.use_base_domain = self.importance_sampling_settings.get(
             "use_base_domain", False
@@ -197,6 +219,12 @@ class ImportanceSamplingInput(Input):
                 "num_processes": self.request_cpus,
             }
             self.result.sample_synthetic_phase(synthetic_phase_kwargs)
+
+        if "calibration_sampling_settings" in self.importance_sampling_settings:
+            logger.info("Sampling calibration parameters for importance sampling.")
+            self.result.sample_calibration_parameters(
+                self.importance_sampling_settings["calibration_sampling_settings"]
+            )
 
         self.result.importance_sample(
             num_processes=self.request_cpus,

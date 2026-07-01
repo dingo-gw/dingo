@@ -13,12 +13,12 @@ import scipy
 from matplotlib import pyplot as plt
 from scipy.constants import golden
 from scipy.special import logsumexp
-from bilby.core.prior import Constraint, DeltaFunction, PriorDict, Prior
+from bilby.core.prior import Constraint, DeltaFunction, PriorDict
 
 from dingo.core.dataset import DingoDataset
 from dingo.core.density import train_unconditional_density_estimator
 from dingo.core.utils.misc import recursive_check_dicts_are_equal
-from dingo.core.utils.plotting import plot_corner_multi
+from dingo.core.utils.plotting import get_latex_labels, plot_corner_multi
 
 DATA_KEYS = [
     "samples",
@@ -28,6 +28,31 @@ DATA_KEYS = [
     "log_evidence",
     "log_noise_evidence",
 ]
+
+
+def _clip_weights(weights: np.ndarray, num_clip: int) -> np.ndarray:
+    """Replace the ``num_clip`` largest weights with their mean, then re-normalize.
+
+    Clipping to the mean (rather than the minimum) preserves the total weight of
+    the clipped group, which minimises the bias introduced by the operation.
+
+    Parameters
+    ----------
+    weights : np.ndarray
+        1-D array of non-negative importance weights (need not be normalized).
+    num_clip : int
+        Number of largest weights to clip.
+
+    Returns
+    -------
+    np.ndarray
+        Clipped weights normalized to mean 1.
+    """
+    weights = weights.copy()
+    clip_idx = np.argpartition(-weights, num_clip)[:num_clip]
+    weights[clip_idx] = weights[clip_idx].mean()
+    weights /= weights.mean()
+    return weights
 
 
 class Result(DingoDataset):
@@ -284,7 +309,7 @@ class Result(DingoDataset):
         # For these, we do not want to evaluate the likelihood, in particular because
         # it may not even be possible to generate signals outside the prior (e.g.,
         # for BH spins > 1).
-        valid_samples = (log_prior + delta_log_prob_target) != -np.inf
+        valid_samples = np.isfinite(log_prior + delta_log_prob_target)
         theta = theta.iloc[valid_samples]
 
         print(f"Calculating {len(theta)} likelihoods.")
@@ -397,6 +422,112 @@ class Result(DingoDataset):
             random_state=random_state,
         )
         return unweighted_samples.drop(["weights"], axis=1)
+
+    def rejection_sample(
+        self,
+        max_samples_per_draw: int = 1,
+        clip_weights: bool = False,
+        random_state=None,
+    ):
+        """
+        Generate unweighted posterior samples from weighted ones via rejection sampling.
+
+        Each original sample contributes at most ``max_samples_per_draw`` copies to
+        the output, so the result avoids the excessive duplication that
+        :meth:`sampling_importance_resampling` can produce for high-weight samples.
+
+        **Algorithm (unbiased, maximum efficiency)**
+
+        The weights are first scaled so that the largest weight equals
+        ``max_samples_per_draw``.  Each sample ``i`` then contributes
+
+        * ``floor(w_scaled[i])`` copies deterministically (integer part), and
+        * one additional copy with probability ``w_scaled[i] - floor(w_scaled[i])``
+          (fractional part, a single Bernoulli draw).
+
+        The expected number of copies of sample ``i`` is therefore exactly
+        ``w_scaled[i] ∝ w[i]``, which guarantees an unbiased representation of the
+        posterior.  Using the integer part deterministically (rather than rounding
+        stochastically) maximises the expected total number of output samples for a
+        given ``max_samples_per_draw``.
+
+        **Optional weight clipping**
+
+        When ``clip_weights=True``, the ``ceil(sqrt(N))`` largest weights are
+        replaced by their mean and the weights are re-normalized to mean 1 before
+        rejection sampling.  This number of clips is the theoretically optimal
+        choice that yields asymptotically unbiased results [1]_.  Using the mean
+        (rather than the minimum) of the clipped group preserves their total weight,
+        which minimises the bias introduced by clipping.  The net effect is reduced
+        weight variance and a larger expected number of output samples.
+
+        If the samples DataFrame has no ``weights`` column the samples are already
+        unweighted and are returned unchanged.
+
+        Parameters
+        ----------
+        max_samples_per_draw : int
+            Maximum number of copies any single input sample may contribute to the
+            output.  Default is 1 (standard rejection sampling, no duplicates).
+        clip_weights : bool
+            Whether to clip the ``ceil(sqrt(N))`` largest weights to their mean
+            before rejection sampling.  Default is False.
+        random_state : int or None
+            Seed for the random number generator, for reproducibility.
+
+        Returns
+        -------
+        pd.DataFrame
+            Unweighted samples (the ``weights`` column is dropped).
+
+        References
+        ----------
+        .. [1] Elvira et al., "A Comparison Of Clipping Strategies For Importance Sampling"
+               https://ieeexplore.ieee.org/document/8450722
+        """
+        if max_samples_per_draw < 1:
+            raise ValueError("max_samples_per_draw must be >= 1.")
+
+        if "weights" not in self.samples:
+            return self.samples.copy()
+
+        rng = np.random.default_rng(random_state)
+        weights = self.samples["weights"].to_numpy(dtype=float)
+
+        print(
+            f"Rejection sampling: {self.num_samples} samples, "
+            f"ESS = {self.effective_sample_size:.0f} "
+            f"(efficiency = {100 * self.sample_efficiency:.1f}%)"
+        )
+
+        if clip_weights:
+            num_clip = math.ceil(math.sqrt(len(weights)))
+            weights = _clip_weights(weights, num_clip)
+
+        # Scale so the maximum weight maps to max_samples_per_draw.
+        # Expected copies of sample i = w_scaled[i] ∝ w[i]  →  unbiased.
+        w_scaled = weights * (max_samples_per_draw / weights.max())
+
+        # Deterministic part: floor(w_scaled[i]) copies always included.
+        n_det = np.floor(w_scaled).astype(int)
+
+        # Stochastic part: one extra copy with probability = fractional remainder.
+        p_frac = w_scaled - n_det
+        extra = (rng.random(len(weights)) < p_frac).astype(int)
+
+        n_copies = n_det + extra
+
+        # Build the output by repeating each row according to its copy count.
+        indices = np.repeat(np.arange(len(weights)), n_copies)
+        unweighted = self.samples.iloc[indices].reset_index(drop=True)
+        # Drop columns that are only meaningful for weighted samples: weights and
+        # log_prob are tied to the proposal distribution, and delta_log_prob_target
+        # is an auxiliary correction term used during importance sampling.
+        unweighted = unweighted.drop(
+            columns=["weights", "log_prob", "delta_log_prob_target"], errors="ignore"
+        )
+        print(f"Produced {len(unweighted)} unweighted samples.")
+        return unweighted
 
     def parameter_subset(self, parameters):
         """
@@ -961,23 +1092,3 @@ def freeze(d):
     return d
 
 
-def get_latex_labels(prior: PriorDict) -> dict:
-    """
-    Get the latex labels for prior parameters. If no latex label exists within the
-    prior object, try to choose based on parameter key. Finally, return the parameter key.
-
-    Parameters
-    ----------
-    prior : PriorDict
-
-    Returns
-    -------
-    dict of latex labels
-    """
-    labels = {}
-    for k, v in prior.items():
-        l = v.latex_label
-        if l is None:
-            l = Prior._default_latex_labels.get(k, k)
-        labels[k] = l
-    return labels

@@ -184,13 +184,13 @@ def split_off_extrinsic_parameters(theta):
     theta_intrinsic: dict
         BBH intrinsic parameters.
     theta_extrinsic: dict
-        BBH extrinsic parameters.
+        BBH extrinsic parameters (includes calibration parameters).
     """
     extrinsic_parameters = ["geocent_time", "luminosity_distance", "ra", "dec", "psi"]
     theta_intrinsic = {}
     theta_extrinsic = {}
     for k, v in theta.items():
-        if k in extrinsic_parameters:
+        if k in extrinsic_parameters or "recalib" in k:
             theta_extrinsic[k] = v
         else:
             theta_intrinsic[k] = v

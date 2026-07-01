@@ -177,11 +177,6 @@ While this file contains numerous settings that are discussed in [training](trai
 data:
   waveform_dataset_path: training_data/waveform_dataset.hdf5  # Contains intrinsic waveforms
   train_fraction: 0.95
-  window:  # Needed to calculate window factor for simulated data
-    type: tukey
-    f_s: 4096
-    T: 4.0
-    roll_off: 0.4
   detectors:
     - H1
     - L1

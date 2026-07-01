@@ -11,7 +11,7 @@ from dingo.core.utils.backward_compatibility import (
 )
 
 
-class TestModel(torch.nn.Module):
+class DummyModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.linear = torch.nn.Linear(5, 3)
@@ -19,7 +19,7 @@ class TestModel(torch.nn.Module):
 
 @pytest.fixture
 def model_path(tmp_path) -> str:
-    model = TestModel()
+    model = DummyModel()
     model.linear.weight.data.fill_(1.0)
     model.linear.bias.data.fill_(2.0)
     model_path = tmp_path / "test_model.pt"

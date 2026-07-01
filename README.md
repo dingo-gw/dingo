@@ -29,41 +29,76 @@ handled by Dingo include
 ### Pip
 
 To install using pip, run the following within a suitable virtual environment:
+
 ```sh
 pip install dingo-gw
 ```
-This will install Dingo as well as all of its requirements, which are listed in
-[pyproject.toml](https://github.com/dingo-gw/dingo/blob/main/pyproject.toml).
+
+This installs Dingo and its runtime dependencies, as specified in  
+[`pyproject.toml`](https://github.com/dingo-gw/dingo/blob/main/pyproject.toml).
+
+Optional functionality can be enabled via extras, for example:
+
+```sh
+pip install "dingo-gw[wandb,pyseobnr]"
+```
 
 ### Conda
 
-Dingo is also available from the [conda-forge](https://conda-forge.org) repository.
-To install using conda, first activate a conda environment, and then run
+Dingo is also available from the [conda-forge](https://conda-forge.org) repository.  
+To install using conda, first activate a conda environment, then run:
+
 ```sh
 conda install -c conda-forge dingo-gw
 ```
 
 ### Development install
 
-If you would like to make changes to Dingo, or to contribute to its development, you
-should install Dingo from source. To do so, first clone this repository:
+If you would like to make changes to Dingo or contribute to its development, install it
+from source.
+
+First clone the repository:
+
 ```sh
 git clone git@github.com:dingo-gw/dingo.git
+cd dingo-gw
 ```
-Next create a virtual environment for Dingo, e.g.,
+
+#### Recommended (using `uv`)
+
+We recommend using [`uv`](https://docs.astral.sh/uv/) for development installs, as it
+provides fast, reproducible dependency resolution.
+
+Create a virtual environment and install all development dependencies:
+
+```sh
+uv sync
+```
+
+This installs Dingo in editable mode along with development, documentation, and typing
+dependencies. To also install optional dependencies, use
+
+```sh
+uv sync --extra wandb --extra pyseobnr
+```
+
+#### Alternative (pip)
+
+If you prefer pip, create and activate a virtual environment:
 ```sh
 python3 -m venv dingo-venv
 source dingo-venv/bin/activate
 ```
-This creates and activates a [venv](https://docs.python.org/3/library/venv.html) for Dingo
-called `dingo-venv`. In this virtual environment, install Dingo:
+
+Install Dingo in editable mode with development tools:
 ```sh
-cd dingo
-pip install -e ."[dev]"
+pip install -e ".[dev]"
 ```
-This command installs an editable version of Dingo, meaning that any changes to the Dingo
-source are reflected immediately in the installation. The inclusion of `dev` installs
-extra packages needed for development (code formatting, compiling documentation, etc.)
+
+Optional user-facing features can be enabled via extras, for example:
+```sh
+pip install -e ".[dev,wandb]"
+```
 
 ## Usage
 

@@ -65,8 +65,8 @@ def recursive_hdf5_load(
                 # If the array has column names, load it as a pandas DataFrame
                 if d[k].dtype.names is not None:
                     d[k] = pd.DataFrame(d[k])
-                # Convert arrays of size 1 to scalars
-                elif d[k].size == 1:
+                # Convert 0-dimensional arrays to scalars
+                elif d[k].ndim == 0:
                     d[k] = d[k].item()
                     if isinstance(d[k], bytes):
                         # Assume this is a string.
