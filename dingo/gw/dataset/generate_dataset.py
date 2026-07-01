@@ -9,15 +9,17 @@ import hydra
 import numpy as np
 import pandas as pd
 from bilby.gw.prior import BBHPriorDict
-from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from threadpoolctl import threadpool_limits
 from torchvision.transforms import Compose
 
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
+from dingo.gw.domains import build_domain
+from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.SVD import ApplySVD, SVDBasis
 from dingo.gw.transforms import WhitenFixedASD
 from dingo.gw.waveform_generator import (
+    NewInterfaceWaveformGenerator,
     WaveformGenerator,
     generate_waveforms_parallel,
 )
@@ -139,33 +141,43 @@ def train_svd_basis(dataset: WaveformDataset, size: int, n_train: int):
     return basis, n_train, n_test
 
 
-def _dataset_settings(cfg: DictConfig) -> Dict:
+def _settings_from_config(cfg: DictConfig) -> Dict:
     settings = OmegaConf.to_container(cfg, resolve=True)
     settings.pop("out_file", None)
     settings.pop("num_processes", None)
     return settings
 
 
-def generate_dataset(cfg: DictConfig) -> WaveformDataset:
+def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
     """
     Generate a waveform dataset.
 
     Parameters
     ----------
-    cfg : DictConfig
-        Hydra configuration for dataset generation.
+    settings : dict
+        Dictionary of settings to configure the dataset
+    num_processes : int
 
     Returns
     -------
     A WaveformDataset based on the settings.
     """
 
-    prior = instantiate(cfg.intrinsic_prior, _convert_="all")
-    domain = instantiate(cfg.domain)
-    waveform_generator = instantiate(cfg.waveform_generator, domain=domain)
-    num_processes = cfg.get("num_processes", 1)
+    prior = build_prior_with_defaults(settings["intrinsic_prior"])
+    domain = build_domain(settings["domain"])
 
-    settings = _dataset_settings(cfg)
+    new_interface_flag = settings["waveform_generator"].get("new_interface", False)
+    if new_interface_flag:
+        waveform_generator = NewInterfaceWaveformGenerator(
+            domain=domain,
+            **settings["waveform_generator"],
+        )
+    else:
+        waveform_generator = WaveformGenerator(
+            domain=domain,
+            **settings["waveform_generator"],
+        )
+
     dataset_dict = {"settings": settings}
 
     if settings.get("compression", None) is not None:
@@ -243,13 +255,14 @@ def generate_dataset(cfg: DictConfig) -> WaveformDataset:
     dataset_dict["parameters"] = parameters
     dataset_dict["polarizations"] = polarizations
 
+    dataset_dict[settings["num_samples"]] = len(parameters)
     dataset = WaveformDataset(dictionary=dataset_dict)
     return dataset
 
 
 @hydra.main(
     version_base="1.3",
-    config_path="../../../configs/gw/dataset",
+    config_path="../../../configs/examples",
     config_name="generate_dataset",
 )
 def main(cfg: DictConfig) -> None:
@@ -259,7 +272,8 @@ def main(cfg: DictConfig) -> None:
             f"dataset generation: can not create {out_file}: "
             f"{Path(out_file).parent} does not exist"
         )
-    dataset = generate_dataset(cfg)
+    settings = _settings_from_config(cfg)
+    dataset = generate_dataset(settings, cfg.num_processes)
     dataset.to_file(str(out_file))
 
 

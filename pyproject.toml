@@ -33,6 +33,7 @@ dependencies = [
     "glasflow",
     "gwpy",
     "h5py",
+    "hydra-core",
     "lalsuite>=7.15",
     "matplotlib",
     "numpy",
