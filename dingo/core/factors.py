@@ -257,12 +257,30 @@ class FlowFactor(Factor):
         return log_prob + self.standardization.log_det(self.parameters)
 
 
+class Step(Protocol):
+    """
+    One entry a ``ChainComposer`` folds over: it emits a parameter block and an optional
+    contribution to the proposal ``log_prob``.
+
+    Density-contributing steps (``Factor``) return a tensor; density-free sampling blocks
+    (``GibbsBlock``) return ``None``. ``parameters`` names the block produced, ``conditioning``
+    the earlier-block parameters read from the chain (data is implicit via the context).
+    """
+
+    parameters: list[str]
+    conditioning: list[str]
+
+    def sample_and_log_prob(
+        self, num_samples: int, cond: "Conditioning"
+    ) -> tuple[dict[str, torch.Tensor], Optional[torch.Tensor]]: ...
+
+
 @dataclass
 class Stage:
-    """A chain factor and its fan-out: the number of samples drawn per incoming
+    """A chain ``Step`` and its fan-out: the number of samples drawn per incoming
     conditioning row. The root stage draws the base count and ignores ``fan_out``."""
 
-    factor: Factor
+    step: Step
     fan_out: int = 1
 
 
@@ -270,35 +288,38 @@ class ChainComposer:
     """
     Autoregressive composer over an ordered list of ``Stage``s.
 
-    Draws the stages in declared order -- a topological order of the conditioning DAG --
-    expanding each stage by its fan-out and summing the log-probs. Covers plain NPE,
-    single-step GNPE, prior conditioning, synthetic phase, and intrinsic/extrinsic splits.
-    Multi-iteration (cyclic) GNPE uses ``GibbsComposer`` instead.
+    Folds the steps in declared order -- a topological order of the conditioning DAG --
+    expanding each by its fan-out and summing the proposal log-probs. A step is a
+    ``Factor`` (contributes ``log q_i``) or a density-free sampling block (``GibbsBlock``,
+    contributes ``None``); if any step is density-free the chain has no tractable density
+    and ``sample`` omits ``log_prob``. Covers plain NPE, single-step GNPE, prior
+    conditioning, synthetic phase, intrinsic/extrinsic splits, and -- via ``GibbsBlock`` --
+    multi-iteration GNPE.
 
-    Accepts bare factors (wrapped as ``Stage(factor, fan_out=1)``) or explicit ``Stage``s.
+    Accepts bare steps (wrapped as ``Stage(step, fan_out=1)``) or explicit ``Stage``s.
     """
 
-    def __init__(self, stages: list[Union["Stage", Factor]]):
+    def __init__(self, stages: list[Union["Stage", Step]]):
         self.stages = [s if isinstance(s, Stage) else Stage(s) for s in stages]
         self._validate()
 
     def _validate(self):
         """Check the declared order is a valid topological order: every conditioning
-        name is produced by an earlier factor."""
+        name is produced by an earlier step."""
         produced: set[str] = set()
-        for factor in self.factors:
-            missing = [c for c in factor.conditioning if c not in produced]
+        for step in self.steps:
+            missing = [c for c in step.conditioning if c not in produced]
             if missing:
                 raise ValueError(
-                    f"Factor producing {factor.parameters} conditions on {missing}, "
-                    f"which no earlier factor produces. Check chain order."
+                    f"A step producing {step.parameters} conditions on {missing}, "
+                    f"which no earlier step produces. Check chain order."
                 )
-            produced.update(factor.parameters)
+            produced.update(step.parameters)
 
     @property
-    def factors(self) -> list[Factor]:
-        """The stage factors, in order."""
-        return [stage.factor for stage in self.stages]
+    def steps(self) -> list[Step]:
+        """The stage steps, in order."""
+        return [stage.step for stage in self.stages]
 
     @property
     def expansion(self) -> int:
@@ -311,45 +332,53 @@ class ChainComposer:
         num_samples: int,
         context: SamplerContext,
         batch_size: Optional[int] = None,
-    ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
+    ) -> tuple[dict[str, torch.Tensor], Optional[torch.Tensor]]:
         """Draw samples. ``num_samples`` is the base (root) count; the result has
         ``num_samples * expansion`` rows. ``batch_size`` chunks the base count (``None``
-        draws in one pass)."""
+        draws in one pass). The log-prob is ``None`` if any step is density-free."""
         return chunk_and_concat(
             num_samples, batch_size, lambda n: self._run_chain_once(n, context)
         )
 
     def _run_chain_once(
         self, base: int, context: SamplerContext
-    ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
-        """One pass of the whole chain for ``base`` root samples."""
+    ) -> tuple[dict[str, torch.Tensor], Optional[torch.Tensor]]:
+        """One pass of the whole chain for ``base`` root samples. Returns the samples and
+        the summed proposal log-prob, or ``None`` if any step is density-free."""
         samples: dict[str, torch.Tensor] = {}
         total: torch.Tensor | float = 0.0
+        has_density = True
         for i, stage in enumerate(self.stages):
-            factor = stage.factor
+            step = stage.step
             n = base if i == 0 else stage.fan_out
-            cond = Conditioning(context, {k: samples[k] for k in factor.conditioning})
-            block, lp = factor.sample_and_log_prob(n, cond)
-            # The factor returned (rows_so_far * n) rows. Expand the carried columns to
-            # match -- each upstream row repeated n times (the block is flattened in the
-            # same row-major order). The root has no carried rows, and fan_out=1 stages
-            # are a no-op, so 1:1 chains are untouched.
+            cond = Conditioning(context, {k: samples[k] for k in step.conditioning})
+            block, lp = step.sample_and_log_prob(n, cond)
+            # The step returned (rows_so_far * n) rows. Expand the carried columns to match
+            # -- each upstream row repeated n times (the block is flattened in the same
+            # row-major order). The root has no carried rows, and fan_out=1 stages are a
+            # no-op, so 1:1 chains are untouched.
             if i > 0 and n > 1:
                 samples = {k: v.repeat_interleave(n, 0) for k, v in samples.items()}
                 if torch.is_tensor(total):
                     total = total.repeat_interleave(n, 0)
             samples.update(block)
-            total = total + lp
-        return samples, total
+            # A single density-free step (Gibbs) makes the whole chain density-free.
+            if lp is None:
+                has_density = False
+            elif has_density:
+                total = total + lp
+        return samples, (total if has_density else None)
 
     def log_prob(
         self, samples: dict[str, torch.Tensor], context: SamplerContext
     ) -> torch.Tensor:
+        """Sum each step's ``log_prob`` at the given samples. Valid only for an all-density
+        chain (every step a ``Factor``)."""
         total: torch.Tensor | float = 0.0
-        for factor in self.factors:
-            cond = Conditioning(context, {k: samples[k] for k in factor.conditioning})
-            theta_i = {k: samples[k] for k in factor.parameters}
-            total = total + factor.log_prob(theta_i, cond)
+        for step in self.steps:
+            cond = Conditioning(context, {k: samples[k] for k in step.conditioning})
+            theta_i = {k: samples[k] for k in step.parameters}
+            total = total + step.log_prob(theta_i, cond)
         return total
 
     def sample(
@@ -358,42 +387,45 @@ class ChainComposer:
         context: SamplerContext,
         batch_size: Optional[int] = None,
     ) -> dict[str, torch.Tensor]:
-        """Per-sample dict of parameters plus ``log_prob``."""
+        """Per-sample dict of parameters, plus ``log_prob`` for an all-density chain."""
         samples, log_prob = self.sample_and_log_prob(num_samples, context, batch_size)
+        if log_prob is None:
+            return dict(samples)
         return {**samples, "log_prob": log_prob}
 
 
-class GibbsComposer:
+class GibbsBlock:
     """
-    Blocked Gibbs composer over a cyclic conditioning dependency.
+    A density-free sampling-block ``Step``: runs blocked Gibbs internally and yields no
+    proposal log-prob.
 
     Seeds the chain with an init factor, then sweeps the factor list in order for
     ``num_iterations`` iterations; each factor conditions on the current state and
-    overwrites its own block. The cyclic dependency has no tractable marginal, so
-    ``sample`` returns parameters without a ``log_prob`` (recoverable by fitting an
-    unconditional density to the samples and taking one ``ChainComposer`` step). Dingo uses
-    this only for multi-iteration GNPE (the GNPE factors in ``dingo.gw.inference.factors``),
-    but the loop is generic.
+    overwrites its own block. As a chain ``Step`` it produces the swept parameter blocks
+    and returns ``None`` for the log-prob -- the cyclic dependency has no tractable marginal
+    (recoverable by fitting an unconditional density to the samples and taking one
+    ``ChainComposer`` step). Dingo uses this only for multi-iteration GNPE (the GNPE factors
+    in ``dingo.gw.inference.factors``), but the loop is generic.
 
-    Batching is vertical, via ``chunk_and_concat``: chunk the walkers and run the whole
-    loop per chunk.
+    Batching is handled by the enclosing ``ChainComposer``: it chunks the walkers and runs
+    the whole loop per chunk (``chunk_and_concat``).
     """
 
     def __init__(self, init_factor: Factor, factors: list[Factor], num_iterations: int):
         self.init_factor = init_factor
         self.factors = list(factors)
         self.num_iterations = num_iterations
+        # The blocks this step produces (proxies + inference parameters), dropping
+        # side-channel columns such as the recomputed detector times.
+        self.parameters = [p for factor in self.factors for p in factor.parameters]
+        self.conditioning: list[str] = []
 
-    def sample(
-        self,
-        num_samples: int,
-        context: SamplerContext,
-        batch_size: Optional[int] = None,
-    ) -> dict[str, torch.Tensor]:
-        samples, _ = chunk_and_concat(
-            num_samples, batch_size, lambda n: (self._run_once(n, context), None)
-        )
-        return samples
+    def sample_and_log_prob(
+        self, num_samples: int, cond: Conditioning
+    ) -> tuple[dict[str, torch.Tensor], None]:
+        """Run the Gibbs loop for ``num_samples`` walkers; return ``(samples, None)``.
+        ``num_samples`` is the walker (root) count -- Gibbs does not fan out."""
+        return self._run_once(num_samples, cond.context), None
 
     def _run_once(
         self, num_samples: int, context: SamplerContext
@@ -405,35 +437,20 @@ class GibbsComposer:
         state = dict(seed)
         for _ in range(self.num_iterations):
             for factor in self.factors:
-                cond = Conditioning(context, {k: state[k] for k in factor.conditioning})
+                c = Conditioning(context, {k: state[k] for k in factor.conditioning})
                 # One sample per walker (Gibbs is 1:1); walkers are the conditioning rows.
-                block, _ = factor.sample_and_log_prob(1, cond)
+                block, _ = factor.sample_and_log_prob(1, c)
                 state.update(block)
-        # Each factor's parameter block (e.g. proxies + inference parameters), dropping
-        # side-channel columns such as the recomputed detector times.
-        return {p: state[p] for factor in self.factors for p in factor.parameters}
-
-
-class Composer(Protocol):
-    """Interface required by ``ComposedSampler``: ``sample`` returns a per-sample dict of
-    parameters (plus ``log_prob`` for density-preserving composers). Satisfied by
-    ``ChainComposer`` and ``GibbsComposer``."""
-
-    def sample(
-        self,
-        num_samples: int,
-        context: SamplerContext,
-        batch_size: Optional[int] = None,
-    ) -> dict[str, torch.Tensor]: ...
+        return {p: state[p] for p in self.parameters}
 
 
 class ComposedSampler:
     """
-    Façade over a ``Composer`` and a ``SamplerContext``. Runs the composer, applies
+    Façade over a ``ChainComposer`` and a ``SamplerContext``. Runs the composer, applies
     domain-specific post-processing, and returns the samples as a DataFrame.
     """
 
-    def __init__(self, composer: Composer, context: SamplerContext):
+    def __init__(self, composer: ChainComposer, context: SamplerContext):
         self.composer = composer
         self.context = context
         self.samples: Optional[pd.DataFrame] = None
@@ -446,8 +463,8 @@ class ComposedSampler:
         self, num_samples: int, batch_size: Optional[int] = None
     ) -> pd.DataFrame:
         """Draw ``num_samples`` samples (chunked by ``batch_size``), post-process, and
-        return them as a DataFrame. ``ChainComposer`` includes ``log_prob``;
-        ``GibbsComposer`` does not."""
+        return them as a DataFrame. An all-density chain includes ``log_prob``; a chain
+        with a ``GibbsBlock`` step does not."""
         merged = self.composer.sample(num_samples, self.context, batch_size)
         merged = {k: v.cpu().numpy() for k, v in merged.items()}
         self._post_process(merged)

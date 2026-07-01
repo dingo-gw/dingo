@@ -7,7 +7,7 @@ domain-agnostic and lives in ``dingo.core.factors``; what is GW-specific is the
 ``GWSamplerContext`` (which builds the data-preprocessing conditioning map ``f_i``) and
 the post-processing in ``GWComposedSampler``. Covers plain NPE (``FlowFactor`` via a
 ``ChainComposer``) and multi-iteration time-shift GNPE (``GNPEKernelFactor`` +
-``GNPEFlowFactor`` cycled by a ``GibbsComposer``); the synthetic-phase factor and
+``GNPEFlowFactor`` cycled by a ``GibbsBlock``); the synthetic-phase factor and
 single-step GNPE importance sampling remain for later steps.
 """
 
@@ -27,11 +27,10 @@ from torchvision.transforms import Compose
 from dingo.core.factors import (
     ChainComposer,
     ComposedSampler,
-    Composer,
     Conditioning,
     Factor,
     FlowFactor,
-    GibbsComposer,
+    GibbsBlock,
     _base_model_metadata,
 )
 from dingo.core.posterior_models import BasePosteriorModel
@@ -323,7 +322,7 @@ class GNPEFlowFactor(Factor):
     and geocent time. The proxies are supplied, so no blurring happens here. Wraps the main
     model and the per-iteration transforms built for ``GWSamplerGNPE``.
 
-    The single network factor in either GNPE mode: cycled by ``GibbsComposer`` for
+    The single network factor in either GNPE mode: cycled by a ``GibbsBlock`` for
     multi-iteration GNPE, or a ``ChainComposer`` factor for single-step GNPE. The recomputed
     detector times are returned as extra columns: the next Gibbs iteration blurs them into
     fresh proxies, and single-step GNPE evaluates the kernel correction at them. One sample
@@ -402,7 +401,7 @@ class GWComposedSampler(ComposedSampler):
 
     def __init__(
         self,
-        composer: Composer,
+        composer: ChainComposer,
         context: GWSamplerContext,
         metadata: dict,
         inference_parameters: list[str],
@@ -443,18 +442,17 @@ class GWComposedSampler(ComposedSampler):
         num_iterations: int = 30,
     ) -> "GWComposedSampler":
         """Build a multi-iteration time-GNPE sampler from an init + main model pair: the
-        init model's data preprocessing, an init ``FlowFactor`` to seed, and a
-        ``GibbsComposer`` cycling the GNPE kernel and main-network factors. Returns samples
-        without a log_prob (Gibbs breaks density access)."""
+        init model's data preprocessing, an init ``FlowFactor`` to seed, and a single
+        ``GibbsBlock`` step -- cycling the GNPE kernel and main-network factors -- in a
+        ``ChainComposer``. Returns samples without a log_prob (Gibbs breaks density
+        access)."""
         context = GWSamplerContext.from_model(init_model, raw_context, event_metadata)
         init_factor = FlowFactor.from_model(init_model)
         kernel_factor = GNPEKernelFactor.from_model(main_model)
         flow_factor = GNPEFlowFactor.from_model(main_model)
-        composer = GibbsComposer(
-            init_factor, [kernel_factor, flow_factor], num_iterations
-        )
+        gibbs = GibbsBlock(init_factor, [kernel_factor, flow_factor], num_iterations)
         return cls(
-            composer,
+            ChainComposer([gibbs]),
             context,
             _base_model_metadata(main_model),
             flow_factor.parameters,

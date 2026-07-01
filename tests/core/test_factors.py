@@ -15,6 +15,7 @@ from dingo.core.factors import (
     ChainComposer,
     Conditioning,
     Factor,
+    GibbsBlock,
     Stage,
     chunk_and_concat,
 )
@@ -61,7 +62,7 @@ def test_bare_factor_is_wrapped_as_stage():
     comp = ChainComposer([_ConstFactor("a")])
     assert isinstance(comp.stages[0], Stage)
     assert comp.stages[0].fan_out == 1
-    assert comp.factors[0].parameters == ["a"]
+    assert comp.steps[0].parameters == ["a"]
 
 
 def test_fan_out_expansion_alignment_and_logprob():
@@ -146,3 +147,59 @@ def test_conditioning_dataclass_defaults():
     cond = Conditioning(context="ctx")
     assert cond.context == "ctx"
     assert cond.given == {}
+
+
+class _NoDensityStep:
+    """A density-free step (like ``GibbsBlock``): emits a block but returns ``None`` for the
+    log-prob. Honors the per-row fan-out contract so it composes like any step."""
+
+    def __init__(self, name, conditioning=()):
+        self.parameters = [name]
+        self.conditioning = list(conditioning)
+        self._name = name
+
+    def sample_and_log_prob(self, n, cond):
+        if self.conditioning:
+            base = sum(cond.given[k] for k in self.conditioning)
+            within = torch.arange(n, dtype=base.dtype)
+            vals = (base.unsqueeze(1) + within).reshape(-1)
+        else:
+            vals = torch.arange(n, dtype=torch.float32)
+        return {self._name: vals}, None
+
+
+def test_density_free_step_omits_log_prob():
+    # A density-free root step (Gibbs) yields no proposal density.
+    comp = ChainComposer([_NoDensityStep("a")])
+    _, lp = comp.sample_and_log_prob(5, context=None)
+    assert lp is None
+    out = comp.sample(5, context=None)
+    assert "log_prob" not in out
+    assert torch.equal(out["a"], torch.arange(5, dtype=torch.float32))
+
+
+def test_one_density_free_step_nulls_the_whole_chain():
+    # A single None step makes the chain density-free even alongside a density factor.
+    comp = ChainComposer(
+        [_ConstFactor("a"), Stage(_NoDensityStep("b", conditioning=["a"]))]
+    )
+    _, lp = comp.sample_and_log_prob(4, context=None)
+    assert lp is None
+    assert "log_prob" not in comp.sample(4, context=None)
+
+
+def test_gibbs_block_runs_as_a_density_free_step():
+    # GibbsBlock seeds, sweeps its factors num_iterations times, and yields no density;
+    # seed-only params (not reproduced by a factor) are dropped, matching the old composer.
+    block = GibbsBlock(
+        init_factor=_ConstFactor("proxy"),
+        factors=[_ConstFactor("theta", conditioning=["proxy"])],
+        num_iterations=3,
+    )
+    assert block.parameters == ["theta"] and block.conditioning == []
+    comp = ChainComposer([block])
+    out = comp.sample(6, context=None)
+    assert "log_prob" not in out
+    assert "proxy" not in out  # seed-only, dropped
+    # theta | proxy with Gibbs' one-per-walker draw: theta == proxy == arange(6).
+    assert torch.equal(out["theta"], torch.arange(6, dtype=torch.float32))
