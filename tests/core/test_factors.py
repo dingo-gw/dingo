@@ -16,6 +16,7 @@ from dingo.core.factors import (
     Conditioning,
     Factor,
     GibbsBlock,
+    Reparametrization,
     Stage,
     chunk_and_concat,
 )
@@ -203,3 +204,105 @@ def test_gibbs_block_runs_as_a_density_free_step():
     assert "proxy" not in out  # seed-only, dropped
     # theta | proxy with Gibbs' one-per-walker draw: theta == proxy == arange(6).
     assert torch.equal(out["theta"], torch.arange(6, dtype=torch.float32))
+
+
+class _MockReparam(Reparametrization):
+    """A mock bijection ``u -> v = u + shift`` with a constant nonzero ``log|det J|`` so the
+    density contribution (``-log_det``) is checkable."""
+
+    def __init__(self, shift=10.0, log_det_val=0.5):
+        self.conditioning = ["u"]
+        self.parameters = ["v"]
+        self._shift = shift
+        self._ld = log_det_val
+
+    def forward(self, given, context):
+        return {"v": given["u"] + self._shift}
+
+    def inverse(self, params, context):
+        return {"u": params["v"] - self._shift}
+
+    def log_det(self, given, context):
+        n = next(iter(given.values())).shape[0]
+        return torch.full((n,), self._ld)
+
+
+def test_reparam_step_consumes_input_and_contributes_neg_logdet():
+    # A reparam is an in-place bijection: it replaces its input column and contributes
+    # -log_det to the chain density.
+    comp = ChainComposer([_ConstFactor("u"), _MockReparam(shift=10.0, log_det_val=0.5)])
+    out = comp.sample(4, context=None)
+    assert "u" not in out  # consumed
+    assert torch.equal(out["v"], torch.arange(4, dtype=torch.float32) + 10.0)
+    # chain log_prob = factor(+0.5) + reparam(-0.5) = 0.
+    assert torch.allclose(out["log_prob"], torch.zeros(4))
+
+
+def test_reparam_rejects_fan_out():
+    rp = _MockReparam()
+    with pytest.raises(ValueError, match="1:1"):
+        rp.sample_and_log_prob(
+            2, Conditioning(context=None, given={"u": torch.zeros(3)})
+        )
+
+
+def test_reparam_forward_inverse_round_trip():
+    rp = _MockReparam(shift=10.0)
+    u = torch.arange(5, dtype=torch.float32)
+    v = rp.forward({"u": u}, context=None)["v"]
+    u2 = rp.inverse({"v": v}, context=None)["u"]
+    assert torch.equal(u, u2)
+
+
+class _ConstFillFactor(Factor):
+    """An unconditioned factor emitting a constant (like a ``FixedFactor``). As the root it
+    draws the base count; as a non-root step it fills one value per current row."""
+
+    def __init__(self, name, value=3.0):
+        self.parameters = [name]
+        self.conditioning = []
+        self._name, self._v = name, value
+
+    def sample_and_log_prob(self, n, cond):
+        return {self._name: torch.full((n,), self._v)}, torch.zeros(n)
+
+    def log_prob(self, theta_i, cond):
+        return torch.zeros(next(iter(theta_i.values())).shape[0])
+
+
+def test_unconditioned_filler_fills_the_current_batch():
+    # A non-root unconditioned factor (fixed/delta filler) emits one value per current row,
+    # not a single row, and contributes 0 to the density.
+    comp = ChainComposer([_ConstFactor("a"), _ConstFillFactor("c", 3.0)])
+    out = comp.sample(5, context=None)
+    assert out["a"].shape == (5,) and out["c"].shape == (5,)
+    assert torch.equal(out["c"], torch.full((5,), 3.0))
+    assert torch.allclose(
+        out["log_prob"], torch.full((5,), 0.5)
+    )  # factor(0.5) + fill(0)
+
+
+def test_unconditioned_filler_fills_after_fan_out():
+    # The filler matches the expanded batch, not the base count.
+    comp = ChainComposer(
+        [
+            _ConstFactor("a"),
+            Stage(_ConstFactor("b", conditioning=["a"]), fan_out=3),
+            _ConstFillFactor("c", 7.0),
+        ]
+    )
+    out = comp.sample(4, context=None)  # 4 * 3 = 12 rows
+    assert out["c"].shape == (12,)
+    assert torch.equal(out["c"], torch.full((12,), 7.0))
+
+
+def test_unconditioned_factor_as_root_draws_base_count():
+    # As the chain root (prior-conditioning / FixedFactor proxy), an unconditioned factor
+    # draws the base count; a downstream factor conditions on the pinned values.
+    comp = ChainComposer(
+        [_ConstFillFactor("c", 2.0), _ConstFactor("d", conditioning=["c"])]
+    )
+    out = comp.sample(6, context=None)
+    assert out["c"].shape == (6,) and out["d"].shape == (6,)
+    assert torch.equal(out["c"], torch.full((6,), 2.0))
+    assert torch.equal(out["d"], torch.full((6,), 2.0))  # d | c: sum(c) + 0 == c

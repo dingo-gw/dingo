@@ -187,9 +187,15 @@ class FlowFactor(Factor):
         parameters: list[str],
         conditioning: Optional[list[str]] = None,
         context_parameters: Optional[list[str]] = None,
+        aliases: Optional[dict[str, str]] = None,
     ):
         self.model = model
-        self.parameters = parameters
+        # The network's trained parameter names -- standardization is keyed by these. The
+        # factor exposes them under canonical aliases (e.g. ra -> ra@t_ref), so a downstream
+        # reparametrization can convert frames by name without retraining (design Q#7).
+        self._net_parameters = parameters
+        self.aliases = aliases or {}
+        self.parameters = [self.aliases.get(p, p) for p in parameters]
         self.conditioning = conditioning or []
         # Network conditioning inputs (GNPE proxies). Empty for plain NPE.
         self.context_parameters = context_parameters or []
@@ -197,9 +203,12 @@ class FlowFactor(Factor):
         self.standardization = Standardization(std["mean"], std["std"])
 
     @classmethod
-    def from_model(cls, model: BasePosteriorModel) -> "FlowFactor":
+    def from_model(
+        cls, model: BasePosteriorModel, aliases: Optional[dict[str, str]] = None
+    ) -> "FlowFactor":
         """Build a factor from a model, reading ``parameters`` and ``context_parameters``
-        from its training metadata."""
+        from its training metadata. ``aliases`` maps trained names to exposed canonical
+        names (e.g. ``{"ra": "ra@t_ref"}``) at the factor boundary."""
         data_settings = _base_model_metadata(model)["train_settings"]["data"]
         context_parameters = data_settings.get("context_parameters") or []
         return cls(
@@ -207,6 +216,7 @@ class FlowFactor(Factor):
             parameters=data_settings["inference_parameters"],
             conditioning=list(context_parameters),
             context_parameters=list(context_parameters),
+            aliases=aliases,
         )
 
     def sample_and_log_prob(self, num_samples, cond):
@@ -236,13 +246,19 @@ class FlowFactor(Factor):
                 )
             z = z.reshape(n_rows * num_samples, z.shape[-1])
             log_prob = log_prob.reshape(n_rows * num_samples)
-        theta = self.standardization.destandardize(z, self.parameters)
-        log_prob = log_prob + self.standardization.log_det(self.parameters)
+        theta = self.standardization.destandardize(z, self._net_parameters)
+        log_prob = log_prob + self.standardization.log_det(self._net_parameters)
+        # Expose trained names under their canonical aliases at the factor boundary.
+        theta = {self.aliases.get(k, k): v for k, v in theta.items()}
         return theta, log_prob
 
     def log_prob(self, theta_i, cond):
-        num_samples = next(iter(theta_i.values())).shape[0]
-        z = self.standardization.standardize(theta_i, self.parameters)
+        # theta_i uses exposed (aliased) names; map back to the network's trained names.
+        theta_net = {
+            net: theta_i[self.aliases.get(net, net)] for net in self._net_parameters
+        }
+        num_samples = next(iter(theta_net.values())).shape[0]
+        z = self.standardization.standardize(theta_net, self._net_parameters)
         data = cond.context.prepared_data()
         data = data.expand(num_samples, *data.shape)
         net_context: tuple[torch.Tensor, ...]
@@ -254,7 +270,60 @@ class FlowFactor(Factor):
         self.model.network.eval()
         with torch.no_grad():
             log_prob = self.model.log_prob(z, *net_context)
-        return log_prob + self.standardization.log_det(self.parameters)
+        return log_prob + self.standardization.log_det(self._net_parameters)
+
+
+class Reparametrization(ABC):
+    """
+    A deterministic bijection ``Step``: it transforms existing parameters (no sampling)
+    and contributes ``-log|det J|`` to the proposal density.
+
+    Unlike a ``Factor`` it is 1:1 and invertible -- ``forward`` maps the conditioning block
+    to the ``parameters`` block, ``inverse`` maps back (for re-plug / importance sampling),
+    and its density contribution is a Jacobian, not a sampled log-prob. Used to relate a
+    network's coordinates to physical ones (e.g. right ascension from the training reference
+    frame to the event frame). Subclasses implement ``forward`` / ``inverse`` and, where the
+    map is not measure-preserving, ``log_det``.
+    """
+
+    parameters: list[str]
+    conditioning: list[str]
+
+    @abstractmethod
+    def forward(
+        self, given: dict[str, torch.Tensor], context: "SamplerContext"
+    ) -> dict[str, torch.Tensor]:
+        """Map the conditioning block to the ``parameters`` block."""
+
+    @abstractmethod
+    def inverse(
+        self, params: dict[str, torch.Tensor], context: "SamplerContext"
+    ) -> dict[str, torch.Tensor]:
+        """Map the ``parameters`` block back to the conditioning block."""
+
+    def log_det(
+        self, given: dict[str, torch.Tensor], context: "SamplerContext"
+    ) -> torch.Tensor:
+        """``log|det J|`` of ``forward``, per row. Default 0 (measure-preserving)."""
+        n = next(iter(given.values())).shape[0]
+        return torch.zeros(n)
+
+    def sample_and_log_prob(
+        self, num_samples: int, cond: "Conditioning"
+    ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
+        """Apply ``forward`` to the conditioning; contribute ``-log|det J|``. ``num_samples``
+        must be 1 (a reparametrization is 1:1)."""
+        if num_samples != 1:
+            raise ValueError("A reparametrization is 1:1; use fan_out=1.")
+        out = self.forward(cond.given, cond.context)
+        return out, -self.log_det(cond.given, cond.context)
+
+    def log_prob(
+        self, theta_i: dict[str, torch.Tensor], cond: "Conditioning"
+    ) -> torch.Tensor:
+        raise NotImplementedError(
+            "Reparametrization.log_prob (re-plug through the inverse map) -- later step."
+        )
 
 
 class Step(Protocol):
@@ -350,18 +419,31 @@ class ChainComposer:
         has_density = True
         for i, stage in enumerate(self.stages):
             step = stage.step
-            n = base if i == 0 else stage.fan_out
+            if i == 0:
+                n = base  # root: draw the base count
+            elif step.conditioning:
+                n = stage.fan_out  # fan_out samples per conditioning row
+            else:
+                # Unconditioned non-root step (e.g. a fixed/delta factor): draw one value
+                # per current row -- it fills the batch rather than fanning out.
+                n = len(next(iter(samples.values())))
             cond = Conditioning(context, {k: samples[k] for k in step.conditioning})
             block, lp = step.sample_and_log_prob(n, cond)
-            # The step returned (rows_so_far * n) rows. Expand the carried columns to match
-            # -- each upstream row repeated n times (the block is flattened in the same
-            # row-major order). The root has no carried rows, and fan_out=1 stages are a
-            # no-op, so 1:1 chains are untouched.
-            if i > 0 and n > 1:
-                samples = {k: v.repeat_interleave(n, 0) for k, v in samples.items()}
+            # A conditioned fan-out (fan_out > 1) expands the batch: repeat each carried row
+            # to align with the step's fan_out sub-rows (the block is flattened row-major).
+            # 1:1 stages and unconditioned fillers leave the batch untouched.
+            if i > 0 and step.conditioning and stage.fan_out > 1:
+                fan = stage.fan_out
+                samples = {k: v.repeat_interleave(fan, 0) for k, v in samples.items()}
                 if torch.is_tensor(total):
-                    total = total.repeat_interleave(n, 0)
+                    total = total.repeat_interleave(fan, 0)
             samples.update(block)
+            # A reparametrization is an in-place bijection: it replaces the columns it
+            # consumed with its outputs, so drop the consumed (non-reproduced) inputs.
+            if isinstance(step, Reparametrization):
+                for k in step.conditioning:
+                    if k not in step.parameters:
+                        samples.pop(k, None)
             # A single density-free step (Gibbs) makes the whole chain density-free.
             if lp is None:
                 has_density = False
@@ -455,7 +537,7 @@ class ComposedSampler:
         self.context = context
         self.samples: Optional[pd.DataFrame] = None
 
-    def _post_process(self, samples: dict, inverse: bool = False):
+    def _post_process(self, samples: dict):
         """Hook for domain-specific post-processing; no-op by default."""
         pass
 

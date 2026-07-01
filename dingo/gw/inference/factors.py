@@ -14,10 +14,9 @@ single-step GNPE importance sampling remain for later steps.
 from __future__ import annotations
 
 import copy
-from typing import Optional, Union
+from typing import Optional
 
 import numpy as np
-import pandas as pd
 import torch
 from astropy.time import Time
 from bilby.core.prior import DeltaFunction, PriorDict
@@ -31,6 +30,7 @@ from dingo.core.factors import (
     Factor,
     FlowFactor,
     GibbsBlock,
+    Reparametrization,
     _base_model_metadata,
 )
 from dingo.core.posterior_models import BasePosteriorModel
@@ -144,12 +144,15 @@ class GWSamplerContext:
         )
 
 
-# --- Stubs for later steps -------------------------------------------------------------
-
-
 class FixedFactor(Factor):
-    """``q_i = delta(theta_i - c)``: pins parameters to fixed values (prior-conditioning
-    / known proxies). Subsumes ``FixedInitSampler``. TODO: implement."""
+    """``q_i = delta(theta_i - c)``: pins parameters to fixed values, contributing 0 to the
+    proposal log-prob.
+
+    Serves two roles in a chain: the **root**, for prior-conditioning / known proxies
+    (single-step GNPE, where later factors condition on the pinned values -- subsumes
+    ``FixedInitSampler``), and a non-root **filler** for delta-prior parameters the network
+    does not infer (one constant per current row). ``log_prob`` (re-plug) is a later step.
+    """
 
     def __init__(self, values: dict[str, float]):
         self.values = values
@@ -164,6 +167,9 @@ class FixedFactor(Factor):
 
     def log_prob(self, theta_i, cond):
         raise NotImplementedError("FixedFactor.log_prob -- later step.")
+
+
+# --- Stubs for later steps -------------------------------------------------------------
 
 
 class SyntheticPhaseFactor(Factor):
@@ -336,22 +342,31 @@ class GNPEFlowFactor(Factor):
         transform_post: Compose,
         gnpe_parameters: list[str],
         parameters: list[str],
+        aliases: Optional[dict[str, str]] = None,
     ):
         self.model = model
         self.transform_pre = transform_pre
         self.transform_post = transform_post
         self.gnpe_parameters = gnpe_parameters
         self.proxy_parameters = [p + "_proxy" for p in gnpe_parameters]
-        self.parameters = parameters
+        self.aliases = aliases or {}
+        self._net_parameters = parameters
+        self.parameters = [self.aliases.get(p, p) for p in parameters]
         self.conditioning = list(self.proxy_parameters)
 
     @classmethod
-    def from_model(cls, model: BasePosteriorModel) -> "GNPEFlowFactor":
-        """Build the GNPE per-iteration transforms from the main model's metadata."""
+    def from_model(
+        cls, model: BasePosteriorModel, aliases: Optional[dict[str, str]] = None
+    ) -> "GNPEFlowFactor":
+        """Build the GNPE per-iteration transforms from the main model's metadata.
+        ``aliases`` maps trained names to canonical names (e.g. ``{"ra": "ra@t_ref"}``).
+        """
         pre, post, gnpe_parameters, inference_parameters, _, _ = _build_gnpe_transforms(
             model
         )
-        return cls(model, pre, post, gnpe_parameters, inference_parameters)
+        return cls(
+            model, pre, post, gnpe_parameters, inference_parameters, aliases=aliases
+        )
 
     def sample_and_log_prob(self, num_samples, cond):
         """Sample one parameter set per proxy row; ``num_samples`` must be 1 (GNPE is 1:1).
@@ -378,6 +393,8 @@ class GNPEFlowFactor(Factor):
         x["log_prob"] = log_prob.squeeze(1)
         x = self.transform_post(x)
         params = dict(x["parameters"])
+        # Expose trained names under their canonical aliases (e.g. ra -> ra@t_ref).
+        params = {self.aliases.get(k, k): v for k, v in params.items()}
         # Surface the recomputed detector times: the next Gibbs iteration's input, and the
         # evaluation point for GNPEKernelFactor's importance-sampling correction.
         for k in self.gnpe_parameters:
@@ -388,6 +405,86 @@ class GNPEFlowFactor(Factor):
         raise NotImplementedError(
             "GNPEFlowFactor.log_prob -- later step (single-step GNPE importance sampling)."
         )
+
+
+class RAReparam(Reparametrization):
+    """
+    Rotate right ascension from the network's training reference frame (``ra@t_ref``) to the
+    event frame (``ra``).
+
+    The network is trained at a fixed reference time; an event at a different GPS time needs
+    the sky rotated by the sidereal-time difference. This is a measure-preserving shift
+    modulo 2*pi (``log_det = 0``), so it contributes nothing to the density. Ported from
+    ``GWSamplerMixin._correct_reference_time``: ``forward`` produces the event-frame ``ra``
+    for downstream, ``inverse`` recovers ``ra@t_ref`` for re-plug / importance sampling
+    (design Q#7). The sidereal correction is read from the shared context (``t_ref`` and the
+    event time).
+    """
+
+    def __init__(self):
+        self.conditioning = ["ra@t_ref"]
+        self.parameters = ["ra"]
+
+    @staticmethod
+    def _correction(context) -> float:
+        """Sidereal-time difference (event minus reference) in radians; 0 when the event
+        time is unset or equal to the reference time."""
+        event_metadata = context.event_metadata
+        t_event = None if event_metadata is None else event_metadata.get("time_event")
+        t_ref = context.t_ref
+        if t_event is None or t_event == t_ref:
+            return 0.0
+        longitude_event = Time(t_event, format="gps", scale="utc").sidereal_time(
+            "apparent", "greenwich"
+        )
+        longitude_reference = Time(t_ref, format="gps", scale="utc").sidereal_time(
+            "apparent", "greenwich"
+        )
+        return (longitude_event - longitude_reference).rad
+
+    def forward(self, given, context):
+        correction = self._correction(context)
+        if correction == 0.0:
+            return {"ra": given["ra@t_ref"]}
+        # ra is a bounded angle -> float32 is plenty. The correction is a difference of
+        # absolute GPS times, so compute it in float64, but store the wrapped angle float32.
+        ra = (given["ra@t_ref"].double() + correction) % (2 * np.pi)
+        return {"ra": ra.float()}
+
+    def inverse(self, params, context):
+        correction = self._correction(context)
+        if correction == 0.0:
+            return {"ra@t_ref": params["ra"]}
+        ra_tref = (params["ra"].double() - correction) % (2 * np.pi)
+        return {"ra@t_ref": ra_tref.float()}
+
+
+def _ra_aliases(inference_parameters: list[str]) -> dict[str, str]:
+    """The RA frame alias (``ra`` -> ``ra@t_ref``), applied only when the model infers
+    ``ra``; paired with an ``RAReparam`` step that maps it back to the event frame."""
+    return {"ra": "ra@t_ref"} if "ra" in inference_parameters else {}
+
+
+def _ra_reparam_steps(inference_parameters: list[str]) -> list:
+    """The ``RAReparam`` step, appended to a chain only when the model infers ``ra``."""
+    return [RAReparam()] if "ra" in inference_parameters else []
+
+
+def _fixed_prior_steps(metadata: dict, inference_parameters: list[str]) -> list:
+    """Delta-prior parameters the chain does not produce, as a single ``FixedFactor`` step
+    (or none). These are pinned constants (e.g. an aligned-spin component fixed to 0); the
+    old sampler injected them in ``_post_process``."""
+    intrinsic_prior = metadata["dataset_settings"]["intrinsic_prior"]
+    extrinsic_prior = get_extrinsic_prior_dict(
+        metadata["train_settings"]["data"]["extrinsic_prior"]
+    )
+    prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
+    fixed = {
+        k: p.peak
+        for k, p in prior.items()
+        if isinstance(p, DeltaFunction) and k not in inference_parameters
+    }
+    return [FixedFactor(fixed)] if fixed else []
 
 
 class GWComposedSampler(ComposedSampler):
@@ -422,14 +519,24 @@ class GWComposedSampler(ComposedSampler):
         raw_context: dict,
         event_metadata: Optional[dict] = None,
     ) -> "GWComposedSampler":
-        """Build a single-factor (plain-NPE) GW sampler from a model and event data."""
+        """Build a plain-NPE GW sampler from a model and event data: the flow exposes
+        ``ra`` as ``ra@t_ref``, followed by an ``RAReparam`` to the event frame."""
         context = GWSamplerContext.from_model(model, raw_context, event_metadata)
-        factor = FlowFactor.from_model(model)
+        metadata = _base_model_metadata(model)
+        inference_parameters = metadata["train_settings"]["data"][
+            "inference_parameters"
+        ]
+        factor = FlowFactor.from_model(model, aliases=_ra_aliases(inference_parameters))
+        steps = (
+            [factor]
+            + _ra_reparam_steps(inference_parameters)
+            + _fixed_prior_steps(metadata, inference_parameters)
+        )
         return cls(
-            composer=ChainComposer([factor]),
+            composer=ChainComposer(steps),
             context=context,
-            metadata=_base_model_metadata(model),
-            inference_parameters=factor.parameters,
+            metadata=metadata,
+            inference_parameters=inference_parameters,
         )
 
     @classmethod
@@ -444,18 +551,29 @@ class GWComposedSampler(ComposedSampler):
         """Build a multi-iteration time-GNPE sampler from an init + main model pair: the
         init model's data preprocessing, an init ``FlowFactor`` to seed, and a single
         ``GibbsBlock`` step -- cycling the GNPE kernel and main-network factors -- in a
-        ``ChainComposer``. Returns samples without a log_prob (Gibbs breaks density
-        access)."""
+        ``ChainComposer``, then an ``RAReparam`` to the event frame. Returns samples without
+        a log_prob (Gibbs breaks density access)."""
         context = GWSamplerContext.from_model(init_model, raw_context, event_metadata)
+        metadata = _base_model_metadata(main_model)
+        inference_parameters = metadata["train_settings"]["data"][
+            "inference_parameters"
+        ]
         init_factor = FlowFactor.from_model(init_model)
         kernel_factor = GNPEKernelFactor.from_model(main_model)
-        flow_factor = GNPEFlowFactor.from_model(main_model)
+        flow_factor = GNPEFlowFactor.from_model(
+            main_model, aliases=_ra_aliases(inference_parameters)
+        )
         gibbs = GibbsBlock(init_factor, [kernel_factor, flow_factor], num_iterations)
+        steps = (
+            [gibbs]
+            + _ra_reparam_steps(inference_parameters)
+            + _fixed_prior_steps(metadata, inference_parameters)
+        )
         return cls(
-            ChainComposer([gibbs]),
+            ChainComposer(steps),
             context,
-            _base_model_metadata(main_model),
-            flow_factor.parameters,
+            metadata,
+            inference_parameters,
         )
 
     @classmethod
@@ -467,48 +585,34 @@ class GWComposedSampler(ComposedSampler):
         event_metadata: Optional[dict] = None,
     ) -> "GWComposedSampler":
         """Build a single-step (density-preserving) time-GNPE sampler: a ``ChainComposer``
-        of ``[proxy_source, GNPEFlowFactor]``. ``proxy_source`` supplies the detector-time
-        proxies -- a ``FixedFactor`` for prior conditioning (BNS), or an unconditional NDE
-        for density recovery. Unlike multi-iteration GNPE the chain is autoregressive, so
-        log_prob is preserved; the ``GNPEKernelFactor`` supplies the
+        of ``[proxy_source, GNPEFlowFactor, RAReparam]``. ``proxy_source`` supplies the
+        detector-time proxies -- a ``FixedFactor`` for prior conditioning (BNS), or an
+        unconditional NDE for density recovery. Unlike multi-iteration GNPE the chain is
+        autoregressive, so log_prob is preserved; the ``GNPEKernelFactor`` supplies the
         ``delta_log_prob_target`` correction that importance sampling adds to the target.
         """
         context = GWSamplerContext.from_model(main_model, raw_context, event_metadata)
-        flow_factor = GNPEFlowFactor.from_model(main_model)
+        metadata = _base_model_metadata(main_model)
+        inference_parameters = metadata["train_settings"]["data"][
+            "inference_parameters"
+        ]
+        flow_factor = GNPEFlowFactor.from_model(
+            main_model, aliases=_ra_aliases(inference_parameters)
+        )
         kernel_factor = GNPEKernelFactor.from_model(main_model)
-        composer = ChainComposer([proxy_source, flow_factor])
+        steps = (
+            [proxy_source, flow_factor]
+            + _ra_reparam_steps(inference_parameters)
+            + _fixed_prior_steps(metadata, inference_parameters)
+        )
+        composer = ChainComposer(steps)
         return cls(
             composer,
             context,
-            _base_model_metadata(main_model),
-            flow_factor.parameters,
+            metadata,
+            inference_parameters,
             kernel_factor=kernel_factor,
         )
-
-    def _correct_reference_time(
-        self, samples: Union[dict, pd.DataFrame], inverse: bool = False
-    ):
-        """Correct the right ascension for the difference between the event time and the
-        model's training reference time (fixed detector positions)."""
-        event_metadata = self.context.event_metadata
-        if event_metadata is None:
-            return
-        t_event = event_metadata.get("time_event")
-        t_ref = self.context.t_ref
-        if t_event is None or t_event == t_ref or "ra" not in samples:
-            return
-        ra = samples["ra"]
-        longitude_event = Time(t_event, format="gps", scale="utc").sidereal_time(
-            "apparent", "greenwich"
-        )
-        longitude_reference = Time(t_ref, format="gps", scale="utc").sidereal_time(
-            "apparent", "greenwich"
-        )
-        ra_correction = (longitude_event - longitude_reference).rad
-        if not inverse:
-            samples["ra"] = (ra + ra_correction) % (2 * np.pi)
-        else:
-            samples["ra"] = (ra - ra_correction) % (2 * np.pi)
 
     def _add_kernel_correction(self, samples: dict):
         """Single-step GNPE: add ``delta_log_prob_target = log p(theta_hat | theta)``,
@@ -523,32 +627,12 @@ class GWComposedSampler(ComposedSampler):
         for k in kf.gnpe_parameters:
             samples.pop(k, None)
 
-    def _post_process(self, samples: Union[dict, pd.DataFrame], inverse: bool = False):
-        if self.kernel_factor is not None and not inverse:
+    def _post_process(self, samples: dict):
+        # Fixed (delta-prior) parameters are a FixedFactor in the chain and the RA frame
+        # rotation is a chain reparametrization; only the single-step-GNPE kernel correction
+        # remains here (moves to a chain step next).
+        if self.kernel_factor is not None:
             self._add_kernel_correction(samples)
-
-        intrinsic_prior = self.metadata["dataset_settings"]["intrinsic_prior"]
-        extrinsic_prior = get_extrinsic_prior_dict(
-            self.metadata["train_settings"]["data"]["extrinsic_prior"]
-        )
-        prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
-
-        if not inverse:
-            # Add fixed (delta-prior) parameters not produced by the chain.
-            num_samples = len(samples[list(samples.keys())[0]])
-            for k, p in prior.items():
-                if isinstance(p, DeltaFunction) and k not in samples:
-                    print(f"Adding fixed parameter {k} = {p.peak} from prior.")
-                    samples[k] = p.peak * np.ones(num_samples)
-        else:
-            drop = [k for k in samples.keys() if k not in self.inference_parameters]
-            if isinstance(samples, pd.DataFrame):
-                samples.drop(columns=drop, inplace=True, errors="ignore")
-            else:
-                for k in drop:
-                    samples.pop(k, None)
-
-        self._correct_reference_time(samples, inverse)
 
     def to_result(self):
         """Export to a gw ``Result`` (samples + raw event data + metadata), so the
