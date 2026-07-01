@@ -318,12 +318,50 @@ class Reparametrization(ABC):
         out = self.forward(cond.given, cond.context)
         return out, -self.log_det(cond.given, cond.context)
 
+    @property
+    def consumes(self) -> list[str]:
+        """Conditioning the bijection replaces with its outputs (dropped after the step)."""
+        return [c for c in self.conditioning if c not in self.parameters]
+
     def log_prob(
         self, theta_i: dict[str, torch.Tensor], cond: "Conditioning"
     ) -> torch.Tensor:
-        raise NotImplementedError(
-            "Reparametrization.log_prob (re-plug through the inverse map) -- later step."
-        )
+        raise NotImplementedError("Reparametrization.log_prob")
+
+
+class TargetCorrection(ABC):
+    """
+    A ``Step`` that emits an importance-sampling target correction as a side-channel column
+    and contributes nothing to the proposal density.
+
+    Its value belongs to the IS target, not the proposal: it reads earlier blocks, emits a
+    named column, optionally consumes intermediates (``consumes``), and adds 0 to the
+    proposal log-prob. 1:1.
+    """
+
+    parameters: list[str]
+    conditioning: list[str]
+    consumes: list[str]
+
+    @abstractmethod
+    def correction(
+        self, given: dict[str, torch.Tensor], context: "SamplerContext"
+    ) -> dict[str, torch.Tensor]:
+        """The side-channel column(s), one value per conditioning row."""
+
+    def sample_and_log_prob(
+        self, num_samples: int, cond: "Conditioning"
+    ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
+        if num_samples != 1:
+            raise ValueError("A target correction is 1:1; use fan_out=1.")
+        out = self.correction(cond.given, cond.context)
+        n = next(iter(out.values())).shape[0]
+        return out, torch.zeros(n)
+
+    def log_prob(
+        self, theta_i: dict[str, torch.Tensor], cond: "Conditioning"
+    ) -> torch.Tensor:
+        raise NotImplementedError("TargetCorrection.log_prob")
 
 
 class Step(Protocol):
@@ -374,7 +412,8 @@ class ChainComposer:
 
     def _validate(self):
         """Check the declared order is a valid topological order: every conditioning
-        name is produced by an earlier step."""
+        name is produced by an earlier step. A step's emitted columns default to its
+        ``parameters``, but a step may emit side-channel columns too (``produces``)."""
         produced: set[str] = set()
         for step in self.steps:
             missing = [c for c in step.conditioning if c not in produced]
@@ -383,7 +422,7 @@ class ChainComposer:
                     f"A step producing {step.parameters} conditions on {missing}, "
                     f"which no earlier step produces. Check chain order."
                 )
-            produced.update(step.parameters)
+            produced.update(getattr(step, "produces", step.parameters))
 
     @property
     def steps(self) -> list[Step]:
@@ -438,12 +477,10 @@ class ChainComposer:
                 if torch.is_tensor(total):
                     total = total.repeat_interleave(fan, 0)
             samples.update(block)
-            # A reparametrization is an in-place bijection: it replaces the columns it
-            # consumed with its outputs, so drop the consumed (non-reproduced) inputs.
-            if isinstance(step, Reparametrization):
-                for k in step.conditioning:
-                    if k not in step.parameters:
-                        samples.pop(k, None)
+            # Drop any intermediates the step consumed: a reparametrization replaces its
+            # inputs (in-place bijection); a target correction drops the columns it read.
+            for k in getattr(step, "consumes", ()):
+                samples.pop(k, None)
             # A single density-free step (Gibbs) makes the whole chain density-free.
             if lp is None:
                 has_density = False

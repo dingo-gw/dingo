@@ -1,14 +1,12 @@
 """
-Gravitational-wave factors for the factorized sampler.
+Gravitational-wave factors, steps, and samplers for the factorized sampler.
 
-GW-specific pieces of the factorized-sampler design (see
-vault/Hackathon/Factorized_Sampler_Design.md). The generic ``FlowFactor`` is
-domain-agnostic and lives in ``dingo.core.factors``; what is GW-specific is the
-``GWSamplerContext`` (which builds the data-preprocessing conditioning map ``f_i``) and
-the post-processing in ``GWComposedSampler``. Covers plain NPE (``FlowFactor`` via a
-``ChainComposer``) and multi-iteration time-shift GNPE (``GNPEKernelFactor`` +
-``GNPEFlowFactor`` cycled by a ``GibbsBlock``); the synthetic-phase factor and
-single-step GNPE importance sampling remain for later steps.
+The domain-agnostic pieces (``Factor``, ``FlowFactor``, ``Reparametrization``,
+``TargetCorrection``, and the composers) live in ``dingo.core.factors``. This module adds
+the GW-specific ones: ``GWSamplerContext`` (the data-preprocessing conditioning map), the
+GNPE factors and steps (``GNPEKernelFactor``, ``GNPEFlowFactor``, ``GNPEKernelCorrection``),
+the ``RAReparam`` sky-frame reparametrization, and ``GWComposedSampler``, which assembles
+the chain for plain NPE, multi-iteration GNPE, or single-step GNPE.
 """
 
 from __future__ import annotations
@@ -31,6 +29,7 @@ from dingo.core.factors import (
     FlowFactor,
     GibbsBlock,
     Reparametrization,
+    TargetCorrection,
     _base_model_metadata,
 )
 from dingo.core.posterior_models import BasePosteriorModel
@@ -138,20 +137,16 @@ class GWSamplerContext:
         return self._prepared
 
     def likelihood(self):
-        raise NotImplementedError(
-            "Likelihood construction moves onto the context in a later step "
-            "(synthetic-phase / importance-sampling factors)."
-        )
+        raise NotImplementedError("GWSamplerContext.likelihood")
 
 
 class FixedFactor(Factor):
     """``q_i = delta(theta_i - c)``: pins parameters to fixed values, contributing 0 to the
     proposal log-prob.
 
-    Serves two roles in a chain: the **root**, for prior-conditioning / known proxies
-    (single-step GNPE, where later factors condition on the pinned values -- subsumes
-    ``FixedInitSampler``), and a non-root **filler** for delta-prior parameters the network
-    does not infer (one constant per current row). ``log_prob`` (re-plug) is a later step.
+    Used as the chain root for prior-conditioning or known proxies (single-step GNPE, where
+    later factors condition on the pinned values), and as a non-root filler for delta-prior
+    parameters the network does not infer (one constant per current row).
     """
 
     def __init__(self, values: dict[str, float]):
@@ -166,26 +161,25 @@ class FixedFactor(Factor):
         return samples, torch.zeros(num_samples)
 
     def log_prob(self, theta_i, cond):
-        raise NotImplementedError("FixedFactor.log_prob -- later step.")
+        raise NotImplementedError("FixedFactor.log_prob")
 
 
 # --- Stubs for later steps -------------------------------------------------------------
 
 
 class SyntheticPhaseFactor(Factor):
-    """``q(phase | theta_rest, d)`` from the likelihood on a phase grid; the final,
-    non-NN factor, run in the CPU post-processing stage. TODO: port from
-    ``Result.sample_synthetic_phase``."""
+    """``q(phase | theta_rest, d)`` from the likelihood on a phase grid (a non-network
+    factor, the final step of the chain). Not yet implemented."""
 
     def __init__(self):
         self.parameters = ["phase"]
         self.conditioning = []  # conditions on all preceding params via the likelihood
 
     def sample_and_log_prob(self, num_samples, cond):
-        raise NotImplementedError("SyntheticPhaseFactor -- later step.")
+        raise NotImplementedError("SyntheticPhaseFactor")
 
     def log_prob(self, theta_i, cond):
-        raise NotImplementedError("SyntheticPhaseFactor -- later step.")
+        raise NotImplementedError("SyntheticPhaseFactor")
 
 
 def _build_gnpe_transforms(model: BasePosteriorModel):
@@ -267,21 +261,14 @@ def _build_gnpe_transforms(model: BasePosteriorModel):
 
 class GNPEKernelFactor(Factor):
     """
-    The GNPE perturbation kernel p(theta_hat | theta) as a factor (non-NN).
+    The GNPE perturbation kernel ``p(theta_hat | theta)`` as a non-network factor.
 
-    GNPE (arXiv:2111.13139) conditions the main network on "proxy" parameters theta_hat
-    drawn from a fixed kernel p(theta_hat | theta). Here theta are the detector coalescence
-    times and the kernel adds a bounded perturbation to each. Conditioning on the proxies
-    frees the network input to be simplified by them -- ``GNPEFlowFactor`` shifts each
-    detector's strain to its proxy time -- at the price of inferring theta and theta_hat
-    jointly.
-
-    The parameter block is the proxies; the conditioning is the detector times.
+    ``theta`` are the detector coalescence times; the kernel adds a bounded perturbation to
+    each, giving the proxies ``theta_hat`` the main network conditions on. The parameter
+    block is the proxies, the conditioning is the detector times.
     ``sample_and_log_prob`` blurs the times into proxies (the proxy update of a Gibbs
-    sweep). ``log_prob`` returns the kernel density log p(theta_hat | theta); for
-    single-step GNPE this is the ``delta_log_prob_target`` importance-sampling correction,
-    evaluated at the proxies and the detector times recomputed from theta. One proxy per
-    detector-time row.
+    sweep); ``log_prob`` returns the kernel density ``log p(theta_hat | theta)`` at the
+    proxies and the detector times. One proxy per detector-time row.
     """
 
     def __init__(self, gnpe_transform: GNPEBase, gnpe_parameters: list[str]):
@@ -320,19 +307,18 @@ class GNPEKernelFactor(Factor):
 
 class GNPEFlowFactor(Factor):
     """
-    The GNPE main network q(theta | theta_hat, d) as a factor.
+    The GNPE main network ``q(theta | theta_hat, d)`` as a factor.
 
     Conditions on the detector-time proxies from ``GNPEKernelFactor``: it shifts each
     detector's strain by the corresponding proxy time (standardizing the network input),
     samples the network, and recomputes the detector times from the sampled sky position
-    and geocent time. The proxies are supplied, so no blurring happens here. Wraps the main
-    model and the per-iteration transforms built for ``GWSamplerGNPE``.
+    and geocent time. The proxies are supplied, so no blurring happens here.
 
     The single network factor in either GNPE mode: cycled by a ``GibbsBlock`` for
     multi-iteration GNPE, or a ``ChainComposer`` factor for single-step GNPE. The recomputed
-    detector times are returned as extra columns: the next Gibbs iteration blurs them into
-    fresh proxies, and single-step GNPE evaluates the kernel correction at them. One sample
-    per proxy row.
+    detector times are emitted as extra columns (``produces``): the next Gibbs iteration
+    blurs them into fresh proxies, and single-step GNPE evaluates the kernel correction at
+    them. One sample per proxy row.
     """
 
     def __init__(
@@ -353,6 +339,11 @@ class GNPEFlowFactor(Factor):
         self._net_parameters = parameters
         self.parameters = [self.aliases.get(p, p) for p in parameters]
         self.conditioning = list(self.proxy_parameters)
+
+    @property
+    def produces(self) -> list[str]:
+        """Emitted columns: the inference block plus the recomputed detector times."""
+        return self.parameters + self.gnpe_parameters
 
     @classmethod
     def from_model(
@@ -402,9 +393,7 @@ class GNPEFlowFactor(Factor):
         return params, x["log_prob"]
 
     def log_prob(self, theta_i, cond):
-        raise NotImplementedError(
-            "GNPEFlowFactor.log_prob -- later step (single-step GNPE importance sampling)."
-        )
+        raise NotImplementedError("GNPEFlowFactor.log_prob")
 
 
 class RAReparam(Reparametrization):
@@ -414,11 +403,9 @@ class RAReparam(Reparametrization):
 
     The network is trained at a fixed reference time; an event at a different GPS time needs
     the sky rotated by the sidereal-time difference. This is a measure-preserving shift
-    modulo 2*pi (``log_det = 0``), so it contributes nothing to the density. Ported from
-    ``GWSamplerMixin._correct_reference_time``: ``forward`` produces the event-frame ``ra``
-    for downstream, ``inverse`` recovers ``ra@t_ref`` for re-plug / importance sampling
-    (design Q#7). The sidereal correction is read from the shared context (``t_ref`` and the
-    event time).
+    modulo 2*pi (``log_det = 0``), so it contributes nothing to the density. ``forward``
+    produces the event-frame ``ra``, ``inverse`` recovers ``ra@t_ref``. The sidereal
+    correction is read from the shared context (``t_ref`` and the event time).
     """
 
     def __init__(self):
@@ -459,6 +446,31 @@ class RAReparam(Reparametrization):
         return {"ra@t_ref": ra_tref.float()}
 
 
+class GNPEKernelCorrection(TargetCorrection):
+    """
+    The single-step GNPE kernel correction as a target-side chain step.
+
+    Emits ``delta_log_prob_target = log p(theta_hat | theta)`` -- the GNPE kernel evaluated
+    at the proxies and the detector times recomputed from theta -- for importance sampling
+    on the joint proposal ``q(theta, theta_hat | d)``. Contributes 0 to the proposal
+    density and consumes the intermediate detector times.
+    """
+
+    def __init__(self, kernel_factor: GNPEKernelFactor):
+        self.kernel_factor = kernel_factor
+        self.parameters = ["delta_log_prob_target"]
+        self.conditioning = list(kernel_factor.parameters) + list(
+            kernel_factor.gnpe_parameters
+        )
+        self.consumes = list(kernel_factor.gnpe_parameters)
+
+    def correction(self, given, context):
+        proxies = {p: given[p] for p in self.kernel_factor.parameters}
+        times = {k: given[k] for k in self.kernel_factor.gnpe_parameters}
+        correction = self.kernel_factor.log_prob(proxies, Conditioning(context, times))
+        return {"delta_log_prob_target": correction}
+
+
 def _ra_aliases(inference_parameters: list[str]) -> dict[str, str]:
     """The RA frame alias (``ra`` -> ``ra@t_ref``), applied only when the model infers
     ``ra``; paired with an ``RAReparam`` step that maps it back to the event frame."""
@@ -472,8 +484,8 @@ def _ra_reparam_steps(inference_parameters: list[str]) -> list:
 
 def _fixed_prior_steps(metadata: dict, inference_parameters: list[str]) -> list:
     """Delta-prior parameters the chain does not produce, as a single ``FixedFactor`` step
-    (or none). These are pinned constants (e.g. an aligned-spin component fixed to 0); the
-    old sampler injected them in ``_post_process``."""
+    (or none). These are pinned constants (e.g. an aligned-spin component fixed to 0).
+    """
     intrinsic_prior = metadata["dataset_settings"]["intrinsic_prior"]
     extrinsic_prior = get_extrinsic_prior_dict(
         metadata["train_settings"]["data"]["extrinsic_prior"]
@@ -489,11 +501,10 @@ def _fixed_prior_steps(metadata: dict, inference_parameters: list[str]) -> list:
 
 class GWComposedSampler(ComposedSampler):
     """
-    GW façade: a ``ComposedSampler`` that adds the gravitational-wave post-processing --
-    injecting fixed (delta-prior) parameters and correcting the sky position for the
-    model's fixed reference time. Ported from ``GWSamplerMixin._post_process``; in the
-    longer run the reference-time correction becomes a deterministic reparametrization
-    factor in the chain (see the design doc, Q#4/Q#7).
+    GW façade over a ``ChainComposer``. Builds the chain for plain NPE, multi-iteration
+    GNPE, or single-step GNPE from model metadata, and exports the samples to a gw
+    ``Result``. All GW-specific processing (RA frame, fixed parameters, kernel correction)
+    is expressed as chain steps, so there is no post-processing step.
     """
 
     def __init__(
@@ -502,15 +513,10 @@ class GWComposedSampler(ComposedSampler):
         context: GWSamplerContext,
         metadata: dict,
         inference_parameters: list[str],
-        kernel_factor: Optional[GNPEKernelFactor] = None,
     ):
         super().__init__(composer, context)
         self.metadata = metadata
         self.inference_parameters = inference_parameters
-        # Set for single-step GNPE. Supplies the delta_log_prob_target kernel correction
-        # (evaluated in post-processing, out of the proposal sum) that importance sampling
-        # applies to the joint target q(theta, theta_hat | d).
-        self.kernel_factor = kernel_factor
 
     @classmethod
     def from_model(
@@ -585,10 +591,10 @@ class GWComposedSampler(ComposedSampler):
         event_metadata: Optional[dict] = None,
     ) -> "GWComposedSampler":
         """Build a single-step (density-preserving) time-GNPE sampler: a ``ChainComposer``
-        of ``[proxy_source, GNPEFlowFactor, RAReparam]``. ``proxy_source`` supplies the
-        detector-time proxies -- a ``FixedFactor`` for prior conditioning (BNS), or an
-        unconditional NDE for density recovery. Unlike multi-iteration GNPE the chain is
-        autoregressive, so log_prob is preserved; the ``GNPEKernelFactor`` supplies the
+        of ``[proxy_source, GNPEFlowFactor, GNPEKernelCorrection, RAReparam]``.
+        ``proxy_source`` supplies the detector-time proxies -- a ``FixedFactor`` for prior
+        conditioning (BNS), or an unconditional NDE for density recovery. The chain is
+        autoregressive, so log_prob is preserved, and ``GNPEKernelCorrection`` emits the
         ``delta_log_prob_target`` correction that importance sampling adds to the target.
         """
         context = GWSamplerContext.from_model(main_model, raw_context, event_metadata)
@@ -601,38 +607,11 @@ class GWComposedSampler(ComposedSampler):
         )
         kernel_factor = GNPEKernelFactor.from_model(main_model)
         steps = (
-            [proxy_source, flow_factor]
+            [proxy_source, flow_factor, GNPEKernelCorrection(kernel_factor)]
             + _ra_reparam_steps(inference_parameters)
             + _fixed_prior_steps(metadata, inference_parameters)
         )
-        composer = ChainComposer(steps)
-        return cls(
-            composer,
-            context,
-            metadata,
-            inference_parameters,
-            kernel_factor=kernel_factor,
-        )
-
-    def _add_kernel_correction(self, samples: dict):
-        """Single-step GNPE: add ``delta_log_prob_target = log p(theta_hat | theta)``,
-        evaluated at the proxies and the detector times recomputed from theta, then drop
-        those intermediate detector times. This is the joint-target correction importance
-        sampling applies; it is deliberately kept out of the proposal ``log_prob``."""
-        kf = self.kernel_factor
-        proxies = {p: samples[p] for p in kf.parameters}
-        times = {k: samples[k] for k in kf.gnpe_parameters}
-        correction = kf.log_prob(proxies, Conditioning(self.context, times))
-        samples["delta_log_prob_target"] = np.asarray(correction)
-        for k in kf.gnpe_parameters:
-            samples.pop(k, None)
-
-    def _post_process(self, samples: dict):
-        # Fixed (delta-prior) parameters are a FixedFactor in the chain and the RA frame
-        # rotation is a chain reparametrization; only the single-step-GNPE kernel correction
-        # remains here (moves to a chain step next).
-        if self.kernel_factor is not None:
-            self._add_kernel_correction(samples)
+        return cls(ChainComposer(steps), context, metadata, inference_parameters)
 
     def to_result(self):
         """Export to a gw ``Result`` (samples + raw event data + metadata), so the

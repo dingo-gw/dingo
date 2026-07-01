@@ -18,6 +18,7 @@ from dingo.core.factors import (
     GibbsBlock,
     Reparametrization,
     Stage,
+    TargetCorrection,
     chunk_and_concat,
 )
 
@@ -306,3 +307,69 @@ def test_unconditioned_factor_as_root_draws_base_count():
     assert out["c"].shape == (6,) and out["d"].shape == (6,)
     assert torch.equal(out["c"], torch.full((6,), 2.0))
     assert torch.equal(out["d"], torch.full((6,), 2.0))  # d | c: sum(c) + 0 == c
+
+
+class _MockTargetCorrection(TargetCorrection):
+    """A mock kind-3 correction: emits ``corr = 2 * x``, contributes 0 to the proposal,
+    and consumes its input."""
+
+    def __init__(self, reads="x", emits="corr"):
+        self.conditioning = [reads]
+        self.parameters = [emits]
+        self.consumes = [reads]
+        self._reads, self._emits = reads, emits
+
+    def correction(self, given, context):
+        return {self._emits: given[self._reads] * 2}
+
+
+def test_target_correction_emits_side_channel_and_contributes_zero():
+    comp = ChainComposer([_ConstFactor("x"), _MockTargetCorrection(reads="x")])
+    out = comp.sample(5, context=None)
+    assert "x" not in out  # consumed
+    assert torch.equal(out["corr"], 2 * torch.arange(5, dtype=torch.float32))
+    # A correction adds 0 to the proposal density: log_prob = factor(0.5) + corr(0).
+    assert torch.allclose(out["log_prob"], torch.full((5,), 0.5))
+
+
+def test_target_correction_rejects_fan_out():
+    tc = _MockTargetCorrection()
+    with pytest.raises(ValueError, match="1:1"):
+        tc.sample_and_log_prob(
+            2, Conditioning(context=None, given={"x": torch.zeros(3)})
+        )
+
+
+class _SideChannelFactor(Factor):
+    """A factor emitting an extra side-channel column beyond ``parameters``, declared via
+    ``produces`` so the topological check sees it (like GNPEFlowFactor's detector times).
+    """
+
+    def __init__(self, name, side):
+        self.parameters = [name]
+        self.conditioning = []
+        self._name, self._side = name, side
+
+    @property
+    def produces(self):
+        return self.parameters + [self._side]
+
+    def sample_and_log_prob(self, n, cond):
+        block = {
+            self._name: torch.arange(n, dtype=torch.float32),
+            self._side: torch.zeros(n),
+        }
+        return block, torch.zeros(n)
+
+    def log_prob(self, theta_i, cond):
+        return torch.zeros(next(iter(theta_i.values())).shape[0])
+
+
+def test_side_channel_produces_satisfies_topological_check():
+    # A later step may condition on a side-channel column declared via `produces`; without
+    # `produces` the topological check would reject the chain.
+    comp = ChainComposer(
+        [_SideChannelFactor("a", side="s"), _ConstFactor("b", conditioning=["s"])]
+    )
+    out = comp.sample(4, context=None)
+    assert out["b"].shape == (4,) and "s" in out
