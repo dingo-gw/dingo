@@ -13,6 +13,7 @@ from bilby_pipe.utils import (
     logger,
     convert_string_to_dict,
     convert_prior_string_input,
+    resolve_filename_with_transfer_fallback,
     BilbyPipeError,
 )
 import lalsimulation as LS
@@ -29,14 +30,10 @@ logger.name = "dingo_pipe"
 
 class DataGenerationInput(BilbyDataGenerationInput):
     def __init__(self, args, unknown_args, create_data=True):
-        # if running on the OSG, the network has been transferred to
-        # the local directory, replace osdf string
-        if args.osg:
-            self.model = os.path.basename(args.model)
-            self.model_init = os.path.basename(args.model_init)
-        else:
-            self.model = args.model
-            self.model_init = args.model_init
+        self.model = resolve_filename_with_transfer_fallback(args.model) or args.model
+        self.model_init = args.model_init and (
+            resolve_filename_with_transfer_fallback(args.model_init) or args.model_init
+        )
 
         Input.__init__(self, args, unknown_args)
         # Generic initialisation
@@ -443,15 +440,19 @@ class DataGenerationInput(BilbyDataGenerationInput):
             # Dingo and Bilby have different geocent_time conventions.
             settings["injection_parameters"]["geocent_time"] -= self.trigger_time
             settings["optimal_SNR"] = {
-                k: v["optimal_SNR"].item()
-                if hasattr(v["optimal_SNR"], "item")
-                else v["optimal_SNR"]
+                k: (
+                    v["optimal_SNR"].item()
+                    if hasattr(v["optimal_SNR"], "item")
+                    else v["optimal_SNR"]
+                )
                 for k, v in self.interferometers.meta_data.items()
             }
             settings["matched_filter_SNR"] = {
-                k: v["matched_filter_SNR"].item()
-                if hasattr(v["matched_filter_SNR"], "item")
-                else v["matched_filter_SNR"]
+                k: (
+                    v["matched_filter_SNR"].item()
+                    if hasattr(v["matched_filter_SNR"], "item")
+                    else v["matched_filter_SNR"]
+                )
                 for k, v in self.interferometers.meta_data.items()
             }
 

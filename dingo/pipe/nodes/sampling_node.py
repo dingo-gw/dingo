@@ -7,7 +7,8 @@ from dingo.pipe.utils import _strip_unwanted_submission_keys
 
 class SamplingNode(AnalysisNode):
     def __init__(self, inputs, generation_node, dag):
-        super(AnalysisNode, self).__init__(inputs)
+        retry = 3 if inputs.osg else None
+        super(AnalysisNode, self).__init__(inputs, retry=retry)
         self.dag = dag
         self.generation_node = generation_node
         self.request_cpus = inputs.request_cpus
