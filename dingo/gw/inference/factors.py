@@ -501,10 +501,11 @@ def _delta_prior_steps(metadata: dict, inference_parameters: list[str]) -> list:
 
 class GWComposedSampler(ComposedSampler):
     """
-    GW façade over a ``ChainComposer``. Builds the chain for plain NPE, multi-iteration
-    GNPE, or single-step GNPE from model metadata, and exports the samples to a gw
-    ``Result``. All GW-specific processing (RA frame, fixed parameters, kernel correction)
-    is expressed as chain steps, so there is no post-processing step.
+    GW builder and exporter over the generic ``ComposedSampler`` runner. The ``from_*``
+    constructors assemble the chain for plain NPE, multi-iteration GNPE, or single-step
+    GNPE from model metadata; ``to_result`` exports the samples to a gw ``Result``. All
+    GW-specific processing (RA frame, fixed parameters, kernel correction) is expressed as
+    chain steps, so there is no post-processing.
     """
 
     def __init__(

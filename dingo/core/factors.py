@@ -565,8 +565,9 @@ class GibbsBlock:
 
 class ComposedSampler:
     """
-    Façade over a ``ChainComposer`` and a ``SamplerContext``. Runs the composer, applies
-    domain-specific post-processing, and returns the samples as a DataFrame.
+    Generic runner over a ``ChainComposer`` and a ``SamplerContext``: draws samples and
+    returns them as a DataFrame. Domain-specific processing lives in the chain's steps, so
+    the runner is domain-agnostic.
     """
 
     def __init__(self, composer: ChainComposer, context: SamplerContext):
@@ -574,18 +575,13 @@ class ComposedSampler:
         self.context = context
         self.samples: Optional[pd.DataFrame] = None
 
-    def _post_process(self, samples: dict):
-        """Hook for domain-specific post-processing; no-op by default."""
-        pass
-
     def run_sampler(
         self, num_samples: int, batch_size: Optional[int] = None
     ) -> pd.DataFrame:
-        """Draw ``num_samples`` samples (chunked by ``batch_size``), post-process, and
-        return them as a DataFrame. An all-density chain includes ``log_prob``; a chain
-        with a ``GibbsBlock`` step does not."""
+        """Draw ``num_samples`` samples (chunked by ``batch_size``) and return them as a
+        DataFrame. An all-density chain includes ``log_prob``; a chain with a ``GibbsBlock``
+        step does not."""
         merged = self.composer.sample(num_samples, self.context, batch_size)
         merged = {k: v.cpu().numpy() for k, v in merged.items()}
-        self._post_process(merged)
         self.samples = pd.DataFrame(merged)
         return self.samples
