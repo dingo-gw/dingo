@@ -28,6 +28,7 @@ from dingo.core.factors import (
     ChainComposer,
     ComposedSampler,
     Composer,
+    Conditioning,
     Factor,
     FlowFactor,
     GibbsComposer,
@@ -405,10 +406,15 @@ class GWComposedSampler(ComposedSampler):
         context: GWSamplerContext,
         metadata: dict,
         inference_parameters: list[str],
+        kernel_factor: Optional[GNPEKernelFactor] = None,
     ):
         super().__init__(composer, context)
         self.metadata = metadata
         self.inference_parameters = inference_parameters
+        # Set for single-step GNPE. Supplies the delta_log_prob_target kernel correction
+        # (evaluated in post-processing, out of the proposal sum) that importance sampling
+        # applies to the joint target q(theta, theta_hat | d).
+        self.kernel_factor = kernel_factor
 
     @classmethod
     def from_model(
@@ -454,6 +460,33 @@ class GWComposedSampler(ComposedSampler):
             flow_factor.parameters,
         )
 
+    @classmethod
+    def from_singlestep_gnpe(
+        cls,
+        main_model: BasePosteriorModel,
+        proxy_source: Factor,
+        raw_context: dict,
+        event_metadata: Optional[dict] = None,
+    ) -> "GWComposedSampler":
+        """Build a single-step (density-preserving) time-GNPE sampler: a ``ChainComposer``
+        of ``[proxy_source, GNPEFlowFactor]``. ``proxy_source`` supplies the detector-time
+        proxies -- a ``FixedFactor`` for prior conditioning (BNS), or an unconditional NDE
+        for density recovery. Unlike multi-iteration GNPE the chain is autoregressive, so
+        log_prob is preserved; the ``GNPEKernelFactor`` supplies the
+        ``delta_log_prob_target`` correction that importance sampling adds to the target.
+        """
+        context = GWSamplerContext.from_model(main_model, raw_context, event_metadata)
+        flow_factor = GNPEFlowFactor.from_model(main_model)
+        kernel_factor = GNPEKernelFactor.from_model(main_model)
+        composer = ChainComposer([proxy_source, flow_factor])
+        return cls(
+            composer,
+            context,
+            _base_model_metadata(main_model),
+            flow_factor.parameters,
+            kernel_factor=kernel_factor,
+        )
+
     def _correct_reference_time(
         self, samples: Union[dict, pd.DataFrame], inverse: bool = False
     ):
@@ -479,7 +512,23 @@ class GWComposedSampler(ComposedSampler):
         else:
             samples["ra"] = (ra - ra_correction) % (2 * np.pi)
 
+    def _add_kernel_correction(self, samples: dict):
+        """Single-step GNPE: add ``delta_log_prob_target = log p(theta_hat | theta)``,
+        evaluated at the proxies and the detector times recomputed from theta, then drop
+        those intermediate detector times. This is the joint-target correction importance
+        sampling applies; it is deliberately kept out of the proposal ``log_prob``."""
+        kf = self.kernel_factor
+        proxies = {p: samples[p] for p in kf.parameters}
+        times = {k: samples[k] for k in kf.gnpe_parameters}
+        correction = kf.log_prob(proxies, Conditioning(self.context, times))
+        samples["delta_log_prob_target"] = np.asarray(correction)
+        for k in kf.gnpe_parameters:
+            samples.pop(k, None)
+
     def _post_process(self, samples: Union[dict, pd.DataFrame], inverse: bool = False):
+        if self.kernel_factor is not None and not inverse:
+            self._add_kernel_correction(samples)
+
         intrinsic_prior = self.metadata["dataset_settings"]["intrinsic_prior"]
         extrinsic_prior = get_extrinsic_prior_dict(
             self.metadata["train_settings"]["data"]["extrinsic_prior"]
