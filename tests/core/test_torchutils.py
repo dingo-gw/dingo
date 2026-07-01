@@ -42,3 +42,32 @@ def test_split_dataset_into_train_and_test():
     assert len(test) == 20
     # The split is a partition (no shared indices, full coverage).
     assert len(train) + len(test) == len(dataset)
+
+
+def test_get_number_of_model_parameters():
+    model = nn.Linear(2, 3)  # weight 2*3 + bias 3 = 9
+    assert torchutils.get_number_of_model_parameters(model) == 9
+
+
+def test_get_lr_returns_optimizer_learning_rates():
+    optimizer = torchutils.get_optimizer_from_kwargs(
+        nn.Linear(2, 2).parameters(), type="adam", lr=0.007
+    )
+    assert torchutils.get_lr(optimizer) == [0.007]
+
+
+def test_torch_detach_to_cpu():
+    tensor = torch.ones(3, requires_grad=True)
+    detached = torchutils.torch_detach_to_cpu(tensor)
+    assert not detached.requires_grad
+    # Non-tensor inputs pass through unchanged.
+    assert torchutils.torch_detach_to_cpu(5) == 5
+
+
+def test_set_requires_grad_flag_by_name():
+    model = nn.Linear(2, 3)
+    torchutils.set_requires_grad_flag(
+        model, name_contains="weight", requires_grad=False
+    )
+    assert model.weight.requires_grad is False
+    assert model.bias.requires_grad is True

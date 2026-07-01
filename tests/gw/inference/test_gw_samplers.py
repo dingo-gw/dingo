@@ -80,7 +80,7 @@ def test_frequency_validator_rejects_value_beyond_hard_bound(
     domain, validate, valid_change, beyond_bound
 ):
     crop = {"cropping_probability": 0.5}
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="domain.f_"):
         validate(beyond_bound, DETECTORS, domain, crop)
 
 
@@ -154,7 +154,7 @@ def test_check_frequency_updates_accepts_valid_and_rejects_invalid():
     # Valid frequency updates pass without raising.
     assert check_frequency_updates(model_metadata, f_min=40.0, f_max=512.0) is None
     # Beyond the hard bound raises.
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="domain.f_min"):
         check_frequency_updates(model_metadata, f_min=10.0)
 
 
