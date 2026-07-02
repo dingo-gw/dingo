@@ -76,7 +76,7 @@ class DataGenerationInput(Input):
         )
 
         if create_data:
-            if self.dingo_injection:
+            if args.dingo_injection:
                 self.create_data_dingo_injection(args)
             else:
                 self.bilby_generation_input.create_data(args)
@@ -107,7 +107,7 @@ class DataGenerationInput(Input):
 
         # Create noise with bilby_pipe and inject with DINGO
         self.bilby_generation_input.create_data(args)
-        if self.injection:
+        if args.injection:
             self._inject_dingo_signal()
 
     def _inject_dingo_signal(self):
