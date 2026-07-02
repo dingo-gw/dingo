@@ -2,9 +2,10 @@
 """Auto-generate the quartodoc API `sections` in _quarto.yml.
 
 The quartodoc analogue of running ``sphinx-apidoc``: walk the ``dingo`` package,
-find every public module that defines classes or functions, and list them (grouped
-by sub-package) so quartodoc documents all their members. New modules appear
-automatically; no hand-maintained object list.
+extract every public class/function from each module (via ``ast``, no import needed),
+and list them so quartodoc renders a full-docstring page per object. Objects are
+grouped by sub-package, so each appears individually in the API sidebar (one click
+from its full docstring, like Sphinx). New objects appear automatically.
 
 Run from ``docs/source``::
 
@@ -12,6 +13,7 @@ Run from ``docs/source``::
 
 then ``quartodoc build`` && ``quarto render`` as usual.
 """
+import ast
 import os
 import re
 
@@ -25,7 +27,7 @@ SKIP_TOP = {"pipe"}
 
 
 def discover():
-    """Return {group: [module.dotted.path, ...]} for public modules with an API."""
+    """Return {group: [dotted.object.path, ...]} of public classes/functions."""
     groups = {}
     for root, dirs, files in os.walk(PKG_DIR):
         dirs[:] = sorted(
@@ -39,11 +41,20 @@ def discover():
             parts = rel.split(".")
             if parts[0] in SKIP_TOP:
                 continue
-            src = open(path, encoding="utf-8", errors="ignore").read()
-            if not re.search(r"^(class|def)\s+[A-Za-z]", src, re.M):
-                continue  # no public classes/functions -> nothing to document
+            try:
+                tree = ast.parse(open(path, encoding="utf-8", errors="ignore").read())
+            except SyntaxError:
+                continue
+            objs = [
+                f"{rel}.{n.name}"
+                for n in tree.body
+                if isinstance(n, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+                and not n.name.startswith("_")
+            ]
+            if not objs:
+                continue
             group = ".".join(parts[:2]) if len(parts) > 1 else parts[0]
-            groups.setdefault(group, []).append(rel)
+            groups.setdefault(group, []).extend(objs)
     return groups
 
 
@@ -52,9 +63,8 @@ def build_sections(groups):
     for group in sorted(groups):
         lines.append(f'    - title: "dingo.{group}"')
         lines.append("      contents:")
-        for mod in sorted(groups[group]):
-            lines.append(f"        - name: {mod}")
-            lines.append("          children: linked")
+        for obj in sorted(groups[group]):
+            lines.append(f"        - {obj}")
     return "\n".join(lines)
 
 
@@ -68,11 +78,11 @@ def main():
         text,
         flags=re.S,
     )
-    if new == text or "BEGIN AUTOGEN" not in new:
+    if "BEGIN AUTOGEN" not in new:
         raise SystemExit("AUTOGEN markers not found in _quarto.yml")
     open(QUARTO_YML, "w", encoding="utf-8").write(new)
-    n_mods = sum(len(v) for v in groups.values())
-    print(f"Wrote {n_mods} modules across {len(groups)} groups to _quarto.yml")
+    n_obj = sum(len(v) for v in groups.values())
+    print(f"Wrote {n_obj} objects across {len(groups)} groups to _quarto.yml")
 
 
 if __name__ == "__main__":

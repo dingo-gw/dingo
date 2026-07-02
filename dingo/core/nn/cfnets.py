@@ -302,15 +302,6 @@ class PositionalEncoding(nn.Module):
         Otherwise, it is computed only for the first feature (e.g., the time dimension).
     base_freq : float, optional (default=2 * np.pi)
         The base frequency used for sinusoidal encoding.
-
-    Methods
-    -------
-    forward(t_theta)
-        Computes the positional encoding for the input tensor `t_theta` and concatenates 
-        it with the original input features.
-        - If `encode_all` is True, the positional encoding is computed for all features.
-        - If `encode_all` is False, the positional encoding is applied only to the first
-          feature, such as time, while other features remain unchanged.
     """
     def __init__(self, nr_frequencies, encode_all=True, base_freq=2 * np.pi):
         super(PositionalEncoding, self).__init__()

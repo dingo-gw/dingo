@@ -112,226 +112,317 @@ quartodoc:
     # BEGIN AUTOGEN SECTIONS  (run `python gen_api.py` to regenerate; do not edit by hand)
     - title: "dingo.asimov.asimov"
       contents:
-        - name: asimov.asimov
-          children: linked
+        - asimov.asimov.Dingo
     - title: "dingo.core.dataset"
       contents:
-        - name: core.dataset
-          children: linked
+        - core.dataset.DingoDataset
+        - core.dataset.recursive_hdf5_load
+        - core.dataset.recursive_hdf5_save
     - title: "dingo.core.density"
       contents:
-        - name: core.density.interpolation
-          children: linked
-        - name: core.density.nde_settings
-          children: linked
-        - name: core.density.unconditional_density_estimation
-          children: linked
+        - core.density.interpolation.interpolated_log_prob
+        - core.density.interpolation.interpolated_log_prob_multi
+        - core.density.interpolation.interpolated_sample_and_log_prob
+        - core.density.interpolation.interpolated_sample_and_log_prob_multi
+        - core.density.nde_settings.get_default_nde_settings_3d
+        - core.density.unconditional_density_estimation.SampleDataset
+        - core.density.unconditional_density_estimation.parse_args
+        - core.density.unconditional_density_estimation.train_unconditional_density_estimator
     - title: "dingo.core.likelihood"
       contents:
-        - name: core.likelihood
-          children: linked
+        - core.likelihood.Likelihood
     - title: "dingo.core.multiprocessing"
       contents:
-        - name: core.multiprocessing
-          children: linked
+        - core.multiprocessing.apply_func_with_multiprocessing
     - title: "dingo.core.nn"
       contents:
-        - name: core.nn.cfnets
-          children: linked
-        - name: core.nn.enets
-          children: linked
-        - name: core.nn.nsf
-          children: linked
+        - core.nn.cfnets.ContinuousFlow
+        - core.nn.cfnets.PositionalEncoding
+        - core.nn.cfnets.create_cf
+        - core.nn.cfnets.get_dim_positional_embedding
+        - core.nn.cfnets.get_theta_embedding_net
+        - core.nn.enets.DenseResidualNet
+        - core.nn.enets.LinearProjectionRB
+        - core.nn.enets.ModuleMerger
+        - core.nn.enets.create_enet_with_projection_layer_and_dense_resnet
+        - core.nn.nsf.FlowWrapper
+        - core.nn.nsf.create_base_transform
+        - core.nn.nsf.create_linear_transform
+        - core.nn.nsf.create_nsf_model
+        - core.nn.nsf.create_nsf_with_rb_projection_embedding_net
+        - core.nn.nsf.create_nsf_wrapped
+        - core.nn.nsf.create_transform
     - title: "dingo.core.posterior_models"
       contents:
-        - name: core.posterior_models.base_model
-          children: linked
-        - name: core.posterior_models.build_model
-          children: linked
-        - name: core.posterior_models.cflow_base
-          children: linked
-        - name: core.posterior_models.flow_matching
-          children: linked
-        - name: core.posterior_models.normalizing_flow
-          children: linked
-        - name: core.posterior_models.score_matching
-          children: linked
+        - core.posterior_models.base_model.BasePosteriorModel
+        - core.posterior_models.base_model.test_epoch
+        - core.posterior_models.base_model.train_epoch
+        - core.posterior_models.build_model.autocomplete_model_kwargs
+        - core.posterior_models.build_model.build_model_from_kwargs
+        - core.posterior_models.cflow_base.ContinuousFlowPosteriorModel
+        - core.posterior_models.cflow_base.compute_divergence
+        - core.posterior_models.cflow_base.compute_hutchinson_divergence
+        - core.posterior_models.cflow_base.compute_log_prior
+        - core.posterior_models.cflow_base.norm_without_divergence_component
+        - core.posterior_models.flow_matching.FlowMatchingPosteriorModel
+        - core.posterior_models.flow_matching.ot_conditional_flow
+        - core.posterior_models.normalizing_flow.NormalizingFlowPosteriorModel
+        - core.posterior_models.score_matching.ScoreDiffusionPosteriorModel
     - title: "dingo.core.result"
       contents:
-        - name: core.result
-          children: linked
+        - core.result.Result
+        - core.result.check_equal_dict_of_arrays
+        - core.result.freeze
+        - core.result.make_pp_plot
     - title: "dingo.core.samplers"
       contents:
-        - name: core.samplers
-          children: linked
+        - core.samplers.GNPESampler
+        - core.samplers.Sampler
     - title: "dingo.core.transforms"
       contents:
-        - name: core.transforms
-          children: linked
+        - core.transforms.GetItem
+        - core.transforms.RenameKey
     - title: "dingo.core.utils"
       contents:
-        - name: core.utils.backward_compatibility
-          children: linked
-        - name: core.utils.condor_utils
-          children: linked
-        - name: core.utils.gnpeutils
-          children: linked
-        - name: core.utils.logging_utils
-          children: linked
-        - name: core.utils.misc
-          children: linked
-        - name: core.utils.plotting
-          children: linked
-        - name: core.utils.pt_to_hdf5
-          children: linked
-        - name: core.utils.torchutils
-          children: linked
-        - name: core.utils.trainutils
-          children: linked
+        - core.utils.backward_compatibility.check_minimum_version
+        - core.utils.backward_compatibility.torch_available_devices
+        - core.utils.backward_compatibility.torch_load_with_fallback
+        - core.utils.backward_compatibility.update_model_config
+        - core.utils.condor_utils.copy_logfiles
+        - core.utils.condor_utils.copyfile
+        - core.utils.condor_utils.create_submission_file
+        - core.utils.condor_utils.create_submission_file_and_submit_job
+        - core.utils.condor_utils.resubmit_condor_job
+        - core.utils.gnpeutils.IterationTracker
+        - core.utils.logging_utils.check_directory_exists_and_if_not_mkdir
+        - core.utils.logging_utils.setup_logger
+        - core.utils.misc.call_func_strict_output_dim
+        - core.utils.misc.get_version
+        - core.utils.misc.recursive_check_dicts_are_equal
+        - core.utils.plotting.get_latex_labels
+        - core.utils.plotting.plot_corner_multi
+        - core.utils.pt_to_hdf5.main
+        - core.utils.pt_to_hdf5.parse_args
+        - core.utils.torchutils.build_train_and_test_loaders
+        - core.utils.torchutils.fix_random_seeds
+        - core.utils.torchutils.get_activation_function_from_string
+        - core.utils.torchutils.get_lr
+        - core.utils.torchutils.get_number_of_model_parameters
+        - core.utils.torchutils.get_optimizer_from_kwargs
+        - core.utils.torchutils.get_scheduler_from_kwargs
+        - core.utils.torchutils.perform_scheduler_step
+        - core.utils.torchutils.set_requires_grad_flag
+        - core.utils.torchutils.split_dataset_into_train_and_test
+        - core.utils.torchutils.torch_detach_to_cpu
+        - core.utils.trainutils.AvgTracker
+        - core.utils.trainutils.EarlyStopping
+        - core.utils.trainutils.LossInfo
+        - core.utils.trainutils.RuntimeLimits
+        - core.utils.trainutils.copyfile
+        - core.utils.trainutils.save_model
+        - core.utils.trainutils.write_history
     - title: "dingo.gw.SVD"
       contents:
-        - name: gw.SVD
-          children: linked
+        - gw.SVD.ApplySVD
+        - gw.SVD.SVDBasis
     - title: "dingo.gw.conversion"
       contents:
-        - name: gw.conversion.spin_conversion
-          children: linked
+        - gw.conversion.spin_conversion.cartesian_spins
+        - gw.conversion.spin_conversion.change_spin_conversion_phase
+        - gw.conversion.spin_conversion.component_masses
+        - gw.conversion.spin_conversion.pe_spins
     - title: "dingo.gw.data"
       contents:
-        - name: gw.data.data_download
-          children: linked
-        - name: gw.data.data_preparation
-          children: linked
-        - name: gw.data.event_dataset
-          children: linked
+        - gw.data.data_download.download_psd
+        - gw.data.data_download.download_raw_data
+        - gw.data.data_preparation.data_to_domain
+        - gw.data.data_preparation.get_event_data_and_domain
+        - gw.data.data_preparation.load_raw_data
+        - gw.data.data_preparation.parse_settings_for_raw_data
+        - gw.data.event_dataset.EventDataset
     - title: "dingo.gw.dataset"
       contents:
-        - name: gw.dataset.evaluate_multibanded_domain
-          children: linked
-        - name: gw.dataset.generate_dataset
-          children: linked
-        - name: gw.dataset.generate_dataset_dag
-          children: linked
-        - name: gw.dataset.utils
-          children: linked
-        - name: gw.dataset.waveform_dataset
-          children: linked
+        - gw.dataset.evaluate_multibanded_domain.main
+        - gw.dataset.evaluate_multibanded_domain.parse_args
+        - gw.dataset.generate_dataset.generate_dataset
+        - gw.dataset.generate_dataset.generate_parameters_and_polarizations
+        - gw.dataset.generate_dataset.main
+        - gw.dataset.generate_dataset.parse_args
+        - gw.dataset.generate_dataset.train_svd_basis
+        - gw.dataset.generate_dataset_dag.configure_runs
+        - gw.dataset.generate_dataset_dag.create_args_string
+        - gw.dataset.generate_dataset_dag.create_dag
+        - gw.dataset.generate_dataset_dag.main
+        - gw.dataset.generate_dataset_dag.modulus_check
+        - gw.dataset.generate_dataset_dag.parse_args
+        - gw.dataset.utils.build_svd_cli
+        - gw.dataset.utils.merge_datasets
+        - gw.dataset.utils.merge_datasets_cli
+        - gw.dataset.waveform_dataset.WaveformDataset
     - title: "dingo.gw.domains"
       contents:
-        - name: gw.domains.base
-          children: linked
-        - name: gw.domains.base_frequency_domain
-          children: linked
-        - name: gw.domains.build_domain
-          children: linked
-        - name: gw.domains.multibanded_frequency_domain
-          children: linked
-        - name: gw.domains.time_domain
-          children: linked
-        - name: gw.domains.uniform_frequency_domain
-          children: linked
+        - gw.domains.base.Domain
+        - gw.domains.base_frequency_domain.BaseFrequencyDomain
+        - gw.domains.build_domain.build_domain
+        - gw.domains.build_domain.build_domain_from_model_metadata
+        - gw.domains.multibanded_frequency_domain.MultibandedFrequencyDomain
+        - gw.domains.multibanded_frequency_domain.decimate_uniform
+        - gw.domains.time_domain.TimeDomain
+        - gw.domains.uniform_frequency_domain.UniformFrequencyDomain
     - title: "dingo.gw.download_strain_data"
       contents:
-        - name: gw.download_strain_data
-          children: linked
+        - gw.download_strain_data.download_event_data_in_FD
+        - gw.download_strain_data.download_strain_data_in_FD
+        - gw.download_strain_data.estimate_single_psd
     - title: "dingo.gw.gwutils"
       contents:
-        - name: gw.gwutils
-          children: linked
+        - gw.gwutils.get_extrinsic_prior_dict
+        - gw.gwutils.get_mismatch
+        - gw.gwutils.get_standardization_dict
+        - gw.gwutils.get_window
     - title: "dingo.gw.importance_sampling"
       contents:
-        - name: gw.importance_sampling.diagnostics
-          children: linked
-        - name: gw.importance_sampling.importance_weights
-          children: linked
+        - gw.importance_sampling.diagnostics.plot_diagnostics
+        - gw.importance_sampling.diagnostics.plot_posterior_slice
+        - gw.importance_sampling.diagnostics.plot_posterior_slice2d
+        - gw.importance_sampling.importance_weights.main
+        - gw.importance_sampling.importance_weights.parse_args
     - title: "dingo.gw.inference"
       contents:
-        - name: gw.inference.gw_samplers
-          children: linked
-        - name: gw.inference.inference_utils
-          children: linked
-        - name: gw.inference.visualization
-          children: linked
+        - gw.inference.gw_samplers.GWSampler
+        - gw.inference.gw_samplers.GWSamplerGNPE
+        - gw.inference.gw_samplers.GWSamplerMixin
+        - gw.inference.gw_samplers.SamplerProtocol
+        - gw.inference.gw_samplers.check_frequency_updates
+        - gw.inference.inference_utils.prepare_log_prob
+        - gw.inference.visualization.generate_cornerplot
+        - gw.inference.visualization.load_ref_samples
     - title: "dingo.gw.injection"
       contents:
-        - name: gw.injection
-          children: linked
+        - gw.injection.GWSignal
+        - gw.injection.Injection
     - title: "dingo.gw.likelihood"
       contents:
-        - name: gw.likelihood
-          children: linked
+        - gw.likelihood.StationaryGaussianGWLikelihood
+        - gw.likelihood.build_stationary_gaussian_likelihood
+        - gw.likelihood.get_wfg
+        - gw.likelihood.inner_product
+        - gw.likelihood.inner_product_complex
+        - gw.likelihood.main
     - title: "dingo.gw.ls_cli"
       contents:
-        - name: gw.ls_cli
-          children: linked
+        - gw.ls_cli.determine_dataset_type
+        - gw.ls_cli.ls
     - title: "dingo.gw.noise"
       contents:
-        - name: gw.noise.asd_dataset
-          children: linked
-        - name: gw.noise.asd_estimation
-          children: linked
-        - name: gw.noise.generate_dataset
-          children: linked
-        - name: gw.noise.generate_dataset_dag
-          children: linked
-        - name: gw.noise.synthetic.asd_parameterization
-          children: linked
-        - name: gw.noise.synthetic.asd_sampling
-          children: linked
-        - name: gw.noise.synthetic.generate_dataset
-          children: linked
-        - name: gw.noise.synthetic.utils
-          children: linked
-        - name: gw.noise.utils
-          children: linked
+        - gw.noise.asd_dataset.ASDDataset
+        - gw.noise.asd_dataset.check_domain_compatibility
+        - gw.noise.asd_estimation.download_and_estimate_cli
+        - gw.noise.asd_estimation.download_and_estimate_psds
+        - gw.noise.generate_dataset.generate_dataset
+        - gw.noise.generate_dataset.parse_args
+        - gw.noise.generate_dataset_dag.create_args_string
+        - gw.noise.generate_dataset_dag.create_dag
+        - gw.noise.generate_dataset_dag.split_time_segments
+        - gw.noise.synthetic.asd_parameterization.curve_fit
+        - gw.noise.synthetic.asd_parameterization.fit_broadband_noise
+        - gw.noise.synthetic.asd_parameterization.fit_spectral
+        - gw.noise.synthetic.asd_parameterization.parameterize_asd_dataset
+        - gw.noise.synthetic.asd_parameterization.parameterize_asds_parallel
+        - gw.noise.synthetic.asd_parameterization.parameterize_single_psd
+        - gw.noise.synthetic.asd_sampling.KDE
+        - gw.noise.synthetic.asd_sampling.get_rescaling_params
+        - gw.noise.synthetic.generate_dataset.generate_dataset
+        - gw.noise.synthetic.generate_dataset.main
+        - gw.noise.synthetic.generate_dataset.parse_args
+        - gw.noise.synthetic.utils.get_index_for_elem
+        - gw.noise.synthetic.utils.lorentzian_eval
+        - gw.noise.synthetic.utils.reconstruct_psds_from_parameters
+        - gw.noise.utils.get_event_gps_times
+        - gw.noise.utils.get_time_segments
+        - gw.noise.utils.merge_datasets
+        - gw.noise.utils.merge_datasets_cli
+        - gw.noise.utils.psd_data_path
     - title: "dingo.gw.prior"
       contents:
-        - name: gw.prior
-          children: linked
+        - gw.prior.BBHExtrinsicPriorDict
+        - gw.prior.build_prior_with_defaults
+        - gw.prior.split_off_extrinsic_parameters
     - title: "dingo.gw.result"
       contents:
-        - name: gw.result
-          children: linked
+        - gw.result.Result
     - title: "dingo.gw.temporary_debug_utils"
       contents:
-        - name: gw.temporary_debug_utils
-          children: linked
+        - gw.temporary_debug_utils.save_training_injection
     - title: "dingo.gw.training"
       contents:
-        - name: gw.training.train_builders
-          children: linked
-        - name: gw.training.train_pipeline
-          children: linked
-        - name: gw.training.train_pipeline_condor
-          children: linked
-        - name: gw.training.utils
-          children: linked
+        - gw.training.train_builders.build_dataset
+        - gw.training.train_builders.build_svd_for_embedding_network
+        - gw.training.train_builders.set_train_transforms
+        - gw.training.train_pipeline.copy_files_to_local
+        - gw.training.train_pipeline.initialize_stage
+        - gw.training.train_pipeline.parse_args
+        - gw.training.train_pipeline.prepare_training_new
+        - gw.training.train_pipeline.prepare_training_resume
+        - gw.training.train_pipeline.train_local
+        - gw.training.train_pipeline.train_stages
+        - gw.training.train_pipeline_condor.copy_logfiles
+        - gw.training.train_pipeline_condor.copyfile
+        - gw.training.train_pipeline_condor.create_submission_file
+        - gw.training.train_pipeline_condor.train_condor
+        - gw.training.utils.append_stage
     - title: "dingo.gw.transforms"
       contents:
-        - name: gw.transforms.detector_transforms
-          children: linked
-        - name: gw.transforms.general_transforms
-          children: linked
-        - name: gw.transforms.gnpe_transforms
-          children: linked
-        - name: gw.transforms.inference_transforms
-          children: linked
-        - name: gw.transforms.noise_transforms
-          children: linked
-        - name: gw.transforms.parameter_transforms
-          children: linked
-        - name: gw.transforms.utils
-          children: linked
-        - name: gw.transforms.waveform_transforms
-          children: linked
+        - gw.transforms.detector_transforms.ApplyCalibrationToWaveform
+        - gw.transforms.detector_transforms.GetDetectorTimes
+        - gw.transforms.detector_transforms.ProjectOntoDetectors
+        - gw.transforms.detector_transforms.SampleCalibrationParameters
+        - gw.transforms.detector_transforms.TimeShiftStrain
+        - gw.transforms.detector_transforms.time_delay_from_geocenter
+        - gw.transforms.general_transforms.UnpackDict
+        - gw.transforms.gnpe_transforms.GNPEBase
+        - gw.transforms.gnpe_transforms.GNPECoalescenceTimes
+        - gw.transforms.inference_transforms.CopyToExtrinsicParameters
+        - gw.transforms.inference_transforms.ExpandStrain
+        - gw.transforms.inference_transforms.PostCorrectGeocentTime
+        - gw.transforms.inference_transforms.ResetSample
+        - gw.transforms.inference_transforms.ToTorch
+        - gw.transforms.noise_transforms.AddWhiteNoiseComplex
+        - gw.transforms.noise_transforms.RepackageStrainsAndASDS
+        - gw.transforms.noise_transforms.SampleNoiseASD
+        - gw.transforms.noise_transforms.WhitenAndScaleStrain
+        - gw.transforms.noise_transforms.WhitenFixedASD
+        - gw.transforms.noise_transforms.WhitenStrain
+        - gw.transforms.parameter_transforms.SampleExtrinsicParameters
+        - gw.transforms.parameter_transforms.SelectStandardizeRepackageParameters
+        - gw.transforms.parameter_transforms.StandardizeParameters
+        - gw.transforms.utils.get_batch_size_of_input_sample
+        - gw.transforms.waveform_transforms.CropMaskStrainRandom
+        - gw.transforms.waveform_transforms.DecimateAll
+        - gw.transforms.waveform_transforms.DecimateWaveformsAndASDS
+        - gw.transforms.waveform_transforms.MaskDataForFrequencyRangeUpdate
+        - gw.transforms.waveform_transforms.check_sample_in_domain
+        - gw.transforms.waveform_transforms.create_mask_based_on_frequency_update
+        - gw.transforms.waveform_transforms.decimate_recursive
     - title: "dingo.gw.waveform_generator"
       contents:
-        - name: gw.waveform_generator.frame_utils
-          children: linked
-        - name: gw.waveform_generator.waveform_generator
-          children: linked
-        - name: gw.waveform_generator.wfg_utils
-          children: linked
+        - gw.waveform_generator.frame_utils.convert_J_to_L0_frame
+        - gw.waveform_generator.frame_utils.get_JL0_euler_angles
+        - gw.waveform_generator.frame_utils.rotate_y
+        - gw.waveform_generator.frame_utils.rotate_z
+        - gw.waveform_generator.waveform_generator.NewInterfaceWaveformGenerator
+        - gw.waveform_generator.waveform_generator.SEOBNRv4PHM_maximum_starting_frequency
+        - gw.waveform_generator.waveform_generator.WaveformGenerator
+        - gw.waveform_generator.waveform_generator.generate_waveforms_parallel
+        - gw.waveform_generator.waveform_generator.generate_waveforms_task_func
+        - gw.waveform_generator.waveform_generator.sum_contributions_m
+        - gw.waveform_generator.wfg_utils.get_polarizations_from_fd_modes_m
+        - gw.waveform_generator.wfg_utils.get_starting_frequency_for_SEOBRNRv5_conditioning
+        - gw.waveform_generator.wfg_utils.get_tapering_window_for_complex_time_series
+        - gw.waveform_generator.wfg_utils.linked_list_modes_to_dict_modes
+        - gw.waveform_generator.wfg_utils.taper_td_modes_for_SEOBRNRv5_extra_time
+        - gw.waveform_generator.wfg_utils.taper_td_modes_in_place
+        - gw.waveform_generator.wfg_utils.td_modes_to_fd_modes
     # END AUTOGEN SECTIONS
 
 metadata-files:
