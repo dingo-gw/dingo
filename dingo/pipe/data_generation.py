@@ -1,80 +1,56 @@
 import os
 import sys
 
-import dingo.pipe.create_injections  # Needed for delta-function time priors.
-
-import bilby
 from bilby_pipe.input import Input
-from bilby_pipe.plotting_utils import plot_whitened_data
 from bilby_pipe.data_generation import DataGenerationInput as BilbyDataGenerationInput
-from bilby.core.prior import PriorDict
 from bilby_pipe.utils import (
     parse_args,
     logger,
     convert_string_to_dict,
-    convert_prior_string_input,
     resolve_filename_with_transfer_fallback,
-    BilbyPipeError,
 )
 import lalsimulation as LS
 import numpy as np
 
-from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import UniformFrequencyDomain, build_domain_from_model_metadata
 from dingo.gw.injection import Injection
 from dingo.pipe.parser import create_parser
+from dingo.core.utils.backward_compatibility import torch_load_with_fallback
 
 logger.name = "dingo_pipe"
 
 
-class DataGenerationInput(BilbyDataGenerationInput):
-    def __init__(self, args, unknown_args, create_data=True):
-        self.model = resolve_filename_with_transfer_fallback(args.model) or args.model
-        self.model_init = args.model_init and (
-            resolve_filename_with_transfer_fallback(args.model_init) or args.model_init
-        )
+class DataGenerationInput(Input):
 
-        Input.__init__(self, args, unknown_args)
-        # Generic initialisation
+    def __init__(self, args, unknown_args, create_data=True):
+        super().__init__(args, unknown_args)
         self.meta_data = dict(
             command_line_args=args.__dict__,
             unknown_command_line_args=unknown_args,
             injection_parameters=None,
-            # bilby_version=bilby.__version__,
-            # bilby_pipe_version=get_version_information(),
         )
-        self.injection_parameters = None
 
-        # Admin arguments
-        self.ini = args.ini
-        self.transfer_files = args.transfer_files
-
-        # Global settings
-        # self.cosmology = args.cosmology
-
-        # Run index arguments
-        self.idx = args.idx
-        self.generation_seed = args.generation_seed
+        self.model = resolve_filename_with_transfer_fallback(args.model) or args.model
+        self.model_init = args.model_init and (
+            resolve_filename_with_transfer_fallback(args.model_init) or args.model_init
+        )
         self.trigger_time = args.trigger_time
 
-        # Naming arguments
-        self.outdir = args.outdir
-        self.label = args.label
+        model, _ = torch_load_with_fallback(self.model, preferred_map_location="meta")
+        self.model_metadata = model["metadata"]
 
-        # Prior arguments
-        # self.reference_frame = args.reference_frame
-        # self.time_reference = "geocent" # DINGO mod used for saving data dump
-        # self.phase_marginalization = args.phase_marginalization
-        self.prior_dict = args.prior_dict
-        self.default_prior = "BBHPriorDict"
-        self.time_reference = "geocent"
-        self.prior_dict_updates = args.prior_dict_updates
+        # ###############################
+        # TODO: AUTOCOMPLETE FROM MODEL #
+        # ###############################
+        args.detectors = self.model_metadata["train_settings"]["data"]["detectors"]
+        self.domain = build_domain_from_model_metadata(self.model_metadata, base=True)
+        assert isinstance(self.domain, UniformFrequencyDomain)
+        args.duration = int(np.round(1 / self.domain.delta_f))
 
         # Whether to generate data for importance sampling. This must be done when
         # desired data settings differ from those used for network training. If this is
         # the case, save the new data to a different file name.
-
         self.importance_sampling = args.importance_sampling_generation
         self.importance_sampling_updates = args.importance_sampling_updates
         if self.importance_sampling:
@@ -85,129 +61,32 @@ class DataGenerationInput(BilbyDataGenerationInput):
                 self.importance_sampling_updates.pop("maximum_frequency")
             vars(args).update(self.importance_sampling_updates)
 
-        # Data arguments
-        self.ignore_gwpy_data_quality_check = args.ignore_gwpy_data_quality_check
-        self.detectors = args.detectors
-        self.channel_dict = args.channel_dict
-        self.fetch_open_data_kwargs = args.fetch_open_data_kwargs
-        self.data_dict = args.data_dict
-        self.data_format = args.data_format
-        self.allow_tape = args.allow_tape
-        self.tukey_roll_off = args.tukey_roll_off
-        self.gaussian_noise = args.gaussian_noise
-        self.zero_noise = args.zero_noise
-        self.resampling_method = args.resampling_method
-
-        if args.timeslide_dict is not None:
-            self.timeslide_dict = convert_string_to_dict(args.timeslide_dict)
-            logger.info(f"Read-in timeslide dict directly: {self.timeslide_dict}")
-        elif args.timeslide_file is not None:
-            self.gps_file = args.gps_file
-            self.timeslide_file = args.timeslide_file
-            self.timeslide_dict = self.get_timeslide_dict(self.idx)
-
-        # Data duration arguments
-        self.duration = args.duration
-        self.post_trigger_duration = args.post_trigger_duration
-
-        # Frequencies
-        self.sampling_frequency = args.sampling_frequency
-        self.minimum_frequency = args.minimum_frequency
-        self.maximum_frequency = args.maximum_frequency
-        self.reference_frequency = args.reference_frequency
-
-        # Waveform, source model and likelihood
-        self.waveform_generator_class = (
-            "bilby.gw.waveform_generator.LALCBCWaveformGenerator"
-        )
-        # self.waveform_generator_class_ctor_args = (
-        #     args.waveform_generator_constructor_dict
-        # )
-        self.waveform_approximant = args.waveform_approximant
-        self.catch_waveform_errors = args.catch_waveform_errors
-        # TODO: These are set to parser defaults. Fix to set from model.
-        self.pn_spin_order = -1
-        self.pn_tidal_order = -1
-        self.pn_phase_order = -1
-        self.pn_amplitude_order = 0
-        self.mode_array = None
-        # don't set self.waveform_arguments_dict, it will be updated later by injection_waveform_arguments
-        self.waveform_arguments_dict = None
-        self.injection_waveform_arguments = args.injection_waveform_arguments
-        self.numerical_relativity_file = args.numerical_relativity_file
-        self.dingo_injection = args.dingo_injection
-        self.injection_waveform_approximant = args.injection_waveform_approximant
-        if args.injection_waveform_approximant in [
-            "SEOBNRv5PHM",
-            "SEOBNRv5EHM",
-            "SEOBNRv5HM",
-        ]:
-            self.injection_frequency_domain_source_model = "gwsignal_binary_black_hole"
-            self.frequency_domain_source_model = "gwsignal_binary_black_hole"
-        else:
-            self.injection_frequency_domain_source_model = "lal_binary_black_hole"
-            self.frequency_domain_source_model = "lal_binary_black_hole"
-
-        # DINGO mod
         self.save_bilby_data_dump = args.save_bilby_data_dump
-        if self.save_bilby_data_dump:
-            self.time_reference = args.time_reference
-            self.deltaT = args.deltaT
 
-        # self.conversion_function = args.conversion_function
-        # self.generation_function = args.generation_function
-        # self.likelihood_type = args.likelihood_type
-        # self.extra_likelihood_kwargs = args.extra_likelihood_kwargs
-        self.enforce_signal_duration = args.enforce_signal_duration
-
-        # PSD
-        self.psd_maximum_duration = args.psd_maximum_duration
-        self.psd_dict = args.psd_dict
-        self.psd_length = args.psd_length
-        self.psd_fractional_overlap = args.psd_fractional_overlap
-        self.psd_start_time = args.psd_start_time
-        self.psd_method = args.psd_method
-
-        # # ROQ
-        # self.roq_folder = args.roq_folder
-        # self.roq_linear_matrix = args.roq_linear_matrix
-        # self.roq_quadratic_matrix = args.roq_quadratic_matrix
-        # self.roq_weights = args.roq_weights
-        # self.roq_weight_format = args.roq_weight_format
-        # self.roq_scale_factor = args.roq_scale_factor
-        #
-        # # Calibration
-        # self.calibration_model = args.calibration_model
-        # self.calibration_correction_type = args.calibration_correction_type
-        # self.spline_calibration_envelope_dict = args.spline_calibration_envelope_dict
-        # self.spline_calibration_amplitude_uncertainty_dict = (
-        #     args.spline_calibration_amplitude_uncertainty_dict
-        # )
-        # self.spline_calibration_phase_uncertainty_dict = (
-        #     args.spline_calibration_phase_uncertainty_dict
-        # )
-        # self.spline_calibration_nodes = args.spline_calibration_nodes
-        # self.calibration_prior_boundary = args.calibration_prior_boundary
-        #
-        # # Marginalization
-        # self.distance_marginalization = args.distance_marginalization
-        # self.distance_marginalization_lookup_table = (
-        #     args.distance_marginalization_lookup_table
-        # )
-        # self.phase_marginalization = args.phase_marginalization
-        # self.time_marginalization = args.time_marginalization
-        # self.jitter_time = args.jitter_time
-        #
-        # # Plotting
-        self.plot_data = args.plot_data
-        self.plot_spectrogram = args.plot_spectrogram
-        self.plot_injection = args.plot_injection
+        # Build the base domain from model metadata to ensure bilby generates
+        # data with the full available frequency range. This way it won't set zeros
+        # outside the range, and DINGO can mask it later as needed.
+        self.bilby_generation_input = BilbyDataGenerationInput(
+            args, unknown_args, create_data=False
+        )
+        self.bilby_generation_input.minimum_frequency = self.domain.f_min
+        self.bilby_generation_input.maximum_frequency = self.domain.f_max
+        self.bilby_generation_input.sampling_frequency = (
+            self.lowest_sampling_frequency_from_domain()
+        )
 
         if create_data:
             if self.dingo_injection:
                 self.create_data_dingo_injection(args)
             else:
-                self.create_data(args)
+                self.bilby_generation_input.create_data(args)
+
+    def __getattr__(self, name):
+        try:
+            return getattr(self.bilby_generation_input, name)
+        except AttributeError:
+            pass
+        return None
 
     def create_data_dingo_injection(self, args):
         """Adaptation of create_data to use Dingo signal models rather than Bilby.
@@ -218,70 +97,23 @@ class DataGenerationInput(BilbyDataGenerationInput):
         Second, calls _inject_dingo_signal to generate the Dingo signal waveform and
         add it to the noisy data within the interferometers.
         """
-        # Save values of relevant args.
-        injection = args.injection
-        injection_file = args.injection_file
-        injection_dict = args.injection_dict
+        self.injection = args.injection
+        self.injection_file = args.injection_file
+        self.injection_dict = args.injection_dict
 
         args.injection = False
         args.injection_file = None
         args.injection_dict = None
 
-        # Create noise.
-        self.create_data(args)
-
-        # Reset args.
-        args.injection = injection
-        args.injection_file = injection_file
-        args.injection_dict = injection_dict
-        self.injection = args.injection
-        self.injection_file = args.injection_file
-        self.injection_dict = args.injection_dict
-
+        # Create noise with bilby_pipe and inject with DINGO
+        self.bilby_generation_input.create_data(args)
         if self.injection:
-            self._inject_dingo_signal(args)
+            self._inject_dingo_signal()
 
-    @BilbyDataGenerationInput.interferometers.setter
-    def interferometers(self, interferometers):
-        # Monkey patch to avoid bilby_pipe zeroing data below
-        # self.minimum_frequency_dict and above self.maximum_frequency_dict. Remove
-        # this code if we are happy to let bilby_pipe do this. Possible issue is edge
-        # effects for multi-banded frequency domain, so instead we do the masking
-        # within Dingo.
-        for ifo in interferometers:
-            if isinstance(ifo, bilby.gw.detector.Interferometer) is False:
-                raise BilbyPipeError(f"ifo={ifo} is not a bilby Interferometer")
-            # if self.minimum_frequency is not None:
-            #     ifo.minimum_frequency = self.minimum_frequency_dict[ifo.name]
-            # if self.maximum_frequency is not None:
-            #     ifo.maximum_frequency = self.maximum_frequency_dict[ifo.name]
-            # if self.calibration_model is not None:
-            #     self.add_calibration_model_to_interferometers(ifo)
-
-        self._interferometers = interferometers
-        self.data_set = True
-        if self.plot_data:
-            interferometers.plot_data(outdir=self.data_directory, label=self.label)
-            plot_whitened_data(
-                interferometers=interferometers,
-                data_directory=self.data_directory,
-                label=self.label,
-            )
-
-    def _inject_dingo_signal(self, args):
+    def _inject_dingo_signal(self):
         """Generate a GW signal using the dingo.gw.injection class and add it to the
         interferometer strain data. Also compute SNRs and store them."""
-        try:
-            model = build_model_from_kwargs(
-                filename=args.model, device="meta", load_training_info=False
-            )
-        except RuntimeError:
-            # 'meta' is not supported by older version of python / torch
-            model = build_model_from_kwargs(
-                filename=args.model, device="cpu", load_training_info=False
-            )
-
-        injection = Injection.from_posterior_model_metadata(model.metadata)
+        injection = Injection.from_posterior_model_metadata(self.model_metadata)
         injection.use_base_domain = True  # Do not generate MFD signals.
         injection.t_ref = self.trigger_time
         injection._initialize_transform()
@@ -339,19 +171,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
         This method will also save the PSDs as .txt files in the data directory
         for easy reading by pesummary and Bilby.
         """
-
-        try:
-            model = build_model_from_kwargs(
-                filename=self.model, device="meta", load_training_info=False
-            )
-        except RuntimeError:
-            # 'meta' is not supported by older version of python / torch
-            model = build_model_from_kwargs(
-                filename=self.model, device="cpu", load_training_info=False
-            )
-        domain = build_domain_from_model_metadata(model.metadata, base=True)
-        assert isinstance(domain, UniformFrequencyDomain)
-
         if self.save_bilby_data_dump:
             # this is needed because we want bilby to use the updated DINGO
             # prior
@@ -381,14 +200,14 @@ class DataGenerationInput(BilbyDataGenerationInput):
             )
 
             # These arrays extend up to self.sampling_frequency / 2. Truncate them to
-            # the model maximum frequency, and also set the ASD to 1.0 below model
-            # minimum frequency.
-            strain = domain.update_data(strain)
-            asd = domain.update_data(asd, low_value=1.0)
+            # the base domain maximum frequency, and set the ASD to 1.0 below base domain
+            # minimum frequency (which should already be the case from bilby generation).
+            strain = self.domain.update_data(strain)
+            asd = self.domain.update_data(asd, low_value=1.0)
 
             # Dingo expects data to have trigger time 0, so we apply a cyclic time shift
             # by the post-trigger duration.
-            strain = domain.time_translate_data(strain, self.post_trigger_duration)
+            strain = self.domain.time_translate_data(strain, self.post_trigger_duration)
 
             # Note that the ASD estimated by the Bilby Interferometer differs ever so
             # slightly from the ASDs we computed before using pycbc. In addition,
@@ -469,7 +288,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
         for ifo in self.interferometers:
             np.savetxt(
                 os.path.join(self.data_directory, f"{ifo.name}_psd.txt"),
-                np.vstack([domain(), data["asds"][ifo.name] ** 2]).T,
+                np.vstack([self.domain(), data["asds"][ifo.name] ** 2]).T,
             )
 
     @property
@@ -491,39 +310,12 @@ class DataGenerationInput(BilbyDataGenerationInput):
         else:
             self._importance_sampling_updates = None
 
-    @property
-    def prior_dict_updates(self):
-        """The input prior_dict from the ini (if given)
-
-        Note, this is not the bilby prior (see self.priors for that), this is
-        a key-val dictionary where the val's are strings which are converting
-        into bilby priors in `_get_prior
-        """
-        return self._prior_dict_updates
-
-    @prior_dict_updates.setter
-    def prior_dict_updates(self, prior_dict_updates):
-        if isinstance(prior_dict_updates, dict):
-            prior_dict_updates = prior_dict_updates
-        elif isinstance(prior_dict_updates, str):
-            prior_dict_updates = convert_prior_string_input(prior_dict_updates)
-        elif prior_dict_updates is None:
-            self._prior_dict_updates = None
-            return
-        else:
-            raise BilbyPipeError(
-                f"prior_dict_updates={prior_dict_updates} not " f"understood"
-            )
-
-        self._prior_dict_updates = {
-            self._convert_prior_dict_key(key): val
-            for key, val in prior_dict_updates.items()
-        }
-
-    def _get_priors(self, add_time=True):
-        priors = super()._get_priors(add_time=add_time)
-        priors.update(PriorDict(self.prior_dict_updates))
-        return priors
+    def lowest_sampling_frequency_from_domain(self):
+        """Set the sampling frequency as the lowest power of two greater than
+        self.domain.f_max that, when divided by two, is greater or equal to
+        self.domain.f_max."""
+        target = 2 * self.domain.f_max
+        return 2 ** np.ceil(np.log2(target))
 
 
 def create_generation_parser():

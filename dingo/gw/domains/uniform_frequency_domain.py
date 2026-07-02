@@ -155,7 +155,7 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
         elif data.shape[-1] != len(self):
             raise TypeError(
                 f"Data with {data.shape[-1]} frequency bins is "
-                f"incompatible with domain."
+                f"incompatible with domain with {len(self)} bins."
             )
 
         return f
