@@ -12,15 +12,22 @@ the chain for plain NPE, multi-iteration GNPE, or single-step GNPE.
 from __future__ import annotations
 
 import copy
+import logging
+import time
 from typing import Optional
 
 import numpy as np
+import pandas as pd
 import torch
 from astropy.time import Time
-from bilby.core.prior import DeltaFunction, PriorDict
+from bilby.core.prior import DeltaFunction, PriorDict, Uniform
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 
+from dingo.core.density import (
+    interpolated_log_prob_multi,
+    interpolated_sample_and_log_prob_multi,
+)
 from dingo.core.factors import (
     ChainComposer,
     ComposedSampler,
@@ -31,10 +38,12 @@ from dingo.core.factors import (
     TargetCorrection,
     _base_model_metadata,
 )
+from dingo.core.multiprocessing import apply_func_with_multiprocessing
 from dingo.core.posterior_models import BasePosteriorModel
 from dingo.core.transforms import GetItem, RenameKey
 from dingo.gw.domains import build_domain, MultibandedFrequencyDomain
 from dingo.gw.gwutils import get_extrinsic_prior_dict
+from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.transforms import (
     CopyToExtrinsicParameters,
@@ -50,6 +59,8 @@ from dingo.gw.transforms import (
     WhitenAndScaleStrain,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class GWSamplerContext:
     """
@@ -58,8 +69,9 @@ class GWSamplerContext:
     stages.
 
     This implements the ``dingo.core.factors.SamplerContext`` protocol. It owns the
-    one-time data preprocessing (``prepared_data``) and -- once wired in a later step --
-    the likelihood used by likelihood-based factors and importance sampling.
+    one-time data preprocessing (``prepared_data``) and builds the exact likelihood
+    (``likelihood``) used by likelihood-based factors (synthetic phase) and importance
+    sampling.
 
     Event metadata lives here (not on individual factors): it is a property of the data,
     and it drives frequency cropping, the t_ref/RA correction, and the likelihood.
@@ -73,11 +85,14 @@ class GWSamplerContext:
         data_prep: Compose,
         raw_context: dict,
         event_metadata: Optional[dict] = None,
+        base_metadata: Optional[dict] = None,
     ):
         self.domain = domain
         self.detectors = detectors
         self.t_ref = t_ref
         self._data_prep = data_prep
+        # The base (parameter/waveform/domain) metadata, used to build the likelihood.
+        self.base_metadata = base_metadata
         # The raw event data `d` (strain + ASDs per detector), i.e. EventDataset.data --
         # the same object set as GWSampler.context today. Consumed lazily by
         # prepared_data(); also retained for the likelihood (synthetic-phase / IS factors)
@@ -127,6 +142,7 @@ class GWSamplerContext:
             data_prep=Compose(transforms),
             raw_context=raw_context,
             event_metadata=event_metadata,
+            base_metadata=meta,
         )
 
     def prepared_data(self) -> torch.Tensor:
@@ -135,8 +151,125 @@ class GWSamplerContext:
             self._prepared = self._data_prep(self.raw_context)
         return self._prepared
 
-    def likelihood(self):
-        raise NotImplementedError("GWSamplerContext.likelihood")
+    def likelihood(
+        self,
+        time_marginalization_kwargs: Optional[dict] = None,
+        phase_marginalization_kwargs: Optional[dict] = None,
+        calibration_marginalization_kwargs: Optional[dict] = None,
+        phase_grid: Optional[np.ndarray] = None,
+        use_base_domain: bool = False,
+    ) -> StationaryGaussianGWLikelihood:
+        """
+        Build the exact GW likelihood on this event's data, in physical parameter space.
+
+        The network's standardized, decimated view of the data is `prepared_data()`; the
+        likelihood instead takes the raw event data (`raw_context`) and builds its own
+        representation -- decimating to the multibanded domain unless `use_base_domain`,
+        and masking the ASDs to the event's frequency range. Its reference time is the
+        event time (the training-frame right-ascension correction is already applied to the
+        samples), or the training reference time when no event time is set.
+
+        Importance-sampling domain rebuilds (an updated `T` / `delta_f` or frequency range)
+        are not wired here yet: the likelihood uses this context's domain.
+
+        Parameters
+        ----------
+        time_marginalization_kwargs : dict, optional
+            Analytically marginalize over `geocent_time`; `t_lower` / `t_upper` are filled
+            from the network's (uniform) time prior. Requires a time-marginalized network.
+        phase_marginalization_kwargs : dict, optional
+            Analytically marginalize over `phase`. Requires a uniform [0, 2 pi) phase prior.
+        calibration_marginalization_kwargs : dict, optional
+            Marginalize over detector calibration uncertainty.
+        phase_grid : np.ndarray, optional
+            Phase grid for the exact phase-marginalized / synthetic-phase likelihood.
+        use_base_domain : bool, default False
+            For a multibanded domain, evaluate on the base (undecimated) frequency domain
+            rather than the decimated one.
+
+        Returns
+        -------
+        StationaryGaussianGWLikelihood
+        """
+        # Marginalizing over a parameter needs the (uniform) prior the network
+        # marginalized over; use it to parameterize the requested marginalization.
+        if time_marginalization_kwargs is not None:
+            time_prior = self._marginalized_prior("geocent_time")
+            if time_prior is None:
+                raise NotImplementedError(
+                    "Time marginalization is not compatible with a non-marginalized "
+                    "network."
+                )
+            if type(time_prior) != Uniform:
+                raise NotImplementedError(
+                    "Only uniform time prior is supported for time marginalization."
+                )
+            time_marginalization_kwargs = {
+                **time_marginalization_kwargs,
+                "t_lower": time_prior.minimum,
+                "t_upper": time_prior.maximum,
+            }
+        if phase_marginalization_kwargs is not None:
+            phase_prior = self._marginalized_prior("phase")
+            if not (
+                isinstance(phase_prior, Uniform)
+                and (phase_prior._minimum, phase_prior._maximum) == (0, 2 * np.pi)
+            ):
+                raise ValueError(
+                    f"Phase prior should be uniform [0, 2pi) for phase marginalization, "
+                    f"but is {phase_prior}."
+                )
+
+        dataset_settings = self.base_metadata["dataset_settings"]
+        # WaveformGenerator domain -- generally the dataset domain (it may be wider than
+        # the data domain for generation). delta_f / T importance-sampling updates: TODO.
+        wfg_domain = build_domain(dataset_settings["domain"])
+
+        # Likelihood reference time: the event time (the training-frame RA correction has
+        # already been applied to the samples), falling back to the training reference.
+        if self.event_metadata is not None and "time_event" in self.event_metadata:
+            t_ref = self.event_metadata["time_event"]
+        else:
+            t_ref = self.t_ref
+
+        return StationaryGaussianGWLikelihood(
+            wfg_kwargs=dataset_settings["waveform_generator"],
+            wfg_domain=wfg_domain,
+            data_domain=self.domain,
+            event_data=self.raw_context,
+            t_ref=t_ref,
+            time_marginalization_kwargs=time_marginalization_kwargs,
+            phase_marginalization_kwargs=phase_marginalization_kwargs,
+            calibration_marginalization_kwargs=calibration_marginalization_kwargs,
+            phase_grid=phase_grid,
+            use_base_domain=use_base_domain,
+            frequency_update=dict(
+                minimum_frequency=self._frequency(
+                    "minimum_frequency", self.domain.f_min
+                ),
+                maximum_frequency=self._frequency(
+                    "maximum_frequency", self.domain.f_max
+                ),
+            ),
+        )
+
+    def _frequency(self, key: str, default: float):
+        """The event's frequency-range override for `key` (min/max), else `default`."""
+        if self.event_metadata is None:
+            return default
+        return self.event_metadata.get(key, default)
+
+    def _marginalized_prior(self, name: str):
+        """The prior over `name` if the network marginalized it (i.e. `name` is not an
+        inference parameter), else `None` -- used to parameterize likelihood
+        marginalization over time / phase."""
+        data_settings = self.base_metadata["train_settings"]["data"]
+        if name in data_settings["inference_parameters"]:
+            return None
+        intrinsic_prior = self.base_metadata["dataset_settings"]["intrinsic_prior"]
+        extrinsic_prior = get_extrinsic_prior_dict(data_settings["extrinsic_prior"])
+        prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
+        return prior.get(name)
 
 
 class DeltaFactor(Factor):
@@ -163,22 +296,120 @@ class DeltaFactor(Factor):
         raise NotImplementedError("DeltaFactor.log_prob")
 
 
-# --- Stubs for later steps -------------------------------------------------------------
+def _to_numpy(v) -> np.ndarray:
+    """Detach a torch tensor (or coerce anything) to a numpy array."""
+    if torch.is_tensor(v):
+        return v.detach().cpu().numpy()
+    return np.asarray(v)
 
 
 class SyntheticPhaseFactor(Factor):
-    """``q(phase | theta_rest, d)`` from the likelihood on a phase grid (a non-network
-    factor, the final step of the chain). Not yet implemented."""
+    """
+    Reconstruct the coalescence phase for a phase-marginalized network:
+    `q(phase | theta_rest, d)` from the likelihood on a phase grid. The terminal factor of
+    the chain.
 
-    def __init__(self):
+    For each incoming `theta_rest` it builds the phase-full likelihood
+    (`context.likelihood()`) and evaluates `log L` on a grid over `[0, 2 pi)`, exploiting
+    that the waveform modes computed once at `phase = 0` each transform as `exp(-i m phase)`
+    -- so the whole grid follows from a single waveform evaluation. The grid is
+    exponentiated into a conditional phase distribution, a uniform floor (weight
+    `uniform_weight`) is added to keep it mass-covering, and one phase is drawn per sample
+    from the interpolated distribution. The returned proposal log-prob
+    `log q(phase | theta_rest, d)` joins the chain's proposal density; importance sampling
+    then targets the phase-full posterior (with the phase prior re-added).
+
+    Two grid modes: `approximation_22_mode=True` assumes a (2, 2)-dominated signal (the
+    whole waveform transforms as `exp(2i phase)`), giving `log L` from the complex overlap
+    `Re[(d | h(phase=0)) exp(2i phase)]`; `False` (the production default) sums the modes
+    exactly and requires the waveform generator's `spin_conversion_phase = 0`.
+    """
+
+    def __init__(
+        self,
+        conditioning: list[str],
+        n_grid: int = 5001,
+        approximation_22_mode: bool = False,
+        uniform_weight: float = 0.01,
+        num_processes: int = 1,
+    ):
+        """
+        Parameters
+        ----------
+        conditioning : list[str]
+            The physical parameters the likelihood needs to generate the waveform
+            (everything the chain has produced except `phase`).
+        n_grid : int, default 5001
+            Number of phase grid points on `[0, 2 pi)`.
+        approximation_22_mode : bool, default False
+            Use the (2, 2)-mode approximation instead of the exact mode sum.
+        uniform_weight : float, default 0.01
+            Weight of the uniform floor added to the phase distribution for mass coverage.
+        num_processes : int, default 1
+            Parallel processes for the per-sample likelihood evaluation and phase sampling.
+        """
         self.parameters = ["phase"]
-        self.conditioning = []  # conditions on all preceding params via the likelihood
+        self.conditioning = list(conditioning)
+        self.n_grid = n_grid
+        self.approximation_22_mode = approximation_22_mode
+        self.uniform_weight = uniform_weight
+        self.num_processes = num_processes
 
     def sample_and_log_prob(self, num_samples, context, given=None):
-        raise NotImplementedError("SyntheticPhaseFactor")
+        """Draw one phase per `theta_rest` row (`num_samples` must be 1); return the phases
+        and their proposal log-prob `log q(phase | theta_rest, d)`."""
+        if num_samples != 1:
+            raise ValueError(
+                "Synthetic phase is 1:1; draw one phase per sample (fan_out=1)."
+            )
+        n = len(next(iter(given.values())))
+        logger.info(f"Estimating synthetic phase for {n} samples.")
+        t0 = time.time()
+        phases, phase_posterior = self._phase_profile(given, context)
+        new_phase, log_prob = interpolated_sample_and_log_prob_multi(
+            phases, phase_posterior, self.num_processes
+        )
+        logger.info(f"Done. This took {time.time() - t0:.2f} s.")
+        return {"phase": torch.as_tensor(new_phase)}, torch.as_tensor(log_prob)
 
     def log_prob(self, theta_i, context, given=None):
-        raise NotImplementedError("SyntheticPhaseFactor")
+        """Evaluate `log q(phase | theta_rest, d)` at the given phases (re-plug / IS)."""
+        phases, phase_posterior = self._phase_profile(given, context)
+        log_prob = interpolated_log_prob_multi(
+            phases, phase_posterior, _to_numpy(theta_i["phase"]), self.num_processes
+        )
+        return torch.as_tensor(log_prob)
+
+    def _phase_profile(self, given, context):
+        """The phase grid and the mass-covered (un-normalized) phase distribution, one row
+        per sample: evaluate `log L` on the grid, exponentiate (shifted by the per-row
+        max), and add the uniform floor."""
+        theta = pd.DataFrame({k: _to_numpy(v) for k, v in given.items()})
+        likelihood = context.likelihood()
+        phases = np.linspace(0, 2 * np.pi, self.n_grid)
+        if self.approximation_22_mode:
+            # Assume the waveform is (2, 2)-dominated (transforms as exp(2i phase)), so the
+            # phase-dependent log-posterior is Re[(d | h(phase=0)) exp(2i phase)].
+            theta = theta.copy()
+            theta["phase"] = 0.0
+            d_inner_h = likelihood.d_inner_h_complex_multi(theta, self.num_processes)
+            phase_log_posterior = np.outer(d_inner_h, np.exp(2j * phases)).real
+        else:
+            # Exact: each mode m contributes exp(-i m phase); needs spin_conversion_phase=0.
+            likelihood.phase_grid = phases
+            phase_log_posterior = apply_func_with_multiprocessing(
+                likelihood.log_likelihood_phase_grid,
+                theta,
+                num_processes=self.num_processes,
+            )
+        phase_posterior = np.exp(
+            phase_log_posterior - np.amax(phase_log_posterior, axis=1, keepdims=True)
+        )
+        # Uniform floor: keep q(phase) > 0 everywhere so importance sampling stays finite.
+        phase_posterior += (
+            phase_posterior.mean(axis=-1, keepdims=True) * self.uniform_weight
+        )
+        return phases, phase_posterior
 
 
 def _build_gnpe_transforms(model: BasePosteriorModel):
