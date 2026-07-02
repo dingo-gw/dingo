@@ -6,8 +6,9 @@
 ## Goal
 
 Given a dingo `Result` HDF5 file, compute and plot the posterior-predictive
-distribution (PPD) of the **whitened strain** in both the time domain and the
-frequency domain, per detector, and save the figures as PNGs.
+distribution (PPD) of the **whitened strain** in the **time domain**, per
+detector, and save the figure as a PNG. (Frequency-domain plotting is out of
+scope for this PR.)
 
 Derived from `/work/nihargupte/analysis/dingo/asimov/eccentricity/plotting/
 production_plots/strain_posterior.ipynb`, but stripped of the
@@ -16,47 +17,91 @@ script.
 
 ## Deliverable
 
-Two plotting **methods on the GW `Result` class** (`dingo/gw/result.py`),
-mirroring the existing `result.plot_corner` API:
+Rendering lives in a new GW-specific module **`dingo/gw/utils/plotting.py`**, the
+domain-specific counterpart to `dingo/core/utils/plotting.py` (which holds
+`plot_corner_multi`). It cannot live in `core/` because PPDs need the GW
+likelihood, detector projection, and ASD whitening — `core/` stays
+domain-agnostic. The module exposes:
+
+```python
+plot_ppd_td(wf_fd, data_fd, domain, filename="ppd_td.png",
+            zoom=None, axes=None, plot_data=True, colors=None)
+one_sided_fd_to_td(fd, domain)   # IFFT helper, also here
+```
+
+`wf_fd` is `{mode: {ifo: (n_waveforms, n_freq) complex}}` (whitened model
+waveforms) and `data_fd` is `{ifo: (n_freq,) complex}` (whitened data) — both
+straight from `_compute_ppd`. `plot_ppd_td` draws **one coloured min/max envelope
+per `mode`** (`"dingo"`, and `"dingo-is"` when present), labelled via
+`_MODE_LABELS`, and overlays the grey whitened-data trace once. `axes=None`
+creates a figure and saves to `filename`; passing `axes` draws onto them and
+skips saving, for composition.
+
+The GW `Result` (subclass of `CoreResult`) keeps a thin convenience method that
+mirrors the `result.plot_corner` API and delegates to the module:
 
 ```python
 result.plot_ppd_td(filename="ppd_td.png", credible_interval=0.9,
                    num_waveforms=1000, num_processes=1, zoom=None, ppd=None)
-result.plot_ppd_fd(filename="ppd_fd.png", credible_interval=0.9,
-                   num_waveforms=1000, num_processes=1, ppd=None)
 ```
 
-They live on the GW `Result` (subclass of `CoreResult`), **not** `core/`,
-because they need the GW likelihood, detector projection, and ASD whitening —
-`core/` stays domain-agnostic.
+Like `plot_corner`, both the **Dingo** posterior (credible set from the raw
+network samples) and — when the result is importance-sampled (`"weights"`
+present) — the **Dingo-IS** posterior are overlaid on one figure.
 
-Shared expensive computation lives in a private
-`_compute_ppd(self, credible_interval, num_waveforms, num_processes, seed)`
-(used by both methods, so extraction is justified) returning
-`{domain, ifos, wf_fd, data_fd}`. Each public method accepts an optional
-precomputed `ppd=` dict so a caller can generate the draws once and render both
-plots without regenerating waveforms.
+The shared expensive computation stays a **private `Result` method**
+`_compute_ppd(self, credible_interval, num_waveforms, num_processes, seed)`,
+returning the tuple `(wf_fd, data_fd)`. It builds a credible set and generates
+waveforms for **each** available posterior internally (no `weighting` argument):
+`"dingo"` always, `"dingo-is"` iff importance-sampled. `plot_ppd_td` accepts a
+precomputed `ppd=(wf_fd, data_fd)` to render without regenerating waveforms; the
+`Result` method supplies `domain` from `self.domain`.
 
-Demo run target: GW230709_122727 EAS importance-sampling result
-(`prod_o4a/working/S230709bi/Exp19_more_points_1/result/
-Exp19_more_points_1_data0_1372940865-2_importance_sampling.hdf5`). A few-line
-script loads the `Result` and calls both methods, producing
-`GW230709_ppd_td.png` and `GW230709_ppd_fd.png`.
+Robustness (prior filter): the normalizing-flow proposal `q(theta)` is a smooth
+density over a box and leaks a small fraction of draws outside the prior — with
+finite `log_prob` but unphysical (e.g. tiny negative spin magnitudes). These are
+exactly the draws that fail waveform generation. `_compute_ppd` therefore
+restricts to the prior support up front (`self.prior.ln_prob(...)`, keeping
+`log_prior` finite) — the same in-prior restriction `importance_sample` applies —
+before generating anything. This removes the failures *and* keeps unphysical
+waveforms out of the envelope, and it is a strict improvement for the `"dingo"`
+mode (which otherwise gives those out-of-prior draws equal mass `1/N`). For an
+importance-sampled result the filter leaves **no** generation failures at all:
+IS already generated every in-prior sample successfully (or it would have crashed
+at `core/likelihood.py`, which has no `try/except`). Measured on the GW150914
+fixture: 43/5000 draws (0.86%) are out-of-prior; **all** generation failures were
+among them, **zero** in-prior draws failed.
+
+Because the prior filter removes every observed failure, there is no per-sample
+failure handling: `_compute_ppd` calls `self.likelihood.signal` directly (a bound
+method, picklable for the pool, as with `log_likelihood` in `core/likelihood.py`)
+and the envelope uses plain `min`/`max`. A genuine in-prior model failure (an
+approximant interpolation edge on a *not-yet-importance-sampled* result) is left to
+raise, surfacing the offending sample rather than being silently dropped.
+
+Dev fixture: GW150914 dingo-ci result (IMRPhenomXPHM, no `pyseobnr` needed),
+`.../dingo-ci/outdir_GW150914/result/
+GW150914_data0_1126259462-4_importance_sampling_part1.hdf5`, rendered via the
+throwaway `ppd_dev.py`.
 
 ## Pipeline (per detector)
 
 1. `result = Result(file_name=...)`; `result._build_likelihood()`.
    `domain = result.domain.base_domain if hasattr(result.domain, "base_domain")
    else result.domain`.
-2. **Sample selection.** Build the `credible_interval` (default 0.9) credible
-   set: normalize the importance/posterior weights, sort descending, and keep
-   the highest-weight samples whose cumulative weight ≤ `credible_interval`
-   (the X% credible region — same definition as the notebook's
-   `select_from_n_percent_interval`). Then draw up to `num_waveforms` rows
-   **uniformly at random** from that set (seeded `np.random.default_rng`) so the
-   envelope represents the whole interval rather than only the peak (the
-   notebook took the top-N highest-weight rows, biasing toward the peak — we
-   diverge here).
+2. **Sample selection.** Build the `credible_interval` (default 0.9) highest-
+   posterior-density credible set using the per-sample probability **mass** that
+   is correct for how the samples were drawn (no assumed reference density): for
+   `"dingo"` the raw samples are equal-mass draws from q(θ) — mass `1/N`, ranked
+   by `log_prob`; for `"dingo-is"` the target is the true posterior, so the mass
+   is the self-normalized importance weight (the `weights` column, ∝ p/q), ranked
+   by `log_likelihood + log_prior`. Sort by rank descending and keep the top
+   samples whose cumulative mass ≤ `credible_interval` (standard HPD estimator —
+   the same weighting `plot_corner` feeds to corner). Then draw up to
+   `num_waveforms` rows **uniformly at random** from that set (seeded
+   `np.random.default_rng`) so the envelope spans the whole interval rather than
+   only the peak (the notebook took the top-N highest-weight rows, biasing toward
+   the peak — we diverge here).
 3. Generate whitened FD waveforms:
    `apply_func_with_multiprocessing(result.likelihood.signal, samples_df,
    num_processes)`. Each `wf["waveform"][ifo]` is **already whitened**
@@ -66,36 +111,33 @@ script loads the `Result` and calls both methods, producing
 ### Time offset (hidden from the user)
 
 The merger always lands at **t = 0**. Internally each waveform is phase-shifted
-by a fixed offset derived from the data segment (`t0 = 1 / domain.delta_f`, the
-segment duration `T`, which places the dingo coalescence at the segment edge),
-via `wf *= exp(2πi·f·t0)`, then the time axis has `t0` subtracted. `t0` is a
-private detail — not a method argument. The implementation verifies the demo
-merger sits at 0 and adjusts the offset derivation if not.
+by a fixed offset derived from the data segment (`t0 = 1 / (2·domain.delta_f)`,
+i.e. `T/2`, the segment **midpoint** where dingo centers the coalescence), via
+`wf *= exp(2πi·f·t0)`, then the time axis has `t0` subtracted. `t0` is a private
+detail — not a method argument. This generalizes the source notebook's hardcoded
+`CENTRAL_TIME = 8` s (which was `T/2` for those `T = 16` s segments). Verified
+empirically: for the GW150914 CI result (`T = 8` s, `t0 = 4`) the whitened-strain
+peak lands at t ≈ +0.02 s in both H1 and L1.
 
 ## Time domain (`<event>_ppd_td.png`, one row per detector)
 
 - Each draw: phase-shift by `t0`, `one_sided_fd_to_td`, keep real part.
 - Band = pointwise **min/max envelope** across the selected draws
-  (`np.nanmin` / `np.nanmax`, ignoring NaN waveforms), drawn with
-  `fill_between`.
+  (`td.min` / `td.max`), drawn with `fill_between`.
 - Overlay: whitened data trace (`√(4Δf)·context_waveform/asd`, same shift +
   IFFT, light sliding-window average), grey.
-- x-axis: time to merger (s), linear, zoomed via `zoom=` (default
-  `(-0.7, 0.1)` for GW230709). y-axis: whitened strain (dimensionless, σ units).
+- x-axis: time to merger (s), linear, zoomed via `zoom=` (method default
+  `(-1.0, 0.2)`; `(-0.7, 0.1)` works well for GW230709). y-axis: whitened strain
+  (dimensionless, σ units).
 
-## Frequency domain (`<event>_ppd_fd.png`, one row per detector)
-
-- Per draw: `|whitened h(f)|` (magnitude of the complex whitened FD waveform).
-- Band = min/max envelope of `|whitened h(f)|` across the selected draws.
-- Overlay: `|whitened data|` = `|√(4Δf)·context_waveform/asd|` — the noisy
-  ~O(1) floor the signal rises above.
-- x-axis: frequency [Hz], **log scale**. y-axis: dimensionless whitened
-  amplitude.
+Frequency-domain PPD plotting is deferred to a follow-up (a per-bin whitened FD
+view buries the signal below the unit-variance noise floor; the useful FD view is
+an amplitude-spectral-density / log-log plot, out of scope here).
 
 ## Reused logic
 
-`one_sided_fd_to_td(fd, domain)` is reused verbatim from the notebook (added as
-a module-level function in `dingo/gw/result.py`): it builds the full Hermitian
+`one_sided_fd_to_td(fd, domain)` is reused verbatim from the notebook (a
+module-level function in `dingo/gw/utils/plotting.py`): it builds the full Hermitian
 two-sided spectrum (DC zeroed), `np.fft.ifft(...) * sqrt(N)` (normalization tied
 to the whitening so noise has unit variance), `dt = 1/(2·f_max)`, output length
 `2n-1`. Correct and whitening-consistent.
@@ -103,14 +145,15 @@ to the whitening so noise has unit variance), `dt = 1/(2·f_max)`, output length
 ## Testing / determinism
 
 - Seeded `np.random.default_rng` for resampling → deterministic figures.
-- `tests/gw/inference/test_ppd.py`: assert `one_sided_fd_to_td` round-trips —
-  a one-sided spectrum with a single populated frequency bin returns a real
-  cosine of the expected period (exercises the Hermitian-mirror + normalization
-  logic, the one piece of non-trivial new math).
+- `tests/gw/test_ppd.py`: assert `one_sided_fd_to_td` (imported from
+  `dingo.gw.utils.plotting`) round-trips — a one-sided spectrum with a single populated
+  frequency bin returns a real cosine of the expected period (exercises the
+  Hermitian-mirror + normalization logic, the one piece of non-trivial new math).
 
 ## Boundaries / conventions
 
-- Methods on the GW `Result` in `gw/result.py`; imports `gw/` + `core/`
-  (allowed direction). No new classes, no new dependencies.
+- Rendering in `gw/utils/plotting.py`, thin `Result.plot_ppd_td` + `_compute_ppd` in
+  `gw/result.py`; imports `gw/` + `core/` (allowed direction). No new classes,
+  no new dependencies.
 - Whitening conventions for data (`√(4Δf)/asd`) and model (likelihood's
   `/asd/noise_std`, `noise_std = 1/√(4Δf)`) are identical and must be preserved.

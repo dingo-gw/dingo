@@ -1,6 +1,6 @@
 import copy
 import time
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 import yaml
@@ -19,6 +19,7 @@ from dingo.gw.domains import MultibandedFrequencyDomain
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
+from dingo.gw.utils.plotting import plot_ppd_td as _plot_ppd_td
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.core.utils.backward_compatibility import check_minimum_version
 
@@ -781,3 +782,181 @@ class Result(CoreResult):
                 except AttributeError:
                     continue
         return prior
+
+    def _compute_ppd(
+        self,
+        credible_interval: float = 0.9,
+        num_waveforms: int = 1000,
+        num_processes: int = 1,
+        seed: int = RANDOM_STATE,
+    ) -> Tuple[dict, dict]:
+        """Generate whitened waveforms for the time-domain strain PPD.
+
+        Builds a ``credible_interval`` highest-posterior-density credible set for each
+        available posterior -- ``"dingo"`` (the raw network samples) and, when the result is
+        importance-sampled, ``"dingo-is"`` -- draws up to ``num_waveforms`` of each uniformly
+        at random (so the envelope spans the whole interval, not just the peak), and projects
+        them onto the detectors via the likelihood. Model waveforms come back already whitened
+        (``h / asd / noise_std``), matching the whitened data.
+
+        Parameters
+        ----------
+        credible_interval : float
+            Posterior probability of the credible set to draw from (default 0.9).
+        num_waveforms : int
+            Maximum number of waveforms drawn from each credible set.
+        num_processes : int
+            Processes used for waveform generation.
+        seed : int
+            Seed for the uniform subsampling, for deterministic figures.
+
+        Returns
+        -------
+        wf_fd : dict
+            ``{mode: {ifo: complex ndarray (n_kept, n_freq)}}`` whitened model waveforms,
+            where ``mode`` is ``"dingo"`` (always) and ``"dingo-is"`` (present iff the result
+            is importance-sampled). Rows are the successfully generated draws; the rare failed
+            draw is dropped, so ``n_kept`` may be slightly below the number requested.
+        data_fd : dict
+            ``{ifo: complex ndarray (n_freq,)}`` whitened detector data (shared across modes).
+
+        Both are consumed by :func:`dingo.gw.utils.plotting.plot_ppd_td` (together with
+        ``self.domain``).
+
+        Notes
+        -----
+        Per-mode credible set. The ``credible_interval`` (= X) region is the highest-
+        posterior-density set ``R = {theta : p(theta) >= c}`` with ``\\int_R p = X``. It needs
+        *two distinct* quantities per sample -- a probability **mass** and a **ranking key** --
+        not one weight. Given samples ``theta_i ~ g`` (the sampling density) and target density
+        ``p``, self-normalized importance sampling estimates any set's mass as
+        ``P(A) ~= sum_i m_i 1[theta_i in A]`` with ``m_i = (p_i/g_i) / sum_j (p_j/g_j)``
+
+        - ``"dingo"``: ``m_i propto 1/N``; rank by ``log_prob``.
+        - ``"dingo-is"``: ``m_i propto p/q``; rank by ``log_likelihood + log_prior``.
+
+        Ranking by the density and accumulating ``m_i`` until the cumulative mass reaches X
+        keeps exactly the samples above the density threshold ``c``
+
+        Prior filter. Samples are first restricted to the prior support (finite ``log_prior``).
+        The flow proposal is a smooth density over a box and leaks a small fraction of draws
+        outside the prior (e.g. tiny negative spin magnitudes); these are unphysical, carry
+        zero target mass, and are the samples that fail waveform generation. This is exactly
+        the in-prior restriction that :meth:`importance_sample` applies, so for an importance-
+        sampled result -- whose in-prior samples were all generated successfully during IS --
+        the filter is guaranteed to leave no generation failures. A genuine in-prior model
+        failure (e.g. an approximant interpolation edge on a not-yet-importance-sampled result)
+        is left to raise, surfacing the offending sample rather than being silently dropped.
+        """
+        if getattr(self, "likelihood", None) is None:
+            self._build_likelihood()
+
+        domain = (
+            self.domain.base_domain
+            if hasattr(self.domain, "base_domain")
+            else self.domain
+        )
+        ifos = list(self.context["waveform"].keys())
+        rng = np.random.default_rng(seed)
+
+        # Whitened data, same convention as the (already-whitened) model waveforms.
+        data_fd = {
+            ifo: np.sqrt(4 * domain.delta_f)
+            * self.context["waveform"][ifo]
+            / self.context["asds"][ifo]
+            for ifo in ifos
+        }
+
+        # Restrict to the prior support before generating anything. The flow proposal is a
+        # smooth density over a box and leaks a small fraction of draws outside the prior
+        # (e.g. tiny negative spin magnitudes); these are unphysical and are exactly the
+        # draws that fail waveform generation. Dropping them here -- the same in-prior
+        # restriction importance sampling uses -- removes those failures (guaranteed for an
+        # importance-sampled result, whose in-prior samples all generated during IS) and
+        # keeps unphysical waveforms out of the envelope.
+        non_fixed = [
+            k
+            for k, v in self.prior.items()
+            if not isinstance(v, (Constraint, DeltaFunction))
+        ]
+        in_prior = np.isfinite(
+            np.asarray(self.prior.ln_prob(self.samples[non_fixed], axis=0), dtype=float)
+        )
+
+        # One credible set per available posterior: "dingo" always; "dingo-is" when the
+        # result is importance-sampled (weights present).
+        wf_fd = {}
+        for mode in ("dingo", "dingo-is"):
+            if mode == "dingo":
+                mass = in_prior.astype(float)
+                rank = self.samples["log_prob"].to_numpy()
+            else:
+                if "weights" not in self.samples:
+                    continue
+                mass = self.samples["weights"].to_numpy().astype(float)
+                rank = (
+                    self.samples["log_likelihood"] + self.samples["log_prior"]
+                ).to_numpy()
+            # Out-of-prior draws get zero mass and bottom rank, so they never enter the
+            # credible set (this also sidesteps NaN log_likelihood on unevaluated samples).
+            mass = np.where(in_prior, mass, 0.0)
+            mass = mass / mass.sum()
+            rank = np.where(in_prior, rank, -np.inf)
+            order = np.argsort(rank)[::-1]
+            n_keep = int(np.searchsorted(np.cumsum(mass[order]), credible_interval)) + 1
+            credible_idx = order[:n_keep]
+            # Subsample uniformly from the credible set so the min/max envelope spans it.
+            if len(credible_idx) > num_waveforms:
+                credible_idx = rng.choice(
+                    credible_idx, size=num_waveforms, replace=False
+                )
+            theta = self.samples.iloc[credible_idx]
+
+            # In-prior samples generate cleanly (guaranteed for an importance-sampled
+            # result, whose in-prior draws were all generated during IS); a genuine model
+            # failure here should surface, not be silently dropped.
+            signals = apply_func_with_multiprocessing(
+                self.likelihood.signal,
+                theta,
+                num_processes=num_processes,
+            )
+            wf_fd[mode] = {
+                ifo: np.array([s["waveform"][ifo] for s in signals]) for ifo in ifos
+            }
+
+        if wf_fd["dingo"][ifos[0]].shape[1] != len(domain()):
+            raise ValueError(
+                "Whitened waveform length does not match the inverse-FFT domain; "
+                "time-domain PPD requires a uniform frequency domain."
+            )
+        return wf_fd, data_fd
+
+    def plot_ppd_td(
+        self,
+        filename: str = "ppd_td.png",
+        credible_interval: float = 0.9,
+        num_waveforms: int = 1000,
+        num_processes: int = 1,
+        zoom: Optional[Tuple[float, float]] = None,
+    ) -> Tuple[dict, dict]:
+        """Plot the time-domain whitened-strain posterior-predictive distribution.
+
+        For each detector, inverse-FFTs whitened waveforms to the time domain with the merger
+        at t = 0 and shades the pointwise min/max envelope; the whitened detector data is
+        overlaid in grey. Mirroring :meth:`plot_corner`, both the **Dingo** posterior and (when
+        the result is importance-sampled) the **Dingo-IS** posterior are overlaid on one
+        figure.
+
+        ``zoom`` is the (left, right) x-limit in seconds-to-merger; defaults to (-1.0, 0.2).
+        Returns the ``(wf_fd, data_fd)`` tuple that was plotted.
+        """
+        wf_fd, data_fd = self._compute_ppd(
+            credible_interval, num_waveforms, num_processes
+        )
+        domain = (
+            self.domain.base_domain
+            if hasattr(self.domain, "base_domain")
+            else self.domain
+        )
+        _plot_ppd_td(wf_fd, data_fd, domain, filename=filename, zoom=zoom)
+        return wf_fd, data_fd
