@@ -5,8 +5,10 @@ import torch
 from torch import nn
 
 from .cflow_base import ContinuousFlowPosteriorModel
+from dingo.core.registry import NEURAL_DISTRIBUTIONS
 
 
+@NEURAL_DISTRIBUTIONS.register("flow_matching")
 class FlowMatchingPosteriorModel(ContinuousFlowPosteriorModel):
     __doc__ = (
         inspect.getdoc(ContinuousFlowPosteriorModel)

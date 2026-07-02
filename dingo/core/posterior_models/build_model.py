@@ -1,7 +1,9 @@
-from dingo.core.posterior_models.base_model import BasePosteriorModel
-from dingo.core.posterior_models.flow_matching import FlowMatchingPosteriorModel
-from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
-from dingo.core.posterior_models.score_matching import ScoreDiffusionPosteriorModel
+# Importing the modules registers the built-in model types with NEURAL_DISTRIBUTIONS.
+import dingo.core.posterior_models.flow_matching  # noqa: F401
+import dingo.core.posterior_models.normalizing_flow  # noqa: F401
+import dingo.core.posterior_models.score_matching  # noqa: F401
+from dingo.core.posterior_models.base_model import NeuralDistribution
+from dingo.core.registry import NEURAL_DISTRIBUTIONS
 from dingo.core.utils.backward_compatibility import (
     torch_load_with_fallback,
     update_model_config,
@@ -11,12 +13,13 @@ from dingo.core.utils.backward_compatibility import (
 
 def build_model_from_kwargs(
     filename: str = None, settings: dict = None, **kwargs
-) -> BasePosteriorModel:
+) -> NeuralDistribution:
     """
-    Returns a PosteriorModel based on a saved network or settings dict.
+    Returns a NeuralDistribution based on a saved network or settings dict.
 
-    The function is careful to choose the appropriate PosteriorModel class (e.g.,
-    for a normalizing flow, flow matching, or score matching).
+    The model class is resolved from the settings' posterior_model_type via the
+    NEURAL_DISTRIBUTIONS registry (e.g., normalizing flow, flow matching, or score
+    matching, or a plugin type; see dingo.core.registry).
 
     Parameters
     ----------
@@ -29,18 +32,12 @@ def build_model_from_kwargs(
 
     Returns
     -------
-    PosteriorModel
+    NeuralDistribution
     """
     if (filename is None) == (settings is None):
         raise ValueError(
             "Either a filename or a settings dict must be provided, but not both."
         )
-
-    models_dict = {
-        "normalizing_flow": NormalizingFlowPosteriorModel,
-        "flow_matching": FlowMatchingPosteriorModel,
-        "score_matching": ScoreDiffusionPosteriorModel,
-    }
 
     if filename is not None:
         d, _ = torch_load_with_fallback(filename, preferred_map_location="meta")
@@ -59,10 +56,10 @@ def build_model_from_kwargs(
             "posterior_model_type"
         ]
 
-    if not posterior_model_type.lower() in models_dict:
-        raise ValueError("No valid posterior model type specified.")
-
-    model = models_dict[posterior_model_type.lower()]
+    try:
+        model = NEURAL_DISTRIBUTIONS.get(posterior_model_type)
+    except KeyError as e:
+        raise ValueError(f"No valid posterior model type specified. {e}") from e
 
     return model(model_filename=filename, metadata=settings, **kwargs)
 

@@ -1,4 +1,5 @@
-from .base_model import BasePosteriorModel
+from .base_model import NeuralDistribution
+from dingo.core.registry import NEURAL_DISTRIBUTIONS
 
 from dingo.core.nn.nsf import (
     create_nsf_with_rb_projection_embedding_net,
@@ -6,7 +7,8 @@ from dingo.core.nn.nsf import (
 )
 
 
-class NormalizingFlowPosteriorModel(BasePosteriorModel):
+@NEURAL_DISTRIBUTIONS.register("normalizing_flow")
+class NormalizingFlowPosteriorModel(NeuralDistribution):
     """
     Posterior model based on a (discrete) normalizing flow.
 

@@ -147,3 +147,13 @@ def update_model_config(model_settings: dict):
         del model_settings["nsf_kwargs"]
         model_settings["embedding_kwargs"] = model_settings["embedding_net_kwargs"]
         del model_settings["embedding_net_kwargs"]
+
+    # The model type used to be matched case-insensitively; registry lookup is
+    # case-sensitive, so lowercase built-in type names from old checkpoints.
+    posterior_model_type = model_settings.get("posterior_model_type")
+    if posterior_model_type is not None and posterior_model_type.lower() in (
+        "normalizing_flow",
+        "flow_matching",
+        "score_matching",
+    ):
+        model_settings["posterior_model_type"] = posterior_model_type.lower()

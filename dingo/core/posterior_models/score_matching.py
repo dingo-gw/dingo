@@ -4,8 +4,10 @@ import textwrap
 import torch
 
 from .cflow_base import ContinuousFlowPosteriorModel
+from dingo.core.registry import NEURAL_DISTRIBUTIONS
 
 
+@NEURAL_DISTRIBUTIONS.register("score_matching")
 class ScoreDiffusionPosteriorModel(ContinuousFlowPosteriorModel):
     __doc__ = (
         inspect.getdoc(ContinuousFlowPosteriorModel)

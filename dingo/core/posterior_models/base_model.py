@@ -24,14 +24,19 @@ from dingo.core.utils.misc import get_version
 from dingo.core.utils.trainutils import EarlyStopping
 
 
-class BasePosteriorModel(ABC):
+class NeuralDistribution(ABC):
     """
-    Abstract base class for PosteriorModels. This is intended to construct and hold a
-    neural network for estimating the posterior density, as well as saving / loading,
-    and training.
+    Abstract base class for distributions parameterized by a neural network.
 
-    Subclasses must implement methods for constructing the specific network, sampling,
-    density evaluation, and computing the loss during training.
+    A NeuralDistribution can be conditional or unconditional, and can model any
+    distribution over parameters — a posterior, a prior, or a proposal. The contract
+    is: sampling is always available; log_prob is available where the architecture
+    affords it (e.g., normalizing flows exactly, score matching only via
+    probability-flow ODE integration).
+
+    This class constructs and holds the network, and provides saving / loading and
+    training. Subclasses must implement methods for constructing the specific
+    network, sampling, density evaluation, and computing the loss during training.
     """
 
     def __init__(
@@ -467,6 +472,12 @@ class BasePosteriorModel(ABC):
                         print("Early stopping")
                         break
                 print(f"Finished training epoch {self.epoch}.\n")
+
+
+# Lasting alias: the class was called BasePosteriorModel before the NN build-system
+# refactor; "posterior" was too narrow (a NeuralDistribution can also model e.g. a
+# prior). Kept so that existing imports and branches keep working.
+BasePosteriorModel = NeuralDistribution
 
 
 def train_epoch(pm, dataloader):

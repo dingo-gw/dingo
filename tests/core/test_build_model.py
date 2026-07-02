@@ -333,6 +333,16 @@ def test_update_model_config_maps_old_schema():
     assert "type" not in old and "nsf_kwargs" not in old
 
 
+def test_update_model_config_lowercases_builtin_type_names():
+    """Model types used to be matched case-insensitively; the compat shim lowercases
+    built-in names from old checkpoints so the case-sensitive registry finds them."""
+    settings = model_settings("normalizing_flow")
+    model = settings["train_settings"]["model"]
+    model["posterior_model_type"] = "Normalizing_Flow"
+    pm = build_model_from_kwargs(settings=settings, device="cpu")
+    assert type(pm) is NormalizingFlowPosteriorModel
+
+
 def test_build_model_from_old_schema_settings():
     settings = model_settings("normalizing_flow")
     model = settings["train_settings"]["model"]

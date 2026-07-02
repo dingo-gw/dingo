@@ -5,12 +5,12 @@ from abc import abstractmethod
 from torchdiffeq import odeint
 from glasflow.nflows.utils.torchutils import repeat_rows, split_leading_dim
 
-from .base_model import BasePosteriorModel
+from .base_model import NeuralDistribution
 
 from dingo.core.nn.cfnets import create_cf
 
 
-class ContinuousFlowPosteriorModel(BasePosteriorModel):
+class ContinuousFlowPosteriorModel(NeuralDistribution):
     """
     Class for posterior models based on continuous normalizing flows (CNFs).
 

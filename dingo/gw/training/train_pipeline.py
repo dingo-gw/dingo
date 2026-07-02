@@ -28,7 +28,7 @@ from dingo.core.utils import (
 )
 from dingo.core.utils.trainutils import EarlyStopping
 from dingo.gw.dataset import WaveformDataset
-from dingo.core.posterior_models import BasePosteriorModel
+from dingo.core.posterior_models import NeuralDistribution
 
 
 def copy_files_to_local(
@@ -82,7 +82,7 @@ def copy_files_to_local(
 
 def prepare_training_new(
     train_settings: dict, train_dir: str, local_settings: dict
-) -> Tuple[BasePosteriorModel, WaveformDataset]:
+) -> Tuple[NeuralDistribution, WaveformDataset]:
     """
     Based on a settings dictionary, initialize a WaveformDataset and PosteriorModel.
 
@@ -101,7 +101,7 @@ def prepare_training_new(
 
     Returns
     -------
-    (BasePosteriorModel, WaveformDataset)
+    (NeuralDistribution, WaveformDataset)
     """
     data_settings = deepcopy(train_settings["data"])
     # Optionally copy files to local and update path
@@ -180,7 +180,7 @@ def prepare_training_new(
 
 def prepare_training_resume(
     checkpoint_name: str, local_settings: dict, train_dir: str
-) -> Tuple[BasePosteriorModel, WaveformDataset]:
+) -> Tuple[NeuralDistribution, WaveformDataset]:
     """
     Loads a PosteriorModel from a checkpoint, as well as the corresponding
     WaveformDataset, in order to continue training. It initializes the saved optimizer
@@ -197,7 +197,7 @@ def prepare_training_resume(
 
     Returns
     -------
-    (BasePosteriorModel, WaveformDataset)
+    (NeuralDistribution, WaveformDataset)
     """
 
     pm = build_model_from_kwargs(
@@ -232,7 +232,7 @@ def prepare_training_resume(
 
 
 def initialize_stage(
-    pm: BasePosteriorModel,
+    pm: NeuralDistribution,
     wfd: WaveformDataset,
     stage: dict,
     num_workers: int,
@@ -248,7 +248,7 @@ def initialize_stage(
 
     Parameters
     ----------
-    pm : BasePosteriorModel
+    pm : NeuralDistribution
     wfd : WaveformDataset
     stage : dict
         Settings specific to current stage of training
@@ -301,7 +301,7 @@ def initialize_stage(
 
 
 def train_stages(
-    pm: BasePosteriorModel, wfd: WaveformDataset, train_dir: str, local_settings: dict
+    pm: NeuralDistribution, wfd: WaveformDataset, train_dir: str, local_settings: dict
 ) -> bool:
     """
     Train the network, iterating through the sequence of stages. Stages can change
@@ -309,7 +309,7 @@ def train_stages(
 
     Parameters
     ----------
-    pm : BasePosteriorModel
+    pm : NeuralDistribution
     wfd : WaveformDataset
     train_dir : str
         Directory for saving checkpoints and train history.

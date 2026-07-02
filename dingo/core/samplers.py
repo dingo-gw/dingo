@@ -10,7 +10,7 @@ import pandas as pd
 import torch
 from torchvision.transforms import Compose
 
-from dingo.core.posterior_models import BasePosteriorModel
+from dingo.core.posterior_models import NeuralDistribution
 from dingo.core.result import Result
 from dingo.core.result import DATA_KEYS as RESULT_DATA_KEYS
 from dingo.core.utils import torch_detach_to_cpu, IterationTracker
@@ -42,7 +42,7 @@ class Sampler(object):
 
     Attributes
     ----------
-    model : BasePosteriorModel
+    model : NeuralDistribution
     inference_parameters : list
     samples : DataFrame
         Samples produced from the model by run_sampler().
@@ -59,12 +59,12 @@ class Sampler(object):
 
     def __init__(
         self,
-        model: BasePosteriorModel,
+        model: NeuralDistribution,
     ):
         """
         Parameters
         ----------
-        model : BasePosteriorModel
+        model : NeuralDistribution
         """
         self.model = model
         self.event_metadata = None
@@ -363,14 +363,14 @@ class GNPESampler(Sampler):
 
     def __init__(
         self,
-        model: BasePosteriorModel,
+        model: NeuralDistribution,
         init_sampler: Sampler,
         num_iterations: int = 1,
     ):
         """
         Parameters
         ----------
-        model : BasePosteriorModel
+        model : NeuralDistribution
         init_sampler : Sampler
             Used for generating initial samples
         num_iterations : int
