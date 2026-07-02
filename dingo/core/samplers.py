@@ -153,8 +153,12 @@ class Sampler(object):
             # requested sample. We therefore apply pre-processing only once.
             x = self.transform_pre(context)
             # Require a batch dimension for the embedding network.
-            x = x.unsqueeze(0)
-            x = [x]
+            # For transformer models, transform_pre returns a list of tensors
+            # (waveform, position, drop_token_mask); for resnet models a single tensor.
+            if isinstance(x, list):
+                x = [t.unsqueeze(0) for t in x]
+            else:
+                x = [x.unsqueeze(0)]
         else:
             if context is not None:
                 print("Unconditional model. Ignoring context.")
