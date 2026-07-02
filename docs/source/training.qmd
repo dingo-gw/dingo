@@ -203,6 +203,7 @@ optional arguments:
 ### `dingo_train_condor`
 
 On a cluster using HTCondor, use `dingo_train_condor`. This calls itself recursively as follows:
+
 1. The first time you call it, use the flag `--start-submission`. This creates a condor submission file `submission_file.sub` that again calls the executable `dingo_train_condor` (now without the flag) and submits it. This will run `dingo_train_condor` directly on the cluster node that is assigned.
 2. On the cluster node, `dingo_train_condor` first trains the network until done or a runtime limit is reached (be careful to set this shorter than the condor time limit). Then it creates a *new* submission file that once again calls `dingo_train_condor`, and submits it. This will resume the run on a new node, and repeat.
 
@@ -220,6 +221,7 @@ optional arguments:
 ## Output
 
 Output from training is stored in the `TRAIN_DIR` folder passed to the training scripts. This consists of the following:
+
 * `model_latest.pt` checkpoints every epoch (overwritten);
 * `model_XXX.pt` checkpoints where `XXX` is the epoch number, every `checkpoint_epochs` epochs;
 * `model_stage_X.pt` at the end of training stage `X`;

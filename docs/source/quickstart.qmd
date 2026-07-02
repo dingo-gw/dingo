@@ -52,7 +52,7 @@ Dingo `venv` is active.
 
 To generate a waveform dataset for training, execute
 
-```
+```sh
 dingo_generate_dataset --settings_file waveform_dataset_settings.yaml --num_processes N --out_file waveform_dataset.hdf5
 ```
 
@@ -68,7 +68,7 @@ on a cluster. This is typically useful for slower waveform models.
 Training also requires a dataset of noise ASDs, which are sampled randomly for each
 training sample. To generate this dataset based on noise observed during a run, execute
 
-```
+```sh
 dingo_generate_ASD_dataset --data_dir data_dir --settings_file asd_dataset_settings.yaml
 ```
 
@@ -83,7 +83,7 @@ one `data_dir/asd_dataset_settings.yaml`.
 With a waveform dataset and ASD dataset(s), one can train a neural network. Configure
 the `train_settings.yaml` file to point to these datasets, and run
 
-```
+```sh
 dingo_train --settings_file train_settings.yaml --train_dir train_dir
 ```
 
@@ -91,7 +91,7 @@ This will configure the network, train it, and store checkpoints, a record of th
 and the final network in the directory `train_dir`. Alternatively, to resume training from
 a checkpoint file, run
 
-```
+```sh
 dingo_train --checkpoint model.pt --train_dir train_dir
 ```
 
@@ -127,7 +127,7 @@ found under `examples/pipe/GW150914.ini`.
 
 To do inference, cd into the directory with the .ini file and run 
 
-```
+```sh
 dingo_pipe GW150914.ini
 ```
 
@@ -135,7 +135,7 @@ dingo_pipe GW150914.ini
 <!-- One can also just run the network without doing importance sampling with the following
 command line argument. 
 
-```
+```sh
 dingo_analyze_event
   --model model
   --model_init model_init

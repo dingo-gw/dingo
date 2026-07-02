@@ -7,6 +7,7 @@ Generating reproducible results must be central to any deep learning code. Dingo
 ### Settings
 
 There are a large number of configuration options that must be selected when using Dingo. These include
+
 * Waveform and noise dataset settings,
 * Training settings, including pre-processing, neural network, and training strategy settings,
 * Inference settings, including event time or injection data.

@@ -91,10 +91,7 @@ format:
     theme: [cosmo, custom.scss]
     toc: true
     code-copy: true
-    code-overflow: wrap
     highlight-style: github
-    code-block-bg: true
-    code-block-border-left: "#2478cc"
     mermaid:
       theme: neutral
 

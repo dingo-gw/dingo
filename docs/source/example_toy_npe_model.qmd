@@ -17,7 +17,7 @@ There are 4 main steps:
 In this tutorial as well as the [npe model](example_npe_model.qmd) and [gnpe model](example_gnpe_model.qmd) the following file structure will
 be employed
 
-```
+```default
 toy_npe_model/
 
     #  config files
@@ -51,7 +51,7 @@ Step 1 Generating a waveform dataset
 
 After downloading the files for the tutorial first run
 
-```
+```sh
 cd toy_npe_model/
 mkdir training_data
 mkdir training
@@ -59,7 +59,7 @@ mkdir training
 
 to set up the file structure. Then run
 
-```
+```sh
 dingo_generate_dataset --settings waveform_dataset_settings.yaml --out_file training_data/waveform_dataset.hdf5
 ```
 
@@ -137,7 +137,7 @@ Step 2 Generating the Amplitude Spectral Density (ASD) dataset
 
 To generate an ASD dataset run
 
-```
+```sh
 dingo_generate_asd_dataset --settings_file asd_dataset_settings.yaml --data_dir training_data/asd_dataset
 ```
 
@@ -166,7 +166,7 @@ Step 3 Training the network
 
 To train the network, first the paths to the correct datasets must be specified before executing:
 
-```
+```sh
 dingo_train --settings_file train_settings.yaml --train_dir training
 ```
 
@@ -267,7 +267,7 @@ Step 4 Doing Inference
 The final step is to do inference, for example on GW150914. To do this we will use
 [dingo_pipe](dingo_pipe.qmd). For a local run execute:
 
-```
+```sh
 dingo_pipe GW150914.ini
 ```
 
@@ -317,7 +317,7 @@ This will generate files which are described in [dingo_pipe](dingo_pipe.qmd). To
 
 We can load and manipulate the data with the following code. For example, here we create a cornerplot
 
-```
+```python
 from dingo.gw.result import Result
 result = Result(file_name="outdir_GW150914/result/GW150914_data0_1126259462-4_sampling.hdf5")
 result.plot_corner()

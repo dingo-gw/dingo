@@ -85,12 +85,15 @@ install `quartodoc`:
 pip install quartodoc
 ```
 
-The documentation sources live in `docs/source`. From that directory, first generate the
-API reference pages from the docstrings:
+The documentation sources live in `docs/source`. From that directory, first refresh the
+API reference: `gen_api.py` scans the `dingo` package and lists every public module in
+`_quarto.yml` (the analogue of `sphinx-apidoc`), then `quartodoc build` writes a reference
+page for each module's members from their docstrings:
 ```sh
-quartodoc build
+python gen_api.py    # refresh the API module list (run when modules are added or removed)
+quartodoc build      # generate the reference/ pages from docstrings
 ```
-This writes the `reference/` pages. Then render the site:
+Then render the site:
 ```sh
 quarto render
 ```

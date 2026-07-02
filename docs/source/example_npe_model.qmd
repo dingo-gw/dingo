@@ -10,7 +10,7 @@ We can repeat the same first few steps from the previous tutorial with a couple
 differences. The file structure is mostly the same but now there is an additional
 `asd_dataset_fiducial` which will be explained below.
 
-```
+```default
 npe_model/
 
     #  config files
@@ -42,7 +42,7 @@ Step 1 Generating a Waveform Dataset
 
 Again the first step is to generate the necessary folders
 
-```
+```sh
 cd npe_model
 mkdir training_data
 mkdir training
@@ -50,7 +50,7 @@ mkdir training
 
 As before we run `dingo_generate_dataset`:
 
-```
+```sh
 dingo_generate_dataset --settings waveform_dataset_settings.yaml --out_file training_data/waveform_dataset.hdf5
 ```
 
@@ -70,13 +70,13 @@ We could also generate the waveform dataset using a
 [condor DAG](https://htcondor.readthedocs.io/en/latest/users-manual/dagman-workflows.html)
 on a cluster. To do this run
 
-```
+```sh
 dingo_generate_dataset_dag --settings_file waveform_dataset_settings.yaml --out_file training_data/waveform_dataset.hdf5 --env_path $DINGO_VENV_PATH --num_jobs 4 --request_cpus 64 --request_memory 128000 --request_memory_high 256000
 ```
 
 and then submit the generated DAG
 
-```
+```sh
 condor_submit_dag condor/submit/dingo_generate_dataset_dagman_DATE.submit
 ```
 
@@ -88,7 +88,7 @@ Step 2 Generating an ASD dataset
 
 To generate an ASD dataset we can run the same command as in the previous tutorial.
 
-```
+```sh
 dingo_generate_asd_dataset --settings_file asd_dataset_settings_fiducial.yaml --data_dir training_data/asd_dataset_fiducial --out_name training_data/asd_dataset_fiducial/asds_O1_fiducial.hdf5
 ```
 
@@ -102,7 +102,7 @@ the ASD will be variable. Thus, in the second stage many ASDs are used so that d
 of ASDs from the observing run. We find this split leads to an improvement in
 overall performance. To generate this second dataset run
 
-```
+```sh
 dingo_generate_asd_dataset --settings_file asd_dataset_settings.yaml --data_dir training_data/asd_dataset --out_name training_data/asd_dataset/asds_O1.hdf5
 ```
 
@@ -119,7 +119,7 @@ Step 3 Training the network
 Now we are ready for training. The command is analogous to the previous tutorial 
 but the settings are increased to production values. To run the training do
 
-```
+```sh
 dingo_train --settings_file train_settings.yaml --train_dir training
 ```
 
@@ -153,7 +153,7 @@ Step 4 Doing Inference
 
 We can run inference with the same command as before
 
-```
+```sh
 dingo_pipe GW150914.ini
 ```
 

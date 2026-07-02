@@ -6,7 +6,7 @@ the `dingo.gw.injection.Injection` using the metadata from the
 `dingo.core.models.posterior_model.PosteriorModel` (the trained network). An ASD dataset also needs to be specified,
 one can take the fiducial asd dataset the network was trained on. 
 
-```
+```python
 from dingo.core.models import PosteriorModel
 import dingo.gw.injection as injection
 from dingo.gw.noise.asd_dataset import ASDDataset
@@ -55,7 +55,7 @@ strain_data = injection_generator.injection(theta)
 
 Then one can create a injections and do inference on them.
 
-```
+```python
 from dingo.gw.inference.gw_samplers import GWSamplerGNPE, GWSampler
 
 init_sampler = GWSampler(model=init_pm)

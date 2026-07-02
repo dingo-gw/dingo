@@ -3,6 +3,7 @@
 In contrast to classical parameter estimation codes like [Bilby](https://lscsoft.docs.ligo.org/bilby/index.html) and [LALInference](https://lscsoft.docs.ligo.org/lalsuite/lalinference/index.html), Dingo uses simulation-based (or likelihood-free) inference. The basic idea is to train a neural network to represent the Bayesian posterior over source parameters given the observed data. Training is based on simulated data rather than likelihood evaluations, combining the ideas of simulation-based inference with conditional neural density estimators.
 
 The two main approaches supported in Dingo are:
+
 - **Neural Posterior Estimation (NPE)**: Based on discrete normalizing flows.
 - **Flow Matching Posterior Estimation (FMPE)**: Built on continuous normalizing flows.
 
@@ -22,6 +23,7 @@ Neural Posterior Estimation uses **discrete normalizing flows** to model the pos
 
 ### Discrete Normalizing Flows
 A normalizing flow must satisfy the following properties:
+
 1. **Invertibility,** so that one can evaluate $f_d^{-1}(\theta)$ for any $\theta$. 
 2. **Simple Jacobian determinant,** so that one can quickly evaluate $\det f_d^{-1}(\theta)$.
 
@@ -64,6 +66,7 @@ L \approx - \frac{1}{N} \sum_{i=1}^N \log q(\theta^{(i)} | d^{(i)}),
 $$
 
 where the samples are drawn ancestrally in a two-step process:
+
 1. **Sample from the prior,** $\theta^{(i)} \sim p(\theta)$,
 2. **Simulate data,** $d^{(i)} \sim p(d | \theta^{(i)})$,
 
@@ -106,6 +109,7 @@ $$
 $$
 
 The components of the loss are:
+
 1. **Sample from the prior**: $ \theta_1 \sim p(\theta) $,
 2. **Simulate data**: $ d \sim p(d | \theta_1) $,
 3. **Sample intermediate points**: $ \theta_t \sim p_t(\theta_t | \theta_1) $ along the trajectory.

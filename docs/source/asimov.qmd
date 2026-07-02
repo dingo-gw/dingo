@@ -20,7 +20,7 @@ this could be the network you want to use to analyze the event.
 
 The first step is to start a project which can be done with 
 
-```
+```sh
 mkdir project_tutorial
 cd project_tutorial
 asimov init "init message"
@@ -28,7 +28,7 @@ asimov init "init message"
 
 If you type `ls -a` this should now show the following directory structure
 
-```
+```default
 asimov.log .asimov checkouts  logs  results  working
 ```
 
@@ -41,7 +41,7 @@ While the project has now been started, currently there are no settings applied 
 the project. To apply some settings, download the `project_dingo.yaml` file from 
 `https://github.com/dingo-gw/dingo/tree/main/examples/asimov` and apply them with:
 
-```
+```sh
 asimov apply -f project_dingo.yaml
 ```
 
@@ -50,7 +50,7 @@ Let's add the GW150914 event to the ledger. You can download the `event_dingo.ya
 file from `https://github.com/dingo-gw/dingo/tree/main/examples/asimov` and apply it 
 with
 
-```
+```sh
 asimov apply -f ../../event_dingo.yaml
 ```
 
@@ -60,14 +60,14 @@ download a sample `analysis_dingo.yaml` file from
 You will need to change this yaml file to point to the location 
 of your network .pt files. 
 
-```
+```sh
 asimov apply -f ../../analysis_dingo.yaml -e GW150914_095045
 ```
 
 We have now applied all the settings to GW150914 and are ready 
 to begin the asimov run! Start by creating the .ini file using 
 
-```
+```sh
 asimov manage build
 ```
 
@@ -79,7 +79,7 @@ the dag files are created using `dingo_pipe` based off the .ini
 files created using the `asimov manage build` command. Next the 
 dag files will be submitted to the cluster. To do this run 
 
-```
+```sh
 asimov manage submit
 ```
 
@@ -87,7 +87,7 @@ Now you should be all done! Check the output of the `working` directory
 to ensure that log files are being created in accordance with 
 starting a `dingo_pipe` run. You can run 
 
-```
+```sh
 asimov monitor
 ```
 
@@ -103,7 +103,7 @@ you will need to install a few extra packages which
 are not shipped with default DINGO. To do this, 
 run 
 
-```
+```sh
 python -m pip install kerberos paramiko M2Crypto 
 python -m pip install python-nds2-client
 conda install python-ldas-tools-framecpp==2.6.14
@@ -111,7 +111,7 @@ conda install python-ldas-tools-framecpp==2.6.14
 
 Then, before running `asimov manage build` make sure to run 
 
-```
+```sh
 export GWDATAFIND_SERVER=datafind.igwn.org
 ```
 
@@ -120,7 +120,7 @@ store your credentials in the condor vault. To do this
 run the following commands and follow the prompts. 
 They will ask for your LIGO credentials. 
 
-```
+```sh
 export HTGETTOKENOPTS="-a vault.ligo.org -i igwn"
 condor_vault_storer -v igwn
 kinit 
