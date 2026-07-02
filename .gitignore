@@ -152,3 +152,6 @@ dmypy.json
 **/tmp_files/*
 
 dingo-venv/
+
+# scratch/output dir for generated images and throwaway artifacts
+local/
