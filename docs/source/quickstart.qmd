@@ -107,7 +107,7 @@ rather to get a feel for the Dingo pipeline. The production settings contain tes
 settings. Note that depending on the waveform model and event, these may need to occasionally
 be tuned. `train_settings_init_toy.yaml` and `train_settings_init_production.yaml` train
 flows to estimate the time of coalescence in the individual detectors. These two
-networks are needed to use [GNPE](gnpe.md). This is the preferred and
+networks are needed to use [GNPE](gnpe.qmd). This is the preferred and
 most tested way of using Dingo. 
 
 Alternatively, the `train_settings_no_gnpe_toy.yaml` and
@@ -119,7 +119,7 @@ new ideas or doing a less expensive training.
 ## Inference
 
 Once a Dingo model is trained, inference for real events can be performed using
-[dingo_pipe](dingo_pipe.md). There are 3 main inference steps, downloading the data, 
+[dingo_pipe](dingo_pipe.qmd). There are 3 main inference steps, downloading the data, 
 running Dingo on this data and finally running importance sampling. The basic
 idea is to create a .ini file which contains the filepaths of the Dingo networks
 trained above and the segment of data to analyze. An example .ini file can be

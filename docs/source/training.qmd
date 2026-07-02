@@ -6,10 +6,9 @@ Both of these scripts take as main argument a settings file, which specifies opt
 
 ## Settings file
 
-```{code-block} yaml
----
-caption: Example `train_settings.yaml` file. This is also available in the examples/ folder. The specific settings listed will train a production-size network, taking about a week on an NVIDIA A100. Consider reducing some model hyperparameters for experimentation.
----
+Example `train_settings.yaml` file (also available in the `examples/` folder). The specific settings listed will train a production-size network, taking about a week on an NVIDIA A100. Consider reducing some model hyperparameters for experimentation.
+
+```yaml
 data:
   waveform_dataset_path: /path/to/waveform_dataset.hdf5  # Contains intrinsic waveforms
   train_fraction: 0.95
@@ -143,9 +142,9 @@ scheduler
 batch_size
 : Number of training samples per mini-batch. For a training dataset of size $N$, then each epoch will consist of $N / \text{batch_size}$ batches. Generally training will be faster for a larger batch size, but will require additional iterations.
 
-```{important}
+::: {.callout-important}
 The stage-training framework allows for separate pre-training and fine-tuning stages. We found that having a pre-training stage where we freeze certain network weights and fix the noise ASD improves overall training results.
-```
+:::
 
 ### `local`
 
@@ -257,6 +256,6 @@ optional arguments:
   --value VALUE
   ```
   
-```{warning}
+::: {.callout-warning}
 Modifications to model metadata can easily break things. Do not use this unless completely sure what you are doing!
-```
+:::

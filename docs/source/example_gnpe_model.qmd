@@ -1,8 +1,8 @@
 # GNPE model (production)
 
 This tutorial has the highest profile settings and is the one typically used for production use.
-The main difference from the [NPE](example_npe_model.md) tutorial is that here we are now using [GNPE](gnpe.md)
-(group neural posterior estimation). The data generation is exactly the same as the [previous](example_npe_model.md)
+The main difference from the [NPE](example_npe_model.qmd) tutorial is that here we are now using [GNPE](gnpe.qmd)
+(group neural posterior estimation). The data generation is exactly the same as the [previous](example_npe_model.qmd)
 tutorial, but we repeat it here, for completeness.
 
 The file structure is similar to the NPE example, except now there are two
@@ -114,7 +114,7 @@ dingo_train --settings_file train_settings.yaml --train_dir training/main_train_
 ```
 
 Notice the `data.gnpe_time_shifts` section. The `kernel` describes how much to blur the GNPE proxies and is specified in 
-seconds. To read more about this see [GNPE](gnpe.md).
+seconds. To read more about this see [GNPE](gnpe.qmd).
 
 
 Step 4 Doing Inference

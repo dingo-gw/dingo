@@ -2,8 +2,8 @@
 
 A simple example is creating an injection consistent with what the
 network was trained on, and then running Dingo on it. First one can instantiate
-the {py:class}`dingo.gw.injection.Injection` using the metadata from the
-{py:class}`dingo.core.models.posterior_model.PosteriorModel` (the trained network). An ASD dataset also needs to be specified,
+the `dingo.gw.injection.Injection` using the metadata from the
+`dingo.core.models.posterior_model.PosteriorModel` (the trained network). An ASD dataset also needs to be specified,
 one can take the fiducial asd dataset the network was trained on. 
 
 ```

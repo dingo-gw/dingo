@@ -12,7 +12,7 @@ Normalizing flows provide a means to represent complicated probability distribut
 
 $$
 q(\theta | d) = \mathcal{N}(0, 1)^D(f_d^{-1}(\theta)) \left| \det f_d^{-1} \right|,
-$$ (eq:flow)
+$$ {#eq-flow}
 
 where $D$ is the dimensionality of the parameter space.
 
@@ -25,7 +25,7 @@ A normalizing flow must satisfy the following properties:
 1. **Invertibility,** so that one can evaluate $f_d^{-1}(\theta)$ for any $\theta$. 
 2. **Simple Jacobian determinant,** so that one can quickly evaluate $\det f_d^{-1}(\theta)$.
 
-With these properties, one can quickly evaluate the right-hand side of {eq}`eq:flow` to obtain the density. Various types of normalizing flow have been constructed to satisfy these properties, typically as a composition of relatively simple transforms $f^{(j)}$. These relatively simple transforms are then parametrized by the output of a neural network. To sample $\theta \sim q(\theta|d)$, one samples $u \sim \mathcal N(0,1)^D$ and applies the flow in the forward direction.
+With these properties, one can quickly evaluate the right-hand side of @eq-flow to obtain the density. Various types of normalizing flow have been constructed to satisfy these properties, typically as a composition of relatively simple transforms $f^{(j)}$. These relatively simple transforms are then parametrized by the output of a neural network. To sample $\theta \sim q(\theta|d)$, one samples $u \sim \mathcal N(0,1)^D$ and applies the flow in the forward direction.
 
 For each flow step, Dingo uses a conditional coupling transform, meaning that half of the components are held fixed, and the other half transform elementwise, conditional on the untransformed components and the data,
 
@@ -55,7 +55,7 @@ $$
     L &= \int dd\, p(d) \int d\theta\, p(\theta | d) \left[ - \log q(\theta | d) \right]\\
     &=  \int d\theta\, p(\theta) \int dd\, p(d|\theta)\left[ - \log q(\theta | d) \right].
 \end{align}
-$$ (eq:loss)
+$$ {#eq-loss}
 
 On the second line we used Bayes' theorem $p(d) p(\theta | d) = p(\theta) p(d | \theta)$ to re-order the integrations. The loss may finally be approximated on a mini-batch of samples,
 
@@ -69,7 +69,7 @@ where the samples are drawn ancestrally in a two-step process:
 
 We then take the gradient of $L$ with respect to network parameters and minimize using the [Adam](https://pytorch.org/docs/stable/generated/torch.optim.Adam.html) optimizer.
 
-Importantly, the process to generate training samples incorporates the **same information** as a standard (likelihood-based) sampler would use. Namely, the prior is incorporated by sampling parameters from it, and the likelihood is incorporated by simulating data. Bayes' theorem is incorporated in going from line 1 to line 2 in {eq}`eq:loss`. For gravitational waves, the likelihood is taken to be the probability that the residual when subtracting a signal $h(\theta)$ from $d$ is stationary Gaussian noise (with the measured PSD $S_{\text{n}}(f)$ in the detector). Likewise, to simulate data we generate a waveform $h(\theta^{(i)})$ and add a random noise realization $n \sim \mathcal N(0, S_\text{n}(f))$. Ultimately, however, the SBI approach is more flexible, since in principle one could add non-stationary or non-Gaussian noise, and train the network to reproduce the posterior, despite not having a tractable likelihood. See the section on training data for additional details of training for gravitational wave inference.
+Importantly, the process to generate training samples incorporates the **same information** as a standard (likelihood-based) sampler would use. Namely, the prior is incorporated by sampling parameters from it, and the likelihood is incorporated by simulating data. Bayes' theorem is incorporated in going from line 1 to line 2 in @eq-loss. For gravitational waves, the likelihood is taken to be the probability that the residual when subtracting a signal $h(\theta)$ from $d$ is stationary Gaussian noise (with the measured PSD $S_{\text{n}}(f)$ in the detector). Likewise, to simulate data we generate a waveform $h(\theta^{(i)})$ and add a random noise realization $n \sim \mathcal N(0, S_\text{n}(f))$. Ultimately, however, the SBI approach is more flexible, since in principle one could add non-stationary or non-Gaussian noise, and train the network to reproduce the posterior, despite not having a tractable likelihood. See the section on training data for additional details of training for gravitational wave inference.
 
 Intuitively, one way to understand NPE is simply that we are doing supervised deep learning---inferring parameter labels from examples---but allowing for the flexibility to produce a probabilistic answer. With this flexibility, the network learns to produce the Bayesian posterior.
 

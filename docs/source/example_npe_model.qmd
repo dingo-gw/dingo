@@ -1,9 +1,9 @@
 # NPE Model (production)
 
 We will now do a tutorial with higher profile settings. Note these are not the
-full production settings used for runs since we are not using [GNPE](gnpe.md), but
-they should lead to decent results. Go to [this](example_gnpe_model.md) tutorial for the full production network. The
-steps are the essentially same as [the toy example](example_toy_model.md) but with higher level settings. It is
+full production settings used for runs since we are not using [GNPE](gnpe.qmd), but
+they should lead to decent results. Go to [this](example_gnpe_model.qmd) tutorial for the full production network. The
+steps are the essentially same as [the toy example](example_toy_npe_model.qmd) but with higher level settings. It is
 recommended to run this on a cluster or GPU machine. 
 
 We can repeat the same first few steps from the previous tutorial with a couple
@@ -123,10 +123,10 @@ but the settings are increased to production values. To run the training do
 dingo_train --settings_file train_settings.yaml --train_dir training
 ```
 
-```{tip}
+::: {.callout-tip}
 If running on a machine with multiple GPUs make sure to specify the GPU by running 
 export `CUDA_VISIBILE_DEVICES=GPU_NUM` before running `dingo_train`
-```
+:::
 
 The main difference from the toy example in the network architecture is the size of the embedding
 network which is described in `model.embedding_net_kwargs.hidden_dims` and the
@@ -135,18 +135,18 @@ number of neural spline flow transforms described in
 number/size of the layers in the embedding network. 
 
 Notice, we are not inferring the phase parameter here as it is not listed below `inference_parameters`. However,
-we do recover the phase in post processing. To see why and how this is done see [synthetic phase](result.md)
+we do recover the phase in post processing. To see why and how this is done see [synthetic phase](result.qmd)
 
 Also notice there are now two training stages `stage_0` and `stage_1`. In `stage_0`, a fixed ASD is used and the reduced basis layer
 is frozen. Then in `stage_1`, all ASDs are used and the reduced basis layer is unfrozen. 
 
 The main difference in the local settings is that the `device` is set to `CUDA`.
 
-```{important}
+::: {.callout-important}
 It is recommended to have at least 40 GB of GPU memory on the device. If there is not enough memory on the machine,
 first try halving the `batch_size`. In this case one should also multiply the learning rate, `lr`, by $\frac{1}{\sqrt{2}}$. If 
 there is still not enough memory, consider reducing the number of hidden dimensions.
-```
+:::
 
 Step 4 Doing Inference
 ----------------------

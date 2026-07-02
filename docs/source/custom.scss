@@ -1,0 +1,40 @@
+/*-- scss:defaults --*/
+$link-color: #2478cc;
+$code-bg: #f7f8fa;
+
+/*-- scss:rules --*/
+
+// Links: drop the heavy permanent underline; underline only on hover.
+a {
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+// Code blocks (incl. the example config listings): soft border + rounded corners
+// so ini/yaml examples read as tidy panels rather than bare text.
+div.sourceCode {
+  border: 1px solid #e3e6ea;
+  border-radius: 6px;
+  margin-block: 1rem;
+  overflow: hidden;
+}
+div.sourceCode pre {
+  padding: 0.8em 1em;
+  margin-bottom: 0;
+}
+pre > code.sourceCode {
+  font-size: 0.85em;
+}
+
+// Mermaid: center the flowchart and cap its width so it isn't oversized.
+.cell-output-display svg,
+figure.quarto-figure svg,
+div.mermaid svg,
+pre.mermaid svg {
+  max-width: 720px;
+  height: auto;
+  display: block;
+  margin-inline: auto;
+}
