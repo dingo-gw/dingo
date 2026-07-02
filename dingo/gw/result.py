@@ -1,5 +1,7 @@
 import copy
 import time
+import warnings
+from functools import partial
 from typing import Optional, Tuple
 
 import numpy as np
@@ -18,6 +20,7 @@ from dingo.gw.conversion import change_spin_conversion_phase
 from dingo.gw.domains import MultibandedFrequencyDomain
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_extrinsic_prior_dict
+from dingo.gw.injection import safe_signal
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 from dingo.gw.utils.plotting import plot_ppd_td as _plot_ppd_td
 from dingo.gw.prior import build_prior_with_defaults
@@ -841,12 +844,16 @@ class Result(CoreResult):
         Prior filter. Samples are first restricted to the prior support (finite ``log_prior``).
         The flow proposal is a smooth density over a box and leaks a small fraction of draws
         outside the prior (e.g. tiny negative spin magnitudes); these are unphysical, carry
-        zero target mass, and are the samples that fail waveform generation. This is exactly
-        the in-prior restriction that :meth:`importance_sample` applies, so for an importance-
-        sampled result -- whose in-prior samples were all generated successfully during IS --
-        the filter is guaranteed to leave no generation failures. A genuine in-prior model
-        failure (e.g. an approximant interpolation edge on a not-yet-importance-sampled result)
-        is left to raise, surfacing the offending sample rather than being silently dropped.
+        zero target mass, and account for most waveform-generation failures. This is exactly
+        the in-prior restriction that :meth:`importance_sample` applies.
+
+        Per-sample guard. The prior filter is not sufficient on its own: a waveform model can
+        fail on an *interior* parameter (e.g. SEOBNRv5EHM's eccentric ``CubicSpline`` on a
+        non-monotonic omega array), and this happens even for importance-sampled results
+        whenever the waveform backend here differs from the one used at IS time -- re-plotting
+        a stored result with a newer/older ``pyseobnr``/``lalsimulation`` is enough. So each
+        draw is generated through ``safe_signal``: failures are dropped from the envelope with
+        a warning, and only an all-failed batch raises.
         """
         if getattr(self, "likelihood", None) is None:
             self._build_likelihood()
@@ -912,14 +919,30 @@ class Result(CoreResult):
                 )
             theta = self.samples.iloc[credible_idx]
 
-            # In-prior samples generate cleanly (guaranteed for an importance-sampled
-            # result, whose in-prior draws were all generated during IS); a genuine model
-            # failure here should surface, not be silently dropped.
+            # The prior filter removes out-of-prior draws, but it does not guarantee every
+            # in-prior draw generates: a waveform model can fail on an interior parameter
+            # (e.g. SEOBNRv5EHM's eccentric CubicSpline hitting a non-monotonic omega array).
+            # This bites even for importance-sampled results whenever the waveform backend
+            # here differs from the one used at IS time -- re-plotting a stored result with a
+            # newer/older pyseobnr/lalsimulation is enough to make an IS-accepted draw fail.
+            # So guard per-sample: drop failures, warn with the count, raise only if all fail.
             signals = apply_func_with_multiprocessing(
-                self.likelihood.signal,
+                partial(safe_signal, self.likelihood),
                 theta,
                 num_processes=num_processes,
             )
+            n_failed = sum(s is None for s in signals)
+            signals = [s for s in signals if s is not None]
+            if not signals:
+                raise RuntimeError(
+                    f"All '{mode}' PPD waveform generations failed; cannot build the PPD."
+                )
+            if n_failed:
+                warnings.warn(
+                    f"{n_failed} in-prior '{mode}' PPD waveform(s) failed to generate "
+                    "and were dropped from the envelope.",
+                    stacklevel=2,
+                )
             wf_fd[mode] = {
                 ifo: np.array([s["waveform"][ifo] for s in signals]) for ifo in ifos
             }

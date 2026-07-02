@@ -59,25 +59,30 @@ precomputed `ppd=(wf_fd, data_fd)` to render without regenerating waveforms; the
 
 Robustness (prior filter): the normalizing-flow proposal `q(theta)` is a smooth
 density over a box and leaks a small fraction of draws outside the prior — with
-finite `log_prob` but unphysical (e.g. tiny negative spin magnitudes). These are
-exactly the draws that fail waveform generation. `_compute_ppd` therefore
-restricts to the prior support up front (`self.prior.ln_prob(...)`, keeping
-`log_prior` finite) — the same in-prior restriction `importance_sample` applies —
-before generating anything. This removes the failures *and* keeps unphysical
-waveforms out of the envelope, and it is a strict improvement for the `"dingo"`
-mode (which otherwise gives those out-of-prior draws equal mass `1/N`). For an
-importance-sampled result the filter leaves **no** generation failures at all:
-IS already generated every in-prior sample successfully (or it would have crashed
-at `core/likelihood.py`, which has no `try/except`). Measured on the GW150914
-fixture: 43/5000 draws (0.86%) are out-of-prior; **all** generation failures were
-among them, **zero** in-prior draws failed.
+finite `log_prob` but unphysical (e.g. tiny negative spin magnitudes). These
+account for most waveform-generation failures. `_compute_ppd` therefore restricts
+to the prior support up front (`self.prior.ln_prob(...)`, keeping `log_prior`
+finite) — the same in-prior restriction `importance_sample` applies — before
+generating anything. This removes those failures *and* keeps unphysical waveforms
+out of the envelope, and it is a strict improvement for the `"dingo"` mode (which
+otherwise gives those out-of-prior draws equal mass `1/N`). Measured on the
+GW150914 fixture: 43/5000 draws (0.86%) are out-of-prior; all failures there were
+among them, zero in-prior draws failed.
 
-Because the prior filter removes every observed failure, there is no per-sample
-failure handling: `_compute_ppd` calls `self.likelihood.signal` directly (a bound
-method, picklable for the pool, as with `log_likelihood` in `core/likelihood.py`)
-and the envelope uses plain `min`/`max`. A genuine in-prior model failure (an
-approximant interpolation edge on a *not-yet-importance-sampled* result) is left to
-raise, surfacing the offending sample rather than being silently dropped.
+Robustness (per-sample guard): the prior filter is **not** sufficient on its own.
+A waveform model can fail on an *interior* parameter, and this bites even for
+importance-sampled results whenever the waveform backend differs from the one used
+at IS time — re-plotting a stored result with a newer/older `pyseobnr` /
+`lalsimulation` is enough to make an IS-accepted draw fail. Observed on the
+`S231001aq` (SEOBNRv5EHM) external result: 2/200 in-prior credible-set draws crash
+inside pyseobnr's eccentric `CubicSpline` (`x must be strictly increasing`) under
+`pyseobnr 0.3.6` / `lalsimulation 6.2.1`. So each draw is generated through the
+module-level picklable `safe_signal` (`injection.py`): failures are dropped from
+the `min`/`max` envelope with a warning giving the count, and only an all-failed
+batch raises. (An earlier revision removed this guard on the mistaken assumption
+that the prior filter left no in-prior failures for IS results; `S231001aq` is the
+counterexample — the "IS already generated these" guarantee only holds for the
+exact same waveform backend.)
 
 Dev fixture: GW150914 dingo-ci result (IMRPhenomXPHM, no `pyseobnr` needed),
 `.../dingo-ci/outdir_GW150914/result/

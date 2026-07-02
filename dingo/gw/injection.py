@@ -1,3 +1,5 @@
+from typing import Optional
+
 import numpy as np
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
@@ -442,3 +444,19 @@ class Injection(GWSignal):
             k: float(v) for k, v in theta.items()
         }  # Some parameters are np.float64
         return self.injection(theta)
+
+
+def safe_signal(gw_signal: "GWSignal", theta: dict) -> Optional[dict]:
+    """Call ``gw_signal.signal(theta)``, returning ``None`` if generation fails.
+
+    Even in-prior posterior draws can hit waveform-model edge cases -- e.g. SEOBNRv5EHM's
+    eccentric interpolation failing on an interior parameter, or simply a waveform backend
+    (pyseobnr / lalsimulation) that differs from the one used when the result was produced.
+    Returning ``None`` lets callers such as :meth:`dingo.gw.result.Result._compute_ppd` drop
+    the offending draw rather than aborting a whole :class:`multiprocessing.Pool` batch.
+    Defined at module level (not a lambda/nested function) so it is picklable for the pool.
+    """
+    try:
+        return gw_signal.signal(theta)
+    except Exception:
+        return None
