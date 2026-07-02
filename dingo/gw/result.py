@@ -980,11 +980,11 @@ class Result(CoreResult):
     ) -> Tuple[dict, dict, dict]:
         """Plot the time-domain whitened-strain posterior-predictive distribution.
 
-        For each detector, inverse-FFTs whitened waveforms to the time domain with the merger
-        at t = 0 and shades the pointwise min/max envelope, with the maximum-probability
-        waveform of each mode drawn as a line over it; the whitened detector data is overlaid
-        in grey. Mirroring :meth:`plot_corner`, both the **Dingo** posterior and (when the
-        result is importance-sampled) the **Dingo-IS** posterior are overlaid on one figure.
+        For each mode and detector, inverse-FFTs whitened waveforms to the time domain with
+        the merger at t = 0 and shades the pointwise min/max envelope, with the
+        maximum-probability waveform drawn as a line over it and the whitened data in grey.
+        Panels are stacked vertically, one per (mode, detector): the **Dingo** posterior on
+        top and, when the result is importance-sampled, the **Dingo-IS** posterior below.
 
         ``zoom`` is the (left, right) x-limit in seconds-to-merger; defaults to (-1.0, 0.2).
         Returns the ``(wf_fd, data_fd, map_fd)`` tuple that was plotted.

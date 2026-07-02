@@ -2,8 +2,8 @@
 
 GW-specific counterpart to :mod:`dingo.core.utils.plotting`: renders the whitened-strain
 PPD envelopes produced by :meth:`dingo.gw.result.Result._compute_ppd` in the time domain.
-:func:`plot_ppd_td` overlays one envelope per posterior mode in ``wf_fd`` (``"dingo"`` and,
-when available, ``"dingo-is"``), mirroring how ``result.plot_corner`` shows both.
+:func:`plot_ppd_td` draws one min/max envelope panel per (posterior mode, detector),
+stacked vertically -- ``"dingo"`` panels on top and, when available, ``"dingo-is"`` below.
 
 Inputs come straight from ``Result._compute_ppd``: ``wf_fd`` is
 ``{mode: {ifo: (n_waveforms, n_freq) complex}}`` (already whitened), ``data_fd`` is
@@ -12,13 +12,16 @@ Inputs come straight from ``Result._compute_ppd``: ``wf_fd`` is
 a line); ``domain`` is the frequency ``Domain`` used for the inverse FFT.
 """
 
-from typing import Optional, Sequence, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 from matplotlib import pyplot as plt
-from matplotlib.axes import Axes
 
 from dingo.gw.domains import Domain
+
+# One colour per posterior mode (first is the single-mode default orange); grey for data.
+_PPD_COLORS = ["#DD8452", "#4C72B0", "#55A868", "#C44E52", "#8172B3"]
+_DATA_COLOR = "#808080"
 
 
 def plot_ppd_td(
@@ -28,110 +31,91 @@ def plot_ppd_td(
     map_fd: Optional[dict] = None,
     filename: str = "ppd_td.png",
     zoom: Optional[Tuple[float, float]] = None,
-    axes: Optional[Sequence[Axes]] = None,
-    plot_data: bool = True,
-    colors: Optional[Sequence[str]] = None,
 ) -> np.ndarray:
-    """Plot the time-domain whitened-strain PPD, one envelope per posterior mode.
+    """Plot the time-domain whitened-strain PPD min/max envelope, one panel per (mode, ifo).
 
-    For each detector, inverse-FFTs each mode's whitened waveforms to the time domain with
-    the merger at t = 0 (segment-midpoint offset ``t0 = T/2``) and shades the pointwise
-    min/max envelope, with each mode's maximum-probability waveform drawn as a line over it.
-    The grey whitened-data trace is overlaid once.
+    For each mode and detector, inverse-FFTs the whitened draws to the time domain (merger at
+    t = 0, segment-midpoint offset ``t0 = T/2``), shades the pointwise min/max envelope, and
+    draws that mode's maximum-probability waveform as a line over it, all above the grey
+    whitened-data trace. Panels are stacked vertically -- the **Dingo** posterior on top and,
+    when the result is importance-sampled, **Dingo-IS** below.
 
     Parameters
     ----------
     wf_fd : dict
         ``{mode: {ifo: (n_waveforms, n_freq) complex}}`` whitened model waveforms, from
-        :meth:`Result._compute_ppd`. Each ``mode`` (e.g. ``"dingo"``, ``"dingo-is"``) is
-        drawn as its own coloured, labelled envelope.
+        :meth:`Result._compute_ppd` (``mode`` is ``"dingo"`` and/or ``"dingo-is"``).
     data_fd : dict
-        ``{ifo: (n_freq,) complex}`` whitened detector data; its keys set the subplot rows.
+        ``{ifo: (n_freq,) complex}`` whitened detector data; its keys set the detectors.
     domain : Domain
         Frequency domain used for the inverse FFT (needs ``delta_f``, ``f_max``, ``()``).
     map_fd : dict or None
         ``{mode: {ifo: (n_freq,) complex}}`` maximum-probability waveform per mode, drawn as
-        a solid line in the mode's colour over its band. Modes absent from the dict (or a
-        ``None`` argument) get no line.
+        a solid line in the mode's colour. Modes absent from the dict (or ``None``) get no line.
     filename : str
-        Output path. Ignored when ``axes`` is supplied (the caller owns saving).
+        Output path for the saved figure.
     zoom : tuple or None
         ``(left, right)`` x-limits in seconds-to-merger. Default ``(-1.0, 0.2)``.
-    axes : sequence of matplotlib Axes or None
-        Existing axes (one per detector) to draw onto for composition. When None a new
-        figure is created and saved to ``filename``.
-    plot_data : bool
-        Draw the grey whitened-data trace once.
-    colors : list[str] or None
-        One color per mode; defaults to an internal cycle.
 
     Returns
     -------
-    numpy.ndarray of the matplotlib Axes drawn onto.
+    numpy.ndarray of the matplotlib Axes drawn onto (one per stacked (mode, detector) panel).
     """
     map_fd = map_fd or {}
-    # Envelope colors, one per overlaid posterior mode (first is the single-mode
-    # default orange); grey for the whitened-data trace.
-    ppd_colors = ["#DD8452", "#4C72B0", "#55A868", "#C44E52", "#8172B3"]
-    data_color = "#808080"
-
     ifos = list(data_fd.keys())
     modes = list(wf_fd.keys())
-    if colors is None:
-        colors = [ppd_colors[i % len(ppd_colors)] for i in range(len(modes))]
-
-    if axes is None:
-        fig, axes_col = plt.subplots(
-            len(ifos), 1, figsize=(10, 3 * len(ifos)), sharex=True, squeeze=False
-        )
-        axes = axes_col[:, 0]
-    else:
-        fig = None
-        axes = np.atleast_1d(axes)
+    colors = {mode: _PPD_COLORS[i % len(_PPD_COLORS)] for i, mode in enumerate(modes)}
+    zoom = zoom if zoom is not None else (-1.0, 0.2)
 
     t0 = 1 / (2 * domain.delta_f)  # merger at segment midpoint -> t = 0
     phase_shift = np.exp(2j * np.pi * domain() * t0)
 
-    for row, (ax, ifo) in enumerate(zip(axes, ifos)):
-        for mode, color in zip(modes, colors):
-            td = []
-            for wf in wf_fd[mode][ifo] * phase_shift:
-                times, x = one_sided_fd_to_td(wf, domain)
-                td.append(np.real(x))
-            td = np.array(td)
-            ax.fill_between(
-                times - t0,
-                td.min(axis=0),
-                td.max(axis=0),
-                color=color,
-                alpha=0.3,
-                label=mode if row == 0 else None,
-            )
-            # Maximum-probability waveform for this mode, as a solid line over the band.
-            if mode in map_fd:
-                m_times, m_x = one_sided_fd_to_td(map_fd[mode][ifo] * phase_shift, domain)
-                ax.plot(m_times - t0, np.real(m_x), color=color, lw=1.0, alpha=0.9)
-        if plot_data:
-            d_times, d_x = one_sided_fd_to_td(data_fd[ifo] * phase_shift, domain)
-            d_td = np.convolve(np.real(d_x), np.ones(4) / 4, mode="same")
-            ax.plot(
-                d_times - t0,
-                d_td,
-                color=data_color,
-                lw=1,
-                alpha=0.7,
-                zorder=0,
-                label="data" if row == 0 else None,
-            )
-        ax.set_ylabel(f"{ifo}\nwhitened strain")
-        ax.set_xlim(*(zoom if zoom is not None else (-1.0, 0.2)))
+    # Grey whitened-data trace per detector (shared across that detector's panels).
+    data_td = {}
+    for ifo in ifos:
+        d_times, d_x = one_sided_fd_to_td(data_fd[ifo] * phase_shift, domain)
+        data_td[ifo] = (d_times - t0, np.convolve(np.real(d_x), np.ones(4) / 4, mode="same"))
+
+    # One panel per (mode, ifo), stacked vertically (grouped by mode: dingo, then dingo-is).
+    panels = [(mode, ifo) for mode in modes for ifo in ifos]
+    fig, axes = plt.subplots(
+        len(panels), 1, figsize=(11, 2.6 * len(panels)), sharex=True, squeeze=False
+    )
+    axes = axes[:, 0]
+
+    for ax, (mode, ifo) in zip(axes, panels):
+        color = colors[mode]
+        td = np.array(
+            [np.real(one_sided_fd_to_td(wf, domain)[1]) for wf in wf_fd[mode][ifo] * phase_shift]
+        )
+        times, _ = one_sided_fd_to_td(data_fd[ifo], domain)
+
+        # Grey data (bottom) -> min/max band -> MAP line (top).
+        d_t, d_td = data_td[ifo]
+        ax.plot(d_t, d_td, color=_DATA_COLOR, lw=0.8, alpha=0.6, zorder=1)
+        ax.fill_between(
+            times - t0, td.min(axis=0), td.max(axis=0), color=color, alpha=0.3, zorder=2
+        )
+        if mode in map_fd:
+            _, m_x = one_sided_fd_to_td(map_fd[mode][ifo] * phase_shift, domain)
+            ax.plot(times - t0, np.real(m_x), color=color, lw=1.0, alpha=0.9, zorder=3)
+
+        ax.set_xlim(*zoom)
+        ax.set_ylabel("whitened strain")
+        ax.text(
+            0.01,
+            0.95,
+            f"{mode} · {ifo}",
+            transform=ax.transAxes,
+            va="top",
+            ha="left",
+            fontweight="bold",
+            color=color,
+        )
 
     axes[-1].set_xlabel("time to merger (s)")
-    axes[0].legend(loc="upper left")
-    if fig is not None:
-        fig.tight_layout()
-        fig.savefig(filename, dpi=200, bbox_inches="tight")
-        plt.close(fig)
+    fig.savefig(filename, dpi=200, bbox_inches="tight")
+    plt.close(fig)
     return axes
 
 

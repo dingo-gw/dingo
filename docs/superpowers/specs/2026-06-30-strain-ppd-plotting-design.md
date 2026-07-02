@@ -24,18 +24,17 @@ likelihood, detector projection, and ASD whitening — `core/` stays
 domain-agnostic. The module exposes:
 
 ```python
-plot_ppd_td(wf_fd, data_fd, domain, filename="ppd_td.png",
-            zoom=None, axes=None, plot_data=True, colors=None)
+plot_ppd_td(wf_fd, data_fd, domain, map_fd=None, filename="ppd_td.png", zoom=None)
 one_sided_fd_to_td(fd, domain)   # IFFT helper, also here
 ```
 
 `wf_fd` is `{mode: {ifo: (n_waveforms, n_freq) complex}}` (whitened model
-waveforms) and `data_fd` is `{ifo: (n_freq,) complex}` (whitened data) — both
-straight from `_compute_ppd`. `plot_ppd_td` draws **one coloured min/max envelope
-per `mode`** (`"dingo"`, and `"dingo-is"` when present), labelled via
-`_MODE_LABELS`, and overlays the grey whitened-data trace once. `axes=None`
-creates a figure and saves to `filename`; passing `axes` draws onto them and
-skips saving, for composition.
+waveforms), `data_fd` is `{ifo: (n_freq,) complex}` (whitened data), and `map_fd`
+is `{mode: {ifo: (n_freq,) complex}}` (the per-mode maximum-probability waveform)
+— all from `_compute_ppd`. `plot_ppd_td` draws **one min/max envelope panel per
+`(mode, ifo)`, stacked vertically** — `"dingo"` panels on top and, when present,
+`"dingo-is"` below — each with the grey whitened-data trace beneath and the mode's
+MAP waveform as a line on top. Each panel is labelled in-axes `"{mode} · {ifo}"`.
 
 The GW `Result` (subclass of `CoreResult`) keeps a thin convenience method that
 mirrors the `result.plot_corner` API and delegates to the module:
@@ -45,9 +44,9 @@ result.plot_ppd_td(filename="ppd_td.png", credible_interval=0.9,
                    num_waveforms=1000, num_processes=1, zoom=None, ppd=None)
 ```
 
-Like `plot_corner`, both the **Dingo** posterior (credible set from the raw
-network samples) and — when the result is importance-sampled (`"weights"`
-present) — the **Dingo-IS** posterior are overlaid on one figure.
+Both the **Dingo** posterior (credible set from the raw network samples) and —
+when the result is importance-sampled (`"weights"` present) — the **Dingo-IS**
+posterior get their own stacked panels (Dingo on top, Dingo-IS below).
 
 The shared expensive computation stays a **private `Result` method**
 `_compute_ppd(self, credible_interval, num_waveforms, num_processes, seed)`,
@@ -134,6 +133,20 @@ peak lands at t ≈ +0.02 s in both H1 and L1.
 - x-axis: time to merger (s), linear, zoomed via `zoom=` (method default
   `(-1.0, 0.2)`; `(-0.7, 0.1)` works well for GW230709). y-axis: whitened strain
   (dimensionless, σ units).
+
+### Alternative considered: shade by density p(s | t) (rejected)
+
+We prototyped replacing the min/max band with the full per-time strain **density**
+`p(s | t)` — the pushforward of the posterior through the waveform map, rendered as
+an opacity/heatmap (mass-proportional draws, per-column-normalised + gamma, KDE
+smoothing). Mathematically it is the "right" object (min/max is just its support),
+and it looks great on the loud, well-localised GW150914. **But on the real
+eccentric O4 events (e.g. S230709bi) it read as messy** — near merger the draws
+decorrelate in phase, so the density fills a broad lens with fine internal banding
+that is hard to parse, and finite-sample shot noise needs aggressive smoothing.
+The min/max envelope + MAP line conveys the same "where does the signal live" story
+far more legibly, so we kept it. (The density prototype was discarded, not merged; the
+approach is recorded here in case it's worth revisiting with a cleaner rendering.)
 
 Frequency-domain PPD plotting is deferred to a follow-up (a per-bin whitened FD
 view buries the signal below the unit-variance noise floor; the useful FD view is
