@@ -16,6 +16,67 @@ Build strategy:
        directory is already owned by that user.
     3. ``apptainer build dingo-heavy.sif sandbox``
        Pack the sandbox into a read-only SIF.  No user-ns required.
+
+Resulting sandbox layout (a full python:3.11 Debian rootfs with our additions;
+only the paths this test stages/touches are shown)::
+
+    sandbox/                              # the container root filesystem "/"
+    |
+    +-- .singularity.d/
+    |   +-- runscript                     # OVERWRITTEN (step 2c): exec run_pipeline.py "$@"
+    |   +-- env/  actions/  labels.json   # base-image metadata
+    |
+    +-- opt/
+    |   +-- dingo/                        # step 2a: `git archive HEAD` extract (tracked files, no .git)
+    |   |   +-- dingo/  tests/  examples/  docs/  ci/  compatibility/  misc_scripts/
+    |   |   +-- pyproject.toml  uv.lock  MANIFEST.in  README.md  LICENSE
+    |   |                                 # installed FROM here via `pip install /opt/dingo` (step 2e)
+    |   +-- pipeline/                     # step 2b: copied from tests/integration/
+    |       +-- run_pipeline.py           #   the runscript entrypoint
+    |       +-- config/
+    |           +-- waveform_dataset_settings.yaml
+    |           +-- asd_dataset_settings.yaml
+    |           +-- train_settings.yaml
+    |           +-- injection.ini
+    |           +-- gw150914.ini
+    |
+    +-- usr/local/
+    |   +-- bin/                          # pip console-scripts: dingo_generate_dataset,
+    |   |                                 #   dingo_generate_asd_dataset, dingo_train, dingo_pipe
+    |   +-- lib/python3.11/site-packages/ # writable-install target
+    |       +-- torch/  torchvision/      #   cu128 wheels (step 2d, host CUDA 12.8 driver)
+    |       +-- dingo/                    #   the package + transitive deps (step 2e)
+    |
+    +-- bin/ etc/ lib/ var/ ...           # rest of the python:3.11 Debian rootfs
+    +-- tmp/dingo_run                     # location of the the output of run_pipeline.py
+        +-- waveform_dataset_settings.yaml    # the 5 configs copied out of /opt/pipeline/config
+        +-- asd_dataset_settings.yaml
+        +-- train_settings.yaml
+        +-- injection.ini
+        +-- gw150914.ini
+        |
+        +-- waveform_dataset.hdf5             # stage 1: dingo_generate_dataset
+        |
+        +-- time_segments.pkl                 # stage 2: one fixed O1 segment (written by _stage_asd)
+        +-- asds_O1.hdf5                      # stage 2: dingo_generate_asd_dataset (GWOSC, no auth)
+        |
+        +-- model_latest.pt                   # stage 3: dingo_train --train_dir workdir
+        |                                     #   (referenced as `model = model_latest.pt` in both .ini)
+        |
+        +-- inference_out/                    # stage 4: dingo_pipe injection.ini (label=heavy_ci)
+        |   +-- data/                         #   generated injection strain data
+        |   +-- result/                       #   heavy_ci*.hdf5 <- parsed for "Sample efficiency"
+        |   +-- submit/bash_heavy_ci.sh       #   local runscript executed by _stage_inference
+        |   +-- log_data_generation/  log_data_analysis/  log_results_page/
+        |
+        +-- gw150914_out/                     # stage 5: dingo_pipe gw150914.ini (label=gw150914)
+            +-- data/                         #   O1 open data downloaded from GWOSC
+            +-- result/                       #   gw150914*.hdf5 <- parsed for GW150914_* metrics
+            +-- submit/bash_gw150914.sh       #   local runscript executed by _stage_gw150914
+            +-- log_data_generation/  log_data_analysis/  log_results_page/
+
+Step 3 packs this whole directory into a read-only ``dingo-heavy.sif``.  Both the
+sandbox and the SIF live inside a TemporaryDirectory and are deleted on exit.
 """
 import math
 import os
