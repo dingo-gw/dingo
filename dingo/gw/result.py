@@ -2,7 +2,7 @@ import copy
 import time
 import warnings
 from functools import partial
-from typing import Optional, Tuple
+from typing import Optional, Sequence, Tuple, Union
 
 import numpy as np
 import yaml
@@ -788,26 +788,28 @@ class Result(CoreResult):
 
     def _compute_ppd(
         self,
-        credible_interval: float = 0.9,
+        credible_interval: Union[float, Sequence[float]] = 0.9,
         num_waveforms: int = 1000,
         num_processes: int = 1,
         seed: int = RANDOM_STATE,
-    ) -> Tuple[dict, dict, dict]:
+    ) -> Tuple[dict, dict, dict, dict]:
         """Generate whitened waveforms for the time-domain strain PPD.
 
-        Builds a ``credible_interval`` highest-posterior-density credible set for each
-        available posterior -- ``"dingo"`` (the raw network samples) and, when the result is
-        importance-sampled, ``"dingo-is"`` -- draws up to ``num_waveforms`` of each uniformly
-        at random (so the envelope spans the whole interval, not just the peak), and projects
-        them onto the detectors via the likelihood. Model waveforms come back already whitened
-        (``h / asd / noise_std``), matching the whitened data.
+        Builds the highest-posterior-density credible set at the largest requested
+        ``credible_interval`` level for each available posterior -- ``"dingo"`` (the raw
+        network samples) and, when the result is importance-sampled, ``"dingo-is"`` --
+        generates up to ``num_waveforms`` of each, and projects them onto the detectors via
+        the likelihood. Model waveforms come back already whitened (``h / asd / noise_std``),
+        matching the whitened data. The generated draws are returned ordered by descending
+        density, and per-level counts are returned so the plot can draw nested bands.
 
         Parameters
         ----------
-        credible_interval : float
-            Posterior probability of the credible set to draw from (default 0.9).
+        credible_interval : float or sequence of float
+            Posterior probability of the credible set(s). A sequence (e.g. ``[0.5, 0.9]``)
+            requests nested credible bands; the waveforms are generated for the largest level.
         num_waveforms : int
-            Maximum number of waveforms drawn from each credible set.
+            Maximum number of waveforms drawn from the (largest) credible set.
         num_processes : int
             Processes used for waveform generation.
         seed : int
@@ -818,8 +820,8 @@ class Result(CoreResult):
         wf_fd : dict
             ``{mode: {ifo: complex ndarray (n_kept, n_freq)}}`` whitened model waveforms,
             where ``mode`` is ``"dingo"`` (always) and ``"dingo-is"`` (present iff the result
-            is importance-sampled). Rows are the successfully generated draws; the rare failed
-            draw is dropped, so ``n_kept`` may be slightly below the number requested.
+            is importance-sampled). Rows are the successfully generated draws **ordered by
+            descending density**; the rare failed draw is dropped.
         data_fd : dict
             ``{ifo: complex ndarray (n_freq,)}`` whitened detector data (shared across modes).
         map_fd : dict
@@ -827,8 +829,12 @@ class Result(CoreResult):
             whitened waveform per mode -- max ``log_prob`` for ``"dingo"``, max
             ``log_likelihood + log_prior`` for ``"dingo-is"`` -- drawn as a line over the band.
             A mode is absent iff its MAP draw failed generation.
+        level_counts : dict
+            ``{mode: {level: k}}`` -- for each requested credible level, ``k`` is how many of
+            the (density-ordered) generated draws fall in that level's HPD set, so the plot can
+            take the densest ``wf_fd[mode][ifo][:k]`` as the band for that level.
 
-        All three are consumed by :func:`dingo.gw.utils.plotting.plot_ppd_td` (together with
+        All are consumed by :func:`dingo.gw.utils.plotting.plot_ppd_td` (together with
         ``self.domain``).
 
         Notes
@@ -871,6 +877,12 @@ class Result(CoreResult):
         ifos = list(self.context["waveform"].keys())
         rng = np.random.default_rng(seed)
 
+        levels = sorted(
+            {float(credible_interval)}
+            if np.isscalar(credible_interval)
+            else {float(x) for x in credible_interval}
+        )
+
         # Whitened data, same convention as the (already-whitened) model waveforms.
         data_fd = {
             ifo: np.sqrt(4 * domain.delta_f)
@@ -900,6 +912,7 @@ class Result(CoreResult):
         # maximum-probability waveform per mode (drawn as a line over the band).
         wf_fd = {}
         map_fd = {}
+        level_counts = {}
         for mode in ("dingo", "dingo-is"):
             if mode == "dingo":
                 mass = in_prior.astype(float)
@@ -917,13 +930,27 @@ class Result(CoreResult):
             mass = mass / mass.sum()
             rank = np.where(in_prior, rank, -np.inf)
             order = np.argsort(rank)[::-1]
-            n_keep = int(np.searchsorted(np.cumsum(mass[order]), credible_interval)) + 1
+            cum_mass = np.cumsum(mass[order])
+
+            # The HPD set at level L is {theta : density(theta) >= c_L}. Find each level's
+            # density threshold c_L from the population (rank where the cumulative mass first
+            # reaches L); a smaller level is just a higher threshold on the same ranked draws,
+            # so nested bands are a top-k slice of the density-ordered draws -- no extra
+            # generation. Build (and generate) the set for the largest level.
+            thresholds = {
+                lvl: rank[order[min(int(np.searchsorted(cum_mass, lvl)), len(order) - 1)]]
+                for lvl in levels
+            }
+            n_keep = int(np.searchsorted(cum_mass, levels[-1])) + 1
             credible_idx = order[:n_keep]
-            # Subsample uniformly from the credible set so the min/max envelope spans it.
             if len(credible_idx) > num_waveforms:
                 credible_idx = rng.choice(
                     credible_idx, size=num_waveforms, replace=False
                 )
+            # Order the draws by descending density so the plot can take the densest top-k as
+            # the inner (tighter) credible level.
+            credible_idx = credible_idx[np.argsort(rank[credible_idx])[::-1]]
+            sel_rank = rank[credible_idx]
             theta = self.samples.iloc[credible_idx]
 
             # The prior filter removes out-of-prior draws, but it does not guarantee every
@@ -938,7 +965,9 @@ class Result(CoreResult):
                 theta,
                 num_processes=num_processes,
             )
-            n_failed = sum(s is None for s in signals)
+            failed = np.array([s is None for s in signals])
+            n_failed = int(failed.sum())
+            kept_rank = sel_rank[~failed]
             signals = [s for s in signals if s is not None]
             if not signals:
                 raise RuntimeError(
@@ -952,6 +981,10 @@ class Result(CoreResult):
                 )
             wf_fd[mode] = {
                 ifo: np.array([s["waveform"][ifo] for s in signals]) for ifo in ifos
+            }
+            # Density-ordered draws already kept; count how many fall in each level's HPD set.
+            level_counts[mode] = {
+                lvl: int(np.sum(kept_rank >= thresholds[lvl])) for lvl in levels
             }
 
             # Maximum-probability waveform for this mode: the single highest-ranked
@@ -968,12 +1001,12 @@ class Result(CoreResult):
                 "Whitened waveform length does not match the inverse-FFT domain; "
                 "time-domain PPD requires a uniform frequency domain."
             )
-        return wf_fd, data_fd, map_fd
+        return wf_fd, data_fd, map_fd, level_counts
 
     def plot_ppd_td(
         self,
         filename: str = "ppd_td.png",
-        credible_interval: float = 0.9,
+        credible_interval: Union[float, Sequence[float]] = 0.9,
         num_waveforms: int = 1000,
         num_processes: int = 1,
         zoom: Optional[Tuple[float, float]] = None,
@@ -986,10 +1019,12 @@ class Result(CoreResult):
         Panels are stacked vertically, one per (mode, detector): the **Dingo** posterior on
         top and, when the result is importance-sampled, the **Dingo-IS** posterior below.
 
-        ``zoom`` is the (left, right) x-limit in seconds-to-merger; defaults to (-1.0, 0.2).
-        Returns the ``(wf_fd, data_fd, map_fd)`` tuple that was plotted.
+        ``credible_interval`` may be a single level (default 0.9) or a sequence such as
+        ``[0.5, 0.9]`` to overlay nested credible bands. ``zoom`` is the (left, right)
+        x-limit in seconds-to-merger; defaults to (-1.0, 0.2). Returns the
+        ``(wf_fd, data_fd, map_fd)`` tuple that was plotted.
         """
-        wf_fd, data_fd, map_fd = self._compute_ppd(
+        wf_fd, data_fd, map_fd, level_counts = self._compute_ppd(
             credible_interval, num_waveforms, num_processes
         )
         domain = (
@@ -997,5 +1032,13 @@ class Result(CoreResult):
             if hasattr(self.domain, "base_domain")
             else self.domain
         )
-        _plot_ppd_td(wf_fd, data_fd, domain, map_fd=map_fd, filename=filename, zoom=zoom)
+        _plot_ppd_td(
+            wf_fd,
+            data_fd,
+            domain,
+            map_fd=map_fd,
+            level_counts=level_counts,
+            filename=filename,
+            zoom=zoom,
+        )
         return wf_fd, data_fd, map_fd

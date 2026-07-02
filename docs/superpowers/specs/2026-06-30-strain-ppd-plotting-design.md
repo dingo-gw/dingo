@@ -128,6 +128,11 @@ peak lands at t ≈ +0.02 s in both H1 and L1.
 - Each draw: phase-shift by `t0`, `one_sided_fd_to_td`, keep real part.
 - Band = pointwise **min/max envelope** across the selected draws
   (`td.min` / `td.max`), drawn with `fill_between`.
+- **Nested credible levels:** `credible_interval` accepts a list (e.g. `[0.5, 0.9]`).
+  Since the HPD set at level L is `{θ : density ≥ c_L}`, a tighter level is just a
+  higher density threshold on the same ranked draws — so `_compute_ppd` returns the
+  draws ordered by descending density plus a per-level count `k`, and the plot shades
+  `td[:k].min/max` per level (tighter = darker).
 - Overlay: whitened data trace (`√(4Δf)·context_waveform/asd`, same shift +
   IFFT, light sliding-window average), grey.
 - x-axis: time to merger (s), linear, zoomed via `zoom=` (method default
