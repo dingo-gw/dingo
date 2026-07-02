@@ -77,6 +77,12 @@ def setup_logger(outdir=None, label=None, log_level="INFO"):
     if bilby_logger is not None:
         for handler in bilby_logger.handlers:
             if isinstance(handler, logging.FileHandler):
+                handler.setFormatter(
+                    logging.Formatter(
+                        "%(asctime)s %(name)s %(levelname)-8s: %(message)s",
+                        datefmt="%H:%M",
+                    )
+                )
                 if not any(isinstance(h, logging.FileHandler) for h in logger.handlers):
                     logger.addHandler(handler)
 
@@ -90,7 +96,7 @@ def setup_logger(outdir=None, label=None, log_level="INFO"):
         file_handler = logging.FileHandler(log_file)
         file_handler.setFormatter(
             logging.Formatter(
-                "%(asctime)s %(levelname)-8s: %(message)s", datefmt="%H:%M"
+                "%(asctime)s %(name)s %(levelname)-8s: %(message)s", datefmt="%H:%M"
             )
         )
         file_handler.setLevel(level)
