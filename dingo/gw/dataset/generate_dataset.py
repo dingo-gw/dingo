@@ -24,7 +24,7 @@ from dingo.gw.waveform_generator import (
     generate_waveforms_parallel,
 )
 from dingo.core.utils.misc import call_func_strict_output_dim
-from dingo.core.utils.logging_utils import logger
+from dingo.core.utils.logging_utils import logger, setup_logger
 
 
 def generate_parameters_and_polarizations(
@@ -302,6 +302,8 @@ def _generate_dataset_main(
 
 def main() -> None:
     args = parse_args()
+    out_path = Path(args.out_file)
+    setup_logger(outdir=str(out_path.parent), label=out_path.stem)
     _generate_dataset_main(args.settings_file, args.out_file, args.num_processes)
 
 

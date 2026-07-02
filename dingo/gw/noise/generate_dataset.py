@@ -12,7 +12,7 @@ from dingo.gw.noise.asd_estimation import (
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.noise.generate_dataset_dag import create_dag
 from dingo.gw.noise.utils import merge_datasets, get_time_segments
-from dingo.core.utils.logging_utils import logger
+from dingo.core.utils.logging_utils import logger, setup_logger
 
 
 def parse_args():
@@ -59,6 +59,7 @@ def generate_dataset():
     Creates and saves an ASD dataset
     """
     args = parse_args()
+    setup_logger(outdir=args.data_dir, label="asd_dataset")
 
     # Load settings
     settings_file = (

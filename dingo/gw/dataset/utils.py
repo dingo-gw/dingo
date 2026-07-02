@@ -1,12 +1,13 @@
 import argparse
 import textwrap
 import copy
+from pathlib import Path
 import pandas as pd
 import numpy as np
 import yaml
 from typing import List
 
-from dingo.core.utils.logging_utils import logger
+from dingo.core.utils.logging_utils import logger, setup_logger
 from dingo.gw.SVD import SVDBasis
 from dingo.gw.dataset.generate_dataset import train_svd_basis
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
@@ -88,6 +89,8 @@ def merge_datasets_cli():
         "--settings_file", type=str, help="YAML file containing new dataset settings."
     )
     args = parser.parse_args()
+    out_path = Path(args.out_file)
+    setup_logger(outdir=str(out_path.parent), label=out_path.stem)
 
     dataset_list = []
     for i in range(args.num_parts):
@@ -142,6 +145,8 @@ def build_svd_cli():
         "Remainder are used for validation.",
     )
     args = parser.parse_args()
+    out_path = Path(args.out_file)
+    setup_logger(outdir=str(out_path.parent), label=out_path.stem)
 
     dataset = WaveformDataset(file_name=args.dataset_file)
     if args.num_train is None:

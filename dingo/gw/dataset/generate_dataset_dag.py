@@ -5,7 +5,7 @@ from pycondor import Job, Dagman
 import yaml
 import copy
 
-from dingo.core.utils.logging_utils import logger
+from dingo.core.utils.logging_utils import logger, setup_logger
 
 # Fixed file names
 svd_fn = "svd.hdf5"
@@ -266,6 +266,7 @@ def create_dag(args, settings):
 
 def main():
     args = parse_args()
+    setup_logger(outdir=args.temp_dir, label="generate_dataset_dag")
 
     # Load settings
     with open(args.settings_file, "r") as f:

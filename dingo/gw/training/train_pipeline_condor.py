@@ -4,7 +4,7 @@ from os.path import join, isfile
 import yaml
 import argparse
 
-from dingo.core.utils.logging_utils import logger
+from dingo.core.utils.logging_utils import logger, setup_logger
 from dingo.gw.training import (
     prepare_training_new,
     prepare_training_resume,
@@ -79,6 +79,7 @@ def train_condor():
         help="Optional command to execute after completion of training.",
     )
     args = parser.parse_args()
+    setup_logger(outdir=args.train_dir, label="dingo_train")
 
     if not args.start_submission:
 

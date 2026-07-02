@@ -27,7 +27,7 @@ from dingo.core.utils import (
     build_train_and_test_loaders,
 )
 from dingo.core.utils.trainutils import EarlyStopping
-from dingo.core.utils.logging_utils import logger
+from dingo.core.utils.logging_utils import logger, setup_logger
 from dingo.gw.dataset import WaveformDataset
 from dingo.core.posterior_models import BasePosteriorModel
 
@@ -439,6 +439,7 @@ def train_local():
     args = parse_args()
 
     os.makedirs(args.train_dir, exist_ok=True)
+    setup_logger(outdir=args.train_dir, label="dingo_train")
 
     if args.settings_file is not None:
         logger.info("Beginning new training run.")
