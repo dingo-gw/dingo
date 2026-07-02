@@ -792,7 +792,7 @@ class Result(CoreResult):
         num_waveforms: int = 1000,
         num_processes: int = 1,
         seed: int = RANDOM_STATE,
-    ) -> Tuple[dict, dict]:
+    ) -> Tuple[dict, dict, dict]:
         """Generate whitened waveforms for the time-domain strain PPD.
 
         Builds a ``credible_interval`` highest-posterior-density credible set for each
@@ -822,8 +822,13 @@ class Result(CoreResult):
             draw is dropped, so ``n_kept`` may be slightly below the number requested.
         data_fd : dict
             ``{ifo: complex ndarray (n_freq,)}`` whitened detector data (shared across modes).
+        map_fd : dict
+            ``{mode: {ifo: complex ndarray (n_freq,)}}`` the single maximum-probability
+            whitened waveform per mode -- max ``log_prob`` for ``"dingo"``, max
+            ``log_likelihood + log_prior`` for ``"dingo-is"`` -- drawn as a line over the band.
+            A mode is absent iff its MAP draw failed generation.
 
-        Both are consumed by :func:`dingo.gw.utils.plotting.plot_ppd_td` (together with
+        All three are consumed by :func:`dingo.gw.utils.plotting.plot_ppd_td` (together with
         ``self.domain``).
 
         Notes
@@ -891,8 +896,10 @@ class Result(CoreResult):
         )
 
         # One credible set per available posterior: "dingo" always; "dingo-is" when the
-        # result is importance-sampled (weights present).
+        # result is importance-sampled (weights present). map_fd holds the single
+        # maximum-probability waveform per mode (drawn as a line over the band).
         wf_fd = {}
+        map_fd = {}
         for mode in ("dingo", "dingo-is"):
             if mode == "dingo":
                 mass = in_prior.astype(float)
@@ -947,12 +954,21 @@ class Result(CoreResult):
                 ifo: np.array([s["waveform"][ifo] for s in signals]) for ifo in ifos
             }
 
+            # Maximum-probability waveform for this mode: the single highest-ranked
+            # (in-prior) draw -- max log_prob for "dingo", max (log_likelihood + log_prior)
+            # for "dingo-is". Gives a clean representative chirp over the min/max band.
+            map_signal = safe_signal(
+                self.likelihood, self.samples.iloc[order[0]].to_dict()
+            )
+            if map_signal is not None:
+                map_fd[mode] = {ifo: map_signal["waveform"][ifo] for ifo in ifos}
+
         if wf_fd["dingo"][ifos[0]].shape[1] != len(domain()):
             raise ValueError(
                 "Whitened waveform length does not match the inverse-FFT domain; "
                 "time-domain PPD requires a uniform frequency domain."
             )
-        return wf_fd, data_fd
+        return wf_fd, data_fd, map_fd
 
     def plot_ppd_td(
         self,
@@ -961,19 +977,19 @@ class Result(CoreResult):
         num_waveforms: int = 1000,
         num_processes: int = 1,
         zoom: Optional[Tuple[float, float]] = None,
-    ) -> Tuple[dict, dict]:
+    ) -> Tuple[dict, dict, dict]:
         """Plot the time-domain whitened-strain posterior-predictive distribution.
 
         For each detector, inverse-FFTs whitened waveforms to the time domain with the merger
-        at t = 0 and shades the pointwise min/max envelope; the whitened detector data is
-        overlaid in grey. Mirroring :meth:`plot_corner`, both the **Dingo** posterior and (when
-        the result is importance-sampled) the **Dingo-IS** posterior are overlaid on one
-        figure.
+        at t = 0 and shades the pointwise min/max envelope, with the maximum-probability
+        waveform of each mode drawn as a line over it; the whitened detector data is overlaid
+        in grey. Mirroring :meth:`plot_corner`, both the **Dingo** posterior and (when the
+        result is importance-sampled) the **Dingo-IS** posterior are overlaid on one figure.
 
         ``zoom`` is the (left, right) x-limit in seconds-to-merger; defaults to (-1.0, 0.2).
-        Returns the ``(wf_fd, data_fd)`` tuple that was plotted.
+        Returns the ``(wf_fd, data_fd, map_fd)`` tuple that was plotted.
         """
-        wf_fd, data_fd = self._compute_ppd(
+        wf_fd, data_fd, map_fd = self._compute_ppd(
             credible_interval, num_waveforms, num_processes
         )
         domain = (
@@ -981,5 +997,5 @@ class Result(CoreResult):
             if hasattr(self.domain, "base_domain")
             else self.domain
         )
-        _plot_ppd_td(wf_fd, data_fd, domain, filename=filename, zoom=zoom)
-        return wf_fd, data_fd
+        _plot_ppd_td(wf_fd, data_fd, domain, map_fd=map_fd, filename=filename, zoom=zoom)
+        return wf_fd, data_fd, map_fd

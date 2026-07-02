@@ -6,9 +6,10 @@ PPD envelopes produced by :meth:`dingo.gw.result.Result._compute_ppd` in the tim
 when available, ``"dingo-is"``), mirroring how ``result.plot_corner`` shows both.
 
 Inputs come straight from ``Result._compute_ppd``: ``wf_fd`` is
-``{mode: {ifo: (n_waveforms, n_freq) complex}}`` (already whitened) and ``data_fd`` is
-``{ifo: (n_freq,) complex}`` (whitened data); ``domain`` is the frequency ``Domain`` used
-for the inverse FFT.
+``{mode: {ifo: (n_waveforms, n_freq) complex}}`` (already whitened), ``data_fd`` is
+``{ifo: (n_freq,) complex}`` (whitened data), and ``map_fd`` is
+``{mode: {ifo: (n_freq,) complex}}`` (the per-mode maximum-probability waveform, drawn as
+a line); ``domain`` is the frequency ``Domain`` used for the inverse FFT.
 """
 
 from typing import Optional, Sequence, Tuple
@@ -24,6 +25,7 @@ def plot_ppd_td(
     wf_fd: dict,
     data_fd: dict,
     domain: Domain,
+    map_fd: Optional[dict] = None,
     filename: str = "ppd_td.png",
     zoom: Optional[Tuple[float, float]] = None,
     axes: Optional[Sequence[Axes]] = None,
@@ -34,7 +36,8 @@ def plot_ppd_td(
 
     For each detector, inverse-FFTs each mode's whitened waveforms to the time domain with
     the merger at t = 0 (segment-midpoint offset ``t0 = T/2``) and shades the pointwise
-    min/max envelope. The grey whitened-data trace is overlaid once.
+    min/max envelope, with each mode's maximum-probability waveform drawn as a line over it.
+    The grey whitened-data trace is overlaid once.
 
     Parameters
     ----------
@@ -46,6 +49,10 @@ def plot_ppd_td(
         ``{ifo: (n_freq,) complex}`` whitened detector data; its keys set the subplot rows.
     domain : Domain
         Frequency domain used for the inverse FFT (needs ``delta_f``, ``f_max``, ``()``).
+    map_fd : dict or None
+        ``{mode: {ifo: (n_freq,) complex}}`` maximum-probability waveform per mode, drawn as
+        a solid line in the mode's colour over its band. Modes absent from the dict (or a
+        ``None`` argument) get no line.
     filename : str
         Output path. Ignored when ``axes`` is supplied (the caller owns saving).
     zoom : tuple or None
@@ -62,6 +69,7 @@ def plot_ppd_td(
     -------
     numpy.ndarray of the matplotlib Axes drawn onto.
     """
+    map_fd = map_fd or {}
     # Envelope colors, one per overlaid posterior mode (first is the single-mode
     # default orange); grey for the whitened-data trace.
     ppd_colors = ["#DD8452", "#4C72B0", "#55A868", "#C44E52", "#8172B3"]
@@ -99,6 +107,10 @@ def plot_ppd_td(
                 alpha=0.3,
                 label=mode if row == 0 else None,
             )
+            # Maximum-probability waveform for this mode, as a solid line over the band.
+            if mode in map_fd:
+                m_times, m_x = one_sided_fd_to_td(map_fd[mode][ifo] * phase_shift, domain)
+                ax.plot(m_times - t0, np.real(m_x), color=color, lw=1.0, alpha=0.9)
         if plot_data:
             d_times, d_x = one_sided_fd_to_td(data_fd[ifo] * phase_shift, domain)
             d_td = np.convolve(np.real(d_x), np.ones(4) / 4, mode="same")
