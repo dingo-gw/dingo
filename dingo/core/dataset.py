@@ -1,10 +1,15 @@
-from typing import List, Optional, Union
+from typing import List, Mapping, Optional, TypeAlias, Union
 import ast
 import h5py
 import numpy as np
 import pandas as pd
+from numpy.typing import DTypeLike
 
 from dingo.core.utils.misc import get_version
+
+# A mapping from group/dataset names to either a numpy dtype or a nested mapping
+# of the same form (allowing per-subgroup dtype specifications).
+DTypeMap: TypeAlias = Mapping[str, "DTypeLike | DTypeMap"]
 
 
 def recursive_hdf5_save(group, d):
@@ -29,8 +34,8 @@ def recursive_hdf5_load(
     group,
     keys: Optional[List[str]] = None,
     idx: Optional[Union[int, List[int]]] = None,
-    dtype_map: Optional[dict] = None,
-    _inherited_dtype=None,
+    dtype_map: Optional[DTypeMap] = None,
+    _inherited_dtype: Optional[DTypeLike] = None,
 ):
     """This is a generic helper function to recursively load data from an HDF5 file.
 
@@ -143,7 +148,7 @@ class DingoDataset:
         dictionary: Optional[dict] = None,
         data_keys: Optional[List] = None,
         leave_on_disk_keys: Optional[list] = None,
-        dtype_map: Optional[dict] = None,
+        dtype_map: Optional[DTypeMap] = None,
     ):
         """
         For constructing, provide either file_name, or dictionary containing data and
@@ -200,7 +205,7 @@ class DingoDataset:
             if self.dataset_type:
                 f.attrs["dataset_type"] = self.dataset_type
 
-    def from_file(self, file_name: str, dtype_map: Optional[dict] = None):
+    def from_file(self, file_name: str, dtype_map: Optional[DTypeMap] = None):
         print(f"Loading dataset from {str(file_name)}.")
         if self._leave_on_disk_keys:
             print(f"Omitting data keys {self._leave_on_disk_keys}.")

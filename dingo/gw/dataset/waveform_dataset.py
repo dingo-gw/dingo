@@ -1,10 +1,10 @@
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Literal, Optional, Union
 import h5py
 import numpy as np
 import torch.utils.data
 from torchvision.transforms import Compose
 
-from dingo.core.dataset import DingoDataset, recursive_hdf5_load
+from dingo.core.dataset import DingoDataset, DTypeMap, recursive_hdf5_load
 from dingo.gw.SVD import SVDBasis, ApplySVD
 from dingo.gw.domains import build_domain
 from dingo.gw.transforms import WhitenFixedASD
@@ -33,7 +33,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         file_name: Optional[str] = None,
         dictionary: Optional[dict] = None,
         transform=None,
-        precision: Optional[str] = None,
+        precision: Optional[Literal["single", "double"]] = None,
         domain_update: Optional[dict] = None,
         svd_size_update: Optional[int] = None,
         leave_waveforms_on_disk: Optional[bool] = False,
@@ -198,7 +198,7 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         self.decompression_transform = Compose(decompression_transform_list)
 
     @property
-    def dtype_map(self):
+    def dtype_map(self) -> Optional[DTypeMap]:
         """Mapping from group names to target dtypes for HDF5 loading.
 
         This enables direct dtype conversion during HDF5 read, avoiding
