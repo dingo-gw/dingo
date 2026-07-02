@@ -6,11 +6,11 @@ The posterior is an ordered product of conditional factors,
 
     q(theta_1, ..., theta_n | d) = prod_i q_i(theta_i | f_i(theta_<i, d)),
 
-where each ``Factor`` samples one parameter block and returns its own log-prob, and a
-composer evaluates them. ``ChainComposer`` runs the factors autoregressively.
+where each `Factor` samples one parameter block and returns its own log-prob, and a
+composer evaluates them. `ChainComposer` runs the factors autoregressively.
 
 Factors work in physical parameter space; a network's standardized space exists only
-inside its forward pass, mediated by ``Standardization``.
+inside its forward pass, mediated by `Standardization`.
 """
 
 from __future__ import annotations
@@ -28,12 +28,12 @@ from dingo.core.posterior_models import BasePosteriorModel
 
 class Standardization:
     """
-    Affine map between a network's standardized space (``z = (theta - mean) / std``) and
+    Affine map between a network's standardized space (`z = (theta - mean) / std`) and
     physical parameter space.
 
-    Holds one network's ``mean`` and ``std`` and applies them in both directions:
+    Holds one network's `mean` and `std` and applies them in both directions:
     de-standardizing network outputs to physical samples, and standardizing physical
-    parameters for ``log_prob``. Different factors (e.g. a GNPE init and main network)
+    parameters for `log_prob`. Different factors (e.g. a GNPE init and main network)
     carry different instances.
     """
 
@@ -44,31 +44,31 @@ class Standardization:
     def standardize(
         self, values: dict[str, torch.Tensor], names: list[str]
     ) -> torch.Tensor:
-        """Map physical ``values`` (a dict of named tensors) to a standardized tensor
-        with columns in ``names`` order."""
+        """Map physical `values` (a dict of named tensors) to a standardized tensor
+        with columns in `names` order."""
         cols = [(values[n] - self.mean[n]) / self.std[n] for n in names]
         return torch.stack(cols, dim=-1)
 
     def destandardize(
         self, z: torch.Tensor, names: list[str]
     ) -> dict[str, torch.Tensor]:
-        """Map a standardized tensor (columns in ``names`` order) back to a dict of
+        """Map a standardized tensor (columns in `names` order) back to a dict of
         named physical tensors."""
         return {n: z[..., i] * self.std[n] + self.mean[n] for i, n in enumerate(names)}
 
     def log_det(self, names: list[str]) -> float:
         """The term to *add* to a network log-prob to express it in physical space:
-        ``log p_theta = log p_z - sum log std``. Same correction in both directions."""
+        `log p_theta = log p_z - sum log std`. Same correction in both directions."""
         return -sum(math.log(self.std[n]) for n in names)
 
 
 @runtime_checkable
 class SamplerContext(Protocol):
     """
-    Per-event shared state referenced by every factor: the data ``d`` and quantities
+    Per-event shared state referenced by every factor: the data `d` and quantities
     derived from it (the prepared-data representation, the likelihood, event metadata).
     Concrete implementations are domain-specific; see
-    ``dingo.gw.inference.factors.GWSamplerContext``.
+    `dingo.gw.inference.factors.GWSamplerContext`.
     """
 
     event_metadata: Optional[dict]
@@ -86,7 +86,7 @@ class SamplerContext(Protocol):
 def _cat_dict(
     batches: list[dict[str, torch.Tensor]],
 ) -> dict[str, torch.Tensor]:
-    """Concatenate a list of ``name -> tensor`` dicts along dim 0 (re-joining batches)."""
+    """Concatenate a list of `name -> tensor` dicts along dim 0 (re-joining batches)."""
     return {k: torch.cat([b[k] for b in batches]) for k in batches[0]}
 
 
@@ -95,12 +95,27 @@ def chunk_and_concat(
     batch_size: Optional[int],
     run_once: Callable[[int], tuple[dict[str, torch.Tensor], Optional[torch.Tensor]]],
 ) -> tuple[dict[str, torch.Tensor], Optional[torch.Tensor]]:
-    """Run ``run_once`` over batches of ``total`` and concatenate the results.
+    """Run `run_once` over batches of `total` and concatenate the results.
 
-    Splits ``total`` into chunks of ``batch_size``, calls ``run_once(n) -> (samples,
-    log_prob)`` per chunk, and concatenates the sample dicts and log-probs. Caps peak
-    memory at one chunk. ``batch_size=None`` runs ``total`` in a single call. ``log_prob``
-    may be ``None`` (for a composer without a tractable density, i.e. Gibbs)."""
+    Caps peak memory at one chunk. `log_prob` may be `None` (for a composer without a
+    tractable density, i.e. Gibbs).
+
+    Parameters
+    ----------
+    total : int
+        Total number of samples to produce.
+    batch_size : int, optional
+        Chunk size; `None` runs `total` in a single call.
+    run_once : callable
+        `run_once(n) -> (samples, log_prob)` for one chunk of `n` samples.
+
+    Returns
+    -------
+    samples : dict[str, torch.Tensor]
+        The concatenated per-name sample tensors.
+    log_prob : torch.Tensor or None
+        The concatenated log-probs, or `None` when `run_once` returns `None`.
+    """
     bs = batch_size or total
     sample_parts: list[dict[str, torch.Tensor]] = []
     lp_parts: list[Optional[torch.Tensor]] = []
@@ -115,13 +130,13 @@ def chunk_and_concat(
 
 class Factor(ABC):
     """
-    A conditional distribution ``q_i(theta_i | f_i(theta_<i, d))`` over one parameter
+    A conditional distribution `q_i(theta_i | f_i(theta_<i, d))` over one parameter
     block, emitting physical-space samples and a physical-space log-prob.
 
-    A call draws ``num_samples`` samples per conditioning row and returns ``n_rows *
-    num_samples`` rows in row-major order, where ``n_rows`` is the number of rows in
-    ``given`` (1 if unconditioned). This mirrors the network's
-    ``sample_and_log_prob(*context, num_samples=n) -> (n_rows, n, dim)``.
+    A call draws `num_samples` samples per conditioning row and returns `n_rows *
+    num_samples` rows in row-major order, where `n_rows` is the number of rows in
+    `given` (1 if unconditioned). This mirrors the network's
+    `sample_and_log_prob(*context, num_samples=n) -> (n_rows, n, dim)`.
 
     Attributes
     ----------
@@ -141,9 +156,9 @@ class Factor(ABC):
         context: SamplerContext,
         given: Optional[dict[str, torch.Tensor]] = None,
     ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
-        """Draw ``num_samples`` samples per conditioning row; return ``(samples,
-        log_prob)`` in physical space. The samples dict may include named columns beyond
-        ``parameters``."""
+        """Draw `num_samples` samples per conditioning row; return `(samples,
+        log_prob)` in physical space. The samples dict may include named columns beyond
+        `parameters`."""
 
     @abstractmethod
     def log_prob(
@@ -152,13 +167,13 @@ class Factor(ABC):
         context: SamplerContext,
         given: Optional[dict[str, torch.Tensor]] = None,
     ) -> torch.Tensor:
-        """Evaluate ``log q_i`` at given physical ``theta_i`` (one conditioning row per
+        """Evaluate `log q_i` at given physical `theta_i` (one conditioning row per
         row)."""
 
 
 def _base_model_metadata(model: BasePosteriorModel) -> dict:
     """The training metadata describing the parameter standardization / data settings.
-    For an unconditional (density-recovery) model this lives under ``metadata["base"]``.
+    For an unconditional (density-recovery) model this lives under `metadata["base"]`.
     """
     metadata = model.metadata
     if metadata["train_settings"]["data"].get("unconditional", False):
@@ -169,11 +184,11 @@ def _base_model_metadata(model: BasePosteriorModel) -> dict:
 class FlowFactor(Factor):
     """
     Factor wrapping a posterior model (NPE flow, FMPE, ...). Reaches data only through
-    ``SamplerContext.prepared_data()`` and encapsulates the network's standardization, so
+    `SamplerContext.prepared_data()` and encapsulates the network's standardization, so
     its interface is in physical parameter space.
 
     An unconditioned model draws from the shared data context; a model with
-    ``context_parameters`` conditions on the values in ``given``.
+    `context_parameters` conditions on the values in `given`.
     """
 
     def __init__(
@@ -184,6 +199,22 @@ class FlowFactor(Factor):
         context_parameters: Optional[list[str]] = None,
         aliases: Optional[dict[str, str]] = None,
     ):
+        """
+        Parameters
+        ----------
+        model : BasePosteriorModel
+            The posterior model (NPE flow, FMPE, ...) wrapped by this factor.
+        parameters : list[str]
+            The network's trained parameter names (standardization is keyed by these).
+        conditioning : list[str], optional
+            Earlier-block parameters this factor conditions on.
+        context_parameters : list[str], optional
+            Network conditioning inputs (GNPE proxies); empty for plain NPE.
+        aliases : dict[str, str], optional
+            Trained-name to exposed-name map at the factor boundary (e.g.
+            `{"ra": "ra@t_ref"}`), so a downstream reparametrization can convert frames
+            by name without retraining.
+        """
         self.model = model
         # The network's trained parameter names -- standardization is keyed by these. The
         # factor exposes them under canonical aliases (e.g. ra -> ra@t_ref), so a downstream
@@ -201,9 +232,21 @@ class FlowFactor(Factor):
     def from_model(
         cls, model: BasePosteriorModel, aliases: Optional[dict[str, str]] = None
     ) -> "FlowFactor":
-        """Build a factor from a model, reading ``parameters`` and ``context_parameters``
-        from its training metadata. ``aliases`` maps trained names to exposed canonical
-        names (e.g. ``{"ra": "ra@t_ref"}``) at the factor boundary."""
+        """Build a factor from a model, reading `parameters` and `context_parameters`
+        from its training metadata.
+
+        Parameters
+        ----------
+        model : BasePosteriorModel
+            The posterior model to wrap.
+        aliases : dict[str, str], optional
+            Trained-name to exposed canonical-name map (e.g. `{"ra": "ra@t_ref"}`) at
+            the factor boundary.
+
+        Returns
+        -------
+        FlowFactor
+        """
         data_settings = _base_model_metadata(model)["train_settings"]["data"]
         context_parameters = data_settings.get("context_parameters") or []
         return cls(
@@ -215,9 +258,9 @@ class FlowFactor(Factor):
         )
 
     def sample_and_log_prob(self, num_samples, context, given=None):
-        """Draw ``num_samples`` samples per conditioning row. Unconditioned: ``num_samples``
-        draws from the shared data context. Conditioned: ``num_samples`` per context row,
-        returning ``n_rows * num_samples`` rows in row-major order."""
+        """Draw `num_samples` samples per conditioning row. Unconditioned: `num_samples`
+        draws from the shared data context. Conditioned: `num_samples` per context row,
+        returning `n_rows * num_samples` rows in row-major order."""
         data = context.prepared_data()
         self.model.network.eval()
         if not self.context_parameters:
@@ -270,15 +313,15 @@ class FlowFactor(Factor):
 
 class Reparametrization(ABC):
     """
-    A deterministic bijection ``Step``: it transforms existing parameters (no sampling)
-    and contributes ``-log|det J|`` to the proposal density.
+    A deterministic bijection `Step`: it transforms existing parameters (no sampling)
+    and contributes `-log|det J|` to the proposal density.
 
-    Unlike a ``Factor`` it is 1:1 and invertible -- ``forward`` maps the conditioning block
-    to the ``parameters`` block, ``inverse`` maps back (for re-plug / importance sampling),
+    Unlike a `Factor` it is 1:1 and invertible -- `forward` maps the conditioning block
+    to the `parameters` block, `inverse` maps back (for re-plug / importance sampling),
     and its density contribution is a Jacobian, not a sampled log-prob. Used to relate a
     network's coordinates to physical ones (e.g. right ascension from the training reference
-    frame to the event frame). Subclasses implement ``forward`` / ``inverse`` and, where the
-    map is not measure-preserving, ``log_det``.
+    frame to the event frame). Subclasses implement `forward` / `inverse` and, where the
+    map is not measure-preserving, `log_det`.
     """
 
     parameters: list[str]
@@ -288,18 +331,18 @@ class Reparametrization(ABC):
     def forward(
         self, given: dict[str, torch.Tensor], context: "SamplerContext"
     ) -> dict[str, torch.Tensor]:
-        """Map the conditioning block to the ``parameters`` block."""
+        """Map the conditioning block to the `parameters` block."""
 
     @abstractmethod
     def inverse(
         self, params: dict[str, torch.Tensor], context: "SamplerContext"
     ) -> dict[str, torch.Tensor]:
-        """Map the ``parameters`` block back to the conditioning block."""
+        """Map the `parameters` block back to the conditioning block."""
 
     def log_det(
         self, given: dict[str, torch.Tensor], context: "SamplerContext"
     ) -> torch.Tensor:
-        """``log|det J|`` of ``forward``, per row. Default 0 (measure-preserving)."""
+        """`log|det J|` of `forward`, per row. Default 0 (measure-preserving)."""
         n = next(iter(given.values())).shape[0]
         return torch.zeros(n)
 
@@ -309,7 +352,7 @@ class Reparametrization(ABC):
         context: SamplerContext,
         given: Optional[dict[str, torch.Tensor]] = None,
     ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
-        """Apply ``forward`` to the conditioning; contribute ``-log|det J|``. ``num_samples``
+        """Apply `forward` to the conditioning; contribute `-log|det J|`. `num_samples`
         must be 1 (a reparametrization is 1:1)."""
         if num_samples != 1:
             raise ValueError("A reparametrization is 1:1; use fan_out=1.")
@@ -332,11 +375,11 @@ class Reparametrization(ABC):
 
 class TargetCorrection(ABC):
     """
-    A ``Step`` that emits an importance-sampling target correction as a side-channel column
+    A `Step` that emits an importance-sampling target correction as a side-channel column
     and contributes nothing to the proposal density.
 
     Its value belongs to the IS target, not the proposal: it reads earlier blocks, emits a
-    named column, optionally consumes intermediates (``consumes``), and adds 0 to the
+    named column, optionally consumes intermediates (`consumes`), and adds 0 to the
     proposal log-prob. 1:1.
     """
 
@@ -373,11 +416,11 @@ class TargetCorrection(ABC):
 
 class Step(Protocol):
     """
-    One entry a ``ChainComposer`` folds over: it emits a parameter block and an optional
-    contribution to the proposal ``log_prob``.
+    One entry a `ChainComposer` folds over: it emits a parameter block and an optional
+    contribution to the proposal `log_prob`.
 
-    Density-contributing steps (``Factor``) return a tensor; density-free sampling blocks
-    (``GibbsBlock``) return ``None``. ``parameters`` names the block produced, ``conditioning``
+    Density-contributing steps (`Factor`) return a tensor; density-free sampling blocks
+    (`GibbsBlock`) return `None`. `parameters` names the block produced, `conditioning`
     the earlier-block parameters read from the chain (data is implicit via the context).
     """
 
@@ -394,8 +437,8 @@ class Step(Protocol):
 
 @dataclass
 class Stage:
-    """A chain ``Step`` and its fan-out: the number of samples drawn per incoming
-    conditioning row. The root stage draws the base count and ignores ``fan_out``."""
+    """A chain `Step` and its fan-out: the number of samples drawn per incoming
+    conditioning row. The root stage draws the base count and ignores `fan_out`."""
 
     step: Step
     fan_out: int = 1
@@ -403,17 +446,17 @@ class Stage:
 
 class ChainComposer:
     """
-    Autoregressive composer over an ordered list of ``Stage``s.
+    Autoregressive composer over an ordered list of `Stage`s.
 
     Folds the steps in declared order -- a topological order of the conditioning DAG --
     expanding each by its fan-out and summing the proposal log-probs. A step is a
-    ``Factor`` (contributes ``log q_i``) or a density-free sampling block (``GibbsBlock``,
-    contributes ``None``); if any step is density-free the chain has no tractable density
-    and ``sample`` omits ``log_prob``. Covers plain NPE, single-step GNPE, prior
-    conditioning, synthetic phase, intrinsic/extrinsic splits, and -- via ``GibbsBlock`` --
+    `Factor` (contributes `log q_i`) or a density-free sampling block (`GibbsBlock`,
+    contributes `None`); if any step is density-free the chain has no tractable density
+    and `sample` omits `log_prob`. Covers plain NPE, single-step GNPE, prior
+    conditioning, synthetic phase, intrinsic/extrinsic splits, and -- via `GibbsBlock` --
     multi-iteration GNPE.
 
-    Accepts bare steps (wrapped as ``Stage(step, fan_out=1)``) or explicit ``Stage``s.
+    Accepts bare steps (wrapped as `Stage(step, fan_out=1)`) or explicit `Stage`s.
     """
 
     def __init__(self, stages: list[Union["Stage", Step]]):
@@ -423,7 +466,7 @@ class ChainComposer:
     def _validate(self):
         """Check the declared order is a valid topological order: every conditioning
         name is produced by an earlier step. A step's emitted columns default to its
-        ``parameters``, but a step may emit side-channel columns too (``produces``)."""
+        `parameters`, but a step may emit side-channel columns too (`produces`)."""
         produced: set[str] = set()
         for step in self.steps:
             missing = [c for c in step.conditioning if c not in produced]
@@ -441,8 +484,8 @@ class ChainComposer:
 
     @property
     def expansion(self) -> int:
-        """Product of the non-root fan-outs; ``sample`` returns ``num_samples *
-        expansion`` rows."""
+        """Product of the non-root fan-outs; `sample` returns `num_samples *
+        expansion` rows."""
         return math.prod(stage.fan_out for stage in self.stages[1:])
 
     def sample_and_log_prob(
@@ -451,9 +494,9 @@ class ChainComposer:
         context: SamplerContext,
         batch_size: Optional[int] = None,
     ) -> tuple[dict[str, torch.Tensor], Optional[torch.Tensor]]:
-        """Draw samples. ``num_samples`` is the base (root) count; the result has
-        ``num_samples * expansion`` rows. ``batch_size`` chunks the base count (``None``
-        draws in one pass). The log-prob is ``None`` if any step is density-free."""
+        """Draw samples. `num_samples` is the base (root) count; the result has
+        `num_samples * expansion` rows. `batch_size` chunks the base count (`None`
+        draws in one pass). The log-prob is `None` if any step is density-free."""
         return chunk_and_concat(
             num_samples, batch_size, lambda n: self._run_chain_once(n, context)
         )
@@ -461,8 +504,8 @@ class ChainComposer:
     def _run_chain_once(
         self, base: int, context: SamplerContext
     ) -> tuple[dict[str, torch.Tensor], Optional[torch.Tensor]]:
-        """One pass of the whole chain for ``base`` root samples. Returns the samples and
-        the summed proposal log-prob, or ``None`` if any step is density-free."""
+        """One pass of the whole chain for `base` root samples. Returns the samples and
+        the summed proposal log-prob, or `None` if any step is density-free."""
         samples: dict[str, torch.Tensor] = {}
         total: torch.Tensor | float = 0.0
         has_density = True
@@ -501,8 +544,8 @@ class ChainComposer:
     def log_prob(
         self, samples: dict[str, torch.Tensor], context: SamplerContext
     ) -> torch.Tensor:
-        """Sum each step's ``log_prob`` at the given samples. Valid only for an all-density
-        chain (every step a ``Factor``)."""
+        """Sum each step's `log_prob` at the given samples. Valid only for an all-density
+        chain (every step a `Factor`)."""
         total: torch.Tensor | float = 0.0
         for step in self.steps:
             given = {k: samples[k] for k in step.conditioning}
@@ -516,7 +559,7 @@ class ChainComposer:
         context: SamplerContext,
         batch_size: Optional[int] = None,
     ) -> dict[str, torch.Tensor]:
-        """Per-sample dict of parameters, plus ``log_prob`` for an all-density chain."""
+        """Per-sample dict of parameters, plus `log_prob` for an all-density chain."""
         samples, log_prob = self.sample_and_log_prob(num_samples, context, batch_size)
         if log_prob is None:
             return dict(samples)
@@ -525,22 +568,33 @@ class ChainComposer:
 
 class GibbsBlock:
     """
-    A density-free sampling-block ``Step``: runs blocked Gibbs internally and yields no
+    A density-free sampling-block `Step`: runs blocked Gibbs internally and yields no
     proposal log-prob.
 
     Seeds the chain with an init factor, then sweeps the factor list in order for
-    ``num_iterations`` iterations; each factor conditions on the current state and
-    overwrites its own block. As a chain ``Step`` it produces the swept parameter blocks
-    and returns ``None`` for the log-prob -- the cyclic dependency has no tractable marginal
+    `num_iterations` iterations; each factor conditions on the current state and
+    overwrites its own block. As a chain `Step` it produces the swept parameter blocks
+    and returns `None` for the log-prob -- the cyclic dependency has no tractable marginal
     (recoverable by fitting an unconditional density to the samples and taking one
-    ``ChainComposer`` step). Dingo uses this only for multi-iteration GNPE (the GNPE factors
-    in ``dingo.gw.inference.factors``), but the loop is generic.
+    `ChainComposer` step). Dingo uses this only for multi-iteration GNPE (the GNPE factors
+    in `dingo.gw.inference.factors`), but the loop is generic.
 
-    Batching is handled by the enclosing ``ChainComposer``: it chunks the walkers and runs
-    the whole loop per chunk (``chunk_and_concat``).
+    Batching is handled by the enclosing `ChainComposer`: it chunks the walkers and runs
+    the whole loop per chunk (`chunk_and_concat`).
     """
 
     def __init__(self, init_factor: Factor, factors: list[Factor], num_iterations: int):
+        """
+        Parameters
+        ----------
+        init_factor : Factor
+            Seeds the chain (e.g. an init network's detector times).
+        factors : list[Factor]
+            The factors swept in order each iteration; each conditions on the current
+            state and overwrites its own block.
+        num_iterations : int
+            Number of Gibbs sweeps.
+        """
         self.init_factor = init_factor
         self.factors = list(factors)
         self.num_iterations = num_iterations
@@ -555,8 +609,8 @@ class GibbsBlock:
         context: SamplerContext,
         given: Optional[dict[str, torch.Tensor]] = None,
     ) -> tuple[dict[str, torch.Tensor], None]:
-        """Run the Gibbs loop for ``num_samples`` walkers; return ``(samples, None)``.
-        ``num_samples`` is the walker (root) count -- Gibbs does not fan out."""
+        """Run the Gibbs loop for `num_samples` walkers; return `(samples, None)`.
+        `num_samples` is the walker (root) count -- Gibbs does not fan out."""
         return self._run_once(num_samples, context), None
 
     def _run_once(
@@ -576,7 +630,7 @@ class GibbsBlock:
 
 class ComposedSampler:
     """
-    Generic runner over a ``ChainComposer`` and a ``SamplerContext``: draws samples and
+    Generic runner over a `ChainComposer` and a `SamplerContext`: draws samples and
     returns them as a DataFrame. Domain-specific processing lives in the chain's steps, so
     the runner is domain-agnostic.
     """
@@ -589,8 +643,8 @@ class ComposedSampler:
     def run_sampler(
         self, num_samples: int, batch_size: Optional[int] = None
     ) -> pd.DataFrame:
-        """Draw ``num_samples`` samples (chunked by ``batch_size``) and return them as a
-        DataFrame. An all-density chain includes ``log_prob``; a chain with a ``GibbsBlock``
+        """Draw `num_samples` samples (chunked by `batch_size`) and return them as a
+        DataFrame. An all-density chain includes `log_prob`; a chain with a `GibbsBlock`
         step does not."""
         merged = self.composer.sample(num_samples, self.context, batch_size)
         merged = {k: v.cpu().numpy() for k, v in merged.items()}

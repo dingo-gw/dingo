@@ -1,11 +1,11 @@
 """
 Gravitational-wave factors, steps, and samplers for the factorized sampler.
 
-The domain-agnostic pieces (``Factor``, ``FlowFactor``, ``Reparametrization``,
-``TargetCorrection``, and the composers) live in ``dingo.core.factors``. This module adds
-the GW-specific ones: ``GWSamplerContext`` (the data-preprocessing conditioning map), the
-GNPE factors and steps (``GNPEKernelFactor``, ``GNPEFlowFactor``, ``GNPEKernelCorrection``),
-the ``RAReparam`` sky-frame reparametrization, and ``GWComposedSampler``, which assembles
+The domain-agnostic pieces (`Factor`, `FlowFactor`, `Reparametrization`,
+`TargetCorrection`, and the composers) live in `dingo.core.factors`. This module adds
+the GW-specific ones: `GWSamplerContext` (the data-preprocessing conditioning map), the
+GNPE factors and steps (`GNPEKernelFactor`, `GNPEFlowFactor`, `GNPEKernelCorrection`),
+the `RAReparam` sky-frame reparametrization, and `GWComposedSampler`, which assembles
 the chain for plain NPE, multi-iteration GNPE, or single-step GNPE.
 """
 
@@ -64,13 +64,13 @@ logger = logging.getLogger(__name__)
 
 class GWSamplerContext:
     """
-    Per-event shared GW state: the data ``d`` and everything derived from it. Referenced
+    Per-event shared GW state: the data `d` and everything derived from it. Referenced
     by every factor in a chain, and serialized as the transport state between pipe
     stages.
 
-    This implements the ``dingo.core.factors.SamplerContext`` protocol. It owns the
-    one-time data preprocessing (``prepared_data``) and builds the exact likelihood
-    (``likelihood``) used by likelihood-based factors (synthetic phase) and importance
+    This implements the `dingo.core.factors.SamplerContext` protocol. It owns the
+    one-time data preprocessing (`prepared_data`) and builds the exact likelihood
+    (`likelihood`) used by likelihood-based factors (synthetic phase) and importance
     sampling.
 
     Event metadata lives here (not on individual factors): it is a property of the data,
@@ -87,16 +87,33 @@ class GWSamplerContext:
         event_metadata: Optional[dict] = None,
         base_metadata: Optional[dict] = None,
     ):
+        """
+        Parameters
+        ----------
+        domain : Domain
+            The data frequency domain.
+        detectors : list[str]
+            Detector names.
+        t_ref : float
+            Training reference GPS time.
+        data_prep : Compose
+            The one-time data-preprocessing transform chain (whiten / decimate /
+            repackage).
+        raw_context : dict
+            The raw event data `d` (strain + ASDs per detector), i.e. `EventDataset.data`.
+            Consumed lazily by `prepared_data()` and reused for the likelihood.
+        event_metadata : dict, optional
+            Per-event metadata; drives frequency cropping, the RA correction, and the
+            likelihood reference time.
+        base_metadata : dict, optional
+            The base (parameter / waveform / domain) metadata, used to build the
+            likelihood.
+        """
         self.domain = domain
         self.detectors = detectors
         self.t_ref = t_ref
         self._data_prep = data_prep
-        # The base (parameter/waveform/domain) metadata, used to build the likelihood.
         self.base_metadata = base_metadata
-        # The raw event data `d` (strain + ASDs per detector), i.e. EventDataset.data --
-        # the same object set as GWSampler.context today. Consumed lazily by
-        # prepared_data(); also retained for the likelihood (synthetic-phase / IS factors)
-        # and as part of the serialized transport state, neither of which is wired yet.
         self.raw_context = raw_context
         self.event_metadata = event_metadata
         self._prepared: Optional[torch.Tensor] = None
@@ -108,9 +125,23 @@ class GWSamplerContext:
         raw_context: dict,
         event_metadata: Optional[dict] = None,
     ) -> "GWSamplerContext":
-        """Build the context (domain + one-time data-prep chain) from a model's
-        metadata. The data-prep chain reproduces ``GWSampler`` preprocessing for the
-        plain-NPE case (parameter-dependent transforms are handled per-factor)."""
+        """Build the context (domain + one-time data-prep chain) from a model's metadata.
+        The data-prep chain reproduces `GWSampler` preprocessing for the plain-NPE case
+        (parameter-dependent transforms are handled per-factor).
+
+        Parameters
+        ----------
+        model : BasePosteriorModel
+            The model whose metadata defines the domain and preprocessing.
+        raw_context : dict
+            The raw event data (strain + ASDs).
+        event_metadata : dict, optional
+            Per-event metadata.
+
+        Returns
+        -------
+        GWSamplerContext
+        """
         meta = _base_model_metadata(model)
         data_settings = meta["train_settings"]["data"]
 
@@ -273,7 +304,7 @@ class GWSamplerContext:
 
 
 class DeltaFactor(Factor):
-    """``q_i = delta(theta_i - c)``: a point mass pinning parameters to fixed values,
+    """`q_i = delta(theta_i - c)`: a point mass pinning parameters to fixed values,
     contributing 0 to the proposal log-prob.
 
     Used as the chain root for prior-conditioning or known proxies (single-step GNPE, where
@@ -414,7 +445,7 @@ class SyntheticPhaseFactor(Factor):
 
 def _build_gnpe_transforms(model: BasePosteriorModel):
     """Build the time-shift GNPE per-step transforms from a model's metadata (the same
-    chains as ``GWSamplerGNPE._initialize_transforms``).
+    chains as `GWSamplerGNPE._initialize_transforms`).
 
     Returns
     -------
@@ -425,7 +456,7 @@ def _build_gnpe_transforms(model: BasePosteriorModel):
     kernel : PriorDict
         The proxy perturbation kernel.
     gnpe_transform : GNPECoalescenceTimes
-        The blur transform itself, shared so the kernel factor can call ``sample_proxies``.
+        The blur transform itself, shared so the kernel factor can call `sample_proxies`.
     """
     meta = _base_model_metadata(model)
     data_settings = meta["train_settings"]["data"]
@@ -491,17 +522,25 @@ def _build_gnpe_transforms(model: BasePosteriorModel):
 
 class GNPEKernelFactor(Factor):
     """
-    The GNPE perturbation kernel ``p(theta_hat | theta)`` as a non-network factor.
+    The GNPE perturbation kernel `p(theta_hat | theta)` as a non-network factor.
 
-    ``theta`` are the detector coalescence times; the kernel adds a bounded perturbation to
-    each, giving the proxies ``theta_hat`` the main network conditions on. The parameter
+    `theta` are the detector coalescence times; the kernel adds a bounded perturbation to
+    each, giving the proxies `theta_hat` the main network conditions on. The parameter
     block is the proxies, the conditioning is the detector times.
-    ``sample_and_log_prob`` blurs the times into proxies (the proxy update of a Gibbs
-    sweep); ``log_prob`` returns the kernel density ``log p(theta_hat | theta)`` at the
+    `sample_and_log_prob` blurs the times into proxies (the proxy update of a Gibbs
+    sweep); `log_prob` returns the kernel density `log p(theta_hat | theta)` at the
     proxies and the detector times. One proxy per detector-time row.
     """
 
     def __init__(self, gnpe_transform: GNPEBase, gnpe_parameters: list[str]):
+        """
+        Parameters
+        ----------
+        gnpe_transform : GNPEBase
+            The blur transform supplying the kernel and `sample_proxies`.
+        gnpe_parameters : list[str]
+            The detector-time parameters perturbed into proxies.
+        """
         self.gnpe = gnpe_transform
         self.gnpe_parameters = gnpe_parameters
         self.parameters = [p + "_proxy" for p in gnpe_parameters]
@@ -515,7 +554,7 @@ class GNPEKernelFactor(Factor):
         return cls(gnpe_transform, gnpe_parameters)
 
     def sample_and_log_prob(self, num_samples, context, given=None):
-        """Blur the conditioning detector times into proxies; ``num_samples`` must be 1
+        """Blur the conditioning detector times into proxies; `num_samples` must be 1
         (GNPE is 1:1). Returns the proxies and their kernel log-prob."""
         if num_samples != 1:
             raise ValueError("GNPE proxy is 1:1; use fan_out=1.")
@@ -524,8 +563,8 @@ class GNPEKernelFactor(Factor):
         return proxies, self.log_prob(proxies, context, given)
 
     def log_prob(self, theta_i, context, given=None):
-        """``log p(theta_hat | theta)`` from the kernel, at the proxies (``theta_i``) and
-        the detector times (``given``)."""
+        """`log p(theta_hat | theta)` from the kernel, at the proxies (`theta_i`) and
+        the detector times (`given`)."""
         diffs = {}
         for k in self.kernel.keys():
             diff = given[k] - theta_i[f"{k}_proxy"]
@@ -537,16 +576,16 @@ class GNPEKernelFactor(Factor):
 
 class GNPEFlowFactor(Factor):
     """
-    The GNPE main network ``q(theta | theta_hat, d)`` as a factor.
+    The GNPE main network `q(theta | theta_hat, d)` as a factor.
 
-    Conditions on the detector-time proxies from ``GNPEKernelFactor``: it shifts each
+    Conditions on the detector-time proxies from `GNPEKernelFactor`: it shifts each
     detector's strain by the corresponding proxy time (standardizing the network input),
     samples the network, and recomputes the detector times from the sampled sky position
     and geocent time. The proxies are supplied, so no blurring happens here.
 
-    The single network factor in either GNPE mode: cycled by a ``GibbsBlock`` for
-    multi-iteration GNPE, or a ``ChainComposer`` factor for single-step GNPE. The recomputed
-    detector times are emitted as extra columns (``produces``): the next Gibbs iteration
+    The single network factor in either GNPE mode: cycled by a `GibbsBlock` for
+    multi-iteration GNPE, or a `ChainComposer` factor for single-step GNPE. The recomputed
+    detector times are emitted as extra columns (`produces`): the next Gibbs iteration
     blurs them into fresh proxies, and single-step GNPE evaluates the kernel correction at
     them. One sample per proxy row.
     """
@@ -560,6 +599,23 @@ class GNPEFlowFactor(Factor):
         parameters: list[str],
         aliases: Optional[dict[str, str]] = None,
     ):
+        """
+        Parameters
+        ----------
+        model : BasePosteriorModel
+            The GNPE main network.
+        transform_pre : Compose
+            Per-iteration pre-network transforms (proxy bookkeeping, time shift,
+            standardization).
+        transform_post : Compose
+            Post-network transforms (de-standardize, recompute detector times).
+        gnpe_parameters : list[str]
+            The detector-time parameters.
+        parameters : list[str]
+            The network's trained inference parameters.
+        aliases : dict[str, str], optional
+            Trained-name to exposed-name map (e.g. `{"ra": "ra@t_ref"}`).
+        """
         self.model = model
         self.transform_pre = transform_pre
         self.transform_post = transform_post
@@ -580,7 +636,17 @@ class GNPEFlowFactor(Factor):
         cls, model: BasePosteriorModel, aliases: Optional[dict[str, str]] = None
     ) -> "GNPEFlowFactor":
         """Build the GNPE per-iteration transforms from the main model's metadata.
-        ``aliases`` maps trained names to canonical names (e.g. ``{"ra": "ra@t_ref"}``).
+
+        Parameters
+        ----------
+        model : BasePosteriorModel
+            The GNPE main model.
+        aliases : dict[str, str], optional
+            Trained-name to canonical-name map (e.g. `{"ra": "ra@t_ref"}`).
+
+        Returns
+        -------
+        GNPEFlowFactor
         """
         pre, post, gnpe_parameters, inference_parameters, _, _ = _build_gnpe_transforms(
             model
@@ -590,7 +656,7 @@ class GNPEFlowFactor(Factor):
         )
 
     def sample_and_log_prob(self, num_samples, context, given=None):
-        """Sample one parameter set per proxy row; ``num_samples`` must be 1 (GNPE is 1:1).
+        """Sample one parameter set per proxy row; `num_samples` must be 1 (GNPE is 1:1).
         Returns theta plus the recomputed detector times, and the network log-prob."""
         if num_samples != 1:
             raise ValueError("GNPE is 1:1; draw one sample per proxy (fan_out=1).")
@@ -628,14 +694,14 @@ class GNPEFlowFactor(Factor):
 
 class RAReparam(Reparametrization):
     """
-    Rotate right ascension from the network's training reference frame (``ra@t_ref``) to the
-    event frame (``ra``).
+    Rotate right ascension from the network's training reference frame (`ra@t_ref`) to the
+    event frame (`ra`).
 
     The network is trained at a fixed reference time; an event at a different GPS time needs
     the sky rotated by the sidereal-time difference. This is a measure-preserving shift
-    modulo 2*pi (``log_det = 0``), so it contributes nothing to the density. ``forward``
-    produces the event-frame ``ra``, ``inverse`` recovers ``ra@t_ref``. The sidereal
-    correction is read from the shared context (``t_ref`` and the event time).
+    modulo 2*pi (`log_det = 0`), so it contributes nothing to the density. `forward`
+    produces the event-frame `ra`, `inverse` recovers `ra@t_ref`. The sidereal
+    correction is read from the shared context (`t_ref` and the event time).
     """
 
     def __init__(self):
@@ -680,9 +746,9 @@ class GNPEKernelCorrection(TargetCorrection):
     """
     The single-step GNPE kernel correction as a target-side chain step.
 
-    Emits ``delta_log_prob_target = log p(theta_hat | theta)`` -- the GNPE kernel evaluated
+    Emits `delta_log_prob_target = log p(theta_hat | theta)` -- the GNPE kernel evaluated
     at the proxies and the detector times recomputed from theta -- for importance sampling
-    on the joint proposal ``q(theta, theta_hat | d)``. Contributes 0 to the proposal
+    on the joint proposal `q(theta, theta_hat | d)`. Contributes 0 to the proposal
     density and consumes the intermediate detector times.
     """
 
@@ -702,18 +768,18 @@ class GNPEKernelCorrection(TargetCorrection):
 
 
 def _ra_aliases(inference_parameters: list[str]) -> dict[str, str]:
-    """The RA frame alias (``ra`` -> ``ra@t_ref``), applied only when the model infers
-    ``ra``; paired with an ``RAReparam`` step that maps it back to the event frame."""
+    """The RA frame alias (`ra` -> `ra@t_ref`), applied only when the model infers
+    `ra`; paired with an `RAReparam` step that maps it back to the event frame."""
     return {"ra": "ra@t_ref"} if "ra" in inference_parameters else {}
 
 
 def _ra_reparam_steps(inference_parameters: list[str]) -> list:
-    """The ``RAReparam`` step, appended to a chain only when the model infers ``ra``."""
+    """The `RAReparam` step, appended to a chain only when the model infers `ra`."""
     return [RAReparam()] if "ra" in inference_parameters else []
 
 
 def _delta_prior_steps(metadata: dict, inference_parameters: list[str]) -> list:
-    """Delta-prior parameters the chain does not produce, as a single ``DeltaFactor`` step
+    """Delta-prior parameters the chain does not produce, as a single `DeltaFactor` step
     (or none). These are pinned constants (e.g. an aligned-spin component fixed to 0).
     """
     intrinsic_prior = metadata["dataset_settings"]["intrinsic_prior"]
@@ -731,9 +797,9 @@ def _delta_prior_steps(metadata: dict, inference_parameters: list[str]) -> list:
 
 class GWComposedSampler(ComposedSampler):
     """
-    GW builder and exporter over the generic ``ComposedSampler`` runner. The ``from_*``
+    GW builder and exporter over the generic `ComposedSampler` runner. The `from_*`
     constructors assemble the chain for plain NPE, multi-iteration GNPE, or single-step
-    GNPE from model metadata; ``to_result`` exports the samples to a gw ``Result``. All
+    GNPE from model metadata; `to_result` exports the samples to a gw `Result`. All
     GW-specific processing (RA frame, fixed parameters, kernel correction) is expressed as
     chain steps, so there is no post-processing.
     """
@@ -745,6 +811,18 @@ class GWComposedSampler(ComposedSampler):
         metadata: dict,
         inference_parameters: list[str],
     ):
+        """
+        Parameters
+        ----------
+        composer : ChainComposer
+            The assembled chain of steps.
+        context : GWSamplerContext
+            Per-event shared state.
+        metadata : dict
+            Model metadata, carried through to the exported `Result`.
+        inference_parameters : list[str]
+            The inferred parameter names.
+        """
         super().__init__(composer, context)
         self.metadata = metadata
         self.inference_parameters = inference_parameters
@@ -757,7 +835,21 @@ class GWComposedSampler(ComposedSampler):
         event_metadata: Optional[dict] = None,
     ) -> "GWComposedSampler":
         """Build a plain-NPE GW sampler from a model and event data: the flow exposes
-        ``ra`` as ``ra@t_ref``, followed by an ``RAReparam`` to the event frame."""
+        `ra` as `ra@t_ref`, followed by an `RAReparam` to the event frame.
+
+        Parameters
+        ----------
+        model : BasePosteriorModel
+            The NPE model.
+        raw_context : dict
+            The raw event data (strain + ASDs).
+        event_metadata : dict, optional
+            Per-event metadata.
+
+        Returns
+        -------
+        GWComposedSampler
+        """
         context = GWSamplerContext.from_model(model, raw_context, event_metadata)
         metadata = _base_model_metadata(model)
         inference_parameters = metadata["train_settings"]["data"][
@@ -786,10 +878,29 @@ class GWComposedSampler(ComposedSampler):
         num_iterations: int = 30,
     ) -> "GWComposedSampler":
         """Build a multi-iteration time-GNPE sampler from an init + main model pair: the
-        init model's data preprocessing, an init ``FlowFactor`` to seed, and a single
-        ``GibbsBlock`` step -- cycling the GNPE kernel and main-network factors -- in a
-        ``ChainComposer``, then an ``RAReparam`` to the event frame. Returns samples without
-        a log_prob (Gibbs breaks density access)."""
+        init model's data preprocessing, an init `FlowFactor` to seed, and a single
+        `GibbsBlock` step -- cycling the GNPE kernel and main-network factors -- in a
+        `ChainComposer`, then an `RAReparam` to the event frame. Returns samples without
+        a log_prob (Gibbs breaks density access).
+
+        Parameters
+        ----------
+        init_model : BasePosteriorModel
+            The init network (detector times); seeds the Gibbs loop and defines the data
+            preprocessing.
+        main_model : BasePosteriorModel
+            The GNPE main network.
+        raw_context : dict
+            The raw event data (strain + ASDs).
+        event_metadata : dict, optional
+            Per-event metadata.
+        num_iterations : int, default 30
+            Number of Gibbs sweeps.
+
+        Returns
+        -------
+        GWComposedSampler
+        """
         context = GWSamplerContext.from_model(init_model, raw_context, event_metadata)
         metadata = _base_model_metadata(main_model)
         inference_parameters = metadata["train_settings"]["data"][
@@ -821,12 +932,26 @@ class GWComposedSampler(ComposedSampler):
         raw_context: dict,
         event_metadata: Optional[dict] = None,
     ) -> "GWComposedSampler":
-        """Build a single-step (density-preserving) time-GNPE sampler: a ``ChainComposer``
-        of ``[proxy_source, GNPEFlowFactor, GNPEKernelCorrection, RAReparam]``.
-        ``proxy_source`` supplies the detector-time proxies -- a ``DeltaFactor`` for prior
-        conditioning (BNS), or an unconditional NDE for density recovery. The chain is
-        autoregressive, so log_prob is preserved, and ``GNPEKernelCorrection`` emits the
-        ``delta_log_prob_target`` correction that importance sampling adds to the target.
+        """Build a single-step (density-preserving) time-GNPE sampler: a `ChainComposer`
+        of `[proxy_source, GNPEFlowFactor, GNPEKernelCorrection, RAReparam]`. The chain is
+        autoregressive, so log_prob is preserved, and `GNPEKernelCorrection` emits the
+        `delta_log_prob_target` correction that importance sampling adds to the target.
+
+        Parameters
+        ----------
+        main_model : BasePosteriorModel
+            The GNPE main network.
+        proxy_source : Factor
+            Supplies the detector-time proxies -- a `DeltaFactor` for prior conditioning
+            (BNS), or an unconditional NDE for density recovery.
+        raw_context : dict
+            The raw event data (strain + ASDs).
+        event_metadata : dict, optional
+            Per-event metadata.
+
+        Returns
+        -------
+        GWComposedSampler
         """
         context = GWSamplerContext.from_model(main_model, raw_context, event_metadata)
         metadata = _base_model_metadata(main_model)
@@ -845,12 +970,12 @@ class GWComposedSampler(ComposedSampler):
         return cls(ChainComposer(steps), context, metadata, inference_parameters)
 
     def to_result(self):
-        """Export to a gw ``Result`` (samples + raw event data + metadata), so the
+        """Export to a gw `Result` (samples + raw event data + metadata), so the
         existing post-processing pipeline -- synthetic phase, importance sampling,
         evidence, plotting -- runs on the factorized sampler's output unchanged.
 
-        ``context`` is the *raw* event-data dict (``GWSamplerContext.raw_context``, what
-        ``Result`` needs to rebuild the likelihood), not the ``SamplerContext`` object.
+        `context` is the *raw* event-data dict (`GWSamplerContext.raw_context`, what
+        `Result` needs to rebuild the likelihood), not the `SamplerContext` object.
         """
         from dingo.gw.result import Result
 
