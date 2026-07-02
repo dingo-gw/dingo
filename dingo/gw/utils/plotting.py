@@ -96,7 +96,7 @@ def plot_ppd_td(
                 td.min(axis=0),
                 td.max(axis=0),
                 color=color,
-                alpha=0.5,
+                alpha=0.3,
                 label=mode if row == 0 else None,
             )
         if plot_data:
