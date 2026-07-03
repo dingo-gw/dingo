@@ -1,4 +1,5 @@
 import copy
+import logging
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -8,6 +9,8 @@ from dingo.gw.domains import build_domain, UniformFrequencyDomain
 from dingo.gw.domains.base_frequency_domain import BaseFrequencyDomain
 from dingo.gw.gwutils import *
 from dingo.gw.dataset import DingoDataset
+
+log = logging.getLogger(__name__)
 
 HIGH_ASD_VALUE = 1.0
 
@@ -59,7 +62,7 @@ class ASDDataset(DingoDataset):
                     self.gps_times.pop(ifo)
 
         if "window_factor" in self.settings["domain_dict"]:
-            print(
+            log.info(
                 "Warning: 'window_factor' is no longer used in ASDDataset. "
                 "Removing from settings."
             )
@@ -135,14 +138,14 @@ class ASDDataset(DingoDataset):
             self.domain.domain_dict["type"] == "UniformFrequencyDomain"
             and domain_update["type"] == "MultibandedFrequencyDomain"
         ):
-            print("Updating ASD dataset to MultibandedFrequencyDomain.")
+            log.info("Updating ASD dataset to MultibandedFrequencyDomain.")
             asd_dataset_decimated = {}
             mfd = build_domain(domain_update)
             ufd = mfd.base_domain
             if not check_domain_compatibility(self.asds, ufd):
                 # If the ASD length is not compatible with the new base UFD,
                 # first truncate it.
-                print(
+                log.info(
                     f"  Truncating first to new base UniformFrequencyDomain: f_max "
                     f"{self.domain.f_max} Hz -> {ufd.f_max} Hz"
                 )

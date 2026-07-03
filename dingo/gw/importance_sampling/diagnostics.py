@@ -1,10 +1,13 @@
 from os.path import join
+import logging
 import numpy as np
 import math
 import pandas as pd
 import matplotlib.pyplot as plt
 from dingo.core.utils.plotting import plot_corner_multi
 from dingo.gw.result import Result
+
+log = logging.getLogger(__name__)
 
 
 def plot_posterior_slice2d(
@@ -219,7 +222,7 @@ def plot_diagnostics(
     inds = np.where(weights > threshold)[0]
     theta_new = theta.loc[inds]
     weights_new = weights[inds]
-    print(
+    log.info(
         f"Generating cornerplot with {len(theta_new)} out of {len(theta)} IS samples."
     )
 

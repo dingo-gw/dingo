@@ -1,0 +1,16 @@
+# @package _global_
+
+defaults:
+  - override /domain: uniform_frequency
+  - override /waveform_generator: phenom_xphm
+  - override /intrinsic_prior: precessing
+  - _self_
+
+num_samples: 5000000
+compression:
+  svd:
+    size: 200
+    num_training_samples: 50000
+    num_validation_samples: 10000
+  whitening: aLIGO_ZERO_DET_high_P_asd.txt
+out_file: training_data/waveform_dataset.hdf5

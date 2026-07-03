@@ -1,0 +1,28 @@
+checkpoint: ???
+out_file: updated_model.pt
+replace: null
+
+stage:
+  epochs: 20
+  asd_dataset_path: training_data/asd_dataset/asds_O1.hdf5
+  freeze_rb_layer: false
+  optimizer:
+    type: adam
+    lr: 1.0e-5
+  scheduler:
+    type: cosine
+    T_max: 20
+  batch_size: 64
+
+hydra:
+  run:
+    dir: ${oc.env:DINGO_RUNS}/${now:%Y-%m-%d_%H-%M-%S}_${hydra.job.name}_${hydra.job.override_dirname}
+  job:
+    name: append_training_stage
+    chdir: true
+    config:
+      override_dirname:
+        exclude_keys:
+          - checkpoint
+          - out_file
+          - stage.asd_dataset_path

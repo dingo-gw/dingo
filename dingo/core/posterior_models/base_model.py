@@ -4,6 +4,7 @@ as well as functions for training and testing across an epoch.
 """
 
 from abc import abstractmethod, ABC
+import logging
 import os
 from os.path import join
 import h5py
@@ -22,6 +23,8 @@ from dingo.core.utils.backward_compatibility import update_model_config
 from dingo.core.utils.misc import get_version
 
 from dingo.core.utils.trainutils import EarlyStopping
+
+log = logging.getLogger(__name__)
 
 
 class BasePosteriorModel(ABC):
@@ -198,7 +201,7 @@ class BasePosteriorModel(ABC):
         #     raise NotImplementedError('This needs testing!')
         #     # dim = 0 [512, ...] -> [256, ...], [256, ...] on 2 GPUs
         #     self.network = torch.nn.DataParallel(self.network)
-        print(f"Putting posterior model to device {self.device}.")
+        log.info(f"Putting posterior model to device {self.device}.")
         self.network.to(self.device)
 
     def initialize_optimizer_and_scheduler(self):
@@ -394,7 +397,7 @@ class BasePosteriorModel(ABC):
 
         if test_only:
             test_loss = test_epoch(self, test_loader)
-            print(f"test loss: {test_loss:.3f}")
+            log.info(f"test loss: {test_loss:.3f}")
 
         else:
             while not runtime_limits.limits_exceeded(self.epoch):
@@ -403,24 +406,24 @@ class BasePosteriorModel(ABC):
                 # Training
                 lr = utils.get_lr(self.optimizer)
                 with threadpool_limits(limits=1, user_api="blas"):
-                    print(f"\nStart training epoch {self.epoch} with lr {lr}")
+                    log.info(f"\nStart training epoch {self.epoch} with lr {lr}")
                     time_start = time.time()
                     train_loss = train_epoch(self, train_loader)
                     train_time = time.time() - time_start
 
-                    print(
+                    log.info(
                         "Done. This took {:2.0f}:{:2.0f} min.".format(
                             *divmod(train_time, 60)
                         )
                     )
 
                     # Testing
-                    print(f"Start testing epoch {self.epoch}")
+                    log.info(f"Start testing epoch {self.epoch}")
                     time_start = time.time()
                     test_loss = test_epoch(self, test_loader)
                     test_time = time.time() - time_start
 
-                    print(
+                    log.info(
                         "Done. This took {:2.0f}:{:2.0f} min.".format(
                             *divmod(time.time() - time_start, 60)
                         )
@@ -449,7 +452,7 @@ class BasePosteriorModel(ABC):
                             }
                         )
                     except ImportError:
-                        print("wandb not installed. Skipping logging to wandb.")
+                        log.info("wandb not installed. Skipping logging to wandb.")
 
                 if early_stopping is not None:
                     # Whether to use train or test loss
@@ -464,9 +467,9 @@ class BasePosteriorModel(ABC):
                             join(train_dir, "best_model.pt"), save_training_info=False
                         )
                     if early_stopping.early_stop:
-                        print("Early stopping")
+                        log.info("Early stopping")
                         break
-                print(f"Finished training epoch {self.epoch}.\n")
+                log.info(f"Finished training epoch {self.epoch}.\n")
 
 
 def train_epoch(pm, dataloader):

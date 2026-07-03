@@ -1,0 +1,15 @@
+defaults:
+  - hydra: default
+  - domain: uniform_frequency
+  - waveform_generator: phenom_d
+  - intrinsic_prior: default
+  - _self_
+
+num_samples: 10000
+compression: null
+num_processes: 1
+out_file: waveform_dataset.hdf5
+
+hydra:
+  job:
+    name: generate_dataset

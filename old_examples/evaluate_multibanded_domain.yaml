@@ -1,0 +1,45 @@
+# settings for domain of waveforms
+domain:
+  type: MultibandedFrequencyDomain
+  nodes: [20.0, 26.0, 34.0, 46.0, 62.0, 78.0, 1038.0]
+  delta_f_initial: 0.0625
+  base_domain:
+    type: UniformFrequencyDomain
+    f_min: 20.0
+    f_max: 1037.9375
+    delta_f: 0.0625
+
+# settings for waveform generator
+waveform_generator:
+  approximant: IMRPhenomXPHM
+  f_ref: 20.0
+  spin_conversion_phase: 0.0
+
+# Dataset only samples over intrinsic parameters. Extrinsic parameters are chosen at train time.
+intrinsic_prior:
+  mass_1: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0, name='mass_1')
+  mass_2: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0, name='mass_2')
+  chirp_mass: bilby.gw.prior.UniformInComponentsChirpMass(minimum=15.0, maximum=100.0, name='chirp_mass')
+  mass_ratio: bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.125, maximum=1.0, name='mass_ratio')
+  phase: default
+  a_1: bilby.core.prior.Uniform(minimum=0.0, maximum=0.88, name='a_1')
+  a_2: bilby.core.prior.Uniform(minimum=0.0, maximum=0.88, name='a_2')
+  tilt_1: default
+  tilt_2: default
+  phi_12: default
+  phi_jl: default
+  theta_jn: default
+  # Reference values for fixed (extrinsic) parameters. These are needed to generate a waveform.
+  luminosity_distance: 100.0  # Mpc
+  geocent_time: 0.0  # s
+
+num_samples: 1
+
+compression: null
+
+hydra:
+  run:
+    dir: ${oc.env:DINGO_RUNS}/${now:%Y-%m-%d_%H-%M-%S}_${hydra.job.name}_${hydra.job.override_dirname}
+  job:
+    name: evaluate_multibanded_domain
+    chdir: true

@@ -26,6 +26,7 @@ from dingo.gw.waveform_generator import (
 from dingo.core.utils.misc import call_func_strict_output_dim
 
 log = logging.getLogger(__name__)
+logging.captureWarnings(True)
 
 
 def generate_parameters_and_polarizations(
@@ -262,7 +263,7 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
 
 @hydra.main(
     version_base="1.3",
-    config_path="../../../configs/examples",
+    config_path="../../../configs",
     config_name="generate_dataset",
 )
 def main(cfg: DictConfig) -> None:

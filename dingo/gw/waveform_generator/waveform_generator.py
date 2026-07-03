@@ -586,7 +586,7 @@ class WaveformGenerator:
         # numbers if multibanding is used. If that happens, turn off multibanding to
         # fix this.
         if max(np.max(np.abs(hp.data.data)), np.max(np.abs(hc.data.data))) > 1e-20:
-            print(
+            log.info(
                 f"Generation with parameters {parameters_lal} likely numerically "
                 f"unstable due to multibanding, turn off multibanding."
             )
@@ -609,7 +609,7 @@ class WaveformGenerator:
                 *parameters_lal[lal_dict_idx + 1 :],
             )
             if max(np.max(np.abs(hp.data.data)), np.max(np.abs(hc.data.data))) > 1e-20:
-                print(
+                log.info(
                     f"Warning: turning off multibanding for parameters {parameters_lal}"
                     f" likely numerically might not have fixed it, check manually."
                 )
@@ -1624,7 +1624,7 @@ if __name__ == "__main__":
     pol_m = wfg.generate_hplus_hcross_m(p)
 
     phase_shift = np.random.uniform(high=2 * np.pi)
-    print(f"{phase_shift:.2f}")
+    log.info(f"{phase_shift:.2f}")
     pol = sum_contributions_m(pol_m, phase_shift=phase_shift)
 
     pol_ref = wfg.generate_hplus_hcross({**p, "phase": p["phase"] + phase_shift})

@@ -1,5 +1,6 @@
 from typing import List, Optional
 import copy
+import logging
 
 import torch.multiprocessing
 import torchvision
@@ -27,6 +28,8 @@ from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.prior import default_inference_parameters
 from dingo.gw.gwutils import *
 from dingo.core.utils import *
+
+log = logging.getLogger(__name__)
 
 
 def build_dataset(
@@ -82,9 +85,9 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         List of sub-transforms to omit from the full composition.
     """
 
-    print(f"Setting train transforms.")
+    log.info("Setting train transforms.")
     if omit_transforms is not None:
-        print("Omitting \n\t" + "\n\t".join([t.__name__ for t in omit_transforms]))
+        log.info("Omitting \n\t" + "\n\t".join([t.__name__ for t in omit_transforms]))
 
     # By passing the wfd domain when instantiating the noise dataset, this ensures the
     # domains will match. In particular, it truncates the ASD dataset beyond the new
@@ -142,9 +145,9 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     # parameters.
     try:
         standardization_dict = data_settings["standardization"]
-        print("Using previously-calculated parameter standardizations.")
+        log.info("Using previously-calculated parameter standardizations.")
     except KeyError:
-        print("Calculating new parameter standardizations.")
+        log.info("Calculating new parameter standardizations.")
         standardization_dict = get_standardization_dict(
             extrinsic_prior_dict,
             wfd,
@@ -258,7 +261,7 @@ def build_svd_for_embedding_network(
         ],
     )
 
-    print("Generating waveforms for embedding network SVD initialization.")
+    log.info("Generating waveforms for embedding network SVD initialization.")
     time_start = time.time()
     ifos = list(wfd[0]["waveform"].keys())
     waveform_len = len(wfd[0]["waveform"][ifos[0]])
@@ -277,7 +280,7 @@ def build_svd_for_embedding_network(
     loader = DataLoader(
         wfd,
         batch_size=batch_size,
-        num_workers= 0,
+        num_workers=0,
         worker_init_fn=fix_random_seeds,
     )
     with threadpool_limits(limits=1, user_api="blas"):
@@ -296,25 +299,25 @@ def build_svd_for_embedding_network(
                 waveforms[ifo][lower : lower + n] = strains[:n]
             if lower + n == num_waveforms:
                 break
-    print(f"...done. This took {time.time() - time_start:.0f} s.")
+    log.info(f"...done. This took {time.time() - time_start:.0f} s.")
 
     # Reset the standard sharing strategy.
     torch.multiprocessing.set_sharing_strategy(old_sharing_strategy)
 
-    print("Generating SVD basis for ifo:")
+    log.info("Generating SVD basis for ifo:")
     time_start = time.time()
     basis_dict = {}
     for ifo in ifos:
         basis = SVDBasis()
         basis.generate_basis(waveforms[ifo][:num_training_samples], size)
         basis_dict[ifo] = basis
-        print(f"...{ifo} done.")
-    print(f"...this took {time.time() - time_start:.0f} s.")
+        log.info(f"...{ifo} done.")
+    log.info(f"...this took {time.time() - time_start:.0f} s.")
 
     if out_dir is not None:
-        print(f"Testing SVD basis matrices.")
+        log.info("Testing SVD basis matrices.")
         for ifo, basis in basis_dict.items():
-            print(f"...{ifo}:")
+            log.info(f"...{ifo}:")
             basis.compute_test_mismatches(
                 waveforms[ifo][num_training_samples:],
                 parameters=parameters.iloc[num_training_samples:].reset_index(
@@ -323,19 +326,19 @@ def build_svd_for_embedding_network(
                 verbose=True,
             )
             basis.to_file(os.path.join(out_dir, f"svd_{ifo}.hdf5"))
-    print("Done")
+    log.info("Done")
 
     # Return V matrices in standard order. Drop the elements below domain.min_idx,
     # since the neural network expects data truncated below these. The dropped elements
     # should be 0.
-    print(f"Truncating SVD matrices below index {wfd.domain.min_idx}.")
-    print("...V matrix shapes:")
+    log.info(f"Truncating SVD matrices below index {wfd.domain.min_idx}.")
+    log.info("...V matrix shapes:")
     V_rb_list = []
     for ifo in data_settings["detectors"]:
         V = basis_dict[ifo].V
         assert np.allclose(V[: wfd.domain.min_idx], 0)
         V = V[wfd.domain.min_idx :]
-        print("      " + str(V.shape))
+        log.info("      " + str(V.shape))
         V_rb_list.append(V)
-    print("\n")
+    log.info("\n")
     return V_rb_list

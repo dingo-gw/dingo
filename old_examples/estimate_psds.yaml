@@ -1,0 +1,29 @@
+data_dir: asd_dataset
+time_segments_file: ???
+verbose: false
+
+dataset_settings:
+  f_s: 4096
+  time_psd: 1024
+  T: 8.0
+  window:
+    roll_off: 0.4
+    type: tukey
+  time_gap: 0
+  num_psds_max: 1
+  detectors:
+    - H1
+    - L1
+  observing_run: O1
+
+hydra:
+  run:
+    dir: ${oc.env:DINGO_RUNS}/${now:%Y-%m-%d_%H-%M-%S}_${hydra.job.name}_${hydra.job.override_dirname}
+  job:
+    name: estimate_psds
+    chdir: true
+    config:
+      override_dirname:
+        exclude_keys:
+          - data_dir
+          - time_segments_file

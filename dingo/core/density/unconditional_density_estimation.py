@@ -1,13 +1,19 @@
 import copy
+import logging
+import os
 
+import hydra
 import torch
+import numpy as np
+from hydra.utils import to_absolute_path
+from omegaconf import DictConfig, OmegaConf
 
 from dingo.core.utils import build_train_and_test_loaders
 from dingo.core.utils.trainutils import RuntimeLimits
-import numpy as np
-import argparse
-
 from dingo.core.posterior_models import NormalizingFlowPosteriorModel
+
+log = logging.getLogger(__name__)
+logging.captureWarnings(True)
 
 
 class SampleDataset(torch.utils.data.Dataset):
@@ -110,14 +116,24 @@ def train_unconditional_density_estimator(
     return model
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Unconditional density estimation for dingo samples."
-    )
-    parser.add_argument(
-        "--settings",
-        type=str,
-        required=True,
-        help="Path to settings file.",
-    )
-    return parser.parse_args()
+@hydra.main(
+    version_base="1.3",
+    config_path="../../../configs",
+    config_name="unconditional_density_estimation",
+)
+def main(cfg: DictConfig):
+    from dingo.core.result import Result
+
+    settings = OmegaConf.to_container(cfg, resolve=True)
+    result_file = to_absolute_path(settings.pop("result_file"))
+    train_dir = settings.pop("train_dir")
+    os.makedirs(train_dir, exist_ok=True)
+
+    log.info(f"Loading result from {result_file}.")
+    result = Result(file_name=result_file)
+    log.info(f"Training unconditional density estimator in {train_dir}.")
+    train_unconditional_density_estimator(result, settings, train_dir)
+
+
+if __name__ == "__main__":
+    main()

@@ -2,53 +2,63 @@
 Step 1: Train unconditional nde
 Step 2: Set up likelihood and prior
 """
+
+import logging
 from pathlib import Path
 
-import yaml
 from os import rename, makedirs
-from os.path import dirname, join, isfile, exists
-import argparse
+from os.path import join, isfile, exists
+
+import hydra
+from hydra.utils import to_absolute_path
+from omegaconf import DictConfig, OmegaConf
 
 from dingo.core.posterior_models import NormalizingFlowPosteriorModel
 from dingo.gw.result import Result
 from dingo.gw.inference.gw_samplers import GWSampler
 from dingo.gw.importance_sampling.diagnostics import plot_diagnostics
 
-
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Importance sampling (IS) for dingo models."
-    )
-    parser.add_argument(
-        "--settings",
-        type=str,
-        required=True,
-        help="Path to settings file.",
-    )
-    parser.add_argument(
-        "--outdir",
-        type=str,
-        default=None,
-        help="Output directory for the unconditional nde and IS results.",
-    )
-    args = parser.parse_args()
-
-    if args.outdir is None:
-        args.outdir = dirname(args.settings)
-
-    return args
+log = logging.getLogger(__name__)
+logging.captureWarnings(True)
 
 
-def main():
-    # parse args, load settings, load dingo parameter samples
-    args = parse_args()
-    with open(args.settings, "r") as fp:
-        settings = yaml.safe_load(fp)
-    try:
-        result = Result(file_name=settings["parameter_samples"])
-    except KeyError:
-        # except statement for backward compatibility
-        result = Result(file_name=settings["nde"]["data"]["parameter_samples"])
+def _resolve_importance_input_paths(settings: dict) -> None:
+    parameter_samples = settings.get("parameter_samples")
+    if parameter_samples is None:
+        parameter_samples = (
+            settings.get("nde", {}).get("data", {}).get("parameter_samples")
+        )
+    if parameter_samples is None:
+        raise KeyError("Missing required setting parameter_samples.")
+
+    parameter_samples = to_absolute_path(parameter_samples)
+    settings["parameter_samples"] = parameter_samples
+    if "nde" in settings:
+        settings["nde"].setdefault("data", {})
+        settings["nde"]["data"]["parameter_samples"] = parameter_samples
+
+    calibration = settings.get("calibration_marginalization")
+    if calibration and "calibration_envelope" in calibration:
+        calibration["calibration_envelope"] = {
+            ifo: to_absolute_path(path)
+            for ifo, path in calibration["calibration_envelope"].items()
+        }
+
+
+@hydra.main(
+    version_base="1.3",
+    config_path="../../../configs",
+    config_name="importance_weights",
+)
+def main(cfg: DictConfig):
+    settings = OmegaConf.to_container(cfg, resolve=True)
+    outdir = settings.pop("outdir")
+    if outdir is None:
+        outdir = "."
+    makedirs(outdir, exist_ok=True)
+    _resolve_importance_input_paths(settings)
+
+    result = Result(file_name=settings["parameter_samples"])
     metadata = result.settings
     samples = result.samples
     # for time marginalization, we drop geocent time from the samples
@@ -96,25 +106,23 @@ def main():
     if "log_prob" not in samples.columns:
         # Use GPS time as name for now.
         event_name = str(result.event_metadata["time_event"])
-        nde_name = settings["nde"].get(
-            "path", join(args.outdir, f"nde-{event_name}.pt")
-        )
+        nde_name = settings["nde"].get("path") or join(outdir, f"nde-{event_name}.pt")
         if isfile(nde_name):
-            print(f"Loading nde at {nde_name} for event {event_name}.")
+            log.info(f"Loading nde at {nde_name} for event {event_name}.")
             nde = NormalizingFlowPosteriorModel(
                 model_filename=nde_name,
                 device=settings["nde"]["training"]["device"],
                 load_training_info=False,
             )
         else:
-            print(f"Training new nde for event {event_name}.")
+            log.info(f"Training new nde for event {event_name}.")
             nde = result.train_unconditional_flow(
                 inference_parameters,
                 settings["nde"],
-                train_dir=args.outdir,
+                train_dir=outdir,
             )
-            print(f"Renaming trained nde model to {nde_name}.")
-            rename(join(args.outdir, "model_latest.pt"), nde_name)
+            log.info(f"Renaming trained nde model to {nde_name}.")
+            rename(join(outdir, "model_latest.pt"), nde_name)
 
         # Step 1a: Sample from proposal.
         nde_sampler = GWSampler(model=nde)
@@ -162,10 +170,10 @@ def main():
     # print(np.std(log_evidences) / np.mean(log_evidences_std))
 
     if synthetic_phase:
-        print(f"Sampling synthetic phase.")
+        log.info("Sampling synthetic phase.")
         result.sample_synthetic_phase(synthetic_phase_kwargs)
 
-    print(f"Importance sampling.")
+    log.info("Importance sampling.")
     result.importance_sample(
         num_processes=settings.get("num_processes", 1),
         time_marginalization_kwargs=time_marginalization_kwargs,
@@ -173,13 +181,13 @@ def main():
         calibration_marginalization_kwargs=calibration_marginalization_kwargs,
     )
     result.print_summary()
-    result.to_file(file_name=Path(args.outdir, "dingo_samples_weighted.hdf5"))
+    result.to_file(file_name=Path(outdir, "dingo_samples_weighted.hdf5"))
 
     # Diagnostics
-    diagnostics_dir = join(args.outdir, "IS-diagnostics")
+    diagnostics_dir = join(outdir, "IS-diagnostics")
     if not exists(diagnostics_dir):
         makedirs(diagnostics_dir)
-    print("Plotting diagnostics.")
+    log.info("Plotting diagnostics.")
     plot_diagnostics(
         result,
         diagnostics_dir,

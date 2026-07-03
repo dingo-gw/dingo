@@ -52,7 +52,7 @@ dependencies = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["dingo*"]
+include = ["dingo*", "configs*"]
 namespaces = false
 
 [tool.setuptools_scm]

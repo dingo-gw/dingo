@@ -1,0 +1,61 @@
+defaults:
+  - hydra: default
+  - extrinsic_prior: default
+  - model: toy_npe
+  - optimizer: adam
+  - scheduler: cosine
+  - _self_
+
+checkpoint: null
+train_dir: train
+exit_command: ""
+
+data:
+  extrinsic_prior: ${extrinsic_prior}
+  waveform_dataset_path: training_data/waveform_dataset.hdf5
+  train_fraction: 0.95
+  domain_update: null
+  svd_size_update: null
+  detectors:
+    - H1
+    - L1
+  ref_time: 1126259462.391
+  inference_parameters:
+    - chirp_mass
+    - mass_ratio
+    - chi_1
+    - chi_2
+    - theta_jn
+    - dec
+    - ra
+    - geocent_time
+    - luminosity_distance
+    - psi
+    - phase
+
+training:
+  evaluate: false
+  stage_0:
+    optimizer: ${optimizer}
+    scheduler: ${scheduler}
+    epochs: 20
+    asd_dataset_path: training_data/asd_dataset/asds_O1.hdf5
+    freeze_rb_layer: true
+    batch_size: 64
+    early_stopping: null
+
+local:
+  device: cpu
+  num_workers: 6
+  runtime_limits:
+    max_time_per_run: 3600000
+    max_epochs_per_run: 30
+  checkpoint_epochs: 15
+  leave_waveforms_on_disk: true
+  local_cache_path: null
+  wandb: false
+  test_only: false
+
+hydra:
+  job:
+    name: train

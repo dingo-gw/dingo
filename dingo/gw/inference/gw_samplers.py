@@ -1,3 +1,4 @@
+import logging
 from typing import Union, Protocol
 
 import numpy as np
@@ -34,12 +35,13 @@ from dingo.gw.transforms import (
     MaskDataForFrequencyRangeUpdate,
 )
 
+log = logging.getLogger(__name__)
+
 
 class SamplerProtocol(Protocol):
     base_model_metadata: dict
 
-    def _initialize_transforms(self) -> None:
-        ...
+    def _initialize_transforms(self) -> None: ...
 
 
 class _GWMixinProtocol(SamplerProtocol):
@@ -173,7 +175,6 @@ class GWSamplerMixin(object):
         if "domain_update" in data_settings:
             self.domain.update(data_settings["domain_update"])
 
-
     def _correct_reference_time(
         self: Sampler, samples: Union[dict, pd.DataFrame], inverse: bool = False
     ):
@@ -240,7 +241,7 @@ class GWSamplerMixin(object):
             for k, p in prior.items():
                 if isinstance(p, DeltaFunction) and k not in samples:
                     v = p.peak
-                    print(f"Adding fixed parameter {k} = {v} from prior.")
+                    log.info(f"Adding fixed parameter {k} = {v} from prior.")
                     samples[k] = p.peak * np.ones(num_samples)
         else:
             # Drop non-inference parameters from samples.
@@ -472,8 +473,8 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 self.gnpe_parameters += transform.input_parameter_names
                 for k, v in transform.kernel.items():
                     self.gnpe_kernel[k] = v
-        print("GNPE parameters: ", self.gnpe_parameters)
-        print("GNPE kernel: ", self.gnpe_kernel)
+        log.info(f"GNPE parameters: {self.gnpe_parameters}")
+        log.info(f"GNPE kernel: {self.gnpe_kernel}")
 
         self.transform_pre = Compose(transform_pre)
 
