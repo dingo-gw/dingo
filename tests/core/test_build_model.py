@@ -280,6 +280,44 @@ def test_normalizing_flow_unconditional():
 
 
 # -----------------------------------------------------------------------------------
+# Parameter-contract accessors (interface consumed by the factorized sampler)
+# -----------------------------------------------------------------------------------
+
+
+def test_parameter_contract_accessors():
+    """inference_parameters / context_parameters / standardization read the model's
+    own train_settings["data"], the interface FlowFactor.from_model consumes."""
+    settings = model_settings("normalizing_flow")
+    parameters = [f"p{i}" for i in range(NUM_PARAMETERS)]
+    settings["train_settings"]["data"] = {
+        "inference_parameters": parameters,
+        "context_parameters": ["ra", "dec"],
+        "standardization": {
+            "mean": {p: 0.0 for p in parameters + ["ra", "dec"]},
+            "std": {p: 1.0 for p in parameters + ["ra", "dec"]},
+        },
+    }
+    pm = build_model_from_kwargs(settings=settings, device="cpu")
+    assert pm.inference_parameters == parameters
+    assert pm.context_parameters == ["ra", "dec"]
+    assert set(pm.standardization["mean"]) == set(parameters + ["ra", "dec"])
+
+
+def test_parameter_contract_defaults():
+    """context_parameters is [] when absent (plain NPE) or None (written as null by
+    some configs)."""
+    settings = model_settings("normalizing_flow")
+    settings["train_settings"]["data"] = {
+        "inference_parameters": ["chirp_mass"],
+        "standardization": {"mean": {"chirp_mass": 30.0}, "std": {"chirp_mass": 5.0}},
+    }
+    pm = build_model_from_kwargs(settings=settings, device="cpu")
+    assert pm.context_parameters == []
+    pm.metadata["train_settings"]["data"]["context_parameters"] = None
+    assert pm.context_parameters == []
+
+
+# -----------------------------------------------------------------------------------
 # SVD initial-weight seeding
 # -----------------------------------------------------------------------------------
 

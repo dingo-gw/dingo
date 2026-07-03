@@ -99,6 +99,36 @@ class NeuralDistribution(ABC):
         """
         pass
 
+    # Parameter contract read by samplers (e.g. FlowFactor.from_model on the
+    # factorized-sampler branch). These accessors are the supported interface; the
+    # location inside the metadata dict is an implementation detail. All three read
+    # the model's *own* train settings — also for unconditional (density-recovery)
+    # models, whose ``metadata["base"]`` describes the base model's data pipeline,
+    # not this network's standardization.
+
+    @property
+    def inference_parameters(self) -> list:
+        """Names of the parameters this distribution models, in the order of the
+        network's theta columns."""
+        return list(self.metadata["train_settings"]["data"]["inference_parameters"])
+
+    @property
+    def context_parameters(self) -> list:
+        """Names of parameters the network conditions on in addition to the data
+        (e.g. GNPE proxies, chained-inference conditioning), in the order of the
+        network's context-parameter columns. Empty for plain NPE and unconditional
+        models."""
+        return list(
+            self.metadata["train_settings"]["data"].get("context_parameters") or []
+        )
+
+    @property
+    def standardization(self) -> dict:
+        """``{"mean": {name: float}, "std": {name: float}}`` for the affine map to
+        the network's standardized space; covers ``inference_parameters`` and
+        ``context_parameters``."""
+        return self.metadata["train_settings"]["data"]["standardization"]
+
     @abstractmethod
     def sample(self, *context: torch.Tensor, num_samples: int = 1):
         """
