@@ -117,6 +117,7 @@ class GWSamplerContext:
         self.raw_context = raw_context
         self.event_metadata = event_metadata
         self._prepared: Optional[torch.Tensor] = None
+        self._prior: Optional[PriorDict] = None
 
     @classmethod
     def from_model(
@@ -181,6 +182,24 @@ class GWSamplerContext:
         if self._prepared is None:
             self._prepared = self._data_prep(self.raw_context)
         return self._prepared
+
+    @property
+    def prior(self) -> PriorDict:
+        """The static prior over all parameters, built once from the model metadata
+        (intrinsic + extrinsic priors with Dingo defaults).
+
+        This is the event-independent prior fixed at training time. Importance-sampling
+        prior-bound updates and the time / phase split-off for marginalized networks are
+        applied downstream (they depend on the evolving analysis state), not here.
+        """
+        if self._prior is None:
+            data_settings = self.base_metadata["train_settings"]["data"]
+            intrinsic_prior = self.base_metadata["dataset_settings"]["intrinsic_prior"]
+            extrinsic_prior = get_extrinsic_prior_dict(data_settings["extrinsic_prior"])
+            self._prior = build_prior_with_defaults(
+                {**intrinsic_prior, **extrinsic_prior}
+            )
+        return self._prior
 
     def likelihood(
         self,
@@ -294,13 +313,9 @@ class GWSamplerContext:
         """The prior over `name` if the network marginalized it (i.e. `name` is not an
         inference parameter), else `None` -- used to parameterize likelihood
         marginalization over time / phase."""
-        data_settings = self.base_metadata["train_settings"]["data"]
-        if name in data_settings["inference_parameters"]:
+        if name in self.base_metadata["train_settings"]["data"]["inference_parameters"]:
             return None
-        intrinsic_prior = self.base_metadata["dataset_settings"]["intrinsic_prior"]
-        extrinsic_prior = get_extrinsic_prior_dict(data_settings["extrinsic_prior"])
-        prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
-        return prior.get(name)
+        return self.prior.get(name)
 
 
 class DeltaFactor(Factor):
