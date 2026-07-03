@@ -82,11 +82,16 @@ class Result(DingoDataset):
 
     dataset_type = "core_result"
 
-    def __init__(self, file_name=None, dictionary=None):
+    def __init__(self, file_name=None, dictionary=None, sampler_context=None):
         self.event_metadata = None
         self.context = None
         self.samples = None
         self.log_noise_evidence = None
+        # Live sampler context (a GWSamplerContext), set when a sampler builds the
+        # Result rather than loading it from file. When present, _build_prior (and,
+        # later, _build_likelihood) delegate to it; it is not serialized, so a Result
+        # loaded from file has sampler_context=None and self-builds as before.
+        self.sampler_context = sampler_context
         super().__init__(
             file_name=file_name,
             dictionary=dictionary,
@@ -1090,5 +1095,3 @@ def freeze(d):
     elif isinstance(d, list):
         return tuple(freeze(value) for value in d)
     return d
-
-

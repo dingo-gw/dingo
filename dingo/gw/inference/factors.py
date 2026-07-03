@@ -793,21 +793,70 @@ def _ra_reparam_steps(inference_parameters: list[str]) -> list:
     return [RAReparam()] if "ra" in inference_parameters else []
 
 
-def _delta_prior_steps(metadata: dict, inference_parameters: list[str]) -> list:
+def _delta_prior_steps(prior, inference_parameters: list[str]) -> list:
     """Delta-prior parameters the chain does not produce, as a single `DeltaFactor` step
     (or none). These are pinned constants (e.g. an aligned-spin component fixed to 0).
+
+    Parameters
+    ----------
+    prior : PriorDict
+        The static prior (`GWSamplerContext.prior`); its delta-function entries that are
+        not inference parameters become the pinned constants.
+    inference_parameters : list of str
+        The inferred parameter names.
     """
-    intrinsic_prior = metadata["dataset_settings"]["intrinsic_prior"]
-    extrinsic_prior = get_extrinsic_prior_dict(
-        metadata["train_settings"]["data"]["extrinsic_prior"]
-    )
-    prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
     fixed = {
         k: p.peak
         for k, p in prior.items()
         if isinstance(p, DeltaFunction) and k not in inference_parameters
     }
     return [DeltaFactor(fixed)] if fixed else []
+
+
+def _assert_consistent_gnpe_data_prep(init_model, main_model):
+    """Assert the init and main GNPE models agree on the data-preprocessing view.
+
+    Multi-iteration GNPE shares one `GWSamplerContext` (built from the main model)
+    between the init and main factors, so both read the same `prepared_data()` and
+    reference time. That is only valid when the two models agree on everything that
+    determines those: the domain, the detectors, and the reference time. Raises
+    `ValueError` on any mismatch.
+
+    Parameters
+    ----------
+    init_model, main_model : BasePosteriorModel
+        The GNPE init and main networks.
+    """
+    init = _base_model_metadata(init_model)
+    main = _base_model_metadata(main_model)
+    fields = {
+        "domain": (
+            init["dataset_settings"]["domain"],
+            main["dataset_settings"]["domain"],
+        ),
+        "domain_update": (
+            init["train_settings"]["data"].get("domain_update"),
+            main["train_settings"]["data"].get("domain_update"),
+        ),
+        "detectors": (
+            init["train_settings"]["data"]["detectors"],
+            main["train_settings"]["data"]["detectors"],
+        ),
+        "ref_time": (
+            init["train_settings"]["data"]["ref_time"],
+            main["train_settings"]["data"]["ref_time"],
+        ),
+    }
+    mismatched = {k: (i, m) for k, (i, m) in fields.items() if i != m}
+    if mismatched:
+        details = "; ".join(
+            f"{k}: init={i!r} vs main={m!r}" for k, (i, m) in mismatched.items()
+        )
+        raise ValueError(
+            f"GNPE init and main models disagree on the data-preprocessing view "
+            f"({details}). They share one context, so they must agree on the domain, "
+            f"detectors, and reference time."
+        )
 
 
 class GWComposedSampler(ComposedSampler):
@@ -874,7 +923,7 @@ class GWComposedSampler(ComposedSampler):
         steps = (
             [factor]
             + _ra_reparam_steps(inference_parameters)
-            + _delta_prior_steps(metadata, inference_parameters)
+            + _delta_prior_steps(context.prior, inference_parameters)
         )
         return cls(
             composer=ChainComposer(steps),
@@ -916,7 +965,11 @@ class GWComposedSampler(ComposedSampler):
         -------
         GWComposedSampler
         """
-        context = GWSamplerContext.from_model(init_model, raw_context, event_metadata)
+        _assert_consistent_gnpe_data_prep(init_model, main_model)
+        # Build the context from the main model: it owns the analysis (likelihood,
+        # prior, inference parameters). The init model shares the data domain and
+        # preprocessing (asserted above), so prepared_data() is identical either way.
+        context = GWSamplerContext.from_model(main_model, raw_context, event_metadata)
         metadata = _base_model_metadata(main_model)
         inference_parameters = metadata["train_settings"]["data"][
             "inference_parameters"
@@ -930,7 +983,7 @@ class GWComposedSampler(ComposedSampler):
         steps = (
             [gibbs]
             + _ra_reparam_steps(inference_parameters)
-            + _delta_prior_steps(metadata, inference_parameters)
+            + _delta_prior_steps(context.prior, inference_parameters)
         )
         return cls(
             ChainComposer(steps),
@@ -980,7 +1033,7 @@ class GWComposedSampler(ComposedSampler):
         steps = (
             [proxy_source, flow_factor, GNPEKernelCorrection(kernel_factor)]
             + _ra_reparam_steps(inference_parameters)
-            + _delta_prior_steps(metadata, inference_parameters)
+            + _delta_prior_steps(context.prior, inference_parameters)
         )
         return cls(ChainComposer(steps), context, metadata, inference_parameters)
 
@@ -989,8 +1042,10 @@ class GWComposedSampler(ComposedSampler):
         existing post-processing pipeline -- synthetic phase, importance sampling,
         evidence, plotting -- runs on the factorized sampler's output unchanged.
 
-        `context` is the *raw* event-data dict (`GWSamplerContext.raw_context`, what
-        `Result` needs to rebuild the likelihood), not the `SamplerContext` object.
+        The raw event-data dict (`GWSamplerContext.raw_context`) is stored as the
+        `Result` context (serialized), and the live `GWSamplerContext` is passed as
+        `sampler_context` so `Result` can pull the prior (and, later, the likelihood)
+        from it rather than rebuilding them from metadata.
         """
         from dingo.gw.result import Result
 
@@ -1003,4 +1058,4 @@ class GWComposedSampler(ComposedSampler):
             "log_noise_evidence": None,
             "settings": copy.deepcopy(self.metadata),
         }
-        return Result(dictionary=data_dict)
+        return Result(dictionary=data_dict, sampler_context=self.context)
