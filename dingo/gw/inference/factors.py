@@ -14,6 +14,7 @@ from __future__ import annotations
 import copy
 import logging
 import time
+from pathlib import Path
 from typing import Optional, Union
 
 import numpy as np
@@ -1114,3 +1115,9 @@ class GWComposedSampler(ComposedSampler):
             "settings": copy.deepcopy(self.metadata),
         }
         return Result(dictionary=data_dict, sampler_context=self.context)
+
+    def to_hdf5(self, label="result", outdir="."):
+        """Export via `to_result` and save to `<outdir>/<label>.hdf5`."""
+        result = self.to_result()
+        Path(outdir).mkdir(parents=True, exist_ok=True)
+        result.to_file(file_name=Path(outdir, label + ".hdf5"))

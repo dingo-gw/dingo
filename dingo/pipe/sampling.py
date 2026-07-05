@@ -14,6 +14,7 @@ from bilby_pipe.utils import (
 
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset
+from dingo.gw.inference.factors import GWComposedSampler
 from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
 from dingo.gw.inference.inference_utils import prepare_log_prob
 from dingo.pipe.default_settings import DENSITY_RECOVERY_SETTINGS
@@ -52,6 +53,7 @@ class SamplingInput(Input):
         self.model_init = args.model_init and (
             resolve_filename_with_transfer_fallback(args.model_init) or args.model_init
         )
+        self.sampler_implementation = args.sampler_implementation
         self.recover_log_prob = args.recover_log_prob
         self.device = args.device
         self.num_gnpe_iterations = args.num_gnpe_iterations
@@ -118,6 +120,18 @@ class SamplingInput(Input):
         model = build_model_from_kwargs(
             filename=self.model, device=self.device, load_training_info=False
         )
+
+        if self.sampler_implementation == "composed":
+            if self.model_init is not None:
+                raise NotImplementedError(
+                    "sampler-implementation = composed does not support GNPE models "
+                    "yet. Use sampler-implementation = legacy."
+                )
+            self.gnpe = False
+            self.dingo_sampler = GWComposedSampler.from_model(
+                model, self.context, event_metadata=self.event_metadata
+            )
+            return
 
         if self.model_init is not None:
             self.gnpe = True

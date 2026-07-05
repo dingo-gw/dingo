@@ -407,7 +407,10 @@ def create_parser(top_level=True, usage=None):
     # Mutually exclusive: --psd-dict / --asd-dataset
     if _BILBY_PIPE_V1_8:
         det_parser.add(
-            "--psd-dict", type=nonestr, default=None, help="Dictionary of PSD files to use"
+            "--psd-dict",
+            type=nonestr,
+            default=None,
+            help="Dictionary of PSD files to use",
         )
         det_parser.add(
             "--asd-dataset",
@@ -419,7 +422,10 @@ def create_parser(top_level=True, usage=None):
     else:
         psd_dict_parser = det_parser.add_mutually_exclusive_group()
         psd_dict_parser.add(
-            "--psd-dict", type=nonestr, default=None, help="Dictionary of PSD files to use"
+            "--psd-dict",
+            type=nonestr,
+            default=None,
+            help="Dictionary of PSD files to use",
         )
         psd_dict_parser.add(
             "--asd-dataset",
@@ -1253,7 +1259,9 @@ def create_parser(top_level=True, usage=None):
     )
     # Mutually exclusive: --prior-file / --prior-dict
     if _BILBY_PIPE_V1_8:
-        prior_parser.add("--prior-file", type=nonestr, default=None, help="The prior file")
+        prior_parser.add(
+            "--prior-file", type=nonestr, default=None, help="The prior file"
+        )
         prior_parser.add(
             "--prior-dict",
             type=nonestr,
@@ -1268,7 +1276,9 @@ def create_parser(top_level=True, usage=None):
         )
     else:
         prior_parser_main = prior_parser.add_mutually_exclusive_group()
-        prior_parser_main.add("--prior-file", type=nonestr, default=None, help="The prior file")
+        prior_parser_main.add(
+            "--prior-file", type=nonestr, default=None, help="The prior file"
+        )
         prior_parser_main.add(
             "--prior-dict",
             type=nonestr,
@@ -1521,6 +1531,15 @@ def create_parser(top_level=True, usage=None):
         default=None,
         help="Reference time for neural network. Do not add this manually as it is "
         "specified by the network.",
+    )
+    sampler_parser.add(
+        "--sampler-implementation",
+        type=str,
+        default="legacy",
+        choices=["legacy", "composed"],
+        help="Sampler implementation: 'legacy' (GWSampler / GWSamplerGNPE) or "
+        "'composed' (the factorized GWComposedSampler; experimental, currently "
+        "plain NPE only). Default 'legacy'.",
     )
     sampler_parser.add(
         "--recover-log-prob",
