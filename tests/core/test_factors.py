@@ -17,6 +17,7 @@ from dingo.core.factors import (
     ChainComposer,
     DeltaFactor,
     Factor,
+    FlowFactor,
     GibbsBlock,
     Reparametrization,
     Stage,
@@ -524,3 +525,70 @@ def test_chain_device_consistency_on_accelerator():
     assert out["log_prob"].device.type == "mps"
     assert out["c"].device.type == "mps"
     assert out["x"].device.type == "mps"
+
+
+class _FakeUncondModel:
+    """A fake unconditional (density-recovery) model: a deterministic 'flow' whose
+    draws are arange-based, with its OWN standardization distinct from the decoy
+    base-model standardization under metadata["base"] -- the factor must read the
+    model's own metadata."""
+
+    def __init__(self):
+        from types import SimpleNamespace
+
+        self.metadata = {
+            "train_settings": {
+                "data": {
+                    "unconditional": True,
+                    "inference_parameters": ["H1_time_proxy"],
+                    "standardization": {
+                        "mean": {"H1_time_proxy": 2.0},
+                        "std": {"H1_time_proxy": 0.5},
+                    },
+                }
+            },
+            # Decoy: using the base model's settings here would be a bug.
+            "base": {
+                "train_settings": {
+                    "data": {
+                        "inference_parameters": ["x"],
+                        "standardization": {"mean": {"x": 0.0}, "std": {"x": 1.0}},
+                    }
+                }
+            },
+        }
+        self.network = SimpleNamespace(eval=lambda: None)
+
+    def sample_and_log_prob(self, num_samples=None):
+        z = torch.arange(num_samples, dtype=torch.float32).unsqueeze(-1)
+        lp = torch.full((num_samples,), -1.0)
+        return z, lp
+
+    def log_prob(self, z):
+        return torch.full((z.shape[0],), -1.0)
+
+
+def test_unconditional_flow_factor():
+    # A density-recovery NDE takes no input: the factor never touches the context
+    # (context=None), reads the model's own standardization and parameters, and
+    # serves as a chain root (e.g. the single-step GNPE proxy source).
+    factor = FlowFactor.from_model(_FakeUncondModel())
+    assert factor.unconditional
+    assert factor.parameters == ["H1_time_proxy"]
+    assert factor.conditioning == []
+
+    samples, lp = factor.sample_and_log_prob(4, context=None)
+    # z = arange(4), destandardized with the NDE's own mean/std: z * 0.5 + 2.0.
+    expected = torch.arange(4, dtype=torch.float32) * 0.5 + 2.0
+    assert torch.equal(samples["H1_time_proxy"], expected)
+    # Physical-space density: base lp plus the NDE's own -sum(log std).
+    assert torch.allclose(lp, torch.full((4,), -1.0 - math.log(0.5)))
+
+    # Re-plug through the no-context path.
+    lp2 = factor.log_prob(samples, context=None)
+    assert torch.allclose(lp2, lp)
+
+    # Composes as a chain root with a conditioned factor downstream.
+    comp = ChainComposer([factor, _ConstFactor("y", conditioning=["H1_time_proxy"])])
+    out = comp.sample(3, context=None)
+    assert out["y"].shape == (3,)

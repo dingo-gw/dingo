@@ -657,7 +657,8 @@ class GNPEFlowFactor(Factor):
         self.conditioning = list(self.proxy_parameters)
         # For log_prob: the sampling path de-standardizes (and corrects the log-prob)
         # inside transform_post, but evaluating at a point needs the forward map too.
-        std = _base_model_metadata(model)["train_settings"]["data"]["standardization"]
+        # The model's own standardization (network-bound, like FlowFactor's).
+        std = model.metadata["train_settings"]["data"]["standardization"]
         self.standardization = Standardization(std["mean"], std["std"])
 
     @property

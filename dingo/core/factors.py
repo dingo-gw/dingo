@@ -177,9 +177,11 @@ class Factor(ABC):
 
 
 def _base_model_metadata(model: BasePosteriorModel) -> dict:
-    """The training metadata describing the parameter standardization / data settings.
-    For an unconditional (density-recovery) model this lives under `metadata["base"]`.
-    """
+    """The base *analysis* metadata (dataset / domain / detector / data settings): for
+    an unconditional (density-recovery) model this lives under `metadata["base"]`, the
+    metadata of the model whose samples it was trained on. The network-bound settings
+    (`standardization`, `inference_parameters`) are always the model's own and are read
+    from `model.metadata` directly."""
     metadata = model.metadata
     if metadata["train_settings"]["data"].get("unconditional", False):
         return metadata["base"]
@@ -188,12 +190,14 @@ def _base_model_metadata(model: BasePosteriorModel) -> dict:
 
 class FlowFactor(Factor):
     """
-    Factor wrapping a posterior model (NPE flow, FMPE, ...). Reaches data only through
-    `SamplerContext.prepared_data()` and encapsulates the network's standardization, so
-    its interface is in physical parameter space.
+    Factor wrapping a posterior model (NPE flow, FMPE, ...). Encapsulates the network's
+    standardization, so its interface is in physical parameter space.
 
-    An unconditioned model draws from the shared data context; a model with
-    `context_parameters` conditions on the values in `given`.
+    Three conditioning shapes: a data-conditional model draws from the shared
+    `SamplerContext.prepared_data()`; a model with `context_parameters` (GNPE proxies)
+    additionally conditions on the values in `given`; and an *unconditional* model
+    (`unconditional` in its training metadata -- a density-recovery NDE or a
+    model-as-prior) takes no input at all and never touches the context.
     """
 
     def __init__(
@@ -230,7 +234,11 @@ class FlowFactor(Factor):
         self.conditioning = conditioning or []
         # Network conditioning inputs (GNPE proxies). Empty for plain NPE.
         self.context_parameters = context_parameters or []
-        std = _base_model_metadata(model)["train_settings"]["data"]["standardization"]
+        data_settings = model.metadata["train_settings"]["data"]
+        self.unconditional = data_settings.get("unconditional", False)
+        # The model's *own* standardization: an unconditional (density-recovery) NDE
+        # carries its own, distinct from the base model's under metadata["base"].
+        std = data_settings["standardization"]
         self.standardization = Standardization(std["mean"], std["std"])
 
     @classmethod
@@ -238,7 +246,8 @@ class FlowFactor(Factor):
         cls, model: BasePosteriorModel, aliases: Optional[dict[str, str]] = None
     ) -> "FlowFactor":
         """Build a factor from a model, reading `parameters` and `context_parameters`
-        from its training metadata.
+        from its own training metadata (for an unconditional NDE these are its own,
+        e.g. the GNPE proxies it was trained on).
 
         Parameters
         ----------
@@ -252,7 +261,7 @@ class FlowFactor(Factor):
         -------
         FlowFactor
         """
-        data_settings = _base_model_metadata(model)["train_settings"]["data"]
+        data_settings = model.metadata["train_settings"]["data"]
         context_parameters = data_settings.get("context_parameters") or []
         return cls(
             model=model,
@@ -263,12 +272,16 @@ class FlowFactor(Factor):
         )
 
     def sample_and_log_prob(self, num_samples, context, given=None):
-        """Draw `num_samples` samples per conditioning row. Unconditioned: `num_samples`
-        draws from the shared data context. Conditioned: `num_samples` per context row,
-        returning `n_rows * num_samples` rows in row-major order."""
-        data = context.prepared_data()
+        """Draw `num_samples` samples per conditioning row. Unconditional: draws with
+        no input (the context is not touched). Data-conditional: `num_samples` draws
+        from the shared data context. Parameter-conditioned: `num_samples` per context
+        row, returning `n_rows * num_samples` rows in row-major order."""
         self.model.network.eval()
-        if not self.context_parameters:
+        if self.unconditional:
+            with torch.no_grad():
+                z, log_prob = self.model.sample_and_log_prob(num_samples=num_samples)
+        elif not self.context_parameters:
+            data = context.prepared_data()
             with torch.no_grad():
                 z, log_prob = self.model.sample_and_log_prob(
                     data.unsqueeze(0), num_samples=num_samples
@@ -277,9 +290,14 @@ class FlowFactor(Factor):
             z = z.squeeze(0)
             log_prob = log_prob.squeeze(0)
         else:
+            data = context.prepared_data()
             # Standardize the (physical) conditioning the network was trained on, giving
             # B = N context rows; expand the shared data to match. The network draws
             # num_samples per row -> (N, num_samples, dim).
+            # TODO: the embedding runs once per row, so row-identical data with
+            # row-varying conditioning (the intrinsic/extrinsic split) recomputes N
+            # identical data embeddings. Fixing this needs an embed/fuse split on the
+            # model (FlowWrapper) so the cached embedding can be reused across rows.
             ctx = self.standardization.standardize(given, self.context_parameters)
             n_rows = ctx.shape[0]
             data = data.expand(n_rows, *data.shape)
@@ -302,14 +320,17 @@ class FlowFactor(Factor):
         }
         num_samples = next(iter(theta_net.values())).shape[0]
         z = self.standardization.standardize(theta_net, self._net_parameters)
-        data = context.prepared_data()
-        data = data.expand(num_samples, *data.shape)
         net_context: tuple[torch.Tensor, ...]
-        if not self.context_parameters:
-            net_context = (data,)
+        if self.unconditional:
+            net_context = ()
         else:
-            ctx = self.standardization.standardize(given, self.context_parameters)
-            net_context = (data, ctx)
+            data = context.prepared_data()
+            data = data.expand(num_samples, *data.shape)
+            if not self.context_parameters:
+                net_context = (data,)
+            else:
+                ctx = self.standardization.standardize(given, self.context_parameters)
+                net_context = (data, ctx)
         self.model.network.eval()
         with torch.no_grad():
             log_prob = self.model.log_prob(z, *net_context)
