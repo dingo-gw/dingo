@@ -303,7 +303,6 @@ class Result(CoreResult):
         time_marginalization_kwargs: Optional[dict] = None,
         phase_marginalization_kwargs: Optional[dict] = None,
         calibration_marginalization_kwargs: Optional[dict] = None,
-        phase_grid: Optional[np.ndarray] = None,
     ):
         """
         Build the likelihood function based on model metadata. This is called at the
@@ -381,7 +380,6 @@ class Result(CoreResult):
             time_marginalization_kwargs=time_marginalization_kwargs,
             phase_marginalization_kwargs=phase_marginalization_kwargs,
             calibration_marginalization_kwargs=calibration_marginalization_kwargs,
-            phase_grid=phase_grid,
             use_base_domain=self.use_base_domain,
             frequency_update=dict(
                 minimum_frequency=self.minimum_frequency,

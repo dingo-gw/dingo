@@ -150,9 +150,9 @@ def test_higher_max_increases_output():
     ]
     # Expected output grows monotonically with k (stochastically, but very reliably).
     for i in range(len(counts) - 1):
-        assert counts[i] <= counts[i + 1], (
-            f"k={i+1} gave {counts[i]} samples but k={i+2} gave {counts[i+1]}"
-        )
+        assert (
+            counts[i] <= counts[i + 1]
+        ), f"k={i+1} gave {counts[i]} samples but k={i+2} gave {counts[i+1]}"
 
 
 # ---------------------------------------------------------------------------
@@ -233,3 +233,23 @@ def test_clip_weights_reproducible():
     out1 = result.rejection_sample(clip_weights=True, random_state=42)
     out2 = result.rejection_sample(clip_weights=True, random_state=42)
     pd.testing.assert_frame_equal(out1, out2)
+
+
+# ---------------------------------------------------------------------------
+# sampler_context lifecycle
+# ---------------------------------------------------------------------------
+
+
+def test_reset_event_invalidates_sampler_context():
+    """A live sampler context describes the data the samples were drawn from;
+    resetting to new event data must drop it so builders fall back to
+    self-building rather than reading the stale context."""
+    from types import SimpleNamespace
+
+    samples = pd.DataFrame({"x": [1.0, 2.0]})
+    result = Result(dictionary={"samples": samples}, sampler_context=object())
+    assert result.sampler_context is not None
+    event = SimpleNamespace(data={"waveform": np.zeros(3)}, settings={"f_min": 20.0})
+    result.reset_event(event)
+    assert result.sampler_context is None
+    assert result.event_metadata == {"f_min": 20.0}

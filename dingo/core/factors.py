@@ -69,9 +69,14 @@ class SamplerContext(Protocol):
     derived from it (the prepared-data representation, the likelihood, event metadata).
     Concrete implementations are domain-specific; see
     `dingo.gw.inference.factors.GWSamplerContext`.
+
+    `device` is the torch device the chain runs on: steps that create fresh tensors
+    (rather than transforming existing ones) create them here, so their outputs can
+    join a chain whose network factors run on a GPU.
     """
 
     event_metadata: Optional[dict]
+    device: Union[torch.device, str]
 
     def prepared_data(self) -> torch.Tensor:
         """The data representation the factors condition on
@@ -326,10 +331,15 @@ class DeltaFactor(Factor):
         self.conditioning = []
 
     def sample_and_log_prob(self, num_samples, context, given=None):
+        # A delta factor creates fresh tensors, so it places them on the chain's
+        # device (unlike steps that transform existing rows, which follow their
+        # inputs).
+        device = getattr(context, "device", None)
         samples = {
-            p: torch.full((num_samples,), float(v)) for p, v in self.values.items()
+            p: torch.full((num_samples,), float(v), device=device)
+            for p, v in self.values.items()
         }
-        return samples, torch.zeros(num_samples)
+        return samples, torch.zeros(num_samples, device=device)
 
     def log_prob(self, theta_i, context, given=None):
         """0 per row, matching sample time: the point mass is evaluated on its own
@@ -372,9 +382,10 @@ class Reparametrization(ABC):
     def log_det(
         self, given: dict[str, torch.Tensor], context: "SamplerContext"
     ) -> torch.Tensor:
-        """`log|det J|` of `forward`, per row. Default 0 (measure-preserving)."""
-        n = next(iter(given.values())).shape[0]
-        return torch.zeros(n)
+        """`log|det J|` of `forward`, per row. Default 0 (measure-preserving), on
+        the device of the transformed rows."""
+        reference_column = next(iter(given.values()))
+        return torch.zeros_like(reference_column)
 
     def sample_and_log_prob(
         self,
@@ -429,8 +440,9 @@ class TargetCorrection(ABC):
         if num_samples != 1:
             raise ValueError("A target correction is 1:1; use fan_out=1.")
         out = self.correction(given, context)
-        n = next(iter(out.values())).shape[0]
-        return out, torch.zeros(n)
+        # 0 proposal contribution per row, on the device of the emitted column.
+        reference_column = next(iter(out.values()))
+        return out, torch.zeros_like(reference_column)
 
 
 class Step(Protocol):

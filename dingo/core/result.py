@@ -164,6 +164,11 @@ class Result(DingoDataset):
         event_dataset: EventDataset
             New event to be used for importance sampling.
         """
+        # The live sampler context describes the data the samples were drawn from;
+        # after resetting to (possibly regenerated) event data it no longer describes
+        # self.context, so drop it and fall back to self-building.
+        self.sampler_context = None
+
         context = event_dataset.data
         event_metadata = event_dataset.settings
 

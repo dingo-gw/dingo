@@ -39,13 +39,11 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         time_marginalization_kwargs: Optional[dict] = None,
         phase_marginalization_kwargs: Optional[dict] = None,
         calibration_marginalization_kwargs: Optional[dict] = None,
-        phase_grid=None,
         use_base_domain: bool = False,
         frequency_update: Optional[
             dict[str, float | dict[str, float | list[float]]]
         ] = None,
     ):
-        # TODO: Does the phase_grid argument ever get used?
         """
         Parameters
         ----------
@@ -152,7 +150,9 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             ]
         )
         self.whiten = True
-        self.phase_grid = phase_grid
+        # Assigned by phase-grid consumers (synthetic phase) or set internally by
+        # phase marginalization; never a construction input.
+        self.phase_grid = None
 
         # optionally initialize time marginalization
         self.time_marginalization = False

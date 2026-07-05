@@ -15,6 +15,7 @@ import torch
 
 from dingo.core.factors import (
     ChainComposer,
+    DeltaFactor,
     Factor,
     GibbsBlock,
     Reparametrization,
@@ -475,3 +476,51 @@ def test_validation_rejects_column_overwrite():
         ChainComposer([_ConstFactor("a"), _ConstFactor("a")])
     # The in-place reparam is the allowed exception.
     ChainComposer([_ConstFactor("x"), _InPlaceReparam()])
+
+
+class _DeviceContext:
+    """Bare context stub carrying only a device (these steps ignore the rest)."""
+
+    def __init__(self, device):
+        self.device = device
+        self.event_metadata = None
+
+
+def test_delta_factor_creates_on_context_device():
+    # A DeltaFactor creates fresh tensors, so they land on the chain's device;
+    # the 'meta' device stands in for a GPU without needing one.
+    delta = DeltaFactor({"chi_1": 0.0, "chi_2": 0.3})
+    samples, lp = delta.sample_and_log_prob(4, _DeviceContext(torch.device("meta")))
+    assert all(v.device.type == "meta" for v in samples.values())
+    assert lp.device.type == "meta"
+    samples_cpu, lp_cpu = delta.sample_and_log_prob(4, context=None)
+    assert lp_cpu.device.type == "cpu"  # no context device -> torch default
+
+
+_HAS_MPS = getattr(torch.backends, "mps", None) and torch.backends.mps.is_available()
+
+
+@pytest.mark.skipif(not _HAS_MPS, reason="needs an accelerator (MPS) for mixed devices")
+def test_chain_device_consistency_on_accelerator():
+    # A chain mixing a device-emitting factor, an (in-place) reparam, a correction,
+    # and a DeltaFactor filler must stay on one device end to end -- the GPU pipe
+    # case: constants follow the context device, transforms follow their inputs.
+    device = torch.device("mps")
+
+    class _DeviceGauss(_GaussFactor):
+        def sample_and_log_prob(self, n, context, given=None):
+            block, lp = super().sample_and_log_prob(n, context, given)
+            return {k: v.to(device) for k, v in block.items()}, lp.to(device)
+
+    comp = ChainComposer(
+        [
+            _DeviceGauss("x"),
+            _InPlaceReparam(shift=5.0),
+            _MockTargetCorrection(reads="x", emits="corr", consume=False),
+            DeltaFactor({"c": 1.5}),
+        ]
+    )
+    out = comp.sample(8, context=_DeviceContext(device))
+    assert out["log_prob"].device.type == "mps"
+    assert out["c"].device.type == "mps"
+    assert out["x"].device.type == "mps"

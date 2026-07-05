@@ -14,7 +14,7 @@ from __future__ import annotations
 import copy
 import logging
 import time
-from typing import Optional
+from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -88,6 +88,7 @@ class GWSamplerContext:
         raw_context: dict,
         event_metadata: Optional[dict] = None,
         base_metadata: Optional[dict] = None,
+        device: Union[torch.device, str] = "cpu",
     ):
         """
         Parameters
@@ -110,6 +111,9 @@ class GWSamplerContext:
         base_metadata : dict, optional
             The base (parameter / waveform / domain) metadata, used to build the
             likelihood.
+        device : torch.device or str, default "cpu"
+            The torch device the chain runs on (the model device); steps that create
+            fresh tensors (e.g. `DeltaFactor`) create them here.
         """
         self.domain = domain
         self.detectors = detectors
@@ -118,8 +122,11 @@ class GWSamplerContext:
         self.base_metadata = base_metadata
         self.raw_context = raw_context
         self.event_metadata = event_metadata
+        self.device = device
         self._prepared: Optional[torch.Tensor] = None
         self._prior: Optional[PriorDict] = None
+        self._likelihood: Optional[StationaryGaussianGWLikelihood] = None
+        self._likelihood_settings: Optional[dict] = None
 
     @classmethod
     def from_model(
@@ -177,6 +184,7 @@ class GWSamplerContext:
             raw_context=raw_context,
             event_metadata=event_metadata,
             base_metadata=meta,
+            device=model.device,
         )
 
     def prepared_data(self) -> torch.Tensor:
@@ -208,7 +216,6 @@ class GWSamplerContext:
         time_marginalization_kwargs: Optional[dict] = None,
         phase_marginalization_kwargs: Optional[dict] = None,
         calibration_marginalization_kwargs: Optional[dict] = None,
-        phase_grid: Optional[np.ndarray] = None,
         use_base_domain: bool = False,
     ) -> StationaryGaussianGWLikelihood:
         """
@@ -220,6 +227,13 @@ class GWSamplerContext:
         and masking the ASDs to the event's frequency range. Its reference time is the
         event time (the training-frame right-ascension correction is already applied to the
         samples), or the training reference time when no event time is set.
+
+        The most recently built likelihood is cached with its arguments: a repeated
+        call with the same arguments returns the shared instance (the synthetic-phase
+        factor requests one per chain chunk), and a call with different arguments
+        builds a replacement. In the exact synthetic-phase mode the consumer assigns
+        a `phase_grid` attribute on the shared instance, as
+        `Result.sample_synthetic_phase` does.
 
         Importance-sampling domain rebuilds (an updated `T` / `delta_f` or frequency range)
         are not wired here yet: the likelihood uses this context's domain.
@@ -233,8 +247,6 @@ class GWSamplerContext:
             Analytically marginalize over `phase`. Requires a uniform [0, 2 pi) phase prior.
         calibration_marginalization_kwargs : dict, optional
             Marginalize over detector calibration uncertainty.
-        phase_grid : np.ndarray, optional
-            Phase grid for the exact phase-marginalized / synthetic-phase likelihood.
         use_base_domain : bool, default False
             For a multibanded domain, evaluate on the base (undecimated) frequency domain
             rather than the decimated one.
@@ -243,6 +255,15 @@ class GWSamplerContext:
         -------
         StationaryGaussianGWLikelihood
         """
+        # Capture the call's arguments for the cache comparison; this must stay the
+        # first statement so locals() holds exactly the arguments. The comparison
+        # happens before the marginalization bounds are filled in below (which is
+        # deterministic given the same arguments).
+        settings = dict(locals())
+        settings.pop("self")
+        if settings == self._likelihood_settings:
+            return self._likelihood
+
         # Marginalizing over a parameter needs the (uniform) prior the network
         # marginalized over; use it to parameterize the requested marginalization.
         if time_marginalization_kwargs is not None:
@@ -284,7 +305,7 @@ class GWSamplerContext:
         else:
             t_ref = self.t_ref
 
-        return StationaryGaussianGWLikelihood(
+        likelihood = StationaryGaussianGWLikelihood(
             wfg_kwargs=dataset_settings["waveform_generator"],
             wfg_domain=wfg_domain,
             data_domain=self.domain,
@@ -293,7 +314,6 @@ class GWSamplerContext:
             time_marginalization_kwargs=time_marginalization_kwargs,
             phase_marginalization_kwargs=phase_marginalization_kwargs,
             calibration_marginalization_kwargs=calibration_marginalization_kwargs,
-            phase_grid=phase_grid,
             use_base_domain=use_base_domain,
             frequency_update=dict(
                 minimum_frequency=self._frequency(
@@ -304,6 +324,9 @@ class GWSamplerContext:
                 ),
             ),
         )
+        self._likelihood = likelihood
+        self._likelihood_settings = settings
+        return likelihood
 
     def _frequency(self, key: str, default: float):
         """The event's frequency-range override for `key` (min/max), else `default`."""
@@ -386,7 +409,9 @@ class SyntheticPhaseFactor(Factor):
             raise ValueError(
                 "Synthetic phase is 1:1; draw one phase per sample (fan_out=1)."
             )
-        n = len(next(iter(given.values())))
+        reference = next(iter(given.values()))
+        device = reference.device if torch.is_tensor(reference) else None
+        n = len(reference)
         logger.info(f"Estimating synthetic phase for {n} samples.")
         t0 = time.time()
         phases, phase_posterior = self._phase_profile(given, context)
@@ -394,15 +419,20 @@ class SyntheticPhaseFactor(Factor):
             phases, phase_posterior, self.num_processes
         )
         logger.info(f"Done. This took {time.time() - t0:.2f} s.")
-        return {"phase": torch.as_tensor(new_phase)}, torch.as_tensor(log_prob)
+        return (
+            {"phase": torch.as_tensor(new_phase, device=device)},
+            torch.as_tensor(log_prob, device=device),
+        )
 
     def log_prob(self, theta_i, context, given=None):
         """Evaluate `log q(phase | theta_rest, d)` at the given phases (re-plug / IS)."""
+        reference = next(iter(given.values()))
+        device = reference.device if torch.is_tensor(reference) else None
         phases, phase_posterior = self._phase_profile(given, context)
         log_prob = interpolated_log_prob_multi(
             phases, phase_posterior, _to_numpy(theta_i["phase"]), self.num_processes
         )
-        return torch.as_tensor(log_prob)
+        return torch.as_tensor(log_prob, device=device)
 
     def _phase_profile(self, given, context):
         """The phase grid and the mass-covered (un-normalized) phase distribution, one row
@@ -557,14 +587,21 @@ class GNPEKernelFactor(Factor):
 
     def log_prob(self, theta_i, context, given=None):
         """`log p(theta_hat | theta)` from the kernel, at the proxies (`theta_i`) and
-        the detector times (`given`)."""
-        diffs = {}
-        for k in self.kernel.keys():
-            diff = given[k] - theta_i[f"{k}_proxy"]
-            if torch.is_tensor(diff):
-                diff = diff.detach().cpu().numpy()
-            diffs[k] = np.asarray(diff)
-        return torch.as_tensor(self.kernel.ln_prob(diffs, axis=0), dtype=torch.float32)
+        the detector times (`given`).
+
+        The kernel is a bilby `PriorDict` -- the same object that samples the blur --
+        so the density is evaluated in numpy (converting each side first: the times
+        and proxies may live on different devices) and returned on the detector
+        times' device."""
+        reference = next(iter(given.values()))
+        device = reference.device if torch.is_tensor(reference) else None
+        diffs = {
+            k: _to_numpy(given[k]) - _to_numpy(theta_i[f"{k}_proxy"])
+            for k in self.kernel.keys()
+        }
+        return torch.as_tensor(
+            self.kernel.ln_prob(diffs, axis=0), dtype=torch.float32, device=device
+        )
 
 
 class GNPEFlowFactor(Factor):
