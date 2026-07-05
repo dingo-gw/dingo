@@ -47,7 +47,7 @@ def context(monkeypatch):
         detectors=["H1"],
         t_ref=1126259462.4,
         data_prep=None,
-        raw_context={},
+        event_data={},
         base_metadata=_BASE_METADATA,
     )
 
@@ -73,11 +73,11 @@ def test_context_device_default_and_explicit():
         detectors=["H1"],
         t_ref=0.0,
         data_prep=None,
-        raw_context={},
+        event_data={},
         device="meta",
     )
     assert ctx.device == "meta"
     ctx_default = GWSamplerContext(
-        domain=None, detectors=["H1"], t_ref=0.0, data_prep=None, raw_context={}
+        domain=None, detectors=["H1"], t_ref=0.0, data_prep=None, event_data={}
     )
     assert ctx_default.device == "cpu"

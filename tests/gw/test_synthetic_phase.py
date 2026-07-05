@@ -119,7 +119,7 @@ def test_context_frequency_override():
             detectors=[],
             t_ref=0.0,
             data_prep=None,
-            raw_context={},
+            event_data={},
             event_metadata=event_metadata,
         )
 

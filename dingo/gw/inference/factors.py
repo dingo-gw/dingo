@@ -85,7 +85,7 @@ class GWSamplerContext:
         detectors: list[str],
         t_ref: float,
         data_prep: Compose,
-        raw_context: dict,
+        event_data: dict,
         event_metadata: Optional[dict] = None,
         base_metadata: Optional[dict] = None,
         device: Union[torch.device, str] = "cpu",
@@ -102,7 +102,7 @@ class GWSamplerContext:
         data_prep : Compose
             The one-time data-preprocessing transform chain (whiten / decimate /
             repackage).
-        raw_context : dict
+        event_data : dict
             The raw event data `d` (strain + ASDs per detector), i.e. `EventDataset.data`.
             Consumed lazily by `prepared_data()` and reused for the likelihood.
         event_metadata : dict, optional
@@ -120,7 +120,7 @@ class GWSamplerContext:
         self.t_ref = t_ref
         self._data_prep = data_prep
         self.base_metadata = base_metadata
-        self.raw_context = raw_context
+        self.event_data = event_data
         self.event_metadata = event_metadata
         self.device = device
         self._prepared: Optional[torch.Tensor] = None
@@ -132,7 +132,7 @@ class GWSamplerContext:
     def from_model(
         cls,
         model: BasePosteriorModel,
-        raw_context: dict,
+        event_data: dict,
         event_metadata: Optional[dict] = None,
     ) -> "GWSamplerContext":
         """Build the context (domain + one-time data-prep chain) from a model's metadata.
@@ -143,7 +143,7 @@ class GWSamplerContext:
         ----------
         model : BasePosteriorModel
             The model whose metadata defines the domain and preprocessing.
-        raw_context : dict
+        event_data : dict
             The raw event data (strain + ASDs).
         event_metadata : dict, optional
             Per-event metadata.
@@ -181,7 +181,7 @@ class GWSamplerContext:
             detectors=detectors,
             t_ref=data_settings["ref_time"],
             data_prep=Compose(transforms),
-            raw_context=raw_context,
+            event_data=event_data,
             event_metadata=event_metadata,
             base_metadata=meta,
             device=model.device,
@@ -190,7 +190,7 @@ class GWSamplerContext:
     def prepared_data(self) -> torch.Tensor:
         """One-time data preprocessing, computed once and cached."""
         if self._prepared is None:
-            self._prepared = self._data_prep(self.raw_context)
+            self._prepared = self._data_prep(self.event_data)
         return self._prepared
 
     @property
@@ -222,7 +222,7 @@ class GWSamplerContext:
         Build the exact GW likelihood on this event's data, in physical parameter space.
 
         The network's standardized, decimated view of the data is `prepared_data()`; the
-        likelihood instead takes the raw event data (`raw_context`) and builds its own
+        likelihood instead takes the raw event data (`event_data`) and builds its own
         representation -- decimating to the multibanded domain unless `use_base_domain`,
         and masking the ASDs to the event's frequency range. Its reference time is the
         event time (the training-frame right-ascension correction is already applied to the
@@ -309,7 +309,7 @@ class GWSamplerContext:
             wfg_kwargs=dataset_settings["waveform_generator"],
             wfg_domain=wfg_domain,
             data_domain=self.domain,
-            event_data=self.raw_context,
+            event_data=self.event_data,
             t_ref=t_ref,
             time_marginalization_kwargs=time_marginalization_kwargs,
             phase_marginalization_kwargs=phase_marginalization_kwargs,
@@ -949,7 +949,7 @@ class GWComposedSampler(ComposedSampler):
     def from_model(
         cls,
         model: BasePosteriorModel,
-        raw_context: dict,
+        event_data: dict,
         event_metadata: Optional[dict] = None,
     ) -> "GWComposedSampler":
         """Build a plain-NPE GW sampler from a model and event data: the flow exposes
@@ -959,7 +959,7 @@ class GWComposedSampler(ComposedSampler):
         ----------
         model : BasePosteriorModel
             The NPE model.
-        raw_context : dict
+        event_data : dict
             The raw event data (strain + ASDs).
         event_metadata : dict, optional
             Per-event metadata.
@@ -968,7 +968,7 @@ class GWComposedSampler(ComposedSampler):
         -------
         GWComposedSampler
         """
-        context = GWSamplerContext.from_model(model, raw_context, event_metadata)
+        context = GWSamplerContext.from_model(model, event_data, event_metadata)
         metadata = _base_model_metadata(model)
         inference_parameters = metadata["train_settings"]["data"][
             "inference_parameters"
@@ -991,7 +991,7 @@ class GWComposedSampler(ComposedSampler):
         cls,
         init_model: BasePosteriorModel,
         main_model: BasePosteriorModel,
-        raw_context: dict,
+        event_data: dict,
         event_metadata: Optional[dict] = None,
         num_iterations: int = 30,
     ) -> "GWComposedSampler":
@@ -1008,7 +1008,7 @@ class GWComposedSampler(ComposedSampler):
             preprocessing.
         main_model : BasePosteriorModel
             The GNPE main network.
-        raw_context : dict
+        event_data : dict
             The raw event data (strain + ASDs).
         event_metadata : dict, optional
             Per-event metadata.
@@ -1023,7 +1023,7 @@ class GWComposedSampler(ComposedSampler):
         # Build the context from the main model: it owns the analysis (likelihood,
         # prior, inference parameters). The init model shares the data domain and
         # preprocessing (asserted above), so prepared_data() is identical either way.
-        context = GWSamplerContext.from_model(main_model, raw_context, event_metadata)
+        context = GWSamplerContext.from_model(main_model, event_data, event_metadata)
         metadata = _base_model_metadata(main_model)
         inference_parameters = metadata["train_settings"]["data"][
             "inference_parameters"
@@ -1051,7 +1051,7 @@ class GWComposedSampler(ComposedSampler):
         cls,
         main_model: BasePosteriorModel,
         proxy_source: Factor,
-        raw_context: dict,
+        event_data: dict,
         event_metadata: Optional[dict] = None,
     ) -> "GWComposedSampler":
         """Build a single-step (density-preserving) time-GNPE sampler: a `ChainComposer`
@@ -1066,7 +1066,7 @@ class GWComposedSampler(ComposedSampler):
         proxy_source : Factor
             Supplies the detector-time proxies -- a `DeltaFactor` for prior conditioning
             (BNS), or an unconditional NDE for density recovery.
-        raw_context : dict
+        event_data : dict
             The raw event data (strain + ASDs).
         event_metadata : dict, optional
             Per-event metadata.
@@ -1075,7 +1075,7 @@ class GWComposedSampler(ComposedSampler):
         -------
         GWComposedSampler
         """
-        context = GWSamplerContext.from_model(main_model, raw_context, event_metadata)
+        context = GWSamplerContext.from_model(main_model, event_data, event_metadata)
         metadata = _base_model_metadata(main_model)
         inference_parameters = metadata["train_settings"]["data"][
             "inference_parameters"
@@ -1096,7 +1096,7 @@ class GWComposedSampler(ComposedSampler):
         existing post-processing pipeline -- synthetic phase, importance sampling,
         evidence, plotting -- runs on the factorized sampler's output unchanged.
 
-        The raw event-data dict (`GWSamplerContext.raw_context`) is stored as the
+        The raw event-data dict (`GWSamplerContext.event_data`) is stored as the
         `Result` context (serialized), and the live `GWSamplerContext` is passed as
         `sampler_context` so `Result` can pull the prior (and, later, the likelihood)
         from it rather than rebuilding them from metadata.
@@ -1105,7 +1105,7 @@ class GWComposedSampler(ComposedSampler):
 
         data_dict = {
             "samples": self.samples,
-            "context": self.context.raw_context,
+            "context": self.context.event_data,
             "event_metadata": self.context.event_metadata,
             "importance_sampling_metadata": None,
             "log_evidence": None,
