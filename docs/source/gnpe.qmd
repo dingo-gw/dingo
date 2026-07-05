@@ -4,7 +4,7 @@ GNPE (Gibbs- or Group-Equivariant Neural Posterior Estimation) is an algorithm t
 
 For gravitational waves, we use GNPE to standardize the times of arrival of the signal in the individual interferometers. (This corresponds to translations of the time of arrival at geocenter, and approximate sky rotations.) In frequency domain, time translations correspond to multiplication of the data by $e^{-2\pi i f \Delta t}$, and a standard NPE network would have to learn to interpret such transformations consistent with the prior from the data. We found this to be a challenging learning task, which limited inference performance on the other parameters. Instead, GNPE leverages our knowledge of the time translations to build a network that is only required to interpret a much narrower window of arrival times.
 
-We now provide a brief description of the GNPE method. Readers more interested in getting started with GNPE may skip to [](#usage) below.
+We now provide a brief description of the GNPE method. Readers more interested in getting started with GNPE may skip to [usage](#usage) below.
 
 ## Description of method
 

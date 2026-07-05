@@ -42,7 +42,8 @@ def discover():
             if parts[0] in SKIP_TOP:
                 continue
             try:
-                tree = ast.parse(open(path, encoding="utf-8", errors="ignore").read())
+                with open(path, encoding="utf-8", errors="ignore") as fh:
+                    tree = ast.parse(fh.read())
             except SyntaxError:
                 continue
             objs = [
@@ -71,16 +72,18 @@ def build_sections(groups):
 def main():
     groups = discover()
     sections = build_sections(groups)
-    text = open(QUARTO_YML, encoding="utf-8").read()
-    new = re.sub(
+    with open(QUARTO_YML, encoding="utf-8") as fh:
+        text = fh.read()
+    new, n_subs = re.subn(
         r"(    # BEGIN AUTOGEN SECTIONS[^\n]*\n).*?(    # END AUTOGEN SECTIONS)",
         lambda m: m.group(1) + sections + "\n" + m.group(2),
         text,
         flags=re.S,
     )
-    if "BEGIN AUTOGEN" not in new:
-        raise SystemExit("AUTOGEN markers not found in _quarto.yml")
-    open(QUARTO_YML, "w", encoding="utf-8").write(new)
+    if n_subs != 1:
+        raise SystemExit("AUTOGEN markers not found (or not matched once) in _quarto.yml")
+    with open(QUARTO_YML, "w", encoding="utf-8") as fh:
+        fh.write(new)
     n_obj = sum(len(v) for v in groups.values())
     print(f"Wrote {n_obj} objects across {len(groups)} groups to _quarto.yml")
 

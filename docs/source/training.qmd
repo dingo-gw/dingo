@@ -2,7 +2,7 @@
 
 Training a network can require a significant amount of time (for production models, typically a week with a fast GPU). We therefore expect that this will almost always be done non-interactively using a command-line script. Dingo offers two options, `dingo_train` and `dingo_train_condor`, depending on whether your GPU is local or cluster-based.
 
-Both of these scripts take as main argument a settings file, which specifies options relating to [](training_transforms.ipynb), training strategy, [](network_architecture.ipynb), hardware, and checkpointing. They produce a trained model in PyTorch `.pt` format, and they save checkpoints and the training history. The settings file is furthermore saved within the model files for reproducibility and to be able to resume training from a checkpoint. Finally, all *precursor* settings files (for the waveform or noise datasets) are also saved with the model.
+Both of these scripts take as main argument a settings file, which specifies options relating to [data pre-processing](training_transforms.ipynb), training strategy, [network architecture](network_architecture.ipynb), hardware, and checkpointing. They produce a trained model in PyTorch `.pt` format, and they save checkpoints and the training history. The settings file is furthermore saved within the model files for reproducibility and to be able to resume training from a checkpoint. Finally, all *precursor* settings files (for the waveform or noise datasets) are also saved with the model.
 
 ## Settings file
 
@@ -118,7 +118,7 @@ These settings point to a saved dataset of waveform polarizations and describe t
 
 ### `model`
 
-This describes the model architecture, including network type and hyperparameters. All of these settings are described in the section on [](network_architecture.ipynb).
+This describes the model architecture, including network type and hyperparameters. All of these settings are described in the section on [network architecture](network_architecture.ipynb).
 
 ### `training`
 
