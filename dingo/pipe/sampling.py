@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 """Script to sample from a Dingo model. Based on bilby_pipe data analysis script."""
+import copy
 import sys
 from pathlib import Path
 import os
@@ -12,9 +13,10 @@ from bilby_pipe.utils import (
     resolve_filename_with_transfer_fallback,
 )
 
+from dingo.core.factors import FlowFactor
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset
-from dingo.gw.inference.factors import GWComposedSampler
+from dingo.gw.inference.factors import GNPEKernelFactor, GWComposedSampler
 from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
 from dingo.gw.inference.inference_utils import prepare_log_prob
 from dingo.pipe.default_settings import DENSITY_RECOVERY_SETTINGS
@@ -123,14 +125,25 @@ class SamplingInput(Input):
 
         if self.sampler_implementation == "composed":
             if self.model_init is not None:
-                raise NotImplementedError(
-                    "sampler-implementation = composed does not support GNPE models "
-                    "yet. Use sampler-implementation = legacy."
+                self.gnpe = True
+                self._main_model = model
+                init_model = build_model_from_kwargs(
+                    filename=self.model_init,
+                    device=self.device,
+                    load_training_info=False,
                 )
-            self.gnpe = False
-            self.dingo_sampler = GWComposedSampler.from_model(
-                model, self.context, event_metadata=self.event_metadata
-            )
+                self.dingo_sampler = GWComposedSampler.from_gnpe_models(
+                    init_model,
+                    model,
+                    self.context,
+                    event_metadata=self.event_metadata,
+                    num_iterations=self.num_gnpe_iterations,
+                )
+            else:
+                self.gnpe = False
+                self.dingo_sampler = GWComposedSampler.from_model(
+                    model, self.context, event_metadata=self.event_metadata
+                )
             return
 
         if self.model_init is not None:
@@ -194,6 +207,31 @@ class SamplingInput(Input):
     #     result_dir = os.path.join(self.outdir, "result")
     #     return os.path.relpath(result_dir)
 
+    def _recover_log_prob_composed(self):
+        """Density recovery on the composed sampler, mirroring `prepare_log_prob`:
+        run the Gibbs chain, train an unconditional NDE on the GNPE proxies, then
+        swap in a single-step (density-preserving) sampler with the NDE as the
+        proxy source."""
+        settings = copy.deepcopy(self.density_recovery_settings)
+        self.dingo_sampler.run_sampler(
+            settings["num_samples"], batch_size=self.batch_size
+        )
+        result = self.dingo_sampler.to_result()
+        nde_settings = settings["nde_settings"]
+        nde_settings["training"]["device"] = str(self._main_model.device)
+        proxy_parameters = GNPEKernelFactor.from_model(self._main_model).parameters
+        unconditional_model = result.train_unconditional_flow(
+            proxy_parameters,
+            nde_settings,
+            threshold_std=settings.get("threshold_std", float("inf")),
+        )
+        self.dingo_sampler = GWComposedSampler.from_singlestep_gnpe(
+            self._main_model,
+            FlowFactor.from_model(unconditional_model),
+            self.context,
+            event_metadata=self.event_metadata,
+        )
+
     def run_sampler(self):
         if self.gnpe and self.recover_log_prob:
             logger.info(
@@ -202,11 +240,14 @@ class SamplingInput(Input):
             )
 
             # Note that this will not save any low latency samples at present.
-            prepare_log_prob(
-                self.dingo_sampler,
-                batch_size=self.batch_size,
-                **self.density_recovery_settings,
-            )
+            if self.sampler_implementation == "composed":
+                self._recover_log_prob_composed()
+            else:
+                prepare_log_prob(
+                    self.dingo_sampler,
+                    batch_size=self.batch_size,
+                    **self.density_recovery_settings,
+                )
 
         self.dingo_sampler.run_sampler(self.num_samples, batch_size=self.batch_size)
         self.dingo_sampler.to_hdf5(label=self.label, outdir=self.result_directory)

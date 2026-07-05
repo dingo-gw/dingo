@@ -1538,8 +1538,8 @@ def create_parser(top_level=True, usage=None):
         default="legacy",
         choices=["legacy", "composed"],
         help="Sampler implementation: 'legacy' (GWSampler / GWSamplerGNPE) or "
-        "'composed' (the factorized GWComposedSampler; experimental, currently "
-        "plain NPE only). Default 'legacy'.",
+        "'composed' (the factorized GWComposedSampler; experimental). "
+        "Default 'legacy'.",
     )
     sampler_parser.add(
         "--recover-log-prob",
