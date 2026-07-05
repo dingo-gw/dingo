@@ -311,6 +311,36 @@ class FlowFactor(Factor):
         return log_prob + self.standardization.log_det(self._net_parameters)
 
 
+class DeltaFactor(Factor):
+    """`q_i = delta(theta_i - c)`: a point mass pinning parameters to fixed values,
+    contributing 0 to the proposal log-prob.
+
+    Used as the chain root for prior-conditioning or known proxies (where later factors
+    condition on the pinned values), and as a non-root filler for delta-prior parameters
+    a model does not infer (one constant per current row).
+    """
+
+    def __init__(self, values: dict[str, float]):
+        self.values = values
+        self.parameters = list(values)
+        self.conditioning = []
+
+    def sample_and_log_prob(self, num_samples, context, given=None):
+        samples = {
+            p: torch.full((num_samples,), float(v)) for p, v in self.values.items()
+        }
+        return samples, torch.zeros(num_samples)
+
+    def log_prob(self, theta_i, context, given=None):
+        """0 per row, matching sample time: the point mass is evaluated on its own
+        support (the chain only re-plugs its own samples), so the pinned block is
+        conditioned on, not integrated over. Off-support densities are not
+        represented."""
+        # One zero per row, on the same device/dtype as the evaluated block.
+        reference_column = next(iter(theta_i.values()))
+        return torch.zeros_like(reference_column)
+
+
 class Reparametrization(ABC):
     """
     A deterministic bijection `Step`: it transforms existing parameters (no sampling)
@@ -361,16 +391,9 @@ class Reparametrization(ABC):
 
     @property
     def consumes(self) -> list[str]:
-        """Inputs the bijection replaces with its outputs (dropped after the step)."""
+        """Inputs the bijection replaces with its outputs (dropped after the step).
+        `ChainComposer.log_prob` rebuilds them via `inverse`."""
         return [c for c in self.conditioning if c not in self.parameters]
-
-    def log_prob(
-        self,
-        theta_i: dict[str, torch.Tensor],
-        context: SamplerContext,
-        given: Optional[dict[str, torch.Tensor]] = None,
-    ) -> torch.Tensor:
-        raise NotImplementedError("Reparametrization.log_prob")
 
 
 class TargetCorrection(ABC):
@@ -381,6 +404,10 @@ class TargetCorrection(ABC):
     Its value belongs to the IS target, not the proposal: it reads earlier blocks, emits a
     named column, optionally consumes intermediates (`consumes`), and adds 0 to the
     proposal log-prob. 1:1.
+
+    `consumes` must name only side-channel intermediates (e.g. recomputed detector
+    times), never a sampled parameter: unlike a `Reparametrization`, a correction has no
+    inverse, so anything it consumes cannot be rebuilt by `ChainComposer.log_prob`.
     """
 
     parameters: list[str]
@@ -404,14 +431,6 @@ class TargetCorrection(ABC):
         out = self.correction(given, context)
         n = next(iter(out.values())).shape[0]
         return out, torch.zeros(n)
-
-    def log_prob(
-        self,
-        theta_i: dict[str, torch.Tensor],
-        context: SamplerContext,
-        given: Optional[dict[str, torch.Tensor]] = None,
-    ) -> torch.Tensor:
-        raise NotImplementedError("TargetCorrection.log_prob")
 
 
 class Step(Protocol):
@@ -465,8 +484,11 @@ class ChainComposer:
 
     def _validate(self):
         """Check the declared order is a valid topological order: every conditioning
-        name is produced by an earlier step. A step's emitted columns default to its
-        `parameters`, but a step may emit side-channel columns too (`produces`)."""
+        name is produced by an earlier step, and no step overwrites an existing
+        column -- except a `Reparametrization` replacing its own inputs, which is
+        invertible, so `log_prob` can restore the overwritten state. A step's
+        emitted columns default to its `parameters`, but a step may emit
+        side-channel columns too (`produces`)."""
         produced: set[str] = set()
         for step in self.steps:
             missing = [c for c in step.conditioning if c not in produced]
@@ -475,7 +497,18 @@ class ChainComposer:
                     f"A step producing {step.parameters} conditions on {missing}, "
                     f"which no earlier step produces. Check chain order."
                 )
-            produced.update(getattr(step, "produces", step.parameters))
+            emitted = set(getattr(step, "produces", step.parameters))
+            replaceable = (
+                set(step.conditioning) if isinstance(step, Reparametrization) else set()
+            )
+            clobbered = (emitted & produced) - replaceable
+            if clobbered:
+                raise ValueError(
+                    f"A step producing {step.parameters} would overwrite existing "
+                    f"column(s) {sorted(clobbered)}. Only a Reparametrization may "
+                    f"replace columns (its inverse can rebuild them for log_prob)."
+                )
+            produced.update(emitted)
 
     @property
     def steps(self) -> list[Step]:
@@ -544,13 +577,49 @@ class ChainComposer:
     def log_prob(
         self, samples: dict[str, torch.Tensor], context: SamplerContext
     ) -> torch.Tensor:
-        """Sum each step's `log_prob` at the given samples. Valid only for an all-density
-        chain (every step a `Factor`)."""
+        """Evaluate the chain's proposal log-density at given physical samples
+        (re-plug / importance sampling).
+
+        The steps are folded in exact reverse chain order, so the columns are
+        restored to the state each step saw during sampling: a `Reparametrization`
+        rebuilds its inputs via `inverse` (e.g. `ra@t_ref` from the event-frame
+        `ra`) and contributes `-log|det J|`, a `Factor` contributes its `log_prob`,
+        and a `TargetCorrection` contributes nothing (target-side only). Raises for
+        a density-free chain (one containing a `GibbsBlock`).
+
+        Parameters
+        ----------
+        samples : dict[str, torch.Tensor]
+            The chain's emitted columns (one value per row). Consumed intermediates
+            are rebuilt via the reparametrization inverses and need not be present.
+        context : SamplerContext
+            Per-event shared state.
+
+        Returns
+        -------
+        torch.Tensor
+            The proposal log-density per row.
+        """
+        if any(isinstance(step, GibbsBlock) for step in self.steps):
+            raise ValueError(
+                "The chain contains a density-free step (GibbsBlock), so its "
+                "log_prob is unavailable; recover a density first (fit an "
+                "unconditional model and take a chain step)."
+            )
+        values = dict(samples)
         total: torch.Tensor | float = 0.0
-        for step in self.steps:
-            given = {k: samples[k] for k in step.conditioning}
-            theta_i = {k: samples[k] for k in step.parameters}
-            total = total + step.log_prob(theta_i, context, given)
+        for step in reversed(self.steps):
+            if isinstance(step, TargetCorrection):
+                continue
+            if isinstance(step, Reparametrization):
+                params = {k: values[k] for k in step.parameters}
+                values.update(step.inverse(params, context))
+                given = {k: values[k] for k in step.conditioning}
+                total = total - step.log_det(given, context)
+            else:
+                given = {k: values[k] for k in step.conditioning}
+                theta_i = {k: values[k] for k in step.parameters}
+                total = total + step.log_prob(theta_i, context, given)
         return total
 
     def sample(

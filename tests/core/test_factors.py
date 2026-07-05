@@ -8,6 +8,8 @@ parity against the legacy samplers is a model-based check that lives with the GW
 here.
 """
 
+import math
+
 import pytest
 import torch
 
@@ -302,12 +304,12 @@ def test_unconditioned_factor_as_root_draws_base_count():
 
 class _MockTargetCorrection(TargetCorrection):
     """A mock kind-3 correction: emits ``corr = 2 * x``, contributes 0 to the proposal,
-    and consumes its input."""
+    and (by default) consumes its input."""
 
-    def __init__(self, reads="x", emits="corr"):
+    def __init__(self, reads="x", emits="corr", consume=True):
         self.conditioning = [reads]
         self.parameters = [emits]
-        self.consumes = [reads]
+        self.consumes = [reads] if consume else []
         self._reads, self._emits = reads, emits
 
     def correction(self, given, context):
@@ -362,3 +364,114 @@ def test_side_channel_produces_satisfies_topological_check():
     )
     out = comp.sample(4, context=None)
     assert out["b"].shape == (4,) and "s" in out
+
+
+class _GaussFactor(Factor):
+    """A factor with a real analytic density -- standard normal around the sum of its
+    conditioning (0 if unconditioned) -- so log_prob re-plug is checkable against the
+    log-prob stored at sample time."""
+
+    def __init__(self, name, conditioning=()):
+        self.parameters = [name]
+        self.conditioning = list(conditioning)
+        self._name = name
+
+    def _mean(self, given, n_rows):
+        if self.conditioning:
+            return sum(given[k] for k in self.conditioning)
+        return torch.zeros(n_rows)
+
+    def sample_and_log_prob(self, n, context, given=None):
+        n_rows = 1 if not self.conditioning else next(iter(given.values())).shape[0]
+        mean = self._mean(given, n_rows).repeat_interleave(n)
+        vals = mean + torch.randn(n_rows * n)
+        return {self._name: vals}, self.log_prob({self._name: vals}, context, given)
+
+    def log_prob(self, theta_i, context, given=None):
+        v = theta_i[self._name]
+        mean = self._mean(given, v.shape[0])
+        return -0.5 * (v - mean) ** 2 - 0.5 * math.log(2 * math.pi)
+
+
+def test_log_prob_replug_kind_aware():
+    # Re-plug: the kind-aware log_prob rebuilds consumed columns via the reparam
+    # inverses, sums factor densities and Jacobians, and skips target corrections.
+    torch.manual_seed(0)
+    comp = ChainComposer(
+        [
+            _GaussFactor("u"),
+            _MockReparam(shift=10.0, log_det_val=0.5),
+            _MockTargetCorrection(reads="v", emits="corr", consume=False),
+            _GaussFactor("w", conditioning=["v"]),
+        ]
+    )
+    out = comp.sample(64, context=None)
+    assert "u" not in out  # consumed by the reparam
+    samples = {k: v for k, v in out.items() if k != "log_prob"}
+    lp = comp.log_prob(samples, context=None)
+    # u is rebuilt as v - shift; the float round trip is not bit-exact, so compare
+    # with a tolerance.
+    assert torch.allclose(lp, out["log_prob"], atol=1e-5)
+    # And against a hand-built sum: gauss(u) + gauss(w | v) - log_det.
+    manual = (
+        comp.steps[0].log_prob({"u": samples["v"] - 10.0}, None)
+        + comp.steps[3].log_prob({"w": samples["w"]}, None, {"v": samples["v"]})
+        - 0.5
+    )
+    assert torch.allclose(lp, manual, atol=1e-6)
+
+
+def test_log_prob_raises_for_density_free_chain():
+    block = GibbsBlock(
+        init_factor=_ConstFactor("proxy"),
+        factors=[_ConstFactor("theta", conditioning=["proxy"])],
+        num_iterations=2,
+    )
+    comp = ChainComposer([block])
+    out = comp.sample(4, context=None)
+    with pytest.raises(ValueError, match="density-free"):
+        comp.log_prob(dict(out), context=None)
+
+
+class _InPlaceReparam(Reparametrization):
+    """A bijection that replaces its input under the same name (``x -> x + shift``),
+    so evaluation must restore the column state per step position."""
+
+    def __init__(self, shift=5.0):
+        self.conditioning = ["x"]
+        self.parameters = ["x"]
+        self._shift = shift
+
+    def forward(self, given, context):
+        return {"x": given["x"] + self._shift}
+
+    def inverse(self, params, context):
+        return {"x": params["x"] - self._shift}
+
+
+def test_log_prob_replug_in_place_reparam():
+    # An in-place reparam overwrites its own column; the reverse fold restores the
+    # pre-transform value before the factor is scored, and a downstream consumer
+    # (the correction) is evaluated against the post-transform value it saw.
+    torch.manual_seed(0)
+    comp = ChainComposer(
+        [
+            _GaussFactor("x"),
+            _InPlaceReparam(shift=5.0),
+            _MockTargetCorrection(reads="x", emits="corr", consume=False),
+        ]
+    )
+    out = comp.sample(64, context=None)
+    assert torch.equal(out["corr"], 2 * out["x"])  # correction saw the shifted x
+    samples = {k: v for k, v in out.items() if k != "log_prob"}
+    lp = comp.log_prob(samples, context=None)
+    assert torch.allclose(lp, out["log_prob"], atol=1e-5)
+
+
+def test_validation_rejects_column_overwrite():
+    # Only a Reparametrization may replace an existing column (it is invertible);
+    # a factor re-producing a name would destroy state log_prob cannot rebuild.
+    with pytest.raises(ValueError, match="overwrite"):
+        ChainComposer([_ConstFactor("a"), _ConstFactor("a")])
+    # The in-place reparam is the allowed exception.
+    ChainComposer([_ConstFactor("x"), _InPlaceReparam()])

@@ -31,10 +31,12 @@ from dingo.core.density import (
 from dingo.core.factors import (
     ChainComposer,
     ComposedSampler,
+    DeltaFactor,
     Factor,
     FlowFactor,
     GibbsBlock,
     Reparametrization,
+    Standardization,
     TargetCorrection,
     _base_model_metadata,
 )
@@ -316,30 +318,6 @@ class GWSamplerContext:
         if name in self.base_metadata["train_settings"]["data"]["inference_parameters"]:
             return None
         return self.prior.get(name)
-
-
-class DeltaFactor(Factor):
-    """`q_i = delta(theta_i - c)`: a point mass pinning parameters to fixed values,
-    contributing 0 to the proposal log-prob.
-
-    Used as the chain root for prior-conditioning or known proxies (single-step GNPE, where
-    later factors condition on the pinned values), and as a non-root filler for delta-prior
-    parameters the network does not infer (one constant per current row).
-    """
-
-    def __init__(self, values: dict[str, float]):
-        self.values = values
-        self.parameters = list(values)
-        self.conditioning = []
-
-    def sample_and_log_prob(self, num_samples, context, given=None):
-        samples = {
-            p: torch.full((num_samples,), float(v)) for p, v in self.values.items()
-        }
-        return samples, torch.zeros(num_samples)
-
-    def log_prob(self, theta_i, context, given=None):
-        raise NotImplementedError("DeltaFactor.log_prob")
 
 
 def _to_numpy(v) -> np.ndarray:
@@ -640,6 +618,10 @@ class GNPEFlowFactor(Factor):
         self._net_parameters = parameters
         self.parameters = [self.aliases.get(p, p) for p in parameters]
         self.conditioning = list(self.proxy_parameters)
+        # For log_prob: the sampling path de-standardizes (and corrects the log-prob)
+        # inside transform_post, but evaluating at a point needs the forward map too.
+        std = _base_model_metadata(model)["train_settings"]["data"]["standardization"]
+        self.standardization = Standardization(std["mean"], std["std"])
 
     @property
     def produces(self) -> list[str]:
@@ -704,7 +686,37 @@ class GNPEFlowFactor(Factor):
         return params, x["log_prob"]
 
     def log_prob(self, theta_i, context, given=None):
-        raise NotImplementedError("GNPEFlowFactor.log_prob")
+        """Evaluate the network density `log q(theta | theta_hat, d)` in physical space
+        at given `theta_i` (exposed / aliased names), one row per proxy row in `given`.
+        Runs the same proxies-present data preparation as sampling (time-shift by the
+        proxies, standardize the conditioning), then scores the standardized parameters
+        under the network."""
+        proxies = {p: given[p] for p in self.proxy_parameters}
+        n_rows = next(iter(proxies.values())).shape[0]
+        x = {"extrinsic_parameters": dict(proxies), "parameters": {}}
+        d = context.prepared_data().clone()
+        x["data"] = d.expand(n_rows, *d.shape)
+        x = self.transform_pre(x)
+        theta_net = {
+            net: theta_i[self.aliases.get(net, net)] for net in self._net_parameters
+        }
+        # Mirror transform_post: sampling shifts geocent_time by the preferred proxy
+        # after the network (PostCorrectGeocentTime, using the extrinsic geocent_time
+        # set up by the GNPE transform), so score the network in its own output frame
+        # by applying the inverse correction first.
+        y = {
+            "parameters": dict(theta_net),
+            "extrinsic_parameters": dict(x["extrinsic_parameters"]),
+        }
+        theta_net = PostCorrectGeocentTime(inverse=True)(y)["parameters"]
+        z = self.standardization.standardize(theta_net, self._net_parameters)
+        self.model.network.eval()
+        with torch.no_grad():
+            if "context_parameters" in x:
+                log_prob = self.model.log_prob(z, x["data"], x["context_parameters"])
+            else:
+                log_prob = self.model.log_prob(z, x["data"])
+        return log_prob + self.standardization.log_det(self._net_parameters)
 
 
 class RAReparam(Reparametrization):
@@ -717,6 +729,11 @@ class RAReparam(Reparametrization):
     modulo 2*pi (`log_det = 0`), so it contributes nothing to the density. `forward`
     produces the event-frame `ra`, `inverse` recovers `ra@t_ref`. The sidereal
     correction is read from the shared context (`t_ref` and the event time).
+
+    The modulo makes the map a bijection on the circle, while the flow's density lives
+    on the real line: a sample drawn outside `[0, 2 pi)` is wrapped, so `inverse`
+    recovers its principal-branch representative and a re-evaluated `log_prob` refers
+    to that branch. Only tail samples outside the bounded `ra` prior are affected.
     """
 
     def __init__(self):
