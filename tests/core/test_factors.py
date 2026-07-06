@@ -20,6 +20,7 @@ from dingo.core.factors import (
     FlowFactor,
     GibbsBlock,
     Reparametrization,
+    SampleTableFactor,
     Stage,
     TargetCorrection,
     chunk_and_concat,
@@ -202,6 +203,50 @@ def test_gibbs_block_runs_as_a_density_free_step():
     assert "proxy" not in out  # seed-only, dropped
     # theta | proxy with Gibbs' one-per-walker draw: theta == proxy == arange(6).
     assert torch.equal(out["theta"], torch.arange(6, dtype=torch.float32))
+
+
+def test_sample_table_root_feeds_chain_and_sums_log_prob():
+    # A chain continuing from existing samples: the table root emits the rows with
+    # their stored log-prob, a 1:1 factor adds a block, and the ordinary fold yields
+    # the joint proposal density (stored + delta) -- the importance-sampling shape.
+    stored = torch.tensor([0.5, 0.6, 0.7], dtype=torch.float64)
+    table = SampleTableFactor(
+        {"a": torch.tensor([1.0, 2.0, 3.0], dtype=torch.float64)}, log_prob=stored
+    )
+
+    class _PlusOne(Factor):
+        parameters = ["b"]
+        conditioning = ["a"]
+
+        def sample_and_log_prob(self, n, context, given=None):
+            assert n == 1  # 1:1
+            return {"b": given["a"] + 1.0}, torch.full_like(given["a"], 0.25)
+
+        def log_prob(self, theta_i, context, given=None):
+            return torch.full_like(given["a"], 0.25)
+
+    out, lp = ChainComposer([table, _PlusOne()]).sample_and_log_prob(3, None)
+    assert torch.equal(out["a"], torch.tensor([1.0, 2.0, 3.0], dtype=torch.float64))
+    assert torch.equal(out["b"], torch.tensor([2.0, 3.0, 4.0], dtype=torch.float64))
+    assert torch.equal(lp, stored + 0.25)
+
+
+def test_sample_table_requires_full_length():
+    table = SampleTableFactor({"a": torch.arange(3.0)})
+    with pytest.raises(ValueError, match="table length"):
+        table.sample_and_log_prob(2, None)
+
+
+def test_sample_table_without_log_prob_is_density_free():
+    table = SampleTableFactor({"a": torch.arange(3.0)})
+    _, lp = ChainComposer([table]).sample_and_log_prob(3, None)
+    assert lp is None
+
+
+def test_sample_table_log_prob_raises():
+    table = SampleTableFactor({"a": torch.arange(3.0)})
+    with pytest.raises(NotImplementedError, match="stored log-prob"):
+        table.log_prob({"a": torch.zeros(3)}, None)
 
 
 class _MockReparam(Reparametrization):

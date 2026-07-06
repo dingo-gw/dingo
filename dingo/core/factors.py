@@ -372,6 +372,54 @@ class DeltaFactor(Factor):
         return torch.zeros_like(reference_column)
 
 
+class SampleTableFactor(Factor):
+    """
+    Chain root emitting a fixed table of existing samples (with their stored proposal
+    log-prob, if available) instead of drawing new ones.
+
+    This is how a chain continues from previously drawn samples: the
+    importance-sampling side runs its post-sampling steps (e.g. synthetic phase) as a
+    chain rooted in the proposal sample table, and the composer's ordinary log-prob
+    fold then yields the joint proposal density `log q(theta) + log q(extra | theta)`
+    with no special-casing. Without a stored log-prob the chain is density-free (as
+    with a `GibbsBlock`).
+    """
+
+    def __init__(self, table: dict, log_prob=None):
+        """
+        Parameters
+        ----------
+        table : dict
+            The existing samples, one array-like entry per parameter column.
+        log_prob : array-like, optional
+            The stored proposal log-prob of the table rows. If omitted, the chain
+            has no tractable density.
+        """
+        self.table = {k: torch.as_tensor(v) for k, v in table.items()}
+        self.table_log_prob = (
+            torch.as_tensor(log_prob) if log_prob is not None else None
+        )
+        self.parameters = list(self.table)
+        self.conditioning: list[str] = []
+
+    def sample_and_log_prob(self, num_samples, context, given=None):
+        """Emit the table; `num_samples` must equal the table length (a fixed table
+        cannot be chunked, so run the chain with `batch_size=None`)."""
+        n = len(next(iter(self.table.values())))
+        if num_samples != n:
+            raise ValueError(
+                f"A sample table is fixed: num_samples must equal the table length "
+                f"({n}), got {num_samples}. Run the chain with batch_size=None."
+            )
+        return dict(self.table), self.table_log_prob
+
+    def log_prob(self, theta_i, context, given=None):
+        raise NotImplementedError(
+            "A sample table is not a density; its rows carry their stored log-prob. "
+            "Evaluate log_prob through the chain that produced the samples instead."
+        )
+
+
 class Reparametrization(ABC):
     """
     A deterministic bijection `Step`: it transforms existing parameters (no sampling)

@@ -127,3 +127,24 @@ def test_context_frequency_override():
     assert with_override._frequency("minimum_frequency", 20.0) == 25.0
     assert with_override._frequency("maximum_frequency", 1024.0) == 1024.0
     assert context(None)._frequency("minimum_frequency", 20.0) == 20.0
+
+
+def test_likelihood_kwargs_forwarded_to_context():
+    # The IS layer selects the likelihood view (base domain, rebuilt domain, ...);
+    # the factor forwards it verbatim to context.likelihood().
+    recorded = {}
+
+    class _RecordingContext(_MockContext):
+        def likelihood(self, **kwargs):
+            recorded.update(kwargs)
+            return super().likelihood()
+
+    factor = SyntheticPhaseFactor(
+        conditioning=["chirp_mass"],
+        n_grid=11,
+        approximation_22_mode=True,
+        likelihood_kwargs={"use_base_domain": True},
+    )
+    _seed()
+    factor.sample_and_log_prob(1, _RecordingContext(), _given())
+    assert recorded == {"use_base_domain": True}

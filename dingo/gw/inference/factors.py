@@ -479,6 +479,7 @@ class SyntheticPhaseFactor(Factor):
         approximation_22_mode: bool = False,
         uniform_weight: float = 0.01,
         num_processes: int = 1,
+        likelihood_kwargs: Optional[dict] = None,
     ):
         """
         Parameters
@@ -494,6 +495,10 @@ class SyntheticPhaseFactor(Factor):
             Weight of the uniform floor added to the phase distribution for mass coverage.
         num_processes : int, default 1
             Parallel processes for the per-sample likelihood evaluation and phase sampling.
+        likelihood_kwargs : dict, optional
+            Arguments for `context.likelihood()` selecting the likelihood view (e.g.
+            `use_base_domain`, a rebuilt `data_domain`, frequency updates), supplied
+            by the importance-sampling layer. Defaults to the context's own views.
         """
         self.parameters = ["phase"]
         self.conditioning = list(conditioning)
@@ -501,6 +506,7 @@ class SyntheticPhaseFactor(Factor):
         self.approximation_22_mode = approximation_22_mode
         self.uniform_weight = uniform_weight
         self.num_processes = num_processes
+        self.likelihood_kwargs = likelihood_kwargs
 
     def sample_and_log_prob(self, num_samples, context, given=None):
         """Draw one phase per `theta_rest` row (`num_samples` must be 1); return the phases
@@ -539,7 +545,7 @@ class SyntheticPhaseFactor(Factor):
         per sample: evaluate `log L` on the grid, exponentiate (shifted by the per-row
         max), and add the uniform floor."""
         theta = pd.DataFrame({k: _to_numpy(v) for k, v in given.items()})
-        likelihood = context.likelihood()
+        likelihood = context.likelihood(**(self.likelihood_kwargs or {}))
         phases = np.linspace(0, 2 * np.pi, self.n_grid)
         if self.approximation_22_mode:
             # Assume the waveform is (2, 2)-dominated (transforms as exp(2i phase)), so the

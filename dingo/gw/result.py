@@ -318,6 +318,23 @@ class Result(CoreResult):
             # Recalculate the importance-sampling weights and log evidence.
             self._calculate_evidence()
 
+    def _likelihood_view_kwargs(self) -> dict:
+        """The `context.likelihood()` arguments encoding this Result's
+        importance-sampling view: the (possibly rebuilt) data domain, the
+        base-domain choice, and delta_f / frequency updates."""
+        wfg_delta_f = None
+        if "T" in (self.importance_sampling_metadata.get("updates") or {}):
+            wfg_delta_f = 1 / self.importance_sampling_metadata["updates"]["T"]
+        return dict(
+            use_base_domain=self.use_base_domain,
+            data_domain=self.domain,
+            wfg_delta_f=wfg_delta_f,
+            frequency_update=dict(
+                minimum_frequency=self.minimum_frequency,
+                maximum_frequency=self.maximum_frequency,
+            ),
+        )
+
     def _build_likelihood(
         self,
         time_marginalization_kwargs: Optional[dict] = None,
@@ -396,13 +413,7 @@ class Result(CoreResult):
                 time_marginalization_kwargs=time_marginalization_kwargs,
                 phase_marginalization_kwargs=phase_marginalization_kwargs,
                 calibration_marginalization_kwargs=calibration_marginalization_kwargs,
-                use_base_domain=self.use_base_domain,
-                data_domain=self.domain,
-                wfg_delta_f=wfg_delta_f,
-                frequency_update=dict(
-                    minimum_frequency=self.minimum_frequency,
-                    maximum_frequency=self.maximum_frequency,
-                ),
+                **self._likelihood_view_kwargs(),
             )
             return
 
@@ -536,6 +547,52 @@ class Result(CoreResult):
         # Rebuild the prior (which will include calibration priors from prior_update)
         self._build_prior()
 
+    def _sample_synthetic_phase_chain(
+        self, theta, within_prior, approximation_22_mode, num_processes
+    ):
+        """Synthetic phase as a chain over the sampler context: the root emits the
+        within-prior proposal samples with their stored log-prob, and
+        `SyntheticPhaseFactor` draws `phase` -- the composer's ordinary log-prob fold
+        returns the joint proposal density `log q(theta) + log q(phase | theta, d)`,
+        which replaces the samples' log_prob (the legacy `log_prob += delta`). The
+        Result's likelihood view (base domain, rebuilt domain, frequency updates) is
+        passed to the factor, so it shares the cached likelihood instance built by
+        `_build_likelihood`. Out-of-prior rows keep the legacy convention:
+        `phase = 0`, `log_prob = nan`."""
+        from dingo.core.factors import ChainComposer, SampleTableFactor
+        from dingo.gw.inference.factors import SyntheticPhaseFactor
+
+        theta_within = theta.iloc[np.flatnonzero(within_prior)]
+        table = SampleTableFactor(
+            {k: theta_within[k].to_numpy() for k in theta_within.columns},
+            log_prob=self.samples["log_prob"].to_numpy()[within_prior],
+        )
+        factor = SyntheticPhaseFactor(
+            conditioning=list(theta_within.columns),
+            n_grid=self.synthetic_phase_kwargs["n_grid"],
+            approximation_22_mode=approximation_22_mode,
+            uniform_weight=self.synthetic_phase_kwargs.get("uniform_weight", 0.01),
+            num_processes=num_processes,
+            likelihood_kwargs=self._likelihood_view_kwargs(),
+        )
+        chain = ChainComposer([table, factor])
+        out, log_prob = chain.sample_and_log_prob(
+            len(theta_within), self.sampler_context
+        )
+
+        phase_array = np.full(len(theta), 0.0)
+        phase_array[within_prior] = out["phase"].numpy()
+        log_prob_array = np.full(len(theta), np.nan)
+        log_prob_array[within_prior] = log_prob.numpy()
+        self.samples["phase"] = phase_array
+        self.samples["log_prob"] = log_prob_array
+
+        # Insert the phase prior in the prior, since now the phase is present.
+        self.prior["phase"] = self.phase_prior
+        self.phase_prior = None
+        # reset likelihood for safety (matches the legacy path)
+        self.likelihood = None
+
     def sample_synthetic_phase(
         self,
         synthetic_phase_kwargs,
@@ -626,6 +683,14 @@ class Result(CoreResult):
 
         if not inverse:
             self._build_likelihood()
+
+        if not inverse and self.sampler_context is not None:
+            # Run the synthetic-phase step as a chain over the sampler context.
+            self._sample_synthetic_phase_chain(
+                theta, within_prior, approximation_22_mode, num_processes
+            )
+            print(f"Done. This took {time.time() - t0:.2f} s.")
+            return
 
         if inverse:
             # We estimate the log_prob for given phases, so first save the evaluation
