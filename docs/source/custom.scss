@@ -63,6 +63,9 @@ main#quarto-document-content h2 {
   font-weight: 600;
   box-shadow: inset 0 -2px 0 $accent;
 }
+// No text-underline on navbar hover (it sits under the text and clashes with the
+// tab-style active bar); the accent colour change is the hover cue.
+.navbar a:hover { text-decoration: none; }
 .navbar .navbar-nav .nav-link:hover { color: $accent; }
 
 // ── Left sidebar: comfortable spacing + accented active item ──────────────────
