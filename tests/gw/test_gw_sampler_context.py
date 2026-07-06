@@ -7,7 +7,9 @@ harnesses.
 
 import copy
 
+import numpy as np
 import pytest
+import torch
 
 import dingo.gw.inference.factors as factors_module
 from dingo.gw.domains import build_domain
@@ -103,27 +105,54 @@ def test_likelihood_importance_sampling_overrides(context):
     assert default.kwargs["wfg_domain"].delta_f == _DOMAIN_SETTINGS["delta_f"]
 
 
-def test_prepared_data_rejects_frequency_cropping():
-    # A narrower event frequency range needs input masking, which the composed
-    # data-prep chain does not implement yet -> loud failure. Bounds equal to or
-    # wider than the domain (generation writes base-domain bounds) are fine.
-    def make(event_metadata):
-        return GWSamplerContext(
-            domain=build_domain(_DOMAIN_SETTINGS),
-            detectors=["H1"],
-            t_ref=0.0,
-            data_prep=lambda data: "prepared",
-            event_data={},
-            event_metadata=event_metadata,
-        )
+def _event_data(n_bins):
+    strain = np.ones(n_bins, dtype=complex)
+    asd = np.ones(n_bins)
+    return {
+        "waveform": {"H1": strain.copy(), "L1": strain.copy()},
+        "asds": {"H1": asd.copy(), "L1": asd.copy()},
+    }
 
-    with pytest.raises(NotImplementedError, match="cropping"):
-        make({"minimum_frequency": 25.0}).prepared_data()
-    with pytest.raises(NotImplementedError, match="cropping"):
-        make({"maximum_frequency": {"H1": 512.0}}).prepared_data()
-    assert make({"minimum_frequency": 20.0}).prepared_data() == "prepared"
-    assert make({"maximum_frequency": 1099.0}).prepared_data() == "prepared"
-    assert make(None).prepared_data() == "prepared"
+
+def _crop_context(event_metadata, crop_settings=None):
+    meta = copy.deepcopy(_MODEL_METADATA)
+    if crop_settings is not None:
+        meta["train_settings"]["data"]["random_strain_cropping"] = crop_settings
+    n_bins = int(_DOMAIN_SETTINGS["f_max"] / _DOMAIN_SETTINGS["delta_f"]) + 1
+    return GWSamplerContext.from_model_metadata(
+        meta, _event_data(n_bins), event_metadata=event_metadata
+    )
+
+
+def test_frequency_range_equal_bounds_is_a_no_op():
+    reference = _crop_context(None).prepared_data()
+    same = _crop_context(
+        {"minimum_frequency": 20.0, "maximum_frequency": 1024.0}
+    ).prepared_data()
+    assert torch.equal(reference, same)
+
+
+def test_frequency_range_narrowing_requires_crop_license():
+    with pytest.raises(ValueError, match="Cropping disabled"):
+        _crop_context({"minimum_frequency": 25.0}).prepared_data()
+
+
+def test_frequency_range_beyond_domain_rejected():
+    # The O1-file-reuse scenario: event bounds wider than the network domain.
+    with pytest.raises(ValueError, match="domain.f_max"):
+        _crop_context({"maximum_frequency": 1099.0}).prepared_data()
+
+
+def test_frequency_range_cropping_masks_network_input():
+    ctx = _crop_context(
+        {"minimum_frequency": 25.0},
+        crop_settings={"cropping_probability": 0.5, "f_min_upper": 30.0},
+    )
+    out = ctx.prepared_data()  # (n_det, 3 channels, n_bins), real strain first
+    frequencies = ctx.domain.sample_frequencies[ctx.domain.min_idx :]
+    strain_real = out[0, 0].numpy()
+    assert (strain_real[frequencies < 25.0] == 0).all()
+    assert (strain_real[frequencies >= 25.0] != 0).all()
 
 
 def test_likelihood_caller_marginalization_bounds_win(context):

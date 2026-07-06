@@ -45,6 +45,10 @@ from dingo.core.multiprocessing import apply_func_with_multiprocessing
 from dingo.core.posterior_models import BasePosteriorModel
 from dingo.core.transforms import GetItem, RenameKey
 from dingo.gw.domains import build_domain, MultibandedFrequencyDomain
+from dingo.gw.frequency_updates import (
+    _validate_maximum_frequency,
+    _validate_minimum_frequency,
+)
 from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 from dingo.gw.prior import build_prior_with_defaults
@@ -54,6 +58,7 @@ from dingo.gw.transforms import (
     GetDetectorTimes,
     GNPEBase,
     GNPECoalescenceTimes,
+    MaskDataForFrequencyRangeUpdate,
     PostCorrectGeocentTime,
     RepackageStrainsAndASDS,
     SelectStandardizeRepackageParameters,
@@ -63,6 +68,26 @@ from dingo.gw.transforms import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _frequency_range_update(domain, event_metadata) -> Optional[dict]:
+    """The event's requested frequency range when it differs from the data-domain
+    bounds (the legacy `frequency_updates` condition), else `None`. Values may be
+    floats or per-detector dicts; defaults are the domain bounds. Note a request
+    merely *wider* than the domain also triggers (generation writes base-domain
+    bounds, e.g. 1099.0 vs a multibanded band edge of 1098.875) -- the resulting
+    mask is then an identity, matching legacy behavior."""
+    if event_metadata is None:
+        return None
+    minimum = event_metadata.get("minimum_frequency", domain.f_min)
+    maximum = event_metadata.get("maximum_frequency", domain.f_max)
+
+    def normalize(value):
+        return set(value.values()) if isinstance(value, dict) else {value}
+
+    if normalize(minimum) == {domain.f_min} and normalize(maximum) == {domain.f_max}:
+        return None
+    return {"minimum_frequency": minimum, "maximum_frequency": maximum}
 
 
 class GWSamplerContext:
@@ -173,8 +198,16 @@ class GWSamplerContext:
             )
         # Whiten and scale (the network expects standardized data).
         transforms.append(WhitenAndScaleStrain(domain.noise_std))
+        # Event frequency-range update: mask the whitened strain/ASDs outside the
+        # requested range. Must precede repackaging (ranges may be per-detector).
+        # The request is validated against the training crop license the first time
+        # prepared_data() runs.
+        range_update = _frequency_range_update(domain, event_metadata)
+        if range_update is not None:
+            transforms.append(
+                MaskDataForFrequencyRangeUpdate(domain=domain, **range_update)
+            )
         # Repackage strains/ASDs into an array, move to torch, extract the waveform.
-        # TODO: frequency-range cropping (MaskDataForFrequencyRangeUpdate) -- follow-up.
         transforms += [
             RepackageStrainsAndASDS(ifos=detectors, first_index=domain.min_idx),
             ToTorch(device=device),
@@ -231,38 +264,33 @@ class GWSamplerContext:
         )
 
     def prepared_data(self) -> torch.Tensor:
-        """One-time data preprocessing, computed once and cached."""
+        """One-time data preprocessing, computed once and cached. An event
+        frequency-range update is validated against the training crop license
+        before the first preparation."""
         if self._prepared is None:
-            self._require_no_frequency_cropping()
+            self._validate_frequency_range()
             self._prepared = self._data_prep(self.event_data)
         return self._prepared
 
-    def _require_no_frequency_cropping(self):
-        """Frequency-range cropping -- masking the network input to an event range
-        narrower than the network domain (legacy `MaskDataForFrequencyRangeUpdate`)
-        -- is not implemented in the composed data-prep chain yet; fail loudly
-        rather than silently feed the network unmasked data. The likelihood view is
-        unaffected (it applies the range via ASD masking). Event bounds merely
-        *wider* than the data domain are fine (nothing to remove): generation
-        writes base-domain bounds, which can exceed a multibanded domain's
-        quantized band edge (e.g. 1099.0 vs 1098.875)."""
-        if self.event_metadata is None:
+    def _validate_frequency_range(self):
+        """Validate an event frequency-range update, exactly as the legacy sampler
+        setters did: hard bounds against the (base) domain, and narrowing only when
+        the network was trained with random strain cropping covering the requested
+        range. Applies to the network-input view only -- the likelihood view
+        applies the range independently via ASD masking."""
+        update = _frequency_range_update(self.domain, self.event_metadata)
+        if update is None:
             return
-        for key, bound, narrower in (
-            ("minimum_frequency", self.domain.f_min, lambda v, b: v > b),
-            ("maximum_frequency", self.domain.f_max, lambda v, b: v < b),
-        ):
-            value = self.event_metadata.get(key)
-            if value is None:
-                continue
-            values = value.values() if isinstance(value, dict) else [value]
-            if any(narrower(v, bound) for v in values):
-                raise NotImplementedError(
-                    f"Event {key} = {value} is narrower than the network domain "
-                    f"bound ({bound}): frequency-range cropping is not implemented "
-                    "in the composed data-prep chain yet. "
-                    "Use sampler-implementation = legacy."
-                )
+        domain = getattr(self.domain, "base_domain", self.domain)
+        crop_settings = self.base_metadata["train_settings"]["data"].get(
+            "random_strain_cropping"
+        )
+        _validate_minimum_frequency(
+            update["minimum_frequency"], self.detectors, domain, crop_settings
+        )
+        _validate_maximum_frequency(
+            update["maximum_frequency"], self.detectors, domain, crop_settings
+        )
 
     @property
     def prior(self) -> PriorDict:
