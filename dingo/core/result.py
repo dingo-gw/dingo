@@ -170,23 +170,23 @@ class Result(DingoDataset):
         ):
             # This is really just for notification. Actions are only taken if the
             # event metadata differ.
-            log.info("\nNew event data differ from existing.")
+            log.warning("New event data differ from existing.")
         self.context = context
 
         if self.event_metadata is not None and self.event_metadata != event_metadata:
-            log.info("Changes")
-            log.info("=======")
+            log.warning("Changes")
+            log.warning("=======")
             old_minus_new = dict(freeze(self.event_metadata) - freeze(event_metadata))
-            log.info("Old event metadata:")
+            log.warning("Old event metadata:")
             for k in sorted(old_minus_new):
-                log.info(f"  {k}:  {self.event_metadata[k]}")
+                log.warning(f"  {k}:  {self.event_metadata[k]}")
 
             new_minus_old = dict(freeze(event_metadata) - freeze(self.event_metadata))
-            log.info("New event metadata:")
+            log.warning("New event metadata:")
             if self.importance_sampling_metadata.get("updates") is None:
                 self.importance_sampling_metadata["updates"] = {}
             for k in sorted(new_minus_old):
-                log.info(f"  {k}:  {event_metadata[k]}")
+                log.warning(f"  {k}:  {event_metadata[k]}")
                 self.importance_sampling_metadata["updates"][k] = event_metadata[k]
 
             self._rebuild_domain(verbose=True)
@@ -818,7 +818,7 @@ class Result(DingoDataset):
             plt.tight_layout()
             plt.savefig(filename)
         else:
-            log.info("Results not importance sampled. Cannot produce log_prob plot.")
+            log.warning("Results not importance sampled. Cannot produce log_prob plot.")
 
     def plot_weights(self, filename="weights.png"):
         """Make a scatter plot of samples weights vs log proposal."""
@@ -847,7 +847,7 @@ class Result(DingoDataset):
             plt.tight_layout()
             plt.savefig(filename)
         else:
-            log.info("Results not importance sampled. Cannot plot weights.")
+            log.warning("Results not importance sampled. Cannot plot weights.")
 
     def get_all_injection_credible_levels(
         self, keys: list[str] = None, weighted: bool = False

@@ -159,7 +159,7 @@ class Sampler(object):
             x = [x]
         else:
             if context is not None:
-                log.info("Unconditional model. Ignoring context.")
+                log.warning("Unconditional model. Ignoring context.")
             x = []
 
         # For a normalizing flow, we get the log_prob for "free" when sampling,
@@ -431,8 +431,8 @@ class GNPESampler(Sampler):
             init_samples = self.init_sampler._run_sampler(num_samples, context)
         else:
             if self.num_iterations == 1:
-                log.info(
-                    f"Warning: Removing initial outliers, but only carrying out "
+                log.warning(
+                    f"Removing initial outliers, but only carrying out "
                     f"{self.num_iterations} GNPE iteration. This risks biasing "
                     f"results."
                 )

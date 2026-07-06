@@ -75,13 +75,13 @@ def copy_files_to_local(
             "Done. This took {:2.0f}:{:2.0f} min.".format(*divmod(elapsed_time, 60))
         )
     elif leave_keys_on_disk and is_condor:
-        log.info(
-            f"Warning: leave_waveforms_on_disk defaults to True, but local_cache_path is not specified. "
-            f"This means that the waveforms will be loaded during training from {local_file_path} ."
+        log.warning(
+            f"leave_waveforms_on_disk defaults to True, but local_cache_path is not specified. "
+            f"This means that the waveforms will be loaded during training from {local_file_path}. "
             f"This can lead to unexpected long times for data loading during training due to network traffic. "
             f"To prevent this, specify 'local_cache_path = tmp' in the local settings or set "
             f"leave_waveforms_on_disk = False. However, the latter is not recommended for large datasets since "
-            f"it can lead to memory issues when loading the entire dataset into RAM. "
+            f"it can lead to memory issues when loading the entire dataset into RAM."
         )
 
     return local_file_path
@@ -181,7 +181,7 @@ def prepare_training_new(
                 **local_settings["wandb"],
             )
         except ImportError:
-            log.info("WandB is enabled but not installed.")
+            log.warning("WandB is enabled but not installed.")
 
     return pm, wfd
 
@@ -234,7 +234,7 @@ def prepare_training_resume(
                 **local_settings["wandb"],
             )
         except ImportError:
-            log.info("WandB is enabled but not installed.")
+            log.warning("WandB is enabled but not installed.")
 
     return pm, wfd
 
@@ -367,7 +367,7 @@ def train_stages(
             try:
                 early_stopping = EarlyStopping(**stage["early_stopping"])
             except Exception:
-                log.info(
+                log.warning(
                     "Early stopping settings invalid. Please pass 'patience', 'delta', 'metric'"
                 )
                 raise
@@ -443,7 +443,7 @@ def train_local(cfg: DictConfig):
 
                     local_settings["wandb"]["id"] = wandb.util.generate_id()
                 except ImportError:
-                    log.info("wandb not installed, cannot generate run id.")
+                    log.warning("wandb not installed, cannot generate run id.")
             yaml.dump(local_settings, f, default_flow_style=False, sort_keys=False)
 
         pm, wfd = prepare_training_new(train_settings, train_dir, local_settings)

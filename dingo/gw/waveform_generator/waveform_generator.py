@@ -586,7 +586,7 @@ class WaveformGenerator:
         # numbers if multibanding is used. If that happens, turn off multibanding to
         # fix this.
         if max(np.max(np.abs(hp.data.data)), np.max(np.abs(hc.data.data))) > 1e-20:
-            log.info(
+            log.warning(
                 f"Generation with parameters {parameters_lal} likely numerically "
                 f"unstable due to multibanding, turn off multibanding."
             )
@@ -609,8 +609,8 @@ class WaveformGenerator:
                 *parameters_lal[lal_dict_idx + 1 :],
             )
             if max(np.max(np.abs(hp.data.data)), np.max(np.abs(hc.data.data))) > 1e-20:
-                log.info(
-                    f"Warning: turning off multibanding for parameters {parameters_lal}"
+                log.warning(
+                    f"Turning off multibanding for parameters {parameters_lal}"
                     f" likely numerically might not have fixed it, check manually."
                 )
 

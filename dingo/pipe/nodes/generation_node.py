@@ -1,9 +1,12 @@
+import logging
 import os
 
 from bilby_pipe.job_creation.nodes import GenerationNode as BilbyGenerationNode
 from bilby_pipe.utils import BilbyPipeError
 
 from dingo.pipe.utils import _strip_unwanted_submission_keys
+
+logger = logging.getLogger("dingo.pipe")
 
 
 class GenerationNode(BilbyGenerationNode):
@@ -101,7 +104,6 @@ class GenerationNode(BilbyGenerationNode):
             for fname in self.extract_paths_from_dict(frame_files)
             if fname.startswith(self.inputs.data_find_urltype)
         ]:
-            from bilby_pipe.utils import logger
             logger.warning(
                 "The following frame files were identified by gwdatafind for this analysis. "
                 "These frames may not be found by the data generation stage as file "

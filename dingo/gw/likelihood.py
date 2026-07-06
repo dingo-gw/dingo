@@ -22,6 +22,7 @@ from dingo.gw.domains import (
 )
 from dingo.gw.domains import build_domain
 from dingo.gw.data.data_preparation import get_event_data_and_domain
+from dingo.core.utils.logging_utils import logger
 
 
 class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
@@ -173,7 +174,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 # use endpoint = False for grid, since phase = 0/2pi are equivalent
                 self.phase_grid = np.linspace(0, 2 * np.pi, n_grid, endpoint=False)
             else:
-                print("Using phase marginalization with (2,2) mode approximation.")
+                logger.info("Using phase marginalization with (2,2) mode approximation.")
 
         # Initialize calibration marginalization using the setter from GWSignal.
         self.calibration_marginalization_kwargs = calibration_marginalization_kwargs
@@ -870,15 +871,15 @@ def main():
         try:
             l = likelihood.log_prob(theta)
         except:
-            print(idx)
+            logger.warning(idx)
             l = float("nan")
         log_likelihoods.append(l)
     log_likelihoods = np.array(log_likelihoods)
     log_likelihoods = log_likelihoods[~np.isnan(log_likelihoods)]
-    print(f"mean: {np.mean(log_likelihoods)}")
-    print(f"std: {np.std(log_likelihoods)}")
-    print(f"max: {np.max(log_likelihoods)}")
-    print(f"min: {np.min(log_likelihoods)}")
+    logger.info(f"mean: {np.mean(log_likelihoods)}")
+    logger.info(f"std: {np.std(log_likelihoods)}")
+    logger.info(f"max: {np.max(log_likelihoods)}")
+    logger.info(f"min: {np.min(log_likelihoods)}")
 
 
 if __name__ == "__main__":

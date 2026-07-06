@@ -16,11 +16,14 @@ from bilby_pipe.utils import (
     convert_string_to_dict,
     get_colored_string,
     get_command_line_arguments,
-    logger,
     parse_args,
     convert_prior_string_input,
     BilbyPipeError,
 )
+
+import logging
+from dingo.core.utils.logging_utils import setup_logger
+logger = logging.getLogger("dingo.pipe")
 
 from .dag_creator import generate_dag
 from .parser import create_parser
@@ -617,6 +620,8 @@ def write_complete_config_file(parser, args, inputs, input_cls=MainInput):
 def main():
     parser = create_parser(top_level=True)
     args, unknown_args = parse_args(get_command_line_arguments(), parser)
+
+    setup_logger(outdir=args.outdir, label=args.label)
 
     importance_sampling_updates, model_args = fill_in_arguments_from_model(args)
     inputs = MainInput(args, unknown_args, importance_sampling_updates)

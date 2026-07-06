@@ -10,12 +10,12 @@ from bilby_pipe.data_generation import DataGenerationInput as BilbyDataGeneratio
 from bilby.core.prior import PriorDict
 from bilby_pipe.utils import (
     parse_args,
-    logger,
     convert_string_to_dict,
     convert_prior_string_input,
     resolve_filename_with_transfer_fallback,
     BilbyPipeError,
 )
+import logging
 import lalsimulation as LS
 import numpy as np
 
@@ -24,8 +24,9 @@ from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import UniformFrequencyDomain, build_domain_from_model_metadata
 from dingo.gw.injection import Injection
 from dingo.pipe.parser import create_parser
+from dingo.core.utils.logging_utils import setup_logger
 
-logger.name = "dingo_pipe"
+logger = logging.getLogger("dingo.pipe")
 
 
 class DataGenerationInput(BilbyDataGenerationInput):
@@ -534,6 +535,7 @@ def create_generation_parser():
 def main():
     """Data generation main logic"""
     args, unknown_args = parse_args(sys.argv[1:], create_generation_parser())
+    setup_logger(outdir=args.outdir, label=args.label)
     # log_version_information()
     data = DataGenerationInput(args, unknown_args)
     data.save_hdf5()

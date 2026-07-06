@@ -452,7 +452,7 @@ class BasePosteriorModel(ABC):
                             }
                         )
                     except ImportError:
-                        log.info("wandb not installed. Skipping logging to wandb.")
+                        log.warning("wandb not installed. Skipping logging to wandb.")
 
                 if early_stopping is not None:
                     # Whether to use train or test loss
