@@ -70,6 +70,22 @@ def test_likelihood_rebuilt_only_when_settings_change(context):
     assert _StubLikelihood.constructions == 2
 
 
+def test_likelihood_cache_handles_domain_and_none_settings(context):
+    # A bare call (data_domain=None) followed by an explicit domain (either order)
+    # must be a clean cache miss, not a Domain == None comparison error.
+    bare = context.likelihood()
+    explicit = context.likelihood(data_domain=build_domain(_DOMAIN_SETTINGS))
+    assert explicit is not bare
+    assert context.likelihood() is not explicit
+
+
+def test_domain_eq_is_none_safe():
+    domain = build_domain(_DOMAIN_SETTINGS)
+    assert domain == build_domain(_DOMAIN_SETTINGS)
+    assert domain != None  # noqa: E711
+    assert (domain == 3) is False
+
+
 def test_likelihood_importance_sampling_overrides(context):
     # IS-state overrides pass through: an explicit data domain, an updated
     # waveform-generator delta_f, and an explicit frequency range.
