@@ -87,10 +87,10 @@ class Result(DingoDataset):
         self.context = None
         self.samples = None
         self.log_noise_evidence = None
-        # Live sampler context (a GWSamplerContext), set when a sampler builds the
-        # Result rather than loading it from file. When present, _build_prior (and,
-        # later, _build_likelihood) delegate to it; it is not serialized, so a Result
-        # loaded from file has sampler_context=None and self-builds as before.
+        # Sampler context (a GWSamplerContext): passed in live when a sampler builds
+        # the Result, and otherwise reconstructed from the serialized payload by
+        # _build_context(), so that prior (and, later, likelihood) construction
+        # delegates to it no matter how the Result was born.
         self.sampler_context = sampler_context
         super().__init__(
             file_name=file_name,
@@ -102,6 +102,8 @@ class Result(DingoDataset):
         if self.importance_sampling_metadata is None:
             self.importance_sampling_metadata = {}
 
+        if self.sampler_context is None:
+            self.sampler_context = self._build_context()
         self._build_prior()
         self._build_domain()
         if self.importance_sampling_metadata.get("updates"):
@@ -150,6 +152,12 @@ class Result(DingoDataset):
     def _build_likelihood(self, **likelihood_kwargs):
         self.likelihood = None
 
+    def _build_context(self):
+        """Reconstruct the sampler context from the serialized payload; overridden
+        by domain-specific subclasses. Called when no live context was passed in,
+        and again after reset_event()."""
+        return None
+
     def reset_event(self, event_dataset):
         """
         Set the Result context and event_metadata based on an EventDataset.
@@ -164,11 +172,6 @@ class Result(DingoDataset):
         event_dataset: EventDataset
             New event to be used for importance sampling.
         """
-        # The live sampler context describes the data the samples were drawn from;
-        # after resetting to (possibly regenerated) event data it no longer describes
-        # self.context, so drop it and fall back to self-building.
-        self.sampler_context = None
-
         context = event_dataset.data
         event_metadata = event_dataset.settings
 
@@ -198,6 +201,10 @@ class Result(DingoDataset):
 
             self._rebuild_domain(verbose=True)
         self.event_metadata = event_metadata
+
+        # The old context described the data the samples were drawn from; rebuild it
+        # around the new (possibly regenerated) event payload.
+        self.sampler_context = self._build_context()
 
     def _rebuild_domain(self, verbose=False):
         pass

@@ -130,33 +130,37 @@ class GWSamplerContext:
         self._likelihood_settings: Optional[dict] = None
 
     @classmethod
-    def from_model(
+    def from_model_metadata(
         cls,
-        model: BasePosteriorModel,
+        metadata: dict,
         event_data: dict,
         event_metadata: Optional[dict] = None,
+        device: Union[torch.device, str] = "cpu",
     ) -> "GWSamplerContext":
-        """Build the context (domain + one-time data-prep chain) from a model's metadata.
-        The data-prep chain reproduces `GWSampler` preprocessing for the plain-NPE case
-        (parameter-dependent transforms are handled per-factor).
+        """Build the context from a model-metadata dict -- no model required. The
+        domain, one-time data-prep chain, prior, and likelihood are all defined by
+        the metadata (e.g. a saved `Result.settings`); `device` only sets where
+        `prepared_data()` and chain-created tensors live.
 
         Parameters
         ----------
-        model : BasePosteriorModel
-            The model whose metadata defines the domain and preprocessing.
+        metadata : dict
+            Conditional-model metadata (`dataset_settings` + `train_settings`),
+            e.g. the `settings` of a saved `Result`.
         event_data : dict
             The raw event data (strain + ASDs).
         event_metadata : dict, optional
             Per-event metadata.
+        device : torch.device or str, default "cpu"
+            Device for `prepared_data()` and chain-created tensors.
 
         Returns
         -------
         GWSamplerContext
         """
-        meta = _base_model_metadata(model)
-        data_settings = meta["train_settings"]["data"]
+        data_settings = metadata["train_settings"]["data"]
 
-        domain = build_domain(meta["dataset_settings"]["domain"])
+        domain = build_domain(metadata["dataset_settings"]["domain"])
         if "domain_update" in data_settings:
             domain.update(data_settings["domain_update"])
         detectors = data_settings["detectors"]
@@ -173,7 +177,7 @@ class GWSamplerContext:
         # TODO: frequency-range cropping (MaskDataForFrequencyRangeUpdate) -- follow-up.
         transforms += [
             RepackageStrainsAndASDS(ifos=detectors, first_index=domain.min_idx),
-            ToTorch(device=model.device),
+            ToTorch(device=device),
             GetItem("waveform"),
         ]
 
@@ -184,8 +188,46 @@ class GWSamplerContext:
             data_prep=Compose(transforms),
             event_data=event_data,
             event_metadata=event_metadata,
-            base_metadata=meta,
-            device=model.device,
+            base_metadata=metadata,
+            device=device,
+        )
+
+    @classmethod
+    def from_model(
+        cls,
+        model: BasePosteriorModel,
+        event_data: dict,
+        event_metadata: Optional[dict] = None,
+    ) -> "GWSamplerContext":
+        """Build the context from a model: its own metadata and its device. Data
+        preparation is network-bound, so the settings come from `model.metadata`
+        (for a conditional model this equals the base analysis metadata). An
+        unconditional model prepares no data, so no context can be built from one;
+        for the prior/likelihood views alone, use
+        `from_model_metadata(_base_model_metadata(model), ...)`.
+
+        Parameters
+        ----------
+        model : BasePosteriorModel
+            The (conditional) model whose metadata defines the domain and
+            preprocessing.
+        event_data : dict
+            The raw event data (strain + ASDs).
+        event_metadata : dict, optional
+            Per-event metadata.
+
+        Returns
+        -------
+        GWSamplerContext
+        """
+        if model.metadata["train_settings"]["data"].get("unconditional", False):
+            raise ValueError(
+                "An unconditional model has no data preparation, so a context "
+                "cannot be built from it. For the prior/likelihood views, use "
+                "GWSamplerContext.from_model_metadata(_base_model_metadata(model), ...)."
+            )
+        return cls.from_model_metadata(
+            model.metadata, event_data, event_metadata, device=model.device
         )
 
     def prepared_data(self) -> torch.Tensor:

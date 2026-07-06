@@ -1,8 +1,11 @@
 """
-Unit tests for ``GWSamplerContext`` plumbing: the default-likelihood cache and the
-device attribute. The likelihood itself is stubbed (no waveform generation); the
-model-based construction parity lives in the local harnesses.
+Unit tests for ``GWSamplerContext`` plumbing: the default-likelihood cache, the
+device attribute, and the metadata constructors. The likelihood itself is stubbed
+(no waveform generation); the model-based construction parity lives in the local
+harnesses.
 """
+
+import copy
 
 import pytest
 
@@ -81,3 +84,52 @@ def test_context_device_default_and_explicit():
         domain=None, detectors=["H1"], t_ref=0.0, data_prep=None, event_data={}
     )
     assert ctx_default.device == "cpu"
+
+
+# Full conditional-model metadata, as serialized in Result.settings.
+_MODEL_METADATA = {
+    "dataset_settings": {
+        "domain": _DOMAIN_SETTINGS,
+        "waveform_generator": {"approximant": "IMRPhenomD", "f_ref": 20.0},
+    },
+    "train_settings": {
+        "data": {
+            "detectors": ["H1", "L1"],
+            "ref_time": 1126259462.4,
+            "inference_parameters": ["chirp_mass"],
+        }
+    },
+}
+
+
+class _StubModel:
+    metadata = _MODEL_METADATA
+    device = "cpu"
+
+
+def test_from_model_metadata_matches_from_model():
+    ctx_meta = GWSamplerContext.from_model_metadata(_MODEL_METADATA, event_data={})
+    ctx_model = GWSamplerContext.from_model(_StubModel(), event_data={})
+    for ctx in (ctx_meta, ctx_model):
+        assert ctx.detectors == ["H1", "L1"]
+        assert ctx.t_ref == 1126259462.4
+        assert ctx.domain.domain_dict == ctx_meta.domain.domain_dict
+        assert ctx.base_metadata is _MODEL_METADATA
+        assert ctx.device == "cpu"
+        assert ctx._data_prep is not None
+
+
+def test_from_model_rejects_unconditional():
+    nde_metadata = copy.deepcopy(_MODEL_METADATA)
+    nde_metadata["train_settings"]["data"]["unconditional"] = True
+    nde_metadata["base"] = _MODEL_METADATA
+
+    class _StubNDE:
+        metadata = nde_metadata
+        device = "cpu"
+
+    with pytest.raises(ValueError, match="unconditional"):
+        GWSamplerContext.from_model(_StubNDE(), event_data={})
+    # The analysis views remain available from the base metadata.
+    ctx = GWSamplerContext.from_model_metadata(nde_metadata["base"], event_data={})
+    assert ctx.detectors == ["H1", "L1"]

@@ -212,6 +212,26 @@ class Result(CoreResult):
             if verbose:
                 print("No domain updates found; domain not rebuilt.")
 
+    def _build_context(self):
+        """Reconstruct the per-event sampler context from the serialized payload
+        (settings + event data + event metadata), so that prior (and, later,
+        likelihood) construction delegates to `GWSamplerContext` no matter how the
+        Result was born -- live from a sampler or loaded from file."""
+        if self.context is None or self.settings is None:
+            return None
+        from dingo.gw.inference.factors import GWSamplerContext
+
+        try:
+            # base_metadata resolves the unconditional ("base") indirection, so
+            # density-recovery results reconstruct from the analysis metadata.
+            return GWSamplerContext.from_model_metadata(
+                self.base_metadata, self.context, self.event_metadata
+            )
+        except (KeyError, TypeError):
+            # Settings are not a full model metadata (e.g. parameter subsets); the
+            # self-build paths below still apply.
+            return None
+
     def _build_prior(self):
         """Build the prior based on model metadata. Called by __init__()."""
         if self.sampler_context is not None:
