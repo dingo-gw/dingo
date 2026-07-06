@@ -140,7 +140,7 @@ scheduler
 : Use a [learning rate scheduler](https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate) to reduce the learning rate over time. This can improve overall optimization.
 
 batch_size
-: Number of training samples per mini-batch. For a training dataset of size $N$, then each epoch will consist of $N / \text{batch_size}$ batches. Generally training will be faster for a larger batch size, but will require additional iterations.
+: Number of training samples per mini-batch. For a training dataset of size $N$, then each epoch will consist of $N / \text{batch\_size}$ batches. Generally training will be faster for a larger batch size, but will require additional iterations.
 
 ::: {.callout-important}
 The stage-training framework allows for separate pre-training and fine-tuning stages. We found that having a pre-training stage where we freeze certain network weights and fix the noise ASD improves overall training results.
