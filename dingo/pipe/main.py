@@ -28,7 +28,7 @@ from .utils import dict_to_string
 
 from ..gw.domains.build_domain import build_domain_from_model_metadata
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
-from ..gw.inference.gw_samplers import check_frequency_updates
+from ..gw.frequency_updates import check_frequency_updates
 from ..gw.injection import Injection
 from ..gw.noise.asd_dataset import ASDDataset
 
