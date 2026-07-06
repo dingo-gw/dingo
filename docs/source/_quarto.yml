@@ -33,28 +33,33 @@ website:
   description: "Neural posterior estimation for gravitational-wave inference"
   site-url: "https://dingo-gw.github.io/dingo"
   repo-url: "https://github.com/dingo-gw/dingo"
-  # Top navbar: reserved for site-level links (Home, API, source). Docs navigation
-  # lives in the left sidebar below, ReadTheDocs-style.
+  # Top navbar: quick links to the major documentation sections. The brand
+  # ("Dingo", top-left) links home. The full docs tree also lives in the left
+  # sidebar below; the API reference sidebar is auto-generated.
   navbar:
-    background: primary
+    background: light
     search: true
     left:
-      - text: "Home"
-        file: index.qmd
-      - text: "API reference"
+      - text: "Getting Started"
+        file: installation.qmd
+      - text: "Examples"
+        file: example_toy_npe_model.qmd
+      - text: "User Guide"
+        file: sbi.qmd
+      - text: "API Reference"
         file: reference/index.qmd
     right:
       - icon: github
         href: https://github.com/dingo-gw/dingo
         aria-label: Dingo on GitHub
-  # Left sidebar: the full documentation tree, shown on every docs page.
+  # Full documentation tree on the left, shown on every page.
   sidebar:
     style: docked
     collapse-level: 2
     contents:
       - text: "Home"
         file: index.qmd
-      - section: "Getting started"
+      - section: "Getting Started"
         contents:
           - installation.qmd
           - overview.qmd
@@ -65,7 +70,7 @@ website:
           - example_npe_model.qmd
           - example_gnpe_model.qmd
           - example_injection.qmd
-      - section: "User guide"
+      - section: "User Guide"
         contents:
           - sbi.qmd
           - code_design.qmd
@@ -80,7 +85,7 @@ website:
           - result.qmd
           - dingo_pipe.qmd
           - asimov.qmd
-      - section: "API reference"
+      - section: "API Reference"
         contents:
           - reference/index.qmd
 
@@ -88,7 +93,9 @@ bibliography: refs.bib
 
 format:
   html:
-    theme: [cosmo, custom.scss]
+    theme:
+      light: [flatly, custom.scss]
+      dark: [darkly, custom-dark.scss]
     toc: true
     code-copy: true
     highlight-style: github

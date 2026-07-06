@@ -1,0 +1,112 @@
+/*-- scss:defaults --*/
+
+// Dark counterpart of custom.scss. Layered on the `darkly` base, so hard
+// assignments (no !default) are used to override darkly's own values.
+
+// ── Typography (same system stack as light) ──────────────────────────────────
+$web-font-path: false;   // suppress darkly's bundled Lato Google-Fonts import
+$font-family-sans-serif: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+  "Helvetica Neue", "Noto Sans", Arial, sans-serif;
+$font-family-monospace: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+  "Liberation Mono", "Courier New", monospace;
+
+$line-height-base: 1.65;
+$headings-font-weight: 600;
+
+// ── Colour: dark scientific palette (deep neutral-blue + brightened accent) ───
+$accent:       #6ab0e3;            // brightened blue for contrast on dark
+$body-bg:      #12161d;            // deep neutral-blue background
+$body-color:   #c5ccd6;            // light grey body text
+$primary:      $accent;
+$link-color:   $accent;
+$border-color: rgba(255, 255, 255, 0.10);
+
+/*-- scss:rules --*/
+
+body {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  background-color: #12161d;
+  color: #c5ccd6;
+}
+
+// Headings a touch brighter than body.
+h1, h2, h3, h4, h5 { line-height: 1.25; color: #e6eaf0; }
+h1 { font-weight: 700; }
+main#quarto-document-content h2 {
+  margin-top: 2.5rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+// ── Navbar: dark surface, hairline border, light text (overrides navbar-light) ─
+.navbar {
+  background-color: #171c25 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: none;
+}
+.navbar .navbar-brand { font-weight: 700; color: #e6eaf0 !important; }
+.navbar .navbar-nav .nav-link { color: #aeb6c2 !important; font-weight: 500; }
+.navbar .navbar-nav .nav-link:hover { color: #6ab0e3 !important; }
+.navbar .navbar-nav .nav-link.active {
+  color: #6ab0e3 !important;
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 #6ab0e3;
+}
+
+// ── Left sidebar ──────────────────────────────────────────────────────────────
+.sidebar-navigation .sidebar-item .sidebar-link {
+  border-radius: 6px;
+  padding: 0.2rem 0.55rem;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+.sidebar-navigation .sidebar-item .sidebar-link:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.sidebar-navigation .sidebar-item .sidebar-link.active {
+  background: rgba(106, 176, 227, 0.14);
+  color: #6ab0e3;
+  font-weight: 600;
+}
+
+// ── Links (content) ──────────────────────────────────────────────────────────
+a { text-decoration: none; }
+a:hover { text-decoration: underline; }
+main#quarto-document-content a {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: rgba(106, 176, 227, 0.40);
+  text-underline-offset: 0.15em;
+}
+main#quarto-document-content a:hover { text-decoration-color: currentColor; }
+main#quarto-document-content .anchorjs-link,
+main#quarto-document-content .quarto-page-breadcrumbs a { text-decoration: none; }
+
+// ── Code ─────────────────────────────────────────────────────────────────────
+div.sourceCode, pre { border-radius: 8px; }
+div.sourceCode {
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background-color: #171c25;
+}
+pre { background-color: #171c25; }
+p code, li code, td code {
+  background: rgba(255, 255, 255, 0.08);
+  color: #d7dde5;
+  padding: 0.12em 0.36em;
+  border-radius: 5px;
+  font-size: 0.86em;
+}
+
+// ── Callouts ─────────────────────────────────────────────────────────────────
+.callout.callout-style-default { border-radius: 8px; border-left-width: 4px; }
+
+// ── Mermaid ──────────────────────────────────────────────────────────────────
+.cell-output-display svg,
+figure.quarto-figure svg,
+div.mermaid svg,
+pre.mermaid svg {
+  max-width: 720px;
+  height: auto;
+  display: block;
+  margin-inline: auto;
+}
