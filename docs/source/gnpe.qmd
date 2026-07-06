@@ -14,7 +14,7 @@ $$
 p(t_c | d) = p(t_c + \Delta t | d\cdot e^{-2\pi i f \Delta t}).
 $$
 
-It is based on two ideas: 
+It is based on two ideas:
 
 ### Gibbs + NPE
 
@@ -65,7 +65,7 @@ To use GNPE for GW inference one must train **two** Dingo models:
 
 1. An **initialization network** modeling $p(t_I | d)$. This gives the initial guess of the proxy variables for the staring point of the Gibbs sampler. Since this is only modeling two or three parameters and it does not need to give perfect results, this network can also be much smaller than typical Dingo networks.
 
-   For an HL detector network, to infer *just* the detector coalescence times, set this in the train configuration. 
+   For an HL detector network, to infer *just* the detector coalescence times, set this in the train configuration.
     ```yaml
     data:
       inference_parameters: [H1_time, L1_time]
@@ -78,8 +78,8 @@ To use GNPE for GW inference one must train **two** Dingo models:
       gnpe_time_shifts:
         kernel: bilby.core.prior.Uniform(minimum=-0.001, maximum=0.001)
         exact_equiv: True
-    ```  
-   This sets the blurring kernel to be $\text{Unif}(-1~\text{ms}, 1~\text{ms})$ for all $\hat t_I$, and it specifies to enforce the overall time of coalescence symmetry exactly. Dingo will determine automatically from the `detectors` setting which proxy variables to condition on. 
+    ```
+   This sets the blurring kernel to be $\text{Unif}(-1~\text{ms}, 1~\text{ms})$ for all $\hat t_I$, and it specifies to enforce the overall time of coalescence symmetry exactly. Dingo will determine automatically from the `detectors` setting which proxy variables to condition on.
 
 Complete example config files for both networks are provided in the /examples folder.
 

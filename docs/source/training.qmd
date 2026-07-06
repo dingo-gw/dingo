@@ -20,7 +20,7 @@ data:
   domain_update:
     f_min: 20.0
     f_max: 1024.0
-  svd_size_update: 200 
+  svd_size_update: 200
   detectors:
     - H1
     - L1
@@ -166,7 +166,7 @@ checkpoint_epochs
 : Dingo saves a temporary checkpoint in `model_latest.py` after every epoch, but this is later overwritten by the next checkpoint. This setting saves a permanent checkpoint after the specified number of epochs. Having these checkpoints can help in recovering from training failures that do not result in program termination.
 
 leave_waveforms_on_disk
-: To improve memory efficiency during training, the waveforms are not loaded into memory at the beginning of training, but separately for each batch during training. When training on a cluster, it is highly recommended to include a local path where the dataset is cached at the beginning of training (see `local_cache_path`). If RAM is not an issue, the default `leave_waveforms_on_disk=True` can be set to `False`. 
+: To improve memory efficiency during training, the waveforms are not loaded into memory at the beginning of training, but separately for each batch during training. When training on a cluster, it is highly recommended to include a local path where the dataset is cached at the beginning of training (see `local_cache_path`). If RAM is not an issue, the default `leave_waveforms_on_disk=True` can be set to `False`.
 
 local_cache_path
 : When training on a cluster and loading waveforms during training (i.e., `leave_waveforms_on_disk=True`), the waveform dataset should be copied to the disk storage of the local node at the beginning of training. This prevents unexpected long data loading times during training due to network traffic. Usually, paths for local storage are `tmp` or `dev/shm`. When submitting the job with `condor`, `request_disk: 50GB` should be included in the `condor` settings with the requested disk space larger than the size of the waveform dataset used for training.
@@ -186,7 +186,7 @@ usage: dingo_train [-h] [--settings_file SETTINGS_FILE] --train_dir TRAIN_DIR [-
 Train a neural network for gravitational-wave single-event inference.
 
 This program can be called in one of two ways:
-    a) with a settings file. This will create a new network based on the 
+    a) with a settings file. This will create a new network based on the
     contents of the settings file.
     b) with a checkpoint file. This will resume training from the checkpoint.
 
@@ -257,7 +257,7 @@ optional arguments:
   --key KEY [KEY ...]
   --value VALUE
   ```
-  
+
 ::: {.callout-warning}
 Modifications to model metadata can easily break things. Do not use this unless completely sure what you are doing!
 :::
