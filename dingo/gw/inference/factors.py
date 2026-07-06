@@ -72,11 +72,11 @@ logger = logging.getLogger(__name__)
 
 def _frequency_range_update(domain, event_metadata) -> Optional[dict]:
     """The event's requested frequency range when it differs from the data-domain
-    bounds (the legacy `frequency_updates` condition), else `None`. Values may be
-    floats or per-detector dicts; defaults are the domain bounds. Note a request
-    merely *wider* than the domain also triggers (generation writes base-domain
-    bounds, e.g. 1099.0 vs a multibanded band edge of 1098.875) -- the resulting
-    mask is then an identity, matching legacy behavior."""
+    bounds, else `None`. Values may be floats or per-detector dicts; defaults are
+    the domain bounds. A request merely *wider* than the domain also triggers --
+    data generation writes base-domain bounds, which can exceed a multibanded
+    domain's quantized band edge (e.g. 1099.0 vs 1098.875) -- and the resulting
+    mask is then an identity."""
     if event_metadata is None:
         return None
     minimum = event_metadata.get("minimum_frequency", domain.f_min)
@@ -273,11 +273,11 @@ class GWSamplerContext:
         return self._prepared
 
     def _validate_frequency_range(self):
-        """Validate an event frequency-range update, exactly as the legacy sampler
-        setters did: hard bounds against the (base) domain, and narrowing only when
-        the network was trained with random strain cropping covering the requested
-        range. Applies to the network-input view only -- the likelihood view
-        applies the range independently via ASD masking."""
+        """Validate an event frequency-range update: hard bounds against the (base)
+        domain, and narrowing only when the network was trained with random strain
+        cropping covering the requested range. Applies to the network-input view
+        only -- the likelihood view applies the range independently via ASD
+        masking."""
         update = _frequency_range_update(self.domain, self.event_metadata)
         if update is None:
             return
@@ -611,8 +611,9 @@ class SyntheticPhaseFactor(Factor):
 
 
 def _build_gnpe_transforms(model: BasePosteriorModel):
-    """Build the time-shift GNPE per-step transforms from a model's metadata (the same
-    chains as `GWSamplerGNPE._initialize_transforms`).
+    """Build the time-shift GNPE per-step transforms from a model's metadata: the
+    proxy blur, the per-row time-shift alignment applied before the network, and the
+    post-network geocent-time correction.
 
     Returns
     -------
@@ -1097,11 +1098,10 @@ class GWComposedSampler(ComposedSampler):
     def sampler_provenance(self) -> dict:
         """Provenance of how the samples were made, stored as `settings["sampler"]`
         in the exported `Result`: the executed chain in order (one descriptor per
-        step, via `Step.describe()`), plus anything in `provenance_extra`. Nothing
-        consumes this yet -- it is deliberate, structured provenance (the legacy
-        samplers recorded only ad-hoc `num_iterations` / `init_model` keys via
-        setter side effects); the `version` field is insurance for future
-        consumers such as chain reconstruction from file."""
+        step, via `Step.describe()`), plus anything in `provenance_extra`. The
+        block is purely a record -- nothing consumes it at load time -- and the
+        `version` field allows future consumers (e.g. chain reconstruction from
+        file) to evolve the format safely."""
         return {
             "version": 1,
             "implementation": "composed",

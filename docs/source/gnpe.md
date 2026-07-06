@@ -105,16 +105,16 @@ The number of Gibbs iterations is also specified here (typically 30 is appropria
 
 
 
-## The `GNPESampler` class
+## The `GibbsBlock` step
 
-The inference script above uses the `GWSamplerGNPE` class, which is based on `GNPESampler`,
+GNPE inference uses `GWComposedSampler.from_gnpe_models(init_model, main_model, ...)`,
+which wraps the cyclic GNPE loop in a `GibbsBlock` chain step,
 ```{eval-rst}
-.. autoclass:: dingo.core.samplers.GNPESampler
+.. autoclass:: dingo.core.factors.GibbsBlock
    :members:
-   :inherited-members:
    :show-inheritance:
 ```
-In addition to storing a `PosteriorModel`, a `GNPESampler` also stores a second `Sampler` instance, which is based on the initialization network.  When `run_sampler()` is called, it first generates samples from the initialization network, perturbs them with the kernel to obtain proxy samples, and then performs `num_iterations` Gibbs steps to obtain the final samples.
+The block seeds the chain with samples from the initialization network, perturbs them with the kernel to obtain proxy samples, and then performs `num_iterations` Gibbs sweeps (kernel and main-network factors in turn) to obtain the final samples. Because Gibbs sampling breaks density access, the chain yields no log probability; `dingo_pipe` recovers it by training an unconditional flow for the proxies and re-sampling with a single density-preserving step (see [density recovery](result.md#density-recovery)).
 
 ```{eval-rst}
 .. footbibliography::

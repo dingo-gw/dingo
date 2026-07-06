@@ -2,6 +2,7 @@
 Step 1: Train unconditional nde
 Step 2: Set up likelihood and prior
 """
+
 from pathlib import Path
 
 import yaml
@@ -11,7 +12,8 @@ import argparse
 
 from dingo.core.posterior_models import NormalizingFlowPosteriorModel
 from dingo.gw.result import Result
-from dingo.gw.inference.gw_samplers import GWSampler
+from dingo.core.factors import ChainComposer, FlowFactor
+from dingo.gw.inference.factors import GWComposedSampler
 from dingo.gw.importance_sampling.diagnostics import plot_diagnostics
 
 
@@ -116,9 +118,16 @@ def main():
             print(f"Renaming trained nde model to {nde_name}.")
             rename(join(args.outdir, "model_latest.pt"), nde_name)
 
-        # Step 1a: Sample from proposal.
-        nde_sampler = GWSampler(model=nde)
-        nde_sampler.run_sampler(num_samples=settings["num_samples"])
+        # Step 1a: Sample from proposal. The unconditional NDE is the sole
+        # chain factor; the event payload and analysis views come from the
+        # original result's sampler context.
+        nde_sampler = GWComposedSampler(
+            ChainComposer([FlowFactor.from_model(nde)]),
+            result.sampler_context,
+            nde.metadata,
+            nde.metadata["train_settings"]["data"]["inference_parameters"],
+        )
+        nde_sampler.run_sampler(settings["num_samples"])
         result = nde_sampler.to_result()
 
     # else:

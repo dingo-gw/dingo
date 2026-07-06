@@ -1535,11 +1535,12 @@ def create_parser(top_level=True, usage=None):
     sampler_parser.add(
         "--sampler-implementation",
         type=str,
-        default="legacy",
+        default="composed",
         choices=["legacy", "composed"],
-        help="Sampler implementation: 'legacy' (GWSampler / GWSamplerGNPE) or "
-        "'composed' (the factorized GWComposedSampler; experimental). "
-        "Default 'legacy'.",
+        help="Sampler implementation. 'composed' (the factorized "
+        "GWComposedSampler) is the only implementation; 'legacy' is accepted "
+        "for a clear error message (the last commit containing the legacy "
+        "samplers is tagged legacy-samplers-final). Default 'composed'.",
     )
     sampler_parser.add(
         "--recover-log-prob",

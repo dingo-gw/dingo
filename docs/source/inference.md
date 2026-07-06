@@ -4,19 +4,22 @@ With a trained network, inference can be performed on injections or real data. F
 injections, see the [discussion in the examples](example_injection.md). For real data, we 
 recommend to use [dingo_pipe](dingo_pipe.md).
 
-## The `Sampler` class
+## The `GWComposedSampler` class
 
-Inference uses the `Sampler` class, or more specifically, the `GWSampler` class,
-which inherits from it.
+Inference uses the `GWComposedSampler` class, which represents the posterior as a
+chain of conditional factors (the network flow, deterministic reparametrizations
+such as the sky-frame rotation, and fillers for fixed parameters).
 
 ```{eval-rst}
-.. autoclass:: dingo.gw.inference.gw_samplers.GWSampler
+.. autoclass:: dingo.gw.inference.factors.GWComposedSampler
     :members:
     :inherited-members:
     :show-inheritance:
 ```
 
-This is instantiated based on a `PosteriorModel`. To draw samples, the `context` property must first be set to the data to be analyzed. For gravitational waves this should be a dictionary with the following keys:
+A plain-NPE sampler is built with `GWComposedSampler.from_model(model, event_data,
+event_metadata)`, where `model` is a `PosteriorModel` and `event_data` is the data
+to be analyzed---a dictionary with the following keys:
 
 waveform
 : (unwhitened) strain data in each detector
@@ -27,14 +30,14 @@ asds
 parameters (optional)
 : for injections, the true parameters of the signal (for saving; ignored for sampling)
 
-Once this is set, the `run_sampler()` method draws the requested samples from the posterior conditioned on the context. It applies some post-processing (to de-standardize the data, and to correct for the rotation of the Earth between the network reference time and the event time), and then stores the result as a DataFrame in `GWSampler.samples`. The DataFrame contains columns for each inference parameter, as well as the log probability of the sample under the posterior model.
+The `run_sampler()` method then draws the requested samples from the posterior conditioned on the data. All processing---de-standardization inside the network factor, and the correction for the rotation of the Earth between the network reference time and the event time---is expressed as chain steps, and the samples are stored as a DataFrame in `GWComposedSampler.samples`. The DataFrame contains columns for each inference parameter, as well as the log probability of the sample under the posterior model.
 
-The `GWSampler.metadata` attribute contains all settings that went into producing the samples, including training datasets, network training settings, event metadata (for real events) and possible injection parameters. Finally, the `to_samples_dataset()` method returns a `SamplesDataset` containing all results, including the samples, settings, and context. This can be saved easily as HDF5.
+The `GWComposedSampler.metadata` attribute contains all settings that went into producing the samples. The `to_result()` method returns a [Result](dingo.gw.result.Result) containing the samples, settings (including structured sampler provenance under `settings["sampler"]`), and data; `to_hdf5()` saves it directly.
 
 
 ## Injections
 
-Injections (i.e., simulated data) are produced using the `Injection` class. It includes options for fixed or random parameters (drawn from a prior), and it returns injections in a format that can be directly set as `GWSampler.context`.
+Injections (i.e., simulated data) are produced using the `Injection` class. It includes options for fixed or random parameters (drawn from a prior), and it returns injections in a format that can be passed directly as the `event_data` of a `GWComposedSampler`.
 
 ```{eval-rst}
 .. autoclass:: dingo.gw.injection.Injection

@@ -56,11 +56,11 @@ strain_data = injection_generator.injection(theta)
 Then one can create a injections and do inference on them.
 
 ```
-from dingo.gw.inference.gw_samplers import GWSamplerGNPE, GWSampler
+from dingo.gw.inference.factors import GWComposedSampler
 
-init_sampler = GWSampler(model=init_pm)
-sampler = GWSamplerGNPE(model=main_pm, init_sampler=init_sampler, num_iterations=30)
-sampler.context = strain_data
+sampler = GWComposedSampler.from_gnpe_models(
+    init_pm, main_pm, strain_data, num_iterations=30
+)
 sampler.run_sampler(num_samples=50_000, batch_size=10_000)
 result = sampler.to_result()
 result.plot_corner()

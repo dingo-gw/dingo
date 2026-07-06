@@ -94,7 +94,7 @@ Injections mirror the [approach of `bilby_pipe`](https://lscsoft.docs.ligo.org/b
 
 ## Sampling
 
-The next step is sampling from the Dingo model. The model is loaded into a [GWSampler](dingo.gw.inference.gw_samplers.GWSampler) or [GWSamplerGNPE](dingo.gw.inference.gw_samplers.GWSamplerGNPE) object. (If using [GNPE](gnpe) it is necessary to specify a `model-init`.) The Sampler `context` is then set from the EventDataset prepared in the previous step. `num-samples` samples are then generated in batches of size `batch-size`. The samples (and context) are stored in a [Result](dingo.gw.result.Result) object and saved in HDF5 format.
+The next step is sampling from the Dingo model. The model is loaded into a [GWComposedSampler](dingo.gw.inference.factors.GWComposedSampler), built from the EventDataset prepared in the previous step. (If using [GNPE](gnpe) it is necessary to specify a `model-init`.) `num-samples` samples are then generated in batches of size `batch-size`. The samples (and context) are stored in a [Result](dingo.gw.result.Result) object and saved in HDF5 format.
 
 If using GNPE, one can optionally specify `num-gnpe-iterations` (it defaults to 30). Importantly, obtaining the log probability when using GNPE requires an [extra step of training an unconditional flow](result.md#density-recovery). This is done using the `recover-log-prob` flag, which defaults to `True`. The default density recovery settings can be overwritten by providing a `density-recovery-settings` dictionary in the `.ini` file.
 

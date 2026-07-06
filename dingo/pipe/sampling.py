@@ -17,8 +17,6 @@ from dingo.core.factors import FlowFactor
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.inference.factors import GNPEKernelFactor, GWComposedSampler
-from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
-from dingo.gw.inference.inference_utils import prepare_log_prob
 from dingo.pipe.default_settings import DENSITY_RECOVERY_SETTINGS
 from dingo.pipe.parser import create_parser
 
@@ -118,53 +116,38 @@ class SamplingInput(Input):
         self.event_metadata = event_dataset.settings
 
     def _load_sampler(self):
-        """Load the sampler and set its context based on event data."""
+        """Build the sampler from the model(s) and the event data."""
+        if self.sampler_implementation == "legacy":
+            raise ValueError(
+                "The legacy samplers (GWSampler / GWSamplerGNPE) have been removed; "
+                "use sampler-implementation = composed. The last commit containing "
+                "them is tagged legacy-samplers-final."
+            )
         model = build_model_from_kwargs(
             filename=self.model, device=self.device, load_training_info=False
         )
 
-        if self.sampler_implementation == "composed":
-            if self.model_init is not None:
-                self.gnpe = True
-                self._main_model = model
-                init_model = build_model_from_kwargs(
-                    filename=self.model_init,
-                    device=self.device,
-                    load_training_info=False,
-                )
-                self.dingo_sampler = GWComposedSampler.from_gnpe_models(
-                    init_model,
-                    model,
-                    self.context,
-                    event_metadata=self.event_metadata,
-                    num_iterations=self.num_gnpe_iterations,
-                )
-            else:
-                self.gnpe = False
-                self.dingo_sampler = GWComposedSampler.from_model(
-                    model, self.context, event_metadata=self.event_metadata
-                )
-            self.dingo_sampler.provenance_extra["models"] = self._model_paths()
-            return
-
         if self.model_init is not None:
             self.gnpe = True
+            self._main_model = model
             init_model = build_model_from_kwargs(
-                filename=self.model_init, device=self.device, load_training_info=False
+                filename=self.model_init,
+                device=self.device,
+                load_training_info=False,
             )
-            init_sampler = GWSampler(model=init_model)
-            self.dingo_sampler = GWSamplerGNPE(
-                model=model,
-                init_sampler=init_sampler,
+            self.dingo_sampler = GWComposedSampler.from_gnpe_models(
+                init_model,
+                model,
+                self.context,
+                event_metadata=self.event_metadata,
                 num_iterations=self.num_gnpe_iterations,
             )
-
         else:
             self.gnpe = False
-            self.dingo_sampler = GWSampler(model=model)
-
-        self.dingo_sampler.context = self.context
-        self.dingo_sampler.event_metadata = self.event_metadata
+            self.dingo_sampler = GWComposedSampler.from_model(
+                model, self.context, event_metadata=self.event_metadata
+            )
+        self.dingo_sampler.provenance_extra["models"] = self._model_paths()
 
     @property
     def density_recovery_settings(self):
@@ -215,10 +198,10 @@ class SamplingInput(Input):
         return paths
 
     def _recover_log_prob_composed(self):
-        """Density recovery on the composed sampler, mirroring `prepare_log_prob`:
-        run the Gibbs chain, train an unconditional NDE on the GNPE proxies, then
-        swap in a single-step (density-preserving) sampler with the NDE as the
-        proxy source."""
+        """Recover the sample density for a GNPE model: run the Gibbs chain, train
+        an unconditional NDE on the GNPE proxies, then swap in a single-step
+        (density-preserving) sampler with the NDE as the proxy source. The final
+        samples then carry a log_prob, as required for importance sampling."""
         settings = copy.deepcopy(self.density_recovery_settings)
         self.dingo_sampler.run_sampler(
             settings["num_samples"], batch_size=self.batch_size
@@ -245,8 +228,7 @@ class SamplingInput(Input):
         self.dingo_sampler.provenance_extra["models"] = self._model_paths()
         # The recovery recipe: the Gibbs chain that generated the NDE's training
         # samples (with its iteration count inside the GibbsBlock descriptor) plus
-        # the NDE training settings. The legacy metadata recorded only the final
-        # single-step state.
+        # the NDE training settings.
         self.dingo_sampler.provenance_extra["density_recovery"] = {
             "chain": gibbs_chain,
             **settings,
@@ -259,15 +241,7 @@ class SamplingInput(Input):
                 "samples and training a new network to recover it."
             )
 
-            # Note that this will not save any low latency samples at present.
-            if self.sampler_implementation == "composed":
-                self._recover_log_prob_composed()
-            else:
-                prepare_log_prob(
-                    self.dingo_sampler,
-                    batch_size=self.batch_size,
-                    **self.density_recovery_settings,
-                )
+            self._recover_log_prob_composed()
 
         self.dingo_sampler.run_sampler(self.num_samples, batch_size=self.batch_size)
         self.dingo_sampler.to_hdf5(label=self.label, outdir=self.result_directory)

@@ -554,11 +554,11 @@ class Result(CoreResult):
         within-prior proposal samples with their stored log-prob, and
         `SyntheticPhaseFactor` draws `phase` -- the composer's ordinary log-prob fold
         returns the joint proposal density `log q(theta) + log q(phase | theta, d)`,
-        which replaces the samples' log_prob (the legacy `log_prob += delta`). The
-        Result's likelihood view (base domain, rebuilt domain, frequency updates) is
-        passed to the factor, so it shares the cached likelihood instance built by
-        `_build_likelihood`. Out-of-prior rows keep the legacy convention:
-        `phase = 0`, `log_prob = nan`."""
+        which becomes the samples' log_prob. The Result's likelihood view (base
+        domain, rebuilt domain, frequency updates) is passed to the factor, so it
+        shares the cached likelihood instance built by `_build_likelihood`.
+        Out-of-prior rows get `phase = 0` and `log_prob = nan` (they receive zero
+        weight in importance sampling regardless)."""
         from dingo.core.factors import ChainComposer, SampleTableFactor
         from dingo.gw.inference.factors import SyntheticPhaseFactor
 
@@ -590,7 +590,8 @@ class Result(CoreResult):
         # Insert the phase prior in the prior, since now the phase is present.
         self.prior["phase"] = self.phase_prior
         self.phase_prior = None
-        # reset likelihood for safety (matches the legacy path)
+        # Reset so importance sampling rebuilds the likelihood with its own
+        # marginalization settings rather than reusing the phase-full one.
         self.likelihood = None
 
     def sample_synthetic_phase(
