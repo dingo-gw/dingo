@@ -1,9 +1,9 @@
 project:
   type: website
   output-dir: _site
-  # In-place migration on branch `docs-quarto`. Sphinx files (conf.py, dingo.*.rst,
-  # build/, jupyter_execute/) still live in this directory; the explicit render list
-  # below is what makes Quarto ignore them and build only the converted pages.
+  # Explicit render list: pins exactly which pages build, and their order. Now that
+  # the old Sphinx files are gone it could be dropped (Quarto would auto-discover all
+  # .qmd/.ipynb); kept for now to keep the page set and ordering deterministic.
   render:
     - index.qmd
     - installation.qmd
