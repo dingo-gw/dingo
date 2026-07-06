@@ -2,10 +2,10 @@ name: docs
 
 # Build the Quarto documentation and publish it to GitHub Pages.
 #
-# This runs ALONGSIDE the existing Sphinx/readthedocs build (dual hosting) during
-# the docs migration: it deploys to the `gh-pages` branch and does not touch the
-# readthedocs setup (.readthedocs.yaml / conf.py), which keeps serving the old
-# Sphinx docs from `main`.
+# This branch is Quarto-only (the Sphinx toolchain has been removed here). The
+# workflow builds the site and deploys it to the `gh-pages` branch. readthedocs
+# still builds the old Sphinx docs from `main` — where those files still live — so
+# the two run in parallel until this migration reaches `main`.
 #
 # - Pull requests: render only (a build check — catches broken .qmd / render errors).
 # - Push to the migration branch / manual dispatch: render AND deploy to gh-pages.

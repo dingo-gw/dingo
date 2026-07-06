@@ -82,16 +82,17 @@ The documentation is built with [Quarto](https://quarto.org) and
 the package docstrings. First [install Quarto](https://quarto.org/docs/download/), then
 install `quartodoc`:
 ```sh
-pip install quartodoc
+pip install "quartodoc==0.11.1" "griffe==1.15.0"
 ```
 
 The documentation sources live in `docs/source`. From that directory, first refresh the
-API reference: `gen_api.py` scans the `dingo` package and lists every public module in
-`_quarto.yml` (the analogue of `sphinx-apidoc`), then `quartodoc build` writes a reference
-page for each module's members from their docstrings:
+API reference: `gen_api.py` scans the `dingo` package and lists every public object in
+`_quarto.yml` (the analogue of `sphinx-apidoc`), then `build_api.py` writes a reference
+page for each object from its docstrings, merging each `__init__`'s parameters into its
+class page:
 ```sh
-python gen_api.py    # refresh the API module list (run when modules are added or removed)
-quartodoc build      # generate the reference/ pages from docstrings
+python gen_api.py     # refresh the API object list (run when objects are added or removed)
+python build_api.py   # generate the reference/ pages from docstrings (merges __init__ params)
 ```
 Then render the site:
 ```sh

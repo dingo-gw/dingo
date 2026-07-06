@@ -125,7 +125,7 @@ dingo_train --settings_file train_settings.yaml --train_dir training
 
 ::: {.callout-tip}
 If running on a machine with multiple GPUs make sure to specify the GPU by running 
-export `CUDA_VISIBILE_DEVICES=GPU_NUM` before running `dingo_train`
+export `CUDA_VISIBLE_DEVICES=GPU_NUM` before running `dingo_train`
 :::
 
 The main difference from the toy example in the network architecture is the size of the embedding
