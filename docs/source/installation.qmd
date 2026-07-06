@@ -8,7 +8,7 @@ To install using pip, run the following within a suitable virtual environment:
 ```sh
 pip install dingo-gw
 ```
-This installs Dingo and its runtime dependencies, as specified in  
+This installs Dingo and its runtime dependencies, as specified in
 [`pyproject.toml`](https://github.com/dingo-gw/dingo/blob/main/pyproject.toml).
 
 Optional functionality can be enabled via extras, for example:
