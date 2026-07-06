@@ -96,6 +96,35 @@ format:
     theme:
       light: [flatly, custom.scss]
       dark: [darkly, custom-dark.scss]
+    # Highlight the navbar section that matches the current page. Quarto's own
+    # navbar active state is unreliable with a single full sidebar (it marks the
+    # first section on every page), so we derive the section from the active
+    # sidebar item and tag the matching navbar link with .nav-section-current.
+    include-in-header:
+      text: |
+        <script>
+        window.addEventListener("DOMContentLoaded", function () {
+          var navLinks = document.querySelectorAll(".navbar .navbar-nav .nav-link");
+          navLinks.forEach(function (a) {
+            a.classList.remove("active");
+            a.removeAttribute("aria-current");
+          });
+          var section = null;
+          if (location.pathname.indexOf("/reference/") !== -1) {
+            section = "API Reference";
+          } else {
+            var active = document.querySelector(".sidebar-navigation .sidebar-link.active");
+            var sec = active ? active.closest(".sidebar-item-section") : null;
+            var hdr = sec ? sec.querySelector(".menu-text") : null;
+            if (hdr) section = hdr.textContent.trim();
+          }
+          if (section) {
+            navLinks.forEach(function (a) {
+              if (a.textContent.trim() === section) a.classList.add("nav-section-current");
+            });
+          }
+        });
+        </script>
     toc: true
     code-copy: true
     highlight-style: github

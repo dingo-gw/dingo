@@ -29,7 +29,8 @@ $border-color: #e6e8ec;   // neutral hairline
 // Navbar (light).
 $navbar-light-color:        #3a434f;
 $navbar-light-hover-color:  $accent;
-$navbar-light-active-color: $accent;
+$navbar-light-active-color: #3a434f;   // Quarto's active is unreliable here; we
+                                       // highlight the real section via JS instead
 $navbar-light-brand-color:  #1c2530;
 
 /*-- scss:rules --*/
@@ -55,8 +56,9 @@ main#quarto-document-content h2 {
 }
 .navbar .navbar-brand { font-weight: 700; }
 .navbar .navbar-nav .nav-link { font-weight: 500; }
-// Clear active-section cue: accent colour, bold, and a tab-style underline.
-.navbar .navbar-nav .nav-link.active {
+// Clear active-section cue (applied by JS to the section matching the current
+// page — see the include-in-header script in _quarto.yml).
+.navbar .navbar-nav .nav-link.nav-section-current {
   color: $accent;
   font-weight: 600;
   box-shadow: inset 0 -2px 0 $accent;
