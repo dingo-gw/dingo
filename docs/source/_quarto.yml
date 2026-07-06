@@ -108,6 +108,10 @@ quartodoc:
   title: "API reference"
   style: pkgdown
   sidebar: reference/_sidebar.yml
+  # Show public members even when they have no docstring (e.g. `forward`,
+  # `use_cache`), so class pages list their methods/attributes like Sphinx did.
+  options:
+    include_empty: true
   sections:
     # BEGIN AUTOGEN SECTIONS  (run `python gen_api.py` to regenerate; do not edit by hand)
     - title: "dingo.asimov.asimov"

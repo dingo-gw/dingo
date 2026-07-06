@@ -11,7 +11,9 @@ Run from ``docs/source``::
 
     python gen_api.py
 
-then ``quartodoc build`` && ``quarto render`` as usual.
+then ``python build_api.py`` && ``quarto render`` as usual. (Use ``build_api.py``
+rather than a bare ``quartodoc build`` so that ``__init__`` parameters are merged
+into their class pages.)
 """
 import ast
 import os
