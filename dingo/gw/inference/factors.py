@@ -379,6 +379,12 @@ class GWSamplerContext:
         if settings == self._likelihood_settings:
             return self._likelihood
 
+        if self.event_data is None:
+            raise ValueError(
+                "Building the likelihood requires event data (strain + ASDs), "
+                "which this context does not carry."
+            )
+
         # Marginalizing over a parameter needs the (uniform) prior the network
         # marginalized over; use it to parameterize the requested marginalization.
         # Bounds already provided by the caller (e.g. from an updated prior) win.
@@ -496,8 +502,11 @@ class SyntheticPhaseFactor(Factor):
 
     Two grid modes: `approximation_22_mode=True` assumes a (2, 2)-dominated signal (the
     whole waveform transforms as `exp(2i phase)`), giving `log L` from the complex overlap
-    `Re[(d | h(phase=0)) exp(2i phase)]`; `False` (the production default) sums the modes
-    exactly and requires the waveform generator's `spin_conversion_phase = 0`.
+    `Re[(d | h(phase=0)) exp(2i phase)]`; `False` sums the modes exactly and requires the
+    waveform generator's `spin_conversion_phase = 0`. Note the entry points differ on the
+    default: this factor and `dingo_pipe`'s `PhaseRecoveryDefault` use the exact mode,
+    while `Result.sample_synthetic_phase` defaults to the (2, 2) approximation when the
+    key is omitted.
     """
 
     def __init__(

@@ -143,6 +143,16 @@ def test_frequency_range_beyond_domain_rejected():
         _crop_context({"maximum_frequency": 1099.0}).prepared_data()
 
 
+def test_context_without_event_data_serves_metadata_views_only():
+    # A stripped payload (settings but no strain data) still yields the
+    # metadata-derived views; only the likelihood demands event data.
+    ctx = GWSamplerContext.from_model_metadata(_MODEL_METADATA, event_data=None)
+    assert ctx.detectors == ["H1", "L1"]
+    assert ctx.domain.f_max == _DOMAIN_SETTINGS["f_max"]
+    with pytest.raises(ValueError, match="event data"):
+        ctx.likelihood()
+
+
 def test_sampler_provenance_block():
     import ast
 
