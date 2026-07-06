@@ -369,26 +369,46 @@ class Result(CoreResult):
         self.phase_marginalization_kwargs = phase_marginalization_kwargs
         self.calibration_marginalization_kwargs = calibration_marginalization_kwargs
 
-        # Choose the WaveformGenerator domain. This is ultimately projected to the data domain, but generally we
-        # allow it to be different, e.g., to start integrating from lower frequencies than the lower bound of the
-        # likelihood integral. Usually we use the same domain as that used for the WaveformDataset. However,
-        # if we make a change to certain settings during importance sampling, we need to ensure the projection is
-        # still compatible:
+        # The WaveformGenerator domain is ultimately projected to the data domain, but
+        # generally we allow it to be different, e.g., to start integrating from lower
+        # frequencies than the lower bound of the likelihood integral. An updated
+        # T = 1/delta_f cannot be handled by the domain projection, so it enters at
+        # the level of the WaveformGenerator domain.
         #
-        # * delta_f (=1/T): cannot be changed in a domain projection, so update at the level of the
-        #   WaveformGenerator.
-        #
-        # TODO: Add functionality to update other waveform settings, i.e., approximant, generation minimum and
-        #  maximum frequencies, reference frequency, and starting frequency.
+        # TODO: Add functionality to update other waveform settings, i.e., approximant,
+        #  generation minimum and maximum frequencies, reference frequency, and
+        #  starting frequency.
+        wfg_delta_f = None
+        if "T" in (self.importance_sampling_metadata.get("updates") or {}):
+            wfg_delta_f = 1 / self.importance_sampling_metadata["updates"]["T"]
+            print(
+                f"Updating waveform generation delta_f from "
+                f'{self.base_metadata["dataset_settings"]["domain"]["delta_f"]} '
+                f"to {wfg_delta_f}."
+            )
+
+        if self.sampler_context is not None:
+            # Delegate construction to the sampler context (the single owner). The
+            # importance-sampling state -- validated marginalization bounds, the
+            # (possibly rebuilt) data domain, delta_f / frequency updates -- enters
+            # as arguments; the context itself stays IS-state-free.
+            self.likelihood = self.sampler_context.likelihood(
+                time_marginalization_kwargs=time_marginalization_kwargs,
+                phase_marginalization_kwargs=phase_marginalization_kwargs,
+                calibration_marginalization_kwargs=calibration_marginalization_kwargs,
+                use_base_domain=self.use_base_domain,
+                data_domain=self.domain,
+                wfg_delta_f=wfg_delta_f,
+                frequency_update=dict(
+                    minimum_frequency=self.minimum_frequency,
+                    maximum_frequency=self.maximum_frequency,
+                ),
+            )
+            return
 
         wfg_domain_dict = self.base_metadata["dataset_settings"]["domain"].copy()
-        if "updates" in self.importance_sampling_metadata:
-            if "T" in self.importance_sampling_metadata["updates"]:
-                delta_f_new = 1 / self.importance_sampling_metadata["updates"]["T"]
-                print(
-                    f'Updating waveform generation delta_f from {wfg_domain_dict["delta_f"]} to {delta_f_new}.'
-                )
-                wfg_domain_dict["delta_f"] = delta_f_new
+        if wfg_delta_f is not None:
+            wfg_domain_dict["delta_f"] = wfg_delta_f
         wfg_domain = build_domain(wfg_domain_dict)
 
         self.likelihood = StationaryGaussianGWLikelihood(

@@ -70,6 +70,56 @@ def test_likelihood_rebuilt_only_when_settings_change(context):
     assert _StubLikelihood.constructions == 2
 
 
+def test_likelihood_importance_sampling_overrides(context):
+    # IS-state overrides pass through: an explicit data domain, an updated
+    # waveform-generator delta_f, and an explicit frequency range.
+    likelihood = context.likelihood(
+        data_domain="rebuilt-domain",
+        wfg_delta_f=0.5,
+        frequency_update={"minimum_frequency": 21.0, "maximum_frequency": 512.0},
+    )
+    assert likelihood.kwargs["data_domain"] == "rebuilt-domain"
+    assert likelihood.kwargs["wfg_domain"].delta_f == 0.5
+    assert likelihood.kwargs["frequency_update"]["maximum_frequency"] == 512.0
+    # Defaults reproduce the context's own views.
+    default = context.likelihood()
+    assert default.kwargs["data_domain"] is context.domain
+    assert default.kwargs["wfg_domain"].delta_f == _DOMAIN_SETTINGS["delta_f"]
+
+
+def test_prepared_data_rejects_frequency_cropping():
+    # A narrower event frequency range needs input masking, which the composed
+    # data-prep chain does not implement yet -> loud failure. Bounds equal to or
+    # wider than the domain (generation writes base-domain bounds) are fine.
+    def make(event_metadata):
+        return GWSamplerContext(
+            domain=build_domain(_DOMAIN_SETTINGS),
+            detectors=["H1"],
+            t_ref=0.0,
+            data_prep=lambda data: "prepared",
+            event_data={},
+            event_metadata=event_metadata,
+        )
+
+    with pytest.raises(NotImplementedError, match="cropping"):
+        make({"minimum_frequency": 25.0}).prepared_data()
+    with pytest.raises(NotImplementedError, match="cropping"):
+        make({"maximum_frequency": {"H1": 512.0}}).prepared_data()
+    assert make({"minimum_frequency": 20.0}).prepared_data() == "prepared"
+    assert make({"maximum_frequency": 1099.0}).prepared_data() == "prepared"
+    assert make(None).prepared_data() == "prepared"
+
+
+def test_likelihood_caller_marginalization_bounds_win(context):
+    # Bounds provided by the caller (e.g. from an updated prior at the IS layer)
+    # are used as-is; the network-prior fill only runs when they are missing.
+    likelihood = context.likelihood(
+        time_marginalization_kwargs={"n_fft": 2, "t_lower": 1.0, "t_upper": 2.0}
+    )
+    kwargs = likelihood.kwargs["time_marginalization_kwargs"]
+    assert (kwargs["t_lower"], kwargs["t_upper"]) == (1.0, 2.0)
+
+
 def test_context_device_default_and_explicit():
     ctx = GWSamplerContext(
         domain=None,
