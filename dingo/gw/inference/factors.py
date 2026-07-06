@@ -568,6 +568,16 @@ class SyntheticPhaseFactor(Factor):
         )
         return torch.as_tensor(log_prob, device=device)
 
+    def describe(self) -> dict:
+        return {
+            "step": type(self).__name__,
+            "parameters": list(self.parameters),
+            "conditioning": list(self.conditioning),
+            "n_grid": self.n_grid,
+            "approximation_22_mode": self.approximation_22_mode,
+            "uniform_weight": self.uniform_weight,
+        }
+
     def _phase_profile(self, given, context):
         """The phase grid and the mass-covered (un-normalized) phase distribution, one row
         per sample: evaluate `log L` on the grid, exponentiate (shifted by the per-row
@@ -1079,6 +1089,25 @@ class GWComposedSampler(ComposedSampler):
         super().__init__(composer, context)
         self.metadata = metadata
         self.inference_parameters = inference_parameters
+        # Extra provenance merged into settings["sampler"] by to_result -- e.g. the
+        # pipe records model checkpoint paths and the density-recovery recipe.
+        # Literal-only values (the settings dict round-trips through str/literal_eval).
+        self.provenance_extra: dict = {}
+
+    def sampler_provenance(self) -> dict:
+        """Provenance of how the samples were made, stored as `settings["sampler"]`
+        in the exported `Result`: the executed chain in order (one descriptor per
+        step, via `Step.describe()`), plus anything in `provenance_extra`. Nothing
+        consumes this yet -- it is deliberate, structured provenance (the legacy
+        samplers recorded only ad-hoc `num_iterations` / `init_model` keys via
+        setter side effects); the `version` field is insurance for future
+        consumers such as chain reconstruction from file."""
+        return {
+            "version": 1,
+            "implementation": "composed",
+            "chain": [step.describe() for step in self.composer.steps],
+            **copy.deepcopy(self.provenance_extra),
+        }
 
     @classmethod
     def from_model(
@@ -1238,6 +1267,8 @@ class GWComposedSampler(ComposedSampler):
         """
         from dingo.gw.result import Result
 
+        settings = copy.deepcopy(self.metadata)
+        settings["sampler"] = self.sampler_provenance()
         data_dict = {
             "samples": self.samples,
             "context": self.context.event_data,
@@ -1245,7 +1276,7 @@ class GWComposedSampler(ComposedSampler):
             "importance_sampling_metadata": None,
             "log_evidence": None,
             "log_noise_evidence": None,
-            "settings": copy.deepcopy(self.metadata),
+            "settings": settings,
         }
         return Result(dictionary=data_dict, sampler_context=self.context)
 

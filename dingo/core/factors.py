@@ -133,6 +133,17 @@ def chunk_and_concat(
     return samples, log_prob
 
 
+def _describe_default(step) -> dict:
+    """Default provenance descriptor for a chain step: class name, the parameter
+    block it emits, and what it conditions on. Literal-only (round-trips through
+    `str`/`ast.literal_eval` in saved settings)."""
+    return {
+        "step": type(step).__name__,
+        "parameters": list(step.parameters),
+        "conditioning": list(step.conditioning),
+    }
+
+
 class Factor(ABC):
     """
     A conditional distribution `q_i(theta_i | f_i(theta_<i, d))` over one parameter
@@ -174,6 +185,11 @@ class Factor(ABC):
     ) -> torch.Tensor:
         """Evaluate `log q_i` at given physical `theta_i` (one conditioning row per
         row)."""
+
+    def describe(self) -> dict:
+        """Provenance descriptor for saved-result metadata; steps with salient
+        configuration override this."""
+        return _describe_default(self)
 
 
 def _base_model_metadata(model: BasePosteriorModel) -> dict:
@@ -336,6 +352,9 @@ class FlowFactor(Factor):
             log_prob = self.model.log_prob(z, *net_context)
         return log_prob + self.standardization.log_det(self._net_parameters)
 
+    def describe(self) -> dict:
+        return {**_describe_default(self), "unconditional": self.unconditional}
+
 
 class DeltaFactor(Factor):
     """`q_i = delta(theta_i - c)`: a point mass pinning parameters to fixed values,
@@ -370,6 +389,12 @@ class DeltaFactor(Factor):
         # One zero per row, on the same device/dtype as the evaluated block.
         reference_column = next(iter(theta_i.values()))
         return torch.zeros_like(reference_column)
+
+    def describe(self) -> dict:
+        return {
+            **_describe_default(self),
+            "values": {k: float(v) for k, v in self.values.items()},
+        }
 
 
 class SampleTableFactor(Factor):
@@ -475,6 +500,10 @@ class Reparametrization(ABC):
         `ChainComposer.log_prob` rebuilds them via `inverse`."""
         return [c for c in self.conditioning if c not in self.parameters]
 
+    def describe(self) -> dict:
+        """Provenance descriptor for saved-result metadata."""
+        return _describe_default(self)
+
 
 class TargetCorrection(ABC):
     """
@@ -512,6 +541,10 @@ class TargetCorrection(ABC):
         # 0 proposal contribution per row, on the device of the emitted column.
         reference_column = next(iter(out.values()))
         return out, torch.zeros_like(reference_column)
+
+    def describe(self) -> dict:
+        """Provenance descriptor for saved-result metadata."""
+        return _describe_default(self)
 
 
 class Step(Protocol):
@@ -762,6 +795,16 @@ class GibbsBlock:
         """Run the Gibbs loop for `num_samples` walkers; return `(samples, None)`.
         `num_samples` is the walker (root) count -- Gibbs does not fan out."""
         return self._run_once(num_samples, context), None
+
+    def describe(self) -> dict:
+        """Provenance descriptor: the Gibbs structure, with nested descriptors for
+        the init factor and the swept factors."""
+        return {
+            "step": type(self).__name__,
+            "num_iterations": self.num_iterations,
+            "init": self.init_factor.describe(),
+            "factors": [factor.describe() for factor in self.factors],
+        }
 
     def _run_once(
         self, num_samples: int, context: SamplerContext

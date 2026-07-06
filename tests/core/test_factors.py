@@ -249,6 +249,27 @@ def test_sample_table_log_prob_raises():
         table.log_prob({"a": torch.zeros(3)}, None)
 
 
+def test_describe_descriptors_are_structured_and_literal():
+    import ast
+
+    delta = DeltaFactor({"chi_1": 0.1})
+    d = delta.describe()
+    assert d["step"] == "DeltaFactor" and d["values"] == {"chi_1": 0.1}
+    assert isinstance(d["values"]["chi_1"], float)
+
+    gibbs = GibbsBlock(
+        _ConstFactor("proxy"), [_ConstFactor("theta", ["proxy"])], num_iterations=7
+    )
+    g = gibbs.describe()
+    assert g["num_iterations"] == 7
+    assert g["init"]["step"] == "_ConstFactor" and g["init"]["parameters"] == ["proxy"]
+    assert g["factors"][0]["conditioning"] == ["proxy"]
+
+    # Descriptors must survive the settings round-trip (str / literal_eval).
+    for block in (d, g):
+        assert ast.literal_eval(str(block)) == block
+
+
 class _MockReparam(Reparametrization):
     """A mock bijection ``u -> v = u + shift`` with a constant nonzero ``log|det J|`` so the
     density contribution (``-log_det``) is checkable."""

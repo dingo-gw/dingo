@@ -144,6 +144,7 @@ class SamplingInput(Input):
                 self.dingo_sampler = GWComposedSampler.from_model(
                     model, self.context, event_metadata=self.event_metadata
                 )
+            self.dingo_sampler.provenance_extra["models"] = self._model_paths()
             return
 
         if self.model_init is not None:
@@ -207,6 +208,12 @@ class SamplingInput(Input):
     #     result_dir = os.path.join(self.outdir, "result")
     #     return os.path.relpath(result_dir)
 
+    def _model_paths(self) -> dict:
+        paths = {"model": self.model}
+        if self.model_init is not None:
+            paths["model_init"] = self.model_init
+        return paths
+
     def _recover_log_prob_composed(self):
         """Density recovery on the composed sampler, mirroring `prepare_log_prob`:
         run the Gibbs chain, train an unconditional NDE on the GNPE proxies, then
@@ -216,6 +223,10 @@ class SamplingInput(Input):
         self.dingo_sampler.run_sampler(
             settings["num_samples"], batch_size=self.batch_size
         )
+        # The Gibbs chain that generates the NDE's training samples, recorded in the
+        # recovery provenance below (the final sampler's own chain is the recovered
+        # single-step one).
+        gibbs_chain = self.dingo_sampler.sampler_provenance()["chain"]
         result = self.dingo_sampler.to_result()
         nde_settings = settings["nde_settings"]
         nde_settings["training"]["device"] = str(self._main_model.device)
@@ -231,6 +242,15 @@ class SamplingInput(Input):
             self.context,
             event_metadata=self.event_metadata,
         )
+        self.dingo_sampler.provenance_extra["models"] = self._model_paths()
+        # The recovery recipe: the Gibbs chain that generated the NDE's training
+        # samples (with its iteration count inside the GibbsBlock descriptor) plus
+        # the NDE training settings. The legacy metadata recorded only the final
+        # single-step state.
+        self.dingo_sampler.provenance_extra["density_recovery"] = {
+            "chain": gibbs_chain,
+            **settings,
+        }
 
     def run_sampler(self):
         if self.gnpe and self.recover_log_prob:

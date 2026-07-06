@@ -143,6 +143,23 @@ def test_frequency_range_beyond_domain_rejected():
         _crop_context({"maximum_frequency": 1099.0}).prepared_data()
 
 
+def test_sampler_provenance_block():
+    import ast
+
+    from dingo.core.factors import ChainComposer, DeltaFactor
+    from dingo.gw.inference.factors import GWComposedSampler
+
+    sampler = GWComposedSampler(
+        ChainComposer([DeltaFactor({"a": 1.0})]), None, {}, ["a"]
+    )
+    sampler.provenance_extra["models"] = {"model": "model.pt"}
+    block = sampler.sampler_provenance()
+    assert block["version"] == 1 and block["implementation"] == "composed"
+    assert block["chain"][0]["step"] == "DeltaFactor"
+    assert block["models"] == {"model": "model.pt"}
+    assert ast.literal_eval(str(block)) == block
+
+
 def test_frequency_range_cropping_masks_network_input():
     ctx = _crop_context(
         {"minimum_frequency": 25.0},
