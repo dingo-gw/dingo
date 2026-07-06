@@ -93,6 +93,9 @@ docs = [
     # bridge is pip-installable. Notebook execution additionally needs the full dingo
     # runtime, so install the package itself alongside this group.
     "quartodoc>=0.11,<0.12",
+    # Pinned: quartodoc 0.11.1 calls griffe's parse_numpy(allow_section_blank_line=...),
+    # which newer griffe releases dropped. 1.15.0 is the tested-compatible version.
+    "griffe==1.15.0",
 ]
 
 typing = [

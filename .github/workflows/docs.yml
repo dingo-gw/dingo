@@ -54,7 +54,9 @@ jobs:
       # execute is disabled in _quarto.yml so no notebook kernels run here.
       # quartodoc is pinned because build_api.py's __init__-merge hooks its internals.
       - name: Install doc build tooling
-        run: pip install "quartodoc==0.11.1" jupyter
+        # griffe is pinned too: quartodoc 0.11.1 calls parse_numpy(allow_section_blank_line=...),
+        # which newer griffe releases dropped — 1.15.0 is the tested-compatible version.
+        run: pip install "quartodoc==0.11.1" "griffe==1.15.0" jupyter
 
       - name: Generate API reference pages
         working-directory: docs/source
