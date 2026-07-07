@@ -1550,6 +1550,17 @@ def create_parser(top_level=True, usage=None):
         "unconditional flow for the GNPE proxies.",
     )
     sampler_parser.add(
+        "--fixed-context-parameters",
+        type=nonestr,
+        default=None,
+        help="Dictionary of fixed values for the model's context parameters, e.g. "
+        "{chirp_mass_proxy: 1.19786, ra: 3.44616, dec: -0.408084}. Required for "
+        "single-network models conditioned on context parameters (single-step "
+        "GNPE, e.g. binary neutron stars): proxy entries parameterize the data "
+        "preparation (chirp-mass heterodyning), and all pinned values are "
+        "recorded with the samples.",
+    )
+    sampler_parser.add(
         "--device",
         type=str,
         default="cuda",

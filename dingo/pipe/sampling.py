@@ -57,6 +57,11 @@ class SamplingInput(Input):
         self.recover_log_prob = args.recover_log_prob
         self.device = args.device
         self.num_gnpe_iterations = args.num_gnpe_iterations
+        self.fixed_context_parameters = (
+            convert_string_to_dict(args.fixed_context_parameters)
+            if args.fixed_context_parameters is not None
+            else None
+        )
         self.num_samples = args.num_samples
         self.batch_size = args.batch_size
         self.density_recovery_settings = args.density_recovery_settings
@@ -128,6 +133,11 @@ class SamplingInput(Input):
         )
 
         if self.model_init is not None:
+            if self.fixed_context_parameters is not None:
+                raise ValueError(
+                    "fixed-context-parameters pins the context of a single-network "
+                    "model; it cannot be combined with model-init (iterative GNPE)."
+                )
             self.gnpe = True
             self._main_model = model
             init_model = build_model_from_kwargs(
@@ -145,7 +155,10 @@ class SamplingInput(Input):
         else:
             self.gnpe = False
             self.dingo_sampler = GWComposedSampler.from_model(
-                model, self.context, event_metadata=self.event_metadata
+                model,
+                self.context,
+                event_metadata=self.event_metadata,
+                fixed_context_parameters=self.fixed_context_parameters,
             )
         self.dingo_sampler.provenance_extra["models"] = self._model_paths()
 
