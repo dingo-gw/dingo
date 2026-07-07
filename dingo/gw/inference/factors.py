@@ -45,6 +45,7 @@ from dingo.core.factors import (
 from dingo.core.multiprocessing import apply_func_with_multiprocessing
 from dingo.core.posterior_models import BasePosteriorModel
 from dingo.core.transforms import GetItem, RenameKey
+from dingo.gw.conversion import change_spin_conversion_phase
 from dingo.gw.domains import build_domain, MultibandedFrequencyDomain
 from dingo.gw.frequency_updates import (
     _validate_maximum_frequency,
@@ -1054,6 +1055,140 @@ class RAReparam(Reparametrization):
             return {"ra@t_ref": params["ra"]}
         ra_tref = (params["ra"].double() - correction) % (2 * np.pi)
         return {"ra@t_ref": ra_tref.float()}
+
+
+class SpinConventionReparam(Reparametrization):
+    """
+    Relabel the precessing-spin angles between Dingo's internal spin-phase
+    convention and the physical (Bilby) one.
+
+    Dingo fixes the spin-conversion phase (usually to 0) so that the Cartesian
+    spins decouple from the coalescence phase; the whole density / likelihood /
+    synthetic-phase pipeline requires that convention, so stored samples keep the
+    plain names `theta_jn` / `phi_jl` in the *network* convention throughout. The
+    physical convention (spin conversion at the sample's own phase) is what Bilby
+    and PESummary mean by the same names, so the relabel happens at the export
+    boundary -- this class is its single home. Only `theta_jn` and `phi_jl`
+    change; the conversion phase and reference frequency are read from the model
+    metadata, and a model trained without a fixed conversion phase (`None`)
+    relabels to the identity.
+
+    Unlike `RAReparam` no marked intermediate name is needed: the two conventions
+    never coexist in one table -- each world's plain names denote its own
+    convention, and this bijection is the boundary crossing.
+
+    Exporting a finished weighted sample set needs no Jacobian (proposal, prior,
+    and likelihood transform together), which is how `to_physical` is used. As a
+    chain `Step` the bijection is *not* measure-preserving in the flat
+    `(theta_jn, phi_jl)` coordinates: it rotates the line of sight rigidly about
+    the orbital angular momentum, preserving the spherical measure
+    `sin(theta_jn) dtheta dphi`, so
+    `log_det = log sin(theta_jn) - log sin(theta_jn')` (verified numerically
+    against finite differences through the LAL conversion). Forward chain
+    sampling is therefore density-correct; chain re-plug
+    (`ChainComposer.log_prob`) additionally needs the conditioning-aware
+    `inverse`, which the chain protocol does not yet provide.
+    """
+
+    def __init__(self, num_processes: int = 1):
+        """
+        Parameters
+        ----------
+        num_processes : int, default 1
+            Parallel processes for the per-sample LAL spin conversion.
+        """
+        self.parameters = ["theta_jn", "phi_jl"]
+        self.conditioning = [
+            "theta_jn",
+            "phi_jl",
+            "phase",
+            "chirp_mass",
+            "mass_ratio",
+            "a_1",
+            "a_2",
+            "tilt_1",
+            "tilt_2",
+            "phi_12",
+        ]
+        self.num_processes = num_processes
+
+    @property
+    def consumes(self) -> list[str]:
+        # The bijection overwrites theta_jn / phi_jl in place; the remaining
+        # conditioning (phase, masses, tilts, ...) is read-only and must stay in
+        # the chain -- the default conditioning-minus-parameters would drop it.
+        return []
+
+    def log_det(self, given, context):
+        """`log|det J|` of `forward`, per row. The map preserves the spherical
+        measure, so the flat-coordinate Jacobian is
+        `sin(theta_jn) / sin(theta_jn')` -- verified numerically against finite
+        differences through the LAL conversion in
+        `test_jacobian_matches_sin_ratio` (agreement ~1e-9)."""
+        converted = self.forward(given, context)
+        return self._log_det(given["theta_jn"], converted["theta_jn"])
+
+    @staticmethod
+    def _log_det(theta_jn_in, theta_jn_out):
+        # Compute in double (the LAL conversion is double precision anyway),
+        # return in the input dtype: a reparametrization preserves the chain's
+        # dtype rather than promoting the summed log_prob.
+        log_det = torch.log(torch.sin(theta_jn_in.double())) - torch.log(
+            torch.sin(theta_jn_out.double())
+        )
+        return log_det.to(theta_jn_in.dtype)
+
+    def sample_and_log_prob(self, num_samples, context, given=None):
+        """Apply `forward`; contribute `-log|det J|`. Overridden to share the
+        single LAL conversion between the transform and its Jacobian (the base
+        implementation would convert twice)."""
+        if num_samples != 1:
+            raise ValueError("A reparametrization is 1:1; use fan_out=1.")
+        out = self.forward(given, context)
+        return out, -self._log_det(given["theta_jn"], out["theta_jn"])
+
+    @staticmethod
+    def _model_convention(model_metadata: dict) -> tuple[float, Optional[float]]:
+        """The reference frequency and spin-conversion phase the model trained with."""
+        wfg_settings = model_metadata["dataset_settings"]["waveform_generator"]
+        return wfg_settings["f_ref"], wfg_settings.get("spin_conversion_phase")
+
+    def to_physical(self, samples: pd.DataFrame, model_metadata: dict) -> pd.DataFrame:
+        """Relabel samples from the model's convention to the physical (Bilby) one."""
+        f_ref, sc_phase = self._model_convention(model_metadata)
+        return change_spin_conversion_phase(
+            samples, f_ref, sc_phase, None, num_processes=self.num_processes
+        )
+
+    def to_network(self, samples: pd.DataFrame, model_metadata: dict) -> pd.DataFrame:
+        """Relabel samples from the physical (Bilby) convention to the model's,
+        e.g. to ingest external posteriors for comparison."""
+        f_ref, sc_phase = self._model_convention(model_metadata)
+        return change_spin_conversion_phase(
+            samples, f_ref, None, sc_phase, num_processes=self.num_processes
+        )
+
+    def forward(self, given, context):
+        # The conversion runs in double; the outputs return in the input dtype
+        # and device (cf. RAReparam: compute in float64, store the chain dtype).
+        reference = given["theta_jn"]
+        theta = pd.DataFrame({k: _to_numpy(v) for k, v in given.items()})
+        converted = self.to_physical(theta, context.model_metadata)
+        return {
+            k: torch.as_tensor(converted[k].to_numpy()).to(
+                dtype=reference.dtype, device=reference.device
+            )
+            for k in self.parameters
+        }
+
+    def inverse(self, params, context):
+        # The chain protocol hands inverse only the parameters block, but this
+        # bijection also needs the invariant conditioning (phase, masses, tilts).
+        raise NotImplementedError(
+            "The spin-convention inverse needs the conditioning block, which the "
+            "chain re-plug protocol does not provide; convert DataFrames with "
+            "to_network() instead."
+        )
 
 
 class GNPEKernelCorrection(TargetCorrection):

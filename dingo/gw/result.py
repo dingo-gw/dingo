@@ -8,7 +8,6 @@ from bilby.gw.prior import CalibrationPriorDict
 from bilby_pipe.utils import CALIBRATION_CORRECTION_TYPE_LOOKUP
 
 from dingo.core.result import Result as CoreResult
-from dingo.gw.conversion import change_spin_conversion_phase
 from dingo.core.utils.backward_compatibility import check_minimum_version
 
 
@@ -607,17 +606,10 @@ class Result(CoreResult):
         pd.DataFrame
             Samples
         """
-        spin_conversion_phase_old = self.base_metadata["dataset_settings"][
-            "waveform_generator"
-        ].get("spin_conversion_phase")
+        from dingo.gw.inference.factors import SpinConventionReparam
 
-        # Redefine phase parameter to be consistent with Bilby.
-        return change_spin_conversion_phase(
-            self.samples,
-            self.f_ref,
-            spin_conversion_phase_old,
-            None,
-            num_processes=num_processes,
+        return SpinConventionReparam(num_processes=num_processes).to_physical(
+            self.samples, self.base_metadata
         )
 
     def get_pesummary_samples(
@@ -679,17 +671,11 @@ class Result(CoreResult):
             if "time" in col:
                 samples.loc[:, col] += self.t_ref
 
-        spin_conversion_phase_old = self.base_metadata["dataset_settings"][
-            "waveform_generator"
-        ].get("spin_conversion_phase")
+        # Redefine the spin angles to the physical (Bilby) convention.
+        from dingo.gw.inference.factors import SpinConventionReparam
 
-        # Redefine phase parameter to be consistent with Bilby. COMMENTED BECAUSE SLOW
-        samples = change_spin_conversion_phase(
-            samples,
-            self.f_ref,
-            spin_conversion_phase_old,
-            None,
-            num_processes=num_processes,
+        samples = SpinConventionReparam(num_processes=num_processes).to_physical(
+            samples, self.base_metadata
         )
 
         self._pesummary_samples = samples
