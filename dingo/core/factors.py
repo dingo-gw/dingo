@@ -78,9 +78,12 @@ class SamplerContext(Protocol):
     event_metadata: Optional[dict]
     device: Union[torch.device, str]
 
-    def prepared_data(self) -> torch.Tensor:
+    def prepared_data(self, conditioning=None) -> torch.Tensor:
         """The data representation the factors condition on
-        (whiten/decimate/repackage/...), computed once and cached."""
+        (whiten/decimate/repackage/...), computed once and cached. When the
+        preparation is a function of chain conditioning (e.g. a heterodyning
+        proxy), the calling factor passes its conditioning and the cache is
+        keyed on the consumed values."""
         ...
 
     def likelihood(self):
@@ -131,6 +134,15 @@ def chunk_and_concat(
     samples = _cat_dict(sample_parts)
     log_prob = None if lp_parts[0] is None else torch.cat(lp_parts)
     return samples, log_prob
+
+
+def _interleave_rows(samples, total, n):
+    """Repeat each carried chain row `n` times (row-major), keeping the summed
+    log-prob aligned."""
+    samples = {k: v.repeat_interleave(n, 0) for k, v in samples.items()}
+    if torch.is_tensor(total):
+        total = total.repeat_interleave(n, 0)
+    return samples, total
 
 
 def _describe_default(step) -> dict:
@@ -306,7 +318,9 @@ class FlowFactor(Factor):
             z = z.squeeze(0)
             log_prob = log_prob.squeeze(0)
         else:
-            data = context.prepared_data()
+            # The conditioning may parameterize the data preparation itself (e.g.
+            # the chirp-mass heterodyne), so the context receives it.
+            data = context.prepared_data(conditioning=given)
             # Standardize the (physical) conditioning the network was trained on, giving
             # B = N context rows; expand the shared data to match. The network draws
             # num_samples per row -> (N, num_samples, dim).
@@ -339,14 +353,15 @@ class FlowFactor(Factor):
         net_context: tuple[torch.Tensor, ...]
         if self.unconditional:
             net_context = ()
-        else:
+        elif not self.context_parameters:
             data = context.prepared_data()
             data = data.expand(num_samples, *data.shape)
-            if not self.context_parameters:
-                net_context = (data,)
-            else:
-                ctx = self.standardization.standardize(given, self.context_parameters)
-                net_context = (data, ctx)
+            net_context = (data,)
+        else:
+            data = context.prepared_data(conditioning=given)
+            data = data.expand(num_samples, *data.shape)
+            ctx = self.standardization.standardize(given, self.context_parameters)
+            net_context = (data, ctx)
         self.model.network.eval()
         with torch.no_grad():
             log_prob = self.model.log_prob(z, *net_context)
@@ -363,7 +378,14 @@ class DeltaFactor(Factor):
     Used as the chain root for prior-conditioning or known proxies (where later factors
     condition on the pinned values), and as a non-root filler for delta-prior parameters
     a model does not infer (one constant per current row).
+
+    As a point mass, n draws are one atom repeated: `point_mass = True` tells the
+    composer that a root prefix of such steps carries no multiplicity, so the
+    requested sample count lands on the first stage that does (e.g. the flow), which
+    then draws it in a single conditioned call.
     """
+
+    point_mass = True
 
     def __init__(self, values: dict[str, float]):
         self.values = values
@@ -711,30 +733,39 @@ class ChainComposer:
         self, base: int, context: SamplerContext
     ) -> tuple[dict[str, torch.Tensor], Optional[torch.Tensor]]:
         """One pass of the whole chain for `base` root samples. Returns the samples and
-        the summed proposal log-prob, or `None` if any step is density-free."""
+        the summed proposal log-prob, or `None` if any step is density-free.
+
+        The base count lands on the first stage that carries multiplicity: a root
+        prefix of point-mass steps (fixed pins) emits a single row each -- n draws
+        from a point mass are one atom repeated -- and the first non-point-mass
+        stage draws `base` (times its fan-out) in one conditioned call, with the
+        prefix's carried rows expanded to match."""
         samples: dict[str, torch.Tensor] = {}
         total: torch.Tensor | float = 0.0
         has_density = True
+        base_pending: Optional[int] = base
         for i, stage in enumerate(self.stages):
             step = stage.step
-            if i == 0:
-                n = base  # root: draw the base count
+            if base_pending is not None:
+                if getattr(step, "point_mass", False):
+                    n = 1  # a point mass carries no multiplicity
+                else:
+                    n = base_pending * (stage.fan_out if step.conditioning else 1)
+                    base_pending = None
             elif step.conditioning:
                 n = stage.fan_out  # fan_out samples per conditioning row
             else:
-                # Unconditioned non-root step (e.g. a fixed/delta factor): draw one value
-                # per current row -- it fills the batch rather than fanning out.
+                # Unconditioned non-root step (e.g. a fixed/delta filler): draw one
+                # value per current row -- it fills the batch rather than fanning out.
                 n = len(next(iter(samples.values())))
             given = {k: samples[k] for k in step.conditioning}
             block, lp = step.sample_and_log_prob(n, context, given)
-            # A conditioned fan-out (fan_out > 1) expands the batch: repeat each carried row
-            # to align with the step's fan_out sub-rows (the block is flattened row-major).
-            # 1:1 stages and unconditioned fillers leave the batch untouched.
-            if i > 0 and step.conditioning and stage.fan_out > 1:
-                fan = stage.fan_out
-                samples = {k: v.repeat_interleave(fan, 0) for k, v in samples.items()}
-                if torch.is_tensor(total):
-                    total = total.repeat_interleave(fan, 0)
+            # A conditioned multi-draw (fan-out, or the base count landing past a
+            # point-mass prefix) expands the batch: repeat each carried row to align
+            # with the step's sub-rows (the block is flattened row-major). 1:1 stages
+            # and unconditioned fillers leave the batch untouched.
+            if step.conditioning and samples and n > 1:
+                samples, total = _interleave_rows(samples, total, n)
             samples.update(block)
             # Drop any intermediates the step consumed: a reparametrization replaces its
             # inputs (in-place bijection); a target correction drops the columns it read.
@@ -745,6 +776,10 @@ class ChainComposer:
                 has_density = False
             elif has_density:
                 total = total + lp
+        # Degenerate all-point-mass chain: no stage carried multiplicity, so expand
+        # the single emitted row to the requested count.
+        if base_pending is not None and base_pending > 1 and samples:
+            samples, total = _interleave_rows(samples, total, base_pending)
         return samples, (total if has_density else None)
 
     def log_prob(

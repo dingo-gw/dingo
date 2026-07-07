@@ -80,25 +80,60 @@ def _event_data(n_bins=1025):
     return {"waveform": {"H1": strain}, "asds": {"H1": np.ones(n_bins)}}
 
 
-def test_heterodyne_inserted_before_decimation_with_fixed_proxy():
-    ctx = GWSamplerContext.from_model_metadata(
-        _BNS_METADATA, _event_data(), fixed_context_parameters=_PINS
-    )
+def test_heterodyne_inserted_before_decimation_draws_from_conditioning():
+    ctx = GWSamplerContext.from_model_metadata(_BNS_METADATA, _event_data())
     first = ctx._data_prep.transforms[0]
     assert isinstance(first, HeterodynePhase)
-    # Only proxy entries parameterize the data preparation; the pinned sky
-    # position is conditioning only.
-    assert first.fixed_parameters == {"chirp_mass": _PINS["chirp_mass_proxy"]}
+    # Parameters mode: the transform draws the chirp mass from the sample dict;
+    # no value is baked into the context. The context records only the names its
+    # preparation is a function of.
+    assert first.fixed_parameters is None
     assert first.order == 0 and first.inverse is False
+    assert ctx.data_prep_conditioning == ["chirp_mass_proxy"]
 
 
-def test_missing_proxy_makes_prepared_data_fail_loudly():
-    # Without pins the context still constructs (the likelihood and prior views
-    # must work for from-file results), but the network-input view is undefined.
+def test_prepared_data_requires_conditioning():
+    # Without conditioning the context still constructs (the likelihood and
+    # prior views must work for from-file results), but the network-input view
+    # is a function of the chain conditioning and fails loudly without it.
     ctx = GWSamplerContext.from_model_metadata(_BNS_METADATA, _event_data())
     assert ctx.prior is not None
-    with pytest.raises(ValueError, match="chirp-mass"):
+    with pytest.raises(ValueError, match="chirp_mass_proxy"):
         ctx.prepared_data()
+
+
+def _conditioning(value=1.1975, n=4):
+    import torch
+
+    return {
+        "chirp_mass_proxy": torch.full((n,), value),
+        "ra": torch.full((n,), _PINS["ra"]),
+        "dec": torch.full((n,), _PINS["dec"]),
+    }
+
+
+def test_prepared_data_consumes_conditioning_and_keys_the_cache():
+    import torch
+
+    ctx = GWSamplerContext.from_model_metadata(_BNS_METADATA, _event_data())
+    prepared = ctx.prepared_data(conditioning=_conditioning())
+    assert torch.is_tensor(prepared)
+    # Same values: the cached tensor is served.
+    assert ctx.prepared_data(conditioning=_conditioning()) is prepared
+    # A different pin is a different representation: fail rather than serve
+    # stale data.
+    with pytest.raises(ValueError, match="one\\s+representation"):
+        ctx.prepared_data(conditioning=_conditioning(value=1.30))
+
+
+def test_prepared_data_rejects_varying_conditioning():
+    import torch
+
+    ctx = GWSamplerContext.from_model_metadata(_BNS_METADATA, _event_data())
+    conditioning = _conditioning()
+    conditioning["chirp_mass_proxy"] = torch.tensor([1.19, 1.20, 1.21, 1.22])
+    with pytest.raises(ValueError, match="constant"):
+        ctx.prepared_data(conditioning=conditioning)
 
 
 def test_proxy_offset_step_selection():

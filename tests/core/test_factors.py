@@ -658,3 +658,36 @@ def test_unconditional_flow_factor():
     comp = ChainComposer([factor, _ConstFactor("y", conditioning=["H1_time_proxy"])])
     out = comp.sample(3, context=None)
     assert out["y"].shape == (3,)
+
+
+def test_point_mass_prefix_passes_base_to_first_stochastic_stage():
+    # A root prefix of point-mass steps (fixed pins) carries no multiplicity:
+    # it emits a single row, and the base count lands on the first stage that
+    # does carry it, as one conditioned call with num_samples = base. The
+    # prefix's carried rows are then expanded to match.
+    calls = []
+
+    class _RecordingFactor(Factor):
+        parameters = ["x"]
+        conditioning = ["a"]
+
+        def sample_and_log_prob(self, num_samples, context, given=None):
+            n_rows = len(next(iter(given.values())))
+            calls.append((num_samples, n_rows))
+            n = n_rows * num_samples
+            return {"x": torch.arange(n, dtype=torch.float32)}, torch.zeros(n)
+
+        def log_prob(self, theta_i, context, given=None):
+            return torch.zeros_like(next(iter(theta_i.values())))
+
+    chain = ChainComposer([DeltaFactor({"a": 2.0}), _RecordingFactor()])
+    samples, log_prob = chain.sample_and_log_prob(5, context=None)
+    assert calls == [(5, 1)]
+    assert samples["a"].shape == (5,) and torch.all(samples["a"] == 2.0)
+    assert samples["x"].shape == (5,) and log_prob.shape == (5,)
+
+
+def test_all_point_mass_chain_expands_to_base():
+    chain = ChainComposer([DeltaFactor({"a": 2.0, "b": -1.0})])
+    samples, log_prob = chain.sample_and_log_prob(4, context=None)
+    assert samples["a"].shape == (4,) and log_prob.shape == (4,)

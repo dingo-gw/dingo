@@ -94,20 +94,6 @@ def _frequency_range_update(domain, event_metadata) -> Optional[dict]:
     return {"minimum_frequency": minimum, "maximum_frequency": maximum}
 
 
-class _RequireFixedProxies:
-    """Data-prep placeholder for a chirp-GNPE model built without fixed proxies:
-    the network-input view is undefined without the heterodyning proxy, so
-    `prepared_data()` fails loudly. The likelihood and prior views are unaffected
-    (a from-file result reconstructs its context without pins)."""
-
-    def __call__(self, sample):
-        raise ValueError(
-            "This model heterodynes its network input with a fixed chirp-mass "
-            "proxy; construct the context with fixed_context_parameters "
-            "(e.g. {'chirp_mass_proxy': ...}) to prepare network input."
-        )
-
-
 class GWSamplerContext:
     """
     Per-event shared GW state: the data `d` and everything derived from it. Referenced
@@ -144,6 +130,7 @@ class GWSamplerContext:
         device: Union[torch.device, str] = "cpu",
         use_base_domain: bool = False,
         wfg_delta_f: Optional[float] = None,
+        data_prep_conditioning: Optional[list[str]] = None,
     ):
         """
         Parameters
@@ -173,6 +160,12 @@ class GWSamplerContext:
         wfg_delta_f : float, optional
             Override for the waveform-generator domain `delta_f` (an updated
             `T = 1/delta_f` cannot be handled by domain projection). Set via `derive`.
+        data_prep_conditioning : list[str], optional
+            Names of the chain-conditioning parameters the data preparation is a
+            function of (e.g. `["chirp_mass_proxy"]` for a heterodyning model).
+            `prepared_data` requires their values, injects them into the
+            transform chain, and keys its cache on them; the values themselves
+            have a single owner -- the chain.
         """
         self.domain = domain
         self._data_prep = data_prep
@@ -182,6 +175,8 @@ class GWSamplerContext:
         self.device = device
         self.use_base_domain = use_base_domain
         self.wfg_delta_f = wfg_delta_f
+        self.data_prep_conditioning = list(data_prep_conditioning or [])
+        self._prepared_key: Optional[dict] = None
         self._prepared: Optional[torch.Tensor] = None
         self._prior: Optional[PriorDict] = None
         self._likelihood: Optional[StationaryGaussianGWLikelihood] = None
@@ -204,7 +199,6 @@ class GWSamplerContext:
         event_data: dict,
         event_metadata: Optional[dict] = None,
         device: Union[torch.device, str] = "cpu",
-        fixed_context_parameters: Optional[dict] = None,
     ) -> "GWSamplerContext":
         """Build the context from a model-metadata dict -- no model required. The
         domain, one-time data-prep chain, prior, and likelihood are all defined by
@@ -222,11 +216,6 @@ class GWSamplerContext:
             Per-event metadata.
         device : torch.device or str, default "cpu"
             Device for `prepared_data()` and chain-created tensors.
-        fixed_context_parameters : dict, optional
-            Pinned network-conditioning values (e.g.
-            `{"chirp_mass_proxy": 1.1975, "ra": ..., "dec": ...}`). Proxy entries
-            that parameterize the data preparation (the chirp-mass heterodyne)
-            are consumed here; the chain conditions the network on all of them.
 
         Returns
         -------
@@ -240,28 +229,24 @@ class GWSamplerContext:
         detectors = data_settings["detectors"]
 
         transforms = []
-        # Chirp-mass GNPE (BNS): heterodyne the raw strain once with the fixed
-        # proxy -- before decimation (they do not commute) and on the base
-        # domain. Iterated chirp GNPE (heterodyning inside a Gibbs loop) is not
+        # Chirp-mass GNPE (BNS): heterodyne the raw strain -- before decimation
+        # (they do not commute) and on the base domain. The transform draws the
+        # chirp mass from the sample's "parameters", which `prepared_data`
+        # injects from the chain's conditioning: the proxy value has a single
+        # owner (the chain's DeltaFactor), and the preparation is a function of
+        # it. Iterated chirp GNPE (heterodyning inside a Gibbs loop) is not
         # implemented: it would require carrying the undecimated strain per
         # sample.
         gnpe_chirp = data_settings.get("gnpe_chirp")
+        data_prep_conditioning = []
         if gnpe_chirp is not None:
-            fixed = {
-                k[: -len("_proxy")]: v
-                for k, v in (fixed_context_parameters or {}).items()
-                if k.endswith("_proxy")
-            }
-            if "chirp_mass" in fixed:
-                transforms.append(
-                    HeterodynePhase(
-                        domain=getattr(domain, "base_domain", domain),
-                        order=gnpe_chirp.get("order", 0),
-                        fixed_parameters=fixed,
-                    )
+            data_prep_conditioning = [k + "_proxy" for k in gnpe_chirp["kernel"]]
+            transforms.append(
+                HeterodynePhase(
+                    domain=getattr(domain, "base_domain", domain),
+                    order=gnpe_chirp.get("order", 0),
                 )
-            else:
-                transforms.append(_RequireFixedProxies())
+            )
         # Decimate from the base domain when using a multibanded frequency domain.
         if isinstance(domain, MultibandedFrequencyDomain):
             transforms.append(
@@ -295,6 +280,7 @@ class GWSamplerContext:
             event_metadata=event_metadata,
             model_metadata=metadata,
             device=device,
+            data_prep_conditioning=data_prep_conditioning,
         )
 
     @classmethod
@@ -303,7 +289,6 @@ class GWSamplerContext:
         model: BasePosteriorModel,
         event_data: dict,
         event_metadata: Optional[dict] = None,
-        fixed_context_parameters: Optional[dict] = None,
     ) -> "GWSamplerContext":
         """Build the context from a model: its own metadata and its device. Data
         preparation is network-bound, so the settings come from `model.metadata`
@@ -337,7 +322,6 @@ class GWSamplerContext:
             event_data,
             event_metadata,
             device=model.device,
-            fixed_context_parameters=fixed_context_parameters,
         )
 
     def derive(
@@ -415,15 +399,67 @@ class GWSamplerContext:
                 self.use_base_domain if use_base_domain is None else use_base_domain
             ),
             wfg_delta_f=wfg_delta_f,
+            data_prep_conditioning=self.data_prep_conditioning,
         )
 
-    def prepared_data(self) -> torch.Tensor:
+    def prepared_data(self, conditioning=None) -> torch.Tensor:
         """One-time data preprocessing, computed once and cached. An event
         frequency-range update is validated against the training crop license
-        before the first preparation."""
-        if self._prepared is None:
-            self._validate_frequency_range()
-            self._prepared = self._data_prep(self.event_data)
+        before the first preparation.
+
+        When the preparation is a function of chain conditioning
+        (`data_prep_conditioning`, e.g. the chirp-mass heterodyne), the caller
+        supplies the conditioning columns; the required values must be constant
+        across rows (a context serves one representation), are injected into the
+        transform chain under their physical names, and key the cache -- a later
+        call with different values fails rather than silently serving stale
+        data.
+
+        Parameters
+        ----------
+        conditioning : dict[str, torch.Tensor], optional
+            The chain conditioning available to the calling factor. Ignored
+            when the preparation needs none of it.
+        """
+        if not self.data_prep_conditioning:
+            if self._prepared is None:
+                self._validate_frequency_range()
+                self._prepared = self._data_prep(self.event_data)
+            return self._prepared
+
+        conditioning = conditioning or {}
+        key = {}
+        for name in self.data_prep_conditioning:
+            if name not in conditioning:
+                raise ValueError(
+                    f"This model's data preparation is a function of the chain "
+                    f"conditioning `{name}`, which the caller does not provide "
+                    f"(pass it to prepared_data, e.g. from the chain's pins)."
+                )
+            column = torch.as_tensor(conditioning[name]).reshape(-1)
+            if not torch.all(column == column[0]):
+                raise ValueError(
+                    f"Data preparation requires a constant `{name}`, but the "
+                    f"conditioning varies across rows. A context serves one "
+                    f"representation; per-value batching (e.g. a chirp-mass "
+                    f"sweep) needs one context per value."
+                )
+            # Extract as a Python float: the transform chain computes the
+            # heterodyne phase in float64, and a float32 chain column must not
+            # degrade it.
+            key[name[: -len("_proxy")]] = float(column[0])
+
+        if self._prepared is not None:
+            if key != self._prepared_key:
+                raise ValueError(
+                    f"Data already prepared with {self._prepared_key}, but the "
+                    f"chain now conditions on {key}. A context serves one "
+                    f"representation; build a new context for a different value."
+                )
+            return self._prepared
+        self._validate_frequency_range()
+        self._prepared = self._data_prep({**self.event_data, "parameters": key})
+        self._prepared_key = key
         return self._prepared
 
     def _validate_frequency_range(self):
@@ -992,7 +1028,7 @@ class GNPEFlowFactor(Factor):
         proxies = {p: given[p] for p in self.proxy_parameters}
         n_rows = next(iter(proxies.values())).shape[0]
         x = {"extrinsic_parameters": dict(proxies), "parameters": {}}
-        d = context.prepared_data().clone()
+        d = context.prepared_data(conditioning=given).clone()
         x["data"] = d.expand(n_rows, *d.shape)
         x = self.transform_pre(x)
         self.model.network.eval()
@@ -1026,7 +1062,7 @@ class GNPEFlowFactor(Factor):
         proxies = {p: given[p] for p in self.proxy_parameters}
         n_rows = next(iter(proxies.values())).shape[0]
         x = {"extrinsic_parameters": dict(proxies), "parameters": {}}
-        d = context.prepared_data().clone()
+        d = context.prepared_data(conditioning=given).clone()
         x["data"] = d.expand(n_rows, *d.shape)
         x = self.transform_pre(x)
         theta_net = {
@@ -1434,8 +1470,9 @@ class GWComposedSampler(ComposedSampler):
         the flow conditions on them, and each inferred offset `delta_X` with a
         pinned proxy is reconstructed by a `ProxyOffsetReparam`
         (`X = delta_X + X_proxy`). Proxies that parameterize the data
-        preparation (the chirp-mass heterodyne) are applied once inside the
-        context.
+        preparation (the chirp-mass heterodyne) reach it through the chain:
+        the conditioned flow passes them to `prepared_data`, which consumes
+        and caches on them -- the pins have a single owner, the chain's root.
 
         Parameters
         ----------
@@ -1453,12 +1490,7 @@ class GWComposedSampler(ComposedSampler):
         -------
         GWComposedSampler
         """
-        context = GWSamplerContext.from_model(
-            model,
-            event_data,
-            event_metadata,
-            fixed_context_parameters=fixed_context_parameters,
-        )
+        context = GWSamplerContext.from_model(model, event_data, event_metadata)
         metadata = _base_model_metadata(model)
         data_settings = metadata["train_settings"]["data"]
         inference_parameters = data_settings["inference_parameters"]
