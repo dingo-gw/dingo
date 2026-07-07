@@ -102,7 +102,11 @@ main#quarto-document-content .quarto-page-breadcrumbs a { text-decoration: none;
 // Rounded blocks with a hairline border; neutral-grey inline code chip.
 div.sourceCode, pre { border-radius: 8px; }
 div.sourceCode { border: 1px solid $border-color; }
-p code, li code, td code {
+// Quarto's base `code { background: #f8f9fa }` isn't theme-aware; neutralise it and
+// chip inline code in the article body (covers `dd`/headings, not just p/li/td), so
+// the two themes chip the same set of elements.
+code { background-color: transparent; }
+main#quarto-document-content :not(pre) > code:not(.sourceCode) {
   background: #eef0f3;
   color: #2a3441;
   padding: 0.12em 0.36em;

@@ -90,7 +90,12 @@ div.sourceCode {
   background-color: #171c25;
 }
 pre { background-color: #171c25; }
-p code, li code, td code {
+// Quarto emits `code { background: #f8f9fa }` into BOTH the light and dark
+// stylesheets — it isn't theme-aware — so any inline code NOT chipped below (TOC,
+// headings, `dd` parameter descriptions) shows a near-white box in dark mode.
+// Reset that base fill, then apply the dark chip to inline code in the article body.
+code { background-color: transparent; }
+main#quarto-document-content :not(pre) > code:not(.sourceCode) {
   background: rgba(255, 255, 255, 0.08);
   color: #d7dde5;
   padding: 0.12em 0.36em;
