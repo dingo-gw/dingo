@@ -54,12 +54,23 @@ def test_contract():
     assert set(reparam.parameters) < set(reparam.conditioning)
 
 
-def test_inverse_is_guarded():
-    # The chain re-plug protocol hands inverse only the parameters block, which
-    # is insufficient for this bijection; the DataFrame API is the working
-    # physical -> network direction.
-    with pytest.raises(NotImplementedError, match="conditioning"):
-        SpinConventionReparam().inverse({}, None)
+def test_inverse_requires_given_and_closes_roundtrip():
+    # The physical -> network direction needs the invariant conditioning, which
+    # the reverse fold supplies as `given`; without it the call fails loudly.
+    class _Context:
+        model_metadata = _MODEL_METADATA_SC0
+
+    reparam = SpinConventionReparam()
+    with pytest.raises(ValueError, match="conditioning"):
+        reparam.inverse({}, None)
+
+    samples = _samples()
+    given = {k: torch.as_tensor(samples[k].to_numpy()) for k in reparam.conditioning}
+    physical, _ = reparam.sample_and_log_prob(1, _Context(), given)
+    inverse_given = {**given, **physical}
+    back = reparam.inverse(physical, _Context(), inverse_given)
+    for k in reparam.parameters:
+        assert np.allclose(back[k].numpy(), samples[k].to_numpy(), atol=1e-10)
 
 
 def test_none_convention_is_identity():

@@ -469,9 +469,16 @@ class Reparametrization(ABC):
 
     @abstractmethod
     def inverse(
-        self, params: dict[str, torch.Tensor], context: "SamplerContext"
+        self,
+        params: dict[str, torch.Tensor],
+        context: "SamplerContext",
+        given: Optional[dict[str, torch.Tensor]] = None,
     ) -> dict[str, torch.Tensor]:
-        """Map the `parameters` block back to the conditioning block."""
+        """Rebuild the consumed inputs from the `parameters` block. `given` holds
+        the non-consumed conditioning columns still present in the chain (e.g. a
+        proxy the bijection shifts by, or invariant parameters a coordinate
+        change needs); bijections that depend only on their own outputs may
+        ignore it."""
 
     def log_det(
         self, given: dict[str, torch.Tensor], context: "SamplerContext"
@@ -727,7 +734,10 @@ class ChainComposer:
                 continue
             if isinstance(step, Reparametrization):
                 params = {k: values[k] for k in step.parameters}
-                values.update(step.inverse(params, context))
+                # The non-consumed conditioning is still present and may be
+                # needed to invert (e.g. a proxy the bijection shifts by).
+                available = {k: values[k] for k in step.conditioning if k in values}
+                values.update(step.inverse(params, context, available))
                 given = {k: values[k] for k in step.conditioning}
                 total = total - step.log_det(given, context)
             else:

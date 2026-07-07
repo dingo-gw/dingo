@@ -283,7 +283,7 @@ class _MockReparam(Reparametrization):
     def forward(self, given, context):
         return {"v": given["u"] + self._shift}
 
-    def inverse(self, params, context):
+    def inverse(self, params, context, given=None):
         return {"u": params["v"] - self._shift}
 
     def log_det(self, given, context):
@@ -513,7 +513,7 @@ class _InPlaceReparam(Reparametrization):
     def forward(self, given, context):
         return {"x": given["x"] + self._shift}
 
-    def inverse(self, params, context):
+    def inverse(self, params, context, given=None):
         return {"x": params["x"] - self._shift}
 
 
