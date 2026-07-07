@@ -37,6 +37,7 @@ from dingo.core.factors import (
     Factor,
     FlowFactor,
     GibbsBlock,
+    ProxyOffsetReparam,
     Reparametrization,
     Standardization,
     TargetCorrection,
@@ -62,6 +63,7 @@ from dingo.gw.transforms import (
     GNPECoalescenceTimes,
     MaskDataForFrequencyRangeUpdate,
     PostCorrectGeocentTime,
+    HeterodynePhase,
     RepackageStrainsAndASDS,
     SelectStandardizeRepackageParameters,
     TimeShiftStrain,
@@ -90,6 +92,20 @@ def _frequency_range_update(domain, event_metadata) -> Optional[dict]:
     if normalize(minimum) == {domain.f_min} and normalize(maximum) == {domain.f_max}:
         return None
     return {"minimum_frequency": minimum, "maximum_frequency": maximum}
+
+
+class _RequireFixedProxies:
+    """Data-prep placeholder for a chirp-GNPE model built without fixed proxies:
+    the network-input view is undefined without the heterodyning proxy, so
+    `prepared_data()` fails loudly. The likelihood and prior views are unaffected
+    (a from-file result reconstructs its context without pins)."""
+
+    def __call__(self, sample):
+        raise ValueError(
+            "This model heterodynes its network input with a fixed chirp-mass "
+            "proxy; construct the context with fixed_context_parameters "
+            "(e.g. {'chirp_mass_proxy': ...}) to prepare network input."
+        )
 
 
 class GWSamplerContext:
@@ -188,6 +204,7 @@ class GWSamplerContext:
         event_data: dict,
         event_metadata: Optional[dict] = None,
         device: Union[torch.device, str] = "cpu",
+        fixed_context_parameters: Optional[dict] = None,
     ) -> "GWSamplerContext":
         """Build the context from a model-metadata dict -- no model required. The
         domain, one-time data-prep chain, prior, and likelihood are all defined by
@@ -205,6 +222,11 @@ class GWSamplerContext:
             Per-event metadata.
         device : torch.device or str, default "cpu"
             Device for `prepared_data()` and chain-created tensors.
+        fixed_context_parameters : dict, optional
+            Pinned network-conditioning values (e.g.
+            `{"chirp_mass_proxy": 1.1975, "ra": ..., "dec": ...}`). Proxy entries
+            that parameterize the data preparation (the chirp-mass heterodyne)
+            are consumed here; the chain conditions the network on all of them.
 
         Returns
         -------
@@ -218,6 +240,28 @@ class GWSamplerContext:
         detectors = data_settings["detectors"]
 
         transforms = []
+        # Chirp-mass GNPE (BNS): heterodyne the raw strain once with the fixed
+        # proxy -- before decimation (they do not commute) and on the base
+        # domain. Iterated chirp GNPE (heterodyning inside a Gibbs loop) is not
+        # implemented: it would require carrying the undecimated strain per
+        # sample.
+        gnpe_chirp = data_settings.get("gnpe_chirp")
+        if gnpe_chirp is not None:
+            fixed = {
+                k[: -len("_proxy")]: v
+                for k, v in (fixed_context_parameters or {}).items()
+                if k.endswith("_proxy")
+            }
+            if "chirp_mass" in fixed:
+                transforms.append(
+                    HeterodynePhase(
+                        domain=getattr(domain, "base_domain", domain),
+                        order=gnpe_chirp.get("order", 0),
+                        fixed_parameters=fixed,
+                    )
+                )
+            else:
+                transforms.append(_RequireFixedProxies())
         # Decimate from the base domain when using a multibanded frequency domain.
         if isinstance(domain, MultibandedFrequencyDomain):
             transforms.append(
@@ -259,6 +303,7 @@ class GWSamplerContext:
         model: BasePosteriorModel,
         event_data: dict,
         event_metadata: Optional[dict] = None,
+        fixed_context_parameters: Optional[dict] = None,
     ) -> "GWSamplerContext":
         """Build the context from a model: its own metadata and its device. Data
         preparation is network-bound, so the settings come from `model.metadata`
@@ -288,7 +333,11 @@ class GWSamplerContext:
                 "GWSamplerContext.from_model_metadata(_base_model_metadata(model), ...)."
             )
         return cls.from_model_metadata(
-            model.metadata, event_data, event_metadata, device=model.device
+            model.metadata,
+            event_data,
+            event_metadata,
+            device=model.device,
+            fixed_context_parameters=fixed_context_parameters,
         )
 
     def derive(
@@ -1202,58 +1251,6 @@ class SpinConventionReparam(Reparametrization):
         }
 
 
-class ProxyOffsetReparam(Reparametrization):
-    """
-    Reconstruct a physical parameter from a network's offset output and its proxy:
-    `X = delta_X + X_proxy`.
-
-    A proxy-conditioned network (e.g. the chirp-mass prior conditioning of
-    DINGO-BNS) infers the offset `delta_X = X - X_proxy` rather than `X` itself.
-    This step rebuilds `X`, consuming the offset column while keeping the proxy in
-    the chain (it is recorded with the samples, like the GNPE time proxies). A pure
-    shift at fixed proxy, so `log_det = 0`; `inverse` recovers the offset from the
-    proxy the reverse fold supplies.
-    """
-
-    def __init__(self, parameter_name: str):
-        """
-        Parameters
-        ----------
-        parameter_name : str
-            The physical parameter name `X`; the step reads `delta_X` and
-            `X_proxy` and produces `X`.
-        """
-        self.parameter_name = parameter_name
-        self.delta_name = f"delta_{parameter_name}"
-        self.proxy_name = f"{parameter_name}_proxy"
-        self.parameters = [parameter_name]
-        self.conditioning = [self.delta_name, self.proxy_name]
-
-    @property
-    def consumes(self) -> list[str]:
-        # The offset is replaced by the physical parameter; the proxy stays in
-        # the chain (recorded with the samples).
-        return [self.delta_name]
-
-    def forward(self, given, context):
-        return {self.parameter_name: given[self.delta_name] + given[self.proxy_name]}
-
-    def inverse(self, params, context, given=None):
-        if given is None or self.proxy_name not in given:
-            raise ValueError(
-                f"Inverting {self.parameter_name} = {self.delta_name} + "
-                f"{self.proxy_name} requires the proxy in `given`."
-            )
-        return {self.delta_name: params[self.parameter_name] - given[self.proxy_name]}
-
-    def describe(self) -> dict:
-        return {
-            "step": type(self).__name__,
-            "parameters": list(self.parameters),
-            "conditioning": list(self.conditioning),
-        }
-
-
 class GNPEKernelCorrection(TargetCorrection):
     """
     The single-step GNPE kernel correction as a target-side chain step.
@@ -1283,6 +1280,19 @@ def _ra_aliases(inference_parameters: list[str]) -> dict[str, str]:
     """The RA frame alias (`ra` -> `ra@t_ref`), applied only when the model infers
     `ra`; paired with an `RAReparam` step that maps it back to the event frame."""
     return {"ra": "ra@t_ref"} if "ra" in inference_parameters else {}
+
+
+def _proxy_offset_steps(
+    inference_parameters: list[str], context_parameters: list[str]
+) -> list:
+    """One offset reconstruction (`X = delta_X + X_proxy`) per `delta_X` the
+    network infers whose proxy it conditions on."""
+    return [
+        ProxyOffsetReparam(p[len("delta_") :])
+        for p in inference_parameters
+        if p.startswith("delta_")
+        and p[len("delta_") :] + "_proxy" in context_parameters
+    ]
 
 
 def _ra_reparam_steps(inference_parameters: list[str]) -> list:
@@ -1412,34 +1422,60 @@ class GWComposedSampler(ComposedSampler):
         model: BasePosteriorModel,
         event_data: dict,
         event_metadata: Optional[dict] = None,
+        fixed_context_parameters: Optional[dict] = None,
     ) -> "GWComposedSampler":
-        """Build a plain-NPE GW sampler from a model and event data: the flow exposes
-        `ra` as `ra@t_ref`, followed by an `RAReparam` to the event frame.
+        """Build a single-network GW sampler from a model and event data.
+
+        For a plain NPE model the chain is the flow (exposing `ra` as `ra@t_ref`)
+        followed by an `RAReparam` to the event frame. A model with
+        `context_parameters` (e.g. the DINGO-BNS chirp-mass prior conditioning
+        with a fixed sky position) requires `fixed_context_parameters` pinning
+        all of them: the chain is then rooted in a `DeltaFactor` of the pins,
+        the flow conditions on them, and each inferred offset `delta_X` with a
+        pinned proxy is reconstructed by a `ProxyOffsetReparam`
+        (`X = delta_X + X_proxy`). Proxies that parameterize the data
+        preparation (the chirp-mass heterodyne) are applied once inside the
+        context.
 
         Parameters
         ----------
         model : BasePosteriorModel
-            The NPE model.
+            The model.
         event_data : dict
             The raw event data (strain + ASDs).
         event_metadata : dict, optional
             Per-event metadata.
+        fixed_context_parameters : dict, optional
+            Pinned values for the model's `context_parameters`, e.g.
+            `{"chirp_mass_proxy": 1.1975, "ra": 3.446, "dec": -0.408}`.
 
         Returns
         -------
         GWComposedSampler
         """
-        context = GWSamplerContext.from_model(model, event_data, event_metadata)
-        metadata = _base_model_metadata(model)
-        inference_parameters = metadata["train_settings"]["data"][
-            "inference_parameters"
-        ]
-        factor = FlowFactor.from_model(model, aliases=_ra_aliases(inference_parameters))
-        steps = (
-            [factor]
-            + _ra_reparam_steps(inference_parameters)
-            + _delta_prior_steps(context.prior, inference_parameters)
+        context = GWSamplerContext.from_model(
+            model,
+            event_data,
+            event_metadata,
+            fixed_context_parameters=fixed_context_parameters,
         )
+        metadata = _base_model_metadata(model)
+        data_settings = metadata["train_settings"]["data"]
+        inference_parameters = data_settings["inference_parameters"]
+        factor = FlowFactor.from_model(model, aliases=_ra_aliases(inference_parameters))
+        steps = [factor]
+        context_parameters = data_settings.get("context_parameters") or []
+        if context_parameters:
+            if set(fixed_context_parameters or {}) != set(context_parameters):
+                raise ValueError(
+                    f"The model conditions on {context_parameters}; provide "
+                    f"fixed_context_parameters with exactly these keys (for "
+                    f"iterated proxies, use the GNPE builders instead)."
+                )
+            steps = [DeltaFactor(fixed_context_parameters)] + steps
+        steps += _proxy_offset_steps(inference_parameters, context_parameters)
+        steps += _ra_reparam_steps(inference_parameters)
+        steps += _delta_prior_steps(context.prior, inference_parameters)
         return cls(
             composer=ChainComposer(steps),
             context=context,

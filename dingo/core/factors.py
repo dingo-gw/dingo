@@ -512,6 +512,58 @@ class Reparametrization(ABC):
         return _describe_default(self)
 
 
+class ProxyOffsetReparam(Reparametrization):
+    """
+    Reconstruct a physical parameter from a network's offset output and its proxy:
+    `X = delta_X + X_proxy`.
+
+    A proxy-conditioned network (e.g. the chirp-mass prior conditioning of
+    DINGO-BNS) infers the offset `delta_X = X - X_proxy` rather than `X` itself.
+    This step rebuilds `X`, consuming the offset column while keeping the proxy in
+    the chain (it is recorded with the samples, like the GNPE time proxies). A pure
+    shift at fixed proxy, so `log_det = 0`; `inverse` recovers the offset from the
+    proxy the reverse fold supplies.
+    """
+
+    def __init__(self, parameter_name: str):
+        """
+        Parameters
+        ----------
+        parameter_name : str
+            The physical parameter name `X`; the step reads `delta_X` and
+            `X_proxy` and produces `X`.
+        """
+        self.parameter_name = parameter_name
+        self.delta_name = f"delta_{parameter_name}"
+        self.proxy_name = f"{parameter_name}_proxy"
+        self.parameters = [parameter_name]
+        self.conditioning = [self.delta_name, self.proxy_name]
+
+    @property
+    def consumes(self) -> list[str]:
+        # The offset is replaced by the physical parameter; the proxy stays in
+        # the chain (recorded with the samples).
+        return [self.delta_name]
+
+    def forward(self, given, context):
+        return {self.parameter_name: given[self.delta_name] + given[self.proxy_name]}
+
+    def inverse(self, params, context, given=None):
+        if given is None or self.proxy_name not in given:
+            raise ValueError(
+                f"Inverting {self.parameter_name} = {self.delta_name} + "
+                f"{self.proxy_name} requires the proxy in `given`."
+            )
+        return {self.delta_name: params[self.parameter_name] - given[self.proxy_name]}
+
+    def describe(self) -> dict:
+        return {
+            "step": type(self).__name__,
+            "parameters": list(self.parameters),
+            "conditioning": list(self.conditioning),
+        }
+
+
 class TargetCorrection(ABC):
     """
     A `Step` that emits an importance-sampling target correction as a side-channel column
