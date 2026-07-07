@@ -137,7 +137,9 @@ class WhitenAndScaleStrain(object):
     This accounts for frequency binning 
     """
 
-    def __init__(self, scale_factor):
+    def __init__(self, scale_factor=None, domain=None):
+        if domain is not None:
+            scale_factor = domain.noise_std
         self.scale_factor = scale_factor
 
     def __call__(self, input_sample):
@@ -195,8 +197,10 @@ class RepackageStrainsAndASDS(object):
         i = 2: 1 / (asd * 1e23)
     """
 
-    def __init__(self, ifos, first_index=0):
+    def __init__(self, ifos, first_index=0, domain=None):
         self.ifos = ifos
+        if domain is not None:
+            first_index = domain.min_idx
         self.first_index = first_index
 
     def __call__(self, input_sample):

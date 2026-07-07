@@ -1,15 +1,18 @@
 import os
 import sys
+import logging
 from os.path import join, isfile
 import yaml
 import argparse
 
-from dingo.core.utils.logging_utils import logger, setup_logger
+from dingo.core.utils.logging_utils import setup_logger
 from dingo.gw.training import (
     prepare_training_new,
     prepare_training_resume,
     train_stages,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def create_submission_file(

@@ -1,11 +1,14 @@
 import os
 import argparse
+import logging
 from typing import Dict
 from pycondor import Job, Dagman
 import yaml
 import copy
 
-from dingo.core.utils.logging_utils import logger, setup_logger
+from dingo.core.utils.logging_utils import setup_logger
+
+logger = logging.getLogger(__name__)
 
 # Fixed file names
 svd_fn = "svd.hdf5"

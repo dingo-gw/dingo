@@ -12,14 +12,19 @@ exit_command: ""
 
 data:
   extrinsic_prior: ${extrinsic_prior}
-  waveform_dataset_path: training_data/waveform_dataset.hdf5
+  waveform_dataset:
+    _target_: dingo.gw.dataset.WaveformDataset
+    file_name: training_data/waveform_dataset.hdf5
+    precision: single
+    domain_update: null
+    svd_size_update: null
   train_fraction: 0.95
-  domain_update: null
-  svd_size_update: null
   detectors:
     - H1
     - L1
   ref_time: 1126259462.391
+  gnpe_time_shifts: null
+  random_strain_cropping: null
   inference_parameters:
     - chirp_mass
     - mass_ratio
@@ -32,6 +37,54 @@ data:
     - luminosity_distance
     - psi
     - phase
+  context_parameters: []
+  selected_keys:
+    - inference_parameters
+    - waveform
+  standardization:
+    mean: ???
+    std: ???
+  standardization_transforms:
+    - _target_: dingo.gw.transforms.SampleExtrinsicParameters
+      extrinsic_prior_dict: ${data.extrinsic_prior}
+    - _target_: dingo.gw.transforms.GetDetectorTimes
+      ifo_list:
+        _target_: bilby.gw.detector.InterferometerList
+        interferometers: ${data.detectors}
+      ref_time: ${data.ref_time}
+  transforms:
+    - _target_: dingo.gw.transforms.SampleExtrinsicParameters
+      extrinsic_prior_dict: ${data.extrinsic_prior}
+    - _target_: dingo.gw.transforms.GetDetectorTimes
+      ifo_list:
+        _target_: bilby.gw.detector.InterferometerList
+        interferometers: ${data.detectors}
+      ref_time: ${data.ref_time}
+    - _target_: dingo.gw.transforms.ProjectOntoDetectors
+      _partial_: true
+      _runtime_dependencies_: [domain]
+      ifo_list:
+        _target_: bilby.gw.detector.InterferometerList
+        interferometers: ${data.detectors}
+      ref_time: ${data.ref_time}
+    - _target_: dingo.gw.transforms.SampleNoiseASD
+      _partial_: true
+      _runtime_dependencies_: [asd_dataset]
+    - _target_: dingo.gw.transforms.WhitenAndScaleStrain
+      _partial_: true
+      _runtime_dependencies_: [domain]
+    - _target_: dingo.gw.transforms.AddWhiteNoiseComplex
+    - _target_: dingo.gw.transforms.SelectStandardizeRepackageParameters
+      parameters_dict:
+        inference_parameters: ${data.inference_parameters}
+        context_parameters: ${data.context_parameters}
+      standardization_dict: ${data.standardization}
+    - _target_: dingo.gw.transforms.RepackageStrainsAndASDS
+      _partial_: true
+      _runtime_dependencies_: [domain]
+      ifos: ${data.detectors}
+    - _target_: dingo.gw.transforms.UnpackDict
+      selected_keys: ${data.selected_keys}
 
 training:
   evaluate: false
@@ -39,7 +92,12 @@ training:
     optimizer: ${optimizer}
     scheduler: ${scheduler}
     epochs: 20
-    asd_dataset_path: training_data/asd_dataset/asds_O1.hdf5
+    asd_dataset:
+      _target_: dingo.gw.noise.asd_dataset.ASDDataset
+      file_name: training_data/asd_dataset/asds_O1.hdf5
+      ifos: ${data.detectors}
+      precision: single
+      domain_update: null
     freeze_rb_layer: true
     batch_size: 64
     early_stopping: null

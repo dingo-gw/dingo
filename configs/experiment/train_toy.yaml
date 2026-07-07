@@ -5,10 +5,11 @@ defaults:
   - _self_
 
 data:
-  waveform_dataset_path: training_data/waveform_dataset.hdf5
+  waveform_dataset:
+    file_name: training_data/waveform_dataset.hdf5
+    domain_update: null
+    svd_size_update: null
   train_fraction: 0.95
-  domain_update: null
-  svd_size_update: null
   detectors: [H1, L1]
   ref_time: 1126259462.391
   inference_parameters:
@@ -27,7 +28,12 @@ data:
 training:
   stage_0:
     epochs: 20
-    asd_dataset_path: training_data/asd_dataset/asds_O1.hdf5
+    asd_dataset:
+      _target_: dingo.gw.noise.asd_dataset.ASDDataset
+      file_name: training_data/asd_dataset/asds_O1.hdf5
+      ifos: ${data.detectors}
+      precision: single
+      domain_update: null
     freeze_rb_layer: true
     batch_size: 64
     early_stopping: null

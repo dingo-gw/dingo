@@ -16,7 +16,7 @@ from omegaconf import DictConfig, OmegaConf
 from gwpy.table import EventTable
 from dingo.gw.noise.asd_dataset import ASDDataset
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 logging.captureWarnings(True)
 
 """
@@ -161,7 +161,7 @@ def merge_datasets(asd_dataset_list):
     merged_dict = {"asds": {}, "gps_times": {}}
 
     for det, asd_list in asd_dataset_list.items():
-        log.info(f"Merging {len(asd_list)} datasets into one for detector {det}.")
+        logger.info(f"Merging {len(asd_list)} datasets into one for detector {det}.")
         merged_dict["asds"][det] = np.vstack(
             [asd_dataset.asds[det] for asd_dataset in asd_list]
         )

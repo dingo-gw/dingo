@@ -219,8 +219,10 @@ Public console scripts are defined in `pyproject.toml`.
   - Stage 1 has started.
   - Uses Hydra and `instantiate(...)` for some objects already, so it is partly
     beyond a purely superficial Stage 1 pass.
-  - Remaining concern: compression/SVD logic is still procedural and should be
-    revisited in Stage 3.
+  - Stage 3 progress: compression is now represented as an ordered list of
+    Hydra-instantiated transform configs. The train-from-waveforms SVD path is
+    a Hydra target that returns an `SVDBasis`, while the produced SVD arrays are
+    still saved as dataset artifact data.
 
 - [ ] `dingo_generate_dataset_dag`
   - File: `dingo/gw/dataset/generate_dataset_dag.py`
@@ -489,6 +491,142 @@ clear this is a scoped migration rather than an incomplete sweep.
 
 ## Stage 3 Refactor Hotspots
 
+- [ ] Stage 3 implementation philosophy
+  - Prefer moving logic into Hydra configs through defaults, interpolation, and
+    `_target_` entries.
+  - Source-code changes should usually delete old construction/defaulting code
+    or replace it with direct `hydra.utils.instantiate(...)` calls.
+  - Avoid adding new source-code logic. If a new helper seems necessary, discuss
+    it first, except for the already-agreed generic
+    `instantiate_with_runtime_dependencies(...)` helper.
+  - Expect config files to grow and pure Python construction code to shrink.
+  - Start implementation with easier direct-instantiation migrations to
+    establish patterns before touching the transform/metadata-heavy pieces.
+
+- [ ] Define the Stage 3 config-construction contract
+  - Goal: replace old `from_config` / `build_*` / string-dispatch constructors
+    with Hydra-native `_target_` configs and `hydra.utils.instantiate(...)`
+    as the normal construction mechanism.
+  - Target architecture: configs describe the object graph, code defines the
+    objects/functions, and Hydra composes plus instantiates. Avoid config
+    completion helpers, compatibility-shaped builders, and side-channel
+    mutation of settings dictionaries.
+  - Stage 3 implementation rule: only remove old config-construction code or
+    replace it by `_target_` configs plus `hydra.utils.instantiate(...)`.
+    Do not introduce new factories, adapters, compatibility builders, or
+    config-normalization layers without first discussing the design and getting
+    explicit agreement.
+  - Approved helper exception: a small generic
+    `instantiate_with_runtime_dependencies(...)` helper is acceptable for
+    Hydra-instantiating transform lists whose entries sometimes need live
+    runtime objects. This helper should remain generic and should not encode
+    Dingo-specific config completion logic.
+  - Runtime-dependent quantities should be handled by the instantiated objects
+    or by explicit setup methods on those objects, not by patching config
+    dictionaries before construction.
+  - Avoid mixing two construction idioms for the same object family. Once a
+    family is migrated, prefer `_target_` configs over parallel `type` strings
+    plus builder switches.
+  - Difficulty: medium/high because the easy cases are straightforward, but the
+    boundary between declarative construction and normal object lifecycle must
+    be chosen deliberately.
+
+- [ ] Define the saved-metadata contract for Hydra configs
+  - Current datasets, models, and results save settings dictionaries as
+    metadata. Stage 3 must decide what gets saved once configs contain
+    `_target_`, interpolations, defaults composition, and possibly instantiated
+    Python objects.
+  - Candidate policy:
+    - Save the resolved, plain-container snapshot of the composed Hydra config
+      as the authoritative run/model/dataset metadata.
+    - Put as much as possible into the composed config before object
+      construction starts: user choices, defaults, resolved paths, dimensions,
+      standardization settings/statistics, and other values that can be known
+      or computed ahead of time.
+    - All paths saved in metadata should be absolute/resolved paths.
+    - Save the exact config produced by Hydra, rather than translating it into
+      the old `dataset_settings` / `train_settings` metadata shape.
+    - Prefer loading saved config metadata back as an OmegaConf/DictConfig-style
+      object so code can use dot access consistently instead of ordinary nested
+      dictionary indexing.
+    - For results, keep the original resolved model config separate from
+      result-specific metadata. The model config records the proposal/model that
+      produced the samples; event, inference, and importance-sampling metadata
+      record what was done to/with those samples.
+    - Compute parameter standardization before model construction and include
+      the resulting standardization statistics in the resolved config.
+    - Prefer Hydra/OmegaConf composition, interpolation, and resolvers for this
+      ahead-of-time computation over code that mutates config dictionaries
+      during construction.
+    - For simple derived values, use OmegaConf interpolation, e.g. `${...}`, to
+      reference values already present elsewhere in the config.
+    - For heavier ahead-of-time computations, use `_target_` config blocks and
+      `hydra.utils.instantiate(...)` on that config subtree. This is acceptable
+      when the target is the actual computation/object being configured, not a
+      new config-factory layer.
+    - Do not save live instantiated objects; save importable targets,
+      primitive parameters, paths, versions, and artifact provenance instead.
+    - Keep produced arrays/tensors outside the config: model weights,
+      optimizer/scheduler state, SVD basis arrays, result samples, context/event
+      strain arrays, etc. These can remain stored in dedicated artifact/data
+      fields broadly as they are today.
+    - Keep the metadata structure close to the config structure so users can
+      understand saved artifacts by looking at the configs.
+    - Do not design the new metadata around legacy dictionary shapes unless a
+      concrete loader requirement is reintroduced.
+  - If old artifacts need support later, prefer a narrow explicit migration
+    shim at the loading boundary rather than carrying legacy shape through the
+    new config design.
+  - Progress:
+    - HDF5-backed `DingoDataset` settings are now saved as resolved YAML and
+      loaded as OmegaConf/DictConfig metadata, with a fallback for old
+      Python-literal attributes.
+    - Posterior-model metadata is held as DictConfig in memory for dot access,
+      but saved to checkpoints as resolved plain containers so `torch.load`
+      remains compatible with safe loading.
+    - Result-specific metadata remains separate from model metadata as before.
+    - Training computes missing parameter standardizations before the
+      configured training transforms are instantiated, writes the computed
+      statistics back into the training settings, and syncs the resolved
+      transform config that consumes them.
+  - Difficulty: very high. This is a cross-cutting compatibility and
+    reproducibility contract, even if we choose not to preserve old metadata
+    formats.
+
+- [ ] Replace manual config autocompletion/resolution with Hydra-era derived
+      metadata handling
+  - Current hotspot: `dingo/core/posterior_models/build_model.py` contains
+    `autocomplete_model_kwargs(...)`, which mutates model settings in-place
+    based on a runtime data sample.
+  - It currently fills:
+    - `embedding_kwargs.input_dims` from waveform/data shape
+    - `posterior_kwargs.input_dim` from the parameter vector length
+    - `embedding_kwargs.added_context` from whether GNPE proxy context exists
+    - `posterior_kwargs.context_dim` from embedding output dimension plus
+      optional GNPE proxy dimension
+  - This is not plain static config composition: the values depend on the
+    realized training dataset and transform pipeline.
+  - Candidate policy:
+    - Keep user-configurable architecture choices in Hydra configs.
+    - Remove hidden in-place config mutation.
+    - Move any dimensions or settings that can be known before construction into
+      the composed Hydra config, using explicit config values or Hydra
+      resolution mechanisms rather than `autocomplete_model_kwargs(...)`.
+    - Only leave shape inference inside instantiated objects when the value
+      genuinely cannot be known before the object is constructed.
+    - Save the resolved config and any resulting learned/artifact state; do not
+      save a separately patched config unless the object itself owns that state.
+  - Related pipe-only helper: `dingo/pipe/main.py` has
+    `write_complete_config_file(...)`, which writes a completed `.ini` file.
+    Since `.ini` pipe workflows are out of scope for the current Hydra
+    migration, keep this separate for now; if pipe migrates later, Hydra's
+    composed config output should replace most of this behavior.
+  - Difficulty: high. It sits at the intersection of model construction,
+    transform realization, and saved metadata.
+  - Design status: agreed. `autocomplete_model_kwargs(...)` should become
+    superfluous. Ahead-of-time computable dimensions should live in the resolved
+    Hydra config through interpolation or explicit ahead-of-time computation.
+
 - [ ] Move Python-defined defaults into Hydra default configs
   - Goal: make default choices visible, overridable, and composable from the
     config tree rather than hidden in module globals or helper functions.
@@ -503,8 +641,8 @@ clear this is a scoped migration rather than an incomplete sweep.
     - `defaults/importance_sampling`
     - `defaults/nde`
     - `defaults/training`
-  - Keep a deliberate backward-compatibility story for old saved metadata that
-    uses strings such as `default`.
+  - Replace old sentinel values such as `default` with explicit defaults-group
+    choices where possible.
 
 - [ ] Audit implicit constructor/function defaults and expose them in config
   - Example configs currently omit many options because Python functions and
@@ -523,6 +661,8 @@ clear this is a scoped migration rather than an incomplete sweep.
     - transform defaults in the training data pipeline, including
       `zero_noise: false`, optional `random_strain_cropping`, derived
       `context_parameters`, and derived `standardization`
+    - ahead-of-time computed model dimensions, replacing
+      `autocomplete_model_kwargs(...)` where possible
     - pipe/inference defaults currently supplied by parser defaults
     - ASD/noise generation defaults such as frequency range, channels, and
       Condor settings
@@ -532,7 +672,7 @@ clear this is a scoped migration rather than an incomplete sweep.
     - runtime limit defaults (`max_time_per_run`, `max_epochs_per_run`,
       `max_epochs_total`, `epoch_start`)
 
-- [ ] `dingo/core/density/nde_settings.py`
+- [x] `dingo/core/density/nde_settings.py`
   - Move or retire `get_default_nde_settings_3d(...)` and
     `DEFAULT_NDE_SETTINGS_2D`.
   - These currently define additional unconditional NDE architectures:
@@ -540,44 +680,181 @@ clear this is a scoped migration rather than an incomplete sweep.
       Adam learning rate 0.005, cosine `T_max: 10`.
     - 2D GNPE proxy recovery: 5 flow steps, hidden dimension 64, batch size
       4096, 10 epochs, Adam learning rate 0.001, cosine `T_max: 10`.
-  - Decide whether these become separate `model/*` and training config groups,
-    or whether they are superseded by `model/unconditional_npe.yaml`.
+  - Retired in favor of Hydra configs, primarily `model/unconditional_npe.yaml`
+    plus `unconditional_density_estimation.yaml`.
 
 - [ ] `dingo/gw/domains/build_domain.py`
   - Replace `type`-based dispatch with Hydra instantiation.
-  - Keep metadata/backward compatibility in mind.
+  - New metadata should save the resolved Hydra domain config, not a parallel
+    legacy domain dictionary.
+  - Design status: agreed/easy. Use `_target_` domain configs directly.
+    `build_domain(...)` and `build_domain_from_model_metadata(...)` should
+    become unnecessary once downstream code reads the resolved Hydra config and
+    calls `hydra.utils.instantiate(...)`.
+  - Initial Stage 3 pass: default Hydra domain configs now use `_target_`, and
+    `build_domain(...)` instantiates `_target_` configs while keeping the legacy
+    `type` path for saved metadata and existing callers.
+  - Progress: `dingo_generate_dataset` and
+    `dingo_evaluate_multibanded_domain` now instantiate the Hydra domain config
+    directly instead of calling `build_domain(...)`.
 
-- [ ] `dingo/gw/prior.py`
+- [x] `dingo/gw/prior.py`
   - Replace `default` string handling and prior builders with explicit config
    targets or reusable config groups.
   - Current code-defined defaults:
     - `default_intrinsic_dict`
     - `default_extrinsic_dict`
     - `default_inference_parameters`
+  - Agreed design:
+    - Remove `default` sentinel strings from the Hydra-era configs.
+    - The intrinsic prior config should target `BBHPriorDict` directly.
+    - The `BBHPriorDict` config should contain explicit entries for the
+      individual parameter priors/constraints.
+    - Prefer making the prior dictionary target explicit over instantiating each
+      Bilby prior object separately, unless a specific parameter requires a
+      different treatment.
+    - Retire `build_prior_with_defaults(...)` once all callers consume the
+      instantiated/configured prior dictionary.
+  - Progress: intrinsic-prior Hydra group configs now target
+    `bilby.gw.prior.BBHPriorDict` directly, with explicit entries replacing
+    `default` sentinels. Extrinsic-prior configs now target
+    `dingo.gw.prior.BBHExtrinsicPriorDict` directly. Dataset generation,
+    multibanded-domain evaluation, training, result, sampler, and injection
+    paths consume these explicit configs. `build_prior_with_defaults(...)`,
+    `get_extrinsic_prior_dict(...)`, and the Python-level default prior /
+    inference-parameter globals were retired. Pipe remains out of scope.
 
 - [ ] Waveform generator construction
   - Replace `new_interface` flags and manual class branching with `_target_`.
+  - Design status: agreed/easy. Use `_target_` waveform-generator configs
+    directly and remove manual branching once callers instantiate from config.
+  - Progress: waveform-generator Hydra group configs now target
+    `dingo.gw.waveform_generator.WaveformGenerator`, and the two dataset
+    entrypoints instantiate them directly with the chosen domain.
 
 - [ ] Compression/SVD workflow
   - Harder than plain instantiation because SVD may be loaded from file or
     trained from generated waveforms.
-  - Possible long-term design: compression is an ordered transform list, with
-    SVD handled by a project-specific factory target.
+  - Possible long-term design: compression is an ordered Hydra-instantiated
+    transform list. An SVD step can be configured as a normal object that knows
+    whether to load an existing basis or train/build one from configured inputs.
+  - Agreed design:
+    - Represent compression as an ordered list of transform configs.
+    - Use different Hydra targets for the different SVD construction paths,
+      e.g. one target that loads an existing `SVDBasis` from file and another
+      target that trains a new `SVDBasis`.
+    - The train-SVD target should return only the `SVDBasis` object needed by
+      `ApplySVD`. Auxiliary information such as actual train/validation counts
+      or mismatch summaries belongs in metadata/provenance, not in the return
+      value used by the transform.
+    - The realized SVD basis should continue to be saved as a produced dataset
+      artifact, embedded in the waveform dataset as today.
+    - The config should save the requested SVD construction method and inputs,
+      not the SVD arrays themselves.
+  - Dataset metadata should save the resolved compression config/request. Any
+    realized SVD arrays remain produced artifact data, saved in the waveform
+    dataset as today.
+  - Progress:
+    - `train_svd_basis(...)` now returns only the `SVDBasis` used by
+      `ApplySVD`.
+    - Dataset-generation compression configs are now ordered lists of
+      Hydra-instantiated transforms.
+    - `train_svd_basis_from_waveforms(...)` is available as a Hydra target for
+      training an `SVDBasis` from generated waveforms and passing it into
+      `ApplySVD`.
+    - The generated SVD arrays remain embedded in the waveform dataset as today.
+    - `WaveformDataset` can reload list-based compression metadata and rebuild
+      decompression transforms.
+    - `load_svd_basis(...)` is available as a Hydra target for loading an
+      existing `SVDBasis` from file and passing it into `ApplySVD`.
+    - Small smoke: `my_runs/compression_svd_smoke` generates and reloads a
+      compressed one-sample dataset with a two-sample SVD-training override.
+  - Remaining work: decide how much SVD training provenance/mismatch
+    information should be saved as metadata.
 
 - [ ] `dingo/gw/training/train_builders.py`
   - Large procedural transform pipeline.
   - Prime candidate for Hydra targets, but many transforms need runtime objects:
     domain, detectors, ASD datasets, standardization, priors, reference time.
+  - Long-term design option: configs define an ordered transform pipeline with
+    `_target_` entries. Transform objects should receive their dependencies
+    through Hydra-instantiated object graphs or through explicit object setup,
+    not through config mutation.
+  - Agreed runtime-dependency pattern:
+    - Instantiate expensive/shared runtime objects once, e.g. effective domain,
+      waveform dataset, ASD dataset, standardization, and optionally
+      `InterferometerList`.
+    - Package them in a `runtime_dependencies` dictionary.
+    - Instantiate transform configs with a generic helper, conceptually:
 
-- [ ] `dingo/core/posterior_models/build_model.py`
-  - Replace `posterior_model_type` dispatch with `_target_`, while preserving
-    saved-model compatibility.
+      ```python
+      transforms = [
+          hydra.utils.instantiate(t_cfg)(**runtime_dependencies)
+          if t_cfg.get("_partial_", False)
+          else hydra.utils.instantiate(t_cfg)
+          for t_cfg in cfg.transforms
+      ]
+      ```
 
-- [ ] `dingo/core/utils/torchutils.py`
+    - Passing runtime objects this way is not a performance concern because
+      Python passes references, and this happens at transform construction time,
+      not for every sample.
+    - Transforms that consume runtime dependencies should fail early if a
+      required dependency is missing. Avoid silent swallowing of misspelled
+      dependency names.
+    - Do not use fake config interpolations such as `${runtime:asd_dataset}`
+      unless a real resolver is explicitly designed later; Hydra does not
+      provide such a runtime-object resolver by default.
+  - Decide which transform state belongs in config, which belongs inside the
+    instantiated transform/model objects, and which artifact provenance should
+    be saved.
+  - Difficulty: very high. This is probably the hardest non-Condor refactor
+    because the pipeline mixes config, runtime datasets, derived state, and
+    metadata persistence.
+  - Progress: the default training transform order now lives in `configs/train.yaml`
+    as `_target_` entries. `set_train_transforms(...)` instantiates that list via
+    the generic `instantiate_with_runtime_dependencies(...)` helper. Cheap
+    dependencies such as priors, interferometer lists, reference time,
+    parameter dictionaries, standardization, selected output keys, and GNPE
+    transforms are now config-owned and recursively instantiated. The live
+    runtime dependency dictionary is reduced to the waveform domain and ASD
+    dataset. `zero_noise` is handled through the ordinary omit-transform path,
+    and `build_dataset(...)` was retired in favor of instantiating the
+    configured `WaveformDataset`. The standardization-prefix transforms are
+    explicit in config so the old standardization behavior is computed before
+    the final transform list is instantiated.
+
+- [x] `dingo/core/posterior_models/build_model.py`
+  - Replace `posterior_model_type` dispatch with `_target_`.
+  - Remove `autocomplete_model_kwargs(...)` as a config-mutation step. Its
+    responsibilities should either become explicit config fields or normal
+    shape-inference behavior of the instantiated model/embedding objects.
+  - Design status: agreed. Model/checkpoint metadata should save the exact
+    resolved Hydra config plus produced checkpoint state. Old
+    `posterior_model_type` dispatch and config autocompletion should disappear
+    in favor of `_target_` / `instantiate`.
+  - Progress: model configs now carry posterior-model `_target_` entries, the
+    `posterior_model_type` dispatch was removed from the Hydra model path, and
+    `autocomplete_model_kwargs(...)` was retired. Model dimensions are computed
+    before model construction in `prepare_training_new(...)` and saved into the
+    config metadata.
+
+- [x] `dingo/core/utils/torchutils.py`
   - Replace optimizer/scheduler `type` switches with `_target_` configs.
+  - Design status: agreed/easy. Optimizers and schedulers should be direct
+    `_target_` configs, removing the current string-switch helpers.
+  - Initial Stage 3 pass: default optimizer/scheduler configs now use
+    `_target_` partials, and the existing helper functions instantiate those
+    configs while keeping legacy `type` settings for older stage/checkpoint
+    metadata.
+  - Progress: the string-switch fallbacks have been removed from the helper
+    functions, and `BasePosteriorModel.initialize_optimizer_and_scheduler()`
+    now calls `hydra.utils.instantiate(...)` directly.
 
 - [ ] Condor integration as a Hydra workflow/launcher
   - Keep Condor-specific migration out of Stage 1.
+  - Discuss later before implementation. This is intentionally not part of the
+    first Stage 3 implementation pass.
   - Stage 3 goal: compose the job config with Hydra and submit Condor jobs from
     that composed config.
   - Desired user experience: a single Hydra-driven command can configure and
@@ -599,26 +876,113 @@ clear this is a scoped migration rather than an incomplete sweep.
   - These are intentionally deferred while `.ini`/pipe workflows remain outside
     the Stage 1/2 Hydra migration.
 
-- [ ] `dingo/core/density/nde_settings.py`
-  - Move `get_default_nde_settings_3d(...)` and `DEFAULT_NDE_SETTINGS_2D` into
-    Hydra configs.
-  - These can likely become reusable `defaults/nde` entries plus overrides for
-    dimension/device/parameters.
-
 - [ ] `dingo/pipe/parser.py`
   - Biggest migration knot. This is both a CLI parser and a compatibility layer
     with bilby_pipe-style settings.
 
+## Stage 3 Testing Requirements
+
+- [ ] Add extensive tests for Hydra configs and instantiated behavior.
+  - Any option included in the configs should be covered by a test at the
+    appropriate level.
+  - At minimum, every config group/file should have composition tests.
+  - Every `_target_` config should have an instantiation test, unless
+    instantiation is intentionally too expensive; in that case add a cheaper
+    test that validates the config shape and document the skipped expensive
+    behavior.
+  - Behavior-affecting options should have unit or smoke tests that exercise the
+    resulting object behavior, not only config composition.
+  - Important override combinations should be tested, especially for:
+    - domain choices and domain updates
+    - waveform generator variants
+    - prior groups
+    - compression/SVD load-vs-train choices
+    - transform pipeline variants, including GNPE context, zero noise, random
+      cropping, and stage-specific ASD/noise settings
+    - model families and model dimensions
+    - optimizer/scheduler configs
+    - metadata saving/loading with dot-access config restoration
+  - Tests should confirm that saved metadata contains the resolved Hydra config,
+    absolute paths, ahead-of-time computed values such as standardization, and
+    separate artifact/result state.
+  - Progress: `tests/test_hydra_config_targets.py` covers Hydra target
+    composition for domain, waveform generator, priors, models,
+    optimizer/scheduler, SVD load-from-file, standardization-prefix transforms,
+    and an in-memory training-transform smoke that verifies standardization is
+    computed before final transform instantiation.
+
 ## Suggested Order
 
-1. Finish Stage 1 for standalone dataset/noise utilities.
-2. Do Stage 1 for training.
-3. Decide whether `dingo_pipe` should be a compatibility wrapper around Hydra
-   configs or a full Hydra CLI.
-4. Do Stage 2 grouping for dataset generation, ASD generation, and training
-   before touching pipe internals.
-5. Start Stage 3 with the small builder switches:
-   domain, prior, waveform generator, optimizer, scheduler.
-6. Design Condor integration as a Stage 3 Hydra workflow/launcher problem.
-7. Tackle training transforms and model construction.
-8. Leave pipe/parser migration until the rest of the config story is stable.
+1. Start with easy direct `_target_` migrations:
+   domain, waveform generator, optimizer, and scheduler.
+2. Move Python-defined defaults into Hydra config groups and make configs
+   complete. This should be mostly config edits plus deletion of old defaulting
+   code.
+3. Migrate priors: remove `default` sentinels, target `BBHPriorDict` directly,
+   and retire `build_prior_with_defaults(...)`.
+4. Migrate model construction: replace `posterior_model_type` dispatch with
+   `_target_` configs and make `autocomplete_model_kwargs(...)` unnecessary
+   through interpolation / ahead-of-time config computation.
+5. Migrate compression/SVD as an ordered transform list with load-vs-train SVD
+   targets and produced SVD arrays saved as dataset artifacts.
+6. Migrate the training transform pipeline using explicit transform configs and
+   the agreed generic `instantiate_with_runtime_dependencies(...)` helper.
+7. Update metadata saving/loading to save the exact resolved Hydra config,
+   restore dot access on load, keep result metadata separate, and keep produced
+   artifacts in dedicated data/state fields.
+8. Add or expand tests throughout each step; do not leave broad config options
+   untested.
+9. Discuss Condor integration later as a separate Stage 3 workflow/launcher
+   design.
+10. Leave pipe/parser migration until the rest of the config story is stable.
+
+## Stage 3 Risk Notes
+
+These are the areas that need the most care, even if implementation starts with
+the easier direct-instantiation changes.
+
+1. **Saved metadata contract** - very high difficulty.
+   - Cross-cuts datasets, trained models, results, checkpoint resume, and
+     reproducibility.
+   - Needs a deliberate policy for saving resolved Hydra config snapshots that
+     already include all ahead-of-time-computable values, plus artifact
+     provenance and truly produced state without reintroducing parallel legacy
+     metadata dictionaries.
+2. **Training transform pipeline** - very high difficulty.
+   - Many transforms are configured partly by settings and partly by runtime
+     objects: waveform/domain metadata, detectors, ASD datasets, priors,
+     standardization, reference time, and context parameters.
+   - Target design should be a Hydra-instantiated transform/object graph, with
+     runtime setup owned by the objects rather than by config patching.
+3. **Compression/SVD workflow** - high difficulty.
+   - Compression can mean loading an existing basis, training a basis from
+     generated waveforms, applying transforms, and saving enough provenance to
+     reproduce the dataset.
+   - Target design should be a declarative compression-target list of
+     Hydra-instantiated objects, including SVD steps.
+4. **Model construction and checkpoint metadata** - high difficulty.
+   - Replace `posterior_model_type` dispatch with `_target_`.
+   - Model configs also interact strongly with saved metadata.
+5. **Config autocompletion / derived model dimensions** - high difficulty.
+   - `autocomplete_model_kwargs(...)` currently hard-codes model config
+     resolution based on a runtime data sample.
+   - Target design should remove hidden config mutation. Dimensions and related
+     settings should be computed into the resolved Hydra config beforehand
+     whenever possible; object-level inference is only the fallback for values
+     that cannot exist before construction.
+6. **Prior construction and defaults** - medium/high difficulty.
+   - Moving `default` strings to explicit prior config groups is conceptually
+     simple, but Bilby prior objects and constraints make it easy to
+     accidentally change behavior.
+7. **Domain and waveform generator construction** - medium difficulty.
+   - Good candidates for early `_target_` migration once the saved-config
+     policy is clear.
+   - Main risks are waveform-generator interface flags and keeping the config
+     readable.
+8. **Optimizer/scheduler construction** - low/medium difficulty.
+   - Natural `_target_` candidates with relatively small metadata surface.
+   - Good later cleanup once the harder contracts are settled.
+9. **Condor integration** - high difficulty, but separable and deferred.
+   - Important for Stage 3, yet mostly an orchestration/launcher design problem
+     rather than a core config-object construction problem.
+   - Discuss later before implementation.

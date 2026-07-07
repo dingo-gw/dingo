@@ -5,7 +5,7 @@ import numpy as np
 
 from dingo.gw.domains import MultibandedFrequencyDomain, UniformFrequencyDomain
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class DecimateAll(object):
@@ -440,14 +440,14 @@ class MaskDataForFrequencyRangeUpdate(object):
         maximum_frequency: Optional[float | dict[str, float]]
             Update of f_max. If a float, the same value will be used for all detectors.
         print_output: bool
-            Whether to write settings information to the log.
+            Whether to write settings information to the logger.
         """
         self.sample_frequencies = domain.sample_frequencies
         self.minimum_frequency = minimum_frequency
         self.maximum_frequency = maximum_frequency
 
         if print_output:
-            log.info(
+            logger.info(
                 f"Transform MaskDataForFrequencyRangeUpdate activated:"
                 f"  Settings: \n"
                 f"    - Minimum_frequency update: {self.minimum_frequency}\n"

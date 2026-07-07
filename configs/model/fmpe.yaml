@@ -1,4 +1,4 @@
-posterior_model_type: flow_matching
+_target_: dingo.core.posterior_models.FlowMatchingPosteriorModel
 posterior_kwargs:
   activation: gelu
   batch_norm: true

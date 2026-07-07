@@ -1,4 +1,5 @@
 import logging
+from copy import deepcopy
 from typing import Union, Protocol
 
 import numpy as np
@@ -6,26 +7,24 @@ import pandas as pd
 from astropy.time import Time
 from bilby.core.prior import PriorDict, DeltaFunction, Constraint
 from bilby.gw.detector import InterferometerList
+from hydra.utils import instantiate
 from torchvision.transforms import Compose
 
 from dingo.core.samplers import Sampler, GNPESampler
 from dingo.core.transforms import GetItem, RenameKey
+from dingo.core.utils.hydra_utils import instantiate_with_runtime_dependencies
 from dingo.gw.domains import (
     MultibandedFrequencyDomain,
     build_domain_from_model_metadata,
     UniformFrequencyDomain,
     Domain,
 )
-from dingo.gw.domains import build_domain
-from dingo.gw.gwutils import get_extrinsic_prior_dict
-from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.result import Result
 from dingo.gw.transforms import (
     WhitenAndScaleStrain,
     RepackageStrainsAndASDS,
     ToTorch,
     SelectStandardizeRepackageParameters,
-    GNPECoalescenceTimes,
     TimeShiftStrain,
     GNPEBase,
     PostCorrectGeocentTime,
@@ -35,7 +34,7 @@ from dingo.gw.transforms import (
     MaskDataForFrequencyRangeUpdate,
 )
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class SamplerProtocol(Protocol):
@@ -167,13 +166,12 @@ class GWSamplerMixin(object):
 
         Called by __init__() immediately after _build_prior().
         """
-        self.domain = build_domain(
-            self.base_model_metadata["dataset_settings"]["domain"]
-        )
+        self.domain = instantiate(self.base_model_metadata["dataset_settings"]["domain"])
 
         data_settings = self.base_model_metadata["train_settings"]["data"]
-        if "domain_update" in data_settings:
-            self.domain.update(data_settings["domain_update"])
+        domain_update = data_settings.get("waveform_dataset", {}).get("domain_update")
+        if domain_update is not None:
+            self.domain.update(domain_update)
 
     def _correct_reference_time(
         self: Sampler, samples: Union[dict, pd.DataFrame], inverse: bool = False
@@ -229,11 +227,11 @@ class GWSamplerMixin(object):
             Whether to apply instead the inverse transformation. This is used prior to
             calculating the log_prob.
         """
-        intrinsic_prior = self.metadata["dataset_settings"]["intrinsic_prior"]
-        extrinsic_prior = get_extrinsic_prior_dict(
+        prior = instantiate(self.metadata["dataset_settings"]["intrinsic_prior"])
+        extrinsic_prior = instantiate(
             self.metadata["train_settings"]["data"]["extrinsic_prior"]
         )
-        prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
+        prior.update(extrinsic_prior)
 
         if not inverse:
             # Add fixed parameters from prior.
@@ -241,7 +239,7 @@ class GWSamplerMixin(object):
             for k, p in prior.items():
                 if isinstance(p, DeltaFunction) and k not in samples:
                     v = p.peak
-                    log.info(f"Adding fixed parameter {k} = {v} from prior.")
+                    logger.info(f"Adding fixed parameter {k} = {v} from prior.")
                     samples[k] = p.peak * np.ones(num_samples)
         else:
             # Drop non-inference parameters from samples.
@@ -446,12 +444,12 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
         transform_pre = []
         transform_pre.append(RenameKey("data", "waveform"))
         if gnpe_time_settings:
+            gnpe_time_settings = deepcopy(gnpe_time_settings)
+            gnpe_time_settings["inference"] = True
             transform_pre.append(
-                GNPECoalescenceTimes(
-                    ifo_list,
-                    gnpe_time_settings["kernel"],
-                    gnpe_time_settings["exact_equiv"],
-                    inference=True,
+                instantiate_with_runtime_dependencies(
+                    gnpe_time_settings,
+                    {"ifo_list": ifo_list},
                 )
             )
             transform_pre.append(TimeShiftStrain(ifo_list, self.domain))
@@ -473,8 +471,8 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
                 self.gnpe_parameters += transform.input_parameter_names
                 for k, v in transform.kernel.items():
                     self.gnpe_kernel[k] = v
-        log.info(f"GNPE parameters: {self.gnpe_parameters}")
-        log.info(f"GNPE kernel: {self.gnpe_kernel}")
+        logger.info(f"GNPE parameters: {self.gnpe_parameters}")
+        logger.info(f"GNPE kernel: {self.gnpe_kernel}")
 
         self.transform_pre = Compose(transform_pre)
 

@@ -1,11 +1,13 @@
 from multiprocessing import Pool
 from typing import Optional
+import logging
 
 import numpy as np
 import pandas as pd
 from scipy.fft import fft
 from scipy.special import logsumexp
 from bilby.gw.utils import ln_i0
+from hydra.utils import instantiate
 from threadpoolctl import threadpool_limits
 
 from dingo.core.likelihood import Likelihood
@@ -22,7 +24,8 @@ from dingo.gw.domains import (
 )
 from dingo.gw.domains import build_domain
 from dingo.gw.data.data_preparation import get_event_data_and_domain
-from dingo.core.utils.logging_utils import logger
+
+logger = logging.getLogger(__name__)
 
 
 class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
@@ -590,7 +593,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             kappa2_ij[:, j] = np.sum(kappa2_, axis=0)
         # Marginalize over time; this requires multiplying the likelihoods with the
         # prior (*not* in log space), summing over the time bins (both axes i and j!),
-        # and then taking the log. See Eq. (52) in https://arxiv.org/pdf/1809.02293.pdf.
+        # and then taking the logger. See Eq. (52) in https://arxiv.org/pdf/1809.02293.pdf.
         # To prevent numerical issues, we use the logsumexp trick.
         assert kappa2_ij.shape == self.time_prior_log.shape
         exponent = kappa2_ij + self.time_prior_log
@@ -791,7 +794,7 @@ def build_stationary_gaussian_likelihood(
     # set up likelihood
     likelihood = StationaryGaussianGWLikelihood(
         wfg_kwargs=metadata["model"]["dataset_settings"]["waveform_generator"],
-        wfg_domain=build_domain(metadata["model"]["dataset_settings"]["domain"]),
+        wfg_domain=instantiate(metadata["model"]["dataset_settings"]["domain"]),
         data_domain=data_domain,
         event_data=event_data,
         t_ref=metadata["event"]["time_event"],

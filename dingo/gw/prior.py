@@ -1,5 +1,3 @@
-from copy import deepcopy
-
 from bilby.gw.prior import BBHPriorDict
 from bilby.gw.conversion import (
     fill_from_fixed_priors,
@@ -8,7 +6,7 @@ from bilby.gw.conversion import (
 from bilby.core.prior import Uniform, Sine, Cosine
 
 import numpy as np
-from typing import Dict, Set, Any
+from typing import Set, Any
 import warnings
 
 # Silence INFO and WARNING messages from bilby
@@ -97,76 +95,6 @@ class BBHExtrinsicPriorDict(BBHPriorDict):
                     std[key] = np.std(samples[key]).item()
 
         return mean, std
-
-
-default_extrinsic_dict = {
-    "dec": "bilby.core.prior.Cosine(minimum=-np.pi/2, maximum=np.pi/2, name='dec')",
-    "ra": 'bilby.core.prior.Uniform(minimum=0., maximum=2*np.pi, boundary="periodic", name="ra")',
-    "geocent_time": "bilby.core.prior.Uniform(minimum=-0.1, maximum=0.1, name='geocent_time')",
-    "psi": 'bilby.core.prior.Uniform(minimum=0.0, maximum=np.pi, boundary="periodic", name="psi")',
-    "luminosity_distance": "bilby.core.prior.Uniform(minimum=100.0, maximum=6000.0, name='luminosity_distance')",
-}
-
-default_intrinsic_dict = {
-    "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0, name='mass_1')",
-    "mass_2": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0, name='mass_2')",
-    "mass_ratio": "bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.125, maximum=1.0, name='mass_ratio')",
-    "chirp_mass": "bilby.gw.prior.UniformInComponentsChirpMass(minimum=25.0, maximum=100.0, name='chirp_mass')",
-    "luminosity_distance": 1000.0,
-    "theta_jn": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi, name='theta_jn')",
-    "phase": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic", name="phase")',
-    "a_1": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.99, name='a_1')",
-    "a_2": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.99, name='a_2')",
-    "tilt_1": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi, name='tilt_1')",
-    "tilt_2": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi, name='tilt_2')",
-    "phi_12": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic", name="phi_12")',
-    "phi_jl": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic", name="phi_jl")',
-    "geocent_time": 0.0,
-}
-
-default_inference_parameters = [
-    "chirp_mass",
-    "mass_ratio",
-    "phase",
-    "a_1",
-    "a_2",
-    "tilt_1",
-    "tilt_2",
-    "phi_12",
-    "phi_jl",
-    "theta_jn",
-    "luminosity_distance",
-    "geocent_time",
-    "ra",
-    "dec",
-    "psi",
-]
-
-
-def build_prior_with_defaults(prior_settings: Dict[str, str]):
-    """
-    Generate BBHPriorDict based on dictionary of prior settings,
-    allowing for default values.
-
-    Parameters
-    ----------
-    prior_settings: Dict
-        A dictionary containing prior definitions for intrinsic parameters
-        Allowed values for each parameter are:
-            * 'default' to use a default prior
-            * a string for a custom prior, e.g.,
-               "Uniform(minimum=10.0, maximum=80.0, name=None, latex_label=None, unit=None, boundary=None)"
-
-    Depending on the particular prior choices the dimensionality of a
-    parameter sample obtained from the returned GWPriorDict will vary.
-    """
-
-    full_prior_settings = deepcopy(prior_settings)
-    for k, v in prior_settings.items():
-        if v == "default":
-            full_prior_settings[k] = default_intrinsic_dict[k]
-
-    return BBHPriorDict(full_prior_settings)
 
 
 def split_off_extrinsic_parameters(theta):

@@ -9,23 +9,21 @@ import hydra
 import numpy as np
 import pandas as pd
 from bilby.gw.prior import BBHPriorDict
+from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from threadpoolctl import threadpool_limits
 from torchvision.transforms import Compose
 
+from dingo.core.utils.hydra_utils import instantiate_with_runtime_dependencies
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
-from dingo.gw.domains import build_domain
-from dingo.gw.prior import build_prior_with_defaults
-from dingo.gw.SVD import ApplySVD, SVDBasis
-from dingo.gw.transforms import WhitenFixedASD
+from dingo.gw.SVD import ApplySVD
 from dingo.gw.waveform_generator import (
-    NewInterfaceWaveformGenerator,
     WaveformGenerator,
     generate_waveforms_parallel,
 )
 from dingo.core.utils.misc import call_func_strict_output_dim
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 logging.captureWarnings(True)
 
 
@@ -50,7 +48,7 @@ def generate_parameters_and_polarizations(
     pandas DataFrame of parameters
     dictionary of numpy arrays corresponding to waveform polarizations
     """
-    log.info("Generating dataset of size " + str(num_samples))
+    logger.info("Generating dataset of size " + str(num_samples))
     parameters = pd.DataFrame(prior.sample(num_samples))
 
     if num_processes > 1:
@@ -70,12 +68,12 @@ def generate_parameters_and_polarizations(
         polarizations_ok = {k: v[idx_ok] for k, v in polarizations.items()}
         parameters_ok = parameters.iloc[idx_ok]
         failed_percent = 100 * len(idx_failed) / len(parameters)
-        log.warning(
+        logger.warning(
             f"{len(idx_failed)} out of {len(parameters)} configuration ({failed_percent:.1f}%) failed to generate."
         )
         with pd.option_context("display.max_rows", None, "display.max_columns", None):
-            log.warning(parameters.iloc[idx_failed].to_string())
-        log.warning(
+            logger.warning(parameters.iloc[idx_failed].to_string())
+        logger.warning(
             f"Only returning the {len(idx_ok)} successfully generated configurations."
         )
         return parameters_ok, polarizations_ok
@@ -83,63 +81,20 @@ def generate_parameters_and_polarizations(
     return parameters, polarizations
 
 
-def train_svd_basis(dataset: WaveformDataset, size: int, n_train: int):
-    """
-    Train (and optionally validate) an SVD basis.
-
-    Parameters
-    ----------
-    dataset : WaveformDataset
-        Contains waveforms to be used for building SVD.
-    size : int
-        Number of elements to keep for the SVD basis.
-    n_train : int
-        Number of training waveforms to use. Remaining are used for validation. Note
-        that the actual number of training waveforms is n_train * len(polarizations),
-        since there is one waveform used for each polarization.
-
-    Returns
-    -------
-    SVDBasis, n_train, n_test
-        Since EOB waveforms can fail to generate, provide also the number used in
-        training and validation.
-    """
-    # Prepare data for training and validation.
-    train_data = np.vstack([val[:n_train] for val in dataset.polarizations.values()])
-    test_data = np.vstack([val[n_train:] for val in dataset.polarizations.values()])
-    test_parameters = pd.concat(
-        [
-            # I would like to save the polarization, but saving the dataframe with
-            # string columns causes problems. Fix this later.
-            # dataset.parameters.iloc[n_train:].assign(polarization=pol)
-            dataset.parameters.iloc[n_train:]
-            for pol in dataset.polarizations
-        ]
-    )
-    test_parameters.reset_index(drop=True, inplace=True)
-
-    log.info("Building SVD basis.")
-    basis = SVDBasis()
-    basis.generate_basis(train_data, size)
-
-    assert np.allclose(basis.V[: dataset.domain.min_idx], 0)
-
-    # Since there is a possibility that the size of the dataset returned by
-    # generate_parameters_and_polarizations is smaller than requested, we don't assume
-    # that there are n_test samples. Instead we just look at the size of the test
-    # dataset.
-    if test_data.size != 0:
-        basis.compute_test_mismatches(
-            test_data, parameters=test_parameters, verbose=True
+def _instantiate_compression_transform(transform_config: Dict, runtime_dependencies: Dict):
+    transform_config = copy.deepcopy(transform_config)
+    if "svd_basis" not in transform_config:
+        return instantiate_with_runtime_dependencies(
+            transform_config,
+            runtime_dependencies,
         )
 
-    # Return also the true number of samples. Some EOB waveforms may have failed to
-    # generate, so this could be smaller than the number requested.
-    n_ifos = len(dataset.polarizations)
-    n_train = len(train_data) // n_ifos
-    n_test = len(test_data) // n_ifos
-
-    return basis, n_train, n_test
+    svd_basis_config = transform_config.pop("svd_basis")
+    svd_basis = instantiate_with_runtime_dependencies(
+        svd_basis_config,
+        runtime_dependencies,
+    )
+    return instantiate(transform_config, svd_basis=svd_basis)
 
 
 def _settings_from_config(cfg: DictConfig) -> Dict:
@@ -164,83 +119,35 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
     A WaveformDataset based on the settings.
     """
 
-    prior = build_prior_with_defaults(settings["intrinsic_prior"])
-    domain = build_domain(settings["domain"])
-
-    new_interface_flag = settings["waveform_generator"].get("new_interface", False)
-    if new_interface_flag:
-        waveform_generator = NewInterfaceWaveformGenerator(
-            domain=domain,
-            **settings["waveform_generator"],
-        )
-    else:
-        waveform_generator = WaveformGenerator(
-            domain=domain,
-            **settings["waveform_generator"],
-        )
+    prior = instantiate(settings["intrinsic_prior"])
+    domain = instantiate(settings["domain"])
+    waveform_generator = instantiate(settings["waveform_generator"], domain=domain)
 
     dataset_dict = {"settings": settings}
 
     if settings.get("compression", None) is not None:
         compression_transforms = []
+        compression_settings = []
+        runtime_dependencies = {
+            "domain": domain,
+            "waveform_generator": waveform_generator,
+            "prior": prior,
+            "num_processes": num_processes,
+            "settings": settings,
+            "compression_transforms": compression_transforms,
+            "compression_settings": compression_settings,
+        }
 
-        if "whitening" in settings["compression"]:
-            compression_transforms.append(
-                WhitenFixedASD(
-                    domain,
-                    asd_file=settings["compression"]["whitening"],
-                    inverse=False,
-                )
+        for transform_config in settings["compression"]:
+            compression_transform = _instantiate_compression_transform(
+                transform_config,
+                runtime_dependencies,
             )
+            compression_transforms.append(compression_transform)
+            compression_settings.append(copy.deepcopy(transform_config))
 
-        if "svd" in settings["compression"]:
-            svd_settings = settings["compression"]["svd"]
-
-            # Load an SVD basis from file, if specified.
-            if "file" in svd_settings:
-                basis = SVDBasis(file_name=svd_settings["file"])
-
-            # Otherwise, generate the basis based on simulated waveforms.
-            else:
-                # If using whitened waveforms, then the SVD should be based on these.
-                waveform_generator.transform = Compose(compression_transforms)
-
-                n_train = svd_settings["num_training_samples"]
-                n_test = svd_settings.get("num_validation_samples", 0)
-
-                func = partial(
-                    generate_parameters_and_polarizations,
-                    waveform_generator,
-                    prior,
-                    num_processes=num_processes,
-                )
-                parameters, polarizations = call_func_strict_output_dim(
-                    func, n_train + n_test
-                )
-                svd_dataset_settings = copy.deepcopy(settings)
-                svd_dataset_settings["num_samples"] = len(parameters)
-                del svd_dataset_settings["compression"]["svd"]
-
-                # We build a WaveformDataset containing the SVD-training waveforms
-                # because when constructed, it will automatically zero the waveforms
-                # below f_min. This is useful for EOB waveforms, which are Fourier
-                # transformed from time domain, and hence are nonzero below f_min. The
-                # waveforms need to be zeroed below f_min because this corresponds to
-                # setting the lower bound of the likelihood integral.
-
-                svd_dataset = WaveformDataset(
-                    dictionary={
-                        "parameters": parameters,
-                        "polarizations": polarizations,
-                        "settings": svd_dataset_settings,
-                    }
-                )
-                basis, n_train, n_test = train_svd_basis(
-                    svd_dataset, svd_settings["size"], n_train
-                )
-
-            compression_transforms.append(ApplySVD(basis))
-            dataset_dict["svd"] = basis.to_dictionary()
+            if isinstance(compression_transform, ApplySVD):
+                dataset_dict["svd"] = compression_transform.svd_basis.to_dictionary()
 
         waveform_generator.transform = Compose(compression_transforms)
 

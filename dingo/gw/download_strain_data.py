@@ -1,12 +1,15 @@
+import logging
+
 import numpy as np
 import pycbc.psd
 from gwpy.timeseries import TimeSeries
 
-from dingo.core.utils.logging_utils import logger
 from dingo.gw.domains import UniformFrequencyDomain
 from dingo.gw.gwutils import (
     get_window,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def estimate_single_psd(

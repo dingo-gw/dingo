@@ -1,16 +1,16 @@
 import os
 import argparse
 import logging
-import sys
 
 import torch
 import h5py
 import json
 
+from dingo.core.utils.logging_utils import setup_logger
 
-log = logging.getLogger(__name__)
+
+logger = logging.getLogger(__name__)
 logging.captureWarnings(True)
-
 
 
 def parse_args():
@@ -44,17 +44,8 @@ def parse_args():
     return parser.parse_args()
 
 
-def configure_logging():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="[%(asctime)s][%(name)s][%(levelname)s] - %(message)s",
-        stream=sys.stdout,
-        force=True,
-    )
-
-
 def main():
-    configure_logging()
+    setup_logger(use_bilby=False)
     args = parse_args()
 
     if os.path.splitext(args.in_file)[-1] != ".pt":
@@ -66,7 +57,7 @@ def main():
     # This is required for use on CVMFS
     root, ext = os.path.splitext(args.out_file)
     out_file_name = f"{root}_v{args.model_version_number}{ext}"
-    log.info(f"Output will be written to {out_file_name}")
+    logger.info(f"Output will be written to {out_file_name}")
 
     # Load data into CPU memory since we'll be saving it using CPU libraries
     d = torch.load(args.in_file, map_location=torch.device("cpu"))

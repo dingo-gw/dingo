@@ -12,7 +12,12 @@ stage:
   optimizer: ${optimizer}
   scheduler: ${scheduler}
   epochs: 20
-  asd_dataset_path: training_data/asd_dataset/asds_O1.hdf5
+  asd_dataset:
+    _target_: dingo.gw.noise.asd_dataset.ASDDataset
+    file_name: training_data/asd_dataset/asds_O1.hdf5
+    ifos: null
+    precision: single
+    domain_update: null
   freeze_rb_layer: false
   batch_size: 64
   early_stopping: null
@@ -25,4 +30,4 @@ hydra:
         exclude_keys:
           - checkpoint
           - out_file
-          - stage.asd_dataset_path
+          - stage.asd_dataset.file_name

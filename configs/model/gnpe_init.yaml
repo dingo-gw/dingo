@@ -1,4 +1,4 @@
-posterior_model_type: normalizing_flow
+_target_: dingo.core.posterior_models.NormalizingFlowPosteriorModel
 posterior_kwargs:
   num_flow_steps: 15
   base_transform_kwargs:

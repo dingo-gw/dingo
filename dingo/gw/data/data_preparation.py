@@ -1,15 +1,17 @@
 from os.path import isfile
+import logging
 
 import numpy as np
 from gwpy.timeseries import TimeSeries
 
 from dingo.core.dataset import DingoDataset
-from dingo.core.utils.logging_utils import logger
 from dingo.core.utils.misc import recursive_check_dicts_are_equal
 from dingo.gw.data.data_download import download_raw_data
 from dingo.gw.gwutils import get_window
 from dingo.gw.domains import UniformFrequencyDomain
 from dingo.gw.domains import build_domain_from_model_metadata
+
+logger = logging.getLogger(__name__)
 
 
 def load_raw_data(time_event, settings, event_dataset=None):

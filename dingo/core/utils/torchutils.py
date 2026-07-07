@@ -5,6 +5,7 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from typing import Union, Tuple, Iterable
 import bilby
+from hydra.utils import instantiate
 
 
 def fix_random_seeds(_):
@@ -84,20 +85,10 @@ def get_optimizer_from_kwargs(
     -------
     optimizer
     """
-    optimizers_dict = {
-        "adagrad": torch.optim.Adagrad,
-        "adam": torch.optim.Adam,
-        "adamw": torch.optim.AdamW,
-        "lbfgs": torch.optim.LBFGS,
-        "RMSprop": torch.optim.RMSprop,
-        "sgd": torch.optim.SGD,
-    }
-    if not "type" in optimizer_kwargs:
-        raise KeyError("Optimizer type needs to be specified.")
-    if not optimizer_kwargs["type"].lower() in optimizers_dict:
-        raise ValueError("No valid optimizer specified.")
-    optimizer = optimizers_dict[optimizer_kwargs.pop("type")]
-    return optimizer(model_parameters, **optimizer_kwargs)
+    optimizer = instantiate(optimizer_kwargs)
+    if optimizer_kwargs.get("_partial_", False):
+        return optimizer(model_parameters)
+    return optimizer
 
 
 def get_scheduler_from_kwargs(
@@ -122,17 +113,10 @@ def get_scheduler_from_kwargs(
     -------
     scheduler
     """
-    schedulers_dict = {
-        "step": torch.optim.lr_scheduler.StepLR,
-        "cosine": torch.optim.lr_scheduler.CosineAnnealingLR,
-        "reduce_on_plateau": torch.optim.lr_scheduler.ReduceLROnPlateau,
-    }
-    if not "type" in scheduler_kwargs:
-        raise KeyError("Scheduler type needs to be specified.")
-    if not scheduler_kwargs["type"].lower() in schedulers_dict:
-        raise ValueError("No valid scheduler specified.")
-    scheduler = schedulers_dict[scheduler_kwargs.pop("type")]
-    return scheduler(optimizer, **scheduler_kwargs)
+    scheduler = instantiate(scheduler_kwargs)
+    if scheduler_kwargs.get("_partial_", False):
+        return scheduler(optimizer)
+    return scheduler
 
 
 def perform_scheduler_step(

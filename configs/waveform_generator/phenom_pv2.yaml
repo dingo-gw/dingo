@@ -1,3 +1,4 @@
+_target_: dingo.gw.waveform_generator.WaveformGenerator
 approximant: IMRPhenomPv2
 f_ref: 20.0
 f_start: null

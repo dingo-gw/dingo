@@ -1,10 +1,13 @@
+import logging
+
 import numpy as np
 from gwpy.timeseries import TimeSeries
 import pycbc.psd
 import math
 
-from dingo.core.utils.logging_utils import logger
 from dingo.gw.gwutils import get_window
+
+logger = logging.getLogger(__name__)
 
 
 def download_psd(det, time_start, time_psd, window, f_s):

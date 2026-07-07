@@ -1,5 +1,6 @@
 # Transformations between PE spins and Cartesian spins
 from functools import partial
+import logging
 from multiprocessing import Pool
 
 import numpy as np
@@ -8,7 +9,7 @@ import lal
 import lalsimulation as LS
 from threadpoolctl import threadpool_limits
 
-from dingo.core.utils.logging_utils import logger
+logger = logging.getLogger(__name__)
 
 
 DINGO_PE_SPIN_PARAMETERS = (

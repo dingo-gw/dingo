@@ -12,7 +12,7 @@ from dingo.gw.noise.synthetic.asd_parameterization import parameterize_asd_datas
 from dingo.gw.noise.synthetic.asd_sampling import KDE, get_rescaling_params
 from dingo.gw.noise.synthetic.utils import reconstruct_psds_from_parameters
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 logging.captureWarnings(True)
 
 

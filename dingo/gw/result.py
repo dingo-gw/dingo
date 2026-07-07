@@ -8,6 +8,7 @@ import yaml
 from bilby.core.prior import Uniform, Constraint, PriorDict, DeltaFunction
 from bilby.gw.prior import CalibrationPriorDict
 from bilby_pipe.utils import CALIBRATION_CORRECTION_TYPE_LOOKUP
+from hydra.utils import instantiate
 
 from dingo.core.density import (
     interpolated_sample_and_log_prob_multi,
@@ -18,14 +19,12 @@ from dingo.core.result import Result as CoreResult
 from dingo.gw.conversion import change_spin_conversion_phase
 from dingo.gw.domains import MultibandedFrequencyDomain
 from dingo.gw.domains import build_domain
-from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
-from dingo.gw.prior import build_prior_with_defaults
 from dingo.core.utils.backward_compatibility import check_minimum_version
 
 
 RANDOM_STATE = 150914
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class Result(CoreResult):
@@ -168,12 +167,13 @@ class Result(CoreResult):
 
         Called by __init__() immediately after _build_prior().
         """
-        self.domain = build_domain(self.base_metadata["dataset_settings"]["domain"])
+        self.domain = instantiate(self.base_metadata["dataset_settings"]["domain"])
         check_minimum_version(self.version, raise_exception=False)
 
         data_settings = self.base_metadata["train_settings"]["data"]
-        if "domain_update" in data_settings:
-            self.domain.update(data_settings["domain_update"])
+        domain_update = data_settings.get("waveform_dataset", {}).get("domain_update")
+        if domain_update is not None:
+            self.domain.update(domain_update)
 
     def _rebuild_domain(self, verbose=False):
         """Rebuild the domain based on settings updated for importance sampling.
@@ -201,8 +201,8 @@ class Result(CoreResult):
             )
 
             if verbose:
-                log.info("Rebuilding domain as follows:")
-                log.info(
+                logger.info("Rebuilding domain as follows:")
+                logger.info(
                     yaml.dump(
                         domain_dict,
                         default_flow_style=False,
@@ -212,15 +212,17 @@ class Result(CoreResult):
             self.domain = build_domain(domain_dict)
         else:
             if verbose:
-                log.info("No domain updates found; domain not rebuilt.")
+                logger.info("No domain updates found; domain not rebuilt.")
 
     def _build_prior(self):
         """Build the prior based on model metadata. Called by __init__()."""
-        intrinsic_prior = self.base_metadata["dataset_settings"]["intrinsic_prior"]
-        extrinsic_prior = get_extrinsic_prior_dict(
+        self.prior = instantiate(
+            self.base_metadata["dataset_settings"]["intrinsic_prior"]
+        )
+        extrinsic_prior = instantiate(
             self.base_metadata["train_settings"]["data"]["extrinsic_prior"]
         )
-        self.prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
+        self.prior.update(extrinsic_prior)
 
         prior_update = self.importance_sampling_metadata.get("prior_update")
         if prior_update is not None:
@@ -361,11 +363,11 @@ class Result(CoreResult):
         if "updates" in self.importance_sampling_metadata:
             if "T" in self.importance_sampling_metadata["updates"]:
                 delta_f_new = 1 / self.importance_sampling_metadata["updates"]["T"]
-                log.info(
+                logger.info(
                     f'Updating waveform generation delta_f from {wfg_domain_dict["delta_f"]} to {delta_f_new}.'
                 )
                 wfg_domain_dict["delta_f"] = delta_f_new
-        wfg_domain = build_domain(wfg_domain_dict)
+        wfg_domain = instantiate(wfg_domain_dict)
 
         self.likelihood = StationaryGaussianGWLikelihood(
             wfg_kwargs=self.base_metadata["dataset_settings"]["waveform_generator"],
@@ -459,7 +461,7 @@ class Result(CoreResult):
 
         # Sample calibration parameters and calculate log_prob
         num_samples = len(self.samples)
-        log.info(f"Sampling calibration parameters for {num_samples} samples.")
+        logger.info(f"Sampling calibration parameters for {num_samples} samples.")
 
         delta_log_prob = np.zeros(num_samples)
 
@@ -578,7 +580,7 @@ class Result(CoreResult):
             self.synthetic_phase_kwargs.get("num_processes", 1), num_valid_samples // 10
         )
 
-        log.info(f"Estimating synthetic phase for {num_valid_samples} samples.")
+        logger.info(f"Estimating synthetic phase for {num_valid_samples} samples.")
         t0 = time.time()
 
         if not inverse:
@@ -667,7 +669,7 @@ class Result(CoreResult):
             self.samples["log_prob"] = log_prob_array
             del self.samples["phase"]
 
-        log.info(f"Done. This took {time.time() - t0:.2f} s.")
+        logger.info(f"Done. This took {time.time() - t0:.2f} s.")
 
     def get_samples_bilby_phase(self, num_processes=1):
         """

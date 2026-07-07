@@ -5,14 +5,13 @@ import os
 import hydra
 import torch
 import numpy as np
-from hydra.utils import to_absolute_path
+from hydra.utils import instantiate, to_absolute_path
 from omegaconf import DictConfig, OmegaConf
 
 from dingo.core.utils import build_train_and_test_loaders
 from dingo.core.utils.trainutils import RuntimeLimits
-from dingo.core.posterior_models import NormalizingFlowPosteriorModel
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 logging.captureWarnings(True)
 
 
@@ -79,8 +78,8 @@ def train_unconditional_density_estimator(
     # set up density estimation network
     settings["model"]["posterior_kwargs"]["input_dim"] = num_params
     settings["model"]["posterior_kwargs"]["context_dim"] = None
-    # TODO: Allow for other types of density estimators (e.g., flow matching).
-    model = NormalizingFlowPosteriorModel(
+    model = instantiate(
+        {"_target_": settings["model"]["_target_"]},
         metadata={"train_settings": settings, "base": copy.deepcopy(result.metadata)},
         device=settings["training"]["device"],
     )
@@ -129,9 +128,9 @@ def main(cfg: DictConfig):
     train_dir = settings.pop("train_dir")
     os.makedirs(train_dir, exist_ok=True)
 
-    log.info(f"Loading result from {result_file}.")
+    logger.info(f"Loading result from {result_file}.")
     result = Result(file_name=result_file)
-    log.info(f"Training unconditional density estimator in {train_dir}.")
+    logger.info(f"Training unconditional density estimator in {train_dir}.")
     train_unconditional_density_estimator(result, settings, train_dir)
 
 

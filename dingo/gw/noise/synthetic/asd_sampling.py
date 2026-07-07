@@ -9,7 +9,7 @@ from dingo.gw.noise.synthetic.utils import (
     get_index_for_elem,
 )
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class KDE:
@@ -57,7 +57,7 @@ class KDE:
                         weights=weights,
                     )
                 except np.linalg.LinAlgError:
-                    log.info(
+                    logger.info(
                         "Warning: Singular Matrix encountered in spectral KDE. Adding small Gaussian noise..."
                     )
                     perturbed_features = spectral_features[:, i, :] + np.random.normal(

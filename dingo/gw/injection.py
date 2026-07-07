@@ -1,16 +1,17 @@
+import logging
+
 import numpy as np
 from bilby.gw.detector import InterferometerList
+from hydra.utils import instantiate
 from torchvision.transforms import Compose
 
-from dingo.core.utils.logging_utils import logger
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.domains import (
     UniformFrequencyDomain,
     MultibandedFrequencyDomain,
 )
-from dingo.gw.domains import build_domain, build_domain_from_model_metadata
-from dingo.gw.gwutils import get_extrinsic_prior_dict
-from dingo.gw.prior import build_prior_with_defaults, split_off_extrinsic_parameters
+from dingo.gw.domains import build_domain_from_model_metadata
+from dingo.gw.prior import split_off_extrinsic_parameters
 from dingo.gw.transforms import (
     GetDetectorTimes,
     ProjectOntoDetectors,
@@ -22,6 +23,8 @@ from dingo.gw.waveform_generator.waveform_generator import (
     WaveformGenerator,
     NewInterfaceWaveformGenerator,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class GWSignal(object):
@@ -355,16 +358,16 @@ class Injection(GWSignal):
         metadata : dict
             Dict which you can get via PosteriorModel.metadata
         """
-        intrinsic_prior = metadata["dataset_settings"]["intrinsic_prior"]
-        extrinsic_prior = get_extrinsic_prior_dict(
+        prior = instantiate(metadata["dataset_settings"]["intrinsic_prior"])
+        extrinsic_prior = instantiate(
             metadata["train_settings"]["data"]["extrinsic_prior"]
         )
-        prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
+        prior.update(extrinsic_prior)
 
         return cls(
             prior=prior,
             wfg_kwargs=metadata["dataset_settings"]["waveform_generator"],
-            wfg_domain=build_domain(metadata["dataset_settings"]["domain"]),
+            wfg_domain=instantiate(metadata["dataset_settings"]["domain"]),
             data_domain=build_domain_from_model_metadata(metadata),
             ifo_list=metadata["train_settings"]["data"]["detectors"],
             t_ref=metadata["train_settings"]["data"]["ref_time"],

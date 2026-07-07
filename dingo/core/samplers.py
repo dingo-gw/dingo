@@ -22,7 +22,7 @@ from dingo.gw.transforms import SelectStandardizeRepackageParameters
 # Sampler classes are motivated by the approach of Bilby.
 #
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class Sampler(object):
@@ -159,7 +159,7 @@ class Sampler(object):
             x = [x]
         else:
             if context is not None:
-                log.warning("Unconditional model. Ignoring context.")
+                logger.warning("Unconditional model. Ignoring context.")
             x = []
 
         # For a normalizing flow, we get the log_prob for "free" when sampling,
@@ -207,7 +207,7 @@ class Sampler(object):
         """
         self.samples = None
 
-        log.info(f"Running sampler to generate {num_samples} samples.")
+        logger.info(f"Running sampler to generate {num_samples} samples.")
         t0 = time.time()
         if not self.unconditional_model:
             if self.context is None:
@@ -231,7 +231,7 @@ class Sampler(object):
         # correction for t_ref) and represent as DataFrame.
         self._post_process(samples)
         self.samples = pd.DataFrame(samples)
-        log.info(f"Done. This took {time.time() - t0:.1f} s.")
+        logger.info(f"Done. This took {time.time() - t0:.1f} s.")
 
     def log_prob(self, samples: pd.DataFrame | dict) -> np.ndarray:
         """
@@ -431,7 +431,7 @@ class GNPESampler(Sampler):
             init_samples = self.init_sampler._run_sampler(num_samples, context)
         else:
             if self.num_iterations == 1:
-                log.warning(
+                logger.warning(
                     f"Removing initial outliers, but only carrying out "
                     f"{self.num_iterations} GNPE iteration. This risks biasing "
                     f"results."
@@ -516,7 +516,7 @@ class GNPESampler(Sampler):
                 p: x["extrinsic_parameters"][p] for p in self.gnpe_proxy_parameters
             }
 
-            log.info(
+            logger.info(
                 f"it {i}.\tmin pvalue: {self.iteration_tracker.pvalue_min:.3f}"
                 f"\tproxy mean: "
                 + " ".join(f"{torch.mean(v).item():.5f}" for v in proxies.values())

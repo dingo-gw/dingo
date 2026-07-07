@@ -1,6 +1,15 @@
 import numpy as np
 import pytest
-from dingo.gw.prior import BBHExtrinsicPriorDict, BBHPriorDict, default_extrinsic_dict, default_intrinsic_dict
+from dingo.gw.prior import BBHExtrinsicPriorDict, BBHPriorDict
+
+
+DEFAULT_EXTRINSIC_DICT = {
+    "dec": "bilby.core.prior.Cosine(minimum=-np.pi/2, maximum=np.pi/2, name='dec')",
+    "ra": 'bilby.core.prior.Uniform(minimum=0., maximum=2*np.pi, boundary="periodic", name="ra")',
+    "geocent_time": "bilby.core.prior.Uniform(minimum=-0.1, maximum=0.1, name='geocent_time')",
+    "psi": 'bilby.core.prior.Uniform(minimum=0.0, maximum=np.pi, boundary="periodic", name="psi")',
+    "luminosity_distance": "bilby.core.prior.Uniform(minimum=100.0, maximum=6000.0, name='luminosity_distance')",
+}
 
 
 def test_prior_constraint():
@@ -18,7 +27,7 @@ def test_mean_std():
     num_samples = 100000
     eps = 0.01
     keys = ['ra', 'dec', 'luminosity_distance']
-    prior = BBHExtrinsicPriorDict(default_extrinsic_dict)
+    prior = BBHExtrinsicPriorDict(DEFAULT_EXTRINSIC_DICT)
     mean_exact, std_exact = prior.mean_std(keys)
     mean_approx, std_approx = prior.mean_std(keys,
                                              sample_size=num_samples,

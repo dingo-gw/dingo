@@ -1,7 +1,6 @@
 import copy
 import logging
 import argparse
-import sys
 import textwrap
 from typing import List
 
@@ -9,21 +8,12 @@ import pandas as pd
 import numpy as np
 import yaml
 
-from dingo.gw.SVD import SVDBasis
-from dingo.gw.dataset.generate_dataset import train_svd_basis
+from dingo.core.utils.logging_utils import setup_logger
+from dingo.gw.dataset.compression import train_svd_basis
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 logging.captureWarnings(True)
-
-
-def configure_logging():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="[%(asctime)s][%(name)s][%(levelname)s] - %(message)s",
-        stream=sys.stdout,
-        force=True,
-    )
 
 
 def merge_datasets(dataset_list: List[WaveformDataset]) -> WaveformDataset:
@@ -41,7 +31,7 @@ def merge_datasets(dataset_list: List[WaveformDataset]) -> WaveformDataset:
     WaveformDataset containing the merged data.
     """
 
-    log.info(f"Merging {len(dataset_list)} datasets into one.")
+    logger.info(f"Merging {len(dataset_list)} datasets into one.")
 
     # This ensures that all the keys are copied into the new dataset. The "extensive"
     # parts of the dataset (parameters, waveforms) will be overwritten by the combined
@@ -74,7 +64,6 @@ def merge_datasets_cli():
     parallelized waveform generation.
     """
 
-    configure_logging()
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=textwrap.dedent(
@@ -103,8 +92,7 @@ def merge_datasets_cli():
         "--settings_file", type=str, help="YAML file containing new dataset settings."
     )
     args = parser.parse_args()
-    out_path = Path(args.out_file)
-    setup_logger(outdir=str(out_path.parent), label=out_path.stem)
+    setup_logger(use_bilby=False)
 
     dataset_list = []
     for i in range(args.num_parts):
@@ -121,7 +109,7 @@ def merge_datasets_cli():
         merged_dataset.settings = settings
 
     merged_dataset.to_file(args.out_file)
-    log.info(
+    logger.info(
         f"Complete. New dataset consists of {merged_dataset.settings['num_samples']} "
         f"samples."
     )
@@ -132,7 +120,6 @@ def build_svd_cli():
     Command-line function to build an SVD based on an uncompressed dataset file.
     """
 
-    configure_logging()
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=textwrap.dedent(
@@ -162,8 +149,7 @@ def build_svd_cli():
         ),
     )
     args = parser.parse_args()
-    out_path = Path(args.out_file)
-    setup_logger(outdir=str(out_path.parent), label=out_path.stem)
+    setup_logger(use_bilby=False)
 
     dataset = WaveformDataset(file_name=args.dataset_file)
     if args.num_train is None:
@@ -174,7 +160,7 @@ def build_svd_cli():
     basis, n_train, n_test = train_svd_basis(dataset, args.size, n_train)
     # FIXME: This is not an ideal treatment. We should update the waveform generation
     #  to always provide the requested number of waveforms.
-    log.info(
+    logger.info(
         f"SVD basis trained based on {n_train} waveforms and validated on {n_test} "
         f"waveforms. Note that if this differs from number requested, it will not be "
         f"reflected in the settings file. This is likely due to EOB failure to "

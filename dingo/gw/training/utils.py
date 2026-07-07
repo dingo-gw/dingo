@@ -9,7 +9,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from dingo.core.utils.backward_compatibility import torch_load_with_fallback
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 logging.captureWarnings(True)
 
 
@@ -30,7 +30,7 @@ def append_stage(cfg: DictConfig):
         if k.startswith("stage_")
     ]
     num_stages = len(stages)
-    log.info(f"Checkpoint training plan consists of {num_stages} stages.")
+    logger.info(f"Checkpoint training plan consists of {num_stages} stages.")
 
     new_stage = cfg["stage"]
 
@@ -43,20 +43,20 @@ def append_stage(cfg: DictConfig):
         current_epoch = d["epoch"]
         stage_epoch = np.sum([s["epochs"] for s in stages[: cfg["replace"]]])
         if current_epoch > stage_epoch:
-            log.info(
+            logger.info(
                 f"WARNING: Modification to training plan changes a training stage "
                 f"that has already started. Current model epoch is {current_epoch}. "
                 f"Proceed at your own risk!"
             )
-        log.info(f"Replacing planned stage {cfg['replace']} with new stage.")
+        logger.info(f"Replacing planned stage {cfg['replace']} with new stage.")
         new_stage_number = cfg["replace"]
     else:
-        log.info("Appending new stage to training plan.")
+        logger.info("Appending new stage to training plan.")
         new_stage_number = num_stages
 
     d["metadata"]["train_settings"]["training"][f"stage_{new_stage_number}"] = new_stage
-    log.info("Summary of new training plan:")
-    log.info(
+    logger.info("Summary of new training plan:")
+    logger.info(
         yaml.dump(
             d["metadata"]["train_settings"]["training"],
             default_flow_style=False,

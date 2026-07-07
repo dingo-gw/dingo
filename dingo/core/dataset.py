@@ -4,10 +4,12 @@ import logging
 import h5py
 import numpy as np
 import pandas as pd
+import yaml
+from omegaconf import OmegaConf
 
 from dingo.core.utils.misc import get_version
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def recursive_hdf5_save(group, d):
@@ -139,7 +141,7 @@ class DingoDataset:
             self.from_dictionary(dictionary)
 
     def to_file(self, file_name: str, mode: str = "w"):
-        log.info(f"Saving dataset to {file_name}")
+        logger.info(f"Saving dataset to {file_name}")
         save_dict = {
             k: v
             for k, v in vars(self).items()
@@ -148,14 +150,17 @@ class DingoDataset:
         with h5py.File(file_name, mode) as f:
             recursive_hdf5_save(f, save_dict)
             if self.settings:
-                f.attrs["settings"] = str(self.settings)
+                f.attrs["settings"] = OmegaConf.to_yaml(
+                    OmegaConf.create(self.settings),
+                    resolve=True,
+                )
             if self.dataset_type:
                 f.attrs["dataset_type"] = self.dataset_type
 
     def from_file(self, file_name: str):
-        log.info(f"Loading dataset from {file_name}.")
+        logger.info(f"Loading dataset from {file_name}.")
         if self._leave_on_disk_keys:
-            log.info(f"Omitting data keys {self._leave_on_disk_keys}.")
+            logger.info(f"Omitting data keys {self._leave_on_disk_keys}.")
 
         with h5py.File(file_name, "r") as f:
             loaded_dict = recursive_hdf5_load(
@@ -167,7 +172,9 @@ class DingoDataset:
                 assert k in self._data_keys
                 setattr(self, k, v)
             try:
-                self.settings = ast.literal_eval(f.attrs["settings"])
+                self.settings = OmegaConf.create(yaml.safe_load(f.attrs["settings"]))
+            except yaml.YAMLError:
+                self.settings = OmegaConf.create(ast.literal_eval(f.attrs["settings"]))
             except KeyError:
                 self.settings = None  # Is this necessary?
 

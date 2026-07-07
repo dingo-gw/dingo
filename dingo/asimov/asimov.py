@@ -205,9 +205,9 @@ class Dingo(Pipeline):
                 with open(log, "r") as log_f:
                     message = log_f.read()
                     message = message.split("\n")
-                    messages[log.split("/")[-1]] = "\n".join(message[-100:])
+                    messages[logger.split("/")[-1]] = "\n".join(message[-100:])
             except FileNotFoundError:
-                messages[log.split("/")[-1]] = (
+                messages[logger.split("/")[-1]] = (
                     "There was a problem opening this log file."
                 )
         return messages
@@ -253,7 +253,10 @@ class Dingo(Pipeline):
 
     @staticmethod
     def _net_max_luminosity_distance(metadata):
-        prior = metadata["train_settings"]["data"]["extrinsic_prior"]["luminosity_distance"]
+        extrinsic_prior = metadata["train_settings"]["data"]["extrinsic_prior"]
+        prior = extrinsic_prior.get("dictionary", extrinsic_prior)[
+            "luminosity_distance"
+        ]
         match = re.findall(r"maximum=[\d]+", prior)
         assert match
         return int(match[0].split("=")[-1])

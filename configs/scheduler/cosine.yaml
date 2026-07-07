@@ -1,2 +1,3 @@
-type: cosine
+_target_: torch.optim.lr_scheduler.CosineAnnealingLR
+_partial_: true
 T_max: 20

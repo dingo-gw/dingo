@@ -6,7 +6,7 @@ from os.path import join, isfile
 import csv
 from typing import Literal
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class AvgTracker:
@@ -88,7 +88,7 @@ class EarlyStopping:
         elif score < self.best_score + self.delta:
             self.counter += 1
             if self.verbose:
-                log.info(
+                logger.info(
                     f"EarlyStopping counter: {self.counter} out of {self.patience}"
                 )
             if self.counter >= self.patience:
@@ -131,7 +131,7 @@ class LossInfo:
         if batch_idx % self.print_freq == 0:
             td, td_avg = self.times["Dataloader"].x, self.times["Dataloader"].get_avg()
             tn, tn_avg = self.times["Network"].x, self.times["Network"].get_avg()
-            log.info(
+            logger.info(
                 "{} Epoch: {} [{}/{} ({:.0f}%)]\t\t"
                 "Loss: {:.3f} ({:.3f})\t\t"
                 "Time Dataloader: {:.3f} ({:.3f})\t\t"
@@ -203,7 +203,7 @@ class RuntimeLimits:
         # check time limit for run
         if self.max_time_per_run is not None:
             if time.time() - self.time_start >= self.max_time_per_run:
-                log.info(
+                logger.info(
                     f"Stop run: Time limit of {self.max_time_per_run} s " f"exceeded."
                 )
                 return True
@@ -212,14 +212,14 @@ class RuntimeLimits:
             if epoch is None:
                 raise ValueError("epoch required")
             if epoch - self.epoch_start >= self.max_epochs_per_run:
-                log.info(
+                logger.info(
                     f"Stop run: Epoch limit of {self.max_epochs_per_run} per run reached."
                 )
                 return True
         # check total epoch limit
         if self.max_epochs_total is not None:
             if epoch >= self.max_epochs_total:
-                log.info(
+                logger.info(
                     f"Stop run: Total epoch limit of {self.max_epochs_total} reached."
                 )
                 return True
@@ -324,13 +324,13 @@ def save_model(pm, log_dir, model_prefix="model", checkpoint_epochs=None):
     """
     # save current model
     model_name = join(log_dir, f"{model_prefix}_latest.pt")
-    log.info(f"Saving model to {model_name}.")
+    logger.info(f"Saving model to {model_name}.")
     pm.save_model(model_name, save_training_info=True)
-    log.info("Done.")
+    logger.info("Done.")
 
     # potentially copy model to a checkpoint
     if checkpoint_epochs is not None and pm.epoch % checkpoint_epochs == 0:
         model_name_cp = join(log_dir, f"{model_prefix}_{pm.epoch:03d}.pt")
-        log.info(f"Copy model to checkpoint {model_name_cp}.")
+        logger.info(f"Copy model to checkpoint {model_name_cp}.")
         copyfile(model_name, model_name_cp)
-        log.info("Done.")
+        logger.info("Done.")

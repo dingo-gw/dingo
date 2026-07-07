@@ -1,8 +1,9 @@
+import logging
 import os
 from os.path import join
 import yaml
 
-from dingo.core.utils.logging_utils import logger
+logger = logging.getLogger(__name__)
 
 
 def resubmit_condor_job(train_dir, train_settings, epoch):

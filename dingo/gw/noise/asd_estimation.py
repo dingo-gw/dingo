@@ -15,7 +15,7 @@ from dingo.gw.gwutils import get_window
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.noise.utils import psd_data_path
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 logging.captureWarnings(True)
 
 
@@ -75,7 +75,7 @@ def download_and_estimate_psds(
     w = get_window(window_kwargs)
     asd_filename_list = {det: [] for det in detectors}
     total_segments = sum(len(time_segments[det]) for det in detectors)
-    log.info(
+    logger.info(
         f"Estimating PSDs for {total_segments} time segments across "
         f"{len(time_segments)} detector(s)."
     )
@@ -93,17 +93,17 @@ def download_and_estimate_psds(
         else:
             estimation_kwargs["det"] = det
 
-        log.info(f"Processing {len(time_segments[det])} PSD segment(s) for {det}.")
+        logger.info(f"Processing {len(time_segments[det])} PSD segment(s) for {det}.")
         for index, (start, end) in enumerate(
             tqdm(time_segments[det], disable=not verbose)
         ):
             filename = join(psd_path, f"asd_{start}.hdf5")
             asd_filename_list[det].append(filename)
             if os.path.exists(filename):
-                log.info(f"ASD file already exists, skipping {filename}.")
+                logger.info(f"ASD file already exists, skipping {filename}.")
                 continue
 
-            log.info(f"Estimating ASD for {det} segment starting at {start}.")
+            logger.info(f"Estimating ASD for {det} segment starting at {start}.")
             dataset_dict = {
                 "settings": {
                     "dataset_settings": settings["dataset_settings"],
@@ -120,7 +120,7 @@ def download_and_estimate_psds(
             dataset = ASDDataset(dictionary=dataset_dict)
             dataset.to_file(file_name=filename)
 
-    log.info("PSD estimation complete.")
+    logger.info("PSD estimation complete.")
     return asd_filename_list
 
 
