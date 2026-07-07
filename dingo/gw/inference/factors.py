@@ -20,6 +20,7 @@ from typing import Optional, Union
 import numpy as np
 import pandas as pd
 import torch
+import yaml
 from astropy.time import Time
 from bilby.core.prior import DeltaFunction, PriorDict, Uniform
 from bilby.gw.detector import InterferometerList
@@ -103,28 +104,35 @@ class GWSamplerContext:
 
     Event metadata lives here (not on individual factors): it is a property of the data,
     and it drives frequency cropping, the t_ref/RA correction, and the likelihood.
+
+    The data representation is part of a context's identity: importance-sampling
+    settings updates produce a *derived* context (`derive`) rather than arguments to
+    `likelihood()`. Contexts are treated as immutable -- to change the representation,
+    derive a new one.
+
+    Note that the representation vocabulary here (frequency domains, multibanded
+    decimation, the base-domain likelihood view, frequency-range masking) is specific
+    to this domain family. A new domain family should get its own context class
+    implementing the same interface (`prepared_data` / `likelihood` / `prior` /
+    `derive`) rather than extending this one.
     """
 
     def __init__(
         self,
         domain,
-        detectors: list[str],
-        t_ref: float,
         data_prep: Compose,
         event_data: dict,
         event_metadata: Optional[dict] = None,
-        base_metadata: Optional[dict] = None,
+        model_metadata: Optional[dict] = None,
         device: Union[torch.device, str] = "cpu",
+        use_base_domain: bool = False,
+        wfg_delta_f: Optional[float] = None,
     ):
         """
         Parameters
         ----------
         domain : Domain
             The data frequency domain.
-        detectors : list[str]
-            Detector names.
-        t_ref : float
-            Training reference GPS time.
         data_prep : Compose
             The one-time data-preprocessing transform chain (whiten / decimate /
             repackage).
@@ -134,25 +142,43 @@ class GWSamplerContext:
         event_metadata : dict, optional
             Per-event metadata; drives frequency cropping, the RA correction, and the
             likelihood reference time.
-        base_metadata : dict, optional
-            The base (parameter / waveform / domain) metadata, used to build the
-            likelihood.
+        model_metadata : dict, optional
+            The metadata of the model defining this analysis (dataset + train
+            settings); the source for the prior, the likelihood, the detector
+            names, and the reference time.
         device : torch.device or str, default "cpu"
             The torch device the chain runs on (the model device); steps that create
             fresh tensors (e.g. `DeltaFactor`) create them here.
+        use_base_domain : bool, default False
+            For a multibanded domain, evaluate the likelihood on the base
+            (undecimated) frequency domain rather than the decimated one. Set via
+            `derive`.
+        wfg_delta_f : float, optional
+            Override for the waveform-generator domain `delta_f` (an updated
+            `T = 1/delta_f` cannot be handled by domain projection). Set via `derive`.
         """
         self.domain = domain
-        self.detectors = detectors
-        self.t_ref = t_ref
         self._data_prep = data_prep
-        self.base_metadata = base_metadata
+        self.model_metadata = model_metadata
         self.event_data = event_data
         self.event_metadata = event_metadata
         self.device = device
+        self.use_base_domain = use_base_domain
+        self.wfg_delta_f = wfg_delta_f
         self._prepared: Optional[torch.Tensor] = None
         self._prior: Optional[PriorDict] = None
         self._likelihood: Optional[StationaryGaussianGWLikelihood] = None
         self._likelihood_settings: Optional[dict] = None
+
+    @property
+    def detectors(self) -> list[str]:
+        """Detector names, read from the model metadata."""
+        return self.model_metadata["train_settings"]["data"]["detectors"]
+
+    @property
+    def t_ref(self) -> float:
+        """Training reference GPS time, read from the model metadata."""
+        return self.model_metadata["train_settings"]["data"]["ref_time"]
 
     @classmethod
     def from_model_metadata(
@@ -201,7 +227,10 @@ class GWSamplerContext:
         # Event frequency-range update: mask the whitened strain/ASDs outside the
         # requested range. Must precede repackaging (ranges may be per-detector).
         # The request is validated against the training crop license the first time
-        # prepared_data() runs.
+        # prepared_data() runs -- deliberately not here: the license governs the
+        # network-input view only, and contexts are also reconstructed for
+        # likelihood-only use (e.g. from saved importance-sampling results), where
+        # a range that is illegal as network input is legal for ASD masking.
         range_update = _frequency_range_update(domain, event_metadata)
         if range_update is not None:
             transforms.append(
@@ -216,12 +245,10 @@ class GWSamplerContext:
 
         return cls(
             domain=domain,
-            detectors=detectors,
-            t_ref=data_settings["ref_time"],
             data_prep=Compose(transforms),
             event_data=event_data,
             event_metadata=event_metadata,
-            base_metadata=metadata,
+            model_metadata=metadata,
             device=device,
         )
 
@@ -263,6 +290,83 @@ class GWSamplerContext:
             model.metadata, event_data, event_metadata, device=model.device
         )
 
+    def derive(
+        self,
+        updates: Optional[dict] = None,
+        use_base_domain: Optional[bool] = None,
+    ) -> "GWSamplerContext":
+        """Derive a context for the same event under a different data representation.
+
+        The derived context shares the event payload (`event_data`, `event_metadata`),
+        the analysis metadata, and the reference time by construction -- parameter
+        meaning is preserved, so importance weights between the two representations
+        remain well-defined. Only the representation changes: an updated duration `T`
+        rebuilds the data domain at `delta_f = 1/T` (and enters waveform generation as
+        `wfg_delta_f`), and `use_base_domain` switches a multibanded likelihood to the
+        undecimated domain. Frequency-range updates act through `event_metadata` (ASD
+        masking in the likelihood) and need no derived state. Caches start fresh.
+
+        Parameters
+        ----------
+        updates : dict, optional
+            Importance-sampling settings updates, as recorded in
+            `Result.importance_sampling_metadata["updates"]`. May contain `T`,
+            `minimum_frequency`, `maximum_frequency` (and non-domain keys, which are
+            ignored here), but no other quantities that define a new domain.
+        use_base_domain : bool, optional
+            For a multibanded domain, evaluate the likelihood on the base
+            (undecimated) frequency domain. `None` keeps this context's setting.
+
+        Returns
+        -------
+        GWSamplerContext
+        """
+        domain = self.domain
+        wfg_delta_f = self.wfg_delta_f
+        if updates and any(
+            k in updates for k in ("minimum_frequency", "maximum_frequency", "T")
+        ):
+            # TODO: Make compatible with MultibandedFrequencyDomain.
+            if isinstance(domain, MultibandedFrequencyDomain):
+                raise NotImplementedError()
+
+            updates = updates.copy()
+            # A duration update is generation-level on both sides: the pipe
+            # regenerates the event data at the new T, and the waveform must be
+            # generated natively at delta_f = 1/T (a resolution change is not a
+            # projection of existing samples). wfg_delta_f persists on the derived
+            # context, reaching every downstream likelihood build and further
+            # derivations.
+            if "T" in updates:
+                updates["delta_f"] = 1.0 / updates["T"]
+                wfg_delta_f = updates["delta_f"]
+                print(
+                    f"Updating waveform generation delta_f from "
+                    f'{self.model_metadata["dataset_settings"]["domain"]["delta_f"]} '
+                    f"to {wfg_delta_f}."
+                )
+
+            domain_dict = domain.domain_dict  # Existing settings
+            domain_dict.update(
+                (k, updates[k]) for k in set(domain_dict).intersection(updates)
+            )
+            print("Rebuilding domain as follows:")
+            print(yaml.dump(domain_dict, default_flow_style=False, sort_keys=False))
+            domain = build_domain(domain_dict)
+
+        return type(self)(
+            domain=domain,
+            data_prep=self._data_prep,
+            event_data=self.event_data,
+            event_metadata=self.event_metadata,
+            model_metadata=self.model_metadata,
+            device=self.device,
+            use_base_domain=(
+                self.use_base_domain if use_base_domain is None else use_base_domain
+            ),
+            wfg_delta_f=wfg_delta_f,
+        )
+
     def prepared_data(self) -> torch.Tensor:
         """One-time data preprocessing, computed once and cached. An event
         frequency-range update is validated against the training crop license
@@ -282,7 +386,7 @@ class GWSamplerContext:
         if update is None:
             return
         domain = getattr(self.domain, "base_domain", self.domain)
-        crop_settings = self.base_metadata["train_settings"]["data"].get(
+        crop_settings = self.model_metadata["train_settings"]["data"].get(
             "random_strain_cropping"
         )
         _validate_minimum_frequency(
@@ -302,8 +406,8 @@ class GWSamplerContext:
         applied downstream (they depend on the evolving analysis state), not here.
         """
         if self._prior is None:
-            data_settings = self.base_metadata["train_settings"]["data"]
-            intrinsic_prior = self.base_metadata["dataset_settings"]["intrinsic_prior"]
+            data_settings = self.model_metadata["train_settings"]["data"]
+            intrinsic_prior = self.model_metadata["dataset_settings"]["intrinsic_prior"]
             extrinsic_prior = get_extrinsic_prior_dict(data_settings["extrinsic_prior"])
             self._prior = build_prior_with_defaults(
                 {**intrinsic_prior, **extrinsic_prior}
@@ -315,10 +419,6 @@ class GWSamplerContext:
         time_marginalization_kwargs: Optional[dict] = None,
         phase_marginalization_kwargs: Optional[dict] = None,
         calibration_marginalization_kwargs: Optional[dict] = None,
-        use_base_domain: bool = False,
-        data_domain=None,
-        wfg_delta_f: Optional[float] = None,
-        frequency_update: Optional[dict] = None,
     ) -> StationaryGaussianGWLikelihood:
         """
         Build the exact GW likelihood on this event's data, in physical parameter space.
@@ -330,17 +430,16 @@ class GWSamplerContext:
         event time (the training-frame right-ascension correction is already applied to the
         samples), or the training reference time when no event time is set.
 
+        The data representation (the domain, `use_base_domain`, `wfg_delta_f`, the
+        event's frequency range) is context state -- importance-sampling settings
+        updates enter by deriving a new context (`derive`), not as arguments here.
+        Marginalization is per-request and enters as arguments.
+
         The most recently built likelihood is cached with its arguments: a repeated
         call with the same arguments returns the shared instance (the synthetic-phase
         factor requests one per chain chunk), and a call with different arguments
         builds a replacement. In the exact synthetic-phase mode the consumer assigns
-        a `phase_grid` attribute on the shared instance, as
-        `Result.sample_synthetic_phase` does.
-
-        The context itself is importance-sampling-state-free: IS-time settings
-        updates (a rebuilt data domain, an updated `T` / `delta_f`, an explicit
-        frequency range) enter as arguments, supplied by the IS layer
-        (`Result._build_likelihood`).
+        a `phase_grid` attribute on the shared instance.
 
         Parameters
         ----------
@@ -353,18 +452,6 @@ class GWSamplerContext:
             Analytically marginalize over `phase`. Requires a uniform [0, 2 pi) phase prior.
         calibration_marginalization_kwargs : dict, optional
             Marginalize over detector calibration uncertainty.
-        use_base_domain : bool, default False
-            For a multibanded domain, evaluate on the base (undecimated) frequency domain
-            rather than the decimated one.
-        data_domain : Domain, optional
-            Override for the data domain (e.g. rebuilt with importance-sampling
-            updates); defaults to this context's domain.
-        wfg_delta_f : float, optional
-            Override for the waveform-generator domain `delta_f` (an updated
-            `T = 1/delta_f` cannot be handled by domain projection).
-        frequency_update : dict, optional
-            `minimum_frequency` / `maximum_frequency` for ASD masking; defaults to
-            the event metadata's values with this context's domain as fallback.
 
         Returns
         -------
@@ -373,9 +460,12 @@ class GWSamplerContext:
         # Capture the call's arguments for the cache comparison; this must stay the
         # first statement so locals() holds exactly the arguments. The comparison
         # happens before the marginalization bounds are filled in below (which is
-        # deterministic given the same arguments).
+        # deterministic given the same arguments). The representation fields join the
+        # key as a guard against off-contract in-place mutation.
         settings = dict(locals())
         settings.pop("self")
+        settings["use_base_domain"] = self.use_base_domain
+        settings["wfg_delta_f"] = self.wfg_delta_f
         if settings == self._likelihood_settings:
             return self._likelihood
 
@@ -387,7 +477,11 @@ class GWSamplerContext:
 
         # Marginalizing over a parameter needs the (uniform) prior the network
         # marginalized over; use it to parameterize the requested marginalization.
-        # Bounds already provided by the caller (e.g. from an updated prior) win.
+        # Bounds already provided by the caller win: the importance-sampling layer
+        # validates against its evolved prior (prior updates, time/phase
+        # split-offs), which this sample-free context cannot see, and passes
+        # explicit bounds. The fill below covers standalone (chain) use from the
+        # network's static prior.
         if time_marginalization_kwargs is not None and not (
             "t_lower" in time_marginalization_kwargs
             and "t_upper" in time_marginalization_kwargs
@@ -418,13 +512,17 @@ class GWSamplerContext:
                     f"but is {phase_prior}."
                 )
 
-        dataset_settings = self.base_metadata["dataset_settings"]
-        # WaveformGenerator domain -- generally the dataset domain (it may be wider than
-        # the data domain for generation). An updated T = 1/delta_f enters here (it
-        # cannot be handled by domain projection).
+        dataset_settings = self.model_metadata["dataset_settings"]
+        # WaveformGenerator domain -- deliberately the dataset domain WITHOUT any
+        # domain_update, so waveform generation mirrors how the training set was
+        # generated (possibly wider than the network's data domain); the likelihood
+        # projects the generated waveform onto the data domain. An updated
+        # T = 1/delta_f enters here: unlike range masking or decimation, a
+        # resolution change needs samples that do not exist on the old grid, so it
+        # cannot be handled by domain projection and must apply at generation.
         wfg_domain_dict = dataset_settings["domain"]
-        if wfg_delta_f is not None:
-            wfg_domain_dict = {**wfg_domain_dict, "delta_f": wfg_delta_f}
+        if self.wfg_delta_f is not None:
+            wfg_domain_dict = {**wfg_domain_dict, "delta_f": self.wfg_delta_f}
         wfg_domain = build_domain(wfg_domain_dict)
 
         # Likelihood reference time: the event time (the training-frame RA correction has
@@ -434,28 +532,21 @@ class GWSamplerContext:
         else:
             t_ref = self.t_ref
 
-        if data_domain is None:
-            data_domain = self.domain
-        if frequency_update is None:
-            frequency_update = dict(
-                minimum_frequency=self._frequency(
-                    "minimum_frequency", self.domain.f_min
-                ),
-                maximum_frequency=self._frequency(
-                    "maximum_frequency", self.domain.f_max
-                ),
-            )
+        frequency_update = dict(
+            minimum_frequency=self._frequency("minimum_frequency", self.domain.f_min),
+            maximum_frequency=self._frequency("maximum_frequency", self.domain.f_max),
+        )
 
         likelihood = StationaryGaussianGWLikelihood(
             wfg_kwargs=dataset_settings["waveform_generator"],
             wfg_domain=wfg_domain,
-            data_domain=data_domain,
+            data_domain=self.domain,
             event_data=self.event_data,
             t_ref=t_ref,
             time_marginalization_kwargs=time_marginalization_kwargs,
             phase_marginalization_kwargs=phase_marginalization_kwargs,
             calibration_marginalization_kwargs=calibration_marginalization_kwargs,
-            use_base_domain=use_base_domain,
+            use_base_domain=self.use_base_domain,
             frequency_update=frequency_update,
         )
         self._likelihood = likelihood
@@ -472,7 +563,10 @@ class GWSamplerContext:
         """The prior over `name` if the network marginalized it (i.e. `name` is not an
         inference parameter), else `None` -- used to parameterize likelihood
         marginalization over time / phase."""
-        if name in self.base_metadata["train_settings"]["data"]["inference_parameters"]:
+        if (
+            name
+            in self.model_metadata["train_settings"]["data"]["inference_parameters"]
+        ):
             return None
         return self.prior.get(name)
 
@@ -516,7 +610,6 @@ class SyntheticPhaseFactor(Factor):
         approximation_22_mode: bool = False,
         uniform_weight: float = 0.01,
         num_processes: int = 1,
-        likelihood_kwargs: Optional[dict] = None,
     ):
         """
         Parameters
@@ -532,10 +625,6 @@ class SyntheticPhaseFactor(Factor):
             Weight of the uniform floor added to the phase distribution for mass coverage.
         num_processes : int, default 1
             Parallel processes for the per-sample likelihood evaluation and phase sampling.
-        likelihood_kwargs : dict, optional
-            Arguments for `context.likelihood()` selecting the likelihood view (e.g.
-            `use_base_domain`, a rebuilt `data_domain`, frequency updates), supplied
-            by the importance-sampling layer. Defaults to the context's own views.
         """
         self.parameters = ["phase"]
         self.conditioning = list(conditioning)
@@ -543,7 +632,6 @@ class SyntheticPhaseFactor(Factor):
         self.approximation_22_mode = approximation_22_mode
         self.uniform_weight = uniform_weight
         self.num_processes = num_processes
-        self.likelihood_kwargs = likelihood_kwargs
 
     def sample_and_log_prob(self, num_samples, context, given=None):
         """Draw one phase per `theta_rest` row (`num_samples` must be 1); return the phases
@@ -592,7 +680,9 @@ class SyntheticPhaseFactor(Factor):
         per sample: evaluate `log L` on the grid, exponentiate (shifted by the per-row
         max), and add the uniform floor."""
         theta = pd.DataFrame({k: _to_numpy(v) for k, v in given.items()})
-        likelihood = context.likelihood(**(self.likelihood_kwargs or {}))
+        # The context (possibly derived for importance sampling) carries the
+        # representation; the phase-full likelihood needs no arguments.
+        likelihood = context.likelihood()
         phases = np.linspace(0, 2 * np.pi, self.n_grid)
         if self.approximation_22_mode:
             # Assume the waveform is (2, 2)-dominated (transforms as exp(2i phase)), so the

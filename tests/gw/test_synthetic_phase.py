@@ -116,8 +116,6 @@ def test_context_frequency_override():
     def context(event_metadata):
         return GWSamplerContext(
             domain=None,
-            detectors=[],
-            t_ref=0.0,
             data_prep=None,
             event_data={},
             event_metadata=event_metadata,
@@ -129,22 +127,22 @@ def test_context_frequency_override():
     assert context(None)._frequency("minimum_frequency", 20.0) == 20.0
 
 
-def test_likelihood_kwargs_forwarded_to_context():
-    # The IS layer selects the likelihood view (base domain, rebuilt domain, ...);
-    # the factor forwards it verbatim to context.likelihood().
-    recorded = {}
+def test_factor_builds_likelihood_from_context():
+    # The factor takes the likelihood from the context with no arguments -- the
+    # data representation lives on the (possibly derived) context, not on the
+    # factor.
+    recorded = []
 
     class _RecordingContext(_MockContext):
         def likelihood(self, **kwargs):
-            recorded.update(kwargs)
+            recorded.append(kwargs)
             return super().likelihood()
 
     factor = SyntheticPhaseFactor(
         conditioning=["chirp_mass"],
         n_grid=11,
         approximation_22_mode=True,
-        likelihood_kwargs={"use_base_domain": True},
     )
     _seed()
     factor.sample_and_log_prob(1, _RecordingContext(), _given())
-    assert recorded == {"use_base_domain": True}
+    assert recorded == [{}]

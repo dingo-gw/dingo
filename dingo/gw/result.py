@@ -3,15 +3,12 @@ import time
 from typing import Optional
 
 import numpy as np
-import yaml
 from bilby.core.prior import Uniform, Constraint, PriorDict, DeltaFunction
 from bilby.gw.prior import CalibrationPriorDict
 from bilby_pipe.utils import CALIBRATION_CORRECTION_TYPE_LOOKUP
 
 from dingo.core.result import Result as CoreResult
 from dingo.gw.conversion import change_spin_conversion_phase
-from dingo.gw.domains import MultibandedFrequencyDomain
-from dingo.gw.domains import build_domain
 from dingo.core.utils.backward_compatibility import check_minimum_version
 
 
@@ -111,6 +108,16 @@ class Result(CoreResult):
     def use_base_domain(self, value: bool):
         if hasattr(self.domain, "base_domain"):
             self.importance_sampling_metadata["use_base_domain"] = value
+            # The representation is context state: re-derive rather than mutate, so
+            # the fresh context starts with an empty likelihood cache and a
+            # previously built likelihood cannot leak across the change.
+            if (
+                self.sampler_context is not None
+                and self.sampler_context.use_base_domain != value
+            ):
+                self.sampler_context = self.sampler_context.derive(
+                    use_base_domain=value
+                )
 
     @property
     def f_ref(self):
@@ -153,59 +160,14 @@ class Result(CoreResult):
         self.event_metadata["maximum_frequency"] = value
 
     def _build_domain(self):
-        """Take the data domain from the sampler context. After importance-sampling
-        updates, `_rebuild_domain` rebinds `self.domain` to a new object, and the
-        updated domain reaches the likelihood through `_likelihood_view_kwargs`;
-        the context keeps the original training-settings domain. Called by
-        __init__()."""
+        """Take the data domain from the sampler context -- its single owner. A
+        context derived with importance-sampling updates already carries the
+        rebuilt domain. Called by __init__() and after reset_event()."""
         check_minimum_version(self.version, raise_exception=False)
         if self.sampler_context is None:
             self.domain = None
             return
         self.domain = self.sampler_context.domain
-
-    def _rebuild_domain(self, verbose=False):
-        """Rebuild the domain based on settings updated for importance sampling.
-
-        These settings should be saved in self.importance_sampling_metadata["updates"],
-        which is expected to be populated by reset_event()."""
-        updates = self.importance_sampling_metadata["updates"].copy()
-
-        # Assume that updates can contain T, f_s, roll_off, f_min, f_max, but no other
-        # quantities that define a new domain (e.g., delta_f). Typical event metadata
-        # will be constructed in this way.
-
-        domain_keys = ["minimum_frequency", "maximum_frequency", "T"]
-        if any(k in updates for k in domain_keys):
-            if self.domain is None:
-                # Transport-only result (no reconstructable context): nothing to
-                # rebuild; domain-dependent operations fail at use.
-                return
-            # TODO: Make compatible with MultibandedFrequencyDomain.
-            if isinstance(self.domain, MultibandedFrequencyDomain):
-                raise NotImplementedError()
-
-            if "T" in updates:
-                updates["delta_f"] = 1.0 / updates["T"]
-
-            domain_dict = self.domain.domain_dict  # Existing settings
-            domain_dict.update(
-                (k, updates[k]) for k in set(domain_dict).intersection(updates)
-            )
-
-            if verbose:
-                print("Rebuilding domain as follows:")
-                print(
-                    yaml.dump(
-                        domain_dict,
-                        default_flow_style=False,
-                        sort_keys=False,
-                    )
-                )
-            self.domain = build_domain(domain_dict)
-        else:
-            if verbose:
-                print("No domain updates found; domain not rebuilt.")
 
     def _build_context(self):
         """Reconstruct the per-event sampler context from the serialized payload
@@ -223,7 +185,7 @@ class Result(CoreResult):
         try:
             # base_metadata resolves the unconditional ("base") indirection, so
             # density-recovery results reconstruct from the analysis metadata.
-            return GWSamplerContext.from_model_metadata(
+            context = GWSamplerContext.from_model_metadata(
                 self.base_metadata, self.context, self.event_metadata
             )
         except (KeyError, TypeError) as e:
@@ -236,6 +198,14 @@ class Result(CoreResult):
                 f"unavailable."
             )
             return None
+        # Importance-sampling settings updates change the data representation, which
+        # lives on a derived context (same event, different representation).
+        metadata = self.importance_sampling_metadata or {}
+        updates = metadata.get("updates")
+        use_base_domain = metadata.get("use_base_domain", False)
+        if updates or use_base_domain:
+            context = context.derive(updates=updates, use_base_domain=use_base_domain)
+        return context
 
     def _build_prior(self):
         """Take the static prior from the sampler context (its single owner), then
@@ -322,23 +292,6 @@ class Result(CoreResult):
             # Recalculate the importance-sampling weights and log evidence.
             self._calculate_evidence()
 
-    def _likelihood_view_kwargs(self) -> dict:
-        """The `context.likelihood()` arguments encoding this Result's
-        importance-sampling view: the (possibly rebuilt) data domain, the
-        base-domain choice, and delta_f / frequency updates."""
-        wfg_delta_f = None
-        if "T" in (self.importance_sampling_metadata.get("updates") or {}):
-            wfg_delta_f = 1 / self.importance_sampling_metadata["updates"]["T"]
-        return dict(
-            use_base_domain=self.use_base_domain,
-            data_domain=self.domain,
-            wfg_delta_f=wfg_delta_f,
-            frequency_update=dict(
-                minimum_frequency=self.minimum_frequency,
-                maximum_frequency=self.maximum_frequency,
-            ),
-        )
-
     def _build_likelihood(
         self,
         time_marginalization_kwargs: Optional[dict] = None,
@@ -360,6 +313,10 @@ class Result(CoreResult):
         calibration_marginalization_kwargs: dict
             Calibration marginalization parameters. If None, no calibration marginalization is used.
         """
+        # Marginalization is validated here against the *evolved* prior (any
+        # importance-sampling prior update, the time / phase split-offs), which
+        # the sample-free context cannot see; the explicit bounds set below
+        # therefore take precedence over the context's static-prior fill.
         if time_marginalization_kwargs is not None:
             if self.geocent_time_prior is None:
                 raise NotImplementedError(
@@ -396,28 +353,17 @@ class Result(CoreResult):
                 "does not carry full model metadata."
             )
 
-        # Construction is owned by the sampler context. The importance-sampling
-        # state -- validated marginalization bounds, the (possibly rebuilt) data
-        # domain, delta_f / frequency updates -- enters as arguments; the context
-        # itself stays IS-state-free. An updated T = 1/delta_f enters at the level
-        # of the WaveformGenerator domain (it cannot be handled by the domain
-        # projection).
+        # Construction is owned by the sampler context; its (possibly derived)
+        # representation already encodes the importance-sampling settings updates.
+        # Validated marginalization bounds enter as arguments.
         #
         # TODO: Add functionality to update other waveform settings, i.e.,
         #  approximant, generation minimum and maximum frequencies, reference
         #  frequency, and starting frequency.
-        view = self._likelihood_view_kwargs()
-        if view["wfg_delta_f"] is not None:
-            print(
-                f"Updating waveform generation delta_f from "
-                f'{self.base_metadata["dataset_settings"]["domain"]["delta_f"]} '
-                f"to {view['wfg_delta_f']}."
-            )
         self.likelihood = self.sampler_context.likelihood(
             time_marginalization_kwargs=time_marginalization_kwargs,
             phase_marginalization_kwargs=phase_marginalization_kwargs,
             calibration_marginalization_kwargs=calibration_marginalization_kwargs,
-            **view,
         )
 
     def sample_calibration_parameters(self, calibration_sampling_kwargs: dict):
@@ -536,11 +482,11 @@ class Result(CoreResult):
         within-prior proposal samples with their stored log-prob, and
         `SyntheticPhaseFactor` draws `phase` -- the composer's ordinary log-prob fold
         returns the joint proposal density `log q(theta) + log q(phase | theta, d)`,
-        which becomes the samples' log_prob. The Result's likelihood view (base
-        domain, rebuilt domain, frequency updates) is passed to the factor, so it
-        shares the cached likelihood instance built by `_build_likelihood`.
-        Out-of-prior rows get `phase = 0` and `log_prob = nan` (they receive zero
-        weight in importance sampling regardless)."""
+        which becomes the samples' log_prob. The factor builds the phase-full
+        likelihood from the sampler context, whose (possibly derived) representation
+        encodes the importance-sampling view (base domain, rebuilt domain, frequency
+        updates). Out-of-prior rows get `phase = 0` and `log_prob = nan` (they
+        receive zero weight in importance sampling regardless)."""
         from dingo.core.factors import ChainComposer, SampleTableFactor
         from dingo.gw.inference.factors import SyntheticPhaseFactor
 
@@ -555,7 +501,6 @@ class Result(CoreResult):
             approximation_22_mode=approximation_22_mode,
             uniform_weight=self.synthetic_phase_kwargs.get("uniform_weight", 0.01),
             num_processes=num_processes,
-            likelihood_kwargs=self._likelihood_view_kwargs(),
         )
         chain = ChainComposer([table, factor])
         out, log_prob = chain.sample_and_log_prob(
@@ -572,8 +517,9 @@ class Result(CoreResult):
         # Insert the phase prior in the prior, since now the phase is present.
         self.prior["phase"] = self.phase_prior
         self.phase_prior = None
-        # Reset so importance sampling rebuilds the likelihood with its own
-        # marginalization settings rather than reusing the phase-full one.
+        # Any previously built likelihood does not describe the now-phase-full
+        # samples; importance sampling rebuilds with its own marginalization
+        # settings.
         self.likelihood = None
 
     def sample_synthetic_phase(self, synthetic_phase_kwargs):
@@ -641,7 +587,6 @@ class Result(CoreResult):
         print(f"Estimating synthetic phase for {num_valid_samples} samples.")
         t0 = time.time()
 
-        self._build_likelihood()
         self._sample_synthetic_phase_chain(
             theta, within_prior, approximation_22_mode, num_processes
         )

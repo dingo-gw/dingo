@@ -1,8 +1,8 @@
 """
-Unit tests for ``GWSamplerContext`` plumbing: the default-likelihood cache, the
-device attribute, and the metadata constructors. The likelihood itself is stubbed
-(no waveform generation); the model-based construction parity lives in the local
-harnesses.
+Unit tests for ``GWSamplerContext`` plumbing: the likelihood cache, derived
+contexts (importance-sampling representations), the device attribute, and the
+metadata constructors. The likelihood itself is stubbed (no waveform generation);
+the model-based construction parity lives in the local harnesses.
 """
 
 import copy
@@ -27,7 +27,13 @@ _BASE_METADATA = {
         "domain": _DOMAIN_SETTINGS,
         "waveform_generator": {"approximant": "IMRPhenomD", "f_ref": 20.0},
     },
-    "train_settings": {"data": {"inference_parameters": ["chirp_mass"]}},
+    "train_settings": {
+        "data": {
+            "inference_parameters": ["chirp_mass"],
+            "detectors": ["H1"],
+            "ref_time": 1126259462.4,
+        }
+    },
 }
 
 
@@ -49,11 +55,9 @@ def context(monkeypatch):
     _StubLikelihood.constructions = 0
     return GWSamplerContext(
         domain=build_domain(_DOMAIN_SETTINGS),
-        detectors=["H1"],
-        t_ref=1126259462.4,
         data_prep=None,
         event_data={},
-        base_metadata=_BASE_METADATA,
+        model_metadata=_BASE_METADATA,
     )
 
 
@@ -65,20 +69,13 @@ def test_likelihood_rebuilt_only_when_settings_change(context):
     assert context.likelihood() is default
     assert _StubLikelihood.constructions == 1
 
-    base = context.likelihood(use_base_domain=True)
-    assert base is not default
-    assert base.kwargs["use_base_domain"] is True
-    assert context.likelihood(use_base_domain=True) is base
+    marg_kwargs = {"num_calibration_curves": 100}
+    marginalized = context.likelihood(calibration_marginalization_kwargs=marg_kwargs)
+    assert marginalized is not default
+    assert context.likelihood(calibration_marginalization_kwargs=marg_kwargs) is (
+        marginalized
+    )
     assert _StubLikelihood.constructions == 2
-
-
-def test_likelihood_cache_handles_domain_and_none_settings(context):
-    # A bare call (data_domain=None) followed by an explicit domain (either order)
-    # must be a clean cache miss, not a Domain == None comparison error.
-    bare = context.likelihood()
-    explicit = context.likelihood(data_domain=build_domain(_DOMAIN_SETTINGS))
-    assert explicit is not bare
-    assert context.likelihood() is not explicit
 
 
 def test_domain_eq_is_none_safe():
@@ -88,21 +85,66 @@ def test_domain_eq_is_none_safe():
     assert (domain == 3) is False
 
 
-def test_likelihood_importance_sampling_overrides(context):
-    # IS-state overrides pass through: an explicit data domain, an updated
-    # waveform-generator delta_f, and an explicit frequency range.
-    likelihood = context.likelihood(
-        data_domain="rebuilt-domain",
-        wfg_delta_f=0.5,
-        frequency_update={"minimum_frequency": 21.0, "maximum_frequency": 512.0},
-    )
-    assert likelihood.kwargs["data_domain"] == "rebuilt-domain"
-    assert likelihood.kwargs["wfg_domain"].delta_f == 0.5
-    assert likelihood.kwargs["frequency_update"]["maximum_frequency"] == 512.0
-    # Defaults reproduce the context's own views.
+def test_derived_context_has_independent_likelihood_cache(context):
+    # The representation is context state: a derived context builds its own
+    # likelihood (fresh cache) without disturbing the original's.
     default = context.likelihood()
-    assert default.kwargs["data_domain"] is context.domain
-    assert default.kwargs["wfg_domain"].delta_f == _DOMAIN_SETTINGS["delta_f"]
+    derived = context.derive(use_base_domain=True)
+    base = derived.likelihood()
+    assert base is not default
+    assert base.kwargs["use_base_domain"] is True
+    assert derived.likelihood() is base
+    assert context.likelihood() is default
+    assert context.use_base_domain is False
+
+
+def test_derive_with_updated_duration_rebuilds_domain(context):
+    # An updated duration T rebuilds the data domain at delta_f = 1/T and enters
+    # waveform generation as wfg_delta_f; the event payload and metadata are
+    # shared with the original context.
+    derived = context.derive(updates={"T": 2.0})
+    assert derived.domain.delta_f == 0.5
+    assert derived.wfg_delta_f == 0.5
+    assert derived.event_data is context.event_data
+    assert derived.model_metadata is context.model_metadata
+    assert derived.t_ref == context.t_ref
+    likelihood = derived.likelihood()
+    assert likelihood.kwargs["data_domain"] is derived.domain
+    assert likelihood.kwargs["wfg_domain"].delta_f == 0.5
+    # The original context is untouched.
+    assert context.domain.delta_f == _DOMAIN_SETTINGS["delta_f"]
+    assert context.wfg_delta_f is None
+    assert context.likelihood().kwargs["wfg_domain"].delta_f == (
+        _DOMAIN_SETTINGS["delta_f"]
+    )
+
+
+def test_derive_with_frequency_updates_keeps_domain_grid(context):
+    # min/max frequency updates apply via ASD masking (through the event
+    # metadata), not the domain grid: the rebuild triggers but reproduces the
+    # same domain settings.
+    derived = context.derive(updates={"minimum_frequency": 25.0})
+    assert derived.domain is not context.domain
+    assert derived.domain.domain_dict == context.domain.domain_dict
+
+
+def test_likelihood_frequency_range_follows_event_metadata(context):
+    # The likelihood masks the ASDs to the event's frequency range; without an
+    # event override the range defaults to the domain bounds.
+    default_update = context.likelihood().kwargs["frequency_update"]
+    assert default_update == {
+        "minimum_frequency": _DOMAIN_SETTINGS["f_min"],
+        "maximum_frequency": _DOMAIN_SETTINGS["f_max"],
+    }
+    with_event = GWSamplerContext(
+        domain=build_domain(_DOMAIN_SETTINGS),
+        data_prep=None,
+        event_data={},
+        event_metadata={"minimum_frequency": 21.0, "maximum_frequency": 512.0},
+        model_metadata=_BASE_METADATA,
+    )
+    update = with_event.likelihood().kwargs["frequency_update"]
+    assert update == {"minimum_frequency": 21.0, "maximum_frequency": 512.0}
 
 
 def _event_data(n_bins):
@@ -195,16 +237,12 @@ def test_likelihood_caller_marginalization_bounds_win(context):
 def test_context_device_default_and_explicit():
     ctx = GWSamplerContext(
         domain=None,
-        detectors=["H1"],
-        t_ref=0.0,
         data_prep=None,
         event_data={},
         device="meta",
     )
     assert ctx.device == "meta"
-    ctx_default = GWSamplerContext(
-        domain=None, detectors=["H1"], t_ref=0.0, data_prep=None, event_data={}
-    )
+    ctx_default = GWSamplerContext(domain=None, data_prep=None, event_data={})
     assert ctx_default.device == "cpu"
 
 
@@ -236,7 +274,7 @@ def test_from_model_metadata_matches_from_model():
         assert ctx.detectors == ["H1", "L1"]
         assert ctx.t_ref == 1126259462.4
         assert ctx.domain.domain_dict == ctx_meta.domain.domain_dict
-        assert ctx.base_metadata is _MODEL_METADATA
+        assert ctx.model_metadata is _MODEL_METADATA
         assert ctx.device == "cpu"
         assert ctx._data_prep is not None
 

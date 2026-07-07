@@ -106,8 +106,6 @@ class Result(DingoDataset):
             self.sampler_context = self._build_context()
         self._build_prior()
         self._build_domain()
-        if self.importance_sampling_metadata.get("updates"):
-            self._rebuild_domain()
 
     @property
     def metadata(self):
@@ -199,15 +197,13 @@ class Result(DingoDataset):
                 print(f"  {k}:  {event_metadata[k]}")
                 self.importance_sampling_metadata["updates"][k] = event_metadata[k]
 
-            self._rebuild_domain(verbose=True)
         self.event_metadata = event_metadata
 
         # The old context described the data the samples were drawn from; rebuild it
-        # around the new (possibly regenerated) event payload.
+        # around the new (possibly regenerated) event payload -- recorded settings
+        # updates enter as a derived representation -- and re-alias the domain.
         self.sampler_context = self._build_context()
-
-    def _rebuild_domain(self, verbose=False):
-        pass
+        self._build_domain()
 
     @property
     def num_samples(self):
