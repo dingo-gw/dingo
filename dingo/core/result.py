@@ -924,27 +924,33 @@ class Result(DingoDataset):
             return np.nan
 
     def get_one_dimensional_median_and_error_bar(self, key: str, weighted: bool = False, fmt: str = '.2f', quantiles: list = [0.16, 0.84]):
-        """ 
-        Calculate the median and error bar for a given key
+        """
+        Calculate the median and the lower and upper error bars for a given
+        parameter, based on the specified quantiles.
 
         Parameters
-        ==========
+        ---------
         key: str
             The parameter key for which to calculate the median and error bar
         weighted: bool, optional
-            Whether to use sample weights in calculating the median and error bar
+            If True, use the importance weights stored in the "weights" 
+            column of the samples. Default is False.
         fmt: str, ('.2f')
-            A format string
-        quantiles: list, 
-            A length-2 list of the lower and upper-quantiles to calculate the errors bars for.
+            Format string used for the values in the returned LaTeX string.
+            Default is '.2f'.
+        quantiles: list, optional
+            A length-2 list with the lower and upper quantiles defining the
+            error bars. Default is [0.16, 0.84] (68% credible interval).
 
         Returns
-        =======
+        ---------
         summary: namedtuple
-            An object with attributes, median, lower, upper and string
-
+            An object with attributes median, lower, upper, and string, where 
+            string is a LaTeX representation of the form 
+            $median_{-lower}^{+upper}$.
         """
-        summary = namedtuple('summary', ['median', 'lower', 'upper', 'string'])
+        
+        Summary = namedtuple('summary', ['median', 'lower', 'upper', 'string'])
 
         if len(quantiles) != 2:
             raise ValueError("quantiles must be of length 2")
@@ -958,15 +964,15 @@ class Result(DingoDataset):
             weights = np.ones(len(theta))
 
         quants = self._percentile(theta[key], weights, quants_to_compute)
-        summary.median = quants[1]
-        summary.plus = quants[2] - summary.median
-        summary.minus = summary.median - quants[0]
+        median = quants[1]
+        upper = quants[2] - median
+        lower = median - quants[0]
 
         fmt = "{{0:{0}}}".format(fmt).format
         string_template = r"${{{0}}}_{{-{1}}}^{{+{2}}}$"
-        summary.string = string_template.format(
-            fmt(summary.median), fmt(summary.minus), fmt(summary.plus))
-        return summary    
+        string = string_template.format(
+            fmt(median), fmt(lower), fmt(upper))
+        return Summary(median=median, lower=lower, upper=upper, string=string)    
 
     def _percentile(self, samples, weights, quants_to_compute):
         """
