@@ -3,7 +3,6 @@
 defaults:
   - override /domain: uniform_frequency
   - override /waveform_generator: phenom_d
-  - override /intrinsic_prior: default
   - _self_
 
 domain:

@@ -1,7 +1,3 @@
-defaults:
-  - hydra: default
-  - _self_
-
 data_dir: asd_dataset
 time_segments_file: null
 out_name: null
@@ -25,11 +21,19 @@ dataset_settings:
   observing_run: O1
 
 hydra:
+  run:
+    dir: ${oc.env:DINGO_RUNS}/${now:%Y-%m-%d_%H-%M-%S}_${hydra.job.name}_${hydra.job.override_dirname}
   job:
     name: generate_asd_dataset
+    chdir: true
     config:
       override_dirname:
         exclude_keys:
           - data_dir
           - time_segments_file
           - out_name
+  job_logging:
+    loggers:
+      bilby:
+        level: INFO
+        propagate: true

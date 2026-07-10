@@ -1,8 +1,0 @@
-_target_: dingo.gw.prior.BBHExtrinsicPriorDict
-_convert_: all
-dictionary:
-  dec: bilby.core.prior.Cosine(minimum=-np.pi/2, maximum=np.pi/2, name='dec')
-  ra: bilby.core.prior.Uniform(minimum=0., maximum=2*np.pi, boundary="periodic", name="ra")
-  geocent_time: bilby.core.prior.Uniform(minimum=-0.10, maximum=0.10, name='geocent_time')
-  psi: bilby.core.prior.Uniform(minimum=0.0, maximum=np.pi, boundary="periodic", name="psi")
-  luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0, name='luminosity_distance')

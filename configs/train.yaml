@@ -1,14 +1,30 @@
 defaults:
-  - hydra: default
-  - extrinsic_prior: default
   - model: toy_npe
-  - optimizer: adam
-  - scheduler: cosine
   - _self_
 
 checkpoint: null
 train_dir: train
 exit_command: ""
+
+extrinsic_prior:
+  _target_: dingo.gw.prior.BBHExtrinsicPriorDict
+  _convert_: all
+  dictionary:
+    dec: bilby.core.prior.Cosine(minimum=-np.pi/2, maximum=np.pi/2, name='dec')
+    ra: bilby.core.prior.Uniform(minimum=0., maximum=2*np.pi, boundary="periodic", name="ra")
+    geocent_time: bilby.core.prior.Uniform(minimum=-0.10, maximum=0.10, name='geocent_time')
+    psi: bilby.core.prior.Uniform(minimum=0.0, maximum=np.pi, boundary="periodic", name="psi")
+    luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0, name='luminosity_distance')
+
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 0.0001
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+  _partial_: true
+  T_max: 20
 
 data:
   extrinsic_prior: ${extrinsic_prior}
@@ -115,5 +131,13 @@ local:
   test_only: false
 
 hydra:
+  run:
+    dir: ${oc.env:DINGO_RUNS}/${now:%Y-%m-%d_%H-%M-%S}_${hydra.job.name}_${hydra.job.override_dirname}
   job:
     name: train
+    chdir: true
+  job_logging:
+    loggers:
+      bilby:
+        level: INFO
+        propagate: true
