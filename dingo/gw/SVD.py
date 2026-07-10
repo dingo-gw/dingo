@@ -3,6 +3,7 @@ import pandas as pd
 import scipy
 from sklearn.utils.extmath import randomized_svd
 from dingo.core.dataset import DingoDataset
+from dingo.core.utils.logging_utils import logger
 
 class SVDBasis(DingoDataset):
 
@@ -155,15 +156,25 @@ class SVDBasis(DingoDataset):
                 if "mismatch" in col:
                     n = int(col.split(sep="=")[-1])
                     mismatches = self.mismatches[col]
-                    print(f"n = {n}")
-                    print("  Mean mismatch = {}".format(np.mean(mismatches)))
-                    print("  Standard deviation = {}".format(np.std(mismatches)))
-                    print("  Max mismatch = {}".format(np.max(mismatches)))
-                    print("  Median mismatch = {}".format(np.median(mismatches)))
-                    print("  Percentiles:")
-                    print("    99    -> {}".format(np.percentile(mismatches, 99)))
-                    print("    99.9  -> {}".format(np.percentile(mismatches, 99.9)))
-                    print("    99.99 -> {}".format(np.percentile(mismatches, 99.99)))
+                    logger.info(
+                        f"n = {n}\n"
+                        "  Mean mismatch = {}\n"
+                        "  Standard deviation = {}\n"
+                        "  Max mismatch = {}\n"
+                        "  Median mismatch = {}\n"
+                        "  Percentiles:\n"
+                        "    99    -> {}\n"
+                        "    99.9  -> {}\n"
+                        "    99.99 -> {}".format(
+                            np.mean(mismatches),
+                            np.std(mismatches),
+                            np.max(mismatches),
+                            np.median(mismatches),
+                            np.percentile(mismatches, 99),
+                            np.percentile(mismatches, 99.9),
+                            np.percentile(mismatches, 99.99),
+                        )
+                    )
 
     def decompress(self, coefficients: np.ndarray):
         """

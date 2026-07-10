@@ -2,6 +2,7 @@ import numpy as np
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 
+from dingo.core.utils.logging_utils import logger
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.domains import (
     UniformFrequencyDomain,
@@ -312,7 +313,7 @@ class GWSignal(object):
             if set(asd.asds.keys()) != set(ifo_names):
                 raise KeyError("ASDDataset ifos do not match signal.")
             if asd.domain.domain_dict != self.data_domain.domain_dict:
-                print("Updating ASDDataset domain to match data domain.")
+                logger.info("Updating ASDDataset domain to match data domain.")
                 domain_dict = self.data_domain.domain_dict
                 asd.update_domain(domain_dict)
         elif isinstance(asd, dict):
@@ -402,7 +403,7 @@ class Injection(GWSignal):
             raise ValueError("self.asd must be set in order to produce injections.")
 
         if self.whiten:
-            print("self.whiten was set to True. Resetting to False.")
+            logger.warning("self.whiten was set to True. Resetting to False.")
             self.whiten = False
 
         data = {}

@@ -2,6 +2,7 @@ import copy
 
 import numpy as np
 from scipy import stats
+from dingo.core.utils.logging_utils import logger
 from dingo.gw.noise.synthetic.asd_parameterization import fit_broadband_noise
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.noise.synthetic.utils import (
@@ -53,7 +54,7 @@ class KDE:
                         weights=weights,
                     )
                 except np.linalg.LinAlgError:
-                    print(
+                    logger.warning(
                         "Warning: Singular Matrix encountered in spectral KDE. Adding small Gaussian noise..."
                     )
                     perturbed_features = spectral_features[:, i, :] + np.random.normal(

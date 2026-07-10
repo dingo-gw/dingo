@@ -9,6 +9,7 @@ from os import rename, makedirs
 from os.path import dirname, join, isfile, exists
 import argparse
 
+from dingo.core.utils.logging_utils import logger
 from dingo.core.posterior_models import NormalizingFlowPosteriorModel
 from dingo.gw.result import Result
 from dingo.gw.inference.gw_samplers import GWSampler
@@ -100,20 +101,20 @@ def main():
             "path", join(args.outdir, f"nde-{event_name}.pt")
         )
         if isfile(nde_name):
-            print(f"Loading nde at {nde_name} for event {event_name}.")
+            logger.info(f"Loading nde at {nde_name} for event {event_name}.")
             nde = NormalizingFlowPosteriorModel(
                 model_filename=nde_name,
                 device=settings["nde"]["training"]["device"],
                 load_training_info=False,
             )
         else:
-            print(f"Training new nde for event {event_name}.")
+            logger.info(f"Training new nde for event {event_name}.")
             nde = result.train_unconditional_flow(
                 inference_parameters,
                 settings["nde"],
                 train_dir=args.outdir,
             )
-            print(f"Renaming trained nde model to {nde_name}.")
+            logger.info(f"Renaming trained nde model to {nde_name}.")
             rename(join(args.outdir, "model_latest.pt"), nde_name)
 
         # Step 1a: Sample from proposal.
@@ -162,10 +163,10 @@ def main():
     # print(np.std(log_evidences) / np.mean(log_evidences_std))
 
     if synthetic_phase:
-        print(f"Sampling synthetic phase.")
+        logger.info("Sampling synthetic phase.")
         result.sample_synthetic_phase(synthetic_phase_kwargs)
 
-    print(f"Importance sampling.")
+    logger.info("Importance sampling.")
     result.importance_sample(
         num_processes=settings.get("num_processes", 1),
         time_marginalization_kwargs=time_marginalization_kwargs,
@@ -179,7 +180,7 @@ def main():
     diagnostics_dir = join(args.outdir, "IS-diagnostics")
     if not exists(diagnostics_dir):
         makedirs(diagnostics_dir)
-    print("Plotting diagnostics.")
+    logger.info("Plotting diagnostics.")
     plot_diagnostics(
         result,
         diagnostics_dir,

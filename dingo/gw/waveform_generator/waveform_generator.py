@@ -30,6 +30,7 @@ from dingo.gw.domains import (
     TimeDomain,
 )
 from dingo.gw.transforms.waveform_transforms import DecimateAll
+from dingo.core.utils.logging_utils import logger
 
 
 class WaveformGenerator:
@@ -142,12 +143,12 @@ class WaveformGenerator:
     @spin_conversion_phase.setter
     def spin_conversion_phase(self, value):
         if value is None:
-            print(
+            logger.info(
                 "Setting spin_conversion_phase = None. Using phase parameter for "
                 "conversion to cartesian spins."
             )
         else:
-            print(
+            logger.info(
                 f"Setting spin_conversion_phase = {value}. Using this value for the "
                 f"phase parameter for conversion to cartesian spins."
             )
@@ -583,7 +584,7 @@ class WaveformGenerator:
         # numbers if multibanding is used. If that happens, turn off multibanding to
         # fix this.
         if max(np.max(np.abs(hp.data.data)), np.max(np.abs(hc.data.data))) > 1e-20:
-            print(
+            logger.warning(
                 f"Generation with parameters {parameters_lal} likely numerically "
                 f"unstable due to multibanding, turn off multibanding."
             )
@@ -606,7 +607,7 @@ class WaveformGenerator:
                 *parameters_lal[lal_dict_idx + 1 :],
             )
             if max(np.max(np.abs(hp.data.data)), np.max(np.abs(hc.data.data))) > 1e-20:
-                print(
+                logger.warning(
                     f"Warning: turning off multibanding for parameters {parameters_lal}"
                     f" likely numerically might not have fixed it, check manually."
                 )

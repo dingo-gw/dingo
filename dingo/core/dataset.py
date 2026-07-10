@@ -4,6 +4,7 @@ import h5py
 import numpy as np
 import pandas as pd
 
+from dingo.core.utils.logging_utils import logger
 from dingo.core.utils.misc import get_version
 
 
@@ -136,7 +137,7 @@ class DingoDataset:
             self.from_dictionary(dictionary)
 
     def to_file(self, file_name: str, mode: str = "w"):
-        print("Saving dataset to " + str(file_name))
+        logger.info("Saving dataset to " + str(file_name))
         save_dict = {
             k: v
             for k, v in vars(self).items()
@@ -150,9 +151,9 @@ class DingoDataset:
                 f.attrs["dataset_type"] = self.dataset_type
 
     def from_file(self, file_name: str):
-        print(f"Loading dataset from {str(file_name)}.")
+        logger.info(f"Loading dataset from {str(file_name)}.")
         if self._leave_on_disk_keys:
-            print(f"Omitting data keys {self._leave_on_disk_keys}.")
+            logger.info(f"Omitting data keys {self._leave_on_disk_keys}.")
 
         with h5py.File(file_name, "r") as f:
             loaded_dict = recursive_hdf5_load(

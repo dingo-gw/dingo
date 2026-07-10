@@ -1,6 +1,7 @@
 from typing import Optional
 import numpy as np
 
+from dingo.core.utils.logging_utils import logger
 from dingo.gw.domains import MultibandedFrequencyDomain, UniformFrequencyDomain
 
 
@@ -443,7 +444,7 @@ class MaskDataForFrequencyRangeUpdate(object):
         self.maximum_frequency = maximum_frequency
 
         if print_output:
-            print(
+            logger.info(
                 f"Transform MaskDataForFrequencyRangeUpdate activated:"
                 f"  Settings: \n"
                 f"    - Minimum_frequency update: {self.minimum_frequency}\n"

@@ -12,6 +12,7 @@ from dingo.gw.noise.asd_estimation import (
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.noise.generate_dataset_dag import create_dag
 from dingo.gw.noise.utils import merge_datasets, get_time_segments
+from dingo.core.utils.logging_utils import logger, setup_logger
 
 
 def parse_args():
@@ -58,6 +59,7 @@ def generate_dataset():
     Creates and saves an ASD dataset
     """
     args = parse_args()
+    setup_logger(outdir=args.data_dir, label="asd_dataset")
 
     # Load settings
     settings_file = (
@@ -94,11 +96,11 @@ def generate_dataset():
             pass
 
         dagman.build()
-        print(f"DAG submission file written.")
+        logger.info("DAG submission file written.")
 
     else:
 
-        print("Downloading strain data and estimating PSDs...")
+        logger.info("Downloading strain data and estimating PSDs...")
         asd_filename_list = download_and_estimate_psds(
             args.data_dir, settings, time_segments, verbose=args.verbose
         )
@@ -106,7 +108,7 @@ def generate_dataset():
             det: [ASDDataset(asd_file) for asd_file in asd_file_list]
             for det, asd_file_list in asd_filename_list.items()
         }
-        print("Merging single dataset files into one...")
+        logger.info("Merging single dataset files into one...")
         dataset = merge_datasets(asd_dataset_list)
         filename = args.out_name
         if filename is None:

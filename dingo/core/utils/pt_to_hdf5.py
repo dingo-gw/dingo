@@ -5,6 +5,8 @@ import h5py
 import json
 import argparse
 
+from dingo.core.utils.logging_utils import logger
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -32,7 +34,7 @@ def main():
     # This is required for use on CVMFS
     root, ext = os.path.splitext(args.out_file)
     out_file_name = f'{root}_v{args.model_version_number}{ext}'
-    print('Output will be written to', out_file_name)
+    logger.info(f'Output will be written to {out_file_name}')
 
     # Load data into CPU memory since we'll be saving it using CPU libraries
     d = torch.load(args.in_file, map_location=torch.device("cpu"))

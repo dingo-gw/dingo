@@ -1,11 +1,13 @@
 import argparse
 import textwrap
 import copy
+from pathlib import Path
 import pandas as pd
 import numpy as np
 import yaml
 from typing import List
 
+from dingo.core.utils.logging_utils import logger, setup_logger
 from dingo.gw.SVD import SVDBasis
 from dingo.gw.dataset.generate_dataset import train_svd_basis
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
@@ -26,7 +28,7 @@ def merge_datasets(dataset_list: List[WaveformDataset]) -> WaveformDataset:
     WaveformDataset containing the merged data.
     """
 
-    print(f"Merging {len(dataset_list)} datasets into one.")
+    logger.info(f"Merging {len(dataset_list)} datasets into one.")
 
     # This ensures that all the keys are copied into the new dataset. The "extensive"
     # parts of the dataset (parameters, waveforms) will be overwritten by the combined
@@ -87,6 +89,8 @@ def merge_datasets_cli():
         "--settings_file", type=str, help="YAML file containing new dataset settings."
     )
     args = parser.parse_args()
+    out_path = Path(args.out_file)
+    setup_logger(outdir=str(out_path.parent), label=out_path.stem)
 
     dataset_list = []
     for i in range(args.num_parts):
@@ -103,7 +107,7 @@ def merge_datasets_cli():
         merged_dataset.settings = settings
 
     merged_dataset.to_file(args.out_file)
-    print(
+    logger.info(
         f"Complete. New dataset consists of {merged_dataset.settings['num_samples']} "
         f"samples."
     )
@@ -141,6 +145,8 @@ def build_svd_cli():
         "Remainder are used for validation.",
     )
     args = parser.parse_args()
+    out_path = Path(args.out_file)
+    setup_logger(outdir=str(out_path.parent), label=out_path.stem)
 
     dataset = WaveformDataset(file_name=args.dataset_file)
     if args.num_train is None:
@@ -151,7 +157,7 @@ def build_svd_cli():
     basis, n_train, n_test = train_svd_basis(dataset, args.size, n_train)
     # FIXME: This is not an ideal treatment. We should update the waveform generation
     #  to always provide the requested number of waveforms.
-    print(
+    logger.info(
         f"SVD basis trained based on {n_train} waveforms and validated on {n_test} "
         f"waveforms. Note that if this differs from number requested, it will not be "
         f"reflected in the settings file. This is likely due to EOB failure to "

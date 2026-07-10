@@ -11,6 +11,7 @@ import torch
 from torchvision.transforms import Compose
 
 from dingo.core.posterior_models import BasePosteriorModel
+from dingo.core.utils.logging_utils import logger
 from dingo.core.result import Result
 from dingo.core.result import DATA_KEYS as RESULT_DATA_KEYS
 from dingo.core.utils import torch_detach_to_cpu, IterationTracker
@@ -157,7 +158,7 @@ class Sampler(object):
             x = [x]
         else:
             if context is not None:
-                print("Unconditional model. Ignoring context.")
+                logger.warning("Unconditional model. Ignoring context.")
             x = []
 
         # For a normalizing flow, we get the log_prob for "free" when sampling,
@@ -205,7 +206,7 @@ class Sampler(object):
         """
         self.samples = None
 
-        print(f"Running sampler to generate {num_samples} samples.")
+        logger.info(f"Running sampler to generate {num_samples} samples.")
         t0 = time.time()
         if not self.unconditional_model:
             if self.context is None:
@@ -229,7 +230,7 @@ class Sampler(object):
         # correction for t_ref) and represent as DataFrame.
         self._post_process(samples)
         self.samples = pd.DataFrame(samples)
-        print(f"Done. This took {time.time() - t0:.1f} s.")
+        logger.info(f"Done. This took {time.time() - t0:.1f} s.")
         sys.stdout.flush()
 
     def log_prob(self, samples: pd.DataFrame | dict) -> np.ndarray:
@@ -430,8 +431,8 @@ class GNPESampler(Sampler):
             init_samples = self.init_sampler._run_sampler(num_samples, context)
         else:
             if self.num_iterations == 1:
-                print(
-                    f"Warning: Removing initial outliers, but only carrying out "
+                logger.warning(
+                    f"Removing initial outliers, but only carrying out "
                     f"{self.num_iterations} GNPE iteration. This risks biasing "
                     f"results."
                 )
@@ -515,16 +516,15 @@ class GNPESampler(Sampler):
                 p: x["extrinsic_parameters"][p] for p in self.gnpe_proxy_parameters
             }
 
-            print(
-                f"it {i}.\tmin pvalue: {self.iteration_tracker.pvalue_min:.3f}"
-                f"\tproxy mean: ",
-                *[f"{torch.mean(v).item():.5f}" for v in proxies.values()],
-                "\tproxy std:",
-                *[f"{torch.std(v).item():.5f}" for v in proxies.values()],
-                "\ttimes:",
-                time_sample_start - start_time,
-                time_sample_end - time_sample_start,
-                time.time() - time_sample_end,
+            proxy_means = " ".join(f"{torch.mean(v).item():.5f}" for v in proxies.values())
+            proxy_stds = " ".join(f"{torch.std(v).item():.5f}" for v in proxies.values())
+            logger.debug(
+                f"it {i}. min pvalue: {self.iteration_tracker.pvalue_min:.3f}"
+                f" proxy mean: {proxy_means}"
+                f" proxy std: {proxy_stds}"
+                f" times: {time_sample_start - start_time:.3f}"
+                f" {time_sample_end - time_sample_start:.3f}"
+                f" {time.time() - time_sample_end:.3f}"
             )
 
         #

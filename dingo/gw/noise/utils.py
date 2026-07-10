@@ -12,6 +12,7 @@ import requests
 import yaml
 
 from gwpy.table import EventTable
+from dingo.core.utils.logging_utils import logger
 from dingo.gw.noise.asd_dataset import ASDDataset
 
 """
@@ -156,7 +157,7 @@ def merge_datasets(asd_dataset_list):
     merged_dict = {"asds": {}, "gps_times": {}}
 
     for det, asd_list in asd_dataset_list.items():
-        print(f"Merging {len(asd_list)} datasets into one for detector {det}.")
+        logger.info(f"Merging {len(asd_list)} datasets into one for detector {det}.")
         merged_dict["asds"][det] = np.vstack(
             [asd_dataset.asds[det] for asd_dataset in asd_list]
         )

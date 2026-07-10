@@ -1,7 +1,10 @@
 import argparse
+import logging
 from pathlib import Path
 
 from dingo.gw.result import Result
+
+logger = logging.getLogger("dingo.pipe")
 
 
 def main():
@@ -15,7 +18,7 @@ def main():
     args = parser.parse_args()
 
     if args.merge:
-        print(f"Merging {len(args.result)} parts into complete Result.")
+        logger.info(f"Merging {len(args.result)} parts into complete Result.")
         sub_results = []
         for file_name in args.result:
             sub_results.append(Result(file_name=file_name))

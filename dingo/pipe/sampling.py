@@ -7,10 +7,12 @@ import os
 from bilby_pipe.input import Input
 from bilby_pipe.utils import (
     parse_args,
-    logger,
     convert_string_to_dict,
     resolve_filename_with_transfer_fallback,
 )
+import logging
+from dingo.core.utils.logging_utils import setup_logger
+logger = logging.getLogger("dingo.pipe")
 
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset
@@ -216,6 +218,7 @@ def create_sampling_parser():
 def main():
     """Data analysis main logic"""
     args, unknown_args = parse_args(sys.argv[1:], create_sampling_parser())
+    setup_logger(outdir=args.outdir, label=args.label)
     # log_version_information()
     analysis = SamplingInput(args, unknown_args)
     analysis.run_sampler()
