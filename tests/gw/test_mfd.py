@@ -67,6 +67,25 @@ def test_mfd_domain_dict(mfd):
     np.testing.assert_equal(mfd.__dict__, domain2.__dict__)
 
 
+def test_mfd_hydra_target(mfd_params):
+    settings = {
+        "_target_": "dingo.gw.domains.MultibandedFrequencyDomain",
+        **mfd_params,
+        "base_domain": {
+            "_target_": "dingo.gw.domains.UniformFrequencyDomain",
+            **mfd_params["base_domain"],
+        },
+    }
+    settings["base_domain"].pop("type")
+
+    domain = build_domain(settings)
+    domain_expected = MultibandedFrequencyDomain(**mfd_params)
+
+    assert isinstance(domain, MultibandedFrequencyDomain)
+    assert type(domain.base_domain) is type(domain_expected.base_domain)
+    np.testing.assert_equal(domain.domain_dict, domain_expected.domain_dict)
+
+
 def test_mfd_set_new_range(mfd_params, mfd):
     domain = mfd
     # test that ValueErrors are raised for infeasible inputs
@@ -182,4 +201,3 @@ def test_mfd_time_translation_torch(mfd):
     # TODO: Is there a way to improve on this?
     assert torch.allclose(result[..., 1, :], torch.tensor(0.0), atol=1e-2)
     assert torch.allclose(result[..., 2, :], torch.tensor(constant_value))
-

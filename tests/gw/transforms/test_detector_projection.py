@@ -9,8 +9,16 @@ from dingo.gw.transforms import (
     SampleExtrinsicParameters,
     time_delay_from_geocenter,
 )
-from dingo.gw.prior import default_extrinsic_dict
 from dingo.gw.domains import build_domain
+
+
+DEFAULT_EXTRINSIC_DICT = {
+    "dec": "bilby.core.prior.Cosine(minimum=-np.pi/2, maximum=np.pi/2, name='dec')",
+    "ra": 'bilby.core.prior.Uniform(minimum=0., maximum=2*np.pi, boundary="periodic", name="ra")',
+    "geocent_time": "bilby.core.prior.Uniform(minimum=-0.1, maximum=0.1, name='geocent_time')",
+    "psi": 'bilby.core.prior.Uniform(minimum=0.0, maximum=np.pi, boundary="periodic", name="psi")',
+    "luminosity_distance": "bilby.core.prior.Uniform(minimum=100.0, maximum=6000.0, name='luminosity_distance')",
+}
 
 
 @pytest.fixture
@@ -30,7 +38,7 @@ def reference_data_research_code():
 @pytest.fixture
 def setup_detector_projection():
     # setup arguments
-    extrinsic_prior_dict = default_extrinsic_dict
+    extrinsic_prior_dict = DEFAULT_EXTRINSIC_DICT
     ref_time = 1126259462.391
     domain_dict = {
         "type": "UniformFrequencyDomain",

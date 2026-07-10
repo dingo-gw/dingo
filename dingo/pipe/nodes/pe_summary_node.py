@@ -1,8 +1,10 @@
 import os 
 from bilby_pipe.job_creation.nodes import PESummaryNode as BilbyPESummaryNode
-from bilby_pipe.utils import BilbyPipeError, logger
+import logging
 
-logger.name = "dingo_pipe"
+from bilby_pipe.utils import BilbyPipeError
+
+logger = logging.getLogger("dingo.pipe")
 
 
 class PESummaryNode(BilbyPESummaryNode):

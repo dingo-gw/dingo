@@ -1,5 +1,6 @@
 # Transformations between PE spins and Cartesian spins
 from functools import partial
+import logging
 from multiprocessing import Pool
 
 import numpy as np
@@ -7,6 +8,8 @@ import pandas as pd
 import lal
 import lalsimulation as LS
 from threadpoolctl import threadpool_limits
+
+logger = logging.getLogger(__name__)
 
 
 DINGO_PE_SPIN_PARAMETERS = (
@@ -225,5 +228,5 @@ def _convert_phase(f_ref, sc_phase_old, sc_phase_new, sample):
 
         return sample_pe_new
     except RuntimeError:
-        print("Failed to convert spins. Saving sample unchanged.")
+        logger.warning("Failed to convert spins. Saving sample unchanged.")
         return sample

@@ -12,7 +12,10 @@ class SampleExtrinsicParameters(object):
 
     def __init__(self, extrinsic_prior_dict):
         self.extrinsic_prior_dict = extrinsic_prior_dict
-        self.prior = BBHExtrinsicPriorDict(extrinsic_prior_dict)
+        if isinstance(extrinsic_prior_dict, BBHExtrinsicPriorDict):
+            self.prior = extrinsic_prior_dict
+        else:
+            self.prior = BBHExtrinsicPriorDict(extrinsic_prior_dict)
 
     def __call__(self, input_sample):
         sample = input_sample.copy()

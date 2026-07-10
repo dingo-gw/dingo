@@ -1,0 +1,29 @@
+defaults:
+  - hydra: default
+  - model: unconditional_npe
+  - optimizer: adam
+  - scheduler: cosine
+  - _self_
+
+result_file: ???
+train_dir: nde
+
+data:
+  parameters: null
+
+training:
+  optimizer: ${optimizer}
+  scheduler: ${scheduler}
+  device: cpu
+  num_workers: 0
+  train_fraction: 0.9
+  batch_size: 512
+  epochs: 20
+
+hydra:
+  job:
+    name: unconditional_density_estimation
+    config:
+      override_dirname:
+        exclude_keys:
+          - result_file

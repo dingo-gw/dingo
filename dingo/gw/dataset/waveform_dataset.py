@@ -2,12 +2,13 @@ from typing import Dict, List, Optional, Union
 import h5py
 import numpy as np
 import torch.utils.data
+from hydra.utils import instantiate
+from omegaconf import OmegaConf
 from torchvision.transforms import Compose
 
 from dingo.core.dataset import DingoDataset, recursive_hdf5_load
 from dingo.gw.SVD import SVDBasis, ApplySVD
 from dingo.gw.domains import build_domain
-from dingo.gw.transforms import WhitenFixedASD
 
 
 class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
@@ -100,7 +101,11 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         svd_size_update : int
             If provided, reduces the SVD size when decompressing (for speed).
         """
-        self.domain = build_domain(self.settings["domain"])
+        domain_settings = self.settings["domain"]
+        if "_target_" in domain_settings:
+            self.domain = instantiate(domain_settings)
+        else:
+            self.domain = build_domain(domain_settings)
 
         # We always call update_domain() (even if domain_update is None) because we
         # want to be sure that the data are consistent with the saved settings. In
@@ -150,14 +155,35 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         # Determine where any domain adjustment must be applied. If the dataset is SVD
         # compressed, then adjust the SVD matrices. Otherwise, adjust the dataset
         # itself (if it already has been loaded).
-        if (
-            self.settings.get("compression", None) is not None
-            and "svd" in self.settings["compression"]
-        ):
+        if self._compression_has_svd():
             self.svd["V"] = self.domain.update_data(self.svd["V"], axis=0)
         elif self.polarizations is not None:
             for k, v in self.polarizations.items():
                 self.polarizations[k] = self.domain.update_data(v)
+
+    def _compression_entries(self):
+        compression = self.settings.get("compression", None)
+        if compression is None:
+            return []
+        if isinstance(compression, dict) or OmegaConf.is_dict(compression):
+            entries = []
+            if "whitening" in compression:
+                entries.append(
+                    {
+                        "_target_": "dingo.gw.transforms.WhitenFixedASD",
+                        "asd_file": compression["whitening"],
+                    }
+                )
+            if "svd" in compression:
+                entries.append({"_target_": "dingo.gw.SVD.ApplySVD"})
+            return entries
+        return list(compression)
+
+    def _compression_has_svd(self):
+        return any(
+            entry.get("_target_", "").endswith("ApplySVD")
+            for entry in self._compression_entries()
+        )
 
     def initialize_decompression(self, svd_size_update: Optional[int] = None):
         """
@@ -174,37 +200,47 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
         # These transforms must be in reverse order compared to when dataset was
         # constructed.
 
-        if "svd" in self.settings["compression"]:
-            assert self.svd is not None
+        for compression_entry in reversed(self._compression_entries()):
+            target = compression_entry.get("_target_", "")
 
-            # We allow the option to reduce the size of the SVD used for decompression,
-            # since decompression is the costliest preprocessing operation. Be careful
-            # when using this to not introduce a large mismatch.
-            if svd_size_update is not None:
-                if svd_size_update > self.svd["V"].shape[-1] or svd_size_update < 0:
-                    raise ValueError(
-                        f"Cannot truncate SVD from size "
-                        f"{self.svd['V'].shape[-1]} to size "
-                        f"{svd_size_update}."
-                    )
-                self.svd["V"] = self.svd["V"][:, :svd_size_update]
-                self.svd["s"] = self.svd["s"][:svd_size_update]
-                if self.polarizations is not None:
-                    for k, v in self.polarizations.items():
-                        self.polarizations[k] = v[:, :svd_size_update]
+            if target.endswith("ApplySVD"):
+                assert self.svd is not None
 
-            svd_basis = SVDBasis(dictionary=self.svd)
-            decompression_transform_list.append(ApplySVD(svd_basis, inverse=True))
+                # We allow the option to reduce the size of the SVD used for
+                # decompression, since decompression is the costliest preprocessing
+                # operation. Be careful when using this to not introduce a large
+                # mismatch.
+                if svd_size_update is not None:
+                    if svd_size_update > self.svd["V"].shape[-1] or svd_size_update < 0:
+                        raise ValueError(
+                            f"Cannot truncate SVD from size "
+                            f"{self.svd['V'].shape[-1]} to size "
+                            f"{svd_size_update}."
+                        )
+                    self.svd["V"] = self.svd["V"][:, :svd_size_update]
+                    self.svd["s"] = self.svd["s"][:svd_size_update]
+                    if self.polarizations is not None:
+                        for k, v in self.polarizations.items():
+                            self.polarizations[k] = v[:, :svd_size_update]
 
-        if "whitening" in self.settings["compression"]:
-            decompression_transform_list.append(
-                WhitenFixedASD(
-                    self.domain,
-                    asd_file=self.settings["compression"]["whitening"],
-                    inverse=True,
-                    precision=self.precision,
+                svd_basis = SVDBasis(dictionary=self.svd)
+                decompression_transform_list.append(ApplySVD(svd_basis, inverse=True))
+
+            elif target.endswith("WhitenFixedASD"):
+                transform_config = OmegaConf.to_container(
+                    OmegaConf.create(compression_entry),
+                    resolve=True,
                 )
-            )
+                transform_config.pop("_partial_", None)
+                transform_config.pop("_runtime_dependencies_", None)
+                decompression_transform_list.append(
+                    instantiate(
+                        transform_config,
+                        domain=self.domain,
+                        inverse=True,
+                        precision=self.precision,
+                    )
+                )
 
         self.decompression_transform = Compose(decompression_transform_list)
 

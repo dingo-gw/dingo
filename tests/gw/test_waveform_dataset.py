@@ -1,58 +1,55 @@
 import os
 import tempfile
 import uuid
+import copy
 from pathlib import Path
 from typing import Generator
-import yaml
 
 import numpy as np
 import pytest
 import bilby
 
-from dingo.gw.dataset.generate_dataset import _generate_dataset_main
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.gw.domains import Domain
 from dingo.gw.dataset import generate_dataset
 
-SETTINGS_YAML_SMALL = """\
-# settings for domain of waveforms
-domain:
-  type: UniformFrequencyDomain
-  f_min: 10.0
-  f_max: 1024.0
-  delta_f: 1.0
-
-# settings for waveform generator
-waveform_generator:
-  approximant: IMRPhenomPv2
-  f_ref: 20.0
-
-# settings for intrinsic prior over parameters
-intrinsic_prior:
-  # prior for non-fixed parameters
-  mass_1: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0, name='mass_1')
-  mass_2: bilby.core.prior.Constraint(minimum=10.0, maximum=80.0, name='mass_2')
-  mass_ratio: bilby.core.prior.Uniform(minimum=0.125, maximum=1.0, name='mass_ratio')
-  chirp_mass: bilby.core.prior.Uniform(minimum=25.0, maximum=100.0, name='chirp_mass')
-  phase: default
-  a_1: bilby.core.prior.Uniform(minimum=0.0, maximum=0.88, name='a_1')
-  a_2: bilby.core.prior.Uniform(minimum=0.0, maximum=0.88, name='a_2')
-  tilt_1: default
-  tilt_2: default
-  phi_12: default
-  phi_jl: default
-  theta_jn: default
-  # reference values for fixed (extrinsic) parameters
-  luminosity_distance: 100.0 # Mpc
-  geocent_time: 0.0 # s
-
-num_samples: 50
-
-compression:
-  svd:
-    num_training_samples: 10
-    size: 5
-"""
+SETTINGS_SMALL = {
+    "domain": {
+        "_target_": "dingo.gw.domains.UniformFrequencyDomain",
+        "f_min": 10.0,
+        "f_max": 1024.0,
+        "delta_f": 1.0,
+    },
+    "waveform_generator": {
+        "_target_": "dingo.gw.waveform_generator.WaveformGenerator",
+        "approximant": "IMRPhenomPv2",
+        "f_ref": 20.0,
+        "f_start": None,
+        "spin_conversion_phase": 0.0,
+    },
+    "intrinsic_prior": {
+        "_target_": "bilby.gw.prior.BBHPriorDict",
+        "_convert_": "all",
+        "dictionary": {
+            "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0, name='mass_1')",
+            "mass_2": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0, name='mass_2')",
+            "mass_ratio": "bilby.core.prior.Uniform(minimum=0.125, maximum=1.0, name='mass_ratio')",
+            "chirp_mass": "bilby.core.prior.Uniform(minimum=25.0, maximum=100.0, name='chirp_mass')",
+            "phase": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic", name="phase")',
+            "a_1": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.88, name='a_1')",
+            "a_2": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.88, name='a_2')",
+            "tilt_1": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi, name='tilt_1')",
+            "tilt_2": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi, name='tilt_2')",
+            "phi_12": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic", name="phi_12")',
+            "phi_jl": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic", name="phi_jl")',
+            "theta_jn": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi, name='theta_jn')",
+            "luminosity_distance": 100.0,
+            "geocent_time": 0.0,
+        },
+    },
+    "num_samples": 50,
+    "compression": None,
+}
 
 
 @pytest.fixture(scope="session")
@@ -75,17 +72,14 @@ def generate_waveform_dataset_small(temp_dir: Path) -> Path:
     in a temporary directory.
     """
 
-    # Create temp directory and settings file
+    # Create temp directory and dataset file
     path = temp_dir / "tmp_test" / str(uuid.uuid4())
     path.mkdir(parents=True)
-    settings_path = path / "settings.yaml"
     out_file = path / "waveform_dataset.hdf5"
     num_processes = 4
 
-    with open(settings_path, "w") as fp:
-        fp.writelines(SETTINGS_YAML_SMALL)
-
-    _generate_dataset_main(str(settings_path), str(out_file), num_processes)
+    dataset = generate_dataset(SETTINGS_SMALL, num_processes)
+    dataset.to_file(str(out_file))
 
     return path
 
@@ -228,8 +222,7 @@ def test_load_waveform_dataset_with_leave_polarizations_on_disk(
 
 @pytest.fixture
 def wfd_settings():
-    settings = yaml.safe_load(SETTINGS_YAML_SMALL)
-    return settings
+    return copy.deepcopy(SETTINGS_SMALL)
 
 
 class BinaryPrior(bilby.prior.Prior):
@@ -254,9 +247,9 @@ def test_wfd_size(wfd_settings: str, binary_prior: BinaryPrior):
     # changing the waveform generator settings to create a prior which will create
     # failing waveforms for a fraction of the prior. I.e. can't generate negative
     # chirp masses so the waveform generator will fail
-    wfd_settings["intrinsic_prior"]["chirp_mass"] = binary_prior
-    del wfd_settings["intrinsic_prior"]["mass_1"]
-    del wfd_settings["intrinsic_prior"]["mass_2"]
+    wfd_settings["intrinsic_prior"]["dictionary"]["chirp_mass"] = binary_prior
+    del wfd_settings["intrinsic_prior"]["dictionary"]["mass_1"]
+    del wfd_settings["intrinsic_prior"]["dictionary"]["mass_2"]
     del wfd_settings["compression"]
     wfd = generate_dataset(wfd_settings, 1)
     assert len(wfd) == wfd_settings["num_samples"]

@@ -1,0 +1,31 @@
+_target_: dingo.core.posterior_models.FlowMatchingPosteriorModel
+posterior_kwargs:
+  activation: gelu
+  batch_norm: true
+  context_with_glu: false
+  dropout: 0.0
+  hidden_dims: [4096, 4096, 4096, 2048, 2048, 2048, 1024, 1024, 1024, 1024, 1024, 1024, 512, 512, 512, 512, 512, 512, 512, 512, 256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 128, 128, 128, 128, 128, 64, 64, 64, 32, 32, 32, 16, 16, 16]
+  sigma_min: 0.001
+  theta_embedding_kwargs:
+    embedding_net:
+      activation: gelu
+      hidden_dims: [16, 32, 64, 128, 256]
+      output_dim: 256
+      type: DenseResidualNet
+    encoding:
+      encode_all: false
+      frequencies: 0
+  theta_with_glu: true
+  time_prior_exponent: 1
+  type: DenseResidualNet
+embedding_kwargs:
+  activation: gelu
+  batch_norm: true
+  dropout: 0.0
+  hidden_dims:
+    - 2048
+  output_dim: 2048
+  svd:
+    num_training_samples: 50000
+    num_validation_samples: 10000
+    size: 150

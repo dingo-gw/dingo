@@ -4,6 +4,7 @@ from dingo.gw.domains import (
     MultibandedFrequencyDomain,
     TimeDomain,
 )
+from hydra.utils import instantiate
 
 
 def build_domain(settings: dict) -> Domain:
@@ -20,10 +21,13 @@ def build_domain(settings: dict) -> Domain:
     -------
     A Domain instance of the correct type.
     """
+    if "_target_" in settings:
+        return instantiate(settings)
+
     if "type" not in settings:
         raise ValueError(
-            f'Domain settings must include a "type" key. Settings included '
-            f"the keys {settings.keys()}."
+            'Domain settings must include a "_target_" or "type" key. '
+            f"Settings included the keys {settings.keys()}."
         )
 
     # The settings other than 'type' correspond to the kwargs of the Domain constructor.
@@ -60,8 +64,13 @@ def build_domain_from_model_metadata(
     A Domain instance of the correct type.
     """
     domain = build_domain(model_metadata["dataset_settings"]["domain"])
-    if "domain_update" in model_metadata["train_settings"]["data"]:
-        domain.update(model_metadata["train_settings"]["data"]["domain_update"])
+    data_settings = model_metadata["train_settings"]["data"]
+    domain_update = data_settings.get("waveform_dataset", {}).get(
+        "domain_update",
+        data_settings.get("domain_update"),
+    )
+    if domain_update is not None:
+        domain.update(domain_update)
     if base and hasattr(domain, "base_domain"):
         domain = domain.base_domain
     return domain

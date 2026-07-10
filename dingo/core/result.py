@@ -1,4 +1,5 @@
 import copy
+import logging
 import math
 import tempfile
 import time
@@ -28,6 +29,8 @@ DATA_KEYS = [
     "log_evidence",
     "log_noise_evidence",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 def _clip_weights(weights: np.ndarray, num_clip: int) -> np.ndarray:
@@ -167,23 +170,23 @@ class Result(DingoDataset):
         ):
             # This is really just for notification. Actions are only taken if the
             # event metadata differ.
-            print("\nNew event data differ from existing.")
+            logger.warning("New event data differ from existing.")
         self.context = context
 
         if self.event_metadata is not None and self.event_metadata != event_metadata:
-            print("Changes")
-            print("=======")
+            logger.warning("Changes")
+            logger.warning("=======")
             old_minus_new = dict(freeze(self.event_metadata) - freeze(event_metadata))
-            print("Old event metadata:")
+            logger.warning("Old event metadata:")
             for k in sorted(old_minus_new):
-                print(f"  {k}:  {self.event_metadata[k]}")
+                logger.warning(f"  {k}:  {self.event_metadata[k]}")
 
             new_minus_old = dict(freeze(event_metadata) - freeze(self.event_metadata))
-            print("New event metadata:")
+            logger.warning("New event metadata:")
             if self.importance_sampling_metadata.get("updates") is None:
                 self.importance_sampling_metadata["updates"] = {}
             for k in sorted(new_minus_old):
-                print(f"  {k}:  {event_metadata[k]}")
+                logger.warning(f"  {k}:  {event_metadata[k]}")
                 self.importance_sampling_metadata["updates"][k] = event_metadata[k]
 
             self._rebuild_domain(verbose=True)
@@ -312,12 +315,12 @@ class Result(DingoDataset):
         valid_samples = np.isfinite(log_prior + delta_log_prob_target)
         theta = theta.iloc[valid_samples]
 
-        print(f"Calculating {len(theta)} likelihoods.")
+        logger.info(f"Calculating {len(theta)} likelihoods.")
         t0 = time.time()
         log_likelihood = self.likelihood.log_likelihood_multi(
             theta, num_processes=num_processes
         )
-        print(f"Done. This took {time.time() - t0:.2f} seconds.")
+        logger.info(f"Done. This took {time.time() - t0:.2f} seconds.")
 
         self.log_noise_evidence = self.likelihood.log_Zn
         self.samples["log_prior"] = log_prior
@@ -494,7 +497,7 @@ class Result(DingoDataset):
         rng = np.random.default_rng(random_state)
         weights = self.samples["weights"].to_numpy(dtype=float)
 
-        print(
+        logger.info(
             f"Rejection sampling: {self.num_samples} samples, "
             f"ESS = {self.effective_sample_size:.0f} "
             f"(efficiency = {100 * self.sample_efficiency:.1f}%)"
@@ -526,7 +529,7 @@ class Result(DingoDataset):
         unweighted = unweighted.drop(
             columns=["weights", "log_prob", "delta_log_prob_target"], errors="ignore"
         )
-        print(f"Produced {len(unweighted)} unweighted samples.")
+        logger.info(f"Produced {len(unweighted)} unweighted samples.")
         return unweighted
 
     def parameter_subset(self, parameters):
@@ -619,12 +622,12 @@ class Result(DingoDataset):
         Display the number of samples, and (if importance sampling is complete) the log
         evidence and number of effective samples.
         """
-        print("Number of samples:", len(self.samples))
+        logger.info(f"Number of samples: {len(self.samples)}")
         if self.log_evidence is not None:
-            print(
+            logger.info(
                 f"Log(evidence): {self.log_evidence:.3f} +- {self.log_evidence_std:.3f}"
             )
-            print(
+            logger.info(
                 f"Effective samples {self.n_eff:.1f}: "
                 f"(Sample efficiency = {100 * self.sample_efficiency:.2f}%)"
             )
@@ -815,7 +818,7 @@ class Result(DingoDataset):
             plt.tight_layout()
             plt.savefig(filename)
         else:
-            print("Results not importance sampled. Cannot produce log_prob plot.")
+            logger.warning("Results not importance sampled. Cannot produce log_prob plot.")
 
     def plot_weights(self, filename="weights.png"):
         """Make a scatter plot of samples weights vs log proposal."""
@@ -844,7 +847,7 @@ class Result(DingoDataset):
             plt.tight_layout()
             plt.savefig(filename)
         else:
-            print("Results not importance sampled. Cannot plot weights.")
+            logger.warning("Results not importance sampled. Cannot plot weights.")
 
     def get_all_injection_credible_levels(
         self, keys: list[str] = None, weighted: bool = False
@@ -1020,7 +1023,7 @@ def make_pp_plot(
 
     pvalues = []
     latex_labels = get_latex_labels(results[0].prior)
-    print("Key: KS-test p-value")
+    logger.info("Key: KS-test p-value")
     for ii, key in enumerate(credible_levels):
         pp = np.array(
             [
@@ -1030,7 +1033,7 @@ def make_pp_plot(
         )
         pvalue = scipy.stats.kstest(credible_levels[key], "uniform").pvalue
         pvalues.append(pvalue)
-        print("{}: {}".format(key, pvalue))
+        logger.info("{}: {}".format(key, pvalue))
         label = "{} ({:2.3f})".format(latex_labels[key], pvalue)
         plt.plot(x_values, pp, lines[ii], label=label, **kwargs)
 
@@ -1040,7 +1043,7 @@ def make_pp_plot(
         pvalues=pvalues,
         names=list(credible_levels.keys()),
     )
-    print("Combined p-value: {}".format(pvals.combined_pvalue))
+    logger.info("Combined p-value: {}".format(pvals.combined_pvalue))
 
     if title:
         ax.set_title(
@@ -1090,5 +1093,3 @@ def freeze(d):
     elif isinstance(d, list):
         return tuple(freeze(value) for value in d)
     return d
-
-

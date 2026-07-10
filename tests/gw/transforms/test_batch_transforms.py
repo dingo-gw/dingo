@@ -17,9 +17,17 @@ from dingo.gw.transforms import (
     RepackageStrainsAndASDS,
     UnpackDict,
 )
-from dingo.gw.prior import default_extrinsic_dict
 from dingo.gw.domains import UniformFrequencyDomain
 from dingo.gw.noise.asd_dataset import ASDDataset
+
+
+DEFAULT_EXTRINSIC_DICT = {
+    "dec": "bilby.core.prior.Cosine(minimum=-np.pi/2, maximum=np.pi/2, name='dec')",
+    "ra": 'bilby.core.prior.Uniform(minimum=0., maximum=2*np.pi, boundary="periodic", name="ra")',
+    "geocent_time": "bilby.core.prior.Uniform(minimum=-0.1, maximum=0.1, name='geocent_time')",
+    "psi": 'bilby.core.prior.Uniform(minimum=0.0, maximum=np.pi, boundary="periodic", name="psi")',
+    "luminosity_distance": "bilby.core.prior.Uniform(minimum=100.0, maximum=6000.0, name='luminosity_distance')",
+}
 
 
 @pytest.fixture
@@ -96,7 +104,7 @@ def transform_list(standardization_dict, asd_dataset, domain):
     ifo_list = InterferometerList(["H1", "L1"])
     ref_time = 1126259462.391
     transforms = [
-        SampleExtrinsicParameters(default_extrinsic_dict),
+        SampleExtrinsicParameters(DEFAULT_EXTRINSIC_DICT),
         GetDetectorTimes(ifo_list, ref_time),
         GNPECoalescenceTimes(ifo_list, Uniform(minimum=-0.001, maximum=0.001), True),
         ProjectOntoDetectors(ifo_list, domain, ref_time),

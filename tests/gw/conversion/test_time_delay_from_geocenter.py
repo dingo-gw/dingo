@@ -5,13 +5,19 @@ import torch
 from bilby.gw.detector import InterferometerList
 
 from dingo.gw.transforms import time_delay_from_geocenter
-from dingo.gw.prior import BBHExtrinsicPriorDict, default_extrinsic_dict
+from dingo.gw.prior import BBHExtrinsicPriorDict
+
+
+DEFAULT_EXTRINSIC_DICT = {
+    "dec": "bilby.core.prior.Cosine(minimum=-np.pi/2, maximum=np.pi/2, name='dec')",
+    "ra": 'bilby.core.prior.Uniform(minimum=0., maximum=2*np.pi, boundary="periodic", name="ra")',
+}
 
 
 @pytest.fixture
 def ifo_list_and_prior_and_tref():
     ifo_list = InterferometerList(["H1", "L1", "V1"])
-    prior = BBHExtrinsicPriorDict({k: default_extrinsic_dict[k] for k in ["ra", "dec"]})
+    prior = BBHExtrinsicPriorDict(DEFAULT_EXTRINSIC_DICT)
     tref = random.randint(
         946339215, 1577491218
     )  # random gps time between 2010 and 2030

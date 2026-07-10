@@ -4,12 +4,15 @@ as well as functions for training and testing across an epoch.
 """
 
 from abc import abstractmethod, ABC
+import logging
 import os
 from os.path import join
 import h5py
 
 import torch
 import dingo.core.utils as utils
+from hydra.utils import instantiate
+from omegaconf import OmegaConf
 from torch.utils.data import Dataset
 import time
 import numpy as np
@@ -22,6 +25,14 @@ from dingo.core.utils.backward_compatibility import update_model_config
 from dingo.core.utils.misc import get_version
 
 from dingo.core.utils.trainutils import EarlyStopping
+
+logger = logging.getLogger(__name__)
+
+
+def _to_plain_container(value):
+    if OmegaConf.is_config(value):
+        return OmegaConf.to_container(value, resolve=True)
+    return value
 
 
 class BasePosteriorModel(ABC):
@@ -65,7 +76,7 @@ class BasePosteriorModel(ABC):
         self.scheduler_kwargs = None
         self.initial_weights = initial_weights
 
-        self.metadata = metadata
+        self.metadata = OmegaConf.create(metadata) if metadata is not None else None
         if self.metadata is not None:
             self.model_kwargs = self.metadata["train_settings"]["model"]
             # Expect self.optimizer_settings and self.scheduler_settings to be set
@@ -198,7 +209,7 @@ class BasePosteriorModel(ABC):
         #     raise NotImplementedError('This needs testing!')
         #     # dim = 0 [512, ...] -> [256, ...], [256, ...] on 2 GPUs
         #     self.network = torch.nn.DataParallel(self.network)
-        print(f"Putting posterior model to device {self.device}.")
+        logger.info(f"Putting posterior model to device {self.device}.")
         self.network.to(self.device)
 
     def initialize_optimizer_and_scheduler(self):
@@ -207,12 +218,18 @@ class BasePosteriorModel(ABC):
         and self.scheduler_kwargs, respectively.
         """
         if self.optimizer_kwargs is not None:
-            self.optimizer = utils.get_optimizer_from_kwargs(
-                self.network.parameters(), **self.optimizer_kwargs
+            optimizer = instantiate(self.optimizer_kwargs)
+            self.optimizer = (
+                optimizer(self.network.parameters())
+                if self.optimizer_kwargs.get("_partial_", False)
+                else optimizer
             )
         if self.scheduler_kwargs is not None:
-            self.scheduler = utils.get_scheduler_from_kwargs(
-                self.optimizer, **self.scheduler_kwargs
+            scheduler = instantiate(self.scheduler_kwargs)
+            self.scheduler = (
+                scheduler(self.optimizer)
+                if self.scheduler_kwargs.get("_partial_", False)
+                else scheduler
             )
 
     def save_model(
@@ -233,14 +250,14 @@ class BasePosteriorModel(ABC):
 
         """
         model_dict = {
-            "model_kwargs": self.model_kwargs,
+            "model_kwargs": _to_plain_container(self.model_kwargs),
             "model_state_dict": self.network.state_dict(),
             "epoch": self.epoch,
             "version": self.version,
         }
 
         if self.metadata is not None:
-            model_dict["metadata"] = self.metadata
+            model_dict["metadata"] = _to_plain_container(self.metadata)
 
         if self.context is not None:
             model_dict["context"] = self.context
@@ -249,8 +266,8 @@ class BasePosteriorModel(ABC):
             model_dict["event_metadata"] = self.event_metadata
 
         if save_training_info:
-            model_dict["optimizer_kwargs"] = self.optimizer_kwargs
-            model_dict["scheduler_kwargs"] = self.scheduler_kwargs
+            model_dict["optimizer_kwargs"] = _to_plain_container(self.optimizer_kwargs)
+            model_dict["scheduler_kwargs"] = _to_plain_container(self.scheduler_kwargs)
             if self.optimizer is not None:
                 model_dict["optimizer_state_dict"] = self.optimizer.state_dict()
             if self.scheduler is not None:
@@ -332,7 +349,7 @@ class BasePosteriorModel(ABC):
 
         self.epoch = d["epoch"]
 
-        self.metadata = d["metadata"]
+        self.metadata = OmegaConf.create(d["metadata"])
 
         if "context" in d:
             self.context = d["context"]
@@ -394,7 +411,7 @@ class BasePosteriorModel(ABC):
 
         if test_only:
             test_loss = test_epoch(self, test_loader)
-            print(f"test loss: {test_loss:.3f}")
+            logger.info(f"test loss: {test_loss:.3f}")
 
         else:
             while not runtime_limits.limits_exceeded(self.epoch):
@@ -403,24 +420,24 @@ class BasePosteriorModel(ABC):
                 # Training
                 lr = utils.get_lr(self.optimizer)
                 with threadpool_limits(limits=1, user_api="blas"):
-                    print(f"\nStart training epoch {self.epoch} with lr {lr}")
+                    logger.info(f"\nStart training epoch {self.epoch} with lr {lr}")
                     time_start = time.time()
                     train_loss = train_epoch(self, train_loader)
                     train_time = time.time() - time_start
 
-                    print(
+                    logger.info(
                         "Done. This took {:2.0f}:{:2.0f} min.".format(
                             *divmod(train_time, 60)
                         )
                     )
 
                     # Testing
-                    print(f"Start testing epoch {self.epoch}")
+                    logger.info(f"Start testing epoch {self.epoch}")
                     time_start = time.time()
                     test_loss = test_epoch(self, test_loader)
                     test_time = time.time() - time_start
 
-                    print(
+                    logger.info(
                         "Done. This took {:2.0f}:{:2.0f} min.".format(
                             *divmod(time.time() - time_start, 60)
                         )
@@ -449,7 +466,7 @@ class BasePosteriorModel(ABC):
                             }
                         )
                     except ImportError:
-                        print("wandb not installed. Skipping logging to wandb.")
+                        logger.warning("wandb not installed. Skipping logging to wandb.")
 
                 if early_stopping is not None:
                     # Whether to use train or test loss
@@ -464,9 +481,9 @@ class BasePosteriorModel(ABC):
                             join(train_dir, "best_model.pt"), save_training_info=False
                         )
                     if early_stopping.early_stop:
-                        print("Early stopping")
+                        logger.info("Early stopping")
                         break
-                print(f"Finished training epoch {self.epoch}.\n")
+                logger.info(f"Finished training epoch {self.epoch}.\n")
 
 
 def train_epoch(pm, dataloader):

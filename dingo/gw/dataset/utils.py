@@ -1,14 +1,19 @@
+import copy
+import logging
 import argparse
 import textwrap
-import copy
+from typing import List
+
 import pandas as pd
 import numpy as np
 import yaml
-from typing import List
 
-from dingo.gw.SVD import SVDBasis
-from dingo.gw.dataset.generate_dataset import train_svd_basis
+from dingo.core.utils.logging_utils import setup_logger
+from dingo.gw.dataset.compression import train_svd_basis
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
+
+logger = logging.getLogger(__name__)
+logging.captureWarnings(True)
 
 
 def merge_datasets(dataset_list: List[WaveformDataset]) -> WaveformDataset:
@@ -26,7 +31,7 @@ def merge_datasets(dataset_list: List[WaveformDataset]) -> WaveformDataset:
     WaveformDataset containing the merged data.
     """
 
-    print(f"Merging {len(dataset_list)} datasets into one.")
+    logger.info(f"Merging {len(dataset_list)} datasets into one.")
 
     # This ensures that all the keys are copied into the new dataset. The "extensive"
     # parts of the dataset (parameters, waveforms) will be overwritten by the combined
@@ -64,9 +69,9 @@ def merge_datasets_cli():
         description=textwrap.dedent(
             """\
         Combine a collection of datasets into one.
-        
-        Datasets must be in sequentially-labeled HDF5 files with a fixed prefix. 
-        The settings for the new dataset will be based on those of the first file. 
+
+        Datasets must be in sequentially-labeled HDF5 files with a fixed prefix.
+        The settings for the new dataset will be based on those of the first file.
         Optionally, replace the settings with those specified in a YAML file.
         """
         ),
@@ -87,6 +92,7 @@ def merge_datasets_cli():
         "--settings_file", type=str, help="YAML file containing new dataset settings."
     )
     args = parser.parse_args()
+    setup_logger(use_bilby=False)
 
     dataset_list = []
     for i in range(args.num_parts):
@@ -103,7 +109,7 @@ def merge_datasets_cli():
         merged_dataset.settings = settings
 
     merged_dataset.to_file(args.out_file)
-    print(
+    logger.info(
         f"Complete. New dataset consists of {merged_dataset.settings['num_samples']} "
         f"samples."
     )
@@ -137,21 +143,24 @@ def build_svd_cli():
     parser.add_argument(
         "--num_train",
         type=int,
-        help="Number of waveforms to use for training SVD. "
-        "Remainder are used for validation.",
+        help=(
+            "Number of waveforms to use for training SVD. Remainder are used "
+            "for validation."
+        ),
     )
     args = parser.parse_args()
+    setup_logger(use_bilby=False)
 
     dataset = WaveformDataset(file_name=args.dataset_file)
     if args.num_train is None:
-        n_train = len(WaveformDataset)
+        n_train = len(dataset)
     else:
         n_train = args.num_train
 
     basis, n_train, n_test = train_svd_basis(dataset, args.size, n_train)
     # FIXME: This is not an ideal treatment. We should update the waveform generation
     #  to always provide the requested number of waveforms.
-    print(
+    logger.info(
         f"SVD basis trained based on {n_train} waveforms and validated on {n_test} "
         f"waveforms. Note that if this differs from number requested, it will not be "
         f"reflected in the settings file. This is likely due to EOB failure to "

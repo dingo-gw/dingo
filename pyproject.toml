@@ -33,6 +33,7 @@ dependencies = [
     "glasflow",
     "gwpy",
     "h5py",
+    "hydra-core",
     "lalsuite>=7.15",
     "matplotlib",
     "numpy",
@@ -51,7 +52,7 @@ dependencies = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["dingo*"]
+include = ["dingo*", "configs*"]
 namespaces = false
 
 [tool.setuptools_scm]

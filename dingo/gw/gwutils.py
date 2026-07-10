@@ -6,7 +6,6 @@ from scipy.interpolate import interp1d
 
 from bilby.gw.detector import PowerSpectralDensity
 
-from dingo.gw.prior import default_extrinsic_dict
 from dingo.gw.prior import BBHExtrinsicPriorDict
 
 
@@ -24,18 +23,6 @@ def get_window(window_kwargs):
         return w
     else:
         raise NotImplementedError(f"Unknown window type {type}.")
-
-
-def get_extrinsic_prior_dict(extrinsic_prior):
-    """Build dict for extrinsic prior by starting with
-    default_extrinsic_dict, and overwriting every element for which
-    extrinsic_prior is not default.
-    TODO: Move to dingo.gw.prior.py?"""
-    extrinsic_prior_dict = default_extrinsic_dict.copy()
-    for k, v in extrinsic_prior.items():
-        if v.lower() != "default":
-            extrinsic_prior_dict[k] = v
-    return extrinsic_prior_dict
 
 
 def get_mismatch(a, b, domain, asd_file=None):
@@ -100,7 +87,10 @@ def get_standardization_dict(
     # Some of the extrinsic prior parameters have analytic means and standard
     # deviations. If possible, this will either get these, or else it will estimate
     # them numerically.
-    ext_prior = BBHExtrinsicPriorDict(extrinsic_prior_dict)
+    if isinstance(extrinsic_prior_dict, BBHExtrinsicPriorDict):
+        ext_prior = extrinsic_prior_dict
+    else:
+        ext_prior = BBHExtrinsicPriorDict(extrinsic_prior_dict)
     mean_extrinsic, std_extrinsic = ext_prior.mean_std(ext_prior.keys())
 
     # Check that overlap between intrinsic and extrinsic parameters is only

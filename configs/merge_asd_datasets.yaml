@@ -1,0 +1,35 @@
+defaults:
+  - hydra: default
+  - _self_
+
+data_dir: asd_dataset
+time_segments_file: null
+num_parts: -1
+out_name: null
+
+dataset_settings:
+  f_min: 0
+  f_max: 2048
+  f_s: 4096
+  time_psd: 1024
+  T: 8.0
+  window:
+    roll_off: 0.4
+    type: tukey
+  time_gap: 0
+  num_psds_max: 1
+  channels: null
+  detectors:
+    - H1
+    - L1
+  observing_run: O1
+
+hydra:
+  job:
+    name: merge_asd_datasets
+    config:
+      override_dirname:
+        exclude_keys:
+          - data_dir
+          - time_segments_file
+          - out_name

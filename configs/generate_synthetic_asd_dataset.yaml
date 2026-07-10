@@ -1,0 +1,33 @@
+defaults:
+  - hydra: default
+  - _self_
+
+asd_dataset: ???
+num_samples: 500
+num_processes: 1
+out_file: synthetic_asd_dataset.hdf5
+verbose: false
+
+parameterization_settings:
+  num_spline_positions: 30
+  num_spectral_segments: 400
+  sigma: 0.14
+  delta_f: -1
+  smoothen: true
+
+sampling_settings:
+  bandwidth_spectral: 0.5
+  bandwidth_spline: 0.25
+  split_frequencies:
+    - 30
+    - 100
+  rescaling_asd_paths: null
+
+hydra:
+  job:
+    name: generate_synthetic_asd_dataset
+    config:
+      override_dirname:
+        exclude_keys:
+          - asd_dataset
+          - out_file

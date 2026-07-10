@@ -1,4 +1,5 @@
 from functools import partial
+import logging
 from multiprocessing import Pool
 from math import isclose
 
@@ -30,6 +31,8 @@ from dingo.gw.domains import (
     TimeDomain,
 )
 from dingo.gw.transforms.waveform_transforms import DecimateAll
+
+logger = logging.getLogger(__name__)
 
 
 class WaveformGenerator:
@@ -142,12 +145,12 @@ class WaveformGenerator:
     @spin_conversion_phase.setter
     def spin_conversion_phase(self, value):
         if value is None:
-            print(
+            logger.info(
                 "Setting spin_conversion_phase = None. Using phase parameter for "
                 "conversion to cartesian spins."
             )
         else:
-            print(
+            logger.info(
                 f"Setting spin_conversion_phase = {value}. Using this value for the "
                 f"phase parameter for conversion to cartesian spins."
             )
@@ -583,7 +586,7 @@ class WaveformGenerator:
         # numbers if multibanding is used. If that happens, turn off multibanding to
         # fix this.
         if max(np.max(np.abs(hp.data.data)), np.max(np.abs(hc.data.data))) > 1e-20:
-            print(
+            logger.warning(
                 f"Generation with parameters {parameters_lal} likely numerically "
                 f"unstable due to multibanding, turn off multibanding."
             )
@@ -606,8 +609,8 @@ class WaveformGenerator:
                 *parameters_lal[lal_dict_idx + 1 :],
             )
             if max(np.max(np.abs(hp.data.data)), np.max(np.abs(hc.data.data))) > 1e-20:
-                print(
-                    f"Warning: turning off multibanding for parameters {parameters_lal}"
+                logger.warning(
+                    f"Turning off multibanding for parameters {parameters_lal}"
                     f" likely numerically might not have fixed it, check manually."
                 )
 
@@ -1567,8 +1570,8 @@ def sum_contributions_m(x_m, phase_shift=0.0):
 if __name__ == "__main__":
     import pandas as pd
     import numpy as np
+    from bilby.gw.prior import BBHPriorDict
     from dingo.gw.domains import build_domain
-    from dingo.gw.prior import build_prior_with_defaults
 
     domain_settings = {
         "type": "UniformFrequencyDomain",
@@ -1593,7 +1596,7 @@ if __name__ == "__main__":
         "phi_jl": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
         "geocent_time": 0.0,
     }
-    prior = build_prior_with_defaults(intrinsic_dict)
+    prior = BBHPriorDict(intrinsic_dict)
     p = prior.sample()
     p = {
         "mass_ratio": 0.3501852584069329,
@@ -1622,7 +1625,7 @@ if __name__ == "__main__":
     pol_m = wfg.generate_hplus_hcross_m(p)
 
     phase_shift = np.random.uniform(high=2 * np.pi)
-    print(f"{phase_shift:.2f}")
+    logger.info(f"{phase_shift:.2f}")
     pol = sum_contributions_m(pol_m, phase_shift=phase_shift)
 
     pol_ref = wfg.generate_hplus_hcross({**p, "phase": p["phase"] + phase_shift})

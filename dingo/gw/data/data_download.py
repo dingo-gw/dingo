@@ -1,9 +1,13 @@
+import logging
+
 import numpy as np
 from gwpy.timeseries import TimeSeries
 import pycbc.psd
 import math
 
 from dingo.gw.gwutils import get_window
+
+logger = logging.getLogger(__name__)
 
 
 def download_psd(det, time_start, time_psd, window, f_s):
@@ -42,7 +46,7 @@ def download_psd(det, time_start, time_psd, window, f_s):
     # if strain for PSD data contains nan, shift segment for PSD
     if np.max(np.isnan(psd_strain)):
         dt = math.ceil(np.where(np.isnan(psd_strain))[0][-1] / f_s)
-        print(
+        logger.warning(
             f"Nan encountered in strain data for PSD estimation for detector {det}. "
             f"Shifting strain segment by {dt} seconds."
         )

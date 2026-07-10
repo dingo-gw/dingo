@@ -1,9 +1,12 @@
 from bilby_pipe.bilbyargparser import BilbyArgParser
-from bilby_pipe.utils import get_command_line_arguments, logger, parse_args
+from bilby_pipe.utils import get_command_line_arguments, parse_args
 
+import logging
+
+from dingo.core.utils.logging_utils import setup_logger
 from dingo.gw.result import Result
 
-logger.name = "dingo_pipe"
+logger = logging.getLogger("dingo.pipe")
 
 
 def create_parser():
@@ -46,6 +49,7 @@ def create_parser():
 
 def main():
     args, _ = parse_args(get_command_line_arguments(), create_parser())
+    setup_logger(outdir=args.outdir, label=args.label)
 
     logger.info(f"Generating plots for results file {args.result}")
 

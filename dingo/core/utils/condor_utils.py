@@ -1,6 +1,9 @@
+import logging
 import os
 from os.path import join
 import yaml
+
+logger = logging.getLogger(__name__)
 
 
 def resubmit_condor_job(train_dir, train_settings, epoch):
@@ -12,14 +15,14 @@ def resubmit_condor_job(train_dir, train_settings, epoch):
     :return:
     """
     if 'condor_settings' in train_settings:
-        print('Copying log files')
+        logger.info("Copying log files")
         copy_logfiles(train_dir, epoch=epoch)
 
         if epoch >= train_settings['train_settings']['runtime_limits'][
             'max_epochs_total']:
-            print('Training complete, job will not be resubmitted')
+            logger.info("Training complete, job will not be resubmitted")
         else:
-            print('Training incomplete, resubmitting job.')
+            logger.info("Training incomplete, resubmitting job.")
             create_submission_file_and_submit_job(train_dir)
 
 
@@ -76,7 +79,7 @@ def copy_logfiles(log_dir, epoch, name='info', suffixes=('.err','.log','.out')):
         try:
             copyfile(src, dest)
         except:
-            print('Could not copy ' + src)
+            logger.warning("Could not copy " + src)
 
 
 if __name__ == '__main__':

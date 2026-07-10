@@ -1,5 +1,8 @@
+import logging
+
 import numpy as np
 from bilby.gw.detector import InterferometerList
+from hydra.utils import instantiate
 from torchvision.transforms import Compose
 
 from dingo.gw.noise.asd_dataset import ASDDataset
@@ -7,9 +10,8 @@ from dingo.gw.domains import (
     UniformFrequencyDomain,
     MultibandedFrequencyDomain,
 )
-from dingo.gw.domains import build_domain, build_domain_from_model_metadata
-from dingo.gw.gwutils import get_extrinsic_prior_dict
-from dingo.gw.prior import build_prior_with_defaults, split_off_extrinsic_parameters
+from dingo.gw.domains import build_domain_from_model_metadata
+from dingo.gw.prior import split_off_extrinsic_parameters
 from dingo.gw.transforms import (
     GetDetectorTimes,
     ProjectOntoDetectors,
@@ -21,6 +23,8 @@ from dingo.gw.waveform_generator.waveform_generator import (
     WaveformGenerator,
     NewInterfaceWaveformGenerator,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class GWSignal(object):
@@ -312,7 +316,7 @@ class GWSignal(object):
             if set(asd.asds.keys()) != set(ifo_names):
                 raise KeyError("ASDDataset ifos do not match signal.")
             if asd.domain.domain_dict != self.data_domain.domain_dict:
-                print("Updating ASDDataset domain to match data domain.")
+                logger.info("Updating ASDDataset domain to match data domain.")
                 domain_dict = self.data_domain.domain_dict
                 asd.update_domain(domain_dict)
         elif isinstance(asd, dict):
@@ -354,16 +358,16 @@ class Injection(GWSignal):
         metadata : dict
             Dict which you can get via PosteriorModel.metadata
         """
-        intrinsic_prior = metadata["dataset_settings"]["intrinsic_prior"]
-        extrinsic_prior = get_extrinsic_prior_dict(
+        prior = instantiate(metadata["dataset_settings"]["intrinsic_prior"])
+        extrinsic_prior = instantiate(
             metadata["train_settings"]["data"]["extrinsic_prior"]
         )
-        prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
+        prior.update(extrinsic_prior)
 
         return cls(
             prior=prior,
             wfg_kwargs=metadata["dataset_settings"]["waveform_generator"],
-            wfg_domain=build_domain(metadata["dataset_settings"]["domain"]),
+            wfg_domain=instantiate(metadata["dataset_settings"]["domain"]),
             data_domain=build_domain_from_model_metadata(metadata),
             ifo_list=metadata["train_settings"]["data"]["detectors"],
             t_ref=metadata["train_settings"]["data"]["ref_time"],
@@ -402,7 +406,7 @@ class Injection(GWSignal):
             raise ValueError("self.asd must be set in order to produce injections.")
 
         if self.whiten:
-            print("self.whiten was set to True. Resetting to False.")
+            logger.warning("self.whiten was set to True. Resetting to False.")
             self.whiten = False
 
         data = {}

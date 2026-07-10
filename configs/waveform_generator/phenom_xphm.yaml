@@ -1,0 +1,5 @@
+_target_: dingo.gw.waveform_generator.WaveformGenerator
+approximant: IMRPhenomXPHM
+f_ref: 20.0
+f_start: null
+spin_conversion_phase: 0.0

@@ -1,9 +1,14 @@
 import os
 import argparse
+import logging
 from typing import Dict
 from pycondor import Job, Dagman
 import yaml
 import copy
+
+from dingo.core.utils.logging_utils import setup_logger
+
+logger = logging.getLogger(__name__)
 
 # Fixed file names
 svd_fn = "svd.hdf5"
@@ -264,6 +269,7 @@ def create_dag(args, settings):
 
 def main():
     args = parse_args()
+    setup_logger(outdir=args.temp_dir, label="generate_dataset_dag")
 
     # Load settings
     with open(args.settings_file, "r") as f:
@@ -284,7 +290,7 @@ def main():
         pass
 
     dagman.build()
-    print(f"DAG submission file written to {args.submit}.")
+    logger.info(f"DAG submission file written to {args.submit}.")
 
 
 if __name__ == "__main__":

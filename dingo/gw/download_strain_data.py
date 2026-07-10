@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 import pycbc.psd
 from gwpy.timeseries import TimeSeries
@@ -6,6 +8,8 @@ from dingo.gw.domains import UniformFrequencyDomain
 from dingo.gw.gwutils import (
     get_window,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def estimate_single_psd(
@@ -107,14 +111,14 @@ def download_strain_data_in_FD(det, time_event, time_segment, time_buffer, windo
         array with the frequency domain strain
     """
     # download strain data
-    print("Downloading strain data for event.", end=" ")
+    logger.info("Downloading strain data for event.")
     event_strain = TimeSeries.fetch_open_data(
         det,
         time_event + time_buffer - time_segment,
         time_event + time_buffer,
         cache=True,
     )
-    print("Done.")
+    logger.info("Done.")
 
     # transform to FD
     if type(window) == dict:
@@ -165,7 +169,7 @@ def download_event_data_in_FD(
     """
     data = {"waveform": {}, "asds": {}}
     for det in detectors:
-        print("Detector {:}:".format(det))
+        logger.info("Detector {:}:".format(det))
 
         data["waveform"][det] = download_strain_data_in_FD(
             det, time_event, time_segment, time_buffer, window

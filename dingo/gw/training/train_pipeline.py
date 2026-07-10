@@ -1,25 +1,26 @@
 from typing import Optional, Tuple
+import logging
 import os
 
+import hydra
 import numpy as np
+import torchvision
 import yaml
-import argparse
 import shutil
-import textwrap
 import time
 from copy import deepcopy
 
+from hydra.utils import instantiate, to_absolute_path
+from omegaconf import DictConfig, OmegaConf
 from threadpoolctl import threadpool_limits
 
-from dingo.core.posterior_models.build_model import (
-    autocomplete_model_kwargs,
-    build_model_from_kwargs,
-)
+from dingo.core.posterior_models.build_model import build_model_from_kwargs
+from dingo.core.utils.hydra_utils import instantiate_with_runtime_dependencies
 from dingo.gw.training.train_builders import (
-    build_dataset,
     set_train_transforms,
     build_svd_for_embedding_network,
 )
+from dingo.gw.gwutils import get_standardization_dict
 from dingo.core.utils.trainutils import RuntimeLimits
 from dingo.core.utils import (
     set_requires_grad_flag,
@@ -29,6 +30,58 @@ from dingo.core.utils import (
 from dingo.core.utils.trainutils import EarlyStopping
 from dingo.gw.dataset import WaveformDataset
 from dingo.core.posterior_models import BasePosteriorModel
+
+logger = logging.getLogger(__name__)
+logging.captureWarnings(True)
+
+
+def _standardization_is_missing(standardization: dict) -> bool:
+    if standardization in (None, "???"):
+        return True
+    return (
+        standardization.get("mean") in (None, "???")
+        or standardization.get("std") in (None, "???")
+    )
+
+
+def _populate_parameter_standardization(
+    wfd: WaveformDataset,
+    data_settings: dict,
+    asd_dataset_config: dict,
+) -> None:
+    if not _standardization_is_missing(data_settings.get("standardization")):
+        logger.info("Using previously-calculated parameter standardizations.")
+        _sync_parameter_standardization_transform_configs(data_settings)
+        return
+
+    logger.info("Calculating new parameter standardizations.")
+    asd_dataset = instantiate(asd_dataset_config, domain_update=wfd.domain.domain_dict)
+    runtime_dependencies = {
+        "domain": wfd.domain,
+        "asd_dataset": asd_dataset,
+    }
+    transforms = [
+        instantiate_with_runtime_dependencies(transform_config, runtime_dependencies)
+        for transform_config in data_settings["standardization_transforms"]
+    ]
+    selected_parameters = (
+        data_settings["inference_parameters"] + data_settings["context_parameters"]
+    )
+    data_settings["standardization"] = get_standardization_dict(
+        instantiate(data_settings["extrinsic_prior"]),
+        wfd,
+        selected_parameters,
+        torchvision.transforms.Compose(transforms),
+    )
+    _sync_parameter_standardization_transform_configs(data_settings)
+
+
+def _sync_parameter_standardization_transform_configs(data_settings: dict) -> None:
+    for transform_config in data_settings["transforms"]:
+        if transform_config.get("_target_", "").endswith(
+            "SelectStandardizeRepackageParameters"
+        ):
+            transform_config["standardization_dict"] = data_settings["standardization"]
 
 
 def copy_files_to_local(
@@ -61,20 +114,22 @@ def copy_files_to_local(
     if local_dir is not None:
         file_name = file_path.split("/")[-1]
         local_file_path = os.path.join(local_dir, file_name)
-        print(f"Copying file to {local_file_path}")
+        logger.info(f"Copying file to {local_file_path}")
         # Copy file
         start_time = time.time()
         shutil.copy(file_path, local_file_path)
         elapsed_time = time.time() - start_time
-        print("Done. This took {:2.0f}:{:2.0f} min.".format(*divmod(elapsed_time, 60)))
+        logger.info(
+            "Done. This took {:2.0f}:{:2.0f} min.".format(*divmod(elapsed_time, 60))
+        )
     elif leave_keys_on_disk and is_condor:
-        print(
-            f"Warning: leave_waveforms_on_disk defaults to True, but local_cache_path is not specified. "
-            f"This means that the waveforms will be loaded during training from {local_file_path} ."
+        logger.warning(
+            f"leave_waveforms_on_disk defaults to True, but local_cache_path is not specified. "
+            f"This means that the waveforms will be loaded during training from {local_file_path}. "
             f"This can lead to unexpected long times for data loading during training due to network traffic. "
             f"To prevent this, specify 'local_cache_path = tmp' in the local settings or set "
             f"leave_waveforms_on_disk = False. However, the latter is not recommended for large datasets since "
-            f"it can lead to memory issues when loading the entire dataset into RAM. "
+            f"it can lead to memory issues when loading the entire dataset into RAM."
         )
 
     return local_file_path
@@ -105,28 +160,36 @@ def prepare_training_new(
     """
     data_settings = deepcopy(train_settings["data"])
     # Optionally copy files to local and update path
-    data_settings["waveform_dataset_path"] = copy_files_to_local(
-        file_path=data_settings["waveform_dataset_path"],
+    data_settings["waveform_dataset"]["file_name"] = copy_files_to_local(
+        file_path=data_settings["waveform_dataset"]["file_name"],
         local_dir=local_settings.get("local_cache_path", None),
         leave_keys_on_disk=local_settings.get("leave_waveforms_on_disk", True),
         is_condor=True if "condor" in local_settings else False,
     )
-    wfd = build_dataset(
-        data_settings=data_settings,
+    wfd = instantiate(
+        data_settings["waveform_dataset"],
         leave_waveforms_on_disk=local_settings.get("leave_waveforms_on_disk", True),
     )  # No transforms yet
+    train_settings["data"] = data_settings
     initial_weights = {}
+
+    _populate_parameter_standardization(
+        wfd,
+        train_settings["data"],
+        train_settings["training"]["stage_0"]["asd_dataset"],
+    )
 
     # The embedding network is assumed to have an SVD projection layer. If other types
     # of embedding networks are added in the future, update this code.
 
-    if train_settings["model"].get("embedding_kwargs", None):
+    svd_settings = (train_settings["model"].get("embedding_kwargs") or {}).get("svd")
+    if svd_settings and svd_settings.get("num_training_samples", 0) > 0:
         # First, build the SVD for seeding the embedding network.
-        print("\nBuilding SVD for initialization of embedding network.")
+        logger.info("\nBuilding SVD for initialization of embedding network.")
         initial_weights["V_rb_list"] = build_svd_for_embedding_network(
             wfd,
             train_settings["data"],
-            train_settings["training"]["stage_0"]["asd_dataset_path"],
+            train_settings["training"]["stage_0"]["asd_dataset"],
             num_workers=local_settings["num_workers"],
             batch_size=train_settings["training"]["stage_0"]["batch_size"],
             out_dir=train_dir,
@@ -143,23 +206,37 @@ def prepare_training_new(
     set_train_transforms(
         wfd,
         train_settings["data"],
-        train_settings["training"]["stage_0"]["asd_dataset_path"],
+        train_settings["training"]["stage_0"]["asd_dataset"],
     )
 
-    # This modifies the model settings in-place.
-    autocomplete_model_kwargs(train_settings["model"], wfd[0])
+    data_sample = wfd[0]
+    train_settings["model"]["embedding_kwargs"]["input_dims"] = list(
+        data_sample[1].shape
+    )
+    train_settings["model"]["posterior_kwargs"]["input_dim"] = len(data_sample[0])
+    try:
+        gnpe_proxy_dim = len(data_sample[2])
+        train_settings["model"]["embedding_kwargs"]["added_context"] = True
+        train_settings["model"]["posterior_kwargs"]["context_dim"] = (
+            train_settings["model"]["embedding_kwargs"]["output_dim"] + gnpe_proxy_dim
+        )
+    except IndexError:
+        train_settings["model"]["embedding_kwargs"]["added_context"] = False
+        train_settings["model"]["posterior_kwargs"]["context_dim"] = train_settings[
+            "model"
+        ]["embedding_kwargs"]["output_dim"]
     full_settings = {
         "dataset_settings": wfd.settings,
         "train_settings": train_settings,
     }
 
-    print("\nInitializing new posterior model.")
-    print("Complete settings:")
-    print(yaml.dump(full_settings, default_flow_style=False, sort_keys=False))
+    logger.info("\nInitializing new posterior model.")
+    logger.info("Complete settings:")
+    logger.info(yaml.dump(full_settings, default_flow_style=False, sort_keys=False))
 
     pm = build_model_from_kwargs(
         settings=full_settings,
-        initial_weights=initial_weights,
+        initial_weights=initial_weights or None,
         device=local_settings["device"],
     )
 
@@ -173,7 +250,7 @@ def prepare_training_new(
                 **local_settings["wandb"],
             )
         except ImportError:
-            print("WandB is enabled but not installed.")
+            logger.warning("WandB is enabled but not installed.")
 
     return pm, wfd
 
@@ -205,14 +282,14 @@ def prepare_training_resume(
     )
     data_settings = deepcopy(pm.metadata["train_settings"]["data"])
     # Optionally copy files to local and update path
-    data_settings["waveform_dataset_path"] = copy_files_to_local(
-        file_path=data_settings["waveform_dataset_path"],
+    data_settings["waveform_dataset"]["file_name"] = copy_files_to_local(
+        file_path=data_settings["waveform_dataset"]["file_name"],
         local_dir=local_settings.get("local_cache_path", None),
         leave_keys_on_disk=local_settings.get("leave_waveforms_on_disk", True),
         is_condor=True if "condor" in local_settings else False,
     )
-    wfd = build_dataset(
-        data_settings=data_settings,
+    wfd = instantiate(
+        data_settings["waveform_dataset"],
         leave_waveforms_on_disk=local_settings.get("leave_waveforms_on_disk", True),
     )
 
@@ -226,7 +303,7 @@ def prepare_training_resume(
                 **local_settings["wandb"],
             )
         except ImportError:
-            print("WandB is enabled but not installed.")
+            logger.warning("WandB is enabled but not installed.")
 
     return pm, wfd
 
@@ -265,7 +342,7 @@ def initialize_stage(
     train_settings = pm.metadata["train_settings"]
 
     # Rebuild transforms based on possibly different noise.
-    set_train_transforms(wfd, train_settings["data"], stage["asd_dataset_path"])
+    set_train_transforms(wfd, train_settings["data"], stage["asd_dataset"])
 
     # Allows for changes in batch size between stages.
     train_loader, test_loader = build_train_and_test_loaders(
@@ -278,7 +355,7 @@ def initialize_stage(
     if not resume:
         # New optimizer and scheduler. If we are resuming, these should have been
         # loaded from the checkpoint.
-        print("Initializing new optimizer and scheduler.")
+        logger.info("Initializing new optimizer and scheduler.")
         pm.optimizer_kwargs = stage["optimizer"]
         pm.scheduler_kwargs = stage["scheduler"]
         pm.initialize_optimizer_and_scheduler()
@@ -295,7 +372,7 @@ def initialize_stage(
             )
     n_grad = get_number_of_model_parameters(pm.network, (True,))
     n_nograd = get_number_of_model_parameters(pm.network, (False,))
-    print(f"Fixed parameters: {n_nograd}\nLearnable parameters: {n_grad}\n")
+    logger.info(f"Fixed parameters: {n_nograd}\nLearnable parameters: {n_grad}\n")
 
     return train_loader, test_loader
 
@@ -343,14 +420,14 @@ def train_stages(
         stage = stages[n]
 
         if pm.epoch == end_epochs[n] - stage["epochs"]:
-            print(f"\nBeginning training stage {n}. Settings:")
-            print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
+            logger.info(f"\nBeginning training stage {n}. Settings:")
+            logger.info(yaml.dump(stage, default_flow_style=False, sort_keys=False))
             train_loader, test_loader = initialize_stage(
                 pm, wfd, stage, local_settings["num_workers"], resume=False
             )
         else:
-            print(f"\nResuming training in stage {n}. Settings:")
-            print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
+            logger.info(f"\nResuming training in stage {n}. Settings:")
+            logger.info(yaml.dump(stage, default_flow_style=False, sort_keys=False))
             train_loader, test_loader = initialize_stage(
                 pm, wfd, stage, local_settings["num_workers"], resume=True
             )
@@ -359,7 +436,7 @@ def train_stages(
             try:
                 early_stopping = EarlyStopping(**stage["early_stopping"])
             except Exception:
-                print(
+                logger.warning(
                     "Early stopping settings invalid. Please pass 'patience', 'delta', 'metric'"
                 )
                 raise
@@ -381,10 +458,10 @@ def train_stages(
 
         if pm.epoch == end_epochs[n]:
             save_file = os.path.join(train_dir, f"model_stage_{n}.pt")
-            print(f"Training stage complete. Saving to {save_file}.")
+            logger.info(f"Training stage complete. Saving to {save_file}.")
             pm.save_model(save_file, save_training_info=True)
         if runtime_limits.local_limits_exceeded(pm.epoch):
-            print("Local runtime limits reached. Ending program.")
+            logger.info("Local runtime limits reached. Ending program.")
             break
 
     if pm.epoch == end_epochs[-1]:
@@ -393,66 +470,41 @@ def train_stages(
         return False
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        description=textwrap.dedent(
-            """\
-        Train a neural network for gravitational-wave single-event inference.
-        
-        This program can be called in one of two ways:
-            a) with a settings file. This will create a new network based on the 
-            contents of the settings file.
-            b) with a checkpoint file. This will resume training from the checkpoint.
-        """
-        ),
+def _resolve_training_input_paths(train_settings: dict) -> None:
+    train_settings["data"]["waveform_dataset"]["file_name"] = to_absolute_path(
+        train_settings["data"]["waveform_dataset"]["file_name"]
     )
-    parser.add_argument(
-        "--settings_file",
-        type=str,
-        help="YAML file containing training settings.",
-    )
-    parser.add_argument(
-        "--train_dir", required=True, help="Directory for Dingo training output."
-    )
-    parser.add_argument(
-        "--checkpoint",
-        type=str,
-        help="Checkpoint file from which to resume training.",
-    )
-    parser.add_argument(
-        "--exit_command",
-        type=str,
-        default="",
-        help="Optional command to execute after completion of training.",
-    )
-    args = parser.parse_args()
-
-    # The settings file and checkpoint are mutually exclusive.
-    if args.checkpoint is None and args.settings_file is None:
-        parser.error("Must specify either a checkpoint file or a settings file.")
-    if args.checkpoint is not None and args.settings_file is not None:
-        parser.error("Cannot specify both a checkpoint file and a settings file.")
-
-    return args
+    for stage in train_settings["training"].values():
+        if isinstance(stage, dict) and "asd_dataset" in stage:
+            stage["asd_dataset"]["file_name"] = to_absolute_path(
+                stage["asd_dataset"]["file_name"]
+            )
 
 
-def train_local():
-    args = parse_args()
+@hydra.main(
+    version_base="1.3",
+    config_path="../../../configs",
+    config_name="train",
+)
+def train_local(cfg: DictConfig):
+    settings = OmegaConf.to_container(cfg, resolve=True)
+    checkpoint = settings.pop("checkpoint")
+    train_dir = settings.pop("train_dir")
+    exit_command = settings.pop("exit_command")
 
-    os.makedirs(args.train_dir, exist_ok=True)
+    os.makedirs(train_dir, exist_ok=True)
 
-    if args.settings_file is not None:
-        print("Beginning new training run.")
-        with open(args.settings_file, "r") as fp:
-            train_settings = yaml.safe_load(fp)
+    if checkpoint is None:
+        logger.info("Beginning new training run.")
+        train_settings = settings
+        _resolve_training_input_paths(train_settings)
 
         # Extract the local settings from train settings file, save it separately. This
         # file can later be modified, and the settings take effect immediately upon
         # resuming.
 
         local_settings = train_settings.pop("local")
-        with open(os.path.join(args.train_dir, "local_settings.yaml"), "w") as f:
+        with open(os.path.join(train_dir, "local_settings.yaml"), "w") as f:
             if (
                 local_settings.get("wandb", False)
                 and "id" not in local_settings["wandb"].keys()
@@ -462,31 +514,30 @@ def train_local():
 
                     local_settings["wandb"]["id"] = wandb.util.generate_id()
                 except ImportError:
-                    print("wandb not installed, cannot generate run id.")
+                    logger.warning("wandb not installed, cannot generate run id.")
             yaml.dump(local_settings, f, default_flow_style=False, sort_keys=False)
 
-        pm, wfd = prepare_training_new(train_settings, args.train_dir, local_settings)
+        pm, wfd = prepare_training_new(train_settings, train_dir, local_settings)
 
     else:
-        if not os.path.isfile(args.checkpoint):
-            raise FileNotFoundError(f"Checkpoint not found: {args.checkpoint}")
-        print("Resuming training run.")
-        with open(os.path.join(args.train_dir, "local_settings.yaml"), "r") as f:
+        checkpoint = to_absolute_path(checkpoint)
+        if not os.path.isfile(checkpoint):
+            raise FileNotFoundError(f"Checkpoint not found: {checkpoint}")
+        logger.info("Resuming training run.")
+        with open(os.path.join(train_dir, "local_settings.yaml"), "r") as f:
             local_settings = yaml.safe_load(f)
-        pm, wfd = prepare_training_resume(
-            args.checkpoint, local_settings, args.train_dir
-        )
+        pm, wfd = prepare_training_resume(checkpoint, local_settings, train_dir)
 
     with threadpool_limits(limits=1, user_api="blas"):
-        complete = train_stages(pm, wfd, args.train_dir, local_settings)
+        complete = train_stages(pm, wfd, train_dir, local_settings)
 
     if complete:
-        if args.exit_command:
-            print(
-                f"All training stages complete. Executing exit command: {args.exit_command}."
+        if exit_command:
+            logger.info(
+                f"All training stages complete. Executing exit command: {exit_command}."
             )
-            os.system(args.exit_command)
+            os.system(exit_command)
         else:
-            print("All training stages complete.")
+            logger.info("All training stages complete.")
     else:
-        print("Program terminated due to runtime limit.")
+        logger.info("Program terminated due to runtime limit.")

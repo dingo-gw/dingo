@@ -1,4 +1,5 @@
 from os.path import isfile
+import logging
 
 import numpy as np
 from gwpy.timeseries import TimeSeries
@@ -9,6 +10,8 @@ from dingo.gw.data.data_download import download_raw_data
 from dingo.gw.gwutils import get_window
 from dingo.gw.domains import UniformFrequencyDomain
 from dingo.gw.domains import build_domain_from_model_metadata
+
+logger = logging.getLogger(__name__)
 
 
 def load_raw_data(time_event, settings, event_dataset=None):
@@ -45,11 +48,11 @@ def load_raw_data(time_event, settings, event_dataset=None):
                         f"{dataset.settings}"
                     )
             data = vars(dataset)[event]
-            print(f"Data for event at {event} found in {event_dataset}.")
+            logger.info(f"Data for event at {event} found in {event_dataset}.")
             return data
 
     # if this did not work, download the data
-    print(f"Downloading data for event at {event}.")
+    logger.info(f"Downloading data for event at {event}.")
     data = download_raw_data(time_event, **settings)
 
     # optionally save this data to event_dataset
@@ -57,7 +60,7 @@ def load_raw_data(time_event, settings, event_dataset=None):
         dataset = DingoDataset(
             dictionary={event: data, "settings": settings}, data_keys=[event]
         )
-        print(f"Saving data for event at {event} to {event_dataset}.")
+        logger.info(f"Saving data for event at {event} to {event_dataset}.")
         dataset.to_file(event_dataset, mode="a")
 
     return data

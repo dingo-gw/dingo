@@ -1,0 +1,4 @@
+_target_: dingo.gw.domains.UniformFrequencyDomain
+f_min: 20.0
+f_max: 1024.0
+delta_f: 0.125

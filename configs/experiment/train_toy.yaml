@@ -1,0 +1,51 @@
+# @package _global_
+
+defaults:
+  - override /model: toy_npe
+  - _self_
+
+data:
+  waveform_dataset:
+    file_name: training_data/waveform_dataset.hdf5
+    domain_update: null
+    svd_size_update: null
+  train_fraction: 0.95
+  detectors: [H1, L1]
+  ref_time: 1126259462.391
+  inference_parameters:
+    - chirp_mass
+    - mass_ratio
+    - chi_1
+    - chi_2
+    - theta_jn
+    - dec
+    - ra
+    - geocent_time
+    - luminosity_distance
+    - psi
+    - phase
+
+training:
+  stage_0:
+    epochs: 20
+    asd_dataset:
+      _target_: dingo.gw.noise.asd_dataset.ASDDataset
+      file_name: training_data/asd_dataset/asds_O1.hdf5
+      ifos: ${data.detectors}
+      precision: single
+      domain_update: null
+    freeze_rb_layer: true
+    batch_size: 64
+    early_stopping: null
+    optimizer:
+      lr: 0.0001
+    scheduler:
+      T_max: 20
+
+local:
+  device: cpu
+  num_workers: 6
+  runtime_limits:
+    max_time_per_run: 3600000
+    max_epochs_per_run: 30
+  checkpoint_epochs: 15

@@ -1,77 +1,40 @@
-import argparse
-import textwrap
+import logging
 from os.path import join
 
+import hydra
 import os
-import yaml
 import pickle
+from hydra.utils import to_absolute_path
+from omegaconf import DictConfig, OmegaConf
 
 from dingo.gw.noise.asd_estimation import (
     download_and_estimate_psds,
 )
 from dingo.gw.noise.asd_dataset import ASDDataset
-from dingo.gw.noise.generate_dataset_dag import create_dag
 from dingo.gw.noise.utils import merge_datasets, get_time_segments
 
-
-def parse_args():
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        description=textwrap.dedent(
-            """\
-        Generate an ASD dataset based on a settings file.
-        """
-        ),
-    )
-    parser.add_argument(
-        "--data_dir",
-        type=str,
-        required=True,
-        help="Path where the PSD data is to be stored. Must contain a 'settings.yaml' file.",
-    )
-    parser.add_argument(
-        "--settings_file",
-        type=str,
-        default=None,
-        help="Path to a settings file in case two different datasets are generated in the same directory",
-    )
-    parser.add_argument(
-        "--time_segments_file",
-        type=str,
-        default=None,
-        help="Optional file containing a dictionary of a list of time segments that should be used for estimating PSDs."
-        "This has to be a pickle file.",
-    )
-    parser.add_argument(
-        "--out_name",
-        type=str,
-        default=None,
-        help="Path to resulting ASD dataset",
-    )
-    parser.add_argument("--verbose", action="store_true")
-
-    return parser.parse_args()
+logger = logging.getLogger(__name__)
+logging.captureWarnings(True)
 
 
-def generate_dataset():
+@hydra.main(
+    version_base="1.3",
+    config_path="../../../configs",
+    config_name="generate_asd_dataset",
+)
+def generate_dataset(cfg: DictConfig):
     """
     Creates and saves an ASD dataset
     """
-    args = parse_args()
+    data_dir = to_absolute_path(cfg.data_dir)
+    settings = OmegaConf.to_container(cfg, resolve=True)
+    time_segments_file = settings.pop("time_segments_file")
+    out_name = settings.pop("out_name")
+    verbose = settings.pop("verbose")
+    settings.pop("data_dir")
 
-    # Load settings
-    settings_file = (
-        args.settings_file
-        if args.settings_file is not None
-        else join(args.data_dir, "asd_dataset_settings.yaml")
-    )
-    with open(settings_file, "r") as f:
-        settings = yaml.safe_load(f)
-
-    data_dir = args.data_dir
-
-    if args.time_segments_file:
-        with open(args.time_segments_file, "rb") as f:
+    if time_segments_file:
+        with open(to_absolute_path(time_segments_file), "rb") as f:
             time_segments = pickle.load(f)
     else:
         time_segments = get_time_segments(settings["dataset_settings"])
@@ -84,31 +47,37 @@ def generate_dataset():
 
     if "condor" in settings:
 
-        dagman = create_dag(data_dir, settings_file, time_segments, args.out_name)
-
-        try:
-            dagman.visualize(
-                join(data_dir, "tmp", "condor", "ASD_dataset_generation_workflow.png")
-            )
-        except:
-            pass
-
-        dagman.build()
-        print(f"DAG submission file written.")
+        raise NotImplementedError(
+            "Hydra Stage 1 only supports local ASD dataset generation. "
+            "Condor/DAG ASD generation is deferred to Stage 3."
+        )
+        # Legacy Condor/DAG implementation to translate in Stage 3:
+        #
+        # dagman = create_dag(data_dir, settings_file, time_segments, out_name)
+        #
+        # try:
+        #     dagman.visualize(
+        #         join(data_dir, "tmp", "condor", "ASD_dataset_generation_workflow.png")
+        #     )
+        # except:
+        #     pass
+        #
+        # dagman.build()
+        # logger.info("DAG submission file written.")
 
     else:
 
-        print("Downloading strain data and estimating PSDs...")
+        logger.info("Downloading strain data and estimating PSDs...")
         asd_filename_list = download_and_estimate_psds(
-            args.data_dir, settings, time_segments, verbose=args.verbose
+            data_dir, settings, time_segments, verbose=verbose
         )
         asd_dataset_list = {
             det: [ASDDataset(asd_file) for asd_file in asd_file_list]
             for det, asd_file_list in asd_filename_list.items()
         }
-        print("Merging single dataset files into one...")
+        logger.info("Merging single dataset files into one...")
         dataset = merge_datasets(asd_dataset_list)
-        filename = args.out_name
+        filename = out_name
         if filename is None:
             run = settings["dataset_settings"]["observing_run"]
             filename = join(data_dir, f"asds_{run}.hdf5")

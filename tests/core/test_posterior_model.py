@@ -44,7 +44,7 @@ def data_setup_pm_1():
     }
 
     d.model_kwargs = {
-        "posterior_model_type": "normalizing_flow",
+        "_target_": "dingo.core.posterior_models.NormalizingFlowPosteriorModel",
         "posterior_kwargs": d.posterior_kwargs,
         "embedding_kwargs": d.embedding_kwargs,
     }
@@ -59,22 +59,31 @@ def data_setup_optimizer_scheduler():
     d = types.SimpleNamespace()
 
     d.adam_kwargs = {
-        "type": "adam",
+        "_target_": "torch.optim.Adam",
+        "_partial_": True,
         "lr": 0.0001,
     }
     d.sgd_kwargs = {
-        "type": "sgd",
+        "_target_": "torch.optim.SGD",
+        "_partial_": True,
         "lr": 0.0001,
         "momentum": 0.9,
     }
 
-    d.step_kwargs = {"type": "step", "step_size": 3, "gamma": 0.5}
+    d.step_kwargs = {
+        "_target_": "torch.optim.lr_scheduler.StepLR",
+        "_partial_": True,
+        "step_size": 3,
+        "gamma": 0.5,
+    }
     d.cosine_kwargs = {
-        "type": "cosine",
+        "_target_": "torch.optim.lr_scheduler.CosineAnnealingLR",
+        "_partial_": True,
         "T_max": 10,
     }
     d.rop_kwargs = {
-        "type": "reduce_on_plateau",
+        "_target_": "torch.optim.lr_scheduler.ReduceLROnPlateau",
+        "_partial_": True,
         "factor": 0.5,
         "patience": 3,
     }
@@ -115,6 +124,7 @@ def test_pm_saving_and_loading_basic(data_setup_pm_1):
 
     # load saved model
     pm_1 = NormalizingFlowPosteriorModel(model_filename=d.model_filename, device="cpu")
+    assert pm_1.metadata.train_settings.model._target_ == d.model_kwargs["_target_"]
 
     # build a model with identical kwargs
     pm_2 = NormalizingFlowPosteriorModel(metadata=d.metadata, device="cpu")
@@ -222,3 +232,22 @@ def test_pm_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler):
         factors.append(lr / pm.optimizer.defaults["lr"])
         torchutils.perform_scheduler_step(pm.scheduler, loss)
     assert np.allclose(factors, e.cosine_factors), "Scheduler does not load correctly."
+
+
+def test_pm_hydra_optimizer_scheduler(data_setup_pm_1):
+    d = data_setup_pm_1
+    pm = NormalizingFlowPosteriorModel(metadata=d.metadata, device="cpu")
+    pm.optimizer_kwargs = {
+        "_target_": "torch.optim.Adam",
+        "_partial_": True,
+        "lr": 0.0001,
+    }
+    pm.scheduler_kwargs = {
+        "_target_": "torch.optim.lr_scheduler.CosineAnnealingLR",
+        "_partial_": True,
+        "T_max": 10,
+    }
+    pm.initialize_optimizer_and_scheduler()
+
+    assert isinstance(pm.optimizer, torch.optim.Adam)
+    assert isinstance(pm.scheduler, torch.optim.lr_scheduler.CosineAnnealingLR)

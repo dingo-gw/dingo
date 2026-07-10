@@ -8,20 +8,20 @@ import yaml
 from bilby_pipe.input import Input
 from bilby_pipe.utils import (
     parse_args,
-    logger,
     convert_string_to_dict,
     convert_prior_string_input,
     resolve_filename_with_transfer_fallback,
     BilbyPipeError,
 )
+import logging
+from dingo.core.utils.logging_utils import setup_logger
+logger = logging.getLogger("dingo.pipe")
 
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import MultibandedFrequencyDomain
 from dingo.pipe.default_settings import IMPORTANCE_SAMPLING_SETTINGS
 from dingo.pipe.parser import create_parser
 from dingo.gw.result import Result
-
-logger.name = "dingo_pipe"
 
 
 class ImportanceSamplingInput(Input):
@@ -285,6 +285,7 @@ def create_sampling_parser():
 def main():
     """Data analysis main logic"""
     args, unknown_args = parse_args(sys.argv[1:], create_sampling_parser())
+    setup_logger(outdir=args.outdir, label=args.label)
     # log_version_information()
     analysis = ImportanceSamplingInput(args, unknown_args)
     analysis.run_sampler()

@@ -1,0 +1,33 @@
+defaults:
+  - hydra: default
+  - optimizer: adam
+  - scheduler: cosine
+  - _self_
+
+checkpoint: ???
+out_file: updated_model.pt
+replace: null
+
+stage:
+  optimizer: ${optimizer}
+  scheduler: ${scheduler}
+  epochs: 20
+  asd_dataset:
+    _target_: dingo.gw.noise.asd_dataset.ASDDataset
+    file_name: training_data/asd_dataset/asds_O1.hdf5
+    ifos: null
+    precision: single
+    domain_update: null
+  freeze_rb_layer: false
+  batch_size: 64
+  early_stopping: null
+
+hydra:
+  job:
+    name: append_training_stage
+    config:
+      override_dirname:
+        exclude_keys:
+          - checkpoint
+          - out_file
+          - stage.asd_dataset.file_name

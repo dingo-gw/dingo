@@ -1,4 +1,3 @@
-import argparse
 import os.path
 import pickle
 from io import StringIO
@@ -6,13 +5,19 @@ from os.path import join
 from os.path import isfile
 import glob
 import copy
+import logging
 
+import hydra
 import numpy as np
 import requests
-import yaml
+from hydra.utils import to_absolute_path
+from omegaconf import DictConfig, OmegaConf
 
 from gwpy.table import EventTable
 from dingo.gw.noise.asd_dataset import ASDDataset
+
+logger = logging.getLogger(__name__)
+logging.captureWarnings(True)
 
 """
 Catalogue against which to check that no event is present in the estimated PSDs
@@ -156,7 +161,7 @@ def merge_datasets(asd_dataset_list):
     merged_dict = {"asds": {}, "gps_times": {}}
 
     for det, asd_list in asd_dataset_list.items():
-        print(f"Merging {len(asd_list)} datasets into one for detector {det}.")
+        logger.info(f"Merging {len(asd_list)} datasets into one for detector {det}.")
         merged_dict["asds"][det] = np.vstack(
             [asd_dataset.asds[det] for asd_dataset in asd_list]
         )
@@ -171,51 +176,26 @@ def merge_datasets(asd_dataset_list):
     return merged
 
 
-def merge_datasets_cli():
+@hydra.main(
+    version_base="1.3",
+    config_path="../../../configs",
+    config_name="merge_asd_datasets",
+)
+def merge_datasets_cli(cfg: DictConfig):
     """
     Command-line function to combine a collection of datasets into one. Used for
     parallelized ASD dataset generation.
     """
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--data_dir",
-        type=str,
-        required=True,
-        help="Path where the PSD data is to be stored.",
-    )
-    parser.add_argument(
-        "--settings_file",
-        type=str,
-        required=True,
-        help="Path to a settings file that contains the settings for the ASD dataset generation",
-    )
-    parser.add_argument(
-        "--time_segments_file",
-        type=str,
-        default=None,
-        help="Path to a file containing the time segments for which PSDs should be estimated",
-    )
-    parser.add_argument(
-        "--num_parts",
-        type=int,
-        default=-1,
-        help="Number of ASD datasets that should be merged",
-    )
-    parser.add_argument(
-        "--out_name",
-        type=str,
-        default=None,
-        help="File name of merged dataset",
-    )
-    args = parser.parse_args()
-
-    with open(args.settings_file, "r") as f:
-        settings = yaml.safe_load(f)
+    settings = OmegaConf.to_container(cfg, resolve=True)
+    data_dir = to_absolute_path(settings.pop("data_dir"))
+    time_segments_file = settings.pop("time_segments_file")
+    num_parts = settings.pop("num_parts")
+    out_name = settings.pop("out_name")
 
     time_segments = None
-    if args.time_segments_file:
-        with open(args.time_segments_file, "rb") as f:
+    if time_segments_file:
+        with open(to_absolute_path(time_segments_file), "rb") as f:
             time_segments = pickle.load(f)
 
     detectors = settings["dataset_settings"]["detectors"]
@@ -223,7 +203,7 @@ def merge_datasets_cli():
     asd_dataset_list = {det: [] for det in detectors}
 
     for det in detectors:
-        file_dir = psd_data_path(args.data_dir, observing_run, det)
+        file_dir = psd_data_path(data_dir, observing_run, det)
         if time_segments:
             filenames = [
                 join(file_dir, f"asd_{seg[0]}.hdf5")
@@ -232,14 +212,16 @@ def merge_datasets_cli():
             ]
         else:  # if no time_segments are specified, use the first 'num_parts' ASD datasets
             filenames = sorted(glob.glob(join(file_dir, f"asd_*.hdf5")))
-            num_parts = min(args.num_parts, len(filenames)) if args.num_parts > 0 else len(filenames)
+            num_parts = (
+                min(num_parts, len(filenames)) if num_parts > 0 else len(filenames)
+            )
             filenames = filenames[:num_parts]
 
         asd_dataset_list[det] = [ASDDataset(filename) for filename in filenames]
 
     merged_dataset = merge_datasets(asd_dataset_list)
-    filename = args.out_name
+    filename = out_name
     if filename is None:
         run = settings["dataset_settings"]["observing_run"]
-        filename = join(args.data_dir, f"asds_{run}.hdf5")
+        filename = join(data_dir, f"asds_{run}.hdf5")
     merged_dataset.to_file(filename)

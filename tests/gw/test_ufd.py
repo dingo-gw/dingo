@@ -40,6 +40,19 @@ def test_FD_domain_dict(uniform_FD_params):
     assert domain.__dict__ == domain2.__dict__
 
 
+def test_FD_hydra_target(uniform_FD_params):
+    settings = {
+        "_target_": "dingo.gw.domains.UniformFrequencyDomain",
+        **uniform_FD_params,
+    }
+    domain = build_domain(settings)
+    assert isinstance(domain, UniformFrequencyDomain)
+    assert domain.domain_dict == {
+        "type": "UniformFrequencyDomain",
+        **uniform_FD_params,
+    }
+
+
 def test_FD_update_data(uniform_FD_params):
     p = uniform_FD_params
     domain = UniformFrequencyDomain(**p)
@@ -163,4 +176,3 @@ def test_FD_caching(uniform_FD_params):
     # after clearing the cache, the __call__ method should return the correct
     # result
     assert len(domain()) < len(domain_ref())
-

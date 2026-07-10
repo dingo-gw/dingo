@@ -1,8 +1,13 @@
+import logging
+
 import numpy as np
 import pandas as pd
 import scipy
 from sklearn.utils.extmath import randomized_svd
 from dingo.core.dataset import DingoDataset
+
+logger = logging.getLogger(__name__)
+
 
 class SVDBasis(DingoDataset):
 
@@ -155,15 +160,17 @@ class SVDBasis(DingoDataset):
                 if "mismatch" in col:
                     n = int(col.split(sep="=")[-1])
                     mismatches = self.mismatches[col]
-                    print(f"n = {n}")
-                    print("  Mean mismatch = {}".format(np.mean(mismatches)))
-                    print("  Standard deviation = {}".format(np.std(mismatches)))
-                    print("  Max mismatch = {}".format(np.max(mismatches)))
-                    print("  Median mismatch = {}".format(np.median(mismatches)))
-                    print("  Percentiles:")
-                    print("    99    -> {}".format(np.percentile(mismatches, 99)))
-                    print("    99.9  -> {}".format(np.percentile(mismatches, 99.9)))
-                    print("    99.99 -> {}".format(np.percentile(mismatches, 99.99)))
+                    logger.info(f"n = {n}")
+                    logger.info("  Mean mismatch = {}".format(np.mean(mismatches)))
+                    logger.info("  Standard deviation = {}".format(np.std(mismatches)))
+                    logger.info("  Max mismatch = {}".format(np.max(mismatches)))
+                    logger.info("  Median mismatch = {}".format(np.median(mismatches)))
+                    logger.info("  Percentiles:")
+                    logger.info("    99    -> {}".format(np.percentile(mismatches, 99)))
+                    logger.info("    99.9  -> {}".format(np.percentile(mismatches, 99.9)))
+                    logger.info(
+                        "    99.99 -> {}".format(np.percentile(mismatches, 99.99))
+                    )
 
     def decompress(self, coefficients: np.ndarray):
         """

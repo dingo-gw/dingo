@@ -1,12 +1,12 @@
 import argparse
 from pathlib import Path
 
-from bilby_pipe.utils import logger
+import logging
 
 from dingo.core.result import make_pp_plot
 from dingo.gw.result import Result
 
-logger.name = "dingo_pipe"
+logger = logging.getLogger("dingo.pipe")
 
 
 def create_parser():

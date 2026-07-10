@@ -1,0 +1,14 @@
+# @package _global_
+
+defaults:
+  - override /domain: uniform_frequency
+  - override /waveform_generator: phenom_d
+  - override /intrinsic_prior: default
+  - _self_
+
+domain:
+  delta_f: 0.25
+num_samples: 10000
+compression: null
+num_processes: 1
+out_file: waveform_dataset.hdf5

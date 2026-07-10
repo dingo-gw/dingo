@@ -1,9 +1,9 @@
 import copy
+import logging
 import math
 import time
 from pathlib import Path
 from typing import Optional, Union
-import sys
 
 import numpy as np
 import pandas as pd
@@ -21,6 +21,8 @@ from dingo.gw.transforms import SelectStandardizeRepackageParameters
 #
 # Sampler classes are motivated by the approach of Bilby.
 #
+
+logger = logging.getLogger(__name__)
 
 
 class Sampler(object):
@@ -157,7 +159,7 @@ class Sampler(object):
             x = [x]
         else:
             if context is not None:
-                print("Unconditional model. Ignoring context.")
+                logger.warning("Unconditional model. Ignoring context.")
             x = []
 
         # For a normalizing flow, we get the log_prob for "free" when sampling,
@@ -205,7 +207,7 @@ class Sampler(object):
         """
         self.samples = None
 
-        print(f"Running sampler to generate {num_samples} samples.")
+        logger.info(f"Running sampler to generate {num_samples} samples.")
         t0 = time.time()
         if not self.unconditional_model:
             if self.context is None:
@@ -229,8 +231,7 @@ class Sampler(object):
         # correction for t_ref) and represent as DataFrame.
         self._post_process(samples)
         self.samples = pd.DataFrame(samples)
-        print(f"Done. This took {time.time() - t0:.1f} s.")
-        sys.stdout.flush()
+        logger.info(f"Done. This took {time.time() - t0:.1f} s.")
 
     def log_prob(self, samples: pd.DataFrame | dict) -> np.ndarray:
         """
@@ -430,8 +431,8 @@ class GNPESampler(Sampler):
             init_samples = self.init_sampler._run_sampler(num_samples, context)
         else:
             if self.num_iterations == 1:
-                print(
-                    f"Warning: Removing initial outliers, but only carrying out "
+                logger.warning(
+                    f"Removing initial outliers, but only carrying out "
                     f"{self.num_iterations} GNPE iteration. This risks biasing "
                     f"results."
                 )
@@ -515,16 +516,21 @@ class GNPESampler(Sampler):
                 p: x["extrinsic_parameters"][p] for p in self.gnpe_proxy_parameters
             }
 
-            print(
+            logger.info(
                 f"it {i}.\tmin pvalue: {self.iteration_tracker.pvalue_min:.3f}"
-                f"\tproxy mean: ",
-                *[f"{torch.mean(v).item():.5f}" for v in proxies.values()],
-                "\tproxy std:",
-                *[f"{torch.std(v).item():.5f}" for v in proxies.values()],
-                "\ttimes:",
-                time_sample_start - start_time,
-                time_sample_end - time_sample_start,
-                time.time() - time_sample_end,
+                f"\tproxy mean: "
+                + " ".join(f"{torch.mean(v).item():.5f}" for v in proxies.values())
+                + "\tproxy std: "
+                + " ".join(f"{torch.std(v).item():.5f}" for v in proxies.values())
+                + "\ttimes: "
+                + " ".join(
+                    str(t)
+                    for t in (
+                        time_sample_start - start_time,
+                        time_sample_end - time_sample_start,
+                        time.time() - time_sample_end,
+                    )
+                )
             )
 
         #

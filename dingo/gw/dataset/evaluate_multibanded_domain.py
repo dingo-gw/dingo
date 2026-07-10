@@ -1,27 +1,31 @@
-import argparse
+import logging
+from typing import Dict
 
+import hydra
 import numpy as np
-import yaml
+from hydra.utils import instantiate
+from omegaconf import DictConfig, OmegaConf
 from scipy.interpolate import interp1d
 
 from dingo.gw.dataset import generate_parameters_and_polarizations
-from dingo.gw.domains import build_domain, MultibandedFrequencyDomain
+from dingo.gw.domains import MultibandedFrequencyDomain
 from dingo.gw.gwutils import get_mismatch
-from dingo.gw.prior import build_prior_with_defaults
-from dingo.gw.waveform_generator import (
-    NewInterfaceWaveformGenerator,
-    WaveformGenerator,
-    generate_waveforms_parallel,
-)
+from dingo.gw.waveform_generator import generate_waveforms_parallel
+
+logger = logging.getLogger(__name__)
+logging.captureWarnings(True)
 
 
-def _evaluate_multibanding_main(
-    settings_file: str,
+def _settings_from_config(cfg: DictConfig) -> Dict:
+    settings = OmegaConf.to_container(cfg, resolve=True)
+    settings.pop("num_samples", None)
+    return settings
+
+
+def evaluate_multibanding(
+    settings: Dict,
     num_samples: int,
 ):
-    with open(settings_file, "r") as f:
-        settings = yaml.safe_load(f)
-
     # Ignore any compression settings
     if "compression" in settings:
         del settings["compression"]
@@ -30,40 +34,28 @@ def _evaluate_multibanding_main(
     #
     # (a) Set geocent_time = 0.12 s (boundary of usual prior + Earth-radius crossing time)
     # (b) Set chirp mass to bottom end of prior.
-    prior = build_prior_with_defaults(settings["intrinsic_prior"])
-    settings["intrinsic_prior"]["geocent_time"] = 0.12
-    settings["intrinsic_prior"]["chirp_mass"] = prior["chirp_mass"].minimum
+    prior = instantiate(settings["intrinsic_prior"])
+    settings["intrinsic_prior"]["dictionary"]["geocent_time"] = 0.12
+    settings["intrinsic_prior"]["dictionary"]["chirp_mass"] = prior[
+        "chirp_mass"
+    ].minimum
     # Rebuild prior with updated settings.
-    prior = build_prior_with_defaults(settings["intrinsic_prior"])
-    print("Prior")
+    prior = instantiate(settings["intrinsic_prior"])
+    logger.info("Prior")
     for k, v in prior.items():
-        print(f"{k}: {v}")
+        logger.info(f"{k}: {v}")
 
-    domain = build_domain(settings["domain"])
-    print("\nDomain")
-    print(domain.domain_dict)
+    domain = instantiate(settings["domain"])
+    logger.info("\nDomain")
+    logger.info(domain.domain_dict)
 
     if not isinstance(domain, MultibandedFrequencyDomain):
         raise ValueError("Waveform dataset domain not a MultibandedFrequencyDomain.")
 
-    if settings["waveform_generator"].get("new_interface", False):
-        waveform_generator_mfd = NewInterfaceWaveformGenerator(
-            domain=domain,
-            **settings["waveform_generator"],
-        )
-        waveform_generator_ufd = NewInterfaceWaveformGenerator(
-            domain=domain.base_domain,
-            **settings["waveform_generator"],
-        )
-    else:
-        waveform_generator_mfd = WaveformGenerator(
-            domain=domain,
-            **settings["waveform_generator"],
-        )
-        waveform_generator_ufd = WaveformGenerator(
-            domain=domain.base_domain,
-            **settings["waveform_generator"],
-        )
+    waveform_generator_mfd = instantiate(settings["waveform_generator"], domain=domain)
+    waveform_generator_ufd = instantiate(
+        settings["waveform_generator"], domain=domain.base_domain
+    )
 
     # Generate MFD waveforms.
     parameters, polarizations_mfd = generate_parameters_and_polarizations(
@@ -88,43 +80,34 @@ def _evaluate_multibanding_main(
                 asd_file="aLIGO_ZERO_DET_high_P_asd.txt",
             )
 
-    print("\nMismatches between UFD waveforms and MFD waveforms interpolated to MFD.")
-    print(
+    logger.info(
+        "\nMismatches between UFD waveforms and MFD waveforms interpolated to MFD."
+    )
+    logger.info(
         "This is a conservative estimate of the MFD performance when training "
         "networks."
     )
     mismatches = np.concatenate([v for v in mismatches.values()])
-    print(f"num_samples = {num_samples}")
-    print("  Mean mismatch = {}".format(np.mean(mismatches)))
-    print("  Standard deviation = {}".format(np.std(mismatches)))
-    print("  Max mismatch = {}".format(np.max(mismatches)))
-    print("  Median mismatch = {}".format(np.median(mismatches)))
-    print("  Percentiles:")
-    print("    99    -> {}".format(np.percentile(mismatches, 99)))
-    print("    99.9  -> {}".format(np.percentile(mismatches, 99.9)))
-    print("    99.99 -> {}".format(np.percentile(mismatches, 99.99)))
+    logger.info(f"num_samples = {num_samples}")
+    logger.info("  Mean mismatch = {}".format(np.mean(mismatches)))
+    logger.info("  Standard deviation = {}".format(np.std(mismatches)))
+    logger.info("  Max mismatch = {}".format(np.max(mismatches)))
+    logger.info("  Median mismatch = {}".format(np.median(mismatches)))
+    logger.info("  Percentiles:")
+    logger.info("    99    -> {}".format(np.percentile(mismatches, 99)))
+    logger.info("    99.9  -> {}".format(np.percentile(mismatches, 99.9)))
+    logger.info("    99.99 -> {}".format(np.percentile(mismatches, 99.99)))
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="Evaluate performance of multibanding on waveform dataset.",
-    )
-    parser.add_argument(
-        "--settings-file",
-        type=str,
-        required=True,
-        help="YAML file containing database settings",
-    )
-    parser.add_argument(
-        "--num-samples",
-        type=int,
-        default=5000,
-        help="Number of waveform evaluations for comparison.",
-    )
-    return parser.parse_args()
+@hydra.main(
+    version_base="1.3",
+    config_path="../../../configs",
+    config_name="evaluate_multibanded_domain",
+)
+def main(cfg: DictConfig) -> None:
+    settings = _settings_from_config(cfg)
+    evaluate_multibanding(settings, cfg.num_samples)
 
 
-def main() -> None:
-    args = parse_args()
-    _evaluate_multibanding_main(args.settings_file, args.num_samples)
+if __name__ == "__main__":
+    main()

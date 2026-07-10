@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
+from bilby.gw.prior import BBHPriorDict
 from scipy.interpolate import interp1d
 
 from dingo.gw.domains import MultibandedFrequencyDomain
 from dingo.gw.gwutils import get_mismatch
-from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.waveform_generator import WaveformGenerator, NewInterfaceWaveformGenerator
 
 
@@ -47,7 +47,7 @@ def intrinsic_prior(approximant):
         "phi_jl": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
         "geocent_time": "bilby.core.prior.Uniform(minimum=-0.1, maximum=0.1)",
     }
-    prior = build_prior_with_defaults(intrinsic_dict)
+    prior = BBHPriorDict(intrinsic_dict)
     return prior
 
 

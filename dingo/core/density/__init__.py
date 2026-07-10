@@ -8,4 +8,3 @@ from .interpolation import (
     interpolated_sample_and_log_prob_multi,
     interpolated_log_prob_multi,
 )
-from .nde_settings import get_default_nde_settings_3d

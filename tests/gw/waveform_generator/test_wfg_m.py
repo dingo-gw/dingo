@@ -17,6 +17,7 @@ import numpy as np
 import lal
 import lalsimulation as LS
 from matplotlib import pyplot as plt
+from bilby.gw.prior import BBHPriorDict
 
 from dingo.gw.waveform_generator import (
     WaveformGenerator,
@@ -25,7 +26,6 @@ from dingo.gw.waveform_generator import (
 )
 from dingo.gw.gwutils import get_mismatch
 from dingo.gw.domains import build_domain
-from dingo.gw.prior import build_prior_with_defaults
 
 
 @pytest.fixture
@@ -103,7 +103,7 @@ def intrinsic_prior(approximant):
             "chi_2": 'bilby.gw.prior.AlignedSpin(name="chi_2", a_prior=Uniform(minimum=0, maximum=0.99))',
             "geocent_time": 0.0,
         }
-    prior = build_prior_with_defaults(intrinsic_dict)
+    prior = BBHPriorDict(intrinsic_dict)
     return prior
 
 
