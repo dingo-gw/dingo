@@ -870,10 +870,9 @@ class Result(DingoDataset):
         if keys is None:
             keys = self.search_parameter_keys
         if self.injection_parameters is None:
-            raise (
-                TypeError,
+            raise TypeError(
                 "Result object has no 'injection_parameters'. "
-                "Cannot compute credible levels.",
+                "Cannot compute credible levels."
             )
         credible_levels = {
             key: self.get_injection_credible_level(key, weighted=weighted)
@@ -902,10 +901,9 @@ class Result(DingoDataset):
         float: credible level
         """
         if self.injection_parameters is None:
-            raise (
-                TypeError,
+            raise TypeError(
                 "Result object has no 'injection_parameters'. "
-                "Cannot compute credible levels.",
+                "Cannot compute credible levels."
             )
         theta = self._cleaned_samples()
 
