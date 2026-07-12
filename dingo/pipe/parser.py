@@ -1561,6 +1561,18 @@ def create_parser(top_level=True, usage=None):
         "recorded with the samples.",
     )
     sampler_parser.add(
+        "--chirp-mass-scan",
+        type=nonestr,
+        default=None,
+        help="Determine the trigger chirp mass from the data before sampling, "
+        "instead of pinning chirp_mass_proxy in fixed-context-parameters "
+        "(mutually exclusive with such a pin). 'true' scans with defaults "
+        "derived from the model (grid from the training prior and kernel, 10 "
+        "draws per point, maximum-likelihood winner); a dictionary overrides "
+        "individual settings, e.g. {num_samples: 10, overlap_factor: 2, "
+        "block_size: 32}.",
+    )
+    sampler_parser.add(
         "--device",
         type=str,
         default="cuda",

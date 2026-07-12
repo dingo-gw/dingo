@@ -32,3 +32,24 @@ def test_ini_dict_form_parses(tmp_path):
         ini_body=f"model = model.pt\nfixed-context-parameters = {DEMO_FORM}\n",
     )
     assert convert_string_to_dict(args.fixed_context_parameters) == DEMO_DICT
+
+
+def test_chirp_mass_scan_default_is_none(tmp_path):
+    assert _parse(tmp_path).chirp_mass_scan is None
+
+
+def test_chirp_mass_scan_true_form_parses(tmp_path):
+    args = _parse(tmp_path, ini_body="model = model.pt\nchirp-mass-scan = true\n")
+    assert args.chirp_mass_scan.strip().lower() == "true"
+
+
+def test_chirp_mass_scan_dict_form_parses(tmp_path):
+    args = _parse(
+        tmp_path,
+        ini_body="model = model.pt\n"
+        "chirp-mass-scan = {num_samples: 10, overlap_factor: 2}\n",
+    )
+    assert convert_string_to_dict(args.chirp_mass_scan) == {
+        "num_samples": 10,
+        "overlap_factor": 2,
+    }

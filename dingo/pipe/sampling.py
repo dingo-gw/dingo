@@ -17,6 +17,7 @@ from dingo.core.factors import FlowFactor
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.inference.factors import GNPEKernelFactor, GWComposedSampler
+from dingo.gw.inference.scan import chirp_mass_scan
 from dingo.pipe.default_settings import DENSITY_RECOVERY_SETTINGS
 from dingo.pipe.parser import create_parser
 
@@ -62,6 +63,12 @@ class SamplingInput(Input):
             if args.fixed_context_parameters is not None
             else None
         )
+        if args.chirp_mass_scan is None:
+            self.chirp_mass_scan_settings = None
+        elif args.chirp_mass_scan.strip().lower() == "true":
+            self.chirp_mass_scan_settings = {}
+        else:
+            self.chirp_mass_scan_settings = convert_string_to_dict(args.chirp_mass_scan)
         self.num_samples = args.num_samples
         self.batch_size = args.batch_size
         self.density_recovery_settings = args.density_recovery_settings
@@ -132,6 +139,46 @@ class SamplingInput(Input):
             filename=self.model, device=self.device, load_training_info=False
         )
 
+        scan_provenance = None
+        if self.chirp_mass_scan_settings is not None:
+            if self.model_init is not None:
+                raise ValueError(
+                    "chirp-mass-scan applies to single-network models; it cannot "
+                    "be combined with model-init (iterative GNPE)."
+                )
+            if (
+                self.fixed_context_parameters is not None
+                and "chirp_mass_proxy" in self.fixed_context_parameters
+            ):
+                raise ValueError(
+                    "chirp-mass-scan and a pinned chirp_mass_proxy in "
+                    "fixed-context-parameters are mutually exclusive; provide one."
+                )
+            scan_kwargs = dict(self.chirp_mass_scan_settings)
+            scan_kwargs.setdefault("num_processes", self.request_cpus)
+            scan = chirp_mass_scan(
+                model,
+                self.context,
+                event_metadata=self.event_metadata,
+                fixed_context_parameters=self.fixed_context_parameters,
+                **scan_kwargs,
+            )
+            logger.info(
+                f"Chirp-mass scan: trigger {scan['chirp_mass_trigger']:.5f}, "
+                f"snr {scan['snr']:.2f}, "
+                f"max log likelihood {scan['max_log_likelihood']:.2f}."
+            )
+            self.fixed_context_parameters = {
+                **(self.fixed_context_parameters or {}),
+                "chirp_mass_proxy": scan["chirp_mass_trigger"],
+            }
+            scan_provenance = {
+                **scan["settings"],
+                "chirp_mass_trigger": scan["chirp_mass_trigger"],
+                "snr": scan["snr"],
+                "max_log_likelihood": scan["max_log_likelihood"],
+            }
+
         if self.model_init is not None:
             if self.fixed_context_parameters is not None:
                 raise ValueError(
@@ -161,6 +208,8 @@ class SamplingInput(Input):
                 fixed_context_parameters=self.fixed_context_parameters,
             )
         self.dingo_sampler.provenance_extra["models"] = self._model_paths()
+        if scan_provenance is not None:
+            self.dingo_sampler.provenance_extra["chirp_mass_scan"] = scan_provenance
 
     @property
     def density_recovery_settings(self):
