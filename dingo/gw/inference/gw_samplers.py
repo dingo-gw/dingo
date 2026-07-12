@@ -32,14 +32,15 @@ from dingo.gw.transforms import (
     GetDetectorTimes,
     DecimateWaveformsAndASDS,
     MaskDataForFrequencyRangeUpdate,
+    SelectKeys,
+    StrainTokenization,
 )
 
 
 class SamplerProtocol(Protocol):
     base_model_metadata: dict
 
-    def _initialize_transforms(self) -> None:
-        ...
+    def _initialize_transforms(self) -> None: ...
 
 
 class _GWMixinProtocol(SamplerProtocol):
@@ -172,7 +173,6 @@ class GWSamplerMixin(object):
         data_settings = self.base_model_metadata["train_settings"]["data"]
         if "domain_update" in data_settings:
             self.domain.update(data_settings["domain_update"])
-
 
     def _correct_reference_time(
         self: Sampler, samples: Union[dict, pd.DataFrame], inverse: bool = False
@@ -309,19 +309,36 @@ class GWSampler(GWSamplerMixin, Sampler):
                 )
             )
         #   * repackage strains and asds from dicts to an array
-        #   * convert array to torch tensor on the correct device
-        #   * extract only strain/waveform from the sample
-        transform_pre += [
-            # Use base metadata so that unconditional samplers still know how to
-            # transform data, since this transform is used by the GNPE sampler as
-            # well.
+        #   * optionally tokenize the strain (tokenized models, e.g. transformer)
+        #   * convert array(s) to torch tensor(s) on the correct device
+        #   * extract the network inputs from the sample
+        # Use base metadata so that unconditional samplers still know how to
+        # transform data, since this transform is used by the GNPE sampler as well.
+        transform_pre.append(
             RepackageStrainsAndASDS(
                 ifos=self.detectors,
                 first_index=self.domain.min_idx,
-            ),
-            ToTorch(device=self.model.device),
-            GetItem("waveform"),
-        ]
+            )
+        )
+        tokenization = self.metadata["train_settings"]["data"].get("tokenization")
+        if tokenization:
+            # StrainTokenization operates on numpy arrays, so it precedes ToTorch.
+            transform_pre.append(
+                StrainTokenization(
+                    domain=self.domain,
+                    token_size=tokenization.get("token_size"),
+                    num_tokens_per_block=tokenization.get("num_tokens_per_block"),
+                    drop_last_token=tokenization.get("drop_last_token", False),
+                )
+            )
+        transform_pre.append(ToTorch(device=self.model.device))
+        if tokenization:
+            # Dict of named network inputs; the model routes them by key.
+            transform_pre.append(
+                SelectKeys(["waveform", "position", "drop_token_mask"])
+            )
+        else:
+            transform_pre.append(GetItem("waveform"))
         self.transform_pre = Compose(transform_pre)
 
         # postprocessing transforms:

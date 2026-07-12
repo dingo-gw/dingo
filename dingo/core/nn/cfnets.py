@@ -1,9 +1,11 @@
+from typing import Optional
+
 import numpy as np
 import torch
 import torch.nn as nn
 
 from dingo.core.utils import torchutils
-from dingo.core.nn.enets import DenseResidualNet
+from dingo.core.nn.resnet import DenseResidualNet
 
 
 class ContinuousFlow(nn.Module):
@@ -25,8 +27,8 @@ class ContinuousFlow(nn.Module):
     def __init__(
         self,
         continuous_flow_net: nn.Module,
-        context_embedding_net: nn.Module = torch.nn.Identity(),
-        theta_embedding_net: nn.Module = torch.nn.Identity(),
+        context_embedding_net: Optional[nn.Module] = None,
+        theta_embedding_net: Optional[nn.Module] = None,
         context_with_glu: bool = False,
         theta_with_glu: bool = False,
         context_keys: tuple = ("waveform",),
@@ -36,10 +38,12 @@ class ContinuousFlow(nn.Module):
         ----------
         continuous_flow_net: nn.Module
             Main network for the continuous flow.
-        context_embedding_net: nn.Module = torch.nn.Identity()
+        context_embedding_net: Optional[nn.Module]
             Embedding network for the context information (e.g., observed data).
-        theta_embedding_net: nn.Module = torch.nn.Identity()
-            Embedding network for the parameters.
+            If None, defaults to nn.Identity().
+        theta_embedding_net: Optional[nn.Module]
+            Embedding network for the parameters. If None, defaults to
+            nn.Identity().
         context_with_glu: bool = False
             Whether to provide context as GLU or main input to the continuous_flow_net.
         theta_with_glu: bool = False
@@ -51,8 +55,18 @@ class ContinuousFlow(nn.Module):
         """
         super(ContinuousFlow, self).__init__()
         self.continuous_flow_net = continuous_flow_net
-        self.context_embedding_net = context_embedding_net
-        self.theta_embedding_net = theta_embedding_net
+        # Default to a fresh nn.Identity() per instance rather than a mutable
+        # default argument, which would otherwise share a single Identity module
+        # (and its registration as a submodule) across every ContinuousFlow that
+        # omits this argument.
+        self.context_embedding_net = (
+            context_embedding_net
+            if context_embedding_net is not None
+            else nn.Identity()
+        )
+        self.theta_embedding_net = (
+            theta_embedding_net if theta_embedding_net is not None else nn.Identity()
+        )
         self.theta_with_glu = theta_with_glu
         self.context_with_glu = context_with_glu
         self.context_keys = tuple(context_keys)
@@ -227,6 +241,7 @@ def create_cf(kwargs: dict, embedding_net: nn.Module = None):
         activation=activation_fn,
         dropout=kwargs["dropout"],
         batch_norm=kwargs["batch_norm"],
+        layer_norm=kwargs.get("layer_norm", False),
         context_features=glu_dim,
     )
 
@@ -262,6 +277,7 @@ def get_theta_embedding_net(embedding_kwargs: dict, input_dim):
             output_dim=embedding_kwargs["embedding_net"]["output_dim"],
             hidden_dims=embedding_kwargs["embedding_net"]["hidden_dims"],
             activation=activation_fn,
+            layer_norm=embedding_kwargs["embedding_net"].get("layer_norm", False),
             dropout=embedding_kwargs["embedding_net"].get("dropout", 0.0),
             batch_norm=embedding_kwargs["embedding_net"].get("batch_norm", True),
         )

@@ -18,6 +18,7 @@ from dingo.gw.transforms import (
     SampleExtrinsicParameters,
     GetDetectorTimes,
     CropMaskStrainRandom,
+    StrainTokenization,
 )
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.prior import default_inference_parameters
@@ -232,10 +233,22 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         transforms.append(
             CropMaskStrainRandom(domain, **data_settings["random_strain_cropping"])
         )
+    if "tokenization" in data_settings:
+        tokenization = data_settings["tokenization"]
+        transforms.append(
+            StrainTokenization(
+                domain=domain,
+                token_size=tokenization.get("token_size"),
+                num_tokens_per_block=tokenization.get("num_tokens_per_block"),
+                drop_last_token=tokenization.get("drop_last_token", False),
+            )
+        )
+
+    selected_keys = ["inference_parameters", "waveform"]
+    if "tokenization" in data_settings:
+        selected_keys += ["position", "drop_token_mask"]
     if data_settings["context_parameters"]:
-        selected_keys = ["inference_parameters", "waveform", "context_parameters"]
-    else:
-        selected_keys = ["inference_parameters", "waveform"]
+        selected_keys += ["context_parameters"]
 
     transforms.append(SelectKeys(selected_keys=selected_keys))
 
@@ -298,6 +311,7 @@ def initialization_dataloader(
             SelectStandardizeRepackageParameters,
             SelectKeys,
             CropMaskStrainRandom,
+            StrainTokenization,
         ]
     set_train_transforms(
         wfd, data_settings, asd_dataset_path, omit_transforms=omit_transforms or None

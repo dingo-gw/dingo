@@ -151,9 +151,14 @@ class Sampler(object):
 
             # transforms_pre are expected to transform the data in the same way for each
             # requested sample. We therefore apply pre-processing only once.
+            # transform_pre yields either the prepared strain tensor, or a dict of
+            # named tensors (e.g. tokenized models: waveform, position,
+            # drop_token_mask).
             x = self.transform_pre(context)
+            if not isinstance(x, dict):
+                x = {"waveform": x}
             # Require a batch dimension for the embedding network.
-            x = {"waveform": x.unsqueeze(0)}
+            x = {k: v.unsqueeze(0) for k, v in x.items()}
         else:
             if context is not None:
                 print("Unconditional model. Ignoring context.")
@@ -274,9 +279,10 @@ class Sampler(object):
             # Context is the same for each sample. Expand across batch dimension after
             # pre-processing.
             x = self.transform_pre(self.context)
-            x = {
-                "waveform": x.expand(len(samples), *x.shape)
-            }  # TODO: Make this more efficient.
+            if not isinstance(x, dict):
+                x = {"waveform": x}
+            # TODO: Make this more efficient.
+            x = {k: v.expand(len(samples), *v.shape) for k, v in x.items()}
         else:
             x = None
 

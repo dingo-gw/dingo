@@ -8,6 +8,7 @@ import torch.nn as nn
 import glasflow.nflows as nflows  # nflows not maintained, so use this maintained fork
 from glasflow.nflows import distributions, flows, transforms
 import glasflow.nflows.nn.nets as nflows_nets
+from dingo.core.nn.resnet import DenseResidualNet
 from dingo.core.utils import torchutils
 
 
@@ -38,6 +39,8 @@ def create_base_transform(
     activation: str = "relu",
     dropout_probability: float = 0.0,
     batch_norm: bool = False,
+    layer_norm: bool = False,
+    conditioner_type: str = "glasflow_residual",
     num_bins: int = 8,
     tail_bound: float = 1.0,
     apply_unconditional_transform: bool = False,
@@ -78,6 +81,16 @@ def create_base_transform(
         dropout probability for regularization
     :param batch_norm: bool = False
         whether to use batch normalization
+    :param layer_norm: bool = False
+        whether to use layer normalization in the conditioner network
+        (conditioner_type "dense_residual" only)
+    :param conditioner_type: str = "glasflow_residual"
+        conditioner network of the rq-coupling transform. "glasflow_residual"
+        (glasflow's ResidualNet, context concatenated to the input once) or
+        "dense_residual" (dingo's DenseResidualNet, context injected into every
+        residual block via a gated linear unit, optional layer_norm). The two are
+        architecturally different — checkpoints are not interchangeable — so this
+        is an explicit type, not a flag.
     :param num_bins: int = 8
         number of bins for the spline
     :param tail_bound: float = 1.
@@ -91,6 +104,11 @@ def create_base_transform(
     """
 
     activation_fn = torchutils.get_activation_function_from_string(activation)
+    if layer_norm and conditioner_type != "dense_residual":
+        raise ValueError(
+            "layer_norm requires conditioner_type 'dense_residual' (glasflow's "
+            "ResidualNet only supports batch norm)."
+        )
 
     if base_transform_type == "rq-coupling":
         if param_dim == 1:
@@ -99,9 +117,9 @@ def create_base_transform(
             mask = nflows.utils.create_alternating_binary_mask(
                 param_dim, even=(i % 2 == 0)
             )
-        return transforms.PiecewiseRationalQuadraticCouplingTransform(
-            mask=mask,
-            transform_net_create_fn=(
+
+        if conditioner_type == "glasflow_residual":
+            transform_net_create_fn = (
                 lambda in_features, out_features: nflows_nets.ResidualNet(
                     in_features=in_features,
                     out_features=out_features,
@@ -112,7 +130,29 @@ def create_base_transform(
                     dropout_probability=dropout_probability,
                     use_batch_norm=batch_norm,
                 )
-            ),
+            )
+        elif conditioner_type == "dense_residual":
+            transform_net_create_fn = (
+                lambda in_features, out_features: DenseResidualNet(
+                    input_dim=in_features,
+                    output_dim=out_features,
+                    hidden_dims=(hidden_dim,) * num_transform_blocks,
+                    activation=activation_fn,
+                    context_features=context_dim,
+                    dropout=dropout_probability,
+                    batch_norm=batch_norm,
+                    layer_norm=layer_norm,
+                )
+            )
+        else:
+            raise ValueError(
+                f"Unknown conditioner_type '{conditioner_type}'; expected "
+                f"'glasflow_residual' or 'dense_residual'."
+            )
+
+        return transforms.PiecewiseRationalQuadraticCouplingTransform(
+            mask=mask,
+            transform_net_create_fn=transform_net_create_fn,
             num_bins=num_bins,
             tails="linear",
             tail_bound=tail_bound,
@@ -120,6 +160,11 @@ def create_base_transform(
         )
 
     elif base_transform_type == "rq-autoregressive":
+        if conditioner_type != "glasflow_residual":
+            raise ValueError(
+                "rq-autoregressive only supports conditioner_type "
+                "'glasflow_residual'."
+            )
         return transforms.MaskedPiecewiseRationalQuadraticAutoregressiveTransform(
             features=param_dim,
             hidden_features=hidden_dim,

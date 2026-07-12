@@ -588,3 +588,130 @@ def test_save_and_rebuild_from_file(tmp_path, posterior_model_type):
     assert type(pm_loaded) is type(pm)
     for p0, p1 in zip(pm.network.parameters(), pm_loaded.network.parameters()):
         assert torch.equal(p0.data, p1.data)
+
+
+# -----------------------------------------------------------------------------------
+# Transformer embedding through the generic build path
+# -----------------------------------------------------------------------------------
+
+NUM_TOKENS = 6
+NUM_FEATURES = 12
+NUM_BLOCKS = 2
+
+
+def transformer_embedding_settings():
+    return {
+        "type": "transformer",
+        "kwargs": {
+            "tokenizer_kwargs": {
+                "hidden_dims": [16],
+                "activation": "elu",
+                "batch_norm": False,
+                "layer_norm": True,
+            },
+            "transformer_kwargs": {
+                "d_model": 16,
+                "dim_feedforward": 32,
+                "nhead": 4,
+                "dropout": 0.0,
+                "num_layers": 1,
+                "norm_first": True,
+            },
+            "pooling": "cls",
+            "final_net_kwargs": {
+                "activation": "elu",
+                "output_dim": EMBEDDING_OUTPUT_DIM,
+            },
+        },
+    }
+
+
+def tokenized_data_sample(with_context_parameters=False):
+    position = np.stack(
+        [
+            np.linspace(20.0, 100.0, NUM_TOKENS),
+            np.linspace(30.0, 110.0, NUM_TOKENS),
+            np.repeat(np.arange(NUM_BLOCKS), NUM_TOKENS // NUM_BLOCKS),
+        ],
+        axis=-1,
+    ).astype(np.float32)
+    sample = {
+        "inference_parameters": np.random.rand(NUM_PARAMETERS).astype(np.float32),
+        "waveform": np.random.rand(NUM_TOKENS, NUM_FEATURES).astype(np.float32),
+        "position": position,
+        "drop_token_mask": np.zeros(NUM_TOKENS, dtype=bool),
+    }
+    if with_context_parameters:
+        sample["context_parameters"] = np.random.rand(GNPE_PROXY_DIM).astype(np.float32)
+    return sample
+
+
+def tokenized_batch(with_context_parameters=False):
+    sample = tokenized_data_sample(with_context_parameters)
+    context = {
+        k: torch.from_numpy(np.stack([v] * BATCH_SIZE))
+        for k, v in sample.items()
+        if k != "inference_parameters"
+    }
+    theta = torch.rand(BATCH_SIZE, NUM_PARAMETERS)
+    return theta, context
+
+
+@pytest.mark.parametrize("model_type", ["normalizing_flow", "flow_matching"])
+def test_transformer_embedding_composes_with_any_distribution(model_type):
+    """The transformer works with any registered distribution type through the
+    generic build path — including flow matching, which the original transformer
+    branch never wired up."""
+    settings = model_settings(model_type, completed=False)
+    model = settings["train_settings"]["model"]
+    model["embedding_net"] = transformer_embedding_settings()
+
+    model = complete_model_settings(model, tokenized_data_sample())
+    assert model["embedding_net"]["kwargs"]["tokenizer_kwargs"]["num_blocks"] == (
+        NUM_BLOCKS
+    )
+    assert model["distribution"]["kwargs"]["context_dim"] == EMBEDDING_OUTPUT_DIM
+
+    pm = build_model_from_kwargs(
+        settings={"train_settings": {"model": model}}, device="cpu"
+    )
+    theta, context = tokenized_batch()
+
+    loss = pm.loss(theta, context)
+    assert torch.isfinite(loss)
+
+    pm.network.eval()
+    with torch.no_grad():
+        samples = pm.sample(context, num_samples=2)
+    assert samples.shape == (BATCH_SIZE, 2, NUM_PARAMETERS)
+
+
+def test_transformer_embedding_with_context_parameters():
+    """Context parameters compose with the transformer via the generic concat
+    merger — on the original branch this was impossible (the batch slot for
+    proxies was occupied by the position tensor)."""
+    settings = model_settings("normalizing_flow", completed=False)
+    model = settings["train_settings"]["model"]
+    model["embedding_net"] = transformer_embedding_settings()
+
+    model = complete_model_settings(
+        model, tokenized_data_sample(with_context_parameters=True)
+    )
+    assert model["context_merger"]["kwargs"]["num_context_parameters"] == (
+        GNPE_PROXY_DIM
+    )
+    assert model["distribution"]["kwargs"]["context_dim"] == (
+        EMBEDDING_OUTPUT_DIM + GNPE_PROXY_DIM
+    )
+
+    pm = build_model_from_kwargs(
+        settings={"train_settings": {"model": model}}, device="cpu"
+    )
+    assert pm.network.context_keys == (
+        "waveform",
+        "position",
+        "drop_token_mask",
+        "context_parameters",
+    )
+    theta, context = tokenized_batch(with_context_parameters=True)
+    assert torch.isfinite(pm.loss(theta, context))

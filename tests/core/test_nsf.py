@@ -335,3 +335,52 @@ def test_mlp_context_merger(data_setup_nsf_small):
         )
         == 12
     )
+
+
+def test_dense_residual_conditioner(data_setup_nsf_small):
+    """The rq-coupling conditioner network is an explicit type: dense_residual
+    (GLU context, optional layer_norm) builds a working flow; layer_norm without
+    it, or unknown types, are errors."""
+    from dingo.core.nn.resnet import DenseResidualNet as DingoDenseResidualNet
+
+    d = data_setup_nsf_small
+    kwargs = dict(d.nde_kwargs)
+    kwargs["base_transform_kwargs"] = {
+        **d.base_transform_kwargs,
+        "batch_norm": False,
+        "conditioner_type": "dense_residual",
+        "layer_norm": True,
+    }
+    flow = create_nsf_model(**kwargs)
+    # The conditioner networks inside the coupling transforms are dingo's
+    # DenseResidualNet, one per flow step.
+    conditioners = [m for m in flow.modules() if isinstance(m, DingoDenseResidualNet)]
+    assert len(conditioners) == d.num_flow_steps
+
+    context_vector = torch.rand(d.batch_size, d.context_dim)
+    log_prob = flow.log_prob(d.y, context_vector)
+    assert log_prob.shape == (d.batch_size,)
+    assert torch.isfinite(log_prob).all()
+
+    # layer_norm requires the dense_residual conditioner.
+    with pytest.raises(ValueError, match="layer_norm"):
+        create_nsf_model(
+            **{
+                **d.nde_kwargs,
+                "base_transform_kwargs": {
+                    **d.base_transform_kwargs,
+                    "layer_norm": True,
+                },
+            }
+        )
+    # Unknown conditioner types are an error.
+    with pytest.raises(ValueError, match="conditioner_type"):
+        create_nsf_model(
+            **{
+                **d.nde_kwargs,
+                "base_transform_kwargs": {
+                    **d.base_transform_kwargs,
+                    "conditioner_type": "foo",
+                },
+            }
+        )
