@@ -6,6 +6,7 @@ from dingo.core.nn.nsf import create_nsf_model, FlowWrapper
 from dingo.core.nn.enets import (
     ConcatContextMerger,
     DenseSVDEmbedding,
+    MLPContextMerger,
     create_enet_with_projection_layer_and_dense_resnet,
 )
 from dingo.core.utils import torchutils
@@ -283,4 +284,54 @@ def test_registered_embedding_with_merger(data_setup_nsf_small):
     assert torch.all(loss > 0) and torch.all(loss < 40), (
         "Unexpected log prob encountered. Network initialization or "
         "normalization seems broken."
+    )
+
+
+def test_mlp_context_merger(data_setup_nsf_small):
+    """
+    Test the mlp context merger (ported ContextMergerMLP): the context parameters
+    are mixed in through a learned MLP, so the merged output dimension does not
+    grow with the number of context parameters.
+    """
+
+    d = data_setup_nsf_small
+    kwargs = {
+        k: v
+        for k, v in d.embedding_net_kwargs.items()
+        if k not in ("added_context", "V_rb_list")
+    }
+    num_context_parameters = d.z.shape[1]
+    embedding_net = DenseSVDEmbedding(**kwargs)
+
+    merged = MLPContextMerger(
+        embedding_net, num_context_parameters, hidden_dims=[16, 16]
+    )
+    assert merged.input_keys == CONTEXT_KEYS
+    # By default, the merged output dimension equals the embedding output dim.
+    assert merged.output_dim == embedding_net.output_dim
+    assert (
+        MLPContextMerger.merged_output_dim(
+            embedding_net.output_dim,
+            num_context_parameters=num_context_parameters,
+            hidden_dims=[16, 16],
+        )
+        == embedding_net.output_dim
+    )
+
+    out = merged(d.x, d.z)
+    assert out.shape == (d.batch_size, embedding_net.output_dim)
+
+    # An explicit output_dim overrides the default.
+    merged_wide = MLPContextMerger(
+        embedding_net, num_context_parameters, hidden_dims=[16], output_dim=12
+    )
+    assert merged_wide(d.x, d.z).shape == (d.batch_size, 12)
+    assert (
+        MLPContextMerger.merged_output_dim(
+            embedding_net.output_dim,
+            num_context_parameters=num_context_parameters,
+            hidden_dims=[16],
+            output_dim=12,
+        )
+        == 12
     )

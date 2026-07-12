@@ -398,6 +398,77 @@ class ConcatContextMerger(ModuleMerger):
         return embedding_output_dim + num_context_parameters
 
 
+@CONTEXT_MERGERS.register("mlp")
+class MLPContextMerger(nn.Module):
+    """
+    Context merger that mixes the embedded data and the (standardized) context
+    parameters through a learned MLP, in contrast to the concat merger which
+    simply concatenates them. Ported from the chained-NPE branch
+    (ContextMergerMLP).
+
+    The data is first embedded, z = embedding_net(x). The context parameters c
+    are concatenated with z and passed through a DenseResidualNet M, producing
+    z_new = M(concat(z, c)) with dim(z_new) = output_dim. By default output_dim
+    equals dim(z), so the conditioning context fed to the downstream flow does
+    not grow with the number of context parameters.
+    """
+
+    def __init__(
+        self,
+        embedding_net: nn.Module,
+        num_context_parameters: int,
+        hidden_dims: Tuple,
+        output_dim: int = None,
+        activation: str = "elu",
+        dropout: float = 0.0,
+        batch_norm: bool = True,
+    ):
+        """
+        Parameters
+        ----------
+        embedding_net : nn.Module
+            The wrapped embedding network.
+        num_context_parameters : int
+            Number of context parameters mixed into the embedded data. Inferred
+            from a sample batch during settings completion.
+        hidden_dims : tuple
+            dimensions of the hidden layers of the merging DenseResidualNet
+        output_dim : int = None
+            output dimension of the merged embedding; defaults to the output
+            dimension of the wrapped embedding network
+        activation : str
+            activation function used in the residual blocks
+        dropout : float
+            dropout probability in the residual blocks
+        batch_norm : bool
+            whether to use batch normalization
+        """
+        super().__init__()
+        if output_dim is None:
+            output_dim = embedding_net.output_dim
+        self.embedding_net = embedding_net
+        self.context_module = DenseResidualNet(
+            input_dim=embedding_net.output_dim + num_context_parameters,
+            output_dim=output_dim,
+            hidden_dims=tuple(hidden_dims),
+            activation=torchutils.get_activation_function_from_string(activation),
+            dropout=dropout,
+            batch_norm=batch_norm,
+        )
+        self.input_keys = (*embedding_net.input_keys, "context_parameters")
+        self.output_dim = output_dim
+
+    def forward(self, *x):
+        *data, context = x
+        z = self.embedding_net(*data)
+        return self.context_module(torch.cat([z, context], dim=1))
+
+    @staticmethod
+    def merged_output_dim(embedding_output_dim: int, output_dim: int = None, **_unused):
+        """Output dimension of the merged embedding, for settings completion."""
+        return output_dim if output_dim is not None else embedding_output_dim
+
+
 def create_enet_with_projection_layer_and_dense_resnet(
     input_dims: List[int],
     # n_rb: int,

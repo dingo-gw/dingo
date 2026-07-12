@@ -29,6 +29,47 @@ from dingo.gw.gwutils import *
 from dingo.core.utils import *
 
 
+TIME_ALIGNMENT_REQUIRED_CONDITIONING = ("ra", "dec", "geocent_time")
+
+
+def validate_time_alignment_settings(data_settings: dict) -> None:
+    """
+    Validate that the data_settings dict is consistent with
+    ``data.time_alignment=True``.
+
+    The aligned model targets the factorisation
+        q(theta | d) = q(theta_hat | d_aligned, ra, dec, geocent_time)
+                       * q(ra, dec, geocent_time | d).
+    The transform pipeline this function gates must:
+      * have {ra, dec, geocent_time} as conditioning parameters (so the network
+        receives them as inputs), and
+      * NOT have them as inference targets (the aligned model does not predict
+        sky/time -- the sky-position model does).
+    It must also not coexist with ``gnpe_time_shifts``, which manipulates the
+    same per-detector arrival times stochastically.
+    """
+    required = set(TIME_ALIGNMENT_REQUIRED_CONDITIONING)
+    conditioning_set = set(data_settings.get("conditioning_parameters", []))
+    missing = required - conditioning_set
+    if missing:
+        raise ValueError(
+            f"data.time_alignment=True requires {sorted(required)} to be in "
+            f"data.conditioning_parameters; missing: {sorted(missing)}."
+        )
+    overlap = required & set(data_settings["inference_parameters"])
+    if overlap:
+        raise ValueError(
+            f"data.time_alignment=True is incompatible with having "
+            f"{sorted(overlap)} in data.inference_parameters; these are "
+            f"conditioning quantities, not inference targets."
+        )
+    if "gnpe_time_shifts" in data_settings:
+        raise ValueError(
+            "data.time_alignment=True is incompatible with data.gnpe_time_shifts; "
+            "both manipulate per-detector arrival times."
+        )
+
+
 def build_dataset(
     data_settings: dict,
     leave_waveforms_on_disk: Optional[bool] = False,
@@ -125,9 +166,24 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         )
         extra_context_parameters += transforms[-1].context_parameters
 
-    # Add the GNPE context to context_parameters the first time the transforms are
-    # constructed. We do not want to overwrite the ordering of the parameters in
-    # subsequent runs.
+    # User-declared conditioning parameters for conditional NPE. These are added
+    # to the context_parameters tensor alongside any GNPE proxies and share the
+    # same standardization / repackaging path. They are assumed to be parameters
+    # already present in either the waveform dataset (intrinsic) or the
+    # extrinsic prior, so no additional sampling transform is required.
+    extra_context_parameters += data_settings.get("conditioning_parameters", [])
+
+    # Chained-NPE time alignment: the network sees data with no detector-frame
+    # time-of-arrival info, and conditions on (ra, dec, geocent_time) to recover
+    # antenna-pattern dependence. Implemented by skipping the per-detector time
+    # shift in ProjectOntoDetectors.
+    time_alignment = data_settings.get("time_alignment", False)
+    if time_alignment:
+        validate_time_alignment_settings(data_settings)
+
+    # Add the auto-derived and user-declared context parameters to
+    # context_parameters the first time the transforms are constructed. We do not
+    # want to overwrite the ordering of the parameters in subsequent runs.
     if "context_parameters" not in data_settings:
         data_settings["context_parameters"] = []
     for p in extra_context_parameters:
@@ -153,7 +209,11 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         )
         data_settings["standardization"] = standardization_dict
 
-    transforms.append(ProjectOntoDetectors(ifo_list, domain, ref_time))
+    transforms.append(
+        ProjectOntoDetectors(
+            ifo_list, domain, ref_time, apply_time_shift=not time_alignment
+        )
+    )
     transforms.append(SampleNoiseASD(asd_dataset))
     transforms.append(WhitenAndScaleStrain(domain.noise_std))
     # We typically add white detector noise. For debugging purposes, this can be turned
@@ -277,7 +337,7 @@ def build_svd_for_embedding_network(
     loader = DataLoader(
         wfd,
         batch_size=batch_size,
-        num_workers= 0,
+        num_workers=0,
         worker_init_fn=fix_random_seeds,
     )
     with threadpool_limits(limits=1, user_api="blas"):
