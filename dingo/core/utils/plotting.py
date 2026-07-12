@@ -147,9 +147,7 @@ def plot_corner_multi(
     # every corner call uses identical bins, so the 1D marginal densities are
     # on a consistent scale regardless of sample size or weight distribution.
     all_data = pd.concat([s[common_parameters] for s in samples], ignore_index=True)
-    common_range = [
-        (all_data[p].min(), all_data[p].max()) for p in common_parameters
-    ]
+    common_range = [(all_data[p].min(), all_data[p].max()) for p in common_parameters]
 
     fig = None
     handles = []

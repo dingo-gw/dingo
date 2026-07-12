@@ -4,8 +4,10 @@ import textwrap
 import torch
 
 from .cflow_base import ContinuousFlowPosteriorModel
+from dingo.core.registry import NEURAL_DISTRIBUTIONS
 
 
+@NEURAL_DISTRIBUTIONS.register("score_matching")
 class ScoreDiffusionPosteriorModel(ContinuousFlowPosteriorModel):
     __doc__ = (
         inspect.getdoc(ContinuousFlowPosteriorModel)
@@ -36,11 +38,12 @@ class ScoreDiffusionPosteriorModel(ContinuousFlowPosteriorModel):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.eps = self.model_kwargs["posterior_kwargs"]["epsilon"]
-        self.beta_min = self.model_kwargs["posterior_kwargs"]["beta_min"]
-        self.beta_max = self.model_kwargs["posterior_kwargs"]["beta_max"]
+        distribution_kwargs = self.model_kwargs["distribution"]["kwargs"]
+        self.eps = distribution_kwargs["epsilon"]
+        self.beta_min = distribution_kwargs["beta_min"]
+        self.beta_max = distribution_kwargs["beta_max"]
 
-        likelihood_weighting = self.model_kwargs["posterior_kwargs"].get(
+        likelihood_weighting = distribution_kwargs.get(
             "likelihood_weighting", "score-matching"
         )
         if likelihood_weighting:
@@ -48,7 +51,7 @@ class ScoreDiffusionPosteriorModel(ContinuousFlowPosteriorModel):
                 likelihood_weighting
             )
 
-    def loss(self, theta, *context_data):
+    def loss(self, theta, context: dict = None):
         """
         Returns the score matching loss for parameters theta conditioned on context.
 
@@ -56,8 +59,9 @@ class ScoreDiffusionPosteriorModel(ContinuousFlowPosteriorModel):
         ----------
         theta: torch.tensor
             parameters (e.g., binary-black hole parameters)
-        *context_data: list[torch.Tensor]
-            context data (e.g., gravitational-wave data)
+        context: dict = None
+            Named context tensors (keyed like the training batches), e.g.
+            gravitational-wave data.
 
         Returns
         -------
@@ -65,7 +69,7 @@ class ScoreDiffusionPosteriorModel(ContinuousFlowPosteriorModel):
             Loss.
         """
         t, theta_t, score = self.get_t_theta_t_score(theta_1=theta)
-        pred_score = self.network(t, theta_t, *context_data)
+        pred_score = self.network(t, theta_t, *self.network.unpack_context(context))
 
         weighting = self.likelihood_weighting(t)
         losses = torch.square(pred_score - score)

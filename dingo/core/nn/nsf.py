@@ -3,16 +3,13 @@ Implementation of the neural spline flow (NSF). Most of this code is adapted
 from the uci.py example from https://github.com/bayesiains/nsf.
 """
 
-import copy
-
 import torch
 import torch.nn as nn
 import glasflow.nflows as nflows  # nflows not maintained, so use this maintained fork
 from glasflow.nflows import distributions, flows, transforms
 import glasflow.nflows.nn.nets as nflows_nets
+from dingo.core.nn.resnet import DenseResidualNet
 from dingo.core.utils import torchutils
-from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
-from typing import Union, Callable, Tuple
 
 
 def create_linear_transform(param_dim: int):
@@ -42,6 +39,8 @@ def create_base_transform(
     activation: str = "relu",
     dropout_probability: float = 0.0,
     batch_norm: bool = False,
+    layer_norm: bool = False,
+    conditioner_type: str = "glasflow_residual",
     num_bins: int = 8,
     tail_bound: float = 1.0,
     apply_unconditional_transform: bool = False,
@@ -82,6 +81,16 @@ def create_base_transform(
         dropout probability for regularization
     :param batch_norm: bool = False
         whether to use batch normalization
+    :param layer_norm: bool = False
+        whether to use layer normalization in the conditioner network
+        (conditioner_type "dense_residual" only)
+    :param conditioner_type: str = "glasflow_residual"
+        conditioner network of the rq-coupling transform. "glasflow_residual"
+        (glasflow's ResidualNet, context concatenated to the input once) or
+        "dense_residual" (dingo's DenseResidualNet, context injected into every
+        residual block via a gated linear unit, optional layer_norm). The two are
+        architecturally different — checkpoints are not interchangeable — so this
+        is an explicit type, not a flag.
     :param num_bins: int = 8
         number of bins for the spline
     :param tail_bound: float = 1.
@@ -95,6 +104,11 @@ def create_base_transform(
     """
 
     activation_fn = torchutils.get_activation_function_from_string(activation)
+    if layer_norm and conditioner_type != "dense_residual":
+        raise ValueError(
+            "layer_norm requires conditioner_type 'dense_residual' (glasflow's "
+            "ResidualNet only supports batch norm)."
+        )
 
     if base_transform_type == "rq-coupling":
         if param_dim == 1:
@@ -103,9 +117,9 @@ def create_base_transform(
             mask = nflows.utils.create_alternating_binary_mask(
                 param_dim, even=(i % 2 == 0)
             )
-        return transforms.PiecewiseRationalQuadraticCouplingTransform(
-            mask=mask,
-            transform_net_create_fn=(
+
+        if conditioner_type == "glasflow_residual":
+            transform_net_create_fn = (
                 lambda in_features, out_features: nflows_nets.ResidualNet(
                     in_features=in_features,
                     out_features=out_features,
@@ -116,7 +130,29 @@ def create_base_transform(
                     dropout_probability=dropout_probability,
                     use_batch_norm=batch_norm,
                 )
-            ),
+            )
+        elif conditioner_type == "dense_residual":
+            transform_net_create_fn = (
+                lambda in_features, out_features: DenseResidualNet(
+                    input_dim=in_features,
+                    output_dim=out_features,
+                    hidden_dims=(hidden_dim,) * num_transform_blocks,
+                    activation=activation_fn,
+                    context_features=context_dim,
+                    dropout=dropout_probability,
+                    batch_norm=batch_norm,
+                    layer_norm=layer_norm,
+                )
+            )
+        else:
+            raise ValueError(
+                f"Unknown conditioner_type '{conditioner_type}'; expected "
+                f"'glasflow_residual' or 'dense_residual'."
+            )
+
+        return transforms.PiecewiseRationalQuadraticCouplingTransform(
+            mask=mask,
+            transform_net_create_fn=transform_net_create_fn,
             num_bins=num_bins,
             tails="linear",
             tail_bound=tail_bound,
@@ -124,6 +160,11 @@ def create_base_transform(
         )
 
     elif base_transform_type == "rq-autoregressive":
+        if conditioner_type != "glasflow_residual":
+            raise ValueError(
+                "rq-autoregressive only supports conditioner_type "
+                "'glasflow_residual'."
+            )
         return transforms.MaskedPiecewiseRationalQuadraticAutoregressiveTransform(
             features=param_dim,
             hidden_features=hidden_dim,
@@ -189,56 +230,63 @@ def create_transform(
 
 class FlowWrapper(nn.Module):
     """
-    This class wraps the neural spline flow. It is required for multiple
-    reasons. (i) some embedding networks take tuples as input, which is not
-    supported by the nflows package. (ii) paralellization across multiple
-    GPUs requires a forward method, but the relevant flow method for training
-    is log_prob.
+    This class wraps the neural spline flow, and routes named context tensors into
+    the embedding network. It is required for multiple reasons. (i) The embedding
+    network can consume several context tensors (declared in context_keys), which is
+    not supported by the nflows package. (ii) Parallelization across multiple GPUs
+    requires a forward method, but the relevant flow method for training is log_prob.
     """
 
-    def __init__(self, flow: flows.base.Flow, embedding_net: nn.Module = None):
+    def __init__(
+        self,
+        flow: flows.base.Flow,
+        embedding_net: nn.Module = None,
+        context_keys: tuple = ("waveform",),
+    ):
         """
-
         :param flow: flows.base.Flow
         :param embedding_net: nn.Module
+        :param context_keys: tuple
+            Keys of the context dict that the embedding network consumes, in the
+            order of its forward arguments.
         """
         super(FlowWrapper, self).__init__()
         self.embedding_net = embedding_net
         self.flow = flow
+        self.context_keys = tuple(context_keys)
 
-    def log_prob(self, y, *x):
-        if len(x) > 0:
-            if self.embedding_net is not None:
-                x = self.embedding_net(*x)
-            return self.flow.log_prob(y, x)
-        else:
-            # if there is no context
+    def _embed_context(self, context: dict):
+        """Select the tensors in context_keys (in order) and embed them."""
+        missing = [k for k in self.context_keys if k not in context]
+        if missing:
+            raise ValueError(
+                f"Context is missing keys {missing}: expected {self.context_keys}, "
+                f"got {sorted(context)}."
+            )
+        x = [context[k] for k in self.context_keys]
+        if self.embedding_net is not None:
+            return self.embedding_net(*x)
+        if len(x) != 1:
+            raise ValueError("Multiple context tensors require an embedding network.")
+        return x[0]
+
+    def log_prob(self, y, context: dict = None):
+        if context is None:
             return self.flow.log_prob(y)
+        return self.flow.log_prob(y, self._embed_context(context))
 
-    def sample(self, *x, num_samples=1):
-        if len(x) > 0:
-            if self.embedding_net is not None:
-                x = self.embedding_net(*x)
-            return self.flow.sample(num_samples, x)
-        else:
-            # if there is no context, omit the context argument
+    def sample(self, context: dict = None, num_samples: int = 1):
+        if context is None:
             return self.flow.sample(num_samples)
+        return self.flow.sample(num_samples, self._embed_context(context))
 
-    def sample_and_log_prob(self, *x, num_samples=1):
-        if len(x) > 0:
-            if self.embedding_net is not None:
-                x = self.embedding_net(*x)
-            return self.flow.sample_and_log_prob(num_samples, x)
-        else:
-            # if there is no context, omit the context argument
+    def sample_and_log_prob(self, context: dict = None, num_samples: int = 1):
+        if context is None:
             return self.flow.sample_and_log_prob(num_samples)
+        return self.flow.sample_and_log_prob(num_samples, self._embed_context(context))
 
-    def forward(self, y, *x):
-        if len(x) > 0:
-            return self.log_prob(y, *x)
-        else:
-            # if there is no context, omit the context argument
-            return self.log_prob(y)
+    def forward(self, y, context: dict = None):
+        return self.log_prob(y, context)
 
 
 def create_nsf_model(
@@ -246,8 +294,6 @@ def create_nsf_model(
     context_dim: int,
     num_flow_steps: int,
     base_transform_kwargs: dict,
-    embedding_net_builder: Union[Callable, str] = None,
-    embedding_kwargs: dict = None,
 ):
     """
     Build NSF model. This models the posterior distribution p(y|x).
@@ -264,81 +310,16 @@ def create_nsf_model(
         number of sequential transforms
     :param base_transform_kwargs: dict,
         hyperparameters for transform steps
-    :param embedding_net_builder: Callable=None,
-        build function for embedding network TODO
-    :param embedding_kwargs: dict=None,
-        hyperparameters for embedding network
     :return: Flow
         the NSF (posterior model)
     """
-
-    if embedding_net_builder is not None:
-        embedding_net = embedding_net_builder(**embedding_kwargs)
-    else:
-        embedding_net = None
-
-    # str(embedding_net_builder).split(' ')[1]
-
     distribution = distributions.StandardNormal((input_dim,))
     transform = create_transform(
         num_flow_steps, input_dim, context_dim, base_transform_kwargs
     )
-    flow = flows.Flow(transform, distribution, embedding_net)
+    flow = flows.Flow(transform, distribution)
 
     return flow
-
-
-def create_nsf_wrapped(**kwargs):
-    """
-    Wraps the NSF model in a FlowWrapper. This is required for parallel
-    training, and wraps the log_prob method as a forward method.
-    """
-    flow = create_nsf_model(**kwargs)
-    return FlowWrapper(flow)
-
-
-def create_nsf_with_rb_projection_embedding_net(
-    posterior_kwargs: dict,
-    embedding_kwargs: dict,
-    initial_weights: dict = None,
-):
-    """Builds a neural spline flow with an embedding network that consists of a
-    reduced basis projection followed by a residual network. Optionally initializes the
-    embedding network weights.
-
-    Parameters
-    ----------
-    posterior_kwargs : dict
-        kwargs for neural spline flow
-    embedding_kwargs : dict
-        kwargs for emebedding network
-    initial_weights : dict
-        Dictionary containing the initial weights for the SVD projection. This should
-        have one key 'V_rb_list', with value a list of SVD V matrices (one for each
-        detector).
-
-    Returns
-    -------
-    nn.Module
-        Neural spline flow model
-    """
-    # We copy the embedding_kwargs to allow an insert of V_rb_list without
-    # affecting the original embedding_kwargs. This is because we don't want to
-    # save the embedding_kwargs with the huge V_rb_list included. This is a bit of
-    # a hack; improve setting of initial weights later.
-
-    embedding_kwargs = copy.deepcopy(embedding_kwargs)
-    if initial_weights is not None:
-        embedding_kwargs["V_rb_list"] = initial_weights["V_rb_list"]
-    elif "V_rb_list" not in embedding_kwargs:
-        embedding_kwargs["V_rb_list"] = None
-
-    embedding_net = create_enet_with_projection_layer_and_dense_resnet(
-        **embedding_kwargs
-    )
-    flow = create_nsf_model(**posterior_kwargs)
-    model = FlowWrapper(flow, embedding_net)
-    return model
 
 
 if __name__ == "__main__":

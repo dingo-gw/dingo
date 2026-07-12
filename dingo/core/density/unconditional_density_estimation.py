@@ -3,6 +3,7 @@ import copy
 import torch
 
 from dingo.core.utils import build_train_and_test_loaders
+from dingo.core.utils.backward_compatibility import update_model_config
 from dingo.core.utils.trainutils import RuntimeLimits
 import numpy as np
 import argparse
@@ -13,10 +14,8 @@ from dingo.core.posterior_models import NormalizingFlowPosteriorModel
 class SampleDataset(torch.utils.data.Dataset):
     """
     Dataset class for unconditional density estimation.
-    This is required, since the training method of dingo.core.posterior_models.Base
-    expects a tuple of (theta, *context) as output of the DataLoader, but here we have
-    no context, so len(context) = 0. This SampleDataset therefore returns a tuple
-    (theta, ) instead of just theta.
+    The training loop of dingo.core.posterior_models expects dict batches keyed by
+    name; here there is no context, so a sample is just the parameters.
     """
 
     def __init__(self, data):
@@ -27,8 +26,8 @@ class SampleDataset(torch.utils.data.Dataset):
         return self.length
 
     def __getitem__(self, index):
-        """Return the data and labels at the given index as a tuple of length 1."""
-        return (self.data[index],)
+        """Return the parameters at the given index as a dict."""
+        return {"inference_parameters": self.data[index]}
 
 
 def train_unconditional_density_estimator(
@@ -71,8 +70,10 @@ def train_unconditional_density_estimator(
     samples_torch = torch.from_numpy((samples - mean) / std).float()
 
     # set up density estimation network
-    settings["model"]["posterior_kwargs"]["input_dim"] = num_params
-    settings["model"]["posterior_kwargs"]["context_dim"] = None
+    update_model_config(settings["model"])  # Map old schemas forward.
+    distribution_kwargs = settings["model"]["distribution"].setdefault("kwargs", {})
+    distribution_kwargs["theta_dim"] = num_params
+    distribution_kwargs["context_dim"] = None
     # TODO: Allow for other types of density estimators (e.g., flow matching).
     model = NormalizingFlowPosteriorModel(
         metadata={"train_settings": settings, "base": copy.deepcopy(result.metadata)},

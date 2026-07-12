@@ -9,9 +9,9 @@ import bilby
 
 def fix_random_seeds(_):
     """Utility function to set random seeds when using multiple workers for DataLoader."""
-    np.random.seed(int(torch.initial_seed()) % (2 ** 32 - 1))
+    np.random.seed(int(torch.initial_seed()) % (2**32 - 1))
     try:
-        bilby.core.utils.random.seed(int(torch.initial_seed()) % (2 ** 32 - 1))
+        bilby.core.utils.random.seed(int(torch.initial_seed()) % (2**32 - 1))
     except AttributeError:  # In case using an old version of Bilby.
         pass
 

@@ -32,14 +32,17 @@ from dingo.gw.transforms import (
     GetDetectorTimes,
     DecimateWaveformsAndASDS,
     MaskDataForFrequencyRangeUpdate,
+    NormalizePosition,
+    SelectKeys,
+    StrainTokenization,
+    UpdateFrequencyRange,
 )
 
 
 class SamplerProtocol(Protocol):
     base_model_metadata: dict
 
-    def _initialize_transforms(self) -> None:
-        ...
+    def _initialize_transforms(self) -> None: ...
 
 
 class _GWMixinProtocol(SamplerProtocol):
@@ -65,6 +68,7 @@ class GWSamplerMixin(object):
         # Has to be specified before init, because the information is required in _initialize_transforms()
         self._minimum_frequency = None
         self._maximum_frequency = None
+        self._suppress = None
         super().__init__(**kwargs)
         self.t_ref = self.base_model_metadata["train_settings"]["data"]["ref_time"]
         self._pesummary_package = "gw"
@@ -129,15 +133,57 @@ class GWSamplerMixin(object):
         self._initialize_transforms()
 
     @property
+    def suppress(self):
+        """Frequency ranges whose tokens are masked out at inference: [f_lo, f_hi],
+        or {detector: [f_lo, f_hi]}. Only available for tokenized models trained
+        with drop augmentation."""
+        return self._suppress
+
+    @suppress.setter
+    def suppress(self: _GWMixinProtocol, value):
+        data_settings = self.base_model_metadata["train_settings"]["data"]
+        tokenization = data_settings.get("tokenization", {})
+        if not tokenization:
+            raise ValueError(
+                "Token suppression requires a model trained on tokenized data."
+            )
+        if not (
+            "drop_frequency_range" in tokenization
+            or "drop_random_tokens" in tokenization
+        ):
+            raise ValueError(
+                "Token suppression requires a model trained with drop augmentation "
+                "(tokenization.drop_frequency_range or drop_random_tokens)."
+            )
+        intervals = value if isinstance(value, dict) else {None: value}
+        if isinstance(value, dict):
+            unknown = set(value) - set(self.detectors)
+            if unknown:
+                raise ValueError(
+                    f"Unknown detectors in suppress setting: {sorted(unknown)}."
+                )
+        for interval in intervals.values():
+            f_lo, f_hi = interval
+            if not self.domain.f_min <= f_lo < f_hi <= self.domain.f_max:
+                raise ValueError(
+                    f"Suppress interval {interval} must satisfy "
+                    f"{self.domain.f_min} <= f_lo < f_hi <= {self.domain.f_max}."
+                )
+        self._suppress = value
+        self._initialize_transforms()
+
+    @property
     def frequency_updates(self) -> bool:
         def normalize(val):
             if isinstance(val, dict):
                 return set(val.values())
             return {val}
 
-        return normalize(self.minimum_frequency) != {self.domain.f_min} or normalize(
-            self.maximum_frequency
-        ) != {self.domain.f_max}
+        return (
+            normalize(self.minimum_frequency) != {self.domain.f_min}
+            or normalize(self.maximum_frequency) != {self.domain.f_max}
+            or self.suppress is not None
+        )
 
     @property
     def event_metadata(self):
@@ -147,6 +193,8 @@ class GWSamplerMixin(object):
             metadata = {}
         metadata["minimum_frequency"] = self.minimum_frequency
         metadata["maximum_frequency"] = self.maximum_frequency
+        if self.suppress is not None:
+            metadata["suppress"] = self.suppress
         return metadata
 
     @event_metadata.setter
@@ -157,6 +205,8 @@ class GWSamplerMixin(object):
                 self.minimum_frequency = value.pop("minimum_frequency")
             if "maximum_frequency" in value:
                 self.maximum_frequency = value.pop("maximum_frequency")
+            if value.get("suppress") is not None:
+                self.suppress = value.pop("suppress")
         self._event_metadata = value
 
     def _build_domain(self: Sampler):
@@ -172,7 +222,6 @@ class GWSamplerMixin(object):
         data_settings = self.base_model_metadata["train_settings"]["data"]
         if "domain_update" in data_settings:
             self.domain.update(data_settings["domain_update"])
-
 
     def _correct_reference_time(
         self: Sampler, samples: Union[dict, pd.DataFrame], inverse: bool = False
@@ -297,10 +346,12 @@ class GWSampler(GWSamplerMixin, Sampler):
         #   * whiten and scale strain (since the inference network expects standardized
         #   data)
         transform_pre.append(WhitenAndScaleStrain(self.domain.noise_std))
-        if self.frequency_updates:
+        tokenization = self.metadata["train_settings"]["data"].get("tokenization")
+        if self.frequency_updates and not tokenization:
             # * update frequency range
             # Needs to happen before RepackageStrainsAndASDs since we might need to apply
-            # detectors specific frequency updates.
+            # detectors specific frequency updates. Tokenized models instead update
+            # the drop_token_mask after tokenization (UpdateFrequencyRange below).
             transform_pre.append(
                 MaskDataForFrequencyRangeUpdate(
                     domain=self.domain,
@@ -309,19 +360,61 @@ class GWSampler(GWSamplerMixin, Sampler):
                 )
             )
         #   * repackage strains and asds from dicts to an array
-        #   * convert array to torch tensor on the correct device
-        #   * extract only strain/waveform from the sample
-        transform_pre += [
-            # Use base metadata so that unconditional samplers still know how to
-            # transform data, since this transform is used by the GNPE sampler as
-            # well.
+        #   * optionally tokenize the strain (tokenized models, e.g. transformer)
+        #   * convert array(s) to torch tensor(s) on the correct device
+        #   * extract the network inputs from the sample
+        # Use base metadata so that unconditional samplers still know how to
+        # transform data, since this transform is used by the GNPE sampler as well.
+        transform_pre.append(
             RepackageStrainsAndASDS(
                 ifos=self.detectors,
                 first_index=self.domain.min_idx,
-            ),
-            ToTorch(device=self.model.device),
-            GetItem("waveform"),
-        ]
+            )
+        )
+        if tokenization:
+            # StrainTokenization operates on numpy arrays, so it precedes ToTorch.
+            transform_pre.append(
+                StrainTokenization(
+                    domain=self.domain,
+                    token_size=tokenization.get("token_size"),
+                    num_tokens_per_block=tokenization.get("num_tokens_per_block"),
+                    drop_last_token=tokenization.get("drop_last_token", False),
+                )
+            )
+            if self.frequency_updates:
+                # Frequency-range updates / token suppression for tokenized
+                # models: mask out the affected tokens. Unchanged bounds are
+                # passed as None — the domain default as a threshold would
+                # needlessly mask the zero-padded final token.
+                transform_pre.append(
+                    UpdateFrequencyRange(
+                        minimum_frequency=(
+                            self.minimum_frequency
+                            if self.minimum_frequency != self.domain.f_min
+                            else None
+                        ),
+                        maximum_frequency=(
+                            self.maximum_frequency
+                            if self.maximum_frequency != self.domain.f_max
+                            else None
+                        ),
+                        suppress_range=self.suppress,
+                        domain=self.domain,
+                        ifos=self.detectors,
+                    )
+                )
+            # Normalize positions after all mask updates, matching training
+            # (the mask transforms compare positions against frequencies in Hz).
+            if tokenization.get("normalize_frequency_for_positional_encoding", False):
+                transform_pre.append(NormalizePosition())
+        transform_pre.append(ToTorch(device=self.model.device))
+        if tokenization:
+            # Dict of named network inputs; the model routes them by key.
+            transform_pre.append(
+                SelectKeys(["waveform", "position", "drop_token_mask"])
+            )
+        else:
+            transform_pre.append(GetItem("waveform"))
         self.transform_pre = Compose(transform_pre)
 
         # postprocessing transforms:

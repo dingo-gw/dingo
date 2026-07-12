@@ -1,0 +1,1220 @@
+from typing import Optional
+
+import numpy as np
+
+from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain
+from dingo.gw.gwutils import add_defaults_for_missing_ifos
+
+DETECTOR_DICT = {"H1": 0, "L1": 1, "V1": 2}
+DETECTOR_DICT_INVERSE = {v: k for k, v in DETECTOR_DICT.items()}
+
+
+class StrainTokenization:
+    """
+    Divide strain frequency bins into fixed-size tokens and attach per-token position
+    information (f_min, f_max, detector index).
+
+    The input waveform is expected to have shape
+        [..., num_detectors, num_channels, num_bins]
+    where num_channels >= 1 (e.g. real, imaginary, ASD).
+
+    The output contains:
+    - 'waveform':        [..., num_detectors * num_tokens_per_detector,
+                               num_channels * num_bins_per_token]
+    - 'position':        [..., num_tokens, 3]
+                         last dim = [f_min, f_max, detector_index]
+    - 'drop_token_mask': [..., num_tokens] bool, False = keep token
+                         (PyTorch transformer convention: True = masked out).
+    """
+
+    def __init__(
+        self,
+        domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
+        num_tokens_per_block: Optional[int] = None,
+        token_size: Optional[int] = None,
+        drop_last_token: bool = False,
+        print_output: bool = True,
+    ):
+        """
+        Parameters
+        ----------
+        domain:
+            Domain carrying f_min, f_max, delta_f, sample_frequencies.
+        num_tokens_per_block:
+            Number of tokens per detector. Mutually exclusive with token_size.
+        token_size:
+            Number of frequency bins per token. Mutually exclusive with
+            num_tokens_per_block.
+        drop_last_token:
+            If True and the bins do not divide evenly, drop the trailing incomplete
+            token. If False, pad it with zeros.
+        print_output:
+            Write a summary to stdout on construction.
+        """
+        if (num_tokens_per_block is None) == (token_size is None):
+            raise ValueError(
+                "Specify exactly one of num_tokens_per_block or token_size."
+            )
+
+        num_f = domain.frequency_mask_length
+
+        if token_size is not None:
+            self.num_bins_per_token = token_size
+            n_full = num_f // token_size
+            remainder = num_f % token_size
+            num_tokens_per_block = (
+                n_full
+                if (drop_last_token and remainder)
+                else (n_full if remainder == 0 else n_full + 1)
+            )
+        else:
+            remainder = num_f % num_tokens_per_block
+            # Ceiling ensures the given number of tokens covers the full frequency range.
+            self.num_bins_per_token = int(np.ceil(num_f / num_tokens_per_block))
+            if drop_last_token and remainder:
+                num_tokens_per_block -= 1
+
+        self.drop_last_token = drop_last_token
+        self.num_tokens_per_detector = num_tokens_per_block
+
+        # f_min / f_max for every token (same for all detectors)
+        freqs = domain.sample_frequencies
+        start = domain.min_idx
+        self.f_min_per_token = freqs[start :: self.num_bins_per_token][
+            :num_tokens_per_block
+        ]
+        self.f_max_per_token = freqs[
+            start + self.num_bins_per_token - 1 :: self.num_bins_per_token
+        ][:num_tokens_per_block]
+
+        # Number of zero-padding bins needed in the last token
+        self.num_padded_f_bins = 0
+        if (
+            len(self.f_min_per_token) > len(self.f_max_per_token)
+            and not drop_last_token
+        ):
+            # Last token is incomplete: extrapolate f_max
+            if isinstance(domain, MultibandedFrequencyDomain):
+                last_delta_f = domain.delta_f[-1]
+            else:
+                last_delta_f = domain.delta_f
+            f_max_pad = (
+                self.f_max_per_token[-1] + self.num_bins_per_token * last_delta_f
+            )
+            self.f_max_per_token = np.append(self.f_max_per_token, f_max_pad)
+            self.num_padded_f_bins = int((f_max_pad - freqs[-1]) / last_delta_f)
+
+        if not (
+            num_tokens_per_block
+            == len(self.f_min_per_token)
+            == len(self.f_max_per_token)
+        ):
+            raise ValueError(
+                "f_min_per_token and f_max_per_token lengths do not match num_tokens_per_block."
+            )
+
+        if isinstance(domain, MultibandedFrequencyDomain):
+            _check_mfd_node_compatibility(
+                f_mins=self.f_min_per_token,
+                f_maxs=self.f_max_per_token,
+                mfd_nodes=domain.nodes,
+                drop_last_token=drop_last_token,
+            )
+
+        if print_output:
+            print(
+                f"StrainTokenization:\n"
+                f"  token_size:             {self.num_bins_per_token} bins\n"
+                f"  tokens per detector:    {self.num_tokens_per_detector}\n"
+                f"  drop last token:        {self.drop_last_token}\n"
+                f"  first token width:      {self.f_min_per_token[1] - self.f_min_per_token[0]:.3f} Hz\n"
+                f"  last token width:       {self.f_min_per_token[-1] - self.f_min_per_token[-2]:.3f} Hz"
+            )
+            if self.num_padded_f_bins > 0:
+                print(f"  zero-padded bins in last token: {self.num_padded_f_bins}")
+
+    def __call__(self, input_sample: dict) -> dict:
+        """
+        Parameters
+        ----------
+        input_sample:
+            Must contain:
+            - 'waveform': array of shape [..., num_detectors, num_channels, num_bins]
+            - 'asds':     dict {detector_name: asd_array} used to read detector order
+
+        Returns
+        -------
+        dict with keys 'waveform', 'position', 'drop_token_mask' (see class docstring).
+        """
+        sample = input_sample.copy()
+        strain = sample["waveform"]
+        *batch_dims, num_blocks, num_channels, _ = strain.shape
+
+        # (0) Cut or zero-pad the frequency axis to a multiple of num_bins_per_token
+        target_bins = self.num_tokens_per_detector * self.num_bins_per_token
+        if self.num_padded_f_bins == 0:
+            strain = strain[..., :target_bins]
+        else:
+            pad = [(0, 0)] * (strain.ndim - 1) + [(0, self.num_padded_f_bins)]
+            strain = np.pad(strain, pad, mode="constant")
+
+        # (1) Split frequency axis into tokens:
+        #     [..., D, C, F] → [..., D, C, T, P]
+        strain = strain.reshape(
+            *batch_dims,
+            num_blocks,
+            num_channels,
+            self.num_tokens_per_detector,
+            self.num_bins_per_token,
+        )
+
+        # (2) Move channels before tokens:
+        #     [..., D, C, T, P] → [..., D, T, C, P]
+        strain = np.moveaxis(strain, source=-2, destination=-3)
+
+        # (3) Flatten block + token, and channel + bin into the final two axes:
+        #     [..., D, T, C, P] → [..., D*T, C*P]
+        sample["waveform"] = strain.reshape(
+            *batch_dims,
+            num_blocks * self.num_tokens_per_detector,
+            num_channels * self.num_bins_per_token,
+        )
+
+        # Position: [f_min, f_max, detector_index] per token
+        num_tokens = num_blocks * self.num_tokens_per_detector
+        token_f_min = np.tile(self.f_min_per_token, num_blocks)
+        token_f_max = np.tile(self.f_max_per_token, num_blocks)
+        detector_indices = np.array(
+            [DETECTOR_DICT[k] for k in input_sample["asds"]], dtype=strain.dtype
+        )
+        token_detector = np.repeat(detector_indices, self.num_tokens_per_detector)
+        token_position = np.stack([token_f_min, token_f_max, token_detector], axis=-1)
+
+        if batch_dims:
+            token_position = np.broadcast_to(
+                token_position, (*batch_dims, num_tokens, 3)
+            ).copy()
+
+        sample["position"] = token_position
+        sample["drop_token_mask"] = np.zeros((*batch_dims, num_tokens), dtype=bool)
+
+        return sample
+
+
+def _check_mfd_node_compatibility(
+    f_mins: np.ndarray,
+    f_maxs: np.ndarray,
+    mfd_nodes: np.ndarray,
+    drop_last_token: bool,
+) -> None:
+    """
+    Verify that every MFD node falls in a gap between consecutive tokens, not inside
+    a token. This is required so that all bins within a token share the same delta_f.
+
+    Each node must lie in (f_max[i-1], f_min[i]) for some i.
+    """
+    left_bounds = np.concatenate([[0], f_maxs[:-1]])
+    right_bounds = f_mins
+    intervals = np.stack([left_bounds, right_bounds], axis=1)
+
+    covered = np.any(
+        (mfd_nodes[:, None] >= intervals[:, 0])
+        & (mfd_nodes[:, None] <= intervals[:, 1]),
+        axis=1,
+    )
+
+    # The last node may lie beyond the last token's f_max when not dropping the last token
+    if not covered[-1] and (mfd_nodes[~covered][0] > f_maxs[-1] or not drop_last_token):
+        covered[-1] = True
+
+    if not np.all(covered):
+        raise ValueError(
+            f"MFD nodes {mfd_nodes[~covered]} fall within a token rather than "
+            f"between tokens. Adjust token_size or MFD nodes."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Augmentation transforms for tokenized strain data (ported from the DINGO-T1
+# branch). These operate on the output of StrainTokenization (waveform /
+# position / drop_token_mask) and mark tokens as dropped by setting
+# drop_token_mask entries to True; the transformer then does not attend to
+# them. Training with these augmentations is what enables inference-time
+# frequency-range updates and token suppression (UpdateFrequencyRange).
+# ---------------------------------------------------------------------------
+
+
+class DropDetectors(object):
+    """
+    Randomly drop detectors.
+    """
+
+    def __init__(
+        self,
+        num_blocks: int,
+        p_drop_012_detectors: list | None = None,
+        p_drop_hlv: dict | None = None,
+        print_output: bool = True,
+    ):
+        """
+        Parameters
+        ----------
+        num_blocks: int
+            Number of blocks (= detectors) in GW use case.
+        p_drop_012_detectors: list[float]
+            Specifies the categorical probability distribution for how many detectors to drop, in ascending order
+            example: [0.1, 0.6, 0.3] = [10% probability to drop 0 detectors (=3 detector setup), 60 % probability for
+            2 detector setup, 30% probability for 1 detector setup]
+        p_drop_hlv: dict
+            Specifies the categorical probability distribution for which specific detectors to drop, order: H1, L1, V1
+            example: {'H1': 0.1, 'L1': 0.2, 'V1': 0.7] = 10 % probability to drop H1, 20 % probability to drop L1,
+            70% probability to drop V1
+        print_output: bool
+            Whether to write print statements to the console.
+        """
+        self.num_blocks = num_blocks
+        if p_drop_012_detectors is None:
+            p_drop_012_detectors = [1 / num_blocks for _ in range(num_blocks)]
+        if not np.isclose(np.sum(p_drop_012_detectors), 1.0, rtol=1e-6, atol=1e-12):
+            raise ValueError(
+                f"p_drop_012_detectors {p_drop_012_detectors} does not sum to 1."
+            )
+        self.p_drop_012_detectors = p_drop_012_detectors
+        if p_drop_hlv is None:
+            p_drop_hlv = {
+                ["H1", "L1", "V1"][k]: 1 / num_blocks for k in range(num_blocks)
+            }
+        if not np.isclose(
+            np.sum(list(p_drop_hlv.values())), 1.0, rtol=1e-6, atol=1e-12
+        ):
+            raise ValueError(f"p_drop_hlv {p_drop_hlv} does not sum to 1.")
+        # Update keys equivalently to tokenization transform
+        self.p_drop_hlv = {DETECTOR_DICT[k]: v for k, v in p_drop_hlv.items()}
+
+        if len(p_drop_012_detectors) > num_blocks:
+            raise ValueError(
+                f"p_drop_num_detectors {self.p_drop_012_detectors} contains more options than"
+                f"detectors available: {num_blocks}. You need to specify a categorical probability"
+                f"value for dropping 0, ..., {num_blocks - 1} detectors."
+            )
+        if len(self.p_drop_hlv) != num_blocks:
+            raise ValueError(
+                f"Provided values for p_drop_hlv={self.p_drop_hlv} is inconsistent with number of "
+                f"detectors: {num_blocks}. You need to specify a categorical probability value for each "
+                f"detector."
+            )
+        if print_output:
+            print(
+                f"Transform DropDetectors activated: \n"
+                f"    - Probabilities for dropping {[i for i in range(num_blocks)]} detectors are "
+                f"{self.p_drop_012_detectors}.\n"
+                f"    - Probabilities for specific detectors are {self.p_drop_hlv}."
+            )
+
+    def __call__(self, input_sample: dict) -> dict:
+        """
+        Parameters
+        ----------
+        input_sample: Dict
+            Values for keys
+            - 'waveform':
+            Sample of shape [batch_size, num_tokens, num_features] =
+            [batch_size, num_blocks * num_tokens_per_block, num_channels * num_bins_per_token]
+            where num_blocks = number of detectors in GW use case,
+            num_channels>=3 (real, imag, auxiliary channels, e.g. asd),
+            and num_bins = number of frequency bins.
+            - 'position', shape [batch_size, num_tokens, 3]
+               contains information [f_min, f_max, block]
+            - 'drop_token_mask', shape [batch_size, num_tokens]
+
+        Returns
+        ----------
+        sample: Dict
+            input_sample with modified value for key
+            - 'drop_token_mask', shape [batch_size, num_tokens]
+
+        """
+        # The transform operates on batched arrays; the training pipeline feeds
+        # single samples, so temporarily add a batch axis.
+        batched = input_sample["drop_token_mask"].ndim > 1
+        if not batched:
+            input_sample["drop_token_mask"] = input_sample["drop_token_mask"][
+                np.newaxis
+            ]
+        blocks = input_sample["position"][..., 2]
+        if not batched:
+            blocks = blocks[np.newaxis]
+        num_blocks = len(np.unique(blocks))
+        detectors = np.unique(blocks)
+
+        # Convert p_drop_hlv dict to list
+        p_drop_hlv = [self.p_drop_hlv[k] for k in detectors]
+
+        # Decide how many detectors to drop (either none, or one less than the number of detectors present)
+        # for each element in batch_size
+        drop_n_blocks = np.random.choice(
+            [i for i in range(num_blocks)],
+            p=self.p_drop_012_detectors,
+            size=[*blocks.shape[:-1]],
+        )
+        if np.sum(drop_n_blocks) != 0:
+            # Treat drop 1 vs. 2 blocks separately because which detectors to drop varies
+            # with the number of detectors to drop
+            for n in [i for i in np.unique(drop_n_blocks) if i > 0]:
+                # Construct mask for which batch indices require updates
+                mask_mod = np.where(drop_n_blocks == n, True, False)
+                # Decide which detectors
+                detectors_to_drop = np.apply_along_axis(
+                    np.random.choice,
+                    axis=1,
+                    arr=np.repeat(
+                        np.expand_dims(detectors, 0), repeats=np.sum(mask_mod), axis=0
+                    ),
+                    p=p_drop_hlv,
+                    size=n,
+                    replace=False,
+                )
+                # Create mask such that tokens corresponding to dropped detectors are True
+                # (1) Drop one detector
+                mask_detectors = np.where(
+                    blocks[mask_mod].T == detectors_to_drop[:, 0], True, False
+                ).T
+                if detectors_to_drop.shape[-1] > 1:
+                    # (2) Update mask to include dropping of any further detector
+                    for i in range(1, detectors_to_drop.shape[-1]):
+                        mask_detectors_i = np.where(
+                            blocks[mask_mod].T == detectors_to_drop[:, i], True, False
+                        ).T
+                        mask_detectors = np.logical_or(mask_detectors_i, mask_detectors)
+                # Keep drop=True from previous transforms with logical OR
+                mask_detectors = np.logical_or(
+                    input_sample["drop_token_mask"][mask_mod], mask_detectors
+                )
+                # Update mask
+                input_sample["drop_token_mask"][mask_mod] = mask_detectors
+
+        if not batched:
+            input_sample["drop_token_mask"] = input_sample["drop_token_mask"][0]
+        return input_sample
+
+
+class DropFrequenciesToUpdateRange(object):
+    """
+    Randomly drop tokens such that f_min and f_max of the frequency range are updated.
+
+    This transform does the following things:
+    * Decides whether to apply a cut to each element of the batch based on p_cut.
+    * Decides whether to treat the detectors individually or apply the same cut to all detectors.
+    * Decides whether to cut upper or lower end or both (potentially for each detector).
+    * Samples f_cut from [f_min, f_max_lower_cut] and/or [f_min_upper_cut, f_max] in UFD (potentially for each
+      detector).
+    * Converts frequency values to tokens and creates a token mask removing [f_min, f_lower_cut] and/or
+      [f_upper_cut, f_max] (potentially for each detector).
+    """
+
+    def __init__(
+        self,
+        domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
+        p_cut: float,
+        f_max_lower_cut: float,
+        f_min_upper_cut: float,
+        p_same_cut_all_detectors: float,
+        p_lower_upper_both: Optional[list] = None,
+        print_output: bool = True,
+    ):
+        """
+        Parameters
+        ----------
+        domain: UniformFrequencyDomain | MultibandedFrequencyDomain
+            Domain corresponding to the data being transformed.
+        p_cut: float
+            Probability of applying a cut to each element of the batch.
+        f_max_lower_cut: float
+            Maximal frequency value to cut at the lower end of the frequency domain. f_min_lower_cut is sampled from
+            [f_min, f_max_lower_cut] in UFD.
+        f_min_upper_cut: float
+            Minimal frequency value to cut at the upper end of the frequency domain. f_max_upper_cut is sampled from
+            [f_min_upper_cut, f_max] in UFD.
+        p_same_cut_all_detectors: float
+            Probability of applying the same cut to all detectors.
+        p_lower_upper_both: list[float]
+            List of probabilities explaining with what probability we either cut at the lower, at the upper, or at both
+            ends. Order: [p_lower, p_upper, p_both]
+        print_output: bool
+            Whether to write print statements to the console.
+        """
+
+        self.domain = domain
+        self.p_cut = p_cut
+        self.f_max_lower_cut = f_max_lower_cut
+        self.f_min_upper_cut = f_min_upper_cut
+        self.prevent_zero_information = (
+            True if self.f_max_lower_cut >= self.f_min_upper_cut else False
+        )
+        self.p_same_cut_all_detectors = p_same_cut_all_detectors
+        if p_lower_upper_both is None:
+            p_lower_upper_both = np.array([0.4, 0.4, 0.2])
+        self.p_lower_upper_both = p_lower_upper_both
+        if not np.isclose(np.sum(self.p_lower_upper_both), 1.0, rtol=1e-6, atol=1e-12):
+            raise ValueError(
+                f"p_lower_upper_both {self.p_lower_upper_both} does not sum to 1. "
+            )
+        if print_output:
+            print(
+                f"Transform DropFrequencyValues activated: \n"
+                f"    - Probability of a cut happening: {self.p_cut}\n"
+                f"    - Lower cut sampled from [{self.domain.f_min}, {self.f_max_lower_cut}]\n"
+                f"    - Upper cut sampled from [{self.f_min_upper_cut}, {self.domain.f_max}]\n"
+                f"    - Probability to apply the same cut on all detectors: {self.p_same_cut_all_detectors} "
+            )
+            if self.prevent_zero_information:
+                print(
+                    f"\n    - Preventing zero information is activated since [{self.domain.f_min}, {self.f_max_lower_cut}]"
+                    f"overlaps with [{self.f_min_upper_cut}, {self.domain.f_max}] "
+                )
+
+    def __call__(self, input_sample: dict) -> dict:
+        """
+        Parameters
+        ----------
+        input_sample: Dict
+            Values for keys
+            - 'waveform':
+                Sample of shape [batch_size, num_tokens, num_features]
+            - 'position', shape [batch_size, num_tokens, 3]
+               contains information [f_min, f_max, block]
+            - 'drop_token_mask', shape [batch_size, num_tokens]
+
+        Returns
+        ----------
+        sample: Dict
+            input_sample with modified value for key
+            - 'drop_token_mask', shape [batch_size, num_tokens]
+
+        """
+        num_tokens = input_sample["waveform"].shape[-2]
+        blocks = input_sample["position"][..., 2]
+        num_blocks = len(np.unique(blocks))
+        num_tokens_per_block = num_tokens // num_blocks
+
+        # Cut in frequency domain, where we remove the upper, lower or both part(s),
+        #     i.e. [f_min, f_cut], [f_cut, f_max], or [f_cut_min, f_cut_max]
+        # - Decide whether to apply a cut for each sample
+        # - Decide whether to treat the detectors individually or apply the same cut to all detectors
+        # - Decide whether to mask upper or lower range or both (potentially for each detector)
+        # - Sample index for f_cut from [f_min, f_max_lower_cut] and/or [f_min_upper_cut, f_max]
+        #   in uniform frequency domain (potentially for each detector)
+        # - Convert frequency values to token mask
+
+        batch_size = [*blocks.shape[:-1]] if blocks.shape[:-1] != () else [1]
+        # Decide whether to apply a cut for each sample
+        apply_cut = np.random.choice(
+            [True, False], p=[self.p_cut, 1 - self.p_cut], size=batch_size
+        )
+
+        # Decide whether to treat the detectors individually or apply the same cut to all detectors
+        same_cut_all_detectors = np.where(
+            apply_cut,
+            np.random.choice(
+                [True, False],
+                p=[self.p_same_cut_all_detectors, 1 - self.p_same_cut_all_detectors],
+                size=batch_size,
+            ),
+            False,
+        )
+        batch_block_size = (
+            [*blocks.shape[:-1], num_blocks]
+            if blocks.shape[:-1] != ()
+            else [1, num_blocks]
+        )
+        # (1) Different cut is applied to every detector
+        # Decide whether to mask upper or lower range or both (potentially for each detector)
+        lower_upper_both_separate = np.random.choice(
+            ["lower", "upper", "both"], p=self.p_lower_upper_both, size=batch_block_size
+        )
+        mask_lower_separate = np.logical_or(
+            lower_upper_both_separate == "lower", lower_upper_both_separate == "both"
+        )
+        mask_upper_separate = np.logical_or(
+            lower_upper_both_separate == "upper", lower_upper_both_separate == "both"
+        )
+        # Combine with masks (a) whether we apply a cut and (b) whether we apply it to a single detector
+        ones_vec = np.ones((1, num_blocks), dtype=bool)
+        mask_lower_separate_combined = np.logical_and.reduce(
+            (
+                mask_lower_separate,
+                apply_cut[..., None] * ones_vec,
+                ~same_cut_all_detectors[..., None] * ones_vec,
+            )
+        )
+        mask_upper_separate_combined = np.logical_and.reduce(
+            (
+                mask_upper_separate,
+                apply_cut[..., None] * ones_vec,
+                ~same_cut_all_detectors[..., None] * ones_vec,
+            )
+        )
+        # Sample f_cut from [f_min, f_max_lower_cut] and/or [f_min_upper_cut, f_max] in UFD for each detector
+        if isinstance(self.domain, UniformFrequencyDomain):
+            f_values_base_domain = self.domain.sample_frequencies[
+                self.domain.frequency_mask
+            ]
+        elif isinstance(self.domain, MultibandedFrequencyDomain):
+            f_values_base_domain = self.domain.base_domain.sample_frequencies[
+                self.domain.base_domain.frequency_mask
+            ]
+        else:
+            raise ValueError(f"Unknown domain type: {self.domain}")
+        f_lower_separate = np.where(
+            mask_lower_separate_combined,
+            np.random.choice(
+                f_values_base_domain[f_values_base_domain <= self.f_max_lower_cut],
+                replace=True,
+                size=batch_block_size,
+            ),
+            -1,
+        )
+        f_upper_separate = np.where(
+            mask_upper_separate_combined,
+            np.random.choice(
+                f_values_base_domain[f_values_base_domain >= self.f_min_upper_cut],
+                replace=True,
+                size=batch_block_size,
+            ),
+            np.inf,
+        )
+
+        # Construct mask: f_cut_lower >= f_min_per_token and f_cut_upper <= f_max_per_token
+        token_mask_separate_lower = (
+            np.repeat(f_lower_separate, repeats=num_tokens_per_block, axis=-1)
+            >= input_sample["position"][..., 0]
+        )
+        token_mask_separate_upper = (
+            np.repeat(f_upper_separate, repeats=num_tokens_per_block, axis=-1)
+            <= input_sample["position"][..., 1]
+        )
+
+        # Combine into one mask
+        token_mask_separate = np.logical_or(
+            token_mask_separate_lower, token_mask_separate_upper
+        )
+        if self.prevent_zero_information:
+            # If all tokens are masked in one sample, only apply upper or lower mask
+            replace_mask = np.where(
+                np.sum(token_mask_separate, axis=-1) == num_tokens, True, False
+            )
+            repl_mask = np.repeat(
+                replace_mask[..., np.newaxis], repeats=num_tokens, axis=-1
+            )
+            # Decide whether to choose lower or upper instead of both
+            lower_upper_probs = self.p_lower_upper_both[:2] / np.sum(
+                self.p_lower_upper_both[:2]
+            )
+            lower_upper_global = np.random.choice(
+                ["lower", "upper"], p=lower_upper_probs, size=batch_size
+            )
+            mask_lower_separate_replace = np.where(
+                lower_upper_global == "lower", True, False
+            )
+            mask_lower_sep_repl = np.repeat(
+                mask_lower_separate_replace[..., np.newaxis],
+                repeats=num_tokens,
+                axis=-1,
+            )
+            # Create replace mask
+            mask_combined_separate_replace = np.where(
+                mask_lower_sep_repl,
+                token_mask_separate_lower,
+                token_mask_separate_upper,
+            )
+            # Combine with token_mask_separate
+            token_mask_separate = np.where(
+                repl_mask, mask_combined_separate_replace, token_mask_separate
+            )
+
+        # (2) Same cut is applied to all detectors
+        # Decide whether to mask upper or lower or both
+        lower_upper_both_same = np.random.choice(
+            ["lower", "upper", "both"], p=self.p_lower_upper_both, size=batch_size
+        )
+        mask_lower_same = np.logical_or(
+            lower_upper_both_same == "lower", lower_upper_both_same == "both"
+        )
+        mask_upper_same = np.logical_or(
+            lower_upper_both_same == "upper", lower_upper_both_same == "both"
+        )
+        # Combine with masks (a) whether we apply a cut and (b) whether we apply it to all detectors
+        mask_lower_combined = np.logical_and.reduce(
+            (mask_lower_same, apply_cut, same_cut_all_detectors)
+        )
+        mask_upper_combined = np.logical_and.reduce(
+            (mask_upper_same, apply_cut, same_cut_all_detectors)
+        )
+        # Sample f_cut from [f_min, f_max_lower_cut] and/or [f_min_upper_cut, f_max] in UFD
+        f_lower_same = np.where(
+            mask_lower_combined,
+            np.random.choice(
+                f_values_base_domain[f_values_base_domain <= self.f_max_lower_cut],
+                replace=True,
+                size=batch_size,
+            ),
+            -1,
+        )
+        f_upper_same = np.where(
+            mask_upper_combined,
+            np.random.choice(
+                f_values_base_domain[f_values_base_domain >= self.f_min_upper_cut],
+                replace=True,
+                size=batch_size,
+            ),
+            np.inf,
+        )
+        # Construct mask: f_cut_lower >= f_min_per_token and f_cut_upper <= f_max_per_token
+        # (Assume that all detectors have same f_min and f_max values)
+        f_mins = input_sample["position"][..., 0:num_tokens_per_block, 0]
+        f_maxs = input_sample["position"][..., 0:num_tokens_per_block, 1]
+        token_mask_same_lower = f_lower_same[:, np.newaxis] >= f_mins
+        token_mask_same_upper = f_upper_same[:, np.newaxis] <= f_maxs
+
+        # Combine into one mask
+        token_mask_same_one_detector = np.logical_or(
+            token_mask_same_lower, token_mask_same_upper
+        )
+        if self.prevent_zero_information:
+            # If all tokens are masked in one block, only apply upper or lower mask
+            replace_mask = np.where(
+                np.sum(token_mask_same_one_detector, axis=-1) == num_tokens_per_block,
+                True,
+                False,
+            )
+            repl_mask = np.repeat(
+                replace_mask[..., np.newaxis], repeats=num_tokens_per_block, axis=-1
+            )
+            # Decide whether to choose lower or upper instead of both
+            lower_upper_probs = self.p_lower_upper_both[:2] / np.sum(
+                self.p_lower_upper_both[:2]
+            )
+            lower_upper_global = np.random.choice(
+                ["lower", "upper"], p=lower_upper_probs, size=batch_size
+            )
+            mask_lower_same_replace = np.where(
+                lower_upper_global == "lower", True, False
+            )
+            mask_lower_same_repl = np.repeat(
+                mask_lower_same_replace[..., np.newaxis],
+                repeats=num_tokens_per_block,
+                axis=-1,
+            )
+            # Create replace mask
+            mask_combined_same_replace = np.where(
+                mask_lower_same_repl, token_mask_same_lower, token_mask_same_upper
+            )
+            # Combine with token_mask_same_one_detector
+            token_mask_same_one_detector = np.where(
+                repl_mask, mask_combined_same_replace, token_mask_same_one_detector
+            )
+
+        # Duplicate for number of detectors
+        token_mask_same = np.tile(token_mask_same_one_detector, reps=num_blocks)
+
+        # Modify mask
+        if len(input_sample["drop_token_mask"].shape) == 1:
+            token_mask_separate = token_mask_separate.squeeze()
+            token_mask_same = token_mask_same.squeeze()
+        input_sample["drop_token_mask"] = np.logical_or.reduce(
+            (input_sample["drop_token_mask"], token_mask_separate, token_mask_same)
+        )
+
+        return input_sample
+
+
+class DropFrequencyInterval(object):
+    """
+    Randomly drop tokens corresponding to specific frequency interval.
+
+    This transform does the following things:
+    * Decides whether to mask a frequency interval per detector based on p_per_detector.
+    * Samples f_lower from [f_min, f_max - max_width].
+    * Samples f_upper from [f_lower, f_lower + max_width].
+    * Converts f_lower and f_upper to tokens and creates a token mask removing all tokens in [f_lower, f_upper].
+    """
+
+    def __init__(
+        self,
+        domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
+        p_per_detector: float,
+        f_min: float,
+        f_max: float,
+        max_width: float,
+        print_output: bool = True,
+    ):
+        """
+        Parameters
+        ----------
+        domain: UniformFrequencyDomain | MultibandedFrequencyDomain
+            Domain corresponding to the data being transformed.
+        p_per_detector: float
+            Probability of dropping tokens (corresponding to a frequency interval) independently per detector.
+        f_min: float
+            Minimal frequency value for which we allow tokens to be dropped.
+        f_max: float
+            Maximum frequency value for which we allow tokens to be dropped.
+        max_width: float
+            Maximal width of frequency interval that can be dropped.
+        print_output: bool
+            Whether to write print statements to the console.
+        """
+        self.domain = domain
+        self.p_per_detector = p_per_detector
+        self.interval_f_min = f_min if domain.f_min < f_min else domain.f_min
+        self.interval_f_max = f_max if domain.f_max > f_max else domain.f_max
+        interval_width = self.interval_f_max - self.interval_f_min
+        self.interval_max_width = (
+            max_width if max_width < interval_width else interval_width
+        )
+        if print_output:
+            print(
+                f"Transform DropFrequencyInterval activated:"
+                f"  Settings: \n"
+                f"    - Probability of dropping interval per detector: {self.p_per_detector}\n"
+                f"    - Interval range sampled from [{self.interval_f_min}, {self.interval_f_max}]\n"
+                f"    - Maximal width of interval: {self.interval_max_width}, but the effective interval can be larger "
+                f"if {self.interval_f_min} and {self.interval_f_max} fall in the middle of a token."
+            )
+
+    def __call__(self, input_sample: dict) -> dict:
+        """
+        Parameters
+        ----------
+        input_sample: Dict
+            Values for keys
+            - 'waveform':
+                Sample of shape [batch_size, num_tokens, num_features]
+            - 'position', shape [batch_size, num_tokens, 3]
+               contains information [f_min, f_max, block]
+            - 'drop_token_mask', shape [batch_size, num_tokens]
+
+        Returns
+        ----------
+        sample: Dict
+            input_sample with modified value for key
+            - 'drop_token_mask', shape [batch_size, num_tokens]
+
+        """
+        num_tokens = input_sample["waveform"].shape[-2]
+        blocks = input_sample["position"][..., 2]
+        num_blocks = len(np.unique(blocks))
+        num_tokens_per_block = num_tokens // num_blocks
+
+        # Mask frequency range:
+        # - Decide whether to apply a mask for each detector
+        # - Sample f_mask_lower and f_mask_upper in uniform frequency domain
+        # - Get tokens corresponding to frequency values
+        # - Mask everything in between, i.e. [f_mask_lower, f_mask_upper]
+
+        batch_block_size = (
+            [*blocks.shape[:-1], num_blocks]
+            if blocks.shape[:-1] != ()
+            else [1, num_blocks]
+        )
+        # Decide whether to cut or mask frequency range for each block
+        mask_interval = np.random.choice(
+            [True, False],
+            p=[self.p_per_detector, 1 - self.p_per_detector],
+            size=batch_block_size,
+        )
+
+        # Sample f_lower and f_upper in UFD
+        if isinstance(self.domain, UniformFrequencyDomain):
+            f_values_base_domain = self.domain.sample_frequencies[
+                self.domain.frequency_mask
+            ]
+        elif isinstance(self.domain, MultibandedFrequencyDomain):
+            f_values_base_domain = self.domain.base_domain.sample_frequencies[
+                self.domain.base_domain.frequency_mask
+            ]
+        else:
+            raise ValueError(f"Unknown domain type: {self.domain}")
+        # f_lower from [interval_f_min, interval_f_max - interval_max_width]
+        mask_f_vals_lower = np.logical_and(
+            self.interval_f_min <= f_values_base_domain,
+            f_values_base_domain <= self.interval_f_max - self.interval_max_width,
+        )
+        possible_f_vals_lower = f_values_base_domain[mask_f_vals_lower]
+        f_lower_full = np.random.choice(
+            possible_f_vals_lower, replace=True, size=batch_block_size
+        )
+        f_lower = np.where(mask_interval, f_lower_full, np.inf)
+
+        # f_upper from [f_lower, f_lower + interval_max_width]
+        # Sampling f_upper is more complicated because it depends on the f_lower sampled for each batch index and
+        # detector
+        mask_f_vals_upper = np.logical_and(
+            f_lower_full[:, :, np.newaxis]
+            <= f_values_base_domain[np.newaxis, np.newaxis, :],
+            f_values_base_domain[np.newaxis, np.newaxis, :]
+            <= f_lower_full[:, :, np.newaxis] + self.interval_max_width,
+        )
+        possible_indices_upper = np.stack(
+            [
+                np.apply_along_axis(
+                    np.argwhere, arr=mask_f_vals_upper[:, b, :], axis=-1
+                ).squeeze()
+                for b in range(num_blocks)
+            ],
+            axis=-2,
+        )
+        possible_f_vals_upper = f_values_base_domain[possible_indices_upper]
+        f_upper_no_mask = np.stack(
+            [
+                np.apply_along_axis(
+                    np.random.choice, arr=possible_f_vals_upper[..., b, :], axis=-1
+                )
+                for b in range(num_blocks)
+            ],
+            axis=-1,
+        )
+        f_upper = np.where(mask_interval, f_upper_no_mask, -1.0)
+
+        # Construct mask: f_lower <= f_maxs AND f_upper >= f_mins
+        f_mins = input_sample["position"][..., 0]
+        f_maxs = input_sample["position"][..., 1]
+        token_mask_lower = (
+            np.repeat(f_lower, repeats=num_tokens_per_block, axis=-1) <= f_maxs
+        )
+        token_mask_upper = (
+            np.repeat(f_upper, repeats=num_tokens_per_block, axis=-1) >= f_mins
+        )
+
+        # Combine into one mask
+        token_mask = np.logical_and(token_mask_lower, token_mask_upper)
+
+        # Modify mask
+        if len(input_sample["drop_token_mask"].shape) == 1:
+            token_mask = token_mask.squeeze()
+        input_sample["drop_token_mask"] = np.logical_or(
+            input_sample["drop_token_mask"], token_mask
+        )
+
+        return input_sample
+
+
+class DropRandomTokens(object):
+    """
+    Randomly drop tokens for data points. Whether tokens will be dropped depends on the drop probability p_drop.
+    The number of tokens that will be dropped is sampled uniformly from [1, max_num_tokens], disregarding any domain
+    information.
+    """
+
+    def __init__(
+        self,
+        p_drop: float,
+        max_num_tokens: int,
+        print_output: bool = True,
+    ):
+        """
+        Parameters
+        ----------
+        p_drop: float
+            Probability of dropping tokens from a data point.
+        max_num_tokens: int
+            Maximum number of tokens that can be dropped.
+        print_output: bool
+            Whether to write print statements to the console.
+        """
+        self.p_drop = p_drop
+        self.max_num_tokens = max_num_tokens
+        if print_output:
+            print(
+                f"Transform DropRandomTokens activated:\n"
+                f"    - Probability of dropping tokens for each data point: {self.p_drop}\n"
+                f"    - Maximal number of tokens that can be dropped: {self.max_num_tokens}"
+            )
+
+    def __call__(self, input_sample: dict) -> dict:
+        """
+        Parameters
+        ----------
+        input_sample: Dict
+            Values for keys
+            - 'waveform':
+            Sample of shape [batch_size, num_tokens, num_features]
+            - 'position', shape [batch_size, num_tokens, 3]
+               contains information [f_min, f_max, block]
+            - 'drop_token_mask', shape [batch_size, num_tokens]
+
+        Returns
+        ----------
+        sample: Dict
+            input_sample with modified value for key
+            - 'position', shape [batch_size, num_tokens, 3]
+
+        """
+        sample_without_channel = input_sample["waveform"][..., 0]
+        num_tokens = sample_without_channel.shape[-1]
+
+        batch_size = (
+            [*sample_without_channel.shape[:-1]]
+            if sample_without_channel.shape[:-1] != ()
+            else [1]
+        )
+        probs = [self.p_drop, 1 - self.p_drop]
+        drop_mask = np.random.choice(
+            [True, False],
+            p=probs,
+            replace=True,
+            size=batch_size,
+        )
+        num_tokens_to_drop = np.random.choice(
+            np.arange(1, self.max_num_tokens + 1), size=batch_size
+        )
+
+        batch_token_size = (
+            [*sample_without_channel.shape]
+            if sample_without_channel.shape[:-1] != ()
+            else [1, num_tokens]
+        )
+        # Generate random values for all tokens
+        random_scores = np.random.uniform(size=batch_token_size)
+        # Sort the scores in ascending order, and get indices
+        sorted_indices = np.argsort(random_scores, axis=-1)
+        # Create an index mask for selecting top-k per row
+        row_indices = np.arange(batch_size[0])[:, np.newaxis]
+        token_ranks = np.arange(num_tokens)
+        # For each row, get threshold index
+        thresholds = num_tokens_to_drop[:, np.newaxis] > token_ranks
+        # Build boolean mask
+        token_mask = np.zeros(batch_token_size, dtype=bool)
+        token_mask[row_indices, sorted_indices] = thresholds
+
+        # Combine masks
+        token_mask = np.logical_and(
+            np.repeat(drop_mask[..., np.newaxis], repeats=num_tokens, axis=-1),
+            token_mask,
+        )
+
+        # Modify mask
+        if len(input_sample["drop_token_mask"].shape) == 1:
+            token_mask = token_mask.squeeze()
+        input_sample["drop_token_mask"] = np.logical_or(
+            input_sample["drop_token_mask"], token_mask
+        )
+
+        return input_sample
+
+
+class NormalizePosition(object):
+    """
+    Normalize f_min and f_max in position
+    """
+
+    def __call__(self, input_sample: dict) -> dict:
+        """
+        Parameters
+        ----------
+        input_sample: Dict
+            Values for keys
+            - 'waveform':
+            Sample of shape [batch_size, num_tokens, num_features]
+            - 'position', shape [batch_size, num_tokens, 3]
+               contains information [f_min, f_max, block]
+            - 'drop_token_mask', shape [batch_size, num_tokens]
+
+        Returns
+        ----------
+        sample: Dict
+            input_sample with modified value for key
+            - 'position', shape [batch_size, num_tokens, 3]
+
+        """
+        position = input_sample["position"]
+        f_min = position[..., 0].min()
+        f_max = position[..., 1].max()
+        position[..., 0] = (position[..., 0] - f_min) / (f_max - f_min)
+        position[..., 1] = (position[..., 1] - f_min) / (f_max - f_min)
+        input_sample["position"] = position
+
+        return input_sample
+
+
+class UpdateFrequencyRange(object):
+    """
+    # TODO: Rename MaskDataForFrequencyRangeUpdateTransformer to distinguish from similar transform applied for cropping
+    Update token mask according to frequency range update
+    """
+
+    def __init__(
+        self,
+        minimum_frequency: Optional[float | dict[str, float]] = None,
+        maximum_frequency: Optional[float | dict[str, float]] = None,
+        suppress_range: Optional[
+            list[float, float] | dict[str, list[float, float]]
+        ] = None,
+        domain: Optional[UniformFrequencyDomain | MultibandedFrequencyDomain] = None,
+        ifos: Optional[list[str]] = None,
+        print_output: bool = True,
+    ):
+        """
+        Parameters
+        ----------
+        minimum_frequency: Optional[float | dict[str, float]]
+            Update of f_min, if float, the same value will be used for all detectors.
+        maximum_frequency: Optional[float | dict[str, float]]
+            Update of f_max, if float, the same value will be used for all detectors.
+        suppress_range: list[float, float] | dict[str, list[float, float]] | None
+            Suppress ranges [f_min, f_max], either for all detectors or for individual detectors.
+        domain: UniformFrequencyDomain | MultibandedFrequencyDomain
+        ifos: list[str]
+            List of detectors.
+        print_output: bool
+            Whether to write print statements to the console.
+        """
+        # Include defaults in case of missing minimum-/maximum frequency values per detector
+        self.minimum_frequency = add_defaults_for_missing_ifos(
+            object_to_update=minimum_frequency, update_value=domain.f_min, ifos=ifos
+        )
+        self.maximum_frequency = add_defaults_for_missing_ifos(
+            object_to_update=maximum_frequency, update_value=domain.f_max, ifos=ifos
+        )
+        self.suppress_range = suppress_range
+        self.print_output = print_output
+        if print_output:
+            print(
+                f"Transform UpdateFrequencyRange activated:"
+                f"  Settings: \n"
+                f"    - Minimum_frequency update: {self.minimum_frequency}\n"
+                f"    - Maximum_frequency update: {self.maximum_frequency}\n"
+                f"    - Suppress range: {self.suppress_range}\n"
+            )
+
+    def __call__(self, input_sample: dict) -> dict:
+        """
+        Parameters
+        ----------
+        input_sample: Dict
+            Values for keys
+            - 'waveform':
+            Sample of shape [batch_size, num_tokens, num_features]
+            - 'position', shape [batch_size, num_tokens, 3]
+               contains information [f_min, f_max, block]
+            - 'drop_token_mask', shape [batch_size, num_tokens]
+
+        Returns
+        ----------
+        sample: Dict
+            input_sample with modified value for key
+            - 'drop_token_mask', shape [batch_size, num_tokens]
+
+        """
+        # TODO: Write test for transform. Vectorize (not required for inference)
+        sample = input_sample.copy()
+        blocks = np.unique(sample["position"][..., 2])
+        num_blocks = len(blocks)
+        num_tokens_per_block = sample["position"].shape[-2] // num_blocks
+
+        # Assume that f_min is the same for all detectors
+        f_min_per_token = sample["position"][..., 0]
+        f_max_per_token = sample["position"][..., 1]
+        f_min_per_token_single = f_min_per_token[:num_tokens_per_block]
+        f_max_per_token_single = f_max_per_token[:num_tokens_per_block]
+
+        # Start with empty mask that we will successively update
+        mask = np.zeros_like(sample["drop_token_mask"], dtype=bool)
+        # Update minimum_frequency
+        if self.minimum_frequency is not None:
+            # Same for all detectors
+            if isinstance(self.minimum_frequency, float) or isinstance(
+                self.minimum_frequency, int
+            ):
+                # Do not mask token if f_min_per_token = minimum_frequency
+                mask_min = np.where(
+                    f_min_per_token < self.minimum_frequency, True, False
+                )
+                mask = np.logical_or(mask, mask_min)
+            # Different for each detector
+            elif isinstance(self.minimum_frequency, dict):
+                for b in blocks:
+                    if DETECTOR_DICT_INVERSE[b] in self.minimum_frequency:
+                        # Do not mask token if f_min_per_token = minimum_frequency
+                        mask_min = np.where(
+                            f_min_per_token_single
+                            < self.minimum_frequency[DETECTOR_DICT_INVERSE[b]],
+                            True,
+                            False,
+                        )
+                        mask_b = np.where(sample["position"][..., 2] == b, True, False)
+                        mask[mask_b] = np.logical_or(mask_min, mask[mask_b])
+            else:
+                raise TypeError(
+                    f"self.minimum_frequency is type {type(self.minimum_frequency)} but must be either a float, an int or a dict."
+                )
+            if self.print_output:
+                print(f"Updated f_min with {self.minimum_frequency}.")
+
+        # Update maximum_frequency
+        if self.maximum_frequency is not None:
+            # Same for all detectors
+            if isinstance(self.maximum_frequency, float) or isinstance(
+                self.maximum_frequency, int
+            ):
+                # Do not mask token if f_max_per_token = maximum_frequency
+                mask_max = np.where(
+                    f_max_per_token > self.maximum_frequency, True, False
+                )
+                mask = np.logical_or(mask, mask_max)
+            # Different for each detector
+            elif isinstance(self.maximum_frequency, dict):
+                for b in blocks:
+                    if DETECTOR_DICT_INVERSE[b] in self.maximum_frequency:
+                        # Do not mask token if f_max_per_token = maximum_frequency
+                        mask_max = np.where(
+                            f_max_per_token_single
+                            > self.maximum_frequency[DETECTOR_DICT_INVERSE[b]],
+                            True,
+                            False,
+                        )
+                        mask_b = np.where(sample["position"][..., 2] == b, True, False)
+                        mask[mask_b] = np.logical_or(mask_max, mask[mask_b])
+            else:
+                raise TypeError(
+                    f"self.maximum_frequency is type {type(self.maximum_frequency)} but must be either a float, an int or a dict."
+                )
+            if self.print_output:
+                print(f"Updated f_max with {self.maximum_frequency}.")
+
+        # Update suppress_range
+        if self.suppress_range is not None:
+            # Same for all detectors
+            if isinstance(self.suppress_range, list):
+                f_min_lower, f_max_upper = self.suppress_range
+                mask_lower = np.where(f_max_per_token >= f_min_lower, True, False)
+                mask_upper = np.where(f_min_per_token <= f_max_upper, True, False)
+                mask_interval = np.logical_and(mask_lower, mask_upper)
+                mask = np.logical_or(mask, mask_interval)
+            # Different for each detector
+            elif isinstance(self.suppress_range, dict):
+                for b in blocks:
+                    if DETECTOR_DICT_INVERSE[b] in self.suppress_range:
+                        f_min_lower, f_max_upper = self.suppress_range[
+                            DETECTOR_DICT_INVERSE[b]
+                        ]
+                        mask_lower = np.where(
+                            f_max_per_token_single >= f_min_lower, True, False
+                        )
+                        mask_upper = np.where(
+                            f_min_per_token_single <= f_max_upper, True, False
+                        )
+                        mask_interval = np.logical_and(mask_lower, mask_upper)
+                        mask_b = np.where(sample["position"][..., 2] == b, True, False)
+                        mask[mask_b] = np.logical_or(mask_interval, mask[mask_b])
+            else:
+                raise TypeError(
+                    f"self.suppress is type {type(self.suppress_range)} but must be either a list or a dict."
+                )
+            if self.print_output:
+                print(f"Updated suppress_range with {self.suppress_range}.")
+
+        # Update drop_token_mask
+        sample["drop_token_mask"] = np.logical_or(mask, sample["drop_token_mask"])
+
+        return sample

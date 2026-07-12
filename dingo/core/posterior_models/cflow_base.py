@@ -5,12 +5,12 @@ from abc import abstractmethod
 from torchdiffeq import odeint
 from glasflow.nflows.utils.torchutils import repeat_rows, split_leading_dim
 
-from .base_model import BasePosteriorModel
+from .base_model import NeuralDistribution
 
 from dingo.core.nn.cfnets import create_cf
 
 
-class ContinuousFlowPosteriorModel(BasePosteriorModel):
+class ContinuousFlowPosteriorModel(NeuralDistribution):
     """
     Class for posterior models based on continuous normalizing flows (CNFs).
 
@@ -49,12 +49,9 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.eps = 0
-        self.time_prior_exponent = self.model_kwargs["posterior_kwargs"][
-            "time_prior_exponent"
-        ]
-        self.theta_dim = self.metadata["train_settings"]["model"]["posterior_kwargs"][
-            "input_dim"
-        ]
+        distribution_kwargs = self.model_kwargs["distribution"]["kwargs"]
+        self.time_prior_exponent = distribution_kwargs["time_prior_exponent"]
+        self.theta_dim = distribution_kwargs["theta_dim"]
 
     def sample_t(self, batch_size):
         t = (1 - self.eps) * torch.rand(batch_size, device=self.device)
@@ -122,14 +119,12 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
         return torch.cat((vf, -div_vf), dim=1)
 
     def initialize_network(self):
-        model_kwargs = {
-            k: v for k, v in self.model_kwargs.items() if k != "posterior_model_type"
-        }
-        if self.initial_weights is not None:
-            model_kwargs["initial_weights"] = self.initial_weights
-        self.network = create_cf(**model_kwargs)
+        embedding_net = self.build_embedding_net()
+        self.network = create_cf(
+            self.model_kwargs["distribution"]["kwargs"], embedding_net
+        )
 
-    def sample(self, *context: torch.Tensor, num_samples: int = None):
+    def sample(self, context: dict = None, num_samples: int = 1):
         """
         Sample parameters theta from the posterior model,
 
@@ -139,9 +134,9 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
 
         Parameters
         ----------
-        context: torch.Tensor
-            Context information (typically observed data). Should have a batch
-            dimension (even if size B = 1).
+        context: dict = None
+            Named context tensors (keyed like the training batches). Each tensor
+            should have a batch dimension (even if size B = 1).
         num_samples: int = 1
             Number of samples to generate.
 
@@ -150,6 +145,12 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
         samples: torch.Tensor
             Shape (B, num_samples, dim(theta))
         """
+        context = self.network.unpack_context(context)
+        if len(context) == 0:
+            raise ValueError(
+                "Sampling requires context; unconditional continuous flows are not "
+                "supported."
+            )
         context_size = context[0].shape[0]
         theta_0 = self.sample_theta_0(num_samples * context_size)
         context = [repeat_rows(c, num_reps=num_samples) for c in context]
@@ -169,7 +170,7 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
         return theta_1
 
     # MD: rename log_prob_batch, extract eps from self.epsilon_ode_integration
-    def log_prob(self, theta: torch.Tensor, *context: torch.Tensor, hutchinson=False):
+    def log_prob(self, theta: torch.Tensor, context: dict = None, hutchinson=False):
         """
         Evaluate the log posterior density,
 
@@ -187,8 +188,9 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
         theta: torch.Tensor
             Parameter values at which to evaluate the density. Should have a batch
             dimension (even if size B = 1).
-        context: torch.Tensor
-            Context information (typically observed data). Must have context.shape[0] = B.
+        context: dict = None
+            Named context tensors (keyed like the training batches). Each tensor must
+            have leading dimension B. None for unconditional models.
         hutchinson
 
         Returns
@@ -196,6 +198,7 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
         log_prob: torch.Tensor
             Shape (B,)
         """
+        context = self.network.unpack_context(context)
         theta_and_div_init = torch.cat(
             (theta, torch.zeros((theta.shape[0],), device=theta.device).unsqueeze(1)),
             dim=1,
@@ -218,7 +221,7 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
         log_prior = compute_log_prior(theta_0)
         return (log_prior - divergence).detach()
 
-    def sample_and_log_prob(self, *context: torch.Tensor, num_samples: int = None):
+    def sample_and_log_prob(self, context: dict = None, num_samples: int = 1):
         """
         Sample parameters theta from the posterior model,
 
@@ -233,9 +236,9 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
 
         Parameters
         ----------
-        context: torch.Tensor
-            Context information (typically observed data). Should have a batch
-            dimension (even if size B = 1).
+        context: dict = None
+            Named context tensors (keyed like the training batches). Each tensor
+            should have a batch dimension (even if size B = 1).
         num_samples: int = 1
             Number of samples to generate.
 
@@ -244,7 +247,12 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
         samples, log_prob: torch.Tensor, torch.Tensor
             Shapes (B, num_samples, dim(theta)), (B, num_samples)
         """
-
+        context = self.network.unpack_context(context)
+        if len(context) == 0:
+            raise ValueError(
+                "Sampling requires context; unconditional continuous flows are not "
+                "supported."
+            )
         context_size = context[0].shape[0]
         theta_0 = self.sample_theta_0(num_samples * context_size)
         context = [repeat_rows(c, num_reps=num_samples) for c in context]

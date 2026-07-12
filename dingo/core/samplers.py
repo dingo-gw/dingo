@@ -10,7 +10,7 @@ import pandas as pd
 import torch
 from torchvision.transforms import Compose
 
-from dingo.core.posterior_models import BasePosteriorModel
+from dingo.core.posterior_models import NeuralDistribution
 from dingo.core.result import Result
 from dingo.core.result import DATA_KEYS as RESULT_DATA_KEYS
 from dingo.core.utils import torch_detach_to_cpu, IterationTracker
@@ -42,7 +42,7 @@ class Sampler(object):
 
     Attributes
     ----------
-    model : BasePosteriorModel
+    model : NeuralDistribution
     inference_parameters : list
     samples : DataFrame
         Samples produced from the model by run_sampler().
@@ -59,12 +59,12 @@ class Sampler(object):
 
     def __init__(
         self,
-        model: BasePosteriorModel,
+        model: NeuralDistribution,
     ):
         """
         Parameters
         ----------
-        model : BasePosteriorModel
+        model : NeuralDistribution
         """
         self.model = model
         self.event_metadata = None
@@ -151,21 +151,25 @@ class Sampler(object):
 
             # transforms_pre are expected to transform the data in the same way for each
             # requested sample. We therefore apply pre-processing only once.
+            # transform_pre yields either the prepared strain tensor, or a dict of
+            # named tensors (e.g. tokenized models: waveform, position,
+            # drop_token_mask).
             x = self.transform_pre(context)
+            if not isinstance(x, dict):
+                x = {"waveform": x}
             # Require a batch dimension for the embedding network.
-            x = x.unsqueeze(0)
-            x = [x]
+            x = {k: v.unsqueeze(0) for k, v in x.items()}
         else:
             if context is not None:
                 print("Unconditional model. Ignoring context.")
-            x = []
+            x = None
 
         # For a normalizing flow, we get the log_prob for "free" when sampling,
         # so we always include this. For other architectures, it may make sense to
         # have a flag for whether to calculate the log_prob.
         self.model.network.eval()
         with torch.no_grad():
-            y, log_prob = self.model.sample_and_log_prob(*x, num_samples=num_samples)
+            y, log_prob = self.model.sample_and_log_prob(x, num_samples=num_samples)
 
         if not self.unconditional_model:
             # Squeeze the batch dimension added earlier.
@@ -275,14 +279,16 @@ class Sampler(object):
             # Context is the same for each sample. Expand across batch dimension after
             # pre-processing.
             x = self.transform_pre(self.context)
-            x = x.expand(len(samples), *x.shape)  # TODO: Make this more efficient.
-            x = [x]
+            if not isinstance(x, dict):
+                x = {"waveform": x}
+            # TODO: Make this more efficient.
+            x = {k: v.expand(len(samples), *v.shape) for k, v in x.items()}
         else:
-            x = []
+            x = None
 
         self.model.network.eval()
         with torch.no_grad():
-            log_prob = self.model.log_prob(y, *x)
+            log_prob = self.model.log_prob(y, x)
 
         log_prob = log_prob.cpu().numpy()
         log_prob -= np.sum(np.log(std))
@@ -363,14 +369,14 @@ class GNPESampler(Sampler):
 
     def __init__(
         self,
-        model: BasePosteriorModel,
+        model: NeuralDistribution,
         init_sampler: Sampler,
         num_iterations: int = 1,
     ):
         """
         Parameters
         ----------
-        model : BasePosteriorModel
+        model : NeuralDistribution
         init_sampler : Sampler
             Used for generating initial samples
         num_iterations : int
@@ -490,12 +496,10 @@ class GNPESampler(Sampler):
             time_sample_start = time.time()
             self.model.network.eval()
             with torch.no_grad():
+                model_context = {"waveform": x["data"]}
                 if "context_parameters" in x:
-                    y, log_prob = self.model.sample_and_log_prob(
-                        x["data"], x["context_parameters"]
-                    )
-                else:
-                    y, log_prob = self.model.sample_and_log_prob(x["data"])
+                    model_context["context_parameters"] = x["context_parameters"]
+                y, log_prob = self.model.sample_and_log_prob(model_context)
 
             # Squeeze the extra dimension added by sample_and_log_prob(num_samples=1).
             y = y.squeeze(1)

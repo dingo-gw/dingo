@@ -1,12 +1,11 @@
-from .base_model import BasePosteriorModel
+from .base_model import NeuralDistribution
+from dingo.core.registry import NEURAL_DISTRIBUTIONS
 
-from dingo.core.nn.nsf import (
-    create_nsf_with_rb_projection_embedding_net,
-    create_nsf_wrapped,
-)
+from dingo.core.nn.nsf import FlowWrapper, create_nsf_model
 
 
-class NormalizingFlowPosteriorModel(BasePosteriorModel):
+@NEURAL_DISTRIBUTIONS.register("normalizing_flow")
+class NormalizingFlowPosteriorModel(NeuralDistribution):
     """
     Posterior model based on a (discrete) normalizing flow.
 
@@ -38,25 +37,27 @@ class NormalizingFlowPosteriorModel(BasePosteriorModel):
         super().__init__(**kwargs)
 
     def initialize_network(self):
-        model_kwargs = {
-            k: v for k, v in self.model_kwargs.items() if k != "posterior_model_type"
-        }
-        if self.initial_weights is not None:
-            model_kwargs["initial_weights"] = self.initial_weights
-
-        if self.model_kwargs.get("embedding_kwargs", False):
-            self.network = create_nsf_with_rb_projection_embedding_net(**model_kwargs)
+        embedding_net = self.build_embedding_net()
+        kwargs = self.model_kwargs["distribution"]["kwargs"]
+        flow = create_nsf_model(
+            input_dim=kwargs["theta_dim"],
+            context_dim=kwargs["context_dim"],
+            num_flow_steps=kwargs["num_flow_steps"],
+            base_transform_kwargs=kwargs["base_transform_kwargs"],
+        )
+        if embedding_net is None:
+            self.network = FlowWrapper(flow)
         else:
-            self.network = create_nsf_wrapped(**model_kwargs["posterior_kwargs"])
+            self.network = FlowWrapper(flow, embedding_net, embedding_net.input_keys)
 
-    def log_prob(self, theta, *context):
-        return self.network(theta, *context)
+    def log_prob(self, theta, context: dict = None):
+        return self.network(theta, context)
 
-    def sample(self, *context, num_samples: int = 1):
-        return self.network.sample(*context, num_samples=num_samples)
+    def sample(self, context: dict = None, num_samples: int = 1):
+        return self.network.sample(context, num_samples=num_samples)
 
-    def sample_and_log_prob(self, *context, num_samples: int = 1):
-        return self.network.sample_and_log_prob(*context, num_samples=num_samples)
+    def sample_and_log_prob(self, context: dict = None, num_samples: int = 1):
+        return self.network.sample_and_log_prob(context, num_samples=num_samples)
 
-    def loss(self, theta, *context):
-        return -self.network(theta, *context).mean()
+    def loss(self, theta, context: dict = None):
+        return -self.network(theta, context).mean()

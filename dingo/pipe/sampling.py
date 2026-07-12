@@ -13,6 +13,7 @@ from bilby_pipe.utils import (
 )
 
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
+from dingo.core.utils.backward_compatibility import update_model_config
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
 from dingo.gw.inference.inference_utils import prepare_log_prob
@@ -164,8 +165,9 @@ class SamplingInput(Input):
         # FIXME: If there are proxies other than time, the condition needs to be updated.
         if len(self.detectors) == 1:
             model_settings = self._density_recovery_settings["nde_settings"]["model"]
-            if model_settings["posterior_model_type"] == "normalizing_flow":
-                base_transform_kwargs = model_settings["posterior_kwargs"][
+            update_model_config(model_settings)  # User settings may use old schema.
+            if model_settings["distribution"]["type"] == "normalizing_flow":
+                base_transform_kwargs = model_settings["distribution"]["kwargs"][
                     "base_transform_kwargs"
                 ]
                 if base_transform_kwargs["base_transform_type"] == "rq-coupling":

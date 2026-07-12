@@ -133,13 +133,23 @@ def check_minimum_version(version_str: str, raise_exception: bool = False) -> No
 def update_model_config(model_settings: dict):
     """
     Update the model settings to ensure backwards compatibility with networks
-    trained using previous versions of Dingo.
+    trained using previous versions of Dingo. This maps all old schemas forward to
+    the current one,
+
+        model:
+          distribution: {type: ..., kwargs: {...}}
+          embedding_net: {type: ..., kwargs: {...}}    # optional
+          context_merger: {type: ..., kwargs: {...}}   # optional
+
+    and is idempotent. It is the single boundary where old settings and checkpoints
+    are translated; code elsewhere only handles the current schema.
 
     Parameters
     ----------
     model_settings: dict
-        Model settings to be updated.
+        Model settings to be updated in-place.
     """
+    # Oldest schema: type nsf+embedding.
     if model_settings.get("type") == "nsf+embedding":
         model_settings["posterior_model_type"] = "normalizing_flow"
         del model_settings["type"]
@@ -147,3 +157,48 @@ def update_model_config(model_settings: dict):
         del model_settings["nsf_kwargs"]
         model_settings["embedding_kwargs"] = model_settings["embedding_net_kwargs"]
         del model_settings["embedding_net_kwargs"]
+
+    # Old schema: posterior_model_type + posterior_kwargs + embedding_kwargs.
+    if "posterior_model_type" in model_settings:
+        posterior_model_type = model_settings.pop("posterior_model_type")
+        # The model type used to be matched case-insensitively; registry lookup is
+        # case-sensitive, so lowercase built-in type names from old checkpoints.
+        if posterior_model_type.lower() in (
+            "normalizing_flow",
+            "flow_matching",
+            "score_matching",
+        ):
+            posterior_model_type = posterior_model_type.lower()
+
+        distribution_kwargs = dict(model_settings.pop("posterior_kwargs", None) or {})
+        if "input_dim" in distribution_kwargs:
+            distribution_kwargs["theta_dim"] = distribution_kwargs.pop("input_dim")
+        model_settings["distribution"] = {
+            "type": posterior_model_type,
+            "kwargs": distribution_kwargs,
+        }
+
+        embedding_kwargs = model_settings.pop("embedding_kwargs", None)
+        if embedding_kwargs:
+            embedding_kwargs = dict(embedding_kwargs)
+            added_context = embedding_kwargs.pop("added_context", False)
+            if embedding_kwargs.get("V_rb_list", "missing") is None:
+                # Old settings stored a V_rb_list: None placeholder; initial weights
+                # are no longer part of the settings.
+                del embedding_kwargs["V_rb_list"]
+            model_settings["embedding_net"] = {
+                "type": "dense_svd",
+                "kwargs": embedding_kwargs,
+            }
+            if added_context:
+                # Old checkpoints merged (waveform, context_parameters) by
+                # concatenation, with context_dim = output_dim + num proxies.
+                context_dim = distribution_kwargs.get("context_dim")
+                output_dim = embedding_kwargs.get("output_dim")
+                merger_kwargs = {}
+                if context_dim is not None and output_dim is not None:
+                    merger_kwargs["num_context_parameters"] = context_dim - output_dim
+                model_settings["context_merger"] = {
+                    "type": "concat",
+                    "kwargs": merger_kwargs,
+                }

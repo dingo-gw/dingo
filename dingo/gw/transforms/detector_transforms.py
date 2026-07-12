@@ -133,12 +133,20 @@ class ProjectOntoDetectors(object):
         the extrinsic parameters (ra, dec, psi)
     (3) Time shift the strains in the individual detectors according to the
         times <ifo.name>_time provided in the extrinsic parameters.
+
+    Step (3) can be disabled with ``apply_time_shift=False``. This is used by the
+    chained-NPE / time-alignment training path, in which the network is meant to
+    see data with no detector-frame time-of-arrival information. The
+    ``<ifo>_time`` parameters are still computed and moved into ``parameters``
+    (so they remain available as conditioning quantities or for downstream
+    transforms); only the strain time-translation is skipped.
     """
 
-    def __init__(self, ifo_list, domain, ref_time):
+    def __init__(self, ifo_list, domain, ref_time, apply_time_shift: bool = True):
         self.ifo_list = ifo_list
         self.domain = domain
         self.ref_time = ref_time
+        self.apply_time_shift = apply_time_shift
 
     def __call__(self, input_sample):
         sample = input_sample.copy()
@@ -204,8 +212,11 @@ class ProjectOntoDetectors(object):
 
             # (3) time shift the strain. If polarizations are timeshifted by
             #     tc_ref != 0, undo this here by subtracting it from dt.
-            dt = extrinsic_parameters[f"{ifo.name}_time"] - tc_ref
-            strains[ifo.name] = self.domain.time_translate_data(strain, dt)
+            if self.apply_time_shift:
+                dt = extrinsic_parameters[f"{ifo.name}_time"] - tc_ref
+                strains[ifo.name] = self.domain.time_translate_data(strain, dt)
+            else:
+                strains[ifo.name] = strain
 
         # Add extrinsic parameters corresponding to the transformations
         # applied in the loop above to parameters. These have all been popped off of
@@ -280,7 +291,7 @@ class SampleCalibrationParameters(object):
     calibration envelope, and applies them to generate $N$ observed waveforms $\{h^n_{
     obs}(f)\}$. This is intended to be used for marginalizing over the calibration
     uncertainty when evaluating the likelihood for importance sampling.
-    
+
     This transform should be followed by ApplyCalibrationToWaveform to apply the
     sampled calibration curves to the waveform.
     """
@@ -318,7 +329,8 @@ class SampleCalibrationParameters(object):
 
         if correction_type is None:
             correction_type_dict = {
-                ifo.name: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo.name] for ifo in self.ifo_list
+                ifo.name: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo.name]
+                for ifo in self.ifo_list
             }
         elif correction_type == "data" or correction_type == "template":
             correction_type_dict = {ifo.name: correction_type for ifo in self.ifo_list}
@@ -331,7 +343,7 @@ class SampleCalibrationParameters(object):
         if all([s.endswith(".txt") for s in calibration_envelope.values()]):
             self.calibration_envelope = calibration_envelope
             for ifo in self.ifo_list:
-                # Setting a calibration prior. 
+                # Setting a calibration prior.
                 # Take the calibration envelope and use it to set a spline on
                 # the median and sigma of the amplitude and phase. Then in log
                 # frequency it will setup node points at frequency points, f_i
@@ -339,15 +351,15 @@ class SampleCalibrationParameters(object):
                 # spaced between f_min and f_max. Then for each node point f_i,
                 # it will create a gaussian prior according to the spline of
                 # the median and sigma found earlier
-                self.calibration_prior[
-                    ifo.name
-                ] = CalibrationPriorDict.from_envelope_file(
-                    self.calibration_envelope[ifo.name],
-                    self.data_domain.f_min,
-                    self.data_domain.f_max,
-                    num_calibration_nodes,
-                    ifo.name,
-                    correction_type=correction_type_dict[ifo.name],
+                self.calibration_prior[ifo.name] = (
+                    CalibrationPriorDict.from_envelope_file(
+                        self.calibration_envelope[ifo.name],
+                        self.data_domain.f_min,
+                        self.data_domain.f_max,
+                        num_calibration_nodes,
+                        ifo.name,
+                        correction_type=correction_type_dict[ifo.name],
+                    )
                 )
         else:
             raise Exception("Calibration envelope must be specified in a .txt file!")
@@ -432,8 +444,12 @@ class ApplyCalibrationToWaveform(object):
         Ensure the calibration model is set up on the ifo. Creates it if not present
         or if it has a different number of nodes.
         """
-        if not hasattr(ifo, "calibration_model") or ifo.calibration_model is None or isinstance(ifo.calibration_model, calibration.Recalibrate):
-            # using https://dcc.ligo.org/LIGO-T2300140 
+        if (
+            not hasattr(ifo, "calibration_model")
+            or ifo.calibration_model is None
+            or isinstance(ifo.calibration_model, calibration.Recalibrate)
+        ):
+            # using https://dcc.ligo.org/LIGO-T2300140
             ifo.calibration_model = calibration.CubicSpline(
                 f"recalib_{ifo.name}_",
                 minimum_frequency=self.data_domain.f_min,
@@ -454,9 +470,7 @@ class ApplyCalibrationToWaveform(object):
             prefix = f"recalib_{ifo.name}_"
 
             # Extract calibration parameters for this ifo
-            calib_params = {
-                k: v for k, v in extrinsic.items() if k.startswith(prefix)
-            }
+            calib_params = {k: v for k, v in extrinsic.items() if k.startswith(prefix)}
 
             if not calib_params:
                 continue
@@ -486,12 +500,14 @@ class ApplyCalibrationToWaveform(object):
             # Compute calibration curve for each parameter set
             for i in range(num_curves):
                 params_i = {k: v[i] for k, v in calib_params.items()}
-                calibration_draws[
-                    i, self.data_domain.frequency_mask
-                ] = ifo.calibration_model.get_calibration_factor(
-                    self.data_domain.sample_frequencies[self.data_domain.frequency_mask],
-                    prefix=prefix,
-                    **params_i,
+                calibration_draws[i, self.data_domain.frequency_mask] = (
+                    ifo.calibration_model.get_calibration_factor(
+                        self.data_domain.sample_frequencies[
+                            self.data_domain.frequency_mask
+                        ],
+                        prefix=prefix,
+                        **params_i,
+                    )
                 )
 
             # Squeeze out leading dimension if input was scalar

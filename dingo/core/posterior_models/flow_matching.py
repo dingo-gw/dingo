@@ -5,8 +5,10 @@ import torch
 from torch import nn
 
 from .cflow_base import ContinuousFlowPosteriorModel
+from dingo.core.registry import NEURAL_DISTRIBUTIONS
 
 
+@NEURAL_DISTRIBUTIONS.register("flow_matching")
 class FlowMatchingPosteriorModel(ContinuousFlowPosteriorModel):
     __doc__ = (
         inspect.getdoc(ContinuousFlowPosteriorModel)
@@ -34,7 +36,7 @@ class FlowMatchingPosteriorModel(ContinuousFlowPosteriorModel):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.eps = 0
-        self.sigma_min = self.model_kwargs["posterior_kwargs"]["sigma_min"]
+        self.sigma_min = self.model_kwargs["distribution"]["kwargs"]["sigma_min"]
 
     def evaluate_vector_field(self, t, theta_t, *context_data):
         """
@@ -59,7 +61,7 @@ class FlowMatchingPosteriorModel(ContinuousFlowPosteriorModel):
         t = t * torch.ones(len(theta_t), device=theta_t.device)
         return self.network(t, theta_t, *context_data)
 
-    def loss(self, theta, *context):
+    def loss(self, theta, context: dict = None):
         """
         Calculates loss as the mean squared error between the predicted vector field and
         the vector field for transporting the parameter data to samples from the prior.
@@ -69,9 +71,9 @@ class FlowMatchingPosteriorModel(ContinuousFlowPosteriorModel):
         theta: torch.Tensor
             Parameter values at which to evaluate the density. Should have a batch
             dimension (even if size B = 1).
-        context: torch.Tensor
-            Context information (typically observed data). Must have the same leading
-            (batch) dimension as theta.
+        context: dict = None
+            Named context tensors (keyed like the training batches). Each tensor must
+            have the same leading (batch) dimension as theta.
 
         Returns
         -------
@@ -87,7 +89,7 @@ class FlowMatchingPosteriorModel(ContinuousFlowPosteriorModel):
         theta_t = ot_conditional_flow(theta_0, theta_1, t, self.sigma_min)
         true_vf = theta - (1 - self.sigma_min) * theta_0
 
-        predicted_vf = self.network(t, theta_t, *context)
+        predicted_vf = self.network(t, theta_t, *self.network.unpack_context(context))
         loss = mse(predicted_vf, true_vf)
         return loss
 

@@ -18,27 +18,32 @@ import dingo.core.utils.trainutils
 import json
 from collections import OrderedDict
 from typing import Optional
+from dingo.core.registry import CONTEXT_MERGERS, EMBEDDING_NETS
 from dingo.core.utils.backward_compatibility import update_model_config
 from dingo.core.utils.misc import get_version
 
 from dingo.core.utils.trainutils import EarlyStopping
 
 
-class BasePosteriorModel(ABC):
+class NeuralDistribution(ABC):
     """
-    Abstract base class for PosteriorModels. This is intended to construct and hold a
-    neural network for estimating the posterior density, as well as saving / loading,
-    and training.
+    Abstract base class for distributions parameterized by a neural network.
 
-    Subclasses must implement methods for constructing the specific network, sampling,
-    density evaluation, and computing the loss during training.
+    A NeuralDistribution can be conditional or unconditional, and can model any
+    distribution over parameters — a posterior, a prior, or a proposal. The contract
+    is: sampling is always available; log_prob is available where the architecture
+    affords it (e.g., normalizing flows exactly, score matching only via
+    probability-flow ODE integration).
+
+    This class constructs and holds the network, and provides saving / loading and
+    training. Subclasses must implement methods for constructing the specific
+    network, sampling, density evaluation, and computing the loss during training.
     """
 
     def __init__(
         self,
         model_filename: str = None,
         metadata: dict = None,
-        initial_weights: dict = None,
         device: str = "cuda",
         load_training_info: bool = True,
     ):
@@ -51,8 +56,6 @@ class BasePosteriorModel(ABC):
             If given, loads data from the given file.
         metadata: dict
             If given, initializes the model from these settings
-        initial_weights: dict
-            Initial weights for the model
         device: str
         load_training_info: bool
         """
@@ -63,10 +66,10 @@ class BasePosteriorModel(ABC):
         self.optimizer_kwargs = None
         self.network_kwargs = None
         self.scheduler_kwargs = None
-        self.initial_weights = initial_weights
 
         self.metadata = metadata
         if self.metadata is not None:
+            update_model_config(self.metadata["train_settings"]["model"])
             self.model_kwargs = self.metadata["train_settings"]["model"]
             # Expect self.optimizer_settings and self.scheduler_settings to be set
             # separately, and before calling initialize_optimizer_and_scheduler().
@@ -94,8 +97,61 @@ class BasePosteriorModel(ABC):
         """
         pass
 
+    def build_embedding_net(self):
+        """
+        Build the embedding network declared in the model settings (resolved via
+        the EMBEDDING_NETS registry), optionally wrapped with a context merger
+        (CONTEXT_MERGERS) that mixes in the context parameters. Data-driven weight
+        initialization (e.g. SVD seeding) happens separately, via the network's
+        init_data_spec / initialize_weights hooks.
+
+        Returns None if the model declares no embedding network (unconditional
+        models).
+        """
+        embedding_settings = self.model_kwargs.get("embedding_net")
+        if embedding_settings is None:
+            return None
+        kwargs = embedding_settings.get("kwargs", {})
+        embedding_net = EMBEDDING_NETS.get(embedding_settings["type"])(**kwargs)
+        merger_settings = self.model_kwargs.get("context_merger")
+        if merger_settings is not None:
+            embedding_net = CONTEXT_MERGERS.get(merger_settings["type"])(
+                embedding_net, **merger_settings.get("kwargs", {})
+            )
+        return embedding_net
+
+    # Parameter contract read by samplers (e.g. FlowFactor.from_model on the
+    # factorized-sampler branch). These accessors are the supported interface; the
+    # location inside the metadata dict is an implementation detail. All three read
+    # the model's *own* train settings — also for unconditional (density-recovery)
+    # models, whose ``metadata["base"]`` describes the base model's data pipeline,
+    # not this network's standardization.
+
+    @property
+    def inference_parameters(self) -> list:
+        """Names of the parameters this distribution models, in the order of the
+        network's theta columns."""
+        return list(self.metadata["train_settings"]["data"]["inference_parameters"])
+
+    @property
+    def context_parameters(self) -> list:
+        """Names of parameters the network conditions on in addition to the data
+        (e.g. GNPE proxies, chained-inference conditioning), in the order of the
+        network's context-parameter columns. Empty for plain NPE and unconditional
+        models."""
+        return list(
+            self.metadata["train_settings"]["data"].get("context_parameters") or []
+        )
+
+    @property
+    def standardization(self) -> dict:
+        """``{"mean": {name: float}, "std": {name: float}}`` for the affine map to
+        the network's standardized space; covers ``inference_parameters`` and
+        ``context_parameters``."""
+        return self.metadata["train_settings"]["data"]["standardization"]
+
     @abstractmethod
-    def sample(self, *context: torch.Tensor, num_samples: int = 1):
+    def sample(self, context: Optional[dict] = None, num_samples: int = 1):
         """
         Sample parameters theta from the posterior model,
 
@@ -103,9 +159,10 @@ class BasePosteriorModel(ABC):
 
         Parameters
         ----------
-        context: torch.Tensor
-            Context information (typically observed data). Should have a batch
-            dimension (even if size B = 1).
+        context: dict = None
+            Named context tensors (keyed like the training batches, e.g. "waveform",
+            "context_parameters"). Each tensor should have a batch dimension (even if
+            size B = 1). None for unconditional models.
         num_samples: int = 1
             Number of samples to generate.
 
@@ -117,7 +174,7 @@ class BasePosteriorModel(ABC):
         pass
 
     @abstractmethod
-    def sample_and_log_prob(self, *context: torch.Tensor, num_samples: int = 1):
+    def sample_and_log_prob(self, context: Optional[dict] = None, num_samples: int = 1):
         """
         Sample parameters theta from the posterior model,
 
@@ -129,9 +186,10 @@ class BasePosteriorModel(ABC):
 
         Parameters
         ----------
-        context: torch.Tensor
-            Context information (typically observed data). Should have a batch
-            dimension (even if size B = 1).
+        context: dict = None
+            Named context tensors (keyed like the training batches). Each tensor
+            should have a batch dimension (even if size B = 1). None for
+            unconditional models.
         num_samples: int = 1
             Number of samples to generate.
 
@@ -143,7 +201,7 @@ class BasePosteriorModel(ABC):
         pass
 
     @abstractmethod
-    def log_prob(self, theta: torch.Tensor, *context: torch.Tensor):
+    def log_prob(self, theta: torch.Tensor, context: Optional[dict] = None):
         """
         Evaluate the log posterior density,
 
@@ -153,9 +211,11 @@ class BasePosteriorModel(ABC):
         ----------
         theta: torch.Tensor
             Parameter values at which to evaluate the density. Should have a batch
-            dimension (even if size B = 1).
-        context: torch.Tensor
-            Context information (typically observed data). Must have context.shape[0] = B.
+            dimension (even if size B = 1). Columns are ordered as
+            inference_parameters.
+        context: dict = None
+            Named context tensors (keyed like the training batches). Each tensor must
+            have leading dimension B. None for unconditional models.
 
         Returns
         -------
@@ -165,7 +225,7 @@ class BasePosteriorModel(ABC):
         pass
 
     @abstractmethod
-    def loss(self, theta: torch.Tensor, *context: torch.Tensor):
+    def loss(self, theta: torch.Tensor, context: Optional[dict] = None):
         """
         Compute the loss for a batch of data.
 
@@ -174,9 +234,10 @@ class BasePosteriorModel(ABC):
         theta: torch.Tensor
             Parameter values at which to evaluate the density. Should have a batch
             dimension (even if size B = 1).
-        context: torch.Tensor
-            Context information (typically observed data). Must have the same leading
-            (batch) dimension as theta.
+        context: dict = None
+            Named context tensors (keyed like the training batches). Each tensor must
+            have the same leading (batch) dimension as theta. None for unconditional
+            models.
 
         Returns
         -------
@@ -232,6 +293,26 @@ class BasePosteriorModel(ABC):
             saved, e.g. optimizer state dict
 
         """
+        # Enforce the parameter contract promised to samplers: the standardization
+        # covers all inference and context parameters, for every architecture
+        # (built-in or plugin).
+        if self.metadata is not None:
+            data_settings = self.metadata.get("train_settings", {}).get("data", {})
+            if "inference_parameters" in data_settings:
+                standardization = data_settings.get("standardization") or {}
+                missing = [
+                    p
+                    for p in self.inference_parameters + self.context_parameters
+                    if p not in standardization.get("mean", {})
+                    or p not in standardization.get("std", {})
+                ]
+                if missing:
+                    raise ValueError(
+                        f"Cannot save model: standardization must cover all "
+                        f"inference and context parameters, but is missing "
+                        f"{missing}."
+                    )
+
         model_dict = {
             "model_kwargs": self.model_kwargs,
             "model_state_dict": self.network.state_dict(),
@@ -333,6 +414,9 @@ class BasePosteriorModel(ABC):
         self.epoch = d["epoch"]
 
         self.metadata = d["metadata"]
+        # model_kwargs and the metadata's model section are separate dicts in old
+        # checkpoints; keep both on the current schema.
+        update_model_config(self.metadata["train_settings"]["model"])
 
         if "context" in d:
             self.context = d["context"]
@@ -469,6 +553,12 @@ class BasePosteriorModel(ABC):
                 print(f"Finished training epoch {self.epoch}.\n")
 
 
+# Lasting alias: the class was called BasePosteriorModel before the NN build-system
+# refactor; "posterior" was too narrow (a NeuralDistribution can also model e.g. a
+# prior). Kept so that existing imports and branches keep working.
+BasePosteriorModel = NeuralDistribution
+
+
 def train_epoch(pm, dataloader):
     pm.network.train()
     loss_info = dingo.core.utils.trainutils.LossInfo(
@@ -482,15 +572,16 @@ def train_epoch(pm, dataloader):
     for batch_idx, data in enumerate(dataloader):
         loss_info.update_timer()
         pm.optimizer.zero_grad()
-        # data to device
-        data = [d.to(pm.device, non_blocking=True) for d in data]
-        # compute loss
-        loss = pm.loss(data[0], *data[1:])
+        # Batches are dicts of named tensors; all entries besides
+        # inference_parameters are context for the network.
+        data = {k: v.to(pm.device, non_blocking=True) for k, v in data.items()}
+        theta = data.pop("inference_parameters")
+        loss = pm.loss(theta, data if data else None)
         # backward pass and optimizer step
         loss.backward()
         pm.optimizer.step()
         # update loss for history and logging
-        loss_info.update(loss.detach().item(), len(data[0]))
+        loss_info.update(loss.detach().item(), len(theta))
         loss_info.print_info(batch_idx)
 
     return loss_info.get_avg()
@@ -509,12 +600,13 @@ def test_epoch(pm, dataloader):
 
         for batch_idx, data in enumerate(dataloader):
             loss_info.update_timer()
-            # data to device
-            data = [d.to(pm.device, non_blocking=True) for d in data]
-            # compute loss
-            loss = pm.loss(data[0], *data[1:])
+            # Batches are dicts of named tensors; all entries besides
+            # inference_parameters are context for the network.
+            data = {k: v.to(pm.device, non_blocking=True) for k, v in data.items()}
+            theta = data.pop("inference_parameters")
+            loss = pm.loss(theta, data if data else None)
             # update loss for history and logging
-            loss_info.update(loss.item(), len(data[0]))
+            loss_info.update(loss.item(), len(theta))
             loss_info.print_info(batch_idx)
 
         return loss_info.get_avg()

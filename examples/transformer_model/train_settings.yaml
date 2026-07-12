@@ -1,0 +1,123 @@
+data:
+  waveform_dataset_path: training_data/waveform_dataset.hdf5
+  train_fraction: 0.95
+  window:
+    type: tukey
+    f_s: 4096
+    T: 8.0
+    roll_off: 0.4
+  detectors:
+    - H1
+    - L1
+    - V1
+  extrinsic_prior:
+    dec: default
+    ra: default
+    geocent_time: bilby.core.prior.Uniform(minimum=-0.1, maximum=0.1)
+    psi: default
+    luminosity_distance: bilby.core.prior.Uniform(minimum=100.0, maximum=6000.0) # Mpc
+  ref_time: 1126259462.391
+  inference_parameters:
+    - chirp_mass
+    - mass_ratio
+    - a_1
+    - a_2
+    - tilt_1
+    - tilt_2
+    - phi_12
+    - phi_jl
+    - theta_jn
+    - luminosity_distance
+    - geocent_time
+    - ra
+    - dec
+    - psi
+  # Tokenized strain representation: the frequency axis is split into fixed-size
+  # tokens with per-token position information (f_min, f_max, detector).
+  # The drop_* augmentations mask random tokens during training, which is what
+  # enables inference-time frequency-range updates, token suppression, and
+  # dropping detectors.
+  tokenization:
+    token_size: 16
+    drop_detectors:
+      p_drop_012_detectors: [0.6, 0.3, 0.1]
+      p_drop_hlv:
+        H1: 0.3
+        L1: 0.3
+        V1: 0.4
+    drop_frequency_range:
+      f_cut:
+        p_cut: 0.25
+        f_max_lower_cut: 180.
+        f_min_upper_cut: 80.
+        p_same_cut_all_detectors: 0.7
+        p_lower_upper_both: [0.1, 0.7, 0.2]
+      mask_interval:
+        p_per_detector: 0.1
+        f_min: 20.
+        f_max: 1800.
+        max_width: 10.
+
+model:
+  distribution:
+    type: normalizing_flow
+    kwargs:
+      num_flow_steps: 30
+      base_transform_kwargs:
+        hidden_dim: 512
+        num_transform_blocks: 5
+        activation: elu
+        batch_norm: False
+        # The dense_residual conditioner injects context into every residual
+        # block via GLUs and supports layer_norm; it is a different architecture
+        # from the default glasflow_residual conditioner.
+        conditioner_type: dense_residual
+        layer_norm: True
+        dropout_probability: 0.0
+        num_bins: 8
+        base_transform_type: rq-coupling
+  embedding_net:
+    type: transformer
+    kwargs:
+      tokenizer_kwargs:
+        hidden_dims: [512]
+        activation: elu
+        batch_norm: False
+        layer_norm: True
+      transformer_kwargs:
+        d_model: 1024
+        dim_feedforward: 2048
+        nhead: 16
+        dropout: 0.0
+        num_layers: 8
+        norm_first: True
+      pooling: cls
+      final_net_kwargs:
+        activation: elu
+        output_dim: 128
+
+training:
+  stage_0:
+    epochs: 300
+    asd_dataset_path: training_data/asd_dataset/asds_O3.hdf5
+    optimizer:
+      type: adamw
+      lr: 0.0001
+    scheduler:
+      type: reduce_on_plateau
+      mode: min
+      factor: 0.5
+      patience: 10
+    early_stopping:
+      patience: 30 # Has to be larger than the ReduceLROnPlateau patience.
+      delta: 0.0
+      metric: validation # one of ['training', 'validation']
+    batch_size: 4096
+
+local:
+  device: cuda
+  num_workers: 8
+  runtime_limits:
+    max_time_per_run: 1_000_000
+    max_epochs_per_run: 500
+  checkpoint_epochs: 25

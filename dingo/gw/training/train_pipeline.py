@@ -2,6 +2,7 @@ from typing import Optional, Tuple
 import os
 
 import numpy as np
+import torch.multiprocessing
 import yaml
 import argparse
 import shutil
@@ -12,13 +13,14 @@ from copy import deepcopy
 from threadpoolctl import threadpool_limits
 
 from dingo.core.posterior_models.build_model import (
-    autocomplete_model_kwargs,
     build_model_from_kwargs,
+    complete_model_settings,
 )
+from dingo.core.utils.backward_compatibility import update_model_config
 from dingo.gw.training.train_builders import (
     build_dataset,
     set_train_transforms,
-    build_svd_for_embedding_network,
+    initialization_dataloader,
 )
 from dingo.core.utils.trainutils import RuntimeLimits
 from dingo.core.utils import (
@@ -28,7 +30,7 @@ from dingo.core.utils import (
 )
 from dingo.core.utils.trainutils import EarlyStopping
 from dingo.gw.dataset import WaveformDataset
-from dingo.core.posterior_models import BasePosteriorModel
+from dingo.core.posterior_models import NeuralDistribution
 
 
 def copy_files_to_local(
@@ -82,13 +84,12 @@ def copy_files_to_local(
 
 def prepare_training_new(
     train_settings: dict, train_dir: str, local_settings: dict
-) -> Tuple[BasePosteriorModel, WaveformDataset]:
+) -> Tuple[NeuralDistribution, WaveformDataset]:
     """
     Based on a settings dictionary, initialize a WaveformDataset and PosteriorModel.
 
-    For model type 'nsf+embedding' (the only acceptable type at this point) this also
-    initializes the embedding network projection stage with SVD V matrices based on
-    clean detector waveforms.
+    If the embedding network requests an SVD projection stage, this also initializes
+    the projection weights with SVD V matrices based on clean detector waveforms.
 
     Parameters
     ----------
@@ -101,7 +102,7 @@ def prepare_training_new(
 
     Returns
     -------
-    (BasePosteriorModel, WaveformDataset)
+    (NeuralDistribution, WaveformDataset)
     """
     data_settings = deepcopy(train_settings["data"])
     # Optionally copy files to local and update path
@@ -115,23 +116,8 @@ def prepare_training_new(
         data_settings=data_settings,
         leave_waveforms_on_disk=local_settings.get("leave_waveforms_on_disk", True),
     )  # No transforms yet
-    initial_weights = {}
 
-    # The embedding network is assumed to have an SVD projection layer. If other types
-    # of embedding networks are added in the future, update this code.
-
-    if train_settings["model"].get("embedding_kwargs", None):
-        # First, build the SVD for seeding the embedding network.
-        print("\nBuilding SVD for initialization of embedding network.")
-        initial_weights["V_rb_list"] = build_svd_for_embedding_network(
-            wfd,
-            train_settings["data"],
-            train_settings["training"]["stage_0"]["asd_dataset_path"],
-            num_workers=local_settings["num_workers"],
-            batch_size=train_settings["training"]["stage_0"]["batch_size"],
-            out_dir=train_dir,
-            **train_settings["model"]["embedding_kwargs"]["svd"],
-        )
+    update_model_config(train_settings["model"])  # Map old schemas forward.
 
     # Now set the transforms for training. We need to do this here so that we can (a)
     # get the data dimensions to configure the network, and (b) save the
@@ -140,14 +126,10 @@ def prepare_training_new(
     # be done outside the transform setup. But for now, this is convenient. The
     # transforms will be reset later by initialize_stage().
 
-    set_train_transforms(
-        wfd,
-        train_settings["data"],
-        train_settings["training"]["stage_0"]["asd_dataset_path"],
-    )
+    asd_dataset_path = train_settings["training"]["stage_0"]["asd_dataset_path"]
+    set_train_transforms(wfd, train_settings["data"], asd_dataset_path)
 
-    # This modifies the model settings in-place.
-    autocomplete_model_kwargs(train_settings["model"], wfd[0])
+    train_settings["model"] = complete_model_settings(train_settings["model"], wfd[0])
     full_settings = {
         "dataset_settings": wfd.settings,
         "train_settings": train_settings,
@@ -159,9 +141,39 @@ def prepare_training_new(
 
     pm = build_model_from_kwargs(
         settings=full_settings,
-        initial_weights=initial_weights,
         device=local_settings["device"],
     )
+
+    # Data-driven weight initialization (e.g. SVD seeding of the projection
+    # layer): any network module that requests a data spec gets a dataloader
+    # answering it and initializes itself. The trainer does not know about
+    # specific architectures.
+    initialized = False
+    for module in pm.network.modules():
+        spec = getattr(module, "init_data_spec", lambda: None)()
+        if spec is None:
+            continue
+        print(f"\nInitializing weights of {type(module).__name__} from data.")
+        dataloader = initialization_dataloader(
+            wfd,
+            train_settings["data"],
+            asd_dataset_path,
+            spec,
+            batch_size=train_settings["training"]["stage_0"]["batch_size"],
+        )
+        # This is needed to prevent an occasional error when loading a large
+        # dataset into memory using a dataloader. This removes a limitation on
+        # the number of "open files".
+        old_sharing_strategy = torch.multiprocessing.get_sharing_strategy()
+        torch.multiprocessing.set_sharing_strategy("file_system")
+        with threadpool_limits(limits=1, user_api="blas"):
+            module.initialize_weights(dataloader, out_dir=train_dir)
+        torch.multiprocessing.set_sharing_strategy(old_sharing_strategy)
+        initialized = True
+    if initialized:
+        # initialization_dataloader replaced the transforms; restore the
+        # training configuration.
+        set_train_transforms(wfd, train_settings["data"], asd_dataset_path)
 
     if local_settings.get("wandb", False):
         try:
@@ -180,7 +192,7 @@ def prepare_training_new(
 
 def prepare_training_resume(
     checkpoint_name: str, local_settings: dict, train_dir: str
-) -> Tuple[BasePosteriorModel, WaveformDataset]:
+) -> Tuple[NeuralDistribution, WaveformDataset]:
     """
     Loads a PosteriorModel from a checkpoint, as well as the corresponding
     WaveformDataset, in order to continue training. It initializes the saved optimizer
@@ -197,7 +209,7 @@ def prepare_training_resume(
 
     Returns
     -------
-    (BasePosteriorModel, WaveformDataset)
+    (NeuralDistribution, WaveformDataset)
     """
 
     pm = build_model_from_kwargs(
@@ -232,7 +244,7 @@ def prepare_training_resume(
 
 
 def initialize_stage(
-    pm: BasePosteriorModel,
+    pm: NeuralDistribution,
     wfd: WaveformDataset,
     stage: dict,
     num_workers: int,
@@ -248,7 +260,7 @@ def initialize_stage(
 
     Parameters
     ----------
-    pm : BasePosteriorModel
+    pm : NeuralDistribution
     wfd : WaveformDataset
     stage : dict
         Settings specific to current stage of training
@@ -301,7 +313,7 @@ def initialize_stage(
 
 
 def train_stages(
-    pm: BasePosteriorModel, wfd: WaveformDataset, train_dir: str, local_settings: dict
+    pm: NeuralDistribution, wfd: WaveformDataset, train_dir: str, local_settings: dict
 ) -> bool:
     """
     Train the network, iterating through the sequence of stages. Stages can change
@@ -309,7 +321,7 @@ def train_stages(
 
     Parameters
     ----------
-    pm : BasePosteriorModel
+    pm : NeuralDistribution
     wfd : WaveformDataset
     train_dir : str
         Directory for saving checkpoints and train history.
