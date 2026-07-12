@@ -153,19 +153,18 @@ class Sampler(object):
             # requested sample. We therefore apply pre-processing only once.
             x = self.transform_pre(context)
             # Require a batch dimension for the embedding network.
-            x = x.unsqueeze(0)
-            x = [x]
+            x = {"waveform": x.unsqueeze(0)}
         else:
             if context is not None:
                 print("Unconditional model. Ignoring context.")
-            x = []
+            x = None
 
         # For a normalizing flow, we get the log_prob for "free" when sampling,
         # so we always include this. For other architectures, it may make sense to
         # have a flag for whether to calculate the log_prob.
         self.model.network.eval()
         with torch.no_grad():
-            y, log_prob = self.model.sample_and_log_prob(*x, num_samples=num_samples)
+            y, log_prob = self.model.sample_and_log_prob(x, num_samples=num_samples)
 
         if not self.unconditional_model:
             # Squeeze the batch dimension added earlier.
@@ -275,14 +274,15 @@ class Sampler(object):
             # Context is the same for each sample. Expand across batch dimension after
             # pre-processing.
             x = self.transform_pre(self.context)
-            x = x.expand(len(samples), *x.shape)  # TODO: Make this more efficient.
-            x = [x]
+            x = {
+                "waveform": x.expand(len(samples), *x.shape)
+            }  # TODO: Make this more efficient.
         else:
-            x = []
+            x = None
 
         self.model.network.eval()
         with torch.no_grad():
-            log_prob = self.model.log_prob(y, *x)
+            log_prob = self.model.log_prob(y, x)
 
         log_prob = log_prob.cpu().numpy()
         log_prob -= np.sum(np.log(std))
@@ -490,12 +490,10 @@ class GNPESampler(Sampler):
             time_sample_start = time.time()
             self.model.network.eval()
             with torch.no_grad():
+                model_context = {"waveform": x["data"]}
                 if "context_parameters" in x:
-                    y, log_prob = self.model.sample_and_log_prob(
-                        x["data"], x["context_parameters"]
-                    )
-                else:
-                    y, log_prob = self.model.sample_and_log_prob(x["data"])
+                    model_context["context_parameters"] = x["context_parameters"]
+                y, log_prob = self.model.sample_and_log_prob(model_context)
 
             # Squeeze the extra dimension added by sample_and_log_prob(num_samples=1).
             y = y.squeeze(1)

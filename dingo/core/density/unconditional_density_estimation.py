@@ -13,10 +13,8 @@ from dingo.core.posterior_models import NormalizingFlowPosteriorModel
 class SampleDataset(torch.utils.data.Dataset):
     """
     Dataset class for unconditional density estimation.
-    This is required, since the training method of dingo.core.posterior_models.Base
-    expects a tuple of (theta, *context) as output of the DataLoader, but here we have
-    no context, so len(context) = 0. This SampleDataset therefore returns a tuple
-    (theta, ) instead of just theta.
+    The training loop of dingo.core.posterior_models expects dict batches keyed by
+    name; here there is no context, so a sample is just the parameters.
     """
 
     def __init__(self, data):
@@ -27,8 +25,8 @@ class SampleDataset(torch.utils.data.Dataset):
         return self.length
 
     def __getitem__(self, index):
-        """Return the data and labels at the given index as a tuple of length 1."""
-        return (self.data[index],)
+        """Return the parameters at the given index as a dict."""
+        return {"inference_parameters": self.data[index]}
 
 
 def train_unconditional_density_estimator(

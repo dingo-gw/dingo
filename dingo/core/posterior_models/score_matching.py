@@ -50,7 +50,7 @@ class ScoreDiffusionPosteriorModel(ContinuousFlowPosteriorModel):
                 likelihood_weighting
             )
 
-    def loss(self, theta, *context_data):
+    def loss(self, theta, context: dict = None):
         """
         Returns the score matching loss for parameters theta conditioned on context.
 
@@ -58,8 +58,9 @@ class ScoreDiffusionPosteriorModel(ContinuousFlowPosteriorModel):
         ----------
         theta: torch.tensor
             parameters (e.g., binary-black hole parameters)
-        *context_data: list[torch.Tensor]
-            context data (e.g., gravitational-wave data)
+        context: dict = None
+            Named context tensors (keyed like the training batches), e.g.
+            gravitational-wave data.
 
         Returns
         -------
@@ -67,7 +68,7 @@ class ScoreDiffusionPosteriorModel(ContinuousFlowPosteriorModel):
             Loss.
         """
         t, theta_t, score = self.get_t_theta_t_score(theta_1=theta)
-        pred_score = self.network(t, theta_t, *context_data)
+        pred_score = self.network(t, theta_t, *self.network.unpack_context(context))
 
         weighting = self.likelihood_weighting(t)
         losses = torch.square(pred_score - score)

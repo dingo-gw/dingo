@@ -189,56 +189,63 @@ def create_transform(
 
 class FlowWrapper(nn.Module):
     """
-    This class wraps the neural spline flow. It is required for multiple
-    reasons. (i) some embedding networks take tuples as input, which is not
-    supported by the nflows package. (ii) paralellization across multiple
-    GPUs requires a forward method, but the relevant flow method for training
-    is log_prob.
+    This class wraps the neural spline flow, and routes named context tensors into
+    the embedding network. It is required for multiple reasons. (i) The embedding
+    network can consume several context tensors (declared in context_keys), which is
+    not supported by the nflows package. (ii) Parallelization across multiple GPUs
+    requires a forward method, but the relevant flow method for training is log_prob.
     """
 
-    def __init__(self, flow: flows.base.Flow, embedding_net: nn.Module = None):
+    def __init__(
+        self,
+        flow: flows.base.Flow,
+        embedding_net: nn.Module = None,
+        context_keys: tuple = ("waveform",),
+    ):
         """
-
         :param flow: flows.base.Flow
         :param embedding_net: nn.Module
+        :param context_keys: tuple
+            Keys of the context dict that the embedding network consumes, in the
+            order of its forward arguments.
         """
         super(FlowWrapper, self).__init__()
         self.embedding_net = embedding_net
         self.flow = flow
+        self.context_keys = tuple(context_keys)
 
-    def log_prob(self, y, *x):
-        if len(x) > 0:
-            if self.embedding_net is not None:
-                x = self.embedding_net(*x)
-            return self.flow.log_prob(y, x)
-        else:
-            # if there is no context
+    def _embed_context(self, context: dict):
+        """Select the tensors in context_keys (in order) and embed them."""
+        missing = [k for k in self.context_keys if k not in context]
+        if missing:
+            raise ValueError(
+                f"Context is missing keys {missing}: expected {self.context_keys}, "
+                f"got {sorted(context)}."
+            )
+        x = [context[k] for k in self.context_keys]
+        if self.embedding_net is not None:
+            return self.embedding_net(*x)
+        if len(x) != 1:
+            raise ValueError("Multiple context tensors require an embedding network.")
+        return x[0]
+
+    def log_prob(self, y, context: dict = None):
+        if context is None:
             return self.flow.log_prob(y)
+        return self.flow.log_prob(y, self._embed_context(context))
 
-    def sample(self, *x, num_samples=1):
-        if len(x) > 0:
-            if self.embedding_net is not None:
-                x = self.embedding_net(*x)
-            return self.flow.sample(num_samples, x)
-        else:
-            # if there is no context, omit the context argument
+    def sample(self, context: dict = None, num_samples: int = 1):
+        if context is None:
             return self.flow.sample(num_samples)
+        return self.flow.sample(num_samples, self._embed_context(context))
 
-    def sample_and_log_prob(self, *x, num_samples=1):
-        if len(x) > 0:
-            if self.embedding_net is not None:
-                x = self.embedding_net(*x)
-            return self.flow.sample_and_log_prob(num_samples, x)
-        else:
-            # if there is no context, omit the context argument
+    def sample_and_log_prob(self, context: dict = None, num_samples: int = 1):
+        if context is None:
             return self.flow.sample_and_log_prob(num_samples)
+        return self.flow.sample_and_log_prob(num_samples, self._embed_context(context))
 
-    def forward(self, y, *x):
-        if len(x) > 0:
-            return self.log_prob(y, *x)
-        else:
-            # if there is no context, omit the context argument
-            return self.log_prob(y)
+    def forward(self, y, context: dict = None):
+        return self.log_prob(y, context)
 
 
 def create_nsf_model(
@@ -337,7 +344,12 @@ def create_nsf_with_rb_projection_embedding_net(
         **embedding_kwargs
     )
     flow = create_nsf_model(**posterior_kwargs)
-    model = FlowWrapper(flow, embedding_net)
+    # With added_context, the embedding merges (waveform, context_parameters).
+    if embedding_kwargs.get("added_context"):
+        context_keys = ("waveform", "context_parameters")
+    else:
+        context_keys = ("waveform",)
+    model = FlowWrapper(flow, embedding_net, context_keys)
     return model
 
 

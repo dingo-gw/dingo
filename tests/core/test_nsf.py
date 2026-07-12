@@ -116,13 +116,19 @@ def data_setup_nsf_small():
         (d.batch_size, d.context_dim - d.embedding_net_kwargs["output_dim"])
     )
     d.y = torch.ones((d.batch_size, d.input_dim))
+    d.context = {"waveform": d.x, "context_parameters": d.z}
 
     # build d.yy, which depends on input d.zz
     d.xx = torch.cat((d.x, d.x))
     d.yy = torch.cat((d.y, -d.y))
     d.zz = torch.cat((d.z, -d.z))
+    d.contextcontext = {"waveform": d.xx, "context_parameters": d.zz}
 
     return d
+
+
+# context_keys for embedding networks built with added_context=True.
+CONTEXT_KEYS = ("waveform", "context_parameters")
 
 
 def test_nsf_number_of_parameters(data_setup_nsf_large):
@@ -151,9 +157,9 @@ def test_sample_method_of_nsf(data_setup_nsf_small):
 
     embedding_net = d.embedding_net_builder(**d.embedding_net_kwargs)
     flow = d.nde_builder(**d.nde_kwargs)
-    model = FlowWrapper(flow, embedding_net)
+    model = FlowWrapper(flow, embedding_net, CONTEXT_KEYS)
 
-    samples = model.sample(d.x, d.z)
+    samples = model.sample(d.context)
     # model.sample(num_samples=1) adds an extra dimension that needs to be squeezed.
     samples = samples.squeeze(1)
 
@@ -163,12 +169,12 @@ def test_sample_method_of_nsf(data_setup_nsf_small):
         "normalization seems broken."
     )
 
+    # missing context key
     with pytest.raises(ValueError):
-        model.sample(d.z, d.x)
-    with pytest.raises(ValueError):
-        model.sample(d.x, d.z, d.z)
+        model.sample({"waveform": d.x})
+    # wrongly-shaped context tensor
     with pytest.raises(RuntimeError):
-        model.sample(d.x, d.x)
+        model.sample({"waveform": d.x, "context_parameters": d.x.flatten(start_dim=1)})
 
 
 def test_forward_pass_for_log_prob_of_nsf(data_setup_nsf_small):
@@ -180,21 +186,21 @@ def test_forward_pass_for_log_prob_of_nsf(data_setup_nsf_small):
 
     embedding_net = d.embedding_net_builder(**d.embedding_net_kwargs)
     flow = d.nde_builder(**d.nde_kwargs)
-    model = FlowWrapper(flow, embedding_net)
+    model = FlowWrapper(flow, embedding_net, CONTEXT_KEYS)
 
-    loss = -model(d.y, d.x, d.z)
+    loss = -model(d.y, d.context)
     assert list(loss.shape) == [d.batch_size], "Unexpected output shape."
     assert torch.all(loss > 0) and torch.all(loss < 40), (
         "Unexpected log prob encountered. Network initialization or "
         "normalization seems broken."
     )
 
+    # missing context key
     with pytest.raises(ValueError):
-        model(d.y, d.z, d.x)
-    with pytest.raises(ValueError):
-        model(d.y, d.x, d.z, d.z)
+        model(d.y, {"waveform": d.x})
+    # wrongly-shaped context tensor
     with pytest.raises(RuntimeError):
-        model(d.y, d.x, d.x)
+        model(d.y, {"waveform": d.x, "context_parameters": d.x.flatten(start_dim=1)})
 
 
 def test_backward_pass_for_log_prob_of_nsf(data_setup_nsf_small):
@@ -207,7 +213,7 @@ def test_backward_pass_for_log_prob_of_nsf(data_setup_nsf_small):
 
     embedding_net = d.embedding_net_builder(**d.embedding_net_kwargs)
     flow = d.nde_builder(**d.nde_kwargs)
-    model = FlowWrapper(flow, embedding_net)
+    model = FlowWrapper(flow, embedding_net, CONTEXT_KEYS)
     optimizer = optim.Adam(model.parameters(), lr=0.003)
 
     # Simple train loop. The learned parameters yy are strongly correlated
@@ -217,12 +223,12 @@ def test_backward_pass_for_log_prob_of_nsf(data_setup_nsf_small):
     for idx in range(40):
         yy = d.yy + 0.02 * torch.rand_like(d.yy)
         xx = torch.rand_like(d.xx)
-        loss = -torch.mean(model(yy, xx, d.zz))
+        loss = -torch.mean(model(yy, {"waveform": xx, "context_parameters": d.zz}))
         losses.append(loss.detach().item())
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
-    samples_n = torch.mean(model.sample(d.xx, d.zz, num_samples=100), axis=1)
+    samples_n = torch.mean(model.sample(d.contextcontext, num_samples=100), axis=1)
 
     assert losses[-1] < losses[0], "Loss did not improve in training."
     assert (
@@ -240,17 +246,19 @@ def test_model_builder_for_nsf_with_rb_embedding_net(data_setup_nsf_small):
     model = create_nsf_with_rb_projection_embedding_net(
         d.nde_kwargs, d.embedding_net_kwargs
     )
+    # The builder derives the context routing from added_context.
+    assert model.context_keys == CONTEXT_KEYS
 
-    loss = -model(d.y, d.x, d.z)
+    loss = -model(d.y, d.context)
     assert list(loss.shape) == [d.batch_size], "Unexpected output shape."
     assert torch.all(loss > 0) and torch.all(loss < 40), (
         "Unexpected log prob encountered. Network initialization or "
         "normalization seems broken."
     )
 
+    # missing context key
     with pytest.raises(ValueError):
-        model(d.y, d.z, d.x)
-    with pytest.raises(ValueError):
-        model(d.y, d.x, d.z, d.z)
+        model(d.y, {"waveform": d.x})
+    # wrongly-shaped context tensor
     with pytest.raises(RuntimeError):
-        model(d.y, d.x, d.x)
+        model(d.y, {"waveform": d.x, "context_parameters": d.x.flatten(start_dim=1)})

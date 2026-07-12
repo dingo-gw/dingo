@@ -33,6 +33,7 @@ class ContinuousFlow(nn.Module):
         theta_embedding_net: nn.Module = torch.nn.Identity(),
         context_with_glu: bool = False,
         theta_with_glu: bool = False,
+        context_keys: tuple = ("waveform",),
     ):
         """
         Parameters
@@ -48,6 +49,9 @@ class ContinuousFlow(nn.Module):
         theta_with_glu: bool = False
             Whether to provide theta (and t) as GLU or main input to the
             continuous_flow_net.
+        context_keys: tuple = ("waveform",)
+            Keys of the context dict that the context embedding network consumes, in
+            the order of its forward arguments.
         """
         super(ContinuousFlow, self).__init__()
         self.continuous_flow_net = continuous_flow_net
@@ -55,10 +59,24 @@ class ContinuousFlow(nn.Module):
         self.theta_embedding_net = theta_embedding_net
         self.theta_with_glu = theta_with_glu
         self.context_with_glu = context_with_glu
+        self.context_keys = tuple(context_keys)
 
         self._use_cache = None
         self._cached_context = None
         self._cached_context_embedding = None
+
+    def unpack_context(self, context: dict = None) -> tuple:
+        """Select the tensors in context_keys (in order) from the context dict.
+        Tensors stay positional inside the network modules."""
+        if context is None:
+            return ()
+        missing = [k for k in self.context_keys if k not in context]
+        if missing:
+            raise ValueError(
+                f"Context is missing keys {missing}: expected {self.context_keys}, "
+                f"got {sorted(context)}."
+            )
+        return tuple(context[k] for k in self.context_keys)
 
     @property
     def use_cache(self):
@@ -226,12 +244,19 @@ def create_cf(
         context_features=glu_dim,
     )
 
+    # With added_context, the embedding merges (waveform, context_parameters).
+    if embedding_kwargs is not None and embedding_kwargs.get("added_context"):
+        context_keys = ("waveform", "context_parameters")
+    else:
+        context_keys = ("waveform",)
+
     model = ContinuousFlow(
         continuous_flow_net,
         context_embedding,
         theta_embedding,
         theta_with_glu=posterior_kwargs.get("theta_with_glu", False),
         context_with_glu=posterior_kwargs.get("context_with_glu", False),
+        context_keys=context_keys,
     )
     return model
 

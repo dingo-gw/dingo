@@ -129,7 +129,7 @@ class ContinuousFlowPosteriorModel(NeuralDistribution):
             model_kwargs["initial_weights"] = self.initial_weights
         self.network = create_cf(**model_kwargs)
 
-    def sample(self, *context: torch.Tensor, num_samples: int = None):
+    def sample(self, context: dict = None, num_samples: int = 1):
         """
         Sample parameters theta from the posterior model,
 
@@ -139,9 +139,9 @@ class ContinuousFlowPosteriorModel(NeuralDistribution):
 
         Parameters
         ----------
-        context: torch.Tensor
-            Context information (typically observed data). Should have a batch
-            dimension (even if size B = 1).
+        context: dict = None
+            Named context tensors (keyed like the training batches). Each tensor
+            should have a batch dimension (even if size B = 1).
         num_samples: int = 1
             Number of samples to generate.
 
@@ -150,6 +150,12 @@ class ContinuousFlowPosteriorModel(NeuralDistribution):
         samples: torch.Tensor
             Shape (B, num_samples, dim(theta))
         """
+        context = self.network.unpack_context(context)
+        if len(context) == 0:
+            raise ValueError(
+                "Sampling requires context; unconditional continuous flows are not "
+                "supported."
+            )
         context_size = context[0].shape[0]
         theta_0 = self.sample_theta_0(num_samples * context_size)
         context = [repeat_rows(c, num_reps=num_samples) for c in context]
@@ -169,7 +175,7 @@ class ContinuousFlowPosteriorModel(NeuralDistribution):
         return theta_1
 
     # MD: rename log_prob_batch, extract eps from self.epsilon_ode_integration
-    def log_prob(self, theta: torch.Tensor, *context: torch.Tensor, hutchinson=False):
+    def log_prob(self, theta: torch.Tensor, context: dict = None, hutchinson=False):
         """
         Evaluate the log posterior density,
 
@@ -187,8 +193,9 @@ class ContinuousFlowPosteriorModel(NeuralDistribution):
         theta: torch.Tensor
             Parameter values at which to evaluate the density. Should have a batch
             dimension (even if size B = 1).
-        context: torch.Tensor
-            Context information (typically observed data). Must have context.shape[0] = B.
+        context: dict = None
+            Named context tensors (keyed like the training batches). Each tensor must
+            have leading dimension B. None for unconditional models.
         hutchinson
 
         Returns
@@ -196,6 +203,7 @@ class ContinuousFlowPosteriorModel(NeuralDistribution):
         log_prob: torch.Tensor
             Shape (B,)
         """
+        context = self.network.unpack_context(context)
         theta_and_div_init = torch.cat(
             (theta, torch.zeros((theta.shape[0],), device=theta.device).unsqueeze(1)),
             dim=1,
@@ -218,7 +226,7 @@ class ContinuousFlowPosteriorModel(NeuralDistribution):
         log_prior = compute_log_prior(theta_0)
         return (log_prior - divergence).detach()
 
-    def sample_and_log_prob(self, *context: torch.Tensor, num_samples: int = None):
+    def sample_and_log_prob(self, context: dict = None, num_samples: int = 1):
         """
         Sample parameters theta from the posterior model,
 
@@ -233,9 +241,9 @@ class ContinuousFlowPosteriorModel(NeuralDistribution):
 
         Parameters
         ----------
-        context: torch.Tensor
-            Context information (typically observed data). Should have a batch
-            dimension (even if size B = 1).
+        context: dict = None
+            Named context tensors (keyed like the training batches). Each tensor
+            should have a batch dimension (even if size B = 1).
         num_samples: int = 1
             Number of samples to generate.
 
@@ -244,7 +252,12 @@ class ContinuousFlowPosteriorModel(NeuralDistribution):
         samples, log_prob: torch.Tensor, torch.Tensor
             Shapes (B, num_samples, dim(theta)), (B, num_samples)
         """
-
+        context = self.network.unpack_context(context)
+        if len(context) == 0:
+            raise ValueError(
+                "Sampling requires context; unconditional continuous flows are not "
+                "supported."
+            )
         context_size = context[0].shape[0]
         theta_0 = self.sample_theta_0(num_samples * context_size)
         context = [repeat_rows(c, num_reps=num_samples) for c in context]

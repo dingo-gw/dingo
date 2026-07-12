@@ -130,7 +130,7 @@ class NeuralDistribution(ABC):
         return self.metadata["train_settings"]["data"]["standardization"]
 
     @abstractmethod
-    def sample(self, *context: torch.Tensor, num_samples: int = 1):
+    def sample(self, context: Optional[dict] = None, num_samples: int = 1):
         """
         Sample parameters theta from the posterior model,
 
@@ -138,9 +138,10 @@ class NeuralDistribution(ABC):
 
         Parameters
         ----------
-        context: torch.Tensor
-            Context information (typically observed data). Should have a batch
-            dimension (even if size B = 1).
+        context: dict = None
+            Named context tensors (keyed like the training batches, e.g. "waveform",
+            "context_parameters"). Each tensor should have a batch dimension (even if
+            size B = 1). None for unconditional models.
         num_samples: int = 1
             Number of samples to generate.
 
@@ -152,7 +153,7 @@ class NeuralDistribution(ABC):
         pass
 
     @abstractmethod
-    def sample_and_log_prob(self, *context: torch.Tensor, num_samples: int = 1):
+    def sample_and_log_prob(self, context: Optional[dict] = None, num_samples: int = 1):
         """
         Sample parameters theta from the posterior model,
 
@@ -164,9 +165,10 @@ class NeuralDistribution(ABC):
 
         Parameters
         ----------
-        context: torch.Tensor
-            Context information (typically observed data). Should have a batch
-            dimension (even if size B = 1).
+        context: dict = None
+            Named context tensors (keyed like the training batches). Each tensor
+            should have a batch dimension (even if size B = 1). None for
+            unconditional models.
         num_samples: int = 1
             Number of samples to generate.
 
@@ -178,7 +180,7 @@ class NeuralDistribution(ABC):
         pass
 
     @abstractmethod
-    def log_prob(self, theta: torch.Tensor, *context: torch.Tensor):
+    def log_prob(self, theta: torch.Tensor, context: Optional[dict] = None):
         """
         Evaluate the log posterior density,
 
@@ -188,9 +190,11 @@ class NeuralDistribution(ABC):
         ----------
         theta: torch.Tensor
             Parameter values at which to evaluate the density. Should have a batch
-            dimension (even if size B = 1).
-        context: torch.Tensor
-            Context information (typically observed data). Must have context.shape[0] = B.
+            dimension (even if size B = 1). Columns are ordered as
+            inference_parameters.
+        context: dict = None
+            Named context tensors (keyed like the training batches). Each tensor must
+            have leading dimension B. None for unconditional models.
 
         Returns
         -------
@@ -200,7 +204,7 @@ class NeuralDistribution(ABC):
         pass
 
     @abstractmethod
-    def loss(self, theta: torch.Tensor, *context: torch.Tensor):
+    def loss(self, theta: torch.Tensor, context: Optional[dict] = None):
         """
         Compute the loss for a batch of data.
 
@@ -209,9 +213,10 @@ class NeuralDistribution(ABC):
         theta: torch.Tensor
             Parameter values at which to evaluate the density. Should have a batch
             dimension (even if size B = 1).
-        context: torch.Tensor
-            Context information (typically observed data). Must have the same leading
-            (batch) dimension as theta.
+        context: dict = None
+            Named context tensors (keyed like the training batches). Each tensor must
+            have the same leading (batch) dimension as theta. None for unconditional
+            models.
 
         Returns
         -------
@@ -523,15 +528,16 @@ def train_epoch(pm, dataloader):
     for batch_idx, data in enumerate(dataloader):
         loss_info.update_timer()
         pm.optimizer.zero_grad()
-        # data to device
-        data = [d.to(pm.device, non_blocking=True) for d in data]
-        # compute loss
-        loss = pm.loss(data[0], *data[1:])
+        # Batches are dicts of named tensors; all entries besides
+        # inference_parameters are context for the network.
+        data = {k: v.to(pm.device, non_blocking=True) for k, v in data.items()}
+        theta = data.pop("inference_parameters")
+        loss = pm.loss(theta, data if data else None)
         # backward pass and optimizer step
         loss.backward()
         pm.optimizer.step()
         # update loss for history and logging
-        loss_info.update(loss.detach().item(), len(data[0]))
+        loss_info.update(loss.detach().item(), len(theta))
         loss_info.print_info(batch_idx)
 
     return loss_info.get_avg()
@@ -550,12 +556,13 @@ def test_epoch(pm, dataloader):
 
         for batch_idx, data in enumerate(dataloader):
             loss_info.update_timer()
-            # data to device
-            data = [d.to(pm.device, non_blocking=True) for d in data]
-            # compute loss
-            loss = pm.loss(data[0], *data[1:])
+            # Batches are dicts of named tensors; all entries besides
+            # inference_parameters are context for the network.
+            data = {k: v.to(pm.device, non_blocking=True) for k, v in data.items()}
+            theta = data.pop("inference_parameters")
+            loss = pm.loss(theta, data if data else None)
             # update loss for history and logging
-            loss_info.update(loss.item(), len(data[0]))
+            loss_info.update(loss.item(), len(theta))
             loss_info.print_info(batch_idx)
 
         return loss_info.get_avg()

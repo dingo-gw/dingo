@@ -64,38 +64,41 @@ def build_model_from_kwargs(
     return model(model_filename=filename, metadata=settings, **kwargs)
 
 
-def autocomplete_model_kwargs(model_kwargs: dict, data_sample: list):
+def autocomplete_model_kwargs(model_kwargs: dict, data_sample: dict):
     """
     Autocomplete the model kwargs from train_settings and data_sample from the dataloader:
 
-    * set input dimension of embedding net to shape of data_sample[1]
-    * set dimension of parameter space to len(data_sample[0])
-    * set added_context flag of embedding net if required for gnpe proxies
-    * set context dim of posterior model to output dim of embedding net + gnpe proxy dim
+    * set input dimension of embedding net to the shape of the waveform data
+    * set dimension of parameter space to the number of inference parameters
+    * set added_context flag of embedding net if required for context parameters
+      (e.g., GNPE proxies)
+    * set context dim of posterior model to output dim of embedding net + dimension
+      of the context parameters
 
     Parameters
     ----------
     model_kwargs: dict
         Model settings, which are modified in-place.
-    data_sample: list
-        Sample from dataloader (e.g., wfd[0]) used for autocomplection.
-        Should be of format [parameters, GW data, gnpe_proxies], where the
-        last element is only there is GNPE proxies are required.
+    data_sample: dict
+        Sample from dataloader (e.g., wfd[0]) used for autocompletion, with keys
+        "inference_parameters", "waveform", and (only if the network is conditioned
+        on additional parameters) "context_parameters".
     """
 
     # set input dims from ifo_list and domain information
-    model_kwargs["embedding_kwargs"]["input_dims"] = list(data_sample[1].shape)
+    model_kwargs["embedding_kwargs"]["input_dims"] = list(data_sample["waveform"].shape)
     # set dimension of parameter space of posterior model
-    model_kwargs["posterior_kwargs"]["input_dim"] = len(data_sample[0])
-    # set added_context flag of embedding net if GNPE proxies are required
-    # set context dim of nsf to output dim of embedding net + GNPE proxy dim
-    try:
-        gnpe_proxy_dim = len(data_sample[2])
+    model_kwargs["posterior_kwargs"]["input_dim"] = len(
+        data_sample["inference_parameters"]
+    )
+    # set added_context flag of embedding net if context parameters are required
+    # set context dim of nsf to output dim of embedding net + context parameter dim
+    if "context_parameters" in data_sample:
         model_kwargs["embedding_kwargs"]["added_context"] = True
-        model_kwargs["posterior_kwargs"]["context_dim"] = (
-            model_kwargs["embedding_kwargs"]["output_dim"] + gnpe_proxy_dim
-        )
-    except IndexError:
+        model_kwargs["posterior_kwargs"]["context_dim"] = model_kwargs[
+            "embedding_kwargs"
+        ]["output_dim"] + len(data_sample["context_parameters"])
+    else:
         model_kwargs["embedding_kwargs"]["added_context"] = False
         model_kwargs["posterior_kwargs"]["context_dim"] = model_kwargs[
             "embedding_kwargs"

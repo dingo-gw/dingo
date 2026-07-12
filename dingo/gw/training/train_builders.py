@@ -17,7 +17,7 @@ from dingo.gw.transforms import (
     AddWhiteNoiseComplex,
     SelectStandardizeRepackageParameters,
     RepackageStrainsAndASDS,
-    UnpackDict,
+    SelectKeys,
     GNPECoalescenceTimes,
     SampleExtrinsicParameters,
     GetDetectorTimes,
@@ -181,7 +181,7 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     else:
         selected_keys = ["inference_parameters", "waveform"]
 
-    transforms.append(UnpackDict(selected_keys=selected_keys))
+    transforms.append(SelectKeys(selected_keys=selected_keys))
 
     # Drop transforms that are not desired. This is useful for generating, e.g.,
     # noise-free data, or for producing data not formatted for input to the network.
@@ -253,7 +253,7 @@ def build_svd_for_embedding_network(
             AddWhiteNoiseComplex,
             RepackageStrainsAndASDS,
             SelectStandardizeRepackageParameters,
-            UnpackDict,
+            SelectKeys,
             CropMaskStrainRandom,
         ],
     )

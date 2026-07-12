@@ -117,22 +117,24 @@ def model_settings(posterior_model_type):
 
 
 def data_sample(with_gnpe_proxies=False):
-    """A sample in the format produced by the dataloader (wfd[0] after UnpackDict):
-    [inference_parameters, strain data(, gnpe_proxies)]."""
-    sample = [
-        np.random.rand(NUM_PARAMETERS).astype(np.float32),
-        np.random.rand(*DATA_SHAPE).astype(np.float32),
-    ]
+    """A sample in the format produced by the dataloader (wfd[0] after SelectKeys):
+    a dict with inference_parameters, waveform(, context_parameters)."""
+    sample = {
+        "inference_parameters": np.random.rand(NUM_PARAMETERS).astype(np.float32),
+        "waveform": np.random.rand(*DATA_SHAPE).astype(np.float32),
+    }
     if with_gnpe_proxies:
-        sample.append(np.random.rand(GNPE_PROXY_DIM).astype(np.float32))
+        sample["context_parameters"] = np.random.rand(GNPE_PROXY_DIM).astype(
+            np.float32
+        )
     return sample
 
 
 def batch(model_type="normalizing_flow", with_gnpe_proxies=False):
     theta = torch.rand(BATCH_SIZE, NUM_PARAMETERS)
-    context = [torch.rand(BATCH_SIZE, *DATA_SHAPE)]
+    context = {"waveform": torch.rand(BATCH_SIZE, *DATA_SHAPE)}
     if with_gnpe_proxies:
-        context.append(torch.rand(BATCH_SIZE, GNPE_PROXY_DIM))
+        context["context_parameters"] = torch.rand(BATCH_SIZE, GNPE_PROXY_DIM)
     return theta, context
 
 
@@ -218,27 +220,27 @@ def test_model_forward_passes(posterior_model_type):
     )
     theta, context = batch()
 
-    loss = pm.loss(theta, *context)
+    loss = pm.loss(theta, context)
     assert loss.shape == ()
     assert torch.isfinite(loss)
 
     pm.network.eval()
     with torch.no_grad():
-        samples = pm.sample(*context, num_samples=3)
+        samples = pm.sample(context, num_samples=3)
         assert samples.shape == (BATCH_SIZE, 3, NUM_PARAMETERS)
 
-        log_prob = pm.log_prob(theta, *context)
+        log_prob = pm.log_prob(theta, context)
         assert log_prob.shape == (BATCH_SIZE,)
         assert torch.isfinite(log_prob).all()
 
-        samples, log_prob = pm.sample_and_log_prob(*context, num_samples=3)
+        samples, log_prob = pm.sample_and_log_prob(context, num_samples=3)
         assert samples.shape == (BATCH_SIZE, 3, NUM_PARAMETERS)
         assert log_prob.shape == (BATCH_SIZE, 3)
 
 
 def test_normalizing_flow_with_gnpe_context():
-    """With added_context=True, the embedding merges (data, proxies) via ModuleMerger,
-    and sampling/density evaluation take two context tensors."""
+    """With added_context=True, the embedding merges (waveform, context_parameters)
+    via ModuleMerger, and sampling/density evaluation consume both context entries."""
     settings = model_settings("normalizing_flow")
     model = settings["train_settings"]["model"]
     model["embedding_kwargs"]["added_context"] = True
@@ -247,13 +249,17 @@ def test_normalizing_flow_with_gnpe_context():
     pm = build_model_from_kwargs(settings=settings, device="cpu")
     theta, context = batch(with_gnpe_proxies=True)
 
-    loss = pm.loss(theta, *context)
+    loss = pm.loss(theta, context)
     assert torch.isfinite(loss)
 
     pm.network.eval()
     with torch.no_grad():
-        log_prob = pm.log_prob(theta, *context)
+        log_prob = pm.log_prob(theta, context)
     assert log_prob.shape == (BATCH_SIZE,)
+
+    # A missing declared context entry must fail loudly.
+    with pytest.raises(ValueError, match="missing keys"):
+        pm.log_prob(theta, {"waveform": context["waveform"]})
 
 
 def test_normalizing_flow_unconditional():
