@@ -11,9 +11,9 @@ import numpy as np
 import pytest
 import torch
 
-import dingo.gw.inference.factors as factors_module
+import dingo.gw.inference.context as context_module
 from dingo.gw.domains import build_domain
-from dingo.gw.inference.factors import GWSamplerContext
+from dingo.gw.inference.context import GWSamplerContext
 
 _DOMAIN_SETTINGS = {
     "type": "FrequencyDomain",
@@ -50,7 +50,7 @@ class _StubLikelihood:
 @pytest.fixture
 def context(monkeypatch):
     monkeypatch.setattr(
-        factors_module, "StationaryGaussianGWLikelihood", _StubLikelihood
+        context_module, "StationaryGaussianGWLikelihood", _StubLikelihood
     )
     _StubLikelihood.constructions = 0
     return GWSamplerContext(
@@ -199,7 +199,7 @@ def test_sampler_provenance_block():
     import ast
 
     from dingo.core.factors import ChainComposer, DeltaFactor
-    from dingo.gw.inference.factors import GWComposedSampler
+    from dingo.gw.inference.sampler import GWComposedSampler
 
     sampler = GWComposedSampler(
         ChainComposer([DeltaFactor({"a": 1.0})]), None, {}, ["a"]

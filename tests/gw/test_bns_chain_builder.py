@@ -7,11 +7,8 @@ import numpy as np
 import pytest
 
 from dingo.core.factors import DeltaFactor, FlowFactor, ProxyOffsetReparam
-from dingo.gw.inference.factors import (
-    GWComposedSampler,
-    GWSamplerContext,
-    _proxy_offset_steps,
-)
+from dingo.gw.inference.context import GWSamplerContext
+from dingo.gw.inference.sampler import GWComposedSampler, _proxy_offset_steps
 from dingo.gw.transforms import HeterodynePhase
 
 _PINS = {"chirp_mass_proxy": 1.1975, "ra": 3.44616, "dec": -0.408084}

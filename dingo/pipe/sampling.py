@@ -16,7 +16,8 @@ from bilby_pipe.utils import (
 from dingo.core.factors import FlowFactor
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset
-from dingo.gw.inference.factors import GNPEKernelFactor, GWComposedSampler
+from dingo.gw.inference.sampler import GWComposedSampler
+from dingo.gw.inference.steps import GNPEKernelFactor
 from dingo.gw.inference.scan import chirp_mass_scan
 from dingo.pipe.default_settings import DENSITY_RECOVERY_SETTINGS
 from dingo.pipe.parser import create_parser

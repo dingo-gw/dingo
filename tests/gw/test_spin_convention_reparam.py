@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 import torch
 
-from dingo.gw.inference.factors import SpinConventionReparam
+from dingo.gw.inference.steps import SpinConventionReparam
 
 _MODEL_METADATA_SC0 = {
     "dataset_settings": {

@@ -13,7 +13,7 @@ import argparse
 from dingo.core.posterior_models import NormalizingFlowPosteriorModel
 from dingo.gw.result import Result
 from dingo.core.factors import ChainComposer, FlowFactor
-from dingo.gw.inference.factors import GWComposedSampler
+from dingo.gw.inference.sampler import GWComposedSampler
 from dingo.gw.importance_sampling.diagnostics import plot_diagnostics
 
 

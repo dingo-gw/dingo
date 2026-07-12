@@ -20,10 +20,15 @@ import numpy as np
 import pandas as pd
 from bilby.gw.prior import BBHPriorDict
 
-from dingo.core.factors import ChainComposer, FlowFactor, SampleTableFactor, Stage
-from dingo.gw.inference.factors import (
-    GWSamplerContext,
+from dingo.core.factors import (
+    ChainComposer,
+    FlowFactor,
+    SampleTableFactor,
+    Stage,
     _base_model_metadata,
+)
+from dingo.gw.inference.context import GWSamplerContext
+from dingo.gw.inference.sampler import (
     _delta_prior_steps,
     _proxy_offset_steps,
     _ra_aliases,

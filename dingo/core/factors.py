@@ -68,7 +68,7 @@ class SamplerContext(Protocol):
     Per-event shared state referenced by every factor: the data `d` and quantities
     derived from it (the prepared-data representation, the likelihood, event metadata).
     Concrete implementations are domain-specific; see
-    `dingo.gw.inference.factors.GWSamplerContext`.
+    `dingo.gw.inference.context.GWSamplerContext`.
 
     `device` is the torch device the chain runs on: steps that create fresh tensors
     (rather than transforming existing ones) create them here, so their outputs can
@@ -861,7 +861,7 @@ class GibbsBlock:
     and returns `None` for the log-prob -- the cyclic dependency has no tractable marginal
     (recoverable by fitting an unconditional density to the samples and taking one
     `ChainComposer` step). Dingo uses this only for multi-iteration GNPE (the GNPE factors
-    in `dingo.gw.inference.factors`), but the loop is generic.
+    in `dingo.gw.inference.steps`), but the loop is generic.
 
     Batching is handled by the enclosing `ChainComposer`: it chunks the walkers and runs
     the whole loop per chunk (`chunk_and_concat`).

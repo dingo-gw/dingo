@@ -8,7 +8,7 @@ import types
 import numpy as np
 import torch
 
-from dingo.gw.inference.factors import RAReparam
+from dingo.gw.inference.steps import RAReparam
 
 
 def _context(t_ref, t_event):

@@ -7,7 +7,8 @@ import pytest
 import torch
 from bilby.core.utils import random as bilby_random
 
-from dingo.gw.inference.factors import GWSamplerContext, SyntheticPhaseFactor
+from dingo.gw.inference.context import GWSamplerContext
+from dingo.gw.inference.steps import SyntheticPhaseFactor
 
 
 class _MockLikelihood:

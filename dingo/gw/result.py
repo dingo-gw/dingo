@@ -179,7 +179,7 @@ class Result(CoreResult):
         # event data itself.
         if self.settings is None:
             return None
-        from dingo.gw.inference.factors import GWSamplerContext
+        from dingo.gw.inference.context import GWSamplerContext
 
         try:
             # base_metadata resolves the unconditional ("base") indirection, so
@@ -487,7 +487,7 @@ class Result(CoreResult):
         updates). Out-of-prior rows get `phase = 0` and `log_prob = nan` (they
         receive zero weight in importance sampling regardless)."""
         from dingo.core.factors import ChainComposer, SampleTableFactor
-        from dingo.gw.inference.factors import SyntheticPhaseFactor
+        from dingo.gw.inference.steps import SyntheticPhaseFactor
 
         theta_within = theta.iloc[np.flatnonzero(within_prior)]
         table = SampleTableFactor(
@@ -606,7 +606,7 @@ class Result(CoreResult):
         pd.DataFrame
             Samples
         """
-        from dingo.gw.inference.factors import SpinConventionReparam
+        from dingo.gw.inference.steps import SpinConventionReparam
 
         return SpinConventionReparam(num_processes=num_processes).to_physical(
             self.samples, self.base_metadata
@@ -672,7 +672,7 @@ class Result(CoreResult):
                 samples.loc[:, col] += self.t_ref
 
         # Redefine the spin angles to the physical (Bilby) convention.
-        from dingo.gw.inference.factors import SpinConventionReparam
+        from dingo.gw.inference.steps import SpinConventionReparam
 
         samples = SpinConventionReparam(num_processes=num_processes).to_physical(
             samples, self.base_metadata

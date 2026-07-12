@@ -11,7 +11,7 @@ chain of conditional factors (the network flow, deterministic reparametrizations
 such as the sky-frame rotation, and fillers for fixed parameters).
 
 ```{eval-rst}
-.. autoclass:: dingo.gw.inference.factors.GWComposedSampler
+.. autoclass:: dingo.gw.inference.sampler.GWComposedSampler
     :members:
     :inherited-members:
     :show-inheritance:
