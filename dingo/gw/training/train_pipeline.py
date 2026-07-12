@@ -2,6 +2,7 @@ from typing import Optional, Tuple
 import os
 
 import numpy as np
+import torch.multiprocessing
 import yaml
 import argparse
 import shutil
@@ -19,7 +20,7 @@ from dingo.core.utils.backward_compatibility import update_model_config
 from dingo.gw.training.train_builders import (
     build_dataset,
     set_train_transforms,
-    build_svd_for_embedding_network,
+    initialization_dataloader,
 )
 from dingo.core.utils.trainutils import RuntimeLimits
 from dingo.core.utils import (
@@ -115,25 +116,8 @@ def prepare_training_new(
         data_settings=data_settings,
         leave_waveforms_on_disk=local_settings.get("leave_waveforms_on_disk", True),
     )  # No transforms yet
-    initial_weights = {}
 
     update_model_config(train_settings["model"])  # Map old schemas forward.
-
-    # Build the SVD for seeding the embedding network, if it declares one.
-    # TODO: replace with the architecture-owned initialization hook (build-system
-    #  step 4), so that the trainer no longer knows about the SVD.
-    embedding_settings = train_settings["model"].get("embedding_net")
-    if embedding_settings and "svd" in embedding_settings.get("kwargs", {}):
-        print("\nBuilding SVD for initialization of embedding network.")
-        initial_weights["V_rb_list"] = build_svd_for_embedding_network(
-            wfd,
-            train_settings["data"],
-            train_settings["training"]["stage_0"]["asd_dataset_path"],
-            num_workers=local_settings["num_workers"],
-            batch_size=train_settings["training"]["stage_0"]["batch_size"],
-            out_dir=train_dir,
-            **embedding_settings["kwargs"]["svd"],
-        )
 
     # Now set the transforms for training. We need to do this here so that we can (a)
     # get the data dimensions to configure the network, and (b) save the
@@ -142,11 +126,8 @@ def prepare_training_new(
     # be done outside the transform setup. But for now, this is convenient. The
     # transforms will be reset later by initialize_stage().
 
-    set_train_transforms(
-        wfd,
-        train_settings["data"],
-        train_settings["training"]["stage_0"]["asd_dataset_path"],
-    )
+    asd_dataset_path = train_settings["training"]["stage_0"]["asd_dataset_path"]
+    set_train_transforms(wfd, train_settings["data"], asd_dataset_path)
 
     train_settings["model"] = complete_model_settings(train_settings["model"], wfd[0])
     full_settings = {
@@ -160,9 +141,39 @@ def prepare_training_new(
 
     pm = build_model_from_kwargs(
         settings=full_settings,
-        initial_weights=initial_weights,
         device=local_settings["device"],
     )
+
+    # Data-driven weight initialization (e.g. SVD seeding of the projection
+    # layer): any network module that requests a data spec gets a dataloader
+    # answering it and initializes itself. The trainer does not know about
+    # specific architectures.
+    initialized = False
+    for module in pm.network.modules():
+        spec = getattr(module, "init_data_spec", lambda: None)()
+        if spec is None:
+            continue
+        print(f"\nInitializing weights of {type(module).__name__} from data.")
+        dataloader = initialization_dataloader(
+            wfd,
+            train_settings["data"],
+            asd_dataset_path,
+            spec,
+            batch_size=train_settings["training"]["stage_0"]["batch_size"],
+        )
+        # This is needed to prevent an occasional error when loading a large
+        # dataset into memory using a dataloader. This removes a limitation on
+        # the number of "open files".
+        old_sharing_strategy = torch.multiprocessing.get_sharing_strategy()
+        torch.multiprocessing.set_sharing_strategy("file_system")
+        with threadpool_limits(limits=1, user_api="blas"):
+            module.initialize_weights(dataloader, out_dir=train_dir)
+        torch.multiprocessing.set_sharing_strategy(old_sharing_strategy)
+        initialized = True
+    if initialized:
+        # initialization_dataloader replaced the transforms; restore the
+        # training configuration.
+        set_train_transforms(wfd, train_settings["data"], asd_dataset_path)
 
     if local_settings.get("wandb", False):
         try:

@@ -44,7 +44,6 @@ class NeuralDistribution(ABC):
         self,
         model_filename: str = None,
         metadata: dict = None,
-        initial_weights: dict = None,
         device: str = "cuda",
         load_training_info: bool = True,
     ):
@@ -57,8 +56,6 @@ class NeuralDistribution(ABC):
             If given, loads data from the given file.
         metadata: dict
             If given, initializes the model from these settings
-        initial_weights: dict
-            Initial weights for the model
         device: str
         load_training_info: bool
         """
@@ -69,7 +66,6 @@ class NeuralDistribution(ABC):
         self.optimizer_kwargs = None
         self.network_kwargs = None
         self.scheduler_kwargs = None
-        self.initial_weights = initial_weights
 
         self.metadata = metadata
         if self.metadata is not None:
@@ -105,9 +101,9 @@ class NeuralDistribution(ABC):
         """
         Build the embedding network declared in the model settings (resolved via
         the EMBEDDING_NETS registry), optionally wrapped with a context merger
-        (CONTEXT_MERGERS) that mixes in the context parameters. Initial weights
-        (e.g. SVD projection matrices) are passed as extra constructor kwargs; they
-        are not part of the saved settings.
+        (CONTEXT_MERGERS) that mixes in the context parameters. Data-driven weight
+        initialization (e.g. SVD seeding) happens separately, via the network's
+        init_data_spec / initialize_weights hooks.
 
         Returns None if the model declares no embedding network (unconditional
         models).
@@ -115,9 +111,7 @@ class NeuralDistribution(ABC):
         embedding_settings = self.model_kwargs.get("embedding_net")
         if embedding_settings is None:
             return None
-        kwargs = dict(embedding_settings.get("kwargs", {}))
-        if self.initial_weights:
-            kwargs.update(self.initial_weights)
+        kwargs = embedding_settings.get("kwargs", {})
         embedding_net = EMBEDDING_NETS.get(embedding_settings["type"])(**kwargs)
         merger_settings = self.model_kwargs.get("context_merger")
         if merger_settings is not None:

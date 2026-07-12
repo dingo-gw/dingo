@@ -367,39 +367,91 @@ def test_parameter_contract_defaults():
 
 
 # -----------------------------------------------------------------------------------
-# SVD initial-weight seeding
+# Data-driven weight initialization (init_data_spec / initialize_weights hooks)
 # -----------------------------------------------------------------------------------
 
 
-def test_initial_weights_seed_svd_projection():
-    """initial_weights['V_rb_list'] seeds the LinearProjectionRB layer weights, and the
-    settings dict is not polluted with the (large) V matrices."""
+def _init_batches(waveform_len, batch_sizes):
+    """Batches in the format the initialization dataloader provides: per-block
+    complex strains plus parameters."""
+    rng = np.random.default_rng(42)
     num_bins = DATA_SHAPE[2]
+    for batch_size in batch_sizes:
+        waveform = {}
+        for block in ("H1", "L1"):
+            strains = rng.normal(size=(batch_size, waveform_len)) + 1j * rng.normal(
+                size=(batch_size, waveform_len)
+            )
+            # Entries outside the network's input range (leading excess) are zero.
+            strains[:, : waveform_len - num_bins] = 0.0
+            waveform[block] = strains
+        yield {
+            "waveform": waveform,
+            "parameters": {"chirp_mass": rng.uniform(size=batch_size)},
+        }
+
+
+def test_svd_initialization_hook():
+    """DenseSVDEmbedding requests clean, un-formatted data via init_data_spec and
+    seeds its projection layer with per-block SVD bases from the provided batches;
+    rows outside the network's input range are dropped."""
     n_rb = 10
-    V_rb_list = [
-        (np.random.rand(num_bins, n_rb) + 1j * np.random.rand(num_bins, n_rb))
-        for _ in range(DATA_SHAPE[0])
-    ]
+    num_bins = DATA_SHAPE[2]
+    waveform_len = num_bins + 5  # data longer than the network input
     settings = model_settings("normalizing_flow")
+    embedding_kwargs = settings["train_settings"]["model"]["embedding_net"]["kwargs"]
+    embedding_kwargs["svd"] = {"size": n_rb, "num_training_samples": 40}
     settings_before = copy.deepcopy(settings)
 
-    pm = build_model_from_kwargs(
-        settings=settings, initial_weights={"V_rb_list": V_rb_list}, device="cpu"
-    )
+    pm = build_model_from_kwargs(settings=settings, device="cpu")
+    embedding = pm.network.embedding_net
 
-    projection = pm.network.embedding_net[0]
-    V = V_rb_list[0][:, :n_rb]
-    layer_weight = projection.layers_rb[0].weight.data
-    assert torch.allclose(
-        layer_weight[:n_rb, :num_bins],
-        torch.from_numpy(V.real.T).float(),
-    )
-    assert torch.allclose(
-        layer_weight[n_rb:, :num_bins],
-        torch.from_numpy(V.imag.T).float(),
+    spec = embedding.init_data_spec()
+    assert spec == {
+        "noise": False,
+        "network_format": False,
+        "fix_parameters": {"luminosity_distance": 100.0},
+        "num_samples": 40,
+    }
+
+    # Two batches of 25 provide the 40 samples (iteration stops mid-batch).
+    embedding.initialize_weights(_init_batches(waveform_len, [25, 25]))
+
+    # The SVD itself is not deterministic (partial SVD with random start vector),
+    # so check the structure: the weights hold an orthonormal complex basis V of
+    # the network's input size, in the (real, imag) block layout of
+    # LinearProjectionRB.init_layers, with zero bias.
+    for layer in embedding[0].layers_rb:
+        weight = layer.weight.data
+        V_real = weight[:n_rb, :num_bins].T
+        V_imag = weight[n_rb:, :num_bins].T
+        assert torch.allclose(weight[:n_rb, num_bins : 2 * num_bins].T, -V_imag)
+        assert torch.allclose(weight[n_rb:, num_bins : 2 * num_bins].T, V_real)
+        # Third channel (e.g. ASD) initialized to zero.
+        assert torch.all(weight[:, 2 * num_bins :] == 0)
+        assert torch.all(layer.bias.data == 0)
+        V = torch.complex(V_real, V_imag).to(torch.complex128)
+        gram = V.T.conj() @ V
+        assert torch.allclose(gram, torch.eye(n_rb, dtype=torch.complex128), atol=1e-5)
+    # The two blocks received different bases (different data).
+    assert not torch.allclose(
+        embedding[0].layers_rb[0].weight, embedding[0].layers_rb[1].weight
     )
     # The V matrices must not leak into the saved settings.
     assert settings == settings_before
+
+    # Too few samples fail loudly.
+    with pytest.raises(IndexError, match="40"):
+        embedding.initialize_weights(_init_batches(waveform_len, [25]))
+
+
+def test_init_data_spec_none_without_seeding_request():
+    """Without num_training_samples in the svd settings (e.g. when loading a saved
+    model), no data-driven initialization is requested."""
+    pm = build_model_from_kwargs(
+        settings=model_settings("normalizing_flow"), device="cpu"
+    )
+    assert pm.network.embedding_net.init_data_spec() is None
 
 
 # -----------------------------------------------------------------------------------

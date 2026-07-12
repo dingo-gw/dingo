@@ -16,7 +16,7 @@ from torchvision.transforms import Compose
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.gw.domains import build_domain
 from dingo.gw.prior import build_prior_with_defaults
-from dingo.gw.SVD import ApplySVD, SVDBasis
+from dingo.core.SVD import ApplySVD, SVDBasis
 from dingo.gw.transforms import WhitenFixedASD
 from dingo.gw.waveform_generator import (
     NewInterfaceWaveformGenerator,

@@ -9,18 +9,30 @@ Embedding networks registered with EMBEDDING_NETS follow a common contract:
   network's own input dimensions from a sample batch; the completed settings
   (which must include ``output_dim``) are saved in the checkpoint, so loading
   never needs a data sample.
+* ``init_data_spec()`` (optional): returns a dict describing the data variation
+  the network wants for data-driven weight initialization (e.g. noise-free,
+  un-formatted waveforms), or None if no initialization is needed.
+* ``initialize_weights(batches, out_dir=None)`` (optional): consumes an iterator
+  of batches matching the spec and initializes the network weights in-place.
+  The trainer answers the spec with a matching dataloader and calls this hook;
+  it does not know about specific architectures.
 
 Context mergers registered with CONTEXT_MERGERS wrap an embedding network to mix
 in the (standardized) context parameters; they follow the same contract, plus a
 ``merged_output_dim`` method used during settings completion.
 """
 
+import os
 from typing import Tuple, Callable, Union, List
+
 import torch
 import numpy as np
+import pandas as pd
 import torch.nn as nn
 from torch.nn import functional as F
 from glasflow.nflows.nn.nets.resnet import ResidualBlock
+
+from dingo.core.SVD import SVDBasis
 from dingo.core.registry import CONTEXT_MERGERS, EMBEDDING_NETS
 from dingo.core.utils import torchutils
 
@@ -303,8 +315,8 @@ class DenseSVDEmbedding(nn.Sequential):
             whether to use batch normalization
         V_rb_list : tuple of np.arrays, or None
             V matrices of the SVD projection used to initialize the projection
-            weights. Passed as initial weights at first build; None when loading a
-            saved model.
+            weights directly. Usually None: the projection is seeded via the
+            initialize_weights hook instead.
         """
         projection = LinearProjectionRB(input_dims, svd["size"], V_rb_list)
         resnet = DenseResidualNet(
@@ -317,6 +329,7 @@ class DenseSVDEmbedding(nn.Sequential):
         )
         super().__init__(projection, resnet)
         self.output_dim = output_dim
+        self.svd_settings = svd
 
     @classmethod
     def complete_settings(cls, settings: dict, sample_batch: dict) -> dict:
@@ -327,6 +340,102 @@ class DenseSVDEmbedding(nn.Sequential):
                 "in the embedding net settings."
             )
         return {**settings, "input_dims": list(sample_batch["waveform"].shape)}
+
+    def init_data_spec(self):
+        """
+        Data variation for seeding the SVD projection: clean (noise-free),
+        un-formatted waveforms at a fixed reference luminosity distance. Returns
+        None if the svd settings do not request seeding (no
+        num_training_samples), e.g. when loading a saved model.
+        """
+        if "num_training_samples" not in self.svd_settings:
+            return None
+        num_samples = self.svd_settings["num_training_samples"] + self.svd_settings.get(
+            "num_validation_samples", 0
+        )
+        return {
+            "noise": False,
+            "network_format": False,
+            "fix_parameters": {"luminosity_distance": 100.0},
+            "num_samples": num_samples,
+        }
+
+    def initialize_weights(self, batches, out_dir=None):
+        """
+        Seed the projection layer with an SVD basis built from clean waveforms.
+
+        Parameters
+        ----------
+        batches : iterable
+            Batches matching init_data_spec: dicts with "waveform" a
+            {block: (batch_size, len) complex array} dict (in the GW use case, a
+            block is a detector) and "parameters", used for validation
+            diagnostics. Iteration stops once num_samples have been consumed.
+        out_dir : str = None
+            If provided, SVD validation diagnostics are computed and saved here.
+        """
+        svd = self.svd_settings
+        num_training = svd["num_training_samples"]
+        num_validation = svd.get("num_validation_samples", 0)
+        num_samples = num_training + num_validation
+
+        waveforms = None
+        parameters = pd.DataFrame()
+        collected = 0
+        for batch in batches:
+            strain_data = batch["waveform"]
+            if waveforms is None:
+                waveforms = {
+                    block: np.empty(
+                        (num_samples, strains.shape[-1]), dtype=np.complex128
+                    )
+                    for block, strains in strain_data.items()
+                }
+            batch_size = len(next(iter(strain_data.values())))
+            n = min(batch_size, num_samples - collected)
+            parameters = pd.concat(
+                [parameters, pd.DataFrame(batch["parameters"]).iloc[:n]],
+                ignore_index=True,
+            )
+            for block, strains in strain_data.items():
+                waveforms[block][collected : collected + n] = strains[:n]
+            collected += n
+            if collected == num_samples:
+                break
+        if collected < num_samples:
+            raise IndexError(
+                f"Requested {num_samples} samples for SVD initialization, but the "
+                f"dataloader only provided {collected}."
+            )
+
+        projection = self[0]
+        V_rb_list = []
+        for block, data in waveforms.items():
+            print(f"Generating SVD basis for block {block}.")
+            basis = SVDBasis()
+            basis.generate_basis(data[:num_training], svd["size"])
+            if out_dir is not None and num_validation > 0:
+                basis.compute_test_mismatches(
+                    data[num_training:],
+                    parameters=parameters.iloc[num_training:].reset_index(drop=True),
+                    verbose=True,
+                )
+                basis.to_file(os.path.join(out_dir, f"svd_{block}.hdf5"))
+            # The provided waveforms may be longer than the network input (leading
+            # entries outside the network's frequency range). These must be zero,
+            # and the corresponding rows of V are dropped.
+            V = basis.V
+            excess = len(V) - projection.num_bins
+            if not np.allclose(V[:excess], 0):
+                raise ValueError(
+                    f"Block {block}: SVD basis has non-zero entries outside the "
+                    f"network input range (waveform length {len(V)}, network "
+                    f"num_bins {projection.num_bins})."
+                )
+            V_rb_list.append(V[excess:])
+
+        projection.test_dimensions(V_rb_list)
+        projection.init_layers(V_rb_list)
 
 
 class ModuleMerger(nn.Module):
