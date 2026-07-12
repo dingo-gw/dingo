@@ -1,10 +1,7 @@
 from .base_model import NeuralDistribution
 from dingo.core.registry import NEURAL_DISTRIBUTIONS
 
-from dingo.core.nn.nsf import (
-    create_nsf_with_rb_projection_embedding_net,
-    create_nsf_wrapped,
-)
+from dingo.core.nn.nsf import FlowWrapper, create_nsf_model
 
 
 @NEURAL_DISTRIBUTIONS.register("normalizing_flow")
@@ -40,16 +37,18 @@ class NormalizingFlowPosteriorModel(NeuralDistribution):
         super().__init__(**kwargs)
 
     def initialize_network(self):
-        model_kwargs = {
-            k: v for k, v in self.model_kwargs.items() if k != "posterior_model_type"
-        }
-        if self.initial_weights is not None:
-            model_kwargs["initial_weights"] = self.initial_weights
-
-        if self.model_kwargs.get("embedding_kwargs", False):
-            self.network = create_nsf_with_rb_projection_embedding_net(**model_kwargs)
+        embedding_net = self.build_embedding_net()
+        kwargs = self.model_kwargs["distribution"]["kwargs"]
+        flow = create_nsf_model(
+            input_dim=kwargs["theta_dim"],
+            context_dim=kwargs["context_dim"],
+            num_flow_steps=kwargs["num_flow_steps"],
+            base_transform_kwargs=kwargs["base_transform_kwargs"],
+        )
+        if embedding_net is None:
+            self.network = FlowWrapper(flow)
         else:
-            self.network = create_nsf_wrapped(**model_kwargs["posterior_kwargs"])
+            self.network = FlowWrapper(flow, embedding_net, embedding_net.input_keys)
 
     def log_prob(self, theta, context: dict = None):
         return self.network(theta, context)

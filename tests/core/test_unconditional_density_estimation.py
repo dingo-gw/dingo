@@ -15,8 +15,9 @@ PARAMETERS = ["x", "y"]
 def _nde_settings():
     """Minimal but valid settings for a fast (1-epoch) unconditional flow.
 
-    Uses the ``model.posterior_kwargs`` shape that train_unconditional_density_estimator
-    reads (matching pipe DENSITY_RECOVERY_SETTINGS), not the flat nde_settings template.
+    Deliberately uses the old ``model.posterior_kwargs`` schema, so that the
+    update_model_config shim inside train_unconditional_density_estimator is
+    exercised (user nde settings files in the wild still use it).
     """
     return {
         "data": {},
@@ -71,8 +72,8 @@ def test_train_unconditional_density_estimator_basic(result, tmp_path):
 
     # The network is configured as an unconditional flow over the chosen parameters.
     assert settings["data"]["unconditional"] is True
-    assert settings["model"]["posterior_kwargs"]["input_dim"] == len(PARAMETERS)
-    assert settings["model"]["posterior_kwargs"]["context_dim"] is None
+    assert settings["model"]["distribution"]["kwargs"]["theta_dim"] == len(PARAMETERS)
+    assert settings["model"]["distribution"]["kwargs"]["context_dim"] is None
 
     # Standardization is computed from the training samples.
     expected_mean = result.samples[PARAMETERS].to_numpy().mean(axis=0)
@@ -94,7 +95,10 @@ def test_train_unconditional_density_estimator_uses_all_parameters_by_default(
     # With no "parameters" entry, all sample columns are used.
     settings = _nde_settings()
     train_unconditional_density_estimator(result, settings, str(tmp_path))
-    assert settings["model"]["posterior_kwargs"]["input_dim"] == result.samples.shape[1]
+    assert (
+        settings["model"]["distribution"]["kwargs"]["theta_dim"]
+        == result.samples.shape[1]
+    )
 
 
 def test_train_unconditional_flow_end_to_end(result, tmp_path):
@@ -103,7 +107,7 @@ def test_train_unconditional_flow_end_to_end(result, tmp_path):
     )
     assert isinstance(model, NormalizingFlowPosteriorModel)
     # Trained over the requested subset only.
-    assert model.model_kwargs["posterior_kwargs"]["input_dim"] == len(PARAMETERS)
+    assert model.model_kwargs["distribution"]["kwargs"]["theta_dim"] == len(PARAMETERS)
 
 
 def test_train_unconditional_flow_rejects_too_many_outliers(result):

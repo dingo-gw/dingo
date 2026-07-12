@@ -1,12 +1,8 @@
-import copy
-
 import numpy as np
 import torch
 import torch.nn as nn
 
 from dingo.core.utils import torchutils
-from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
-
 from dingo.core.nn.enets import DenseResidualNet
 
 
@@ -175,55 +171,47 @@ class ContinuousFlow(nn.Module):
             return self.continuous_flow_net(main_input, glu_context)
 
 
-def create_cf(
-    posterior_kwargs: dict, embedding_kwargs: dict = None, initial_weights: dict = None
-):
+def create_cf(kwargs: dict, embedding_net: nn.Module = None):
     """
-    Build a continuous flow based on settings dictionaries.
+    Build a continuous flow based on completed distribution kwargs.
 
     Parameters
     ----------
-    posterior_kwargs: dict
-        Settings for the flow. This includes the settings for the parameter embedding.
-    embedding_kwargs: dict
-        Settings for the context embedding network.
-    initial_weights: dict
-        Initial weights for the embedding network (of SVD projection type).
+    kwargs: dict
+        Completed kwargs of the distribution settings: theta_dim, context_dim,
+        hidden_dims, activation, dropout, batch_norm, and optionally
+        theta_embedding_kwargs, theta_with_glu, context_with_glu. Extra keys
+        consumed by the training scheme (e.g., sigma_min) are ignored.
+    embedding_net: nn.Module = None
+        Embedding network for the context; None for unconditional models.
 
     Returns
     -------
     nn.Module
         Neural network for the continuous flow.
     """
-    theta_dim = posterior_kwargs["input_dim"]
-    context_dim = posterior_kwargs["context_dim"]
+    theta_dim = kwargs["theta_dim"]
+    context_dim = kwargs["context_dim"] or 0
 
-    # get embeddings modules for context
-    if embedding_kwargs is not None:
-        context_embedding_kwargs = copy.deepcopy(embedding_kwargs)
-        if initial_weights is not None:
-            context_embedding_kwargs["V_rb_list"] = initial_weights["V_rb_list"]
-        elif "V_rb_list" not in context_embedding_kwargs:
-            context_embedding_kwargs["V_rb_list"] = None
-
-        context_embedding = create_enet_with_projection_layer_and_dense_resnet(
-            **context_embedding_kwargs
-        )
-    else:
+    if embedding_net is None:
         context_embedding = torch.nn.Identity()
+        context_keys = ()
+    else:
+        context_embedding = embedding_net
+        context_keys = embedding_net.input_keys
 
     # get embeddings modules for theta (which is actually cat(t, theta))
-    if "theta_embedding_kwargs" in posterior_kwargs:
+    if "theta_embedding_kwargs" in kwargs:
         theta_embedding = get_theta_embedding_net(
-            posterior_kwargs["theta_embedding_kwargs"],
+            kwargs["theta_embedding_kwargs"],
             input_dim=theta_dim + 1,
         )
     else:
         theta_embedding = torch.nn.Identity()
 
     # get output dimensions of embedded context and theta
-    theta_with_glu = posterior_kwargs.get("theta_with_glu", False)
-    context_with_glu = posterior_kwargs.get("context_with_glu", False)
+    theta_with_glu = kwargs.get("theta_with_glu", False)
+    context_with_glu = kwargs.get("context_with_glu", False)
     embedded_theta_dim = theta_embedding(torch.zeros(10, theta_dim + 1)).shape[1]
 
     glu_dim = theta_with_glu * embedded_theta_dim + context_with_glu * context_dim
@@ -231,31 +219,23 @@ def create_cf(
     if glu_dim == 0:
         glu_dim = None
 
-    activation_fn = torchutils.get_activation_function_from_string(
-        posterior_kwargs["activation"]
-    )
+    activation_fn = torchutils.get_activation_function_from_string(kwargs["activation"])
     continuous_flow_net = DenseResidualNet(
         input_dim=input_dim,
         output_dim=theta_dim,
-        hidden_dims=posterior_kwargs["hidden_dims"],
+        hidden_dims=kwargs["hidden_dims"],
         activation=activation_fn,
-        dropout=posterior_kwargs["dropout"],
-        batch_norm=posterior_kwargs["batch_norm"],
+        dropout=kwargs["dropout"],
+        batch_norm=kwargs["batch_norm"],
         context_features=glu_dim,
     )
-
-    # With added_context, the embedding merges (waveform, context_parameters).
-    if embedding_kwargs is not None and embedding_kwargs.get("added_context"):
-        context_keys = ("waveform", "context_parameters")
-    else:
-        context_keys = ("waveform",)
 
     model = ContinuousFlow(
         continuous_flow_net,
         context_embedding,
         theta_embedding,
-        theta_with_glu=posterior_kwargs.get("theta_with_glu", False),
-        context_with_glu=posterior_kwargs.get("context_with_glu", False),
+        theta_with_glu=theta_with_glu,
+        context_with_glu=context_with_glu,
         context_keys=context_keys,
     )
     return model
@@ -296,14 +276,15 @@ def get_dim_positional_embedding(encoding: dict, input_dim: int):
         return (1 + 2 * encoding["frequencies"]) * input_dim
     return 2 * encoding["frequencies"] + input_dim
 
+
 class PositionalEncoding(nn.Module):
     """
     Implements positional encoding as commonly used in transformer architectures.
-    
-    Positional encoding introduces a way to inject information about the order of 
-    the input data (e.g., sequence positions) into a neural network that otherwise 
-    lacks a sense of position due to its permutation-invariant nature. This class 
-    computes sinusoidal encodings based on the position of each element in the input 
+
+    Positional encoding introduces a way to inject information about the order of
+    the input data (e.g., sequence positions) into a neural network that otherwise
+    lacks a sense of position due to its permutation-invariant nature. This class
+    computes sinusoidal encodings based on the position of each element in the input
     and concatenates them with the original input features.
 
     Attributes
@@ -323,7 +304,7 @@ class PositionalEncoding(nn.Module):
         The number of sinusoidal frequencies to compute. This determines the dimensionality
         of the positional encoding for each input feature.
     encode_all : bool, optional (default=True)
-        If True, the positional encoding is computed for all features in the input. 
+        If True, the positional encoding is computed for all features in the input.
         Otherwise, it is computed only for the first feature (e.g., the time dimension).
     base_freq : float, optional (default=2 * np.pi)
         The base frequency used for sinusoidal encoding.
@@ -331,12 +312,13 @@ class PositionalEncoding(nn.Module):
     Methods
     -------
     forward(t_theta)
-        Computes the positional encoding for the input tensor `t_theta` and concatenates 
+        Computes the positional encoding for the input tensor `t_theta` and concatenates
         it with the original input features.
         - If `encode_all` is True, the positional encoding is computed for all features.
         - If `encode_all` is False, the positional encoding is applied only to the first
           feature, such as time, while other features remain unchanged.
     """
+
     def __init__(self, nr_frequencies, encode_all=True, base_freq=2 * np.pi):
         super(PositionalEncoding, self).__init__()
         frequencies = base_freq * torch.pow(

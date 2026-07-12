@@ -12,9 +12,10 @@ from copy import deepcopy
 from threadpoolctl import threadpool_limits
 
 from dingo.core.posterior_models.build_model import (
-    autocomplete_model_kwargs,
     build_model_from_kwargs,
+    complete_model_settings,
 )
+from dingo.core.utils.backward_compatibility import update_model_config
 from dingo.gw.training.train_builders import (
     build_dataset,
     set_train_transforms,
@@ -86,9 +87,8 @@ def prepare_training_new(
     """
     Based on a settings dictionary, initialize a WaveformDataset and PosteriorModel.
 
-    For model type 'nsf+embedding' (the only acceptable type at this point) this also
-    initializes the embedding network projection stage with SVD V matrices based on
-    clean detector waveforms.
+    If the embedding network requests an SVD projection stage, this also initializes
+    the projection weights with SVD V matrices based on clean detector waveforms.
 
     Parameters
     ----------
@@ -117,11 +117,13 @@ def prepare_training_new(
     )  # No transforms yet
     initial_weights = {}
 
-    # The embedding network is assumed to have an SVD projection layer. If other types
-    # of embedding networks are added in the future, update this code.
+    update_model_config(train_settings["model"])  # Map old schemas forward.
 
-    if train_settings["model"].get("embedding_kwargs", None):
-        # First, build the SVD for seeding the embedding network.
+    # Build the SVD for seeding the embedding network, if it declares one.
+    # TODO: replace with the architecture-owned initialization hook (build-system
+    #  step 4), so that the trainer no longer knows about the SVD.
+    embedding_settings = train_settings["model"].get("embedding_net")
+    if embedding_settings and "svd" in embedding_settings.get("kwargs", {}):
         print("\nBuilding SVD for initialization of embedding network.")
         initial_weights["V_rb_list"] = build_svd_for_embedding_network(
             wfd,
@@ -130,7 +132,7 @@ def prepare_training_new(
             num_workers=local_settings["num_workers"],
             batch_size=train_settings["training"]["stage_0"]["batch_size"],
             out_dir=train_dir,
-            **train_settings["model"]["embedding_kwargs"]["svd"],
+            **embedding_settings["kwargs"]["svd"],
         )
 
     # Now set the transforms for training. We need to do this here so that we can (a)
@@ -146,8 +148,7 @@ def prepare_training_new(
         train_settings["training"]["stage_0"]["asd_dataset_path"],
     )
 
-    # This modifies the model settings in-place.
-    autocomplete_model_kwargs(train_settings["model"], wfd[0])
+    train_settings["model"] = complete_model_settings(train_settings["model"], wfd[0])
     full_settings = {
         "dataset_settings": wfd.settings,
         "train_settings": train_settings,

@@ -77,8 +77,11 @@ class Registry:
         if name in self._components:
             return self._components[name]
 
-        for resolve in (self._from_entry_points, self._from_dotted_path,
-                        self._from_file_path):
+        for resolve in (
+            self._from_entry_points,
+            self._from_dotted_path,
+            self._from_file_path,
+        ):
             component = resolve(name)
             if component is not None:
                 # Cache so repeated lookups are cheap and resolve consistently.

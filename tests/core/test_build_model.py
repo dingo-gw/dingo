@@ -1,14 +1,12 @@
 """
-Characterization tests for the model build path.
+Tests for the model build path.
 
-These tests pin the *current* behavior of building posterior models from settings
-dictionaries — type dispatch (build_model_from_kwargs), dimensional autocompletion
-(autocomplete_model_kwargs), end-to-end construction and forward passes for all three
+These tests cover building posterior models from settings dictionaries — type
+dispatch (build_model_from_kwargs), per-architecture dimension inference
+(complete_model_settings), end-to-end construction and forward passes for all three
 posterior model types, SVD initial-weight seeding, and loading of old-schema
-checkpoints — ahead of the NN build-system refactor (see hackathon/
-NN_Build_System_Design.md). If one of these tests breaks, either the refactor changed
-observable behavior (fix the refactor) or the behavior change is intended and
-documented (update the test alongside the compatibility shim).
+settings/checkpoints through the update_model_config boundary (see
+hackathon/NN_Build_System_Design.md).
 """
 
 import copy
@@ -19,8 +17,8 @@ import torch
 
 from dingo.core.posterior_models.base_model import BasePosteriorModel
 from dingo.core.posterior_models.build_model import (
-    autocomplete_model_kwargs,
     build_model_from_kwargs,
+    complete_model_settings,
 )
 from dingo.core.posterior_models.flow_matching import FlowMatchingPosteriorModel
 from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
@@ -36,24 +34,23 @@ GNPE_PROXY_DIM = 2
 BATCH_SIZE = 5
 
 
-def embedding_kwargs():
-    return {
-        "input_dims": list(DATA_SHAPE),
+def embedding_kwargs(completed=True):
+    """Embedding-net kwargs; completed=False gives user-style settings (no dims)."""
+    kwargs = {
         "svd": {"size": 10},
-        "V_rb_list": None,
         "output_dim": EMBEDDING_OUTPUT_DIM,
         "hidden_dims": [32, 16, 8],
         "activation": "elu",
         "dropout": 0.0,
         "batch_norm": True,
-        "added_context": False,
     }
+    if completed:
+        kwargs["input_dims"] = list(DATA_SHAPE)
+    return kwargs
 
 
-def nsf_posterior_kwargs():
-    return {
-        "input_dim": NUM_PARAMETERS,
-        "context_dim": EMBEDDING_OUTPUT_DIM,
+def nsf_distribution_kwargs(completed=True):
+    kwargs = {
         "num_flow_steps": 2,
         "base_transform_kwargs": {
             "hidden_dim": 16,
@@ -65,12 +62,14 @@ def nsf_posterior_kwargs():
             "base_transform_type": "rq-coupling",
         },
     }
+    if completed:
+        kwargs["theta_dim"] = NUM_PARAMETERS
+        kwargs["context_dim"] = EMBEDDING_OUTPUT_DIM
+    return kwargs
 
 
-def cflow_posterior_kwargs():
-    return {
-        "input_dim": NUM_PARAMETERS,
-        "context_dim": EMBEDDING_OUTPUT_DIM,
+def cflow_distribution_kwargs(completed=True):
+    kwargs = {
         "activation": "gelu",
         "batch_norm": False,
         "dropout": 0.0,
@@ -92,25 +91,31 @@ def cflow_posterior_kwargs():
             "encoding": {"encode_all": False, "frequencies": 0},
         },
     }
+    if completed:
+        kwargs["theta_dim"] = NUM_PARAMETERS
+        kwargs["context_dim"] = EMBEDDING_OUTPUT_DIM
+    return kwargs
 
 
-def model_settings(posterior_model_type):
-    if posterior_model_type == "normalizing_flow":
-        posterior_kwargs = nsf_posterior_kwargs()
+def model_settings(model_type, completed=True):
+    if model_type == "normalizing_flow":
+        distribution_kwargs = nsf_distribution_kwargs(completed)
     else:
-        posterior_kwargs = cflow_posterior_kwargs()
-        if posterior_model_type == "flow_matching":
-            posterior_kwargs["sigma_min"] = 0.001
-        elif posterior_model_type == "score_matching":
-            posterior_kwargs["epsilon"] = 1e-3
-            posterior_kwargs["beta_min"] = 0.1
-            posterior_kwargs["beta_max"] = 20.0
+        distribution_kwargs = cflow_distribution_kwargs(completed)
+        if model_type == "flow_matching":
+            distribution_kwargs["sigma_min"] = 0.001
+        elif model_type == "score_matching":
+            distribution_kwargs["epsilon"] = 1e-3
+            distribution_kwargs["beta_min"] = 0.1
+            distribution_kwargs["beta_max"] = 20.0
     return {
         "train_settings": {
             "model": {
-                "posterior_model_type": posterior_model_type,
-                "posterior_kwargs": posterior_kwargs,
-                "embedding_kwargs": embedding_kwargs(),
+                "distribution": {"type": model_type, "kwargs": distribution_kwargs},
+                "embedding_net": {
+                    "type": "dense_svd",
+                    "kwargs": embedding_kwargs(completed),
+                },
             }
         }
     }
@@ -124,9 +129,7 @@ def data_sample(with_gnpe_proxies=False):
         "waveform": np.random.rand(*DATA_SHAPE).astype(np.float32),
     }
     if with_gnpe_proxies:
-        sample["context_parameters"] = np.random.rand(GNPE_PROXY_DIM).astype(
-            np.float32
-        )
+        sample["context_parameters"] = np.random.rand(GNPE_PROXY_DIM).astype(np.float32)
     return sample
 
 
@@ -161,7 +164,7 @@ def test_build_model_from_kwargs_dispatch(posterior_model_type, expected_class):
 
 def test_build_model_from_kwargs_rejects_unknown_type():
     settings = model_settings("normalizing_flow")
-    settings["train_settings"]["model"]["posterior_model_type"] = "not_a_model"
+    settings["train_settings"]["model"]["distribution"]["type"] = "not_a_model"
     with pytest.raises(ValueError):
         build_model_from_kwargs(settings=settings, device="cpu")
 
@@ -175,35 +178,70 @@ def test_build_model_from_kwargs_requires_exactly_one_source():
 
 
 # -----------------------------------------------------------------------------------
-# autocomplete_model_kwargs: dimensional glue
+# complete_model_settings: per-architecture dimension inference
 # -----------------------------------------------------------------------------------
 
 
-def test_autocomplete_model_kwargs_without_gnpe():
-    model_kwargs = model_settings("normalizing_flow")["train_settings"]["model"]
-    # Settings as written by a user: dims absent.
-    del model_kwargs["embedding_kwargs"]["input_dims"]
-    del model_kwargs["posterior_kwargs"]["input_dim"]
-    del model_kwargs["posterior_kwargs"]["context_dim"]
+def test_complete_model_settings_without_context_parameters():
+    user = model_settings("normalizing_flow", completed=False)["train_settings"][
+        "model"
+    ]
+    completed = complete_model_settings(user, data_sample(with_gnpe_proxies=False))
 
-    autocomplete_model_kwargs(model_kwargs, data_sample(with_gnpe_proxies=False))
+    # The user settings are not modified; the completed ones carry the dims.
+    assert "input_dims" not in user["embedding_net"]["kwargs"]
+    assert completed["embedding_net"]["kwargs"]["input_dims"] == list(DATA_SHAPE)
+    assert completed["distribution"]["kwargs"]["theta_dim"] == NUM_PARAMETERS
+    assert completed["distribution"]["kwargs"]["context_dim"] == EMBEDDING_OUTPUT_DIM
+    assert "context_merger" not in completed
 
-    assert model_kwargs["embedding_kwargs"]["input_dims"] == list(DATA_SHAPE)
-    assert model_kwargs["posterior_kwargs"]["input_dim"] == NUM_PARAMETERS
-    assert model_kwargs["embedding_kwargs"]["added_context"] is False
-    assert model_kwargs["posterior_kwargs"]["context_dim"] == EMBEDDING_OUTPUT_DIM
+    # The completed settings build directly.
+    settings = {"train_settings": {"model": completed}}
+    pm = build_model_from_kwargs(settings=settings, device="cpu")
+    assert type(pm) is NormalizingFlowPosteriorModel
 
 
-def test_autocomplete_model_kwargs_with_gnpe():
-    model_kwargs = model_settings("normalizing_flow")["train_settings"]["model"]
+def test_complete_model_settings_with_context_parameters():
+    """With context_parameters in the batch, a concat context merger is added and
+    context_dim grows accordingly."""
+    user = model_settings("normalizing_flow", completed=False)["train_settings"][
+        "model"
+    ]
+    completed = complete_model_settings(user, data_sample(with_gnpe_proxies=True))
 
-    autocomplete_model_kwargs(model_kwargs, data_sample(with_gnpe_proxies=True))
-
-    assert model_kwargs["embedding_kwargs"]["added_context"] is True
+    assert completed["context_merger"] == {
+        "type": "concat",
+        "kwargs": {"num_context_parameters": GNPE_PROXY_DIM},
+    }
     assert (
-        model_kwargs["posterior_kwargs"]["context_dim"]
+        completed["distribution"]["kwargs"]["context_dim"]
         == EMBEDDING_OUTPUT_DIM + GNPE_PROXY_DIM
     )
+
+
+def test_complete_model_settings_rejects_dims_in_user_settings():
+    """Dimensions are derived from the data; specifying them is an error."""
+    user = model_settings("normalizing_flow", completed=True)["train_settings"]["model"]
+    with pytest.raises(ValueError, match="derived from the data"):
+        complete_model_settings(user, data_sample())
+
+    user = model_settings("normalizing_flow", completed=False)["train_settings"][
+        "model"
+    ]
+    user["embedding_net"]["kwargs"]["input_dims"] = list(DATA_SHAPE)
+    with pytest.raises(ValueError, match="derived from the data"):
+        complete_model_settings(user, data_sample())
+
+
+def test_complete_model_settings_rejects_unused_context_merger():
+    """A context merger without context parameters in the data is an error, not
+    silently dropped."""
+    user = model_settings("normalizing_flow", completed=False)["train_settings"][
+        "model"
+    ]
+    user["context_merger"] = {"type": "concat"}
+    with pytest.raises(ValueError, match="context_merger"):
+        complete_model_settings(user, data_sample(with_gnpe_proxies=False))
 
 
 # -----------------------------------------------------------------------------------
@@ -239,12 +277,18 @@ def test_model_forward_passes(posterior_model_type):
 
 
 def test_normalizing_flow_with_gnpe_context():
-    """With added_context=True, the embedding merges (waveform, context_parameters)
-    via ModuleMerger, and sampling/density evaluation consume both context entries."""
+    """With a concat context merger, the embedding merges (waveform,
+    context_parameters), and sampling/density evaluation consume both context
+    entries."""
     settings = model_settings("normalizing_flow")
     model = settings["train_settings"]["model"]
-    model["embedding_kwargs"]["added_context"] = True
-    model["posterior_kwargs"]["context_dim"] = EMBEDDING_OUTPUT_DIM + GNPE_PROXY_DIM
+    model["context_merger"] = {
+        "type": "concat",
+        "kwargs": {"num_context_parameters": GNPE_PROXY_DIM},
+    }
+    model["distribution"]["kwargs"]["context_dim"] = (
+        EMBEDDING_OUTPUT_DIM + GNPE_PROXY_DIM
+    )
 
     pm = build_model_from_kwargs(settings=settings, device="cpu")
     theta, context = batch(with_gnpe_proxies=True)
@@ -263,13 +307,12 @@ def test_normalizing_flow_with_gnpe_context():
 
 
 def test_normalizing_flow_unconditional():
-    """Without embedding_kwargs, an unconditional flow is built (the models-as-priors
-    path used by unconditional_density_estimation)."""
+    """Without an embedding_net, an unconditional flow is built (the
+    models-as-priors path used by unconditional_density_estimation)."""
     settings = model_settings("normalizing_flow")
     model = settings["train_settings"]["model"]
-    del model["embedding_kwargs"]
-    # Convention from unconditional_density_estimation.py:74-75.
-    model["posterior_kwargs"]["context_dim"] = None
+    del model["embedding_net"]
+    model["distribution"]["kwargs"]["context_dim"] = None
 
     pm = build_model_from_kwargs(settings=settings, device="cpu")
     theta = torch.rand(BATCH_SIZE, NUM_PARAMETERS)
@@ -364,39 +407,114 @@ def test_initial_weights_seed_svd_projection():
 # -----------------------------------------------------------------------------------
 
 
-def test_update_model_config_maps_old_schema():
-    old = {
-        "type": "nsf+embedding",
-        "nsf_kwargs": nsf_posterior_kwargs(),
-        "embedding_net_kwargs": embedding_kwargs(),
+def old_schema_model(model_type="normalizing_flow", added_context=False):
+    """A completed model config in the old schema, as found in old checkpoints."""
+    if model_type == "normalizing_flow":
+        posterior_kwargs = nsf_distribution_kwargs()
+    else:
+        posterior_kwargs = cflow_distribution_kwargs()
+        posterior_kwargs["sigma_min"] = 0.001
+    posterior_kwargs["input_dim"] = posterior_kwargs.pop("theta_dim")
+    old_embedding_kwargs = embedding_kwargs()
+    old_embedding_kwargs["V_rb_list"] = None
+    old_embedding_kwargs["added_context"] = added_context
+    if added_context:
+        posterior_kwargs["context_dim"] = EMBEDDING_OUTPUT_DIM + GNPE_PROXY_DIM
+    return {
+        "posterior_model_type": model_type,
+        "posterior_kwargs": posterior_kwargs,
+        "embedding_kwargs": old_embedding_kwargs,
     }
-    update_model_config(old)
-    assert old["posterior_model_type"] == "normalizing_flow"
-    assert old["posterior_kwargs"] == nsf_posterior_kwargs()
-    assert old["embedding_kwargs"] == embedding_kwargs()
-    assert "type" not in old and "nsf_kwargs" not in old
+
+
+def test_update_model_config_maps_old_schemas():
+    """All old schemas map forward to the current one, including the oldest
+    nsf+embedding form; the mapping is idempotent."""
+    old = old_schema_model(added_context=True)
+    oldest = {
+        "type": "nsf+embedding",
+        "nsf_kwargs": old["posterior_kwargs"],
+        "embedding_net_kwargs": old["embedding_kwargs"],
+    }
+    for settings in (old, oldest):
+        update_model_config(settings)
+        assert settings["distribution"]["type"] == "normalizing_flow"
+        assert settings["distribution"]["kwargs"]["theta_dim"] == NUM_PARAMETERS
+        assert settings["embedding_net"]["type"] == "dense_svd"
+        kwargs = settings["embedding_net"]["kwargs"]
+        assert "added_context" not in kwargs and "V_rb_list" not in kwargs
+        # Old concatenated context maps to the concat merger, with the number of
+        # context parameters recovered from the completed dims.
+        assert settings["context_merger"] == {
+            "type": "concat",
+            "kwargs": {"num_context_parameters": GNPE_PROXY_DIM},
+        }
+        before = copy.deepcopy(settings)
+        update_model_config(settings)
+        assert settings == before
 
 
 def test_update_model_config_lowercases_builtin_type_names():
     """Model types used to be matched case-insensitively; the compat shim lowercases
     built-in names from old checkpoints so the case-sensitive registry finds them."""
-    settings = model_settings("normalizing_flow")
-    model = settings["train_settings"]["model"]
+    model = old_schema_model()
     model["posterior_model_type"] = "Normalizing_Flow"
+    settings = {"train_settings": {"model": model}}
     pm = build_model_from_kwargs(settings=settings, device="cpu")
     assert type(pm) is NormalizingFlowPosteriorModel
 
 
-def test_build_model_from_old_schema_settings():
-    settings = model_settings("normalizing_flow")
-    model = settings["train_settings"]["model"]
-    settings["train_settings"]["model"] = {
-        "type": "nsf+embedding",
-        "nsf_kwargs": model["posterior_kwargs"],
-        "embedding_net_kwargs": model["embedding_kwargs"],
+@pytest.mark.parametrize("added_context", [False, True])
+def test_old_schema_builds_state_dict_compatible_network(added_context):
+    """A network built from old-schema settings has exactly the same state-dict keys
+    and shapes as one built from the new schema — old checkpoints stay loadable."""
+    old_settings = {
+        "train_settings": {"model": old_schema_model(added_context=added_context)}
     }
-    pm = build_model_from_kwargs(settings=settings, device="cpu")
-    assert type(pm) is NormalizingFlowPosteriorModel
+    pm_old = build_model_from_kwargs(settings=old_settings, device="cpu")
+
+    new_settings = model_settings("normalizing_flow")
+    if added_context:
+        model = new_settings["train_settings"]["model"]
+        model["context_merger"] = {
+            "type": "concat",
+            "kwargs": {"num_context_parameters": GNPE_PROXY_DIM},
+        }
+        model["distribution"]["kwargs"]["context_dim"] = (
+            EMBEDDING_OUTPUT_DIM + GNPE_PROXY_DIM
+        )
+    pm_new = build_model_from_kwargs(settings=new_settings, device="cpu")
+
+    state_old = pm_old.network.state_dict()
+    state_new = pm_new.network.state_dict()
+    assert list(state_old) == list(state_new)
+    assert all(state_old[k].shape == state_new[k].shape for k in state_old)
+
+
+@pytest.mark.parametrize("model_type", ["normalizing_flow", "flow_matching"])
+def test_load_old_schema_checkpoint_file(tmp_path, model_type):
+    """A checkpoint file whose model_kwargs use the old schema loads through the
+    update_model_config boundary, with identical weights."""
+    pm = build_model_from_kwargs(settings=model_settings(model_type), device="cpu")
+
+    old_model = old_schema_model(model_type)
+    checkpoint = {
+        "model_kwargs": old_model,
+        "model_state_dict": pm.network.state_dict(),
+        "epoch": 3,
+        "version": "dingo=0.9.9",
+        "metadata": {"train_settings": {"model": copy.deepcopy(old_model)}},
+    }
+    filename = str(tmp_path / "old_model.pt")
+    torch.save(checkpoint, filename)
+
+    pm_loaded = build_model_from_kwargs(
+        filename=filename, device="cpu", load_training_info=False
+    )
+    assert type(pm_loaded) is type(pm)
+    assert pm_loaded.epoch == 3
+    for p0, p1 in zip(pm.network.parameters(), pm_loaded.network.parameters()):
+        assert torch.equal(p0.data, p1.data)
 
 
 # -----------------------------------------------------------------------------------
@@ -404,9 +522,7 @@ def test_build_model_from_old_schema_settings():
 # -----------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "posterior_model_type", ["normalizing_flow", "flow_matching"]
-)
+@pytest.mark.parametrize("posterior_model_type", ["normalizing_flow", "flow_matching"])
 def test_save_and_rebuild_from_file(tmp_path, posterior_model_type):
     pm = build_model_from_kwargs(
         settings=model_settings(posterior_model_type), device="cpu"

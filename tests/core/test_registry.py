@@ -49,10 +49,7 @@ def test_get_dotted_path(registry):
 
 def test_get_file_path(registry, tmp_path):
     plugin = tmp_path / "my_plugin.py"
-    plugin.write_text(
-        "class MyNN:\n"
-        "    marker = 'from-file'\n"
-    )
+    plugin.write_text("class MyNN:\n" "    marker = 'from-file'\n")
     component = registry.get(f"{plugin}:MyNN")
     assert component.marker == "from-file"
     # Second lookup resolves from the cache to the same class object.
@@ -106,7 +103,7 @@ def test_builtin_distributions_are_registered():
 
 def test_build_model_from_kwargs_with_file_path_plugin(tmp_path):
     """A NeuralDistribution defined in a user file (never pip-installed, not in the
-    dingo source) can be selected as posterior_model_type via the file-path form."""
+    dingo source) can be selected as the distribution type via the file-path form."""
     from tests.core.test_build_model import model_settings
 
     plugin = tmp_path / "my_distribution.py"
@@ -117,8 +114,8 @@ def test_build_model_from_kwargs_with_file_path_plugin(tmp_path):
         "    pass\n"
     )
     settings = model_settings("normalizing_flow")
-    settings["train_settings"]["model"][
-        "posterior_model_type"
+    settings["train_settings"]["model"]["distribution"][
+        "type"
     ] = f"{plugin}:MyDistribution"
 
     from dingo.core.posterior_models.build_model import build_model_from_kwargs

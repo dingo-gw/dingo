@@ -3,16 +3,12 @@ Implementation of the neural spline flow (NSF). Most of this code is adapted
 from the uci.py example from https://github.com/bayesiains/nsf.
 """
 
-import copy
-
 import torch
 import torch.nn as nn
 import glasflow.nflows as nflows  # nflows not maintained, so use this maintained fork
 from glasflow.nflows import distributions, flows, transforms
 import glasflow.nflows.nn.nets as nflows_nets
 from dingo.core.utils import torchutils
-from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
-from typing import Union, Callable, Tuple
 
 
 def create_linear_transform(param_dim: int):
@@ -253,8 +249,6 @@ def create_nsf_model(
     context_dim: int,
     num_flow_steps: int,
     base_transform_kwargs: dict,
-    embedding_net_builder: Union[Callable, str] = None,
-    embedding_kwargs: dict = None,
 ):
     """
     Build NSF model. This models the posterior distribution p(y|x).
@@ -271,86 +265,16 @@ def create_nsf_model(
         number of sequential transforms
     :param base_transform_kwargs: dict,
         hyperparameters for transform steps
-    :param embedding_net_builder: Callable=None,
-        build function for embedding network TODO
-    :param embedding_kwargs: dict=None,
-        hyperparameters for embedding network
     :return: Flow
         the NSF (posterior model)
     """
-
-    if embedding_net_builder is not None:
-        embedding_net = embedding_net_builder(**embedding_kwargs)
-    else:
-        embedding_net = None
-
-    # str(embedding_net_builder).split(' ')[1]
-
     distribution = distributions.StandardNormal((input_dim,))
     transform = create_transform(
         num_flow_steps, input_dim, context_dim, base_transform_kwargs
     )
-    flow = flows.Flow(transform, distribution, embedding_net)
+    flow = flows.Flow(transform, distribution)
 
     return flow
-
-
-def create_nsf_wrapped(**kwargs):
-    """
-    Wraps the NSF model in a FlowWrapper. This is required for parallel
-    training, and wraps the log_prob method as a forward method.
-    """
-    flow = create_nsf_model(**kwargs)
-    return FlowWrapper(flow)
-
-
-def create_nsf_with_rb_projection_embedding_net(
-    posterior_kwargs: dict,
-    embedding_kwargs: dict,
-    initial_weights: dict = None,
-):
-    """Builds a neural spline flow with an embedding network that consists of a
-    reduced basis projection followed by a residual network. Optionally initializes the
-    embedding network weights.
-
-    Parameters
-    ----------
-    posterior_kwargs : dict
-        kwargs for neural spline flow
-    embedding_kwargs : dict
-        kwargs for emebedding network
-    initial_weights : dict
-        Dictionary containing the initial weights for the SVD projection. This should
-        have one key 'V_rb_list', with value a list of SVD V matrices (one for each
-        detector).
-
-    Returns
-    -------
-    nn.Module
-        Neural spline flow model
-    """
-    # We copy the embedding_kwargs to allow an insert of V_rb_list without
-    # affecting the original embedding_kwargs. This is because we don't want to
-    # save the embedding_kwargs with the huge V_rb_list included. This is a bit of
-    # a hack; improve setting of initial weights later.
-
-    embedding_kwargs = copy.deepcopy(embedding_kwargs)
-    if initial_weights is not None:
-        embedding_kwargs["V_rb_list"] = initial_weights["V_rb_list"]
-    elif "V_rb_list" not in embedding_kwargs:
-        embedding_kwargs["V_rb_list"] = None
-
-    embedding_net = create_enet_with_projection_layer_and_dense_resnet(
-        **embedding_kwargs
-    )
-    flow = create_nsf_model(**posterior_kwargs)
-    # With added_context, the embedding merges (waveform, context_parameters).
-    if embedding_kwargs.get("added_context"):
-        context_keys = ("waveform", "context_parameters")
-    else:
-        context_keys = ("waveform",)
-    model = FlowWrapper(flow, embedding_net, context_keys)
-    return model
 
 
 if __name__ == "__main__":

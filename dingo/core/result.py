@@ -1090,5 +1090,3 @@ def freeze(d):
     elif isinstance(d, list):
         return tuple(freeze(value) for value in d)
     return d
-
-

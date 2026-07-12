@@ -38,11 +38,12 @@ class ScoreDiffusionPosteriorModel(ContinuousFlowPosteriorModel):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.eps = self.model_kwargs["posterior_kwargs"]["epsilon"]
-        self.beta_min = self.model_kwargs["posterior_kwargs"]["beta_min"]
-        self.beta_max = self.model_kwargs["posterior_kwargs"]["beta_max"]
+        distribution_kwargs = self.model_kwargs["distribution"]["kwargs"]
+        self.eps = distribution_kwargs["epsilon"]
+        self.beta_min = distribution_kwargs["beta_min"]
+        self.beta_max = distribution_kwargs["beta_max"]
 
-        likelihood_weighting = self.model_kwargs["posterior_kwargs"].get(
+        likelihood_weighting = distribution_kwargs.get(
             "likelihood_weighting", "score-matching"
         )
         if likelihood_weighting:

@@ -1,4 +1,19 @@
-"""Implementation of embedding networks."""
+"""Implementation of embedding networks.
+
+Embedding networks registered with EMBEDDING_NETS follow a common contract:
+
+* ``input_keys``: class attribute naming the batch entries the network consumes,
+  in the order of its forward arguments.
+* ``output_dim``: dimension of the embedded context vector.
+* ``complete_settings(settings, sample_batch)``: classmethod inferring the
+  network's own input dimensions from a sample batch; the completed settings
+  (which must include ``output_dim``) are saved in the checkpoint, so loading
+  never needs a data sample.
+
+Context mergers registered with CONTEXT_MERGERS wrap an embedding network to mix
+in the (standardized) context parameters; they follow the same contract, plus a
+``merged_output_dim`` method used during settings completion.
+"""
 
 from typing import Tuple, Callable, Union, List
 import torch
@@ -6,6 +21,7 @@ import numpy as np
 import torch.nn as nn
 from torch.nn import functional as F
 from glasflow.nflows.nn.nets.resnet import ResidualBlock
+from dingo.core.registry import CONTEXT_MERGERS, EMBEDDING_NETS
 from dingo.core.utils import torchutils
 
 
@@ -221,9 +237,11 @@ class DenseResidualNet(nn.Module):
         )
         self.resize_layers = nn.ModuleList(
             [
-                nn.Linear(self.hidden_dims[n - 1], self.hidden_dims[n])
-                if self.hidden_dims[n - 1] != self.hidden_dims[n]
-                else nn.Identity()
+                (
+                    nn.Linear(self.hidden_dims[n - 1], self.hidden_dims[n])
+                    if self.hidden_dims[n - 1] != self.hidden_dims[n]
+                    else nn.Identity()
+                )
                 for n in range(1, self.num_res_blocks)
             ]
             + [nn.Linear(self.hidden_dims[-1], self.output_dim)]
@@ -235,6 +253,80 @@ class DenseResidualNet(nn.Module):
             x = block(x, context=context)
             x = resize_layer(x)
         return x
+
+
+@EMBEDDING_NETS.register("dense_svd")
+class DenseSVDEmbedding(nn.Sequential):
+    """
+    The classic dingo embedding network: a linear projection onto a reduced (SVD)
+    basis (LinearProjectionRB), followed by a dense residual network
+    (DenseResidualNet). See the docstrings of the two modules for details.
+
+    Consumes the "waveform" entry of the batch, of shape
+    (batch_size, num_blocks, num_channels, num_bins). Subclasses nn.Sequential so
+    that the state dict lays out as ("0.*", "1.*"), matching old checkpoints.
+    """
+
+    input_keys = ("waveform",)
+
+    def __init__(
+        self,
+        input_dims: List[int],
+        output_dim: int,
+        hidden_dims: Tuple,
+        svd: dict,
+        activation: str = "elu",
+        dropout: float = 0.0,
+        batch_norm: bool = True,
+        V_rb_list: Union[Tuple, None] = None,
+    ):
+        """
+        Parameters
+        ----------
+        input_dims : list
+            dimensions of input batch, omitting batch dimension,
+            input_dims = [num_blocks, num_channels, num_bins]. Inferred from a
+            sample batch by complete_settings; not a user setting.
+        output_dim : int
+            output dimension (dimension of the embedded context)
+        hidden_dims : tuple
+            dimensions of the hidden layers of the residual network
+        svd : dict
+            SVD settings; "size" is the number of reduced-basis elements used for
+            the projection (further entries are consumed by the training pipeline
+            when generating the SVD).
+        activation : str
+            activation function used in the residual blocks
+        dropout : float
+            dropout probability in the residual blocks, for regularization
+        batch_norm : bool
+            whether to use batch normalization
+        V_rb_list : tuple of np.arrays, or None
+            V matrices of the SVD projection used to initialize the projection
+            weights. Passed as initial weights at first build; None when loading a
+            saved model.
+        """
+        projection = LinearProjectionRB(input_dims, svd["size"], V_rb_list)
+        resnet = DenseResidualNet(
+            input_dim=projection.output_dim,
+            output_dim=output_dim,
+            hidden_dims=hidden_dims,
+            activation=torchutils.get_activation_function_from_string(activation),
+            dropout=dropout,
+            batch_norm=batch_norm,
+        )
+        super().__init__(projection, resnet)
+        self.output_dim = output_dim
+
+    @classmethod
+    def complete_settings(cls, settings: dict, sample_batch: dict) -> dict:
+        """Infer input_dims from the sample batch; return completed settings."""
+        if "input_dims" in settings:
+            raise ValueError(
+                "'input_dims' is derived from the data and must not be specified "
+                "in the embedding net settings."
+            )
+        return {**settings, "input_dims": list(sample_batch["waveform"].shape)}
 
 
 class ModuleMerger(nn.Module):
@@ -275,6 +367,35 @@ class ModuleMerger(nn.Module):
             raise ValueError("Invalid number of input tensors provided.")
         x = [module(xi) for module, xi in zip(self.enets, x)]
         return torch.cat(x, axis=1)
+
+
+@CONTEXT_MERGERS.register("concat")
+class ConcatContextMerger(ModuleMerger):
+    """
+    Default context merger: concatenates the embedded data with the (standardized)
+    context parameters, e.g. GNPE proxies. Wraps the embedding network and an
+    identity map via ModuleMerger, which keeps the state-dict layout of old
+    checkpoints ("enets.0.*").
+    """
+
+    def __init__(self, embedding_net: nn.Module, num_context_parameters: int):
+        """
+        Parameters
+        ----------
+        embedding_net : nn.Module
+            The wrapped embedding network.
+        num_context_parameters : int
+            Number of context parameters concatenated to the embedded data.
+            Inferred from a sample batch during settings completion.
+        """
+        super().__init__((embedding_net, nn.Identity()))
+        self.input_keys = (*embedding_net.input_keys, "context_parameters")
+        self.output_dim = embedding_net.output_dim + num_context_parameters
+
+    @staticmethod
+    def merged_output_dim(embedding_output_dim: int, num_context_parameters: int):
+        """Output dimension of the merged embedding, for settings completion."""
+        return embedding_output_dim + num_context_parameters
 
 
 def create_enet_with_projection_layer_and_dense_resnet(
@@ -347,17 +468,16 @@ def create_enet_with_projection_layer_and_dense_resnet(
         a tuple with 2 elements, input = (x, z) rather than just the tensor x.
     :return: nn.Module
     """
-    activation_fn = torchutils.get_activation_function_from_string(activation)
-    module_1 = LinearProjectionRB(input_dims, svd["size"], V_rb_list)
-    module_2 = DenseResidualNet(
-        input_dim=module_1.output_dim,
+    enet = DenseSVDEmbedding(
+        input_dims=input_dims,
         output_dim=output_dim,
         hidden_dims=hidden_dims,
-        activation=activation_fn,
+        svd=svd,
+        activation=activation,
         dropout=dropout,
         batch_norm=batch_norm,
+        V_rb_list=V_rb_list,
     )
-    enet = nn.Sequential(module_1, module_2)
 
     if not added_context:
         return enet

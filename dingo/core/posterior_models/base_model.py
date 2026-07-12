@@ -18,6 +18,7 @@ import dingo.core.utils.trainutils
 import json
 from collections import OrderedDict
 from typing import Optional
+from dingo.core.registry import CONTEXT_MERGERS, EMBEDDING_NETS
 from dingo.core.utils.backward_compatibility import update_model_config
 from dingo.core.utils.misc import get_version
 
@@ -72,6 +73,7 @@ class NeuralDistribution(ABC):
 
         self.metadata = metadata
         if self.metadata is not None:
+            update_model_config(self.metadata["train_settings"]["model"])
             self.model_kwargs = self.metadata["train_settings"]["model"]
             # Expect self.optimizer_settings and self.scheduler_settings to be set
             # separately, and before calling initialize_optimizer_and_scheduler().
@@ -98,6 +100,31 @@ class NeuralDistribution(ABC):
         Initialize the network backbone for the posterior model.
         """
         pass
+
+    def build_embedding_net(self):
+        """
+        Build the embedding network declared in the model settings (resolved via
+        the EMBEDDING_NETS registry), optionally wrapped with a context merger
+        (CONTEXT_MERGERS) that mixes in the context parameters. Initial weights
+        (e.g. SVD projection matrices) are passed as extra constructor kwargs; they
+        are not part of the saved settings.
+
+        Returns None if the model declares no embedding network (unconditional
+        models).
+        """
+        embedding_settings = self.model_kwargs.get("embedding_net")
+        if embedding_settings is None:
+            return None
+        kwargs = dict(embedding_settings.get("kwargs", {}))
+        if self.initial_weights:
+            kwargs.update(self.initial_weights)
+        embedding_net = EMBEDDING_NETS.get(embedding_settings["type"])(**kwargs)
+        merger_settings = self.model_kwargs.get("context_merger")
+        if merger_settings is not None:
+            embedding_net = CONTEXT_MERGERS.get(merger_settings["type"])(
+                embedding_net, **merger_settings.get("kwargs", {})
+            )
+        return embedding_net
 
     # Parameter contract read by samplers (e.g. FlowFactor.from_model on the
     # factorized-sampler branch). These accessors are the supported interface; the
@@ -272,6 +299,26 @@ class NeuralDistribution(ABC):
             saved, e.g. optimizer state dict
 
         """
+        # Enforce the parameter contract promised to samplers: the standardization
+        # covers all inference and context parameters, for every architecture
+        # (built-in or plugin).
+        if self.metadata is not None:
+            data_settings = self.metadata.get("train_settings", {}).get("data", {})
+            if "inference_parameters" in data_settings:
+                standardization = data_settings.get("standardization") or {}
+                missing = [
+                    p
+                    for p in self.inference_parameters + self.context_parameters
+                    if p not in standardization.get("mean", {})
+                    or p not in standardization.get("std", {})
+                ]
+                if missing:
+                    raise ValueError(
+                        f"Cannot save model: standardization must cover all "
+                        f"inference and context parameters, but is missing "
+                        f"{missing}."
+                    )
+
         model_dict = {
             "model_kwargs": self.model_kwargs,
             "model_state_dict": self.network.state_dict(),
@@ -373,6 +420,9 @@ class NeuralDistribution(ABC):
         self.epoch = d["epoch"]
 
         self.metadata = d["metadata"]
+        # model_kwargs and the metadata's model section are separate dicts in old
+        # checkpoints; keep both on the current schema.
+        update_model_config(self.metadata["train_settings"]["model"])
 
         if "context" in d:
             self.context = d["context"]

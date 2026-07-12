@@ -49,12 +49,9 @@ class ContinuousFlowPosteriorModel(NeuralDistribution):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.eps = 0
-        self.time_prior_exponent = self.model_kwargs["posterior_kwargs"][
-            "time_prior_exponent"
-        ]
-        self.theta_dim = self.metadata["train_settings"]["model"]["posterior_kwargs"][
-            "input_dim"
-        ]
+        distribution_kwargs = self.model_kwargs["distribution"]["kwargs"]
+        self.time_prior_exponent = distribution_kwargs["time_prior_exponent"]
+        self.theta_dim = distribution_kwargs["theta_dim"]
 
     def sample_t(self, batch_size):
         t = (1 - self.eps) * torch.rand(batch_size, device=self.device)
@@ -122,12 +119,10 @@ class ContinuousFlowPosteriorModel(NeuralDistribution):
         return torch.cat((vf, -div_vf), dim=1)
 
     def initialize_network(self):
-        model_kwargs = {
-            k: v for k, v in self.model_kwargs.items() if k != "posterior_model_type"
-        }
-        if self.initial_weights is not None:
-            model_kwargs["initial_weights"] = self.initial_weights
-        self.network = create_cf(**model_kwargs)
+        embedding_net = self.build_embedding_net()
+        self.network = create_cf(
+            self.model_kwargs["distribution"]["kwargs"], embedding_net
+        )
 
     def sample(self, context: dict = None, num_samples: int = 1):
         """

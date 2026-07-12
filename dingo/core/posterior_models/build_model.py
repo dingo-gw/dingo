@@ -1,9 +1,15 @@
+import copy
+
 # Importing the modules registers the built-in model types with NEURAL_DISTRIBUTIONS.
 import dingo.core.posterior_models.flow_matching  # noqa: F401
 import dingo.core.posterior_models.normalizing_flow  # noqa: F401
 import dingo.core.posterior_models.score_matching  # noqa: F401
 from dingo.core.posterior_models.base_model import NeuralDistribution
-from dingo.core.registry import NEURAL_DISTRIBUTIONS
+from dingo.core.registry import (
+    CONTEXT_MERGERS,
+    EMBEDDING_NETS,
+    NEURAL_DISTRIBUTIONS,
+)
 from dingo.core.utils.backward_compatibility import (
     torch_load_with_fallback,
     update_model_config,
@@ -17,7 +23,7 @@ def build_model_from_kwargs(
     """
     Returns a NeuralDistribution based on a saved network or settings dict.
 
-    The model class is resolved from the settings' posterior_model_type via the
+    The model class is resolved from the settings' distribution type via the
     NEURAL_DISTRIBUTIONS registry (e.g., normalizing flow, flow matching, or score
     matching, or a plugin type; see dingo.core.registry).
 
@@ -47,59 +53,100 @@ def build_model_from_kwargs(
             # version was introduced in v0.3.3
             check_minimum_version("dingo=0.3.2")
         update_model_config(d["metadata"]["train_settings"]["model"])  # Backward compat
-        posterior_model_type = d["metadata"]["train_settings"]["model"][
-            "posterior_model_type"
-        ]
+        model_type = d["metadata"]["train_settings"]["model"]["distribution"]["type"]
     else:
         update_model_config(settings["train_settings"]["model"])  # Backward compat
-        posterior_model_type = settings["train_settings"]["model"][
-            "posterior_model_type"
-        ]
+        model_type = settings["train_settings"]["model"]["distribution"]["type"]
 
     try:
-        model = NEURAL_DISTRIBUTIONS.get(posterior_model_type)
+        model = NEURAL_DISTRIBUTIONS.get(model_type)
     except KeyError as e:
         raise ValueError(f"No valid posterior model type specified. {e}") from e
 
     return model(model_filename=filename, metadata=settings, **kwargs)
 
 
-def autocomplete_model_kwargs(model_kwargs: dict, data_sample: dict):
+def complete_model_settings(model_settings: dict, sample_batch: dict) -> dict:
     """
-    Autocomplete the model kwargs from train_settings and data_sample from the dataloader:
+    Complete the model settings based on a sample batch from the dataloader.
 
-    * set input dimension of embedding net to the shape of the waveform data
-    * set dimension of parameter space to the number of inference parameters
-    * set added_context flag of embedding net if required for context parameters
-      (e.g., GNPE proxies)
-    * set context dim of posterior model to output dim of embedding net + dimension
-      of the context parameters
+    Each embedding architecture infers its own input dimensions via its
+    complete_settings classmethod; the cross-cutting dimensions (theta_dim,
+    context_dim) are computed here. The completed settings are saved in the
+    checkpoint, so loading a model never needs a data sample.
+
+    If the batch provides context_parameters and the embedding network does not
+    consume them natively (i.e., they are not among its input_keys), a context
+    merger is added ("concat" unless specified otherwise).
+
+    Dimensions are derived from the data; specifying them in the settings is an
+    error.
 
     Parameters
     ----------
-    model_kwargs: dict
-        Model settings, which are modified in-place.
-    data_sample: dict
-        Sample from dataloader (e.g., wfd[0]) used for autocompletion, with keys
-        "inference_parameters", "waveform", and (only if the network is conditioned
-        on additional parameters) "context_parameters".
-    """
+    model_settings: dict
+        Model section of the train settings. Old schemas are mapped forward
+        in-place; the completion itself does not modify the input.
+    sample_batch: dict
+        Sample from the dataloader (e.g., wfd[0]), with keys
+        "inference_parameters", "waveform", optionally "context_parameters", and
+        any architecture-specific entries.
 
-    # set input dims from ifo_list and domain information
-    model_kwargs["embedding_kwargs"]["input_dims"] = list(data_sample["waveform"].shape)
-    # set dimension of parameter space of posterior model
-    model_kwargs["posterior_kwargs"]["input_dim"] = len(
-        data_sample["inference_parameters"]
+    Returns
+    -------
+    dict
+        Completed model settings.
+    """
+    update_model_config(model_settings)
+    model_settings = copy.deepcopy(model_settings)
+
+    distribution_kwargs = model_settings["distribution"].setdefault("kwargs", {})
+    for key in ("theta_dim", "context_dim"):
+        if key in distribution_kwargs:
+            raise ValueError(
+                f"'{key}' is derived from the data and must not be specified in "
+                f"the model settings."
+            )
+    distribution_kwargs["theta_dim"] = len(sample_batch["inference_parameters"])
+
+    embedding_settings = model_settings.get("embedding_net")
+    if embedding_settings is None:
+        if "context_merger" in model_settings:
+            raise ValueError("A context_merger requires an embedding_net.")
+        distribution_kwargs["context_dim"] = None
+        return model_settings
+
+    embedding_cls = EMBEDDING_NETS.get(embedding_settings["type"])
+    missing = [k for k in embedding_cls.input_keys if k not in sample_batch]
+    if missing:
+        raise ValueError(
+            f"Embedding net '{embedding_settings['type']}' consumes batch entries "
+            f"{list(embedding_cls.input_keys)}, but the sample batch is missing "
+            f"{missing} (batch keys: {sorted(sample_batch)})."
+        )
+    embedding_settings["kwargs"] = embedding_cls.complete_settings(
+        embedding_settings.get("kwargs", {}), sample_batch
     )
-    # set added_context flag of embedding net if context parameters are required
-    # set context dim of nsf to output dim of embedding net + context parameter dim
-    if "context_parameters" in data_sample:
-        model_kwargs["embedding_kwargs"]["added_context"] = True
-        model_kwargs["posterior_kwargs"]["context_dim"] = model_kwargs[
-            "embedding_kwargs"
-        ]["output_dim"] + len(data_sample["context_parameters"])
+    output_dim = embedding_settings["kwargs"]["output_dim"]
+
+    native_context = "context_parameters" in embedding_cls.input_keys
+    if "context_parameters" in sample_batch and not native_context:
+        merger_settings = model_settings.setdefault(
+            "context_merger", {"type": "concat"}
+        )
+        merger_cls = CONTEXT_MERGERS.get(merger_settings["type"])
+        merger_settings["kwargs"] = {
+            **merger_settings.get("kwargs", {}),
+            "num_context_parameters": len(sample_batch["context_parameters"]),
+        }
+        distribution_kwargs["context_dim"] = merger_cls.merged_output_dim(
+            output_dim, **merger_settings["kwargs"]
+        )
     else:
-        model_kwargs["embedding_kwargs"]["added_context"] = False
-        model_kwargs["posterior_kwargs"]["context_dim"] = model_kwargs[
-            "embedding_kwargs"
-        ]["output_dim"]
+        if "context_merger" in model_settings:
+            raise ValueError(
+                "A context_merger is specified, but the data provides no "
+                "context_parameters (or the embedding net consumes them natively)."
+            )
+        distribution_kwargs["context_dim"] = output_dim
+    return model_settings

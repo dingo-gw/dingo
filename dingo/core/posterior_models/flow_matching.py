@@ -36,7 +36,7 @@ class FlowMatchingPosteriorModel(ContinuousFlowPosteriorModel):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.eps = 0
-        self.sigma_min = self.model_kwargs["posterior_kwargs"]["sigma_min"]
+        self.sigma_min = self.model_kwargs["distribution"]["kwargs"]["sigma_min"]
 
     def evaluate_vector_field(self, t, theta_t, *context_data):
         """

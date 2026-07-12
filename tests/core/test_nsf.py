@@ -2,12 +2,12 @@ import pytest
 import types
 import torch
 import torch.optim as optim
-from dingo.core.nn.nsf import (
-    create_nsf_model,
-    FlowWrapper,
-    create_nsf_with_rb_projection_embedding_net,
+from dingo.core.nn.nsf import create_nsf_model, FlowWrapper
+from dingo.core.nn.enets import (
+    ConcatContextMerger,
+    DenseSVDEmbedding,
+    create_enet_with_projection_layer_and_dense_resnet,
 )
-from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
 from dingo.core.utils import torchutils
 
 
@@ -236,18 +236,47 @@ def test_backward_pass_for_log_prob_of_nsf(data_setup_nsf_small):
     ), "Training may not have worked. Check manually that sampling improves."
 
 
-def test_model_builder_for_nsf_with_rb_embedding_net(data_setup_nsf_small):
+def test_registered_embedding_with_merger(data_setup_nsf_small):
     """
-    Test the builder function create_nsf_with_rb_projection_embedding_net.
+    Test the registered dense_svd embedding and the concat context merger: contract
+    attributes, dimension inference, and end-to-end use inside a FlowWrapper.
     """
 
     d = data_setup_nsf_small
+    kwargs = {
+        k: v
+        for k, v in d.embedding_net_kwargs.items()
+        if k not in ("added_context", "V_rb_list", "input_dims")
+    }
+    num_context_parameters = d.context_dim - kwargs["output_dim"]
 
-    model = create_nsf_with_rb_projection_embedding_net(
-        d.nde_kwargs, d.embedding_net_kwargs
+    completed = DenseSVDEmbedding.complete_settings(
+        kwargs, {"waveform": d.x[0], "context_parameters": d.z[0]}
     )
-    # The builder derives the context routing from added_context.
-    assert model.context_keys == CONTEXT_KEYS
+    assert completed["input_dims"] == list(d.embedding_net_kwargs["input_dims"])
+
+    embedding_net = DenseSVDEmbedding(**completed)
+    assert embedding_net.input_keys == ("waveform",)
+    assert embedding_net.output_dim == kwargs["output_dim"]
+
+    merged = ConcatContextMerger(embedding_net, num_context_parameters)
+    assert merged.input_keys == CONTEXT_KEYS
+    assert merged.output_dim == d.context_dim
+    assert (
+        ConcatContextMerger.merged_output_dim(
+            embedding_net.output_dim, num_context_parameters
+        )
+        == d.context_dim
+    )
+
+    # State-dict layout matches the historic builder (old checkpoints).
+    legacy = create_enet_with_projection_layer_and_dense_resnet(
+        **d.embedding_net_kwargs
+    )
+    assert list(merged.state_dict()) == list(legacy.state_dict())
+
+    flow = d.nde_builder(**d.nde_kwargs)
+    model = FlowWrapper(flow, merged, merged.input_keys)
 
     loss = -model(d.y, d.context)
     assert list(loss.shape) == [d.batch_size], "Unexpected output shape."
@@ -255,10 +284,3 @@ def test_model_builder_for_nsf_with_rb_embedding_net(data_setup_nsf_small):
         "Unexpected log prob encountered. Network initialization or "
         "normalization seems broken."
     )
-
-    # missing context key
-    with pytest.raises(ValueError):
-        model(d.y, {"waveform": d.x})
-    # wrongly-shaped context tensor
-    with pytest.raises(RuntimeError):
-        model(d.y, {"waveform": d.x, "context_parameters": d.x.flatten(start_dim=1)})

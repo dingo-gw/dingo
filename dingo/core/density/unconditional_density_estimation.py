@@ -3,6 +3,7 @@ import copy
 import torch
 
 from dingo.core.utils import build_train_and_test_loaders
+from dingo.core.utils.backward_compatibility import update_model_config
 from dingo.core.utils.trainutils import RuntimeLimits
 import numpy as np
 import argparse
@@ -69,8 +70,10 @@ def train_unconditional_density_estimator(
     samples_torch = torch.from_numpy((samples - mean) / std).float()
 
     # set up density estimation network
-    settings["model"]["posterior_kwargs"]["input_dim"] = num_params
-    settings["model"]["posterior_kwargs"]["context_dim"] = None
+    update_model_config(settings["model"])  # Map old schemas forward.
+    distribution_kwargs = settings["model"]["distribution"].setdefault("kwargs", {})
+    distribution_kwargs["theta_dim"] = num_params
+    distribution_kwargs["context_dim"] = None
     # TODO: Allow for other types of density estimators (e.g., flow matching).
     model = NormalizingFlowPosteriorModel(
         metadata={"train_settings": settings, "base": copy.deepcopy(result.metadata)},
