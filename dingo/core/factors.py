@@ -80,10 +80,13 @@ class SamplerContext(Protocol):
 
     def prepared_data(self, conditioning=None) -> torch.Tensor:
         """The data representation the factors condition on
-        (whiten/decimate/repackage/...), computed once and cached. When the
-        preparation is a function of chain conditioning (e.g. a heterodyning
-        proxy), the calling factor passes its conditioning and the cache is
-        keyed on the consumed values."""
+        (whiten/decimate/repackage/...). Without `conditioning`: the single
+        shared representation, computed once and cached. With `conditioning`
+        (the chain columns available to a conditioned factor): row-aligned,
+        one data row per conditioning row. The context consumes only the
+        columns its preparation depends on (e.g. a heterodyning proxy);
+        unconsumed columns condition the network alone, and the shared
+        representation is viewed across their rows."""
         ...
 
     def likelihood(self):
@@ -134,6 +137,11 @@ def chunk_and_concat(
     samples = _cat_dict(sample_parts)
     log_prob = None if lp_parts[0] is None else torch.cat(lp_parts)
     return samples, log_prob
+
+
+def _n_rows(block: dict) -> int:
+    """Row count of a column block (all columns share one length)."""
+    return len(next(iter(block.values())))
 
 
 def _interleave_rows(samples, total, n):
@@ -318,19 +326,16 @@ class FlowFactor(Factor):
             z = z.squeeze(0)
             log_prob = log_prob.squeeze(0)
         else:
-            # The conditioning may parameterize the data preparation itself (e.g.
-            # the chirp-mass heterodyne), so the context receives it.
-            data = context.prepared_data(conditioning=given)
-            # Standardize the (physical) conditioning the network was trained on, giving
-            # B = N context rows; expand the shared data to match. The network draws
-            # num_samples per row -> (N, num_samples, dim).
+            # Standardize the (physical) conditioning the network was trained on,
+            # giving B = N context rows; the context returns data row-aligned to
+            # them. The network draws num_samples per row -> (N, num_samples, dim).
             # TODO: the embedding runs once per row, so row-identical data with
             # row-varying conditioning (the intrinsic/extrinsic split) recomputes N
             # identical data embeddings. Fixing this needs an embed/fuse split on the
             # model (FlowWrapper) so the cached embedding can be reused across rows.
             ctx = self.standardization.standardize(given, self.context_parameters)
             n_rows = ctx.shape[0]
-            data = data.expand(n_rows, *data.shape)
+            data = context.prepared_data(conditioning=given)
             with torch.no_grad():
                 z, log_prob = self.model.sample_and_log_prob(
                     data, ctx, num_samples=num_samples
@@ -348,7 +353,7 @@ class FlowFactor(Factor):
         theta_net = {
             net: theta_i[self.aliases.get(net, net)] for net in self._net_parameters
         }
-        num_samples = next(iter(theta_net.values())).shape[0]
+        num_samples = _n_rows(theta_net)
         z = self.standardization.standardize(theta_net, self._net_parameters)
         net_context: tuple[torch.Tensor, ...]
         if self.unconditional:
@@ -359,7 +364,6 @@ class FlowFactor(Factor):
             net_context = (data,)
         else:
             data = context.prepared_data(conditioning=given)
-            data = data.expand(num_samples, *data.shape)
             ctx = self.standardization.standardize(given, self.context_parameters)
             net_context = (data, ctx)
         self.model.network.eval()
@@ -452,7 +456,7 @@ class SampleTableFactor(Factor):
     def sample_and_log_prob(self, num_samples, context, given=None):
         """Emit the table; `num_samples` must equal the table length (a fixed table
         cannot be chunked, so run the chain with `batch_size=None`)."""
-        n = len(next(iter(self.table.values())))
+        n = _n_rows(self.table)
         if num_samples != n:
             raise ValueError(
                 f"A sample table is fixed: num_samples must equal the table length "
@@ -757,7 +761,7 @@ class ChainComposer:
             else:
                 # Unconditioned non-root step (e.g. a fixed/delta filler): draw one
                 # value per current row -- it fills the batch rather than fanning out.
-                n = len(next(iter(samples.values())))
+                n = _n_rows(samples)
             given = {k: samples[k] for k in step.conditioning}
             block, lp = step.sample_and_log_prob(n, context, given)
             # A conditioned multi-draw (fan-out, or the base count landing past a

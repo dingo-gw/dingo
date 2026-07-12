@@ -112,28 +112,60 @@ def _conditioning(value=1.1975, n=4):
     }
 
 
-def test_prepared_data_consumes_conditioning_and_keys_the_cache():
+def test_prepared_data_pinned_is_row_aligned_and_memoized():
     import torch
 
     ctx = GWSamplerContext.from_model_metadata(_BNS_METADATA, _event_data())
     prepared = ctx.prepared_data(conditioning=_conditioning())
-    assert torch.is_tensor(prepared)
-    # Same values: the cached tensor is served.
-    assert ctx.prepared_data(conditioning=_conditioning()) is prepared
-    # A different pin is a different representation: fail rather than serve
-    # stale data.
-    with pytest.raises(ValueError, match="one\\s+representation"):
-        ctx.prepared_data(conditioning=_conditioning(value=1.30))
+    # Row-aligned: one data row per conditioning row, the single pinned
+    # preparation viewed across them.
+    assert prepared.shape[0] == 4
+    cached = ctx._prepared
+    assert torch.equal(ctx.prepared_data(conditioning=_conditioning()), prepared)
+    assert ctx._prepared is cached
+    # A different pin recomputes correctly (the memo is keyed on the value).
+    other = ctx.prepared_data(conditioning=_conditioning(value=1.30))
+    assert ctx._prepared is not cached
+    assert not torch.equal(other, prepared)
 
 
-def test_prepared_data_rejects_varying_conditioning():
+def test_prepared_data_varying_matches_single_preparations():
+    import torch
+
+    values = [1.19, 1.20, 1.21, 1.22]
+    ctx = GWSamplerContext.from_model_metadata(_BNS_METADATA, _event_data())
+    conditioning = _conditioning()
+    conditioning["chirp_mass_proxy"] = torch.tensor(values, dtype=torch.float64)
+    batch = ctx.prepared_data(conditioning=conditioning)
+    assert batch.shape[0] == len(values)
+    # Row i equals the pinned preparation at value i (compared at equal pin
+    # precision: the pinned path extracts the float64 value).
+    for i, value in enumerate(values):
+        single_conditioning = _conditioning()
+        single_conditioning["chirp_mass_proxy"] = torch.full(
+            (4,), value, dtype=torch.float64
+        )
+        single = GWSamplerContext.from_model_metadata(
+            _BNS_METADATA, _event_data()
+        ).prepared_data(conditioning=single_conditioning)
+        assert torch.equal(batch[i], single[0])
+    # A varying pass is not memoized, and the pinned path still works after.
+    assert ctx._prepared is None
+    assert ctx.prepared_data(conditioning=_conditioning()).shape[0] == 4
+
+
+def test_prepared_data_varying_rows_follow_values():
     import torch
 
     ctx = GWSamplerContext.from_model_metadata(_BNS_METADATA, _event_data())
     conditioning = _conditioning()
-    conditioning["chirp_mass_proxy"] = torch.tensor([1.19, 1.20, 1.21, 1.22])
-    with pytest.raises(ValueError, match="constant"):
-        ctx.prepared_data(conditioning=conditioning)
+    conditioning["chirp_mass_proxy"] = torch.tensor(
+        [1.19, 1.19, 1.21, 1.21], dtype=torch.float64
+    )
+    batch = ctx.prepared_data(conditioning=conditioning)
+    assert torch.equal(batch[0], batch[1])
+    assert torch.equal(batch[2], batch[3])
+    assert not torch.equal(batch[0], batch[2])
 
 
 def test_proxy_offset_step_selection():
@@ -166,3 +198,37 @@ def test_from_model_requires_all_pins():
             _event_data(),
             fixed_context_parameters={"chirp_mass_proxy": 1.2},
         )
+
+
+def test_chirp_mass_scan_grid_spans_prior_at_kernel_spacing():
+    from dingo.gw.inference.scan import chirp_mass_scan_grid
+
+    grid = chirp_mass_scan_grid(_BNS_METADATA, overlap_factor=2)
+    # Prior [1.0, 2.0], kernel width 0.01, overlap 2 -> 200 points inset by the
+    # kernel edges, spaced at most half a kernel width apart.
+    assert len(grid) == 200
+    assert grid[0] == pytest.approx(1.005)
+    assert grid[-1] == pytest.approx(1.995)
+    assert np.diff(grid).max() <= 0.005 + 1e-12
+
+
+def test_chirp_mass_scan_validates_model_and_pins():
+    import copy
+
+    from dingo.gw.inference.scan import chirp_mass_scan
+
+    # The non-proxy context parameters must be pinned by the caller.
+    with pytest.raises(ValueError, match="remaining context parameters"):
+        chirp_mass_scan(_StubBNSModel(), _event_data(), fixed_context_parameters={})
+
+    # A model without chirp-mass conditioning cannot be scanned.
+    metadata_no_chirp = copy.deepcopy(_BNS_METADATA)
+    del metadata_no_chirp["train_settings"]["data"]["gnpe_chirp"]
+    metadata_no_chirp["train_settings"]["data"]["context_parameters"] = ["ra", "dec"]
+
+    class _StubNonChirpModel:
+        metadata = metadata_no_chirp
+        device = "cpu"
+
+    with pytest.raises(ValueError, match="chirp_mass_proxy"):
+        chirp_mass_scan(_StubNonChirpModel(), _event_data())

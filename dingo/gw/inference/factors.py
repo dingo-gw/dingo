@@ -42,6 +42,7 @@ from dingo.core.factors import (
     Standardization,
     TargetCorrection,
     _base_model_metadata,
+    _n_rows,
 )
 from dingo.core.multiprocessing import apply_func_with_multiprocessing
 from dingo.core.posterior_models import BasePosteriorModel
@@ -403,32 +404,60 @@ class GWSamplerContext:
         )
 
     def prepared_data(self, conditioning=None) -> torch.Tensor:
-        """One-time data preprocessing, computed once and cached. An event
-        frequency-range update is validated against the training crop license
-        before the first preparation.
+        """The network-input data representation of this event.
 
-        When the preparation is a function of chain conditioning
-        (`data_prep_conditioning`, e.g. the chirp-mass heterodyne), the caller
-        supplies the conditioning columns; the required values must be constant
-        across rows (a context serves one representation), are injected into the
-        transform chain under their physical names, and key the cache -- a later
-        call with different values fails rather than silently serving stale
-        data.
+        Without `conditioning`: the single shared representation, computed once
+        and cached. With `conditioning` (the chain columns available to a
+        conditioned factor): row-aligned, one data row per conditioning row.
+        Only the columns named in `data_prep_conditioning` are consumed by the
+        preparation (e.g. the chirp-mass heterodyne proxy, injected under its
+        physical name); the remaining columns condition the network only, and a
+        context that consumes nothing serves the shared representation viewed
+        across the rows. A constant consumed value (a pinned proxy) is prepared
+        once and viewed across the rows; varying values (a sweep) run through
+        the batch-native transform chain in one vectorized pass, uncached -- a
+        caller sweeping more rows than memory allows blocks its own request.
+
+        An event frequency-range update is validated against the training crop
+        license before any preparation.
 
         Parameters
         ----------
         conditioning : dict[str, torch.Tensor], optional
-            The chain conditioning available to the calling factor. Ignored
-            when the preparation needs none of it.
+            The chain conditioning available to the calling factor, one value
+            per row. May contain columns irrelevant to the preparation.
         """
         if not self.data_prep_conditioning:
             if self._prepared is None:
                 self._validate_frequency_range()
                 self._prepared = self._data_prep(self.event_data)
-            return self._prepared
+            if conditioning is None:
+                return self._prepared
+            return self._prepared.expand(_n_rows(conditioning), *self._prepared.shape)
 
+        columns = self._conditioning_columns(conditioning)
+        self._validate_frequency_range()
+        n_rows = _n_rows(columns)
+        if all(torch.all(c == c[0]) for c in columns.values()):
+            # N rows of one pinned value: prepare once, view it across the rows.
+            key = {name: float(c[0]) for name, c in columns.items()}
+            if key != self._prepared_key:
+                self._prepared = self._data_prep({**self.event_data, "parameters": key})
+                self._prepared_key = key
+            return self._prepared.expand(n_rows, *self._prepared.shape)
+        parameters = {name: column.numpy() for name, column in columns.items()}
+        return self._data_prep(
+            {**self._broadcast_event(n_rows), "parameters": parameters}
+        )
+
+    def _conditioning_columns(self, conditioning) -> dict[str, torch.Tensor]:
+        """Collect the conditioning columns the preparation consumes, keyed by
+        their physical names (the `_proxy` suffix names the chain column; the
+        transform chain reads the physical parameter), as float64 (the
+        heterodyne phase is computed in float64, and a float32 chain column
+        must not degrade it)."""
         conditioning = conditioning or {}
-        key = {}
+        columns = {}
         for name in self.data_prep_conditioning:
             if name not in conditioning:
                 raise ValueError(
@@ -436,31 +465,23 @@ class GWSamplerContext:
                     f"conditioning `{name}`, which the caller does not provide "
                     f"(pass it to prepared_data, e.g. from the chain's pins)."
                 )
-            column = torch.as_tensor(conditioning[name]).reshape(-1)
-            if not torch.all(column == column[0]):
-                raise ValueError(
-                    f"Data preparation requires a constant `{name}`, but the "
-                    f"conditioning varies across rows. A context serves one "
-                    f"representation; per-value batching (e.g. a chirp-mass "
-                    f"sweep) needs one context per value."
-                )
-            # Extract as a Python float: the transform chain computes the
-            # heterodyne phase in float64, and a float32 chain column must not
-            # degrade it.
-            key[name[: -len("_proxy")]] = float(column[0])
+            columns[name[: -len("_proxy")]] = torch.as_tensor(
+                conditioning[name], dtype=torch.float64
+            ).reshape(-1)
+        return columns
 
-        if self._prepared is not None:
-            if key != self._prepared_key:
-                raise ValueError(
-                    f"Data already prepared with {self._prepared_key}, but the "
-                    f"chain now conditions on {key}. A context serves one "
-                    f"representation; build a new context for a different value."
-                )
-            return self._prepared
-        self._validate_frequency_range()
-        self._prepared = self._data_prep({**self.event_data, "parameters": key})
-        self._prepared_key = key
-        return self._prepared
+    def _broadcast_event(self, n_rows: int) -> dict:
+        """The event arrays broadcast (as read-only views) across `n_rows`
+        rows, forming the batched sample dict for a single transform-chain
+        pass."""
+        return {
+            part: (
+                {k: np.broadcast_to(v, (n_rows, *np.shape(v))) for k, v in data.items()}
+                if isinstance(data, dict)
+                else data
+            )
+            for part, data in self.event_data.items()
+        }
 
     def _validate_frequency_range(self):
         """Validate an event frequency-range update: hard bounds against the (base)
@@ -1026,9 +1047,9 @@ class GNPEFlowFactor(Factor):
         if num_samples != 1:
             raise ValueError("GNPE is 1:1; draw one sample per proxy (fan_out=1).")
         proxies = {p: given[p] for p in self.proxy_parameters}
-        n_rows = next(iter(proxies.values())).shape[0]
+        n_rows = _n_rows(proxies)
         x = {"extrinsic_parameters": dict(proxies), "parameters": {}}
-        d = context.prepared_data(conditioning=given).clone()
+        d = context.prepared_data().clone()
         x["data"] = d.expand(n_rows, *d.shape)
         x = self.transform_pre(x)
         self.model.network.eval()
@@ -1056,13 +1077,13 @@ class GNPEFlowFactor(Factor):
     def log_prob(self, theta_i, context, given=None):
         """Evaluate the network density `log q(theta | theta_hat, d)` in physical space
         at given `theta_i` (exposed / aliased names), one row per proxy row in `given`.
-        Runs the same proxies-present data preparation as sampling (time-shift by the
-        proxies, standardize the conditioning), then scores the standardized parameters
-        under the network."""
+        Applies the same per-row view of the data as sampling (the shared
+        representation time-shifted by the proxies, the conditioning standardized),
+        then scores the standardized parameters under the network."""
         proxies = {p: given[p] for p in self.proxy_parameters}
-        n_rows = next(iter(proxies.values())).shape[0]
+        n_rows = _n_rows(proxies)
         x = {"extrinsic_parameters": dict(proxies), "parameters": {}}
-        d = context.prepared_data(conditioning=given).clone()
+        d = context.prepared_data().clone()
         x["data"] = d.expand(n_rows, *d.shape)
         x = self.transform_pre(x)
         theta_net = {
