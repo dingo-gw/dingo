@@ -715,3 +715,50 @@ def test_transformer_embedding_with_context_parameters():
     )
     theta, context = tokenized_batch(with_context_parameters=True)
     assert torch.isfinite(pm.loss(theta, context))
+
+
+def test_pooling_transformer_embedding_through_build_path():
+    """The second tokenized architecture from the T1 branch (sinusoidal positional
+    encoding + average pooling) builds through the same generic path."""
+    settings = model_settings("normalizing_flow", completed=False)
+    model = settings["train_settings"]["model"]
+    model["embedding_net"] = {
+        "type": "pooling_transformer",
+        "kwargs": {
+            "tokenizer_kwargs": {
+                "hidden_dims": [16],
+                "activation": "elu",
+                "batch_norm": False,
+                "layer_norm": True,
+            },
+            "positional_encoder_kwargs": {
+                "max_vals": [1024.0, 1024.0, 3.0],
+                "resolutions": [0.25, 0.25, 1.0],
+            },
+            "transformer_kwargs": {
+                "d_model": 16,
+                "dim_feedforward": 32,
+                "nhead": 4,
+                "dropout": 0.0,
+                "num_layers": 1,
+            },
+            "final_net_kwargs": {
+                "activation": "elu",
+                "hidden_dims": [16],
+                "output_dim": EMBEDDING_OUTPUT_DIM,
+                "batch_norm": False,
+            },
+        },
+    }
+
+    model = complete_model_settings(model, tokenized_data_sample())
+    kwargs = model["embedding_net"]["kwargs"]
+    assert kwargs["tokenizer_kwargs"]["input_dim"] == NUM_FEATURES
+    assert kwargs["output_dim"] == EMBEDDING_OUTPUT_DIM
+    assert model["distribution"]["kwargs"]["context_dim"] == EMBEDDING_OUTPUT_DIM
+
+    pm = build_model_from_kwargs(
+        settings={"train_settings": {"model": model}}, device="cpu"
+    )
+    theta, context = tokenized_batch()
+    assert torch.isfinite(pm.loss(theta, context))

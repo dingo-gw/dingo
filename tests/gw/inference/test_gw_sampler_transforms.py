@@ -1,6 +1,7 @@
 """Tests for GWSampler._initialize_transforms with and without tokenization."""
 
 import numpy as np
+import pytest
 import torch
 from unittest.mock import MagicMock
 
@@ -60,6 +61,7 @@ def _make_sampler_stub(domain, tokenization_settings=None):
     sampler.inference_parameters = INFERENCE_PARAMS
     sampler._minimum_frequency = None
     sampler._maximum_frequency = None
+    sampler._suppress = None
     return sampler
 
 
@@ -199,3 +201,65 @@ def test_transformer_path_waveform_and_position_num_tokens_match():
         == x["position"].shape[0]
         == x["drop_token_mask"].shape[0]
     )
+
+
+# ---------------------------------------------------------------------------
+# Token suppression (inference-side frequency updates for tokenized models)
+# ---------------------------------------------------------------------------
+
+TOK_WITH_DROP = {
+    **TOK_SETTINGS,
+    "drop_frequency_range": {"f_cut": {"p_cut": 0.25}},
+}
+
+
+def test_suppress_requires_tokenized_model_with_drop_augmentation():
+    domain = _make_domain()
+    sampler = _make_sampler_stub(domain, tokenization_settings=None)
+    with pytest.raises(ValueError, match="tokenized"):
+        sampler.suppress = [50.0, 60.0]
+
+    sampler = _make_sampler_stub(domain, tokenization_settings=TOK_SETTINGS)
+    with pytest.raises(ValueError, match="drop augmentation"):
+        sampler.suppress = [50.0, 60.0]
+
+
+def test_suppress_validates_interval():
+    domain = _make_domain()
+    sampler = _make_sampler_stub(domain, tokenization_settings=TOK_WITH_DROP)
+    with pytest.raises(ValueError, match="f_lo < f_hi"):
+        sampler.suppress = [60.0, 50.0]
+    with pytest.raises(ValueError, match="f_lo < f_hi"):
+        sampler.suppress = [5.0, 60.0]  # below domain f_min
+    with pytest.raises(ValueError, match="Unknown detectors"):
+        sampler.suppress = {"V1": [50.0, 60.0]}
+
+
+def test_suppress_masks_tokens():
+    from dingo.gw.transforms import UpdateFrequencyRange
+
+    domain = _make_domain()
+    sampler = _make_sampler_stub(domain, tokenization_settings=TOK_WITH_DROP)
+    sampler.suppress = [50.0, 60.0]
+    assert sampler.frequency_updates
+
+    types = [type(t) for t in sampler.transform_pre.transforms]
+    assert UpdateFrequencyRange in types
+
+    context = _make_context(domain)
+    x = sampler.transform_pre(context)
+    mask = x["drop_token_mask"].numpy()
+    position = x["position"].numpy()
+    overlaps = (position[..., 1] >= 50.0) & (position[..., 0] <= 60.0)
+    assert np.array_equal(mask, overlaps)
+    assert mask.any() and not mask.all()
+
+
+def test_no_frequency_update_has_no_update_transform():
+    from dingo.gw.transforms import UpdateFrequencyRange
+
+    domain = _make_domain()
+    sampler = _make_sampler_stub(domain, tokenization_settings=TOK_WITH_DROP)
+    sampler._initialize_transforms()
+    types = [type(t) for t in sampler.transform_pre.transforms]
+    assert UpdateFrequencyRange not in types

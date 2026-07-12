@@ -19,6 +19,11 @@ from dingo.gw.transforms import (
     GetDetectorTimes,
     CropMaskStrainRandom,
     StrainTokenization,
+    DropDetectors,
+    DropFrequenciesToUpdateRange,
+    DropFrequencyInterval,
+    DropRandomTokens,
+    NormalizePosition,
 )
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.prior import default_inference_parameters
@@ -243,6 +248,69 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
                 drop_last_token=tokenization.get("drop_last_token", False),
             )
         )
+        num_tokens = transforms[-1].num_tokens_per_detector * len(
+            data_settings["detectors"]
+        )
+
+        # Augmentation: randomly drop detectors, frequency ranges, or random
+        # tokens during training. This is what enables inference-time frequency
+        # updates and token suppression.
+        if "drop_detectors" in tokenization:
+            drop_detectors = tokenization["drop_detectors"]
+            transforms.append(
+                DropDetectors(
+                    num_blocks=len(data_settings["detectors"]),
+                    p_drop_012_detectors=drop_detectors.get("p_drop_012_detectors"),
+                    p_drop_hlv=drop_detectors.get("p_drop_hlv"),
+                )
+            )
+        if "drop_frequency_range" in tokenization:
+            if "f_cut" in tokenization["drop_frequency_range"]:
+                f_cut_settings = tokenization["drop_frequency_range"]["f_cut"]
+                transforms.append(
+                    DropFrequenciesToUpdateRange(
+                        domain=domain,
+                        p_cut=f_cut_settings.get("p_cut", 0.2),
+                        f_max_lower_cut=f_cut_settings.get(
+                            "f_max_lower_cut", domain.f_min
+                        ),
+                        f_min_upper_cut=f_cut_settings.get(
+                            "f_min_upper_cut", domain.f_max
+                        ),
+                        p_same_cut_all_detectors=f_cut_settings.get(
+                            "p_same_cut_all_detectors", 0.2
+                        ),
+                        p_lower_upper_both=f_cut_settings.get(
+                            "p_lower_upper_both", [0.4, 0.4, 0.2]
+                        ),
+                    )
+                )
+            if "mask_interval" in tokenization["drop_frequency_range"]:
+                interval_settings = tokenization["drop_frequency_range"][
+                    "mask_interval"
+                ]
+                transforms.append(
+                    DropFrequencyInterval(
+                        domain=domain,
+                        p_per_detector=interval_settings.get("p_per_detector", 0.2),
+                        f_min=interval_settings.get("f_min", domain.f_min),
+                        f_max=interval_settings.get("f_max", domain.f_max),
+                        max_width=interval_settings.get("max_width", 10.0),
+                    )
+                )
+        if "drop_random_tokens" in tokenization:
+            random_drop_settings = tokenization["drop_random_tokens"]
+            transforms.append(
+                DropRandomTokens(
+                    p_drop=random_drop_settings.get("p_drop", 0.4),
+                    max_num_tokens=random_drop_settings.get(
+                        "max_num_tokens", num_tokens
+                    ),
+                )
+            )
+        # Normalize the position entries after all drop transforms.
+        if tokenization.get("normalize_frequency_for_positional_encoding", False):
+            transforms.append(NormalizePosition())
 
     selected_keys = ["inference_parameters", "waveform"]
     if "tokenization" in data_settings:

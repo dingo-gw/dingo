@@ -144,3 +144,18 @@ def get_standardization_dict(
         "std": {k: std[k] for k in selected_parameters},
     }
     return standardization_dict
+
+
+def add_defaults_for_missing_ifos(
+    object_to_update: Optional[float | dict],
+    update_value: float,
+    ifos: list[str],
+):
+    """For a per-detector settings dict, fill in update_value for any detector in
+    ifos that has no entry; scalars and None pass through unchanged."""
+    object_to_update = deepcopy(object_to_update)
+    if isinstance(object_to_update, dict) and ifos is not None:
+        for det in ifos:
+            if det not in object_to_update.keys():
+                object_to_update[det] = update_value
+    return object_to_update

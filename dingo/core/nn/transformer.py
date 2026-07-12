@@ -370,3 +370,241 @@ class TransformerEmbedding(TransformerModel):
             "tokenizer_kwargs": tokenizer_kwargs,
             "output_dim": output_dim,
         }
+
+
+class MultiPositionalEncoding(nn.Module):
+    """
+    Sinusoidal positional encoding over several position quantities (e.g. f_min,
+    f_max, detector index), each allotted a share of the embedding dimension, added
+    to the token embeddings. Ported from the DINGO-T1 branch.
+    """
+
+    def __init__(self, d_model: int, max_vals: List[float], resolutions: List[float]):
+        """
+        Parameters
+        ----------
+        d_model : int
+            embedding size of the transformer
+        max_vals : List[float]
+            maximum value of each position quantity (sets the largest wavelength)
+        resolutions : List[float]
+            resolution of each position quantity (sets the smallest wavelength)
+        """
+        super().__init__()
+        num_encodings = len(max_vals)
+        encoding_sizes = [((d_model // 2) // num_encodings) * 2] * num_encodings
+        encoding_sizes[-1] += d_model - sum(encoding_sizes)
+        if sum(encoding_sizes) != d_model:
+            raise ValueError(
+                f"Cannot partition d_model={d_model} into {num_encodings} encodings."
+            )
+
+        for i in range(num_encodings):
+            k = torch.arange(0, encoding_sizes[i], 2)
+            div_term = torch.exp(
+                torch.log(torch.tensor(max_vals[i] / resolutions[i]))
+                * (-k / encoding_sizes[i])
+            )
+            self.register_buffer("div_term_" + str(i), div_term)
+        self.num_encodings = num_encodings
+
+    def forward(self, x: Tensor, position: Tensor):
+        """
+        Parameters
+        ----------
+        x: Tensor, shape ``[batch_size, seq_length, embedding_dim]``
+        position: Tensor, shape ``[batch_size, seq_length, self.num_encodings]``
+        """
+        position = position.unsqueeze(-1)
+        start = 0
+        pe = torch.zeros_like(x)
+        for i in range(self.num_encodings):
+            div_term = getattr(self, "div_term_" + str(i))
+            end = start + 2 * len(div_term)
+            pe[:, :, start:end:2] = torch.sin(position[:, :, i, :] * div_term)
+            pe[:, :, start + 1 : end : 2] = torch.cos(position[:, :, i, :] * div_term)
+            start = end
+        return x + pe
+
+
+class PoolingTransformer(nn.Module):
+    """
+    Transformer encoder with additive sinusoidal positional encoding and average
+    pooling, used as an embedding network. In contrast to TransformerModel, the
+    tokenizer is an unconditional DenseResidualNet and position enters via
+    MultiPositionalEncoding rather than GLU conditioning. Ported from the DINGO-T1
+    branch.
+    """
+
+    def __init__(
+        self,
+        tokenizer: nn.Module,
+        positional_encoder: nn.Module,
+        transformer_encoder: nn.Module,
+        final_net: Optional[nn.Module] = None,
+    ):
+        super().__init__()
+        self.tokenizer = tokenizer
+        self.positional_encoder = positional_encoder
+        self.transformer_encoder = transformer_encoder
+        self.final_net = final_net
+
+        self.init_weights()
+
+    def init_weights(self) -> None:
+        """
+        Initialize parameters of the transformer encoder explicitly, due to
+        https://github.com/pytorch/pytorch/issues/72253. Parameters are initialized
+        with xavier uniform.
+        """
+        for p in self.transformer_encoder.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+
+    def forward(
+        self,
+        src: Tensor,
+        position: Tensor = None,
+        src_key_padding_mask: Tensor = None,
+    ) -> Tensor:
+        x = self.tokenizer(src)
+
+        if position is not None:
+            x = self.positional_encoder(x, position)
+        x = self.transformer_encoder(x, src_key_padding_mask=src_key_padding_mask)
+
+        # Average over non-masked components.
+        if src_key_padding_mask is not None:
+            denominator = torch.sum(~src_key_padding_mask, -1, keepdim=True)
+            x = torch.sum(x * ~src_key_padding_mask.unsqueeze(-1), dim=-2) / denominator
+        else:
+            x = torch.mean(x, dim=-2)
+
+        if self.final_net is not None:
+            x = self.final_net(x)
+
+        return x
+
+
+@EMBEDDING_NETS.register("pooling_transformer")
+class PoolingTransformerEmbedding(PoolingTransformer):
+    """
+    PoolingTransformer as a registered embedding network (see the contract in
+    dingo.core.nn.enets): consumes the tokenized batch entries produced by
+    StrainTokenization, and builds its modules from settings dicts.
+    """
+
+    input_keys = ("waveform", "position", "drop_token_mask")
+
+    def __init__(
+        self,
+        tokenizer_kwargs: dict,
+        positional_encoder_kwargs: dict,
+        transformer_kwargs: dict,
+        output_dim: int,
+        final_net_kwargs: Optional[dict] = None,
+    ):
+        """
+        Parameters
+        ----------
+        tokenizer_kwargs : dict
+            Settings for the token embedding DenseResidualNet: hidden_dims,
+            activation (str), and optionally dropout, batch_norm, layer_norm.
+            input_dim is inferred from a sample batch by complete_settings; the
+            output_dim is transformer_kwargs["d_model"].
+        positional_encoder_kwargs : dict
+            Settings for MultiPositionalEncoding: max_vals and resolutions, one
+            entry per position quantity (d_model is filled in automatically).
+        transformer_kwargs : dict
+            Settings for the transformer encoder: d_model, nhead, num_layers, and
+            optionally dim_feedforward, dropout.
+        output_dim : int
+            Dimension of the embedded context: the output_dim of final_net_kwargs
+            if given, else d_model. Inferred by complete_settings; not a user
+            setting.
+        final_net_kwargs : Optional[dict]
+            Settings for the DenseResidualNet applied after pooling: output_dim,
+            hidden_dims, activation (str), and optionally dropout, batch_norm,
+            layer_norm. If None, the pooled d_model-dim vector is returned
+            directly.
+        """
+        d_model = transformer_kwargs["d_model"]
+        tokenizer_kwargs = dict(tokenizer_kwargs)
+        tokenizer_kwargs["activation"] = torchutils.get_activation_function_from_string(
+            tokenizer_kwargs["activation"]
+        )
+        tokenizer = DenseResidualNet(output_dim=d_model, **tokenizer_kwargs)
+
+        positional_encoder = MultiPositionalEncoding(
+            d_model=d_model, **positional_encoder_kwargs
+        )
+
+        transformer_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            dim_feedforward=transformer_kwargs.get("dim_feedforward", 2048),
+            nhead=transformer_kwargs["nhead"],
+            dropout=transformer_kwargs.get("dropout", 0.1),
+            batch_first=True,
+        )
+        transformer_encoder = nn.TransformerEncoder(
+            transformer_layer, num_layers=transformer_kwargs["num_layers"]
+        )
+
+        final_net = None
+        if final_net_kwargs is not None:
+            final_net_kwargs = dict(final_net_kwargs)
+            final_net_output_dim = final_net_kwargs.pop("output_dim")
+            final_net_kwargs["activation"] = (
+                torchutils.get_activation_function_from_string(
+                    final_net_kwargs["activation"]
+                )
+            )
+            final_net = DenseResidualNet(
+                input_dim=d_model,
+                output_dim=final_net_output_dim,
+                **final_net_kwargs,
+            )
+        else:
+            final_net_output_dim = d_model
+        if output_dim != final_net_output_dim:
+            raise ValueError(
+                f"Inconsistent settings: output_dim is {output_dim}, but the "
+                f"network produces {final_net_output_dim} "
+                f"(final_net output_dim, or d_model without a final net)."
+            )
+
+        super().__init__(
+            tokenizer=tokenizer,
+            positional_encoder=positional_encoder,
+            transformer_encoder=transformer_encoder,
+            final_net=final_net,
+        )
+        self.output_dim = output_dim
+
+    @classmethod
+    def complete_settings(cls, settings: dict, sample_batch: dict) -> dict:
+        """Infer the tokenizer input dim and the embedding output_dim from a sample
+        batch; return completed settings."""
+        tokenizer_kwargs = dict(settings["tokenizer_kwargs"])
+        if "input_dim" in tokenizer_kwargs:
+            raise ValueError(
+                "'input_dim' is derived from the data and must not be specified "
+                "in the tokenizer settings."
+            )
+        if "output_dim" in settings:
+            raise ValueError(
+                "'output_dim' is derived from the network settings and must not "
+                "be specified."
+            )
+        tokenizer_kwargs["input_dim"] = sample_batch["waveform"].shape[-1]
+
+        final_net_kwargs = settings.get("final_net_kwargs")
+        if final_net_kwargs is not None:
+            output_dim = final_net_kwargs["output_dim"]
+        else:
+            output_dim = settings["transformer_kwargs"]["d_model"]
+        return {
+            **settings,
+            "tokenizer_kwargs": tokenizer_kwargs,
+            "output_dim": output_dim,
+        }
