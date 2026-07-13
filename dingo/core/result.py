@@ -921,6 +921,90 @@ class Result(DingoDataset):
         else:
             return np.nan
 
+    def get_one_dimensional_median_and_error_bar(self, key: str, weighted: bool = False, fmt: str = '.2f', quantiles: list = [0.16, 0.84]):
+        """
+        Calculate the median and the lower and upper error bars for a given
+        parameter, based on the specified quantiles.
+
+        Parameters
+        ---------
+        key: str
+            The parameter key for which to calculate the median and error bar
+        weighted: bool, optional
+            If True, use the importance weights stored in the "weights" 
+            column of the samples. Default is False.
+        fmt: str, ('.2f')
+            Format string used for the values in the returned LaTeX string.
+            Default is '.2f'.
+        quantiles: list, optional
+            A length-2 list with the lower and upper quantiles defining the
+            error bars. Default is [0.16, 0.84] (68% credible interval).
+
+        Returns
+        ---------
+        summary: namedtuple
+            An object with attributes median, lower, upper, and string, where 
+            string is a LaTeX representation of the form 
+            $median_{-lower}^{+upper}$.
+        """
+        
+        Summary = namedtuple('summary', ['median', 'lower', 'upper', 'string'])
+
+        if len(quantiles) != 2:
+            raise ValueError("quantiles must be of length 2")
+
+        quants_to_compute = np.array([quantiles[0], 0.5, quantiles[1]]) 
+
+        theta = self._cleaned_samples()
+        if weighted:
+            weights = theta["weights"]
+        else:
+            weights = np.ones(len(theta))
+
+        quants = self._percentile(theta[key], weights, quants_to_compute)
+        median = quants[1]
+        upper = quants[2] - median
+        lower = median - quants[0]
+
+        fmt = "{{0:{0}}}".format(fmt).format
+        string_template = r"${{{0}}}_{{-{1}}}^{{+{2}}}$"
+        string = string_template.format(
+            fmt(median), fmt(lower), fmt(upper))
+        return Summary(median=median, lower=lower, upper=upper, string=string)    
+
+    def _percentile(self, samples, weights, quants_to_compute):
+        """
+        Compute weighted percentiles of an array of samples.
+    
+        Parameters
+        ----------
+        samples : array-like
+            The samples.
+        weights : array-like
+            The weights for each sample.
+        percentiles : array-like
+            List or array of percentiles in [0, 100].
+    
+        Returns
+        -------
+        np.ndarray
+            Array of weighted percentile values corresponding to the input percentiles.
+        """
+        samples = np.asarray(samples)
+        weights = np.asarray(weights)
+        quants_to_compute = np.asarray(quants_to_compute)
+    
+        # Sort samples and weights by the sample values
+        sorter = np.argsort(samples)
+        samples_sorted = samples[sorter]
+        weights_sorted = weights[sorter]
+    
+        # Cumulative sum of weights
+        cumulative_weights = np.cumsum(weights_sorted)
+        cumulative_weights /= cumulative_weights[-1]  # normalize to 1
+    
+        # Interpolate for all requested percentiles at once
+        return np.interp(quants_to_compute, cumulative_weights, samples_sorted)
 
 def make_pp_plot(
     results: list[Result],
