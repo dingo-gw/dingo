@@ -91,17 +91,28 @@ Complete example config files for both networks are provided in the /examples fo
 
 ### Inference
 
-The inference script must be pointed to both trained networks in order to sample using GNPE.
-```bash
-dingo_analyze_event
-  --model model
-  --model_init model_init
-  --gps_time_event gps_time_event
-  --num_samples num_samples
-  --num_gnpe_iterations num_gnpe_iterations
-  --batch_size batch_size
+GNPE inference requires both trained networks. With [dingo_pipe](dingo_pipe.md), the
+initialization network is passed alongside the main model in the `.ini` file:
+
+```ini
+model = /path/to/main_model.pt
+model-init = /path/to/init_model.pt
+num-gnpe-iterations = 30
 ```
-The number of Gibbs iterations is also specified here (typically 30 is appropriate). This script will save the final samples from each Gibbs chain.
+
+The number of Gibbs iterations defaults to 30. Because Gibbs sampling provides no log
+probability, dingo_pipe recovers the density afterwards by training an unconditional
+flow for the proxies (the `recover-log-prob` flag, on by default; see
+[density recovery](result.md#density-recovery)).
+
+In Python, the sampler is built from the model pair directly (see
+[inference](inference.md)):
+
+```python
+sampler = GWComposedSampler.from_gnpe_models(
+    init_model, main_model, event_data, num_iterations=30
+)
+```
 
 
 
