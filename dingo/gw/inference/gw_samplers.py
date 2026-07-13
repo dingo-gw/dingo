@@ -311,7 +311,7 @@ class GWSampler(GWSamplerMixin, Sampler):
         #   * repackage strains and asds from dicts to an array
         #   * optionally tokenize strain (transformer embedding network only)
         #   * convert array(s) to torch tensor(s) on the correct device
-        #   * extract waveform (and position, drop_token_mask for transformer)
+        #   * extract waveform (and position, token_mask for transformer)
         # Use base metadata so that unconditional samplers still know how to
         # transform data, since this transform is used by the GNPE sampler as well.
         transform_pre.append(
@@ -336,9 +336,7 @@ class GWSampler(GWSamplerMixin, Sampler):
         transform_pre.append(ToTorch(device=self.model.device))
 
         if tok:
-            transform_pre.append(
-                UnpackDict(["waveform", "position", "drop_token_mask"])
-            )
+            transform_pre.append(UnpackDict(["waveform", "position", "token_mask"]))
         else:
             transform_pre.append(GetItem("waveform"))
 

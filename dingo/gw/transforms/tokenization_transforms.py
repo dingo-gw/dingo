@@ -21,7 +21,7 @@ class StrainTokenization:
                                num_channels * num_bins_per_token]
     - 'position':        [..., num_tokens, 3]
                          last dim = [f_min, f_max, detector_index]
-    - 'drop_token_mask': [..., num_tokens] bool, False = keep token
+    - 'token_mask': [..., num_tokens] bool, False = keep token
                          (PyTorch transformer convention: True = masked out).
     """
 
@@ -142,7 +142,7 @@ class StrainTokenization:
 
         Returns
         -------
-        dict with keys 'waveform', 'position', 'drop_token_mask' (see class docstring).
+        dict with keys 'waveform', 'position', 'token_mask' (see class docstring).
         """
         sample = input_sample.copy()
         strain = sample["waveform"]
@@ -194,14 +194,14 @@ class StrainTokenization:
             ).copy()
 
         sample["position"] = token_position
-        sample["drop_token_mask"] = np.zeros((*batch_dims, num_tokens), dtype=bool)
+        sample["token_mask"] = np.zeros((*batch_dims, num_tokens), dtype=bool)
 
         return sample
 
 
 class MaskRandomTokens:
     """
-    Randomly mask tokens by setting entries in ``drop_token_mask`` to True.
+    Randomly mask tokens by setting entries in ``token_mask`` to True.
 
     Applied after StrainTokenization to implement token-level masking during
     training and validation. Each token is masked independently with probability
@@ -224,15 +224,15 @@ class MaskRandomTokens:
 
     def __call__(self, sample: dict) -> dict:
         sample = sample.copy()
-        mask = sample["drop_token_mask"]
+        mask = sample["token_mask"]
         random_mask = np.random.random(mask.shape) < self.mask_probability
-        sample["drop_token_mask"] = mask | random_mask
+        sample["token_mask"] = mask | random_mask
         return sample
 
 
 class MaskDetectors:
     """
-    Randomly mask entire detectors by setting all their tokens in ``drop_token_mask``
+    Randomly mask entire detectors by setting all their tokens in ``token_mask``
     to True.
 
     Applied after StrainTokenization. Each detector is masked independently with
@@ -257,7 +257,7 @@ class MaskDetectors:
     def __call__(self, sample: dict) -> dict:
         sample = sample.copy()
         position = sample["position"]  # [..., num_tokens, 3]
-        mask = sample["drop_token_mask"].copy()  # [..., num_tokens] bool
+        mask = sample["token_mask"].copy()  # [..., num_tokens] bool
 
         detector_indices = position[..., 2]  # [..., num_tokens]
         unique_detectors = np.unique(detector_indices)
@@ -273,7 +273,148 @@ class MaskDetectors:
                 drop_this = np.random.random() < self.mask_probability  # bool scalar
             mask = mask | (token_is_this_det & drop_this)
 
-        sample["drop_token_mask"] = mask
+        sample["token_mask"] = mask
+        return sample
+
+
+class MaskRandomFrequencyRange:
+    """
+    Randomly mask tokens outside a sampled frequency range by setting their
+    ``token_mask`` entries to True.
+
+    The token-level analogue of ``CropMaskStrainRandom``. At each call, lower and upper
+    frequency boundaries are sampled at token granularity from ``position[..., 0/1]``,
+    and all tokens outside the resulting range are masked.
+
+    Operates on numpy arrays and must therefore be placed before ToTorch in the
+    transform chain.
+    """
+
+    def __init__(
+        self,
+        f_min_upper: Optional[float] = None,
+        f_max_lower: Optional[float] = None,
+        mask_probability: float = 1.0,
+        independent_detectors: bool = True,
+        independent_lower_upper: bool = True,
+    ):
+        """
+        Parameters
+        ----------
+        f_min_upper:
+            New f_min is sampled uniformly in token space over tokens with
+            f_min ≤ f_min_upper. Defaults to no lower-boundary masking.
+        f_max_lower:
+            New f_max is sampled uniformly in token space over tokens with
+            f_max ≥ f_max_lower. Defaults to no upper-boundary masking.
+        mask_probability:
+            Probability in [0, 1] that masking is applied to a given boundary.
+        independent_detectors:
+            If True, frequency boundaries are sampled independently per detector.
+        independent_lower_upper:
+            If True, ``mask_probability`` is applied independently to the lower
+            and upper boundaries. If False, both boundaries are masked or kept
+            together.
+        """
+        if not 0.0 <= mask_probability <= 1.0:
+            raise ValueError("mask_probability must be in [0, 1].")
+        if f_min_upper is not None and f_max_lower is not None:
+            if f_min_upper >= f_max_lower:
+                raise ValueError("f_min_upper must be less than f_max_lower.")
+        self.f_min_upper = f_min_upper
+        self.f_max_lower = f_max_lower
+        self.mask_probability = mask_probability
+        self.independent_detectors = independent_detectors
+        self.independent_lower_upper = independent_lower_upper
+
+    def _get_token_index_bounds(
+        self, token_f_mins: np.ndarray, token_f_maxs: np.ndarray
+    ):
+        """
+        Return ``(i_lower_max, i_upper_min)``: the inclusive token-index limits for
+        sampling the lower and upper frequency boundaries.
+
+        ``i_lower_max``: the highest token index allowed for the lower boundary
+        (controlled by ``f_min_upper``). ``i_lower`` is sampled from
+        ``[0, i_lower_max]``.
+
+        ``i_upper_min``: the lowest token index allowed for the upper boundary
+        (controlled by ``f_max_lower``). ``i_upper`` is sampled from
+        ``[i_upper_min, T-1]``.
+        """
+        T = len(token_f_mins)
+        if self.f_min_upper is not None:
+            valid = np.where(token_f_mins <= self.f_min_upper)[0]
+            i_lower_max = int(valid[-1]) if len(valid) > 0 else 0
+        else:
+            i_lower_max = 0  # no lower-boundary masking
+
+        if self.f_max_lower is not None:
+            valid = np.where(token_f_maxs >= self.f_max_lower)[0]
+            i_upper_min = int(valid[0]) if len(valid) > 0 else T - 1
+        else:
+            i_upper_min = T - 1  # no upper-boundary masking
+
+        return i_lower_max, i_upper_min
+
+    def __call__(self, sample: dict) -> dict:
+        sample = sample.copy()
+        position = sample["position"]
+        mask = sample["token_mask"].copy()
+
+        unique_detectors = np.unique(position[..., 2])
+        num_dets = len(unique_detectors)
+        batch_shape = mask.shape[:-1]
+        num_tokens = mask.shape[-1]
+        T = num_tokens // num_dets
+
+        if batch_shape:
+            tok_f_mins = position.reshape(-1, num_tokens, 3)[0, :T, 0]
+            tok_f_maxs = position.reshape(-1, num_tokens, 3)[0, :T, 1]
+        else:
+            tok_f_mins = position[:T, 0]
+            tok_f_maxs = position[:T, 1]
+        i_lower_max, i_upper_min = self._get_token_index_bounds(tok_f_mins, tok_f_maxs)
+
+        within_det = np.tile(np.arange(T), num_dets)
+        det_block = np.repeat(np.arange(num_dets), T)
+
+        det_dim = (num_dets,) if self.independent_detectors else ()
+        shape = batch_shape + det_dim
+
+        if shape:
+            i_lower = np.random.randint(0, i_lower_max + 1, size=shape)
+            i_upper = np.random.randint(i_upper_min, T, size=shape)
+        else:
+            i_lower = int(np.random.randint(0, i_lower_max + 1))
+            i_upper = int(np.random.randint(i_upper_min, T))
+
+        if self.mask_probability < 1.0:
+            if shape:
+                apply = np.random.uniform(size=shape) <= self.mask_probability
+                i_lower = np.where(apply, i_lower, 0)
+                if self.independent_lower_upper:
+                    apply = np.random.uniform(size=shape) <= self.mask_probability
+                i_upper = np.where(apply, i_upper, T - 1)
+            else:
+                apply = np.random.uniform() <= self.mask_probability
+                if not apply:
+                    i_lower = 0
+                if self.independent_lower_upper:
+                    apply = np.random.uniform() <= self.mask_probability
+                if not apply:
+                    i_upper = T - 1
+
+        if self.independent_detectors:
+            i_lower_tok = i_lower[..., det_block]
+            i_upper_tok = i_upper[..., det_block]
+        else:
+            i_lower_tok = i_lower[..., np.newaxis] if batch_shape else i_lower
+            i_upper_tok = i_upper[..., np.newaxis] if batch_shape else i_upper
+
+        sample["token_mask"] = (
+            mask | (within_det < i_lower_tok) | (within_det > i_upper_tok)
+        )
         return sample
 
 

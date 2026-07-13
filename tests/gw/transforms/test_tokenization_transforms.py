@@ -6,6 +6,7 @@ from dingo.gw.transforms import (
     StrainTokenization,
     MaskRandomTokens,
     MaskDetectors,
+    MaskRandomFrequencyRange,
     DETECTOR_DICT,
 )
 
@@ -56,7 +57,7 @@ def make_sample(domain, batch_size, num_channels=3):
 
 
 def _check_position_and_mask(out, domain, num_tokens_per_block, num_blocks):
-    """Shared checks for position and drop_token_mask outputs."""
+    """Shared checks for position and token_mask outputs."""
     num_tokens = num_tokens_per_block * num_blocks
 
     # position shape
@@ -103,10 +104,10 @@ def _check_position_and_mask(out, domain, num_tokens_per_block, num_blocks):
         len(unique_det_indices) == num_blocks
     ), "Detector indices are not unique across blocks"
 
-    # drop_token_mask: shape and default all-False
-    assert out["drop_token_mask"].shape[-1] == num_tokens
+    # token_mask: shape and default all-False
+    assert out["token_mask"].shape[-1] == num_tokens
     assert not out[
-        "drop_token_mask"
+        "token_mask"
     ].any(), "Default mask should keep all tokens (all False)"
 
 
@@ -290,7 +291,7 @@ def test_three_detectors():
 
 
 def test_output_dtype():
-    """Output arrays preserve input dtype; drop_token_mask is always bool."""
+    """Output arrays preserve input dtype; token_mask is always bool."""
     domain = make_ufd()
 
     for dtype in (np.float32, np.float64):
@@ -304,7 +305,7 @@ def test_output_dtype():
 
         assert out["waveform"].dtype == dtype, f"waveform dtype changed from {dtype}"
         assert out["position"].dtype == dtype, f"position dtype changed from {dtype}"
-        assert out["drop_token_mask"].dtype == bool
+        assert out["token_mask"].dtype == bool
 
 
 def test_mutual_exclusivity():
@@ -336,26 +337,26 @@ def _tokenized_sample(num_tokens=86):
     return {
         "waveform": np.zeros((num_tokens, 48)),
         "position": np.zeros((num_tokens, 3)),
-        "drop_token_mask": np.zeros(num_tokens, dtype=bool),
+        "token_mask": np.zeros(num_tokens, dtype=bool),
     }
 
 
 def test_mask_random_tokens_shape_preserved():
     sample = _tokenized_sample()
     out = MaskRandomTokens(mask_probability=0.1)(sample)
-    assert out["drop_token_mask"].shape == sample["drop_token_mask"].shape
+    assert out["token_mask"].shape == sample["token_mask"].shape
 
 
 def test_mask_random_tokens_dtype_bool():
     sample = _tokenized_sample()
     out = MaskRandomTokens(mask_probability=0.1)(sample)
-    assert out["drop_token_mask"].dtype == bool
+    assert out["token_mask"].dtype == bool
 
 
 def test_mask_random_tokens_zero_probability_keeps_all():
     sample = _tokenized_sample(num_tokens=200)
     out = MaskRandomTokens(mask_probability=0.0)(sample)
-    assert not out["drop_token_mask"].any()
+    assert not out["token_mask"].any()
 
 
 def test_mask_random_tokens_high_probability_masks_most():
@@ -364,23 +365,23 @@ def test_mask_random_tokens_high_probability_masks_most():
     sample = _tokenized_sample(num_tokens=1000)
     out = MaskRandomTokens(mask_probability=0.9)(sample)
     np.random.set_state(rng_state)
-    assert out["drop_token_mask"].sum() > 800
+    assert out["token_mask"].sum() > 800
 
 
 def test_mask_random_tokens_does_not_modify_input():
     sample = _tokenized_sample()
-    original_mask = sample["drop_token_mask"].copy()
+    original_mask = sample["token_mask"].copy()
     MaskRandomTokens(mask_probability=0.5)(sample)
-    assert np.array_equal(sample["drop_token_mask"], original_mask)
+    assert np.array_equal(sample["token_mask"], original_mask)
 
 
 def test_mask_random_tokens_preserves_existing_masked_tokens():
     """Existing True entries must remain True; new masks only add True entries."""
     sample = _tokenized_sample(num_tokens=100)
-    sample["drop_token_mask"][:10] = True
+    sample["token_mask"][:10] = True
     out = MaskRandomTokens(mask_probability=0.0)(sample)
-    assert np.all(out["drop_token_mask"][:10])
-    assert not out["drop_token_mask"][10:].any()
+    assert np.all(out["token_mask"][:10])
+    assert not out["token_mask"][10:].any()
 
 
 def test_mask_random_tokens_invalid_probability():
@@ -396,11 +397,11 @@ def test_mask_random_tokens_batched_mask():
     sample = {
         "waveform": np.zeros((batch_size, num_tokens, 48)),
         "position": np.zeros((batch_size, num_tokens, 3)),
-        "drop_token_mask": np.zeros((batch_size, num_tokens), dtype=bool),
+        "token_mask": np.zeros((batch_size, num_tokens), dtype=bool),
     }
     out = MaskRandomTokens(mask_probability=0.5)(sample)
-    assert out["drop_token_mask"].shape == (batch_size, num_tokens)
-    assert out["drop_token_mask"].dtype == bool
+    assert out["token_mask"].shape == (batch_size, num_tokens)
+    assert out["token_mask"].dtype == bool
 
 
 # ---------------------------------------------------------------------------
@@ -420,26 +421,26 @@ def _detector_sample(num_tokens_per_det=43, detectors=("H1", "L1")):
     return {
         "waveform": np.zeros((num_tokens, 48)),
         "position": position,
-        "drop_token_mask": np.zeros(num_tokens, dtype=bool),
+        "token_mask": np.zeros(num_tokens, dtype=bool),
     }
 
 
 def test_mask_detectors_shape_preserved():
     sample = _detector_sample()
     out = MaskDetectors(mask_probability=0.5)(sample)
-    assert out["drop_token_mask"].shape == sample["drop_token_mask"].shape
+    assert out["token_mask"].shape == sample["token_mask"].shape
 
 
 def test_mask_detectors_dtype_bool():
     sample = _detector_sample()
     out = MaskDetectors(mask_probability=0.5)(sample)
-    assert out["drop_token_mask"].dtype == bool
+    assert out["token_mask"].dtype == bool
 
 
 def test_mask_detectors_zero_probability_keeps_all():
     sample = _detector_sample()
     out = MaskDetectors(mask_probability=0.0)(sample)
-    assert not out["drop_token_mask"].any()
+    assert not out["token_mask"].any()
 
 
 def test_mask_detectors_high_probability_masks_most():
@@ -447,23 +448,23 @@ def test_mask_detectors_high_probability_masks_most():
     np.random.seed(0)
     sample = _detector_sample(num_tokens_per_det=200, detectors=("H1", "L1", "V1"))
     results = [MaskDetectors(mask_probability=0.9)(sample) for _ in range(20)]
-    masked_fractions = [r["drop_token_mask"].mean() for r in results]
+    masked_fractions = [r["token_mask"].mean() for r in results]
     np.random.set_state(rng_state)
     assert np.mean(masked_fractions) > 0.5
 
 
 def test_mask_detectors_does_not_modify_input():
     sample = _detector_sample()
-    original_mask = sample["drop_token_mask"].copy()
+    original_mask = sample["token_mask"].copy()
     MaskDetectors(mask_probability=0.5)(sample)
-    assert np.array_equal(sample["drop_token_mask"], original_mask)
+    assert np.array_equal(sample["token_mask"], original_mask)
 
 
 def test_mask_detectors_preserves_existing_masks():
     sample = _detector_sample(num_tokens_per_det=43)
-    sample["drop_token_mask"][:5] = True
+    sample["token_mask"][:5] = True
     out = MaskDetectors(mask_probability=0.0)(sample)
-    assert np.all(out["drop_token_mask"][:5])
+    assert np.all(out["token_mask"][:5])
 
 
 def test_mask_detectors_all_or_nothing_per_detector():
@@ -476,7 +477,7 @@ def test_mask_detectors_all_or_nothing_per_detector():
     )
     for _ in range(20):
         out = MaskDetectors(mask_probability=0.5)(sample)
-        mask = out["drop_token_mask"]
+        mask = out["token_mask"]
         for i, det in enumerate(detectors):
             tok_slice = slice(i * num_tokens_per_det, (i + 1) * num_tokens_per_det)
             det_mask = mask[tok_slice]
@@ -505,14 +506,202 @@ def test_mask_detectors_batched():
     sample = {
         "waveform": np.zeros((batch_size, num_tokens, 48)),
         "position": position,
-        "drop_token_mask": np.zeros((batch_size, num_tokens), dtype=bool),
+        "token_mask": np.zeros((batch_size, num_tokens), dtype=bool),
     }
     out = MaskDetectors(mask_probability=0.5)(sample)
-    assert out["drop_token_mask"].shape == (batch_size, num_tokens)
-    assert out["drop_token_mask"].dtype == bool
+    assert out["token_mask"].shape == (batch_size, num_tokens)
+    assert out["token_mask"].dtype == bool
     # Each batch element's tokens for a given detector must be uniformly masked
     for b in range(batch_size):
         for i in range(len(detectors)):
             tok_slice = slice(i * num_tokens_per_det, (i + 1) * num_tokens_per_det)
-            det_mask = out["drop_token_mask"][b, tok_slice]
+            det_mask = out["token_mask"][b, tok_slice]
             assert det_mask.all() or not det_mask.any()
+
+
+# ---------------------------------------------------------------------------
+# MaskRandomFrequencyRange tests
+# ---------------------------------------------------------------------------
+
+
+def _freq_range_sample(
+    num_tokens_per_det=20, detectors=("H1", "L1"), f_min=20.0, f_max=1020.0
+):
+    """Minimal tokenized sample with realistic position encoding."""
+    num_dets = len(detectors)
+    T = num_tokens_per_det
+    num_tokens = T * num_dets
+    token_width = (f_max - f_min) / T
+
+    # Build per-token f_min/f_max for one detector (shared across all)
+    tok_fmins = f_min + np.arange(T) * token_width
+    tok_fmaxs = tok_fmins + token_width
+
+    position = np.zeros((num_tokens, 3))
+    for i, det in enumerate(detectors):
+        sl = slice(i * T, (i + 1) * T)
+        position[sl, 0] = tok_fmins
+        position[sl, 1] = tok_fmaxs
+        position[sl, 2] = DETECTOR_DICT[det]
+
+    return {
+        "waveform": np.zeros((num_tokens, 48)),
+        "position": position,
+        "token_mask": np.zeros(num_tokens, dtype=bool),
+    }
+
+
+def _contiguous_unmasked(mask_1d):
+    """True if the False (unmasked) entries form a contiguous block."""
+    unmasked = np.where(~mask_1d)[0]
+    if len(unmasked) == 0:
+        return True  # fully masked is degenerate-contiguous
+    return int(unmasked[-1]) - int(unmasked[0]) == len(unmasked) - 1
+
+
+def test_mask_random_frequency_range_shape_preserved():
+    sample = _freq_range_sample()
+    out = MaskRandomFrequencyRange(f_min_upper=200.0, f_max_lower=800.0)(sample)
+    assert out["token_mask"].shape == sample["token_mask"].shape
+    assert out["token_mask"].dtype == bool
+
+
+def test_mask_random_frequency_range_does_not_modify_input():
+    sample = _freq_range_sample()
+    original = sample["token_mask"].copy()
+    MaskRandomFrequencyRange(f_min_upper=200.0, f_max_lower=800.0)(sample)
+    assert np.array_equal(sample["token_mask"], original)
+
+
+def test_mask_random_frequency_range_preserves_existing_masks():
+    sample = _freq_range_sample()
+    sample["token_mask"][0] = True
+    out = MaskRandomFrequencyRange(
+        f_min_upper=None, f_max_lower=None, mask_probability=0.0
+    )(sample)
+    assert out["token_mask"][0]
+
+
+def test_mask_random_frequency_range_zero_probability_no_masking():
+    """mask_probability=0 must never mask any additional tokens."""
+    sample = _freq_range_sample()
+    for _ in range(20):
+        out = MaskRandomFrequencyRange(
+            f_min_upper=200.0, f_max_lower=800.0, mask_probability=0.0
+        )(sample)
+        assert not out["token_mask"].any()
+
+
+def test_mask_random_frequency_range_no_bounds_no_masking():
+    """With no f_min_upper and no f_max_lower, no tokens should be masked."""
+    sample = _freq_range_sample()
+    for _ in range(20):
+        out = MaskRandomFrequencyRange()(sample)
+        assert not out["token_mask"].any()
+
+
+def test_mask_random_frequency_range_contiguous_unmasked_per_detector():
+    """Within each detector the unmasked tokens must form a contiguous block."""
+    np.random.seed(0)
+    T = 20
+    detectors = ("H1", "L1")
+    sample = _freq_range_sample(num_tokens_per_det=T, detectors=detectors)
+    transform = MaskRandomFrequencyRange(f_min_upper=200.0, f_max_lower=800.0)
+    for _ in range(30):
+        out = transform(sample)
+        mask = out["token_mask"]
+        for i in range(len(detectors)):
+            det_mask = mask[i * T : (i + 1) * T]
+            assert _contiguous_unmasked(
+                det_mask
+            ), f"Detector {detectors[i]} has non-contiguous unmasked tokens: {det_mask}"
+
+
+def test_mask_random_frequency_range_f_min_upper_respected():
+    """The sampled lower boundary must never exceed f_min_upper."""
+    np.random.seed(1)
+    T = 20
+    f_min, f_max = 20.0, 1020.0
+    f_min_upper = 220.0  # corresponds to token index 4 (token width = 50 Hz)
+    sample = _freq_range_sample(num_tokens_per_det=T, f_min=f_min, f_max=f_max)
+    transform = MaskRandomFrequencyRange(f_min_upper=f_min_upper)
+    for _ in range(30):
+        out = transform(sample)
+        # First unmasked token for H1 must have f_min <= f_min_upper
+        h1_mask = out["token_mask"][:T]
+        first_unmasked = np.where(~h1_mask)[0]
+        if len(first_unmasked) > 0:
+            assert sample["position"][first_unmasked[0], 0] <= f_min_upper
+
+
+def test_mask_random_frequency_range_f_max_lower_respected():
+    """The sampled upper boundary must never fall below f_max_lower."""
+    np.random.seed(2)
+    T = 20
+    f_min, f_max = 20.0, 1020.0
+    f_max_lower = 820.0  # corresponds to token index 16
+    sample = _freq_range_sample(num_tokens_per_det=T, f_min=f_min, f_max=f_max)
+    transform = MaskRandomFrequencyRange(f_max_lower=f_max_lower)
+    for _ in range(30):
+        out = transform(sample)
+        h1_mask = out["token_mask"][:T]
+        last_unmasked = np.where(~h1_mask)[0]
+        if len(last_unmasked) > 0:
+            assert sample["position"][last_unmasked[-1], 1] >= f_max_lower
+
+
+def test_mask_random_frequency_range_independent_detectors_false():
+    """With independent_detectors=False all detectors share the same boundary."""
+    np.random.seed(3)
+    T = 20
+    detectors = ("H1", "L1")
+    sample = _freq_range_sample(num_tokens_per_det=T, detectors=detectors)
+    transform = MaskRandomFrequencyRange(
+        f_min_upper=200.0, f_max_lower=800.0, independent_detectors=False
+    )
+    for _ in range(30):
+        out = transform(sample)
+        mask = out["token_mask"]
+        h1_mask = mask[:T]
+        l1_mask = mask[T:]
+        assert np.array_equal(h1_mask, l1_mask), "Detectors should share the same mask"
+
+
+def test_mask_random_frequency_range_invalid_args():
+    with pytest.raises(ValueError):
+        MaskRandomFrequencyRange(mask_probability=1.5)
+    with pytest.raises(ValueError):
+        MaskRandomFrequencyRange(f_min_upper=800.0, f_max_lower=200.0)
+
+
+def test_mask_random_frequency_range_batched():
+    """Batched inputs produce per-sample independent masking."""
+    np.random.seed(4)
+    batch_size, T = 8, 20
+    detectors = ("H1", "L1")
+    num_dets = len(detectors)
+    num_tokens = T * num_dets
+    f_min, f_max = 20.0, 1020.0
+    token_width = (f_max - f_min) / T
+    tok_fmins = f_min + np.arange(T) * token_width
+    tok_fmaxs = tok_fmins + token_width
+
+    position = np.zeros((batch_size, num_tokens, 3))
+    for i, det in enumerate(detectors):
+        sl = slice(i * T, (i + 1) * T)
+        position[:, sl, 0] = tok_fmins
+        position[:, sl, 1] = tok_fmaxs
+        position[:, sl, 2] = DETECTOR_DICT[det]
+
+    sample = {
+        "waveform": np.zeros((batch_size, num_tokens, 48)),
+        "position": position,
+        "token_mask": np.zeros((batch_size, num_tokens), dtype=bool),
+    }
+    out = MaskRandomFrequencyRange(f_min_upper=200.0, f_max_lower=800.0)(sample)
+    assert out["token_mask"].shape == (batch_size, num_tokens)
+    assert out["token_mask"].dtype == bool
+    for b in range(batch_size):
+        for i in range(num_dets):
+            det_mask = out["token_mask"][b, i * T : (i + 1) * T]
+            assert _contiguous_unmasked(det_mask)

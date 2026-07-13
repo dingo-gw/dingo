@@ -6,4 +6,4 @@ from .gnpe_transforms import *
 from .inference_transforms import *
 from .utils import *
 from .waveform_transforms import *
-from .tokenization_transforms import StrainTokenization, MaskRandomTokens, MaskDetectors, DETECTOR_DICT
+from .tokenization_transforms import StrainTokenization, MaskRandomTokens, MaskDetectors, MaskRandomFrequencyRange, DETECTOR_DICT
