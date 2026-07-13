@@ -23,11 +23,13 @@ from dingo.gw.transforms import (
     GetDetectorTimes,
     CropMaskStrainRandom,
     StrainTokenization,
+    MaskRandomTokens,
 )
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.prior import default_inference_parameters
 from dingo.gw.gwutils import *
 from dingo.core.utils import *
+from dingo.core.utils.backward_compatibility import update_data_config
 
 
 def build_dataset(
@@ -83,6 +85,7 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         List of sub-transforms to omit from the full composition.
     """
 
+    update_data_config(data_settings)  # For backward compatibility
     print(f"Setting train transforms.")
     if omit_transforms is not None:
         print("Omitting \n\t" + "\n\t".join([t.__name__ for t in omit_transforms]))
@@ -187,6 +190,8 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
                 drop_last_token=tok.get("drop_last_token", False),
             )
         )
+        if "mask_random_tokens" in tok:
+            transforms.append(MaskRandomTokens(**tok["mask_random_tokens"]))
 
     selected_keys = ["inference_parameters", "waveform"]
     if "tokenization" in data_settings:

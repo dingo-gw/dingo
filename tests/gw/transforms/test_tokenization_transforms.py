@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain
-from dingo.gw.transforms import StrainTokenization, DETECTOR_DICT
+from dingo.gw.transforms import StrainTokenization, MaskRandomTokens, DETECTOR_DICT
 
 
 # ---------------------------------------------------------------------------
@@ -319,3 +319,80 @@ def test_mfd_incompatible_nodes():
     domain = make_mfd()
     with pytest.raises(ValueError):
         StrainTokenization(domain, token_size=200, print_output=False)
+
+
+# ---------------------------------------------------------------------------
+# MaskRandomTokens tests
+# ---------------------------------------------------------------------------
+
+
+def _tokenized_sample(num_tokens=86):
+    """Minimal sample as produced by StrainTokenization."""
+    return {
+        "waveform": np.zeros((num_tokens, 48)),
+        "position": np.zeros((num_tokens, 3)),
+        "drop_token_mask": np.zeros(num_tokens, dtype=bool),
+    }
+
+
+def test_mask_random_tokens_shape_preserved():
+    sample = _tokenized_sample()
+    out = MaskRandomTokens(drop_probability=0.1)(sample)
+    assert out["drop_token_mask"].shape == sample["drop_token_mask"].shape
+
+
+def test_mask_random_tokens_dtype_bool():
+    sample = _tokenized_sample()
+    out = MaskRandomTokens(drop_probability=0.1)(sample)
+    assert out["drop_token_mask"].dtype == bool
+
+
+def test_mask_random_tokens_zero_probability_keeps_all():
+    sample = _tokenized_sample(num_tokens=200)
+    out = MaskRandomTokens(drop_probability=0.0)(sample)
+    assert not out["drop_token_mask"].any()
+
+
+def test_mask_random_tokens_high_probability_masks_most():
+    rng_state = np.random.get_state()
+    np.random.seed(0)
+    sample = _tokenized_sample(num_tokens=1000)
+    out = MaskRandomTokens(drop_probability=0.9)(sample)
+    np.random.set_state(rng_state)
+    assert out["drop_token_mask"].sum() > 800
+
+
+def test_mask_random_tokens_does_not_modify_input():
+    sample = _tokenized_sample()
+    original_mask = sample["drop_token_mask"].copy()
+    MaskRandomTokens(drop_probability=0.5)(sample)
+    assert np.array_equal(sample["drop_token_mask"], original_mask)
+
+
+def test_mask_random_tokens_preserves_existing_masked_tokens():
+    """Existing True entries must remain True; new masks only add True entries."""
+    sample = _tokenized_sample(num_tokens=100)
+    sample["drop_token_mask"][:10] = True
+    out = MaskRandomTokens(drop_probability=0.0)(sample)
+    assert np.all(out["drop_token_mask"][:10])
+    assert not out["drop_token_mask"][10:].any()
+
+
+def test_mask_random_tokens_invalid_probability():
+    with pytest.raises(ValueError):
+        MaskRandomTokens(drop_probability=1.0)
+    with pytest.raises(ValueError):
+        MaskRandomTokens(drop_probability=-0.1)
+
+
+def test_mask_random_tokens_batched_mask():
+    """Works correctly on batched masks produced by StrainTokenization."""
+    batch_size, num_tokens = 8, 86
+    sample = {
+        "waveform": np.zeros((batch_size, num_tokens, 48)),
+        "position": np.zeros((batch_size, num_tokens, 3)),
+        "drop_token_mask": np.zeros((batch_size, num_tokens), dtype=bool),
+    }
+    out = MaskRandomTokens(drop_probability=0.5)(sample)
+    assert out["drop_token_mask"].shape == (batch_size, num_tokens)
+    assert out["drop_token_mask"].dtype == bool

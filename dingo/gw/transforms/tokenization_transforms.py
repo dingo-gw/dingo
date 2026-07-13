@@ -199,6 +199,37 @@ class StrainTokenization:
         return sample
 
 
+class MaskRandomTokens:
+    """
+    Randomly mask tokens by setting entries in ``drop_token_mask`` to True.
+
+    Applied after StrainTokenization to implement token-level masking during
+    training and validation. Each token is masked independently with probability
+    ``drop_probability``.
+
+    Operates on numpy arrays and must therefore be placed before ToTorch in the
+    transform chain.
+    """
+
+    def __init__(self, drop_probability: float):
+        """
+        Parameters
+        ----------
+        drop_probability:
+            Probability in [0, 1) that each token is masked out.
+        """
+        if not 0.0 <= drop_probability < 1.0:
+            raise ValueError("drop_probability must be in [0, 1).")
+        self.drop_probability = drop_probability
+
+    def __call__(self, sample: dict) -> dict:
+        sample = sample.copy()
+        mask = sample["drop_token_mask"]
+        random_mask = np.random.random(mask.shape) < self.drop_probability
+        sample["drop_token_mask"] = mask | random_mask
+        return sample
+
+
 def _check_mfd_node_compatibility(
     f_mins: np.ndarray,
     f_maxs: np.ndarray,

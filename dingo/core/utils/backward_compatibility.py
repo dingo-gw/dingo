@@ -130,6 +130,21 @@ def check_minimum_version(version_str: str, raise_exception: bool = False) -> No
             _logger.warning("\n========\nWARNING!\n\n" + error_str + "\n=======\n")
 
 
+def update_data_config(data_settings: dict):
+    """
+    Update data settings to ensure backwards compatibility with networks trained
+    using previous versions of Dingo.
+
+    Parameters
+    ----------
+    data_settings : dict
+        Data settings to be updated in-place.
+    """
+    tok = data_settings.get("tokenization")
+    if tok is not None and "drop_random_tokens" in tok and "mask_random_tokens" not in tok:
+        tok["mask_random_tokens"] = tok.pop("drop_random_tokens")
+
+
 def update_model_config(model_settings: dict):
     """
     Update the model settings to ensure backwards compatibility with networks
