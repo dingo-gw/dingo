@@ -31,7 +31,9 @@ project:
 website:
   title: "Dingo"
   description: "Neural posterior estimation for gravitational-wave inference"
-  site-url: "https://dingo-gw.github.io/dingo"
+  # Canonical home on Read the Docs ("latest" = default branch; other versions are
+  # served under /en/<version>/).
+  site-url: "https://dingo-gw.readthedocs.io/en/latest"
   repo-url: "https://github.com/dingo-gw/dingo"
   # Top navbar: quick links to the major documentation sections. The brand
   # ("Dingo", top-left) links home. The full docs tree also lives in the left

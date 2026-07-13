@@ -80,10 +80,14 @@ pip install -e ".[dev,wandb]"
 The documentation is built with [Quarto](https://quarto.org) and
 [`quartodoc`](https://machow.github.io/quartodoc/), which generates the API reference from
 the package docstrings. First [install Quarto](https://quarto.org/docs/download/), then
-install `quartodoc`:
+install the Python doc tooling (pinned in the `docs` dependency group; `jupyter` is
+needed to render the notebook pages). From the repo root:
 ```sh
-pip install "quartodoc==0.11.1" "griffe==1.15.0"
+pip install --group docs jupyter
 ```
+The hosted documentation on [Read the Docs](https://dingo-gw.readthedocs.io) runs this
+same build via `.readthedocs.yaml`; every pull request gets a preview build, linked
+from the PR checks.
 
 The documentation sources live in `docs/source`. From that directory, first refresh the
 API reference: `gen_api.py` scans the `dingo` package and lists every public object in

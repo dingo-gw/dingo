@@ -1,0 +1,32 @@
+# .readthedocs.yaml
+# Read the Docs configuration file
+# See https://docs.readthedocs.io/en/stable/config-file/v2.html for details
+#
+# The docs are built with Quarto + quartodoc (see docs/README.md). Read the Docs has
+# no native Quarto support, so `build.commands` overrides the whole build process:
+# install Quarto, generate the API reference, render, and place the site in
+# $READTHEDOCS_OUTPUT/html. Hosting on Read the Docs (rather than GitHub Pages)
+# keeps versioned docs, pull-request preview builds, and the existing
+# dingo-gw.readthedocs.io URLs.
+#
+# The API build (gen_api.py / build_api.py) parses the dingo source statically via
+# ast/griffe, so the dingo package is NOT installed here — no torch, no GSL.
+
+version: 2
+
+build:
+  os: ubuntu-24.04
+  tools:
+    python: "3.11"
+  commands:
+    # Quarto is a standalone binary; pin the version the migration was tested with.
+    - wget -q https://github.com/quarto-dev/quarto-cli/releases/download/v1.9.38/quarto-1.9.38-linux-amd64.tar.gz
+    - tar -xzf quarto-1.9.38-linux-amd64.tar.gz
+    # quartodoc/griffe pins live in the `docs` dependency group of pyproject.toml
+    # (single source for local + CI builds). `--group` needs pip >= 25.1, hence the
+    # upgrade. jupyter is needed by Quarto to render the .ipynb pages (not executed).
+    - pip install --upgrade pip
+    - pip install --group docs jupyter
+    - cd docs/source && python gen_api.py && python build_api.py
+    - cd docs/source && ../../quarto-1.9.38/bin/quarto render
+    - mkdir -p $READTHEDOCS_OUTPUT/html && cp -r docs/source/_site/. $READTHEDOCS_OUTPUT/html/
