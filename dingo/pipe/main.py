@@ -180,8 +180,8 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
                 asd_key = ifo_name # normal detector, e.g. 'H1'
             else:
                 asd_key = [ifo.name for ifo in InterferometerList([ifo_name])][0]  # 'ET'-> 'ET1' and fixing 'ET1'
-            psd_path = asd_dataset.save_psd(args.outdir, ifo_name, rng=rng)
-            psd_dict[ifo_name] = str(psd_path)
+            psd_path = asd_dataset.save_psd(args.outdir, asd_key, rng=rng)
+            psd_dict[ifo_name] = str(psd_path) # keyed by 'ET'
         args.asd_dataset = None
         args.psd_dict = str(psd_dict)
 
