@@ -4,34 +4,34 @@ Sampling the posterior involves more than a pass through a neural network: fixed
 parameters are filled in from the prior, coordinates are rotated between reference
 frames, GNPE introduces proxy variables, and a marginalized phase may be reconstructed
 from the likelihood. Dingo's *factorized sampler* expresses all of this as an explicit
-chain of steps acting on a growing table of named parameter columns. Each step is a
-conditional distribution over the block it produces, and the chain samples the
-posterior as an ordered product,
+chain of steps acting on a growing table of named parameter columns. The *factors*
+among the steps sample the posterior as an ordered product of conditionals,
 
 $$
 q(\theta_1, \ldots, \theta_n | d) = \prod_i q_i(\theta_i | \theta_{<i}, d).
 $$
 
-A *factor* is a stochastic conditional. A deterministic step enters as a Dirac delta:
-$\delta(\theta_i - f(\theta_{<i}))$ for a reparametrization, and $\delta(\theta_i - c)$
-for a pinned value. Sampling records the log density of the final table, which
-importance sampling later divides by, and each step contributes one term,
+A factor may be stochastic (a network) or a point mass pinning parameters to fixed
+values, which are conditioned on rather than integrated over. A *reparametrization*
+is a bijective change of variables: it replaces sampled columns with transformed
+ones, so its inputs disappear from the table and the density picks up a Jacobian
+term rather than a new factor. Sampling records the log density of the final table,
+which importance sampling later divides by, and each step contributes one term,
 
 $$
 \log q(\theta | d) = \sum_i \Delta_i,
 $$
 
-where $\Delta_i = \log q_i$ for a factor, $-\log\lvert\det J_i\rvert$ for a delta
-whose inputs the step consumes (the change of variables), and $0$ for a delta whose
-value remains in the table (a pinned value is conditioned on, not integrated over).
-These cases correspond to the [step types](#steps) below. Two example chains:
+where $\Delta_i = \log q_i$ for a factor (identically zero for a point mass) and
+$-\log\lvert\det J_i\rvert$ for a reparametrization. These cases correspond to the
+[step types](#steps) below. Two example chains:
 
 * **Plain NPE** (`FlowFactor → RAToEventFrame`): the network, followed by a rotation
   of the right ascension from the training reference frame to the event frame.
-* **DINGO-BNS prior conditioning** (`DeltaFactor → RAToTrainingFrame → FlowFactor →
-  ProxyOffsetReparam → RAToEventFrame`): pinned proxy and sky values feed a
-  conditioned network, whose offset output is then reconstructed into the physical
-  chirp mass.
+* **DINGO-BNS prior conditioning** (`DeltaFactor → RAToTrainingFrame →
+  FlowFactor → ProxyOffsetReparam → RAToEventFrame`): pinned proxy and sky values
+  feed a conditioned network, whose offset output is then reconstructed into the
+  physical chirp mass.
 
 At construction the composer checks the chain for consistency: every conditioning
 column must be produced by an earlier step. It then runs the steps in order,
@@ -58,6 +58,11 @@ flowchart TB
     class s1,s2,sn step
     class dots ghost
 ```
+
+In the figure every step is written as a conditional $q_i$, which covers all
+factors, point masses included. A reparametrization instead replaces columns in
+place, adding its Jacobian term to the sum but no factor to the product (see
+[the proposal density](#the-proposal-density-forward-and-reverse)).
 
 The generic machinery lives in `dingo.core.factors` (steps, stages, the composer, the
 runner); the gravitational-wave steps, the per-event context, and the chain builders
@@ -135,9 +140,9 @@ carries no sample multiplicity.
 
 ### Target corrections
 
-A `TargetCorrection` contributes nothing to the proposal density. It emits a
-side-channel column, `delta_log_prob_target`, which importance sampling adds to the
-*target* log density. This covers cases where the target is not simply
+A `TargetCorrection` emits a side-channel column, `delta_log_prob_target`, which
+importance sampling adds to the *target* log density; it contributes nothing to the
+proposal. This covers cases where the target is not simply
 $\pi(\theta)\,\mathcal{L}(\theta)$. Because the emitted column is an annotation
 rather than a parameter block, the step stands outside the product of conditionals
 and contributes $\Delta_i = 0$. The one instance is `GNPEKernelCorrection`: in
@@ -318,16 +323,14 @@ step saw during sampling: a reparametrization rebuilds its consumed inputs via
 The reverse fold is what makes single-step GNPE and prior conditioning
 density-preserving end to end.
 
-The delta view of deterministic steps unifies this bookkeeping. A deterministic step
-is a point-mass kernel, and its delta is resolved in one of two ways. If the step
-*consumes* its inputs, the delta is integrated out against them and leaves the
-Jacobian term. This requires the map to be invertible, which is why `inverse` is part
-of the `Reparametrization` contract, and why a `TargetCorrection` (which has no
-inverse) may consume only side-channel intermediates. If the value instead *remains*
-in the table, the target conditions on the same value and the delta cancels in the
-importance weight; the analysis is then conditional on the pinned values. A
-`GibbsBlock` is also a kernel, but one whose output density is intractable, which is
-what "density-free" means.
+Two special cases complete the bookkeeping. A point-mass factor contributes zero to
+the proposal, and the target conditions on the same pinned value, so the analysis is
+conditional on the pins rather than integrating over them. A reparametrization
+removes the columns it consumes, which is lawful only for an invertible map: the
+change of variables supplies the density on the new columns, and the reverse fold
+restores the old ones through `inverse`. This is also why a `TargetCorrection`,
+which has no inverse, may consume only side-channel intermediates. A `GibbsBlock`
+yields samples whose density is intractable, which is what "density-free" means.
 
 ## Provenance
 
