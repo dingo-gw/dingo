@@ -60,6 +60,7 @@ As training a network from scratch can be expensive, we intend to also distribut
    network_architecture
    training
    inference
+   sampling_chains
    gnpe
    result
    dingo_pipe

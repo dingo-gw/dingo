@@ -678,7 +678,7 @@ class Stage:
 
 class ChainComposer:
     """
-    Autoregressive composer over an ordered list of `Stage`s.
+    Autoregressive composer over an ordered list of `Stage` entries.
 
     Folds the steps in declared order -- a topological order of the conditioning DAG --
     expanding each by its fan-out and summing the proposal log-probs. A step is a
@@ -688,7 +688,8 @@ class ChainComposer:
     conditioning, synthetic phase, intrinsic/extrinsic splits, and -- via `GibbsBlock` --
     multi-iteration GNPE.
 
-    Accepts bare steps (wrapped as `Stage(step, fan_out=1)`) or explicit `Stage`s.
+    Accepts bare steps (wrapped as `Stage(step, fan_out=1)`) or explicit `Stage`
+    entries.
     """
 
     def __init__(self, stages: list[Union["Stage", Step]]):
