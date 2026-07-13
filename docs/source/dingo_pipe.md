@@ -98,6 +98,8 @@ The next step is sampling from the Dingo model. The model is loaded into a [GWCo
 
 If using GNPE, one can optionally specify `num-gnpe-iterations` (it defaults to 30). Importantly, obtaining the log probability when using GNPE requires an [extra step of training an unconditional flow](result.md#density-recovery). This is done using the `recover-log-prob` flag, which defaults to `True`. The default density recovery settings can be overwritten by providing a `density-recovery-settings` dictionary in the `.ini` file.
 
+Single-network models that condition on context parameters (e.g., chirp-mass-conditioned [BNS](bns.md) networks) take their pinned values from `fixed-context-parameters`, or determine the trigger chirp mass from the data with `chirp-mass-scan`. Both options are described on the [binary neutron stars](bns.md) page.
+
 Since sampling uses GPU hardware, there is an additional key `sampling-requirements` for HTCondor requirements during the sampling stage. This is intended for specifying GPU requirements such as memory or CUDA version.
 
 ## Importance sampling
@@ -110,7 +112,7 @@ If `prior-dict-updates` is specified in the `.ini` file, then this will be used 
 If extending the prior support during importance sampling, be sure that the posterior does not rail up against the prior boundary being extended.
 ```
 
-By default, dingo_pipe assumes that it is necessary to sample the phase synthetically, so it will do so before importance sampling. This can be turned off by passing an empty dictionary to `importance-sampling-settings`. Note that importance sampling itself can be switched off by setting the `importance-sample` flag to False (it defaults to True). 
+By default, dingo_pipe assumes that it is necessary to sample the phase synthetically, so it will do so before importance sampling. This can be turned off by passing an empty dictionary to `importance-sampling-settings`. Note that importance sampling itself can be switched off by setting the `importance-sample` flag to False (it defaults to True). For models using a multibanded frequency domain, the likelihood is evaluated on the undecimated base domain by default (`use_base_domain` in `importance-sampling-settings`).
 
 Importance sampling (including synthetic phase sampling) is an expensive step, so dingo_pipe allows for parallelization: this step is split over `n-parallel` jobs, each of which uses `request-cpus-importance-sampling` processes. In the backend, this makes use of the Result [split()](dingo.core.result.Result.split) and [merge()](dingo.core.result.Result.merge) methods.
 

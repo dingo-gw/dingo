@@ -127,6 +127,17 @@ which wraps the cyclic GNPE loop in a `GibbsBlock` chain step,
 ```
 The block seeds the chain with samples from the initialization network, perturbs them with the kernel to obtain proxy samples, and then performs `num_iterations` Gibbs sweeps (kernel and main-network factors in turn) to obtain the final samples. Because Gibbs sampling breaks density access, the chain yields no log probability; `dingo_pipe` recovers it by training an unconditional flow for the proxies and re-sampling with a single density-preserving step (see [density recovery](result.md#density-recovery)).
 
+## Single-step GNPE
+
+When reliable proxy values are available before sampling, a single GNPE iteration
+suffices, and the chain becomes autoregressive rather than iterative: the sample
+density is preserved, and no recovery step is needed. Dingo uses this in two places.
+In [density recovery](result.md#density-recovery), an unconditional flow trained on
+the Gibbs proxies supplies the proxy values, and a single pass through the main
+network (`GWComposedSampler.from_singlestep_gnpe`) yields new samples together with
+their density. For [binary neutron stars](bns.md), the chirp-mass proxy is fixed per
+event, so sampling is single-step from the start.
+
 ```{eval-rst}
 .. footbibliography::
 ```
