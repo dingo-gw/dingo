@@ -33,13 +33,6 @@ class Sampler(object):
     This is intended for use either as a standalone sampler, or as a sampler producing
     initial sample points for a GNPE sampler.
 
-    Methods
-    -------
-    run_sampler
-    log_prob
-    to_result
-    to_hdf5
-
     Attributes
     ----------
     model : BasePosteriorModel

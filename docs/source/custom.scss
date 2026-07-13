@@ -1,0 +1,130 @@
+/*-- scss:defaults --*/
+
+// ── Typography ───────────────────────────────────────────────────────────────
+// Native system font stack — clean and professional (the reason Starlight reads
+// well), and no external web-font request. System monospace for code.
+// Hard assignments (no !default) so they override flatly's bundled Lato;
+// $web-font-path: false suppresses flatly's Google-Fonts import entirely.
+$web-font-path: false;
+$font-family-sans-serif: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+  "Helvetica Neue", "Noto Sans", Arial, sans-serif;
+$font-family-monospace: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+  "Liberation Mono", "Courier New", monospace;
+
+$line-height-base: 1.65;
+$headings-font-weight: 600;
+
+// ── Colour ───────────────────────────────────────────────────────────────────
+// A restrained, professional-scientific palette: a deep blue accent with neutral
+// greys. Serious and journal-adjacent rather than a vivid indigo. Swap $accent to
+// retint the whole site.
+$accent:       #1b5a8f;   // deep scientific blue
+$accent-dark:  #123f66;   // hover / pressed
+$accent-tint:  #e9f0f6;   // active-item / subtle fills
+$primary:      $accent;
+$link-color:   $accent;
+$body-color:   #1c2530;   // neutral near-black
+$border-color: #e6e8ec;   // neutral hairline
+
+// Navbar (light).
+$navbar-light-color:        #3a434f;
+$navbar-light-hover-color:  $accent;
+$navbar-light-active-color: #3a434f;   // Quarto's active is unreliable here; we
+                                       // highlight the real section via JS instead
+$navbar-light-brand-color:  #1c2530;
+
+/*-- scss:rules --*/
+
+body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+
+// Headings: clear rhythm at natural tracking.
+h1, h2, h3, h4, h5 { line-height: 1.25; }
+h1 { font-weight: 700; }
+
+// A hairline under each section heading.
+main#quarto-document-content h2 {
+  margin-top: 2.5rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid $border-color;
+}
+
+// ── Navbar: clean off-white with a hairline bottom border ────────────────────
+.navbar {
+  background-color: #f7f8fa;
+  border-bottom: 1px solid $border-color;
+  box-shadow: none;
+}
+.navbar .navbar-brand { font-weight: 700; }
+.navbar .navbar-nav .nav-link { font-weight: 500; }
+// Clear active-section cue (applied by JS to the section matching the current
+// page — see the include-in-header script in _quarto.yml).
+.navbar .navbar-nav .nav-link.nav-section-current {
+  color: $accent;
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 $accent;
+}
+// No text-underline on navbar hover (it sits under the text and clashes with the
+// tab-style active bar); the accent colour change is the hover cue.
+.navbar a:hover { text-decoration: none; }
+.navbar .navbar-nav .nav-link:hover { color: $accent; }
+
+// ── Left sidebar: comfortable spacing + accented active item ──────────────────
+.sidebar-navigation .sidebar-item .sidebar-link {
+  border-radius: 6px;
+  padding: 0.2rem 0.55rem;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+.sidebar-navigation .sidebar-item .sidebar-link:hover {
+  background: #eef0f3;
+}
+.sidebar-navigation .sidebar-item .sidebar-link.active {
+  background: $accent-tint;
+  color: $accent;
+  font-weight: 600;
+}
+
+// ── Links (content) ──────────────────────────────────────────────────────────
+a { text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+// Body/content links: subtle permanent underline (not colour-only — WCAG 1.4.1).
+main#quarto-document-content a {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: rgba(27, 90, 143, 0.35);  // $accent @ 35%
+  text-underline-offset: 0.15em;
+}
+main#quarto-document-content a:hover { text-decoration-color: currentColor; }
+main#quarto-document-content .anchorjs-link,
+main#quarto-document-content .quarto-page-breadcrumbs a { text-decoration: none; }
+
+// ── Code ─────────────────────────────────────────────────────────────────────
+// Rounded blocks with a hairline border; neutral-grey inline code chip.
+div.sourceCode, pre { border-radius: 8px; }
+div.sourceCode { border: 1px solid $border-color; }
+// Quarto's base `code { background: #f8f9fa }` isn't theme-aware; neutralise it and
+// chip inline code in the article body (covers `dd`/headings, not just p/li/td), so
+// the two themes chip the same set of elements.
+code { background-color: transparent; }
+main#quarto-document-content :not(pre) > code:not(.sourceCode) {
+  background: #eef0f3;
+  color: #2a3441;
+  padding: 0.12em 0.36em;
+  border-radius: 5px;
+  font-size: 0.86em;
+}
+
+// ── Callouts: rounded, slightly stronger accent bar ──────────────────────────
+.callout.callout-style-default { border-radius: 8px; border-left-width: 4px; }
+
+// ── Mermaid ──────────────────────────────────────────────────────────────────
+// Center the flowchart and cap its width so it isn't oversized.
+.cell-output-display svg,
+figure.quarto-figure svg,
+div.mermaid svg,
+pre.mermaid svg {
+  max-width: 720px;
+  height: auto;
+  display: block;
+  margin-inline: auto;
+}

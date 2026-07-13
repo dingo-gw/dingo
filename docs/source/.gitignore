@@ -1,0 +1,7 @@
+/.quarto/
+**/*.quarto_ipynb
+
+# Rendered site + quartodoc-generated API reference
+/_site/
+/reference/
+/objects.json

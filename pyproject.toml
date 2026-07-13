@@ -75,17 +75,9 @@ dev = [
     "black",
     "htcondor",
     "ipykernel",
-    "linkify-it-py",
-    "myst-nb",
-    "myst-parser",
     "pandas-stubs>=2.3.3.251219",
     "pytest",
     "scipy-stubs>=1.15.3.0",
-    "sphinx",
-    "sphinx-math-dollar",
-    "sphinx-rtd-theme",
-    "sphinxcontrib-mermaid",
-    "sphinxcontrib-bibtex",
 ]
 wandb = ["wandb"]
 pyseobnr = ["pyseobnr"]
@@ -98,14 +90,15 @@ dev = [
 ]
 
 docs = [
-    "linkify-it-py",
-    "myst-nb",
-    "myst-parser",
-    "sphinx",
-    "sphinx-math-dollar",
-    "sphinx-rtd-theme",
-    "sphinxcontrib-mermaid",
-    "sphinxcontrib-bibtex",
+    # Quarto docs toolchain. Quarto itself is a standalone binary (installed via the
+    # CI setup action or https://quarto.org/docs/download/); only the quartodoc Python
+    # bridge is pip-installable. Notebook execution additionally needs the full dingo
+    # runtime, so install the package itself alongside this group.
+    # Pinned exactly: build_api.py hooks quartodoc 0.11.1 internals (the __init__ ->
+    # class Parameters merge), and 0.11.1 needs griffe 1.15.0's parse_numpy signature.
+    # A newer 0.11.x could shift those internals and break the reference build.
+    "quartodoc==0.11.1",
+    "griffe==1.15.0",
 ]
 
 typing = [

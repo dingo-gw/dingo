@@ -8,7 +8,7 @@ To install using pip, run the following within a suitable virtual environment:
 ```sh
 pip install dingo-gw
 ```
-This installs Dingo and its runtime dependencies, as specified in  
+This installs Dingo and its runtime dependencies, as specified in
 [`pyproject.toml`](https://github.com/dingo-gw/dingo/blob/main/pyproject.toml).
 
 Optional functionality can be enabled via extras, for example:
@@ -77,36 +77,34 @@ pip install -e ".[dev,wandb]"
 
 ### Documentation
 
-To build the documentation, first generate the API documentation using [autodoc](https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html):
+The documentation is built with [Quarto](https://quarto.org) and
+[`quartodoc`](https://machow.github.io/quartodoc/), which generates the API reference from
+the package docstrings. First [install Quarto](https://quarto.org/docs/download/), then
+install the Python doc tooling (pinned in the `docs` dependency group; `jupyter` is
+needed to render the notebook pages). From the repo root:
 ```sh
-cd docs
-sphinx-apidoc -o source ../dingo
+pip install --group docs jupyter
 ```
-This will create `dingo.*.rst` and `modules.rst` files in `source/`. These correspond to
-the various modules and are constructed from docstrings.
+The hosted documentation on [Read the Docs](https://dingo-gw.readthedocs.io) runs this
+same build via `.readthedocs.yaml`; every pull request gets a preview build, linked
+from the PR checks.
 
-To finally compile the documentation, run
+The documentation sources live in `docs/source`. From that directory, first refresh the
+API reference: `gen_api.py` scans the `dingo` package and lists every public object in
+`_quarto.yml` (the analogue of `sphinx-apidoc`), then `build_api.py` writes a reference
+page for each object from its docstrings, merging each `__init__`'s parameters into its
+class page:
 ```sh
-make html
+python gen_api.py     # refresh the API object list (run when objects are added or removed)
+python build_api.py   # generate the reference/ pages from docstrings (merges __init__ params)
 ```
-This creates a directory `build/` containing HTML documentation. The main index is at `build/html/index.html`.
-
-To use the autodoc feature, which works for pycharm and numpy docstrings, insert in a .rst file, e.g.,
-
-```
-.. autofunction:: dingo.core.utils.trainutils.write_history`
-```
-
-This will render as 
-
-```{eval-rst}
-.. autofunction:: dingo.core.utils.trainutils.write_history
-```
-
-#### Cleanup
-
-To remove generated docs, execute
+Then render the site:
 ```sh
-make clean
-rm source/dingo.* source/modules.rst
+quarto render
 ```
+The HTML is written to `docs/source/_site`, with the main index at
+`docs/source/_site/index.html`. While editing, run
+```sh
+quarto preview
+```
+to serve the documentation locally with live reload.
