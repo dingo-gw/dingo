@@ -24,6 +24,7 @@ from dingo.gw.transforms import (
     CropMaskStrainRandom,
     StrainTokenization,
     MaskRandomTokens,
+    MaskDetectors,
 )
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.prior import default_inference_parameters
@@ -192,6 +193,8 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         )
         if "mask_random_tokens" in tok:
             transforms.append(MaskRandomTokens(**tok["mask_random_tokens"]))
+        if "mask_detectors" in tok:
+            transforms.append(MaskDetectors(**tok["mask_detectors"]))
 
     selected_keys = ["inference_parameters", "waveform"]
     if "tokenization" in data_settings:

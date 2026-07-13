@@ -141,8 +141,11 @@ def update_data_config(data_settings: dict):
         Data settings to be updated in-place.
     """
     tok = data_settings.get("tokenization")
-    if tok is not None and "drop_random_tokens" in tok and "mask_random_tokens" not in tok:
-        tok["mask_random_tokens"] = tok.pop("drop_random_tokens")
+    if tok is not None:
+        if "drop_random_tokens" in tok and "mask_random_tokens" not in tok:
+            tok["mask_random_tokens"] = tok.pop("drop_random_tokens")
+        if "drop_detectors" in tok and "mask_detectors" not in tok:
+            tok["mask_detectors"] = tok.pop("drop_detectors")
 
 
 def update_model_config(model_settings: dict):

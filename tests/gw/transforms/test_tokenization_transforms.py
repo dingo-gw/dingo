@@ -2,7 +2,12 @@ import numpy as np
 import pytest
 
 from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain
-from dingo.gw.transforms import StrainTokenization, MaskRandomTokens, DETECTOR_DICT
+from dingo.gw.transforms import (
+    StrainTokenization,
+    MaskRandomTokens,
+    MaskDetectors,
+    DETECTOR_DICT,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -337,19 +342,19 @@ def _tokenized_sample(num_tokens=86):
 
 def test_mask_random_tokens_shape_preserved():
     sample = _tokenized_sample()
-    out = MaskRandomTokens(drop_probability=0.1)(sample)
+    out = MaskRandomTokens(mask_probability=0.1)(sample)
     assert out["drop_token_mask"].shape == sample["drop_token_mask"].shape
 
 
 def test_mask_random_tokens_dtype_bool():
     sample = _tokenized_sample()
-    out = MaskRandomTokens(drop_probability=0.1)(sample)
+    out = MaskRandomTokens(mask_probability=0.1)(sample)
     assert out["drop_token_mask"].dtype == bool
 
 
 def test_mask_random_tokens_zero_probability_keeps_all():
     sample = _tokenized_sample(num_tokens=200)
-    out = MaskRandomTokens(drop_probability=0.0)(sample)
+    out = MaskRandomTokens(mask_probability=0.0)(sample)
     assert not out["drop_token_mask"].any()
 
 
@@ -357,7 +362,7 @@ def test_mask_random_tokens_high_probability_masks_most():
     rng_state = np.random.get_state()
     np.random.seed(0)
     sample = _tokenized_sample(num_tokens=1000)
-    out = MaskRandomTokens(drop_probability=0.9)(sample)
+    out = MaskRandomTokens(mask_probability=0.9)(sample)
     np.random.set_state(rng_state)
     assert out["drop_token_mask"].sum() > 800
 
@@ -365,7 +370,7 @@ def test_mask_random_tokens_high_probability_masks_most():
 def test_mask_random_tokens_does_not_modify_input():
     sample = _tokenized_sample()
     original_mask = sample["drop_token_mask"].copy()
-    MaskRandomTokens(drop_probability=0.5)(sample)
+    MaskRandomTokens(mask_probability=0.5)(sample)
     assert np.array_equal(sample["drop_token_mask"], original_mask)
 
 
@@ -373,16 +378,16 @@ def test_mask_random_tokens_preserves_existing_masked_tokens():
     """Existing True entries must remain True; new masks only add True entries."""
     sample = _tokenized_sample(num_tokens=100)
     sample["drop_token_mask"][:10] = True
-    out = MaskRandomTokens(drop_probability=0.0)(sample)
+    out = MaskRandomTokens(mask_probability=0.0)(sample)
     assert np.all(out["drop_token_mask"][:10])
     assert not out["drop_token_mask"][10:].any()
 
 
 def test_mask_random_tokens_invalid_probability():
     with pytest.raises(ValueError):
-        MaskRandomTokens(drop_probability=1.0)
+        MaskRandomTokens(mask_probability=1.0)
     with pytest.raises(ValueError):
-        MaskRandomTokens(drop_probability=-0.1)
+        MaskRandomTokens(mask_probability=-0.1)
 
 
 def test_mask_random_tokens_batched_mask():
@@ -393,6 +398,121 @@ def test_mask_random_tokens_batched_mask():
         "position": np.zeros((batch_size, num_tokens, 3)),
         "drop_token_mask": np.zeros((batch_size, num_tokens), dtype=bool),
     }
-    out = MaskRandomTokens(drop_probability=0.5)(sample)
+    out = MaskRandomTokens(mask_probability=0.5)(sample)
     assert out["drop_token_mask"].shape == (batch_size, num_tokens)
     assert out["drop_token_mask"].dtype == bool
+
+
+# ---------------------------------------------------------------------------
+# MaskDetectors tests
+# ---------------------------------------------------------------------------
+
+
+def _detector_sample(num_tokens_per_det=43, detectors=("H1", "L1")):
+    """Minimal sample with detector structure as produced by StrainTokenization."""
+    num_detectors = len(detectors)
+    num_tokens = num_tokens_per_det * num_detectors
+    det_indices = np.repeat(
+        [DETECTOR_DICT[d] for d in detectors], num_tokens_per_det
+    ).astype(float)
+    position = np.zeros((num_tokens, 3))
+    position[:, 2] = det_indices
+    return {
+        "waveform": np.zeros((num_tokens, 48)),
+        "position": position,
+        "drop_token_mask": np.zeros(num_tokens, dtype=bool),
+    }
+
+
+def test_mask_detectors_shape_preserved():
+    sample = _detector_sample()
+    out = MaskDetectors(mask_probability=0.5)(sample)
+    assert out["drop_token_mask"].shape == sample["drop_token_mask"].shape
+
+
+def test_mask_detectors_dtype_bool():
+    sample = _detector_sample()
+    out = MaskDetectors(mask_probability=0.5)(sample)
+    assert out["drop_token_mask"].dtype == bool
+
+
+def test_mask_detectors_zero_probability_keeps_all():
+    sample = _detector_sample()
+    out = MaskDetectors(mask_probability=0.0)(sample)
+    assert not out["drop_token_mask"].any()
+
+
+def test_mask_detectors_high_probability_masks_most():
+    rng_state = np.random.get_state()
+    np.random.seed(0)
+    sample = _detector_sample(num_tokens_per_det=200, detectors=("H1", "L1", "V1"))
+    results = [MaskDetectors(mask_probability=0.9)(sample) for _ in range(20)]
+    masked_fractions = [r["drop_token_mask"].mean() for r in results]
+    np.random.set_state(rng_state)
+    assert np.mean(masked_fractions) > 0.5
+
+
+def test_mask_detectors_does_not_modify_input():
+    sample = _detector_sample()
+    original_mask = sample["drop_token_mask"].copy()
+    MaskDetectors(mask_probability=0.5)(sample)
+    assert np.array_equal(sample["drop_token_mask"], original_mask)
+
+
+def test_mask_detectors_preserves_existing_masks():
+    sample = _detector_sample(num_tokens_per_det=43)
+    sample["drop_token_mask"][:5] = True
+    out = MaskDetectors(mask_probability=0.0)(sample)
+    assert np.all(out["drop_token_mask"][:5])
+
+
+def test_mask_detectors_all_or_nothing_per_detector():
+    """All tokens of a detector must be either all masked or all unmasked."""
+    np.random.seed(42)
+    num_tokens_per_det = 43
+    detectors = ("H1", "L1")
+    sample = _detector_sample(
+        num_tokens_per_det=num_tokens_per_det, detectors=detectors
+    )
+    for _ in range(20):
+        out = MaskDetectors(mask_probability=0.5)(sample)
+        mask = out["drop_token_mask"]
+        for i, det in enumerate(detectors):
+            tok_slice = slice(i * num_tokens_per_det, (i + 1) * num_tokens_per_det)
+            det_mask = mask[tok_slice]
+            assert (
+                det_mask.all() or not det_mask.any()
+            ), f"Detector {det} has mixed mask values"
+
+
+def test_mask_detectors_invalid_probability():
+    with pytest.raises(ValueError):
+        MaskDetectors(mask_probability=1.0)
+    with pytest.raises(ValueError):
+        MaskDetectors(mask_probability=-0.1)
+
+
+def test_mask_detectors_batched():
+    """Batched inputs get per-sample drop decisions."""
+    batch_size, num_tokens_per_det = 8, 43
+    detectors = ("H1", "L1")
+    num_tokens = num_tokens_per_det * len(detectors)
+    det_indices = np.repeat(
+        [DETECTOR_DICT[d] for d in detectors], num_tokens_per_det
+    ).astype(float)
+    position = np.zeros((batch_size, num_tokens, 3))
+    position[:, :, 2] = det_indices
+    sample = {
+        "waveform": np.zeros((batch_size, num_tokens, 48)),
+        "position": position,
+        "drop_token_mask": np.zeros((batch_size, num_tokens), dtype=bool),
+    }
+    out = MaskDetectors(mask_probability=0.5)(sample)
+    assert out["drop_token_mask"].shape == (batch_size, num_tokens)
+    assert out["drop_token_mask"].dtype == bool
+    # Each batch element's tokens for a given detector must be uniformly masked
+    for b in range(batch_size):
+        for i in range(len(detectors)):
+            tok_slice = slice(i * num_tokens_per_det, (i + 1) * num_tokens_per_det)
+            det_mask = out["drop_token_mask"][b, tok_slice]
+            assert det_mask.all() or not det_mask.any()

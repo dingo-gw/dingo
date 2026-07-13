@@ -205,28 +205,75 @@ class MaskRandomTokens:
 
     Applied after StrainTokenization to implement token-level masking during
     training and validation. Each token is masked independently with probability
-    ``drop_probability``.
+    ``mask_probability``.
 
     Operates on numpy arrays and must therefore be placed before ToTorch in the
     transform chain.
     """
 
-    def __init__(self, drop_probability: float):
+    def __init__(self, mask_probability: float):
         """
         Parameters
         ----------
-        drop_probability:
+        mask_probability:
             Probability in [0, 1) that each token is masked out.
         """
-        if not 0.0 <= drop_probability < 1.0:
-            raise ValueError("drop_probability must be in [0, 1).")
-        self.drop_probability = drop_probability
+        if not 0.0 <= mask_probability < 1.0:
+            raise ValueError("mask_probability must be in [0, 1).")
+        self.mask_probability = mask_probability
 
     def __call__(self, sample: dict) -> dict:
         sample = sample.copy()
         mask = sample["drop_token_mask"]
-        random_mask = np.random.random(mask.shape) < self.drop_probability
+        random_mask = np.random.random(mask.shape) < self.mask_probability
         sample["drop_token_mask"] = mask | random_mask
+        return sample
+
+
+class MaskDetectors:
+    """
+    Randomly mask entire detectors by setting all their tokens in ``drop_token_mask``
+    to True.
+
+    Applied after StrainTokenization. Each detector is masked independently with
+    probability ``mask_probability``. The detector assignment is read from
+    ``position[..., 2]``, so no explicit knowledge of the detector list is required.
+
+    Operates on numpy arrays and must therefore be placed before ToTorch in the
+    transform chain.
+    """
+
+    def __init__(self, mask_probability: float):
+        """
+        Parameters
+        ----------
+        mask_probability:
+            Probability in [0, 1) that each detector is masked out.
+        """
+        if not 0.0 <= mask_probability < 1.0:
+            raise ValueError("mask_probability must be in [0, 1).")
+        self.mask_probability = mask_probability
+
+    def __call__(self, sample: dict) -> dict:
+        sample = sample.copy()
+        position = sample["position"]  # [..., num_tokens, 3]
+        mask = sample["drop_token_mask"].copy()  # [..., num_tokens] bool
+
+        detector_indices = position[..., 2]  # [..., num_tokens]
+        unique_detectors = np.unique(detector_indices)
+        batch_shape = mask.shape[:-1]
+
+        for det_idx in unique_detectors:
+            token_is_this_det = detector_indices == det_idx  # [..., num_tokens]
+            if batch_shape:
+                drop_this = (np.random.random(batch_shape) < self.mask_probability)[
+                    ..., np.newaxis
+                ]  # [..., 1] bool
+            else:
+                drop_this = np.random.random() < self.mask_probability  # bool scalar
+            mask = mask | (token_is_this_det & drop_this)
+
+        sample["drop_token_mask"] = mask
         return sample
 
 
