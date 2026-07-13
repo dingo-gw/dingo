@@ -30,9 +30,10 @@ from dingo.core.factors import (
 from dingo.gw.inference.context import GWSamplerContext
 from dingo.gw.inference.sampler import (
     _delta_prior_steps,
+    _ra_adjustments,
     _proxy_offset_steps,
     _ra_aliases,
-    _ra_reparam_steps,
+    _ra_to_event_steps,
 )
 
 
@@ -141,10 +142,14 @@ def chirp_mass_scan(
     grid = chirp_mass_scan_grid(metadata, overlap_factor)
 
     context = GWSamplerContext.from_model(model, event_data, event_metadata)
-    flow = FlowFactor.from_model(model, aliases=_ra_aliases(inference_parameters))
+    flow = FlowFactor.from_model(
+        model, aliases=_ra_aliases(inference_parameters + context_parameters)
+    )
+    ra_to_training, ra_to_event = _ra_adjustments(context_parameters)
     tail_steps = (
         _proxy_offset_steps(inference_parameters, context_parameters)
-        + _ra_reparam_steps(inference_parameters)
+        + ra_to_event
+        + _ra_to_event_steps(inference_parameters)
         + _delta_prior_steps(context.prior, inference_parameters)
     )
     # Sweep the grid in blocks: a fixed table roots the chain (its length is
@@ -163,7 +168,10 @@ def chirp_mass_scan(
             {k: np.full(len(block), v, dtype=np.float32) for k, v in pins.items()}
         )
         composer = ChainComposer(
-            [SampleTableFactor(table), Stage(flow, fan_out=num_samples)] + tail_steps
+            [SampleTableFactor(table)]
+            + ra_to_training
+            + [Stage(flow, fan_out=num_samples)]
+            + tail_steps
         )
         out, _ = composer.sample_and_log_prob(len(block), context)
         frames.append(pd.DataFrame({k: v.numpy() for k, v in out.items()}))

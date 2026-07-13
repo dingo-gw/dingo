@@ -472,7 +472,7 @@ class GNPEFlowFactor(Factor):
         return log_prob + self.standardization.log_det(self._net_parameters)
 
 
-class RAReparam(Reparametrization):
+class RAToEventFrame(Reparametrization):
     """
     Rotate right ascension from the network's training reference frame (`ra@t_ref`) to the
     event frame (`ra`).
@@ -527,6 +527,27 @@ class RAReparam(Reparametrization):
         return {"ra@t_ref": ra_tref.float()}
 
 
+class RAToTrainingFrame(RAToEventFrame):
+    """
+    Rotate a pinned event-frame right ascension (`ra`) into the network's training
+    reference frame (`ra@t_ref`) before it conditions the network: the input-side
+    mirror of `RAToEventFrame`. A parameter that is frame-corrected on the output side
+    must be inversely corrected on the input side, so a sky position pinned at the
+    event time is presented to the network in the frame it was trained in; a
+    trailing `RAToEventFrame` restores the event-frame value in the samples.
+    """
+
+    def __init__(self):
+        self.conditioning = ["ra"]
+        self.parameters = ["ra@t_ref"]
+
+    def forward(self, given, context):
+        return super().inverse({"ra": given["ra"]}, context)
+
+    def inverse(self, params, context, given=None):
+        return super().forward({"ra@t_ref": params["ra@t_ref"]}, context)
+
+
 class SpinConventionReparam(Reparametrization):
     """
     Relabel the precessing-spin angles between Dingo's internal spin-phase
@@ -543,7 +564,7 @@ class SpinConventionReparam(Reparametrization):
     metadata, and a model trained without a fixed conversion phase (`None`)
     relabels to the identity.
 
-    Unlike `RAReparam` no marked intermediate name is needed: the two conventions
+    Unlike `RAToEventFrame` no marked intermediate name is needed: the two conventions
     never coexist in one table -- each world's plain names denote its own
     convention, and this bijection is the boundary crossing.
 
@@ -639,7 +660,7 @@ class SpinConventionReparam(Reparametrization):
 
     def forward(self, given, context):
         # The conversion runs in double; the outputs return in the input dtype
-        # and device (cf. RAReparam: compute in float64, store the chain dtype).
+        # and device (cf. RAToEventFrame: compute in float64, store the chain dtype).
         reference = given["theta_jn"]
         theta = pd.DataFrame({k: _to_numpy(v) for k, v in given.items()})
         converted = self.to_physical(theta, context.model_metadata)

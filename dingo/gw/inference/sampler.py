@@ -19,16 +19,17 @@ from dingo.core.factors import (
 from dingo.core.posterior_models import BasePosteriorModel
 from dingo.gw.inference.context import GWSamplerContext
 from dingo.gw.inference.steps import (
+    RAToTrainingFrame,
     GNPEFlowFactor,
     GNPEKernelCorrection,
     GNPEKernelFactor,
-    RAReparam,
+    RAToEventFrame,
 )
 
 
 def _ra_aliases(inference_parameters: list[str]) -> dict[str, str]:
     """The RA frame alias (`ra` -> `ra@t_ref`), applied only when the model infers
-    `ra`; paired with an `RAReparam` step that maps it back to the event frame."""
+    `ra`; paired with an `RAToEventFrame` step that maps it back to the event frame."""
     return {"ra": "ra@t_ref"} if "ra" in inference_parameters else {}
 
 
@@ -45,9 +46,19 @@ def _proxy_offset_steps(
     ]
 
 
-def _ra_reparam_steps(inference_parameters: list[str]) -> list:
-    """The `RAReparam` step, appended to a chain only when the model infers `ra`."""
-    return [RAReparam()] if "ra" in inference_parameters else []
+def _ra_to_event_steps(inference_parameters: list[str]) -> list:
+    """The `RAToEventFrame` step, appended to a chain only when the model infers `ra`."""
+    return [RAToEventFrame()] if "ra" in inference_parameters else []
+
+
+def _ra_adjustments(context_parameters: list[str]) -> tuple[list, list]:
+    """The RA frame pair for a pinned sky position: rotate the pinned event-frame
+    `ra` into the training frame before the network, and back into the event
+    frame after it. A parameter that is frame-corrected on the output side is
+    inversely corrected on the input side."""
+    if "ra" not in context_parameters:
+        return [], []
+    return [RAToTrainingFrame()], [RAToEventFrame()]
 
 
 def _delta_prior_steps(prior, inference_parameters: list[str]) -> list:
@@ -177,7 +188,7 @@ class GWComposedSampler(ComposedSampler):
         """Build a single-network GW sampler from a model and event data.
 
         For a plain NPE model the chain is the flow (exposing `ra` as `ra@t_ref`)
-        followed by an `RAReparam` to the event frame. A model with
+        followed by an `RAToEventFrame` to the event frame. A model with
         `context_parameters` (e.g. the DINGO-BNS chirp-mass prior conditioning
         with a fixed sky position) requires `fixed_context_parameters` pinning
         all of them: the chain is then rooted in a `DeltaFactor` of the pins,
@@ -208,9 +219,12 @@ class GWComposedSampler(ComposedSampler):
         metadata = _base_model_metadata(model)
         data_settings = metadata["train_settings"]["data"]
         inference_parameters = data_settings["inference_parameters"]
-        factor = FlowFactor.from_model(model, aliases=_ra_aliases(inference_parameters))
-        steps = [factor]
         context_parameters = data_settings.get("context_parameters") or []
+        factor = FlowFactor.from_model(
+            model, aliases=_ra_aliases(inference_parameters + context_parameters)
+        )
+        ra_to_training, ra_to_event = _ra_adjustments(context_parameters)
+        steps = ra_to_training + [factor]
         if context_parameters:
             if set(fixed_context_parameters or {}) != set(context_parameters):
                 raise ValueError(
@@ -220,7 +234,8 @@ class GWComposedSampler(ComposedSampler):
                 )
             steps = [DeltaFactor(fixed_context_parameters)] + steps
         steps += _proxy_offset_steps(inference_parameters, context_parameters)
-        steps += _ra_reparam_steps(inference_parameters)
+        steps += ra_to_event
+        steps += _ra_to_event_steps(inference_parameters)
         steps += _delta_prior_steps(context.prior, inference_parameters)
         return cls(
             composer=ChainComposer(steps),
@@ -241,7 +256,7 @@ class GWComposedSampler(ComposedSampler):
         """Build a multi-iteration time-GNPE sampler from an init + main model pair: the
         init model's data preprocessing, an init `FlowFactor` to seed, and a single
         `GibbsBlock` step -- cycling the GNPE kernel and main-network factors -- in a
-        `ChainComposer`, then an `RAReparam` to the event frame. Returns samples without
+        `ChainComposer`, then an `RAToEventFrame` to the event frame. Returns samples without
         a log_prob (Gibbs breaks density access).
 
         Parameters
@@ -279,7 +294,7 @@ class GWComposedSampler(ComposedSampler):
         gibbs = GibbsBlock(init_factor, [kernel_factor, flow_factor], num_iterations)
         steps = (
             [gibbs]
-            + _ra_reparam_steps(inference_parameters)
+            + _ra_to_event_steps(inference_parameters)
             + _delta_prior_steps(context.prior, inference_parameters)
         )
         return cls(
@@ -298,7 +313,7 @@ class GWComposedSampler(ComposedSampler):
         event_metadata: Optional[dict] = None,
     ) -> "GWComposedSampler":
         """Build a single-step (density-preserving) time-GNPE sampler: a `ChainComposer`
-        of `[proxy_source, GNPEFlowFactor, GNPEKernelCorrection, RAReparam]`. The chain is
+        of `[proxy_source, GNPEFlowFactor, GNPEKernelCorrection, RAToEventFrame]`. The chain is
         autoregressive, so log_prob is preserved, and `GNPEKernelCorrection` emits the
         `delta_log_prob_target` correction that importance sampling adds to the target.
 
@@ -329,7 +344,7 @@ class GWComposedSampler(ComposedSampler):
         kernel_factor = GNPEKernelFactor.from_model(main_model)
         steps = (
             [proxy_source, flow_factor, GNPEKernelCorrection(kernel_factor)]
-            + _ra_reparam_steps(inference_parameters)
+            + _ra_to_event_steps(inference_parameters)
             + _delta_prior_steps(context.prior, inference_parameters)
         )
         return cls(ChainComposer(steps), context, metadata, inference_parameters)

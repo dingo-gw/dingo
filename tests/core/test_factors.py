@@ -291,6 +291,25 @@ class _MockReparam(Reparametrization):
         return torch.full((n,), self._ld)
 
 
+def test_point_mass_prefix_then_reparam_defers_base_count():
+    # Regression: a 1:1 step directly after a point-mass root must not swallow
+    # the base count -- it transforms the single pinned row, and the first
+    # sampling stage draws the base (the pinned-sky BNS chain
+    # [DeltaFactor, RAToTrainingFrame, flow]).
+    comp = ChainComposer(
+        [
+            DeltaFactor({"u": 2.0}),
+            _MockReparam(shift=10.0, log_det_val=0.5),
+            _ConstFactor("x", conditioning=["v"]),
+        ]
+    )
+    out, log_prob = comp.sample_and_log_prob(5, context=None)
+    assert len(out["x"]) == 5
+    assert torch.equal(out["v"], torch.full((5,), 12.0))
+    assert "u" not in out
+    assert log_prob.shape == (5,)
+
+
 def test_reparam_step_consumes_input_and_contributes_neg_logdet():
     # A reparam is an in-place bijection: it replaces its input column and contributes
     # -log_det to the chain density.

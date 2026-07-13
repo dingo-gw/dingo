@@ -302,7 +302,9 @@ class FlowFactor(Factor):
         return cls(
             model=model,
             parameters=data_settings["inference_parameters"],
-            conditioning=list(context_parameters),
+            # The chain may carry a frame-corrected alias of a trained conditioning
+            # name (e.g. `ra@t_ref` for a pinned event-frame `ra`).
+            conditioning=[(aliases or {}).get(n, n) for n in context_parameters],
             context_parameters=list(context_parameters),
             aliases=aliases,
         )
@@ -333,7 +335,9 @@ class FlowFactor(Factor):
             # row-varying conditioning (the intrinsic/extrinsic split) recomputes N
             # identical data embeddings. Fixing this needs an embed/fuse split on the
             # model (FlowWrapper) so the cached embedding can be reused across rows.
-            ctx = self.standardization.standardize(given, self.context_parameters)
+            ctx = self.standardization.standardize(
+                self._network_conditioning(given), self.context_parameters
+            )
             n_rows = ctx.shape[0]
             data = context.prepared_data(conditioning=given)
             with torch.no_grad():
@@ -364,12 +368,19 @@ class FlowFactor(Factor):
             net_context = (data,)
         else:
             data = context.prepared_data(conditioning=given)
-            ctx = self.standardization.standardize(given, self.context_parameters)
+            ctx = self.standardization.standardize(
+                self._network_conditioning(given), self.context_parameters
+            )
             net_context = (data, ctx)
         self.model.network.eval()
         with torch.no_grad():
             log_prob = self.model.log_prob(z, *net_context)
         return log_prob + self.standardization.log_det(self._net_parameters)
+
+    def _network_conditioning(self, given):
+        """The conditioning values keyed by the network's trained names (the chain
+        may carry a frame-corrected alias, e.g. `ra@t_ref` for a trained `ra`)."""
+        return {n: given[self.aliases.get(n, n)] for n in self.context_parameters}
 
     def describe(self) -> dict:
         return {**_describe_default(self), "unconditional": self.unconditional}
@@ -474,7 +485,8 @@ class SampleTableFactor(Factor):
 class Reparametrization(ABC):
     """
     A deterministic bijection `Step`: it transforms existing parameters (no sampling)
-    and contributes `-log|det J|` to the proposal density.
+    and contributes `-log|det J|` to the proposal density. It is 1:1 -- one output
+    row per input row -- so it carries no sample multiplicity in a chain.
 
     Unlike a `Factor` it is 1:1 and invertible -- `forward` maps the conditioning block
     to the `parameters` block, `inverse` maps back (for re-plug / importance sampling),
@@ -486,6 +498,7 @@ class Reparametrization(ABC):
 
     parameters: list[str]
     conditioning: list[str]
+    one_to_one = True
 
     @abstractmethod
     def forward(
@@ -606,6 +619,7 @@ class TargetCorrection(ABC):
 
     parameters: list[str]
     conditioning: list[str]
+    one_to_one = True
     consumes: list[str]
 
     @abstractmethod
@@ -687,7 +701,10 @@ class ChainComposer:
         column -- except a `Reparametrization` replacing its own inputs, which is
         invertible, so `log_prob` can restore the overwritten state. A step's
         emitted columns default to its `parameters`, but a step may emit
-        side-channel columns too (`produces`)."""
+        side-channel columns too (`produces`). Consumed columns leave the
+        produced set, mirroring the fold, so a later step may re-emit them
+        (e.g. `RAToEventFrame` restoring a pinned `ra` that `RAToTrainingFrame`
+        consumed)."""
         produced: set[str] = set()
         for step in self.steps:
             missing = [c for c in step.conditioning if c not in produced]
@@ -708,6 +725,7 @@ class ChainComposer:
                     f"replace columns (its inverse can rebuild them for log_prob)."
                 )
             produced.update(emitted)
+            produced.difference_update(getattr(step, "consumes", ()))
 
     @property
     def steps(self) -> list[Step]:
@@ -741,9 +759,10 @@ class ChainComposer:
 
         The base count lands on the first stage that carries multiplicity: a root
         prefix of point-mass steps (fixed pins) emits a single row each -- n draws
-        from a point mass are one atom repeated -- and the first non-point-mass
-        stage draws `base` (times its fan-out) in one conditioned call, with the
-        prefix's carried rows expanded to match."""
+        from a point mass are one atom repeated -- and 1:1 steps (reparametrizations,
+        target corrections) transform those rows in place. The first sampling stage
+        draws `base` (times its fan-out) in one conditioned call, with the prefix's
+        carried rows expanded to match."""
         samples: dict[str, torch.Tensor] = {}
         total: torch.Tensor | float = 0.0
         has_density = True
@@ -751,8 +770,13 @@ class ChainComposer:
         for i, stage in enumerate(self.stages):
             step = stage.step
             if base_pending is not None:
-                if getattr(step, "point_mass", False):
-                    n = 1  # a point mass carries no multiplicity
+                if getattr(step, "point_mass", False) or getattr(
+                    step, "one_to_one", False
+                ):
+                    # Neither a point mass (one emitted row) nor a 1:1 transform
+                    # carries multiplicity; the base count waits for the first
+                    # sampling stage.
+                    n = 1
                 else:
                     n = base_pending * (stage.fan_out if step.conditioning else 1)
                     base_pending = None

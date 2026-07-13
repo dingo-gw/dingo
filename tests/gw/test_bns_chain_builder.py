@@ -179,11 +179,42 @@ def test_from_model_assembles_pinned_chain():
         _StubBNSModel(), _event_data(), fixed_context_parameters=_PINS
     )
     kinds = [type(s).__name__ for s in sampler.composer.steps]
-    assert kinds == ["DeltaFactor", "FlowFactor", "ProxyOffsetReparam"]
-    delta, flow, offset = sampler.composer.steps
+    # The pinned event-frame ra is rotated into the training frame for the
+    # network and back into the event frame afterwards.
+    assert kinds == [
+        "DeltaFactor",
+        "RAToTrainingFrame",
+        "FlowFactor",
+        "ProxyOffsetReparam",
+        "RAToEventFrame",
+    ]
+    delta, ra_in, flow, offset, ra_out = sampler.composer.steps
     assert set(delta.parameters) == set(_PINS)
-    assert flow.conditioning == ["ra", "dec", "chirp_mass_proxy"]
+    assert flow.conditioning == ["ra@t_ref", "dec", "chirp_mass_proxy"]
     assert offset.consumes == ["delta_chirp_mass"]
+
+
+def test_pinned_ra_rotates_to_training_frame_and_back():
+    import torch
+
+    from dingo.gw.inference.steps import RAToEventFrame, RAToTrainingFrame
+
+    class _Ctx:
+        event_metadata = {"time_event": 1187008882.42 + 6 * 3600}
+        t_ref = 1187008882.42
+        device = "cpu"
+
+    ctx = _Ctx()
+    ra = torch.tensor([3.44616], dtype=torch.float32)
+    to_training = RAToTrainingFrame().forward({"ra": ra}, ctx)
+    # Six hours of Earth rotation is a genuinely different frame.
+    assert not torch.allclose(to_training["ra@t_ref"], ra)
+    back = RAToEventFrame().forward(to_training, ctx)
+    assert torch.allclose(back["ra"], ra, atol=1e-6)
+    # Zero shift (bitwise) when the event time equals the reference time.
+    ctx.event_metadata = {"time_event": _Ctx.t_ref}
+    same = RAToTrainingFrame().forward({"ra": ra}, ctx)
+    assert torch.equal(same["ra@t_ref"], ra)
 
 
 def test_from_model_requires_all_pins():
