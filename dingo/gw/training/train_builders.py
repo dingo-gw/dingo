@@ -333,7 +333,7 @@ def build_svd_for_embedding_network(
     print(f"Truncating SVD matrices below index {wfd.domain.min_idx}.")
     print("...V matrix shapes:")
     V_rb_list = []
-    for ifo in ifo_names:
+    for ifo in ifos:
         V = basis_dict[ifo].V
         assert np.allclose(V[: wfd.domain.min_idx], 0)
         V = V[wfd.domain.min_idx :]
