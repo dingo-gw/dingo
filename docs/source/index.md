@@ -64,6 +64,7 @@ As training a network from scratch can be expensive, we intend to also distribut
    gnpe
    result
    dingo_pipe
+   bns
    asimov
    
 .. toctree::

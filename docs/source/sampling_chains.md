@@ -28,7 +28,7 @@ $-\log\lvert\det J_i\rvert$ for a reparametrization. These cases correspond to t
 
 * **Plain NPE** (`FlowFactor → RAToEventFrame`): the network, followed by a rotation
   of the right ascension from the training reference frame to the event frame.
-* **DINGO-BNS prior conditioning** (`DeltaFactor → RAToTrainingFrame →
+* **[DINGO-BNS](bns.md) prior conditioning** (`DeltaFactor → RAToTrainingFrame →
   FlowFactor → ProxyOffsetReparam → RAToEventFrame`): pinned proxy and sky values
   feed a conditioned network, whose offset output is then reconstructed into the
   physical chirp mass.
@@ -297,9 +297,9 @@ Sampling follows three multiplicity rules:
 2. **Fan-out multiplies rows.** A non-root stage with `fan_out=k` draws $k$ samples
    per conditioning row, and the carried columns are repeated row-major to stay
    aligned; the chain returns `num_samples × expansion` rows, where the expansion is
-   the product of the non-root fan-outs. The chirp-mass scan uses this, with a
-   grid-table root followed by `Stage(flow, fan_out=num_samples)` drawing per grid
-   row.
+   the product of the non-root fan-outs. The
+   [chirp-mass scan](bns.md#the-chirp-mass-scan) uses this, with a grid-table root
+   followed by `Stage(flow, fan_out=num_samples)` drawing per grid row.
 3. **Unconditioned non-root steps fill rather than fan.** A delta filler emits one
    constant per current row.
 
@@ -363,8 +363,8 @@ The standard chains are assembled from model metadata by the `GWComposedSampler`
 builders (see [](inference.md) for usage):
 
 `from_model(model, event_data, event_metadata, fixed_context_parameters=None)`
-: A single-network chain: plain NPE, or prior conditioning for a model with
-  `context_parameters`, with the pinned values as the chain root.
+: A single-network chain: plain NPE, or [prior conditioning](bns.md) for a model
+  with `context_parameters`, with the pinned values as the chain root.
 
 `from_gnpe_models(init_model, main_model, event_data, event_metadata, num_iterations=30)`
 : Multi-iteration time GNPE: a `GibbsBlock` cycling the kernel and main-network
