@@ -5,14 +5,13 @@ import yaml
 from scipy.interpolate import interp1d
 
 from dingo.gw.dataset import generate_parameters_and_polarizations
-from dingo.gw.domains import build_domain, MultibandedFrequencyDomain
+from dingo.gw.dataset._multibanded_domain_utils import (build_extreme_prior,
+                                                        print_mismatch_stats)
+from dingo.gw.domains import MultibandedFrequencyDomain, build_domain
 from dingo.gw.gwutils import get_mismatch
-from dingo.gw.prior import build_prior_with_defaults
-from dingo.gw.waveform_generator import (
-    NewInterfaceWaveformGenerator,
-    WaveformGenerator,
-    generate_waveforms_parallel,
-)
+from dingo.gw.waveform_generator import (NewInterfaceWaveformGenerator,
+                                         WaveformGenerator,
+                                         generate_waveforms_parallel)
 
 
 def _evaluate_multibanding_main(
@@ -26,15 +25,7 @@ def _evaluate_multibanding_main(
     if "compression" in settings:
         del settings["compression"]
 
-    # Update prior to challenge the multi-banding:
-    #
-    # (a) Set geocent_time = 0.12 s (boundary of usual prior + Earth-radius crossing time)
-    # (b) Set chirp mass to bottom end of prior.
-    prior = build_prior_with_defaults(settings["intrinsic_prior"])
-    settings["intrinsic_prior"]["geocent_time"] = 0.12
-    settings["intrinsic_prior"]["chirp_mass"] = prior["chirp_mass"].minimum
-    # Rebuild prior with updated settings.
-    prior = build_prior_with_defaults(settings["intrinsic_prior"])
+    prior = build_extreme_prior(settings)
     print("Prior")
     for k, v in prior.items():
         print(f"{k}: {v}")
@@ -88,21 +79,8 @@ def _evaluate_multibanding_main(
                 asd_file="aLIGO_ZERO_DET_high_P_asd.txt",
             )
 
-    print("\nMismatches between UFD waveforms and MFD waveforms interpolated to MFD.")
-    print(
-        "This is a conservative estimate of the MFD performance when training "
-        "networks."
-    )
-    mismatches = np.concatenate([v for v in mismatches.values()])
-    print(f"num_samples = {num_samples}")
-    print("  Mean mismatch = {}".format(np.mean(mismatches)))
-    print("  Standard deviation = {}".format(np.std(mismatches)))
-    print("  Max mismatch = {}".format(np.max(mismatches)))
-    print("  Median mismatch = {}".format(np.median(mismatches)))
-    print("  Percentiles:")
-    print("    99    -> {}".format(np.percentile(mismatches, 99)))
-    print("    99.9  -> {}".format(np.percentile(mismatches, 99.9)))
-    print("    99.99 -> {}".format(np.percentile(mismatches, 99.99)))
+    mismatches = np.concatenate(list(mismatches.values()))
+    print_mismatch_stats(mismatches, num_samples)
 
 
 def parse_args():
