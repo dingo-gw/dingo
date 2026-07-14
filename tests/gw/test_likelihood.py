@@ -355,3 +355,20 @@ class TestDInnerHComplex:
         )
         assert np.isclose(d_inner_h_single, d_inner_h_multi[0])
         assert np.isclose(rho2opt_single, rho2opt_multi[0])
+
+
+def test_phase_marginalized_aux_snr_is_phase_maximized(domain, event_data):
+    """Under phase marginalization the auxiliary SNR is the phase-maximized
+    matched-filter statistic |<d, h_c>| / sqrt(<h, h>), not the marginalized
+    likelihood term ln_i0(|<d, h_c>|)."""
+    likelihood = make_likelihood(
+        domain,
+        event_data,
+        phase_marginalization_kwargs={"approximation_22_mode": True},
+    )
+    likelihood.return_aux_snr = True
+    theta = dict(THETA)
+    theta.pop("phase", None)
+    _, snr = likelihood.log_likelihood(theta)
+    kappa2C, rho2opt = likelihood._d_inner_h_complex({**theta, "phase": 0.0})
+    assert snr == pytest.approx(np.abs(kappa2C) / rho2opt**0.5)

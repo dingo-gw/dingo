@@ -531,7 +531,10 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             log_likelihood = self.log_Zn + ln_i0(np.abs(kappa2C)) - 1 / 2.0 * rho2opt
 
             if self.return_aux_snr:
-                snr = ln_i0(np.abs(kappa2C)) / rho2opt**0.5
+                # Phase-maximized matched-filter SNR: |kappa2C| / sqrt(rho2opt).
+                # (ln_i0(|kappa2C|) is the phase-marginalized likelihood term
+                # above, not a matched-filter statistic.)
+                snr = np.abs(kappa2C) / rho2opt**0.5
                 return log_likelihood, snr
 
             return log_likelihood
