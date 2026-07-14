@@ -35,7 +35,34 @@ $-\log\lvert\det J_i\rvert$ for a reparametrization. These cases correspond to t
 
 At construction the composer checks the chain for consistency: every conditioning
 column must be produced by an earlier step. It then runs the steps in order,
-accumulating the table and the sum.
+accumulating the table and the sum:
+
+```{mermaid}
+flowchart TB
+    subgraph comp ["ChainComposer"]
+        direction TB
+        s1["step 1<br/>q#8321;(#952;#8321; | d)"]
+        s2["step 2<br/>q#8322;(#952;#8322; | #952;#8321;, d)"]
+        dots["#8230;"]
+        sn["step n<br/>q#8345;(#952;#8345; | #952;#8321;, #8230;, #952;#8345;#8331;#8321;, d)"]
+        s1 -- "#916;#8321;" --> s2
+        s2 -- "#916;#8321; + #916;#8322;" --> dots
+        dots --> sn
+    end
+    out(["samples + log_prob"])
+
+    sn -- "#916;#8321; + #8230; + #916;#8345; = log q" --> out
+
+    classDef step fill:#dbe9f6,stroke:#2980b9,color:#1a1a1a
+    classDef ghost fill:none,stroke:none
+    class s1,s2,sn step
+    class dots ghost
+```
+
+In the figure every step is written as a conditional $q_i$, which covers all
+factors, point masses included. A reparametrization instead replaces columns in
+place, adding its Jacobian term to the sum but no factor to the product (see
+[the proposal density](#the-proposal-density-forward-and-reverse)).
 
 The generic machinery lives in `dingo.core.factors` (steps, stages, the composer, the
 runner); the gravitational-wave steps, the per-event context, and the chain builders
@@ -163,6 +190,35 @@ views.
   rather than reusing the network-input view, and its reference time is the event
   time. Marginalization settings (time, phase, calibration) are passed per request.
 
+As data flow, including the conditioning columns that a chain feeds back into the
+data preparation:
+
+```{mermaid}
+flowchart TB
+    d[("event data d")]
+    em["event metadata"]
+    md["model metadata"]
+    subgraph ctx ["GWSamplerContext"]
+        direction LR
+        pd["prepared_data"]
+        pr["prior"]
+        lk["likelihood"]
+    end
+    chain["chain steps"]
+    isamp["importance sampling"]
+
+    d --> ctx
+    em --> ctx
+    md --> ctx
+    pd -- "data rows (row-aligned)" --> chain
+    chain -. "conditioning columns (optional)" .-> pd
+    lk -.-> isamp
+    pr -.-> isamp
+
+    classDef ctxstyle fill:#f4f4f4,stroke:#8c8c8c,color:#1a1a1a
+    class d,em,md,pd,pr,lk ctxstyle
+```
+
 Alongside the strain data, the context carries the per-event **event metadata**. This
 includes the event time, which sets the likelihood reference time and the sidereal
 right-ascension correction (`RAToEventFrame`), together with any per-event analysis
@@ -188,6 +244,28 @@ latter is how a saved `Result` reconstructs the prior, domain, and likelihood fr
 stored settings. The chain's torch device is `context.device`. Steps that create fresh
 tensors, such as the pins of a `DeltaFactor`, create them on this device so that their
 outputs can join a chain running on a GPU.
+
+Putting the pieces together:
+
+```{mermaid}
+flowchart TB
+    d[("event data d")] --> ctx["GWSamplerContext"]
+    ctx -- "data views" --> comp["ChainComposer"]
+    comp -. "conditioning parameters" .-> ctx
+    comp --> out(["samples + log_prob"])
+    out --> isamp["importance sampling"]
+    ctx -.-> isamp
+
+    classDef ctxstyle fill:#f4f4f4,stroke:#8c8c8c,color:#1a1a1a
+    classDef step fill:#dbe9f6,stroke:#2980b9,color:#1a1a1a
+    class ctx ctxstyle
+    class comp step
+```
+
+The chain draws its data views through the context and feeds conditioning parameters
+back into the preparation. The likelihood and prior views serve the downstream
+importance sampling in the same way, so a derived context re-targets the whole
+analysis consistently.
 
 ```{note}
 The representation vocabulary here (frequency domains, multibanded decimation,

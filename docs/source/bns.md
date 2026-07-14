@@ -58,6 +58,28 @@ event-specific narrow prior. The network infers the offset
 `delta_chirp_mass` $= \mathcal{M} - \tilde{\mathcal{M}}$ rather than the chirp mass
 itself; the chain reconstructs the physical value with a `ProxyOffsetReparam` step.
 
+The chain:
+
+```{mermaid}
+flowchart TB
+    pins["DeltaFactor<br/>chirp_mass_proxy"]
+    flow["FlowFactor<br/>draws delta_chirp_mass, #8230;"]
+    off["ProxyOffsetReparam<br/>chirp_mass = delta_chirp_mass + chirp_mass_proxy"]
+    out(["samples + log_prob"])
+    ctx["GWSamplerContext<br/>heterodyne #8594; decimate #8594; whiten"]
+
+    pins --> flow --> off --> out
+    pins -. "chirp_mass_proxy" .-> ctx
+    ctx -. "prepared data" .-> flow
+
+    classDef step fill:#dbe9f6,stroke:#2980b9,color:#1a1a1a
+    classDef reparam fill:#e2f0e6,stroke:#27ae60,color:#1a1a1a
+    classDef ctxstyle fill:#f4f4f4,stroke:#8c8c8c,color:#1a1a1a
+    class pins,flow step
+    class off reparam
+    class ctx ctxstyle
+```
+
 The pinned values have a single owner, the chain root, and are recorded with the
 samples. The heterodyne receives the proxy through the row-aligned `prepared_data`
 contract of the [sampler context](sampling_chains.md#the-sampler-context). Since the
