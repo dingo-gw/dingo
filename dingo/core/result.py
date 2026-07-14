@@ -82,11 +82,16 @@ class Result(DingoDataset):
 
     dataset_type = "core_result"
 
-    def __init__(self, file_name=None, dictionary=None):
+    def __init__(self, file_name=None, dictionary=None, sampler_context=None):
         self.event_metadata = None
         self.context = None
         self.samples = None
         self.log_noise_evidence = None
+        # Sampler context (a GWSamplerContext): passed in live when a sampler builds
+        # the Result, and otherwise reconstructed from the serialized payload by
+        # _build_context(), so that prior (and, later, likelihood) construction
+        # delegates to it no matter how the Result was born.
+        self.sampler_context = sampler_context
         super().__init__(
             file_name=file_name,
             dictionary=dictionary,
@@ -97,10 +102,10 @@ class Result(DingoDataset):
         if self.importance_sampling_metadata is None:
             self.importance_sampling_metadata = {}
 
+        if self.sampler_context is None:
+            self.sampler_context = self._build_context()
         self._build_prior()
         self._build_domain()
-        if self.importance_sampling_metadata.get("updates"):
-            self._rebuild_domain()
 
     @property
     def metadata(self):
@@ -145,6 +150,12 @@ class Result(DingoDataset):
     def _build_likelihood(self, **likelihood_kwargs):
         self.likelihood = None
 
+    def _build_context(self):
+        """Reconstruct the sampler context from the serialized payload; overridden
+        by domain-specific subclasses. Called when no live context was passed in,
+        and again after reset_event()."""
+        return None
+
     def reset_event(self, event_dataset):
         """
         Set the Result context and event_metadata based on an EventDataset.
@@ -186,11 +197,13 @@ class Result(DingoDataset):
                 print(f"  {k}:  {event_metadata[k]}")
                 self.importance_sampling_metadata["updates"][k] = event_metadata[k]
 
-            self._rebuild_domain(verbose=True)
         self.event_metadata = event_metadata
 
-    def _rebuild_domain(self, verbose=False):
-        pass
+        # The old context described the data the samples were drawn from; rebuild it
+        # around the new (possibly regenerated) event payload -- recorded settings
+        # updates enter as a derived representation -- and re-alias the domain.
+        self.sampler_context = self._build_context()
+        self._build_domain()
 
     @property
     def num_samples(self):
@@ -1090,5 +1103,3 @@ def freeze(d):
     elif isinstance(d, list):
         return tuple(freeze(value) for value in d)
     return d
-
-

@@ -3,23 +3,11 @@ import time
 from typing import Optional
 
 import numpy as np
-import yaml
 from bilby.core.prior import Uniform, Constraint, PriorDict, DeltaFunction
 from bilby.gw.prior import CalibrationPriorDict
 from bilby_pipe.utils import CALIBRATION_CORRECTION_TYPE_LOOKUP
 
-from dingo.core.density import (
-    interpolated_sample_and_log_prob_multi,
-    interpolated_log_prob_multi,
-)
-from dingo.core.multiprocessing import apply_func_with_multiprocessing
 from dingo.core.result import Result as CoreResult
-from dingo.gw.conversion import change_spin_conversion_phase
-from dingo.gw.domains import MultibandedFrequencyDomain
-from dingo.gw.domains import build_domain
-from dingo.gw.gwutils import get_extrinsic_prior_dict
-from dingo.gw.likelihood import StationaryGaussianGWLikelihood
-from dingo.gw.prior import build_prior_with_defaults
 from dingo.core.utils.backward_compatibility import check_minimum_version
 
 
@@ -49,8 +37,8 @@ class Result(CoreResult):
         context : dict
             Context data from which the samples were produced (e.g., strain data, ASDs).
         metadata : dict
-            Metadata inherited from the Sampler object. This describes the neural
-            networks and sampling settings used.
+            Metadata describing the neural networks and sampling settings used,
+            including structured sampler provenance under `settings["sampler"]`.
         event_metadata : dict
             Metadata for the event analyzed, including time, data conditioning, channel,
             and detector information.
@@ -119,6 +107,16 @@ class Result(CoreResult):
     def use_base_domain(self, value: bool):
         if hasattr(self.domain, "base_domain"):
             self.importance_sampling_metadata["use_base_domain"] = value
+            # The representation is context state: re-derive rather than mutate, so
+            # the fresh context starts with an empty likelihood cache and a
+            # previously built likelihood cannot leak across the change.
+            if (
+                self.sampler_context is not None
+                and self.sampler_context.use_base_domain != value
+            ):
+                self.sampler_context = self.sampler_context.derive(
+                    use_base_domain=value
+                )
 
     @property
     def f_ref(self):
@@ -161,64 +159,66 @@ class Result(CoreResult):
         self.event_metadata["maximum_frequency"] = value
 
     def _build_domain(self):
-        """
-        Construct the domain object based on model metadata
-
-        Called by __init__() immediately after _build_prior().
-        """
-        self.domain = build_domain(self.base_metadata["dataset_settings"]["domain"])
+        """Take the data domain from the sampler context -- its single owner. A
+        context derived with importance-sampling updates already carries the
+        rebuilt domain. Called by __init__() and after reset_event()."""
         check_minimum_version(self.version, raise_exception=False)
+        if self.sampler_context is None:
+            self.domain = None
+            return
+        self.domain = self.sampler_context.domain
 
-        data_settings = self.base_metadata["train_settings"]["data"]
-        if "domain_update" in data_settings:
-            self.domain.update(data_settings["domain_update"])
+    def _build_context(self):
+        """Reconstruct the per-event sampler context from the serialized payload
+        (settings + event data + event metadata), so that prior (and, later,
+        likelihood) construction delegates to `GWSamplerContext` no matter how the
+        Result was born -- live from a sampler or loaded from file."""
+        # Only the metadata is required: the prior and domain views are defined
+        # without event data (a result whose strain payload was stripped or left
+        # on disk still has a working prior); the likelihood view checks for the
+        # event data itself.
+        if self.settings is None:
+            return None
+        from dingo.gw.inference.context import GWSamplerContext
 
-    def _rebuild_domain(self, verbose=False):
-        """Rebuild the domain based on settings updated for importance sampling.
-
-        These settings should be saved in self.importance_sampling_metadata["updates"],
-        which is expected to be populated by reset_event()."""
-        updates = self.importance_sampling_metadata["updates"].copy()
-
-        # Assume that updates can contain T, f_s, roll_off, f_min, f_max, but no other
-        # quantities that define a new domain (e.g., delta_f). Typical event metadata
-        # will be constructed in this way.
-
-        domain_keys = ["minimum_frequency", "maximum_frequency", "T"]
-        if any(k in updates for k in domain_keys):
-            # TODO: Make compatible with MultibandedFrequencyDomain.
-            if isinstance(self.domain, MultibandedFrequencyDomain):
-                raise NotImplementedError()
-
-            if "T" in updates:
-                updates["delta_f"] = 1.0 / updates["T"]
-
-            domain_dict = self.domain.domain_dict  # Existing settings
-            domain_dict.update(
-                (k, updates[k]) for k in set(domain_dict).intersection(updates)
+        try:
+            # base_metadata resolves the unconditional ("base") indirection, so
+            # density-recovery results reconstruct from the analysis metadata.
+            context = GWSamplerContext.from_model_metadata(
+                self.base_metadata, self.context, self.event_metadata
             )
-
-            if verbose:
-                print("Rebuilding domain as follows:")
-                print(
-                    yaml.dump(
-                        domain_dict,
-                        default_flow_style=False,
-                        sort_keys=False,
-                    )
-                )
-            self.domain = build_domain(domain_dict)
-        else:
-            if verbose:
-                print("No domain updates found; domain not rebuilt.")
+        except (KeyError, TypeError) as e:
+            # Settings are not a full model metadata (e.g. minimal test payloads);
+            # the result is then transport-only. Make the degradation visible
+            # rather than silent.
+            print(
+                f"Could not reconstruct a sampler context from the result settings "
+                f"({type(e).__name__}: {e}); prior, domain, and likelihood are "
+                f"unavailable."
+            )
+            return None
+        # Importance-sampling settings updates change the data representation, which
+        # lives on a derived context (same event, different representation).
+        metadata = self.importance_sampling_metadata or {}
+        updates = metadata.get("updates")
+        use_base_domain = metadata.get("use_base_domain", False)
+        if updates or use_base_domain:
+            context = context.derive(updates=updates, use_base_domain=use_base_domain)
+        return context
 
     def _build_prior(self):
-        """Build the prior based on model metadata. Called by __init__()."""
-        intrinsic_prior = self.base_metadata["dataset_settings"]["intrinsic_prior"]
-        extrinsic_prior = get_extrinsic_prior_dict(
-            self.base_metadata["train_settings"]["data"]["extrinsic_prior"]
-        )
-        self.prior = build_prior_with_defaults({**intrinsic_prior, **extrinsic_prior})
+        """Take the static prior from the sampler context (its single owner), then
+        apply the evolving analysis state: any importance-sampling prior update,
+        and the split-off of time / phase priors for marginalized networks. Called
+        by __init__(). Without a reconstructable context (a payload without full
+        model metadata) the result is transport-only and the prior is `None`."""
+        if self.sampler_context is None:
+            self.prior = None
+            self.geocent_time_prior = None
+            self.phase_prior = None
+            return
+        # Deepcopy because the marginalization split-off below mutates it.
+        self.prior = copy.deepcopy(self.sampler_context.prior)
 
         prior_update = self.importance_sampling_metadata.get("prior_update")
         if prior_update is not None:
@@ -255,7 +255,9 @@ class Result(CoreResult):
             the Result and later instantiated.
         """
         self.importance_sampling_metadata["prior_update"] = prior_update.copy()
-        prior_update = PriorDict(prior_update)
+        # PriorDict instantiates in place, so work on a copy: the caller's dict
+        # keeps its string form.
+        prior_update = PriorDict(prior_update.copy())
 
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
         theta = self.samples[param_keys]
@@ -296,7 +298,6 @@ class Result(CoreResult):
         time_marginalization_kwargs: Optional[dict] = None,
         phase_marginalization_kwargs: Optional[dict] = None,
         calibration_marginalization_kwargs: Optional[dict] = None,
-        phase_grid: Optional[np.ndarray] = None,
     ):
         """
         Build the likelihood function based on model metadata. This is called at the
@@ -313,6 +314,10 @@ class Result(CoreResult):
         calibration_marginalization_kwargs: dict
             Calibration marginalization parameters. If None, no calibration marginalization is used.
         """
+        # Marginalization is validated here against the *evolved* prior (any
+        # importance-sampling prior update, the time / phase split-offs), which
+        # the sample-free context cannot see; the explicit bounds set below
+        # therefore take precedence over the context's static-prior fill.
         if time_marginalization_kwargs is not None:
             if self.geocent_time_prior is None:
                 raise NotImplementedError(
@@ -343,43 +348,23 @@ class Result(CoreResult):
         self.phase_marginalization_kwargs = phase_marginalization_kwargs
         self.calibration_marginalization_kwargs = calibration_marginalization_kwargs
 
-        # Choose the WaveformGenerator domain. This is ultimately projected to the data domain, but generally we
-        # allow it to be different, e.g., to start integrating from lower frequencies than the lower bound of the
-        # likelihood integral. Usually we use the same domain as that used for the WaveformDataset. However,
-        # if we make a change to certain settings during importance sampling, we need to ensure the projection is
-        # still compatible:
-        #
-        # * delta_f (=1/T): cannot be changed in a domain projection, so update at the level of the
-        #   WaveformGenerator.
-        #
-        # TODO: Add functionality to update other waveform settings, i.e., approximant, generation minimum and
-        #  maximum frequencies, reference frequency, and starting frequency.
+        if self.sampler_context is None:
+            raise ValueError(
+                "Building the likelihood requires a sampler context; this result "
+                "does not carry full model metadata."
+            )
 
-        wfg_domain_dict = self.base_metadata["dataset_settings"]["domain"].copy()
-        if "updates" in self.importance_sampling_metadata:
-            if "T" in self.importance_sampling_metadata["updates"]:
-                delta_f_new = 1 / self.importance_sampling_metadata["updates"]["T"]
-                print(
-                    f'Updating waveform generation delta_f from {wfg_domain_dict["delta_f"]} to {delta_f_new}.'
-                )
-                wfg_domain_dict["delta_f"] = delta_f_new
-        wfg_domain = build_domain(wfg_domain_dict)
-
-        self.likelihood = StationaryGaussianGWLikelihood(
-            wfg_kwargs=self.base_metadata["dataset_settings"]["waveform_generator"],
-            wfg_domain=wfg_domain,
-            data_domain=self.domain,
-            event_data=self.context,
-            t_ref=self.t_ref,
+        # Construction is owned by the sampler context; its (possibly derived)
+        # representation already encodes the importance-sampling settings updates.
+        # Validated marginalization bounds enter as arguments.
+        #
+        # TODO: Add functionality to update other waveform settings, i.e.,
+        #  approximant, generation minimum and maximum frequencies, reference
+        #  frequency, and starting frequency.
+        self.likelihood = self.sampler_context.likelihood(
             time_marginalization_kwargs=time_marginalization_kwargs,
             phase_marginalization_kwargs=phase_marginalization_kwargs,
             calibration_marginalization_kwargs=calibration_marginalization_kwargs,
-            phase_grid=phase_grid,
-            use_base_domain=self.use_base_domain,
-            frequency_update=dict(
-                minimum_frequency=self.minimum_frequency,
-                maximum_frequency=self.maximum_frequency,
-            ),
         )
 
     def sample_calibration_parameters(self, calibration_sampling_kwargs: dict):
@@ -497,59 +482,86 @@ class Result(CoreResult):
         # Rebuild the prior (which will include calibration priors from prior_update)
         self._build_prior()
 
-    def sample_synthetic_phase(
-        self,
-        synthetic_phase_kwargs,
-        inverse: bool = False,
+    def _sample_synthetic_phase_chain(
+        self, theta, within_prior, approximation_22_mode, num_processes
     ):
+        """Synthetic phase as a chain over the sampler context: the root emits the
+        within-prior proposal samples with their stored log-prob, and
+        `SyntheticPhaseFactor` draws `phase` -- the composer's ordinary log-prob fold
+        returns the joint proposal density `log q(theta) + log q(phase | theta, d)`,
+        which becomes the samples' log_prob. The factor builds the phase-full
+        likelihood from the sampler context, whose (possibly derived) representation
+        encodes the importance-sampling view (base domain, rebuilt domain, frequency
+        updates). Out-of-prior rows get `phase = 0` and `log_prob = nan` (they
+        receive zero weight in importance sampling regardless)."""
+        from dingo.core.factors import ChainComposer, SampleTableFactor
+        from dingo.gw.inference.steps import SyntheticPhaseFactor
+
+        theta_within = theta.iloc[np.flatnonzero(within_prior)]
+        table = SampleTableFactor(
+            {k: theta_within[k].to_numpy() for k in theta_within.columns},
+            log_prob=self.samples["log_prob"].to_numpy()[within_prior],
+        )
+        factor = SyntheticPhaseFactor(
+            conditioning=list(theta_within.columns),
+            n_grid=self.synthetic_phase_kwargs["n_grid"],
+            approximation_22_mode=approximation_22_mode,
+            uniform_weight=self.synthetic_phase_kwargs.get("uniform_weight", 0.01),
+            num_processes=num_processes,
+        )
+        chain = ChainComposer([table, factor])
+        out, log_prob = chain.sample_and_log_prob(
+            len(theta_within), self.sampler_context
+        )
+
+        phase_array = np.full(len(theta), 0.0)
+        phase_array[within_prior] = out["phase"].numpy()
+        log_prob_array = np.full(len(theta), np.nan)
+        log_prob_array[within_prior] = log_prob.numpy()
+        self.samples["phase"] = phase_array
+        self.samples["log_prob"] = log_prob_array
+
+        # Insert the phase prior in the prior, since now the phase is present.
+        self.prior["phase"] = self.phase_prior
+        self.phase_prior = None
+        # Any previously built likelihood does not describe the now-phase-full
+        # samples; importance sampling rebuilds with its own marginalization
+        # settings.
+        self.likelihood = None
+
+    def sample_synthetic_phase(self, synthetic_phase_kwargs):
         """
         Sample a synthetic phase for the waveform. This is a post-processing step
         applicable to samples theta in the full parameter space, except for the phase
-        parameter (i.e., 14D samples). This step adds a phase parameter to the samples
-        based on likelihood evaluations.
+        parameter (i.e., 14D samples). It adds a `phase` column to the samples and
+        replaces `log_prob` with the joint proposal density
+        `log q(theta) + log q(phase | theta, d)`.
 
-        A synthetic phase is sampled as follows.
+        The phase distribution `q(phase | theta, d)` is constructed per sample by
+        `SyntheticPhaseFactor` from the likelihood on a phase grid (with a uniform
+        floor for mass coverage, so importance sampling remains exact even where the
+        conditional is approximate); the step runs as a chain rooted in the
+        within-prior proposal samples. Out-of-prior samples receive `phase = 0` and
+        `log_prob = nan`, and carry zero weight in importance sampling.
 
-            * Compute and cache the modes for the waveform mu(theta, phase=0) for
-              phase 0, organize them such that each contribution m transforms as
-              exp(-i * m * phase).
-            * Compute the likelihood on a phase grid, by computing mu(theta, phase) from
-              the cached modes. In principle this likelihood is exact, however, it can
-              deviate slightly from the likelihood computed without cached modes for
-              various technical reasons (e.g., slightly different windowing of cached
-              modes compared to full waveform when transforming TD waveform to FD).
-              These small deviations can be fully accounted for by importance sampling.
-              *Note*: when approximation_22_mode=True, the entire waveform is assumed
-              to transform as exp(2i*phase), in which case the likelihood is only exact
-              if the waveform is fully dominated by the (2, 2) mode.
-            * Build a synthetic conditional phase distribution based on this grid. We
-              use an interpolated prior distribution bilby.core.prior.Interped,
-              such that we can sample and also evaluate the log_prob. We add a constant
-              background with weight self.synthetic_phase_kwargs to the kde to make
-              sure that we keep a mass-covering property. With this, the importance
-              sampling will yield exact results even when the synthetic phase conditional
-              is just an approximation.
-
-        Besides adding phase samples to self.samples['phase'], this method also modifies
-        self.samples['log_prob'] by adding the log_prob of the synthetic phase
-        conditional.
-
-        This method modifies self.samples in place.
+        This method modifies self.samples in place. Afterwards the phase prior
+        rejoins `self.prior`.
 
         Parameters
         ----------
         synthetic_phase_kwargs : dict
-            This should consist of the kwargs
-                approximation_22_mode (optional)
-                num_processes (optional)
-                n_grid
-                uniform_weight (optional)
-        inverse : bool, default False
-            Whether to apply instead the inverse transformation. This is used prior to
-            calculating the log_prob. In inverse mode, the posterior probability over
-            phase is calculated for given samples. It is stored in self.samples[
-            'log_prob'].
+            Keys: `n_grid` (required), `approximation_22_mode` (optional; default
+            True assumes a (2, 2)-dominated waveform, otherwise the exact mode sum
+            is used, which requires the waveform generator's
+            `spin_conversion_phase = 0`), `uniform_weight` (optional),
+            `num_processes` (optional).
         """
+        if self.sampler_context is None:
+            raise ValueError(
+                "Synthetic phase requires a sampler context; this result does not "
+                "carry full model metadata."
+            )
+
         self.synthetic_phase_kwargs = synthetic_phase_kwargs
 
         approximation_22_mode = self.synthetic_phase_kwargs.get(
@@ -564,9 +576,6 @@ class Result(CoreResult):
                 f"Phase prior should be uniform [0, 2pi) to work with synthetic phase."
                 f" However, the prior is {self.phase_prior}."
             )
-
-        # This builds on the Bilby approach to sampling the phase when using a
-        # phase-marginalized likelihood.
 
         # Restrict to samples that are within the prior.
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
@@ -602,92 +611,9 @@ class Result(CoreResult):
         print(f"Estimating synthetic phase for {num_valid_samples} samples.")
         t0 = time.time()
 
-        if not inverse:
-            self._build_likelihood()
-
-        if inverse:
-            # We estimate the log_prob for given phases, so first save the evaluation
-            # points.
-            sample_phase = theta["phase"].to_numpy(copy=True)
-
-        # For each sample, build the posterior over phase given the remaining parameters.
-
-        phases = np.linspace(0, 2 * np.pi, self.synthetic_phase_kwargs["n_grid"])
-        if approximation_22_mode:
-            # For each sample, the un-normalized posterior depends only on (d | h(phase)):
-            # The prior p(phase), and the inner products (h | h), and (d | d) only contribute
-            # to the normalization. (We check above that p(phase) is constant.)
-            theta["phase"] = 0.0
-            d_inner_h_complex = self.likelihood.d_inner_h_complex_multi(
-                theta.iloc[within_prior],
-                num_processes,
-            )
-
-            # Evaluate the log posterior over the phase across the grid.
-            phasor = np.exp(2j * phases)
-            phase_log_posterior = np.outer(d_inner_h_complex, phasor).real
-        else:
-            self.likelihood.phase_grid = phases
-
-            phase_log_posterior = apply_func_with_multiprocessing(
-                self.likelihood.log_likelihood_phase_grid,
-                theta.iloc[within_prior],
-                num_processes=num_processes,
-            )
-
-        phase_posterior = np.exp(
-            phase_log_posterior - np.amax(phase_log_posterior, axis=1, keepdims=True)
+        self._sample_synthetic_phase_chain(
+            theta, within_prior, approximation_22_mode, num_processes
         )
-        # Include a floor value to maintain mass coverage.
-        phase_posterior += phase_posterior.mean(
-            axis=-1, keepdims=True
-        ) * self.synthetic_phase_kwargs.get("uniform_weight", 0.01)
-
-        if not inverse:
-            # Forward direction:
-            #   (1) Sample a new phase according to the synthetic posterior.
-            #   (2) Add the log_prob to the existing log_prob.
-
-            new_phase, delta_log_prob = interpolated_sample_and_log_prob_multi(
-                phases,
-                phase_posterior,
-                num_processes,
-            )
-
-            phase_array = np.full(len(theta), 0.0)
-            phase_array[within_prior] = new_phase
-            delta_log_prob_array = np.full(len(theta), -np.nan)
-            delta_log_prob_array[within_prior] = delta_log_prob
-
-            self.samples["phase"] = phase_array
-            self.samples["log_prob"] += delta_log_prob_array
-
-            # Insert the phase prior in the prior, since now the phase is present.
-            self.prior["phase"] = self.phase_prior
-            self.phase_prior = None
-
-            # reset likelihood for safety
-            # TODO: Can this be removed?
-            self.likelihood = None
-
-        else:
-            # TODO: Possibly remove.
-            # Inverse direction:
-            #   (1) Evaluate the synthetic log prob for given phase points, and save it.
-
-            log_prob = interpolated_log_prob_multi(
-                phases,
-                phase_posterior,
-                sample_phase[within_prior],
-                num_processes,
-            )
-
-            # Outside of prior, set log_prob to -np.nan.
-            log_prob_array = np.full(len(theta), -np.nan)
-            log_prob_array[within_prior] = log_prob
-            self.samples["log_prob"] = log_prob_array
-            del self.samples["phase"]
-
         print(f"Done. This took {time.time() - t0:.2f} s.")
 
     def get_samples_bilby_phase(self, num_processes=1):
@@ -705,17 +631,10 @@ class Result(CoreResult):
         pd.DataFrame
             Samples
         """
-        spin_conversion_phase_old = self.base_metadata["dataset_settings"][
-            "waveform_generator"
-        ].get("spin_conversion_phase")
+        from dingo.gw.inference.steps import SpinConventionReparam
 
-        # Redefine phase parameter to be consistent with Bilby.
-        return change_spin_conversion_phase(
-            self.samples,
-            self.f_ref,
-            spin_conversion_phase_old,
-            None,
-            num_processes=num_processes,
+        return SpinConventionReparam(num_processes=num_processes).to_physical(
+            self.samples, self.base_metadata
         )
 
     def get_pesummary_samples(
@@ -777,17 +696,11 @@ class Result(CoreResult):
             if "time" in col:
                 samples.loc[:, col] += self.t_ref
 
-        spin_conversion_phase_old = self.base_metadata["dataset_settings"][
-            "waveform_generator"
-        ].get("spin_conversion_phase")
+        # Redefine the spin angles to the physical (Bilby) convention.
+        from dingo.gw.inference.steps import SpinConventionReparam
 
-        # Redefine phase parameter to be consistent with Bilby. COMMENTED BECAUSE SLOW
-        samples = change_spin_conversion_phase(
-            samples,
-            self.f_ref,
-            spin_conversion_phase_old,
-            None,
-            num_processes=num_processes,
+        samples = SpinConventionReparam(num_processes=num_processes).to_physical(
+            samples, self.base_metadata
         )
 
         self._pesummary_samples = samples

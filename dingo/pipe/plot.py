@@ -23,10 +23,13 @@ def create_parser():
     parser.add(
         "--weights", action="store_true", help="Generate plot of importance " "weights"
     )
+    # Dash-style: bilby_pipe's parse_args normalizes --log_probs to --log-probs
+    # before parsing, so an underscore-defined option is silently dropped as
+    # unknown. argparse still binds the value to args.log_probs.
     parser.add(
-        "--log_probs",
+        "--log-probs",
         action="store_true",
-        help="Generate plot of target" "versus proposal log probability",
+        help="Generate plot of target versus proposal log probability",
     )
     # parser.add("--marginal", action="store_true", help="Generate marginal plots")
     # parser.add("--skymap", action="store_true", help="Generate skymap")
