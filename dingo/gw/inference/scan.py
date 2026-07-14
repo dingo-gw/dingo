@@ -174,7 +174,7 @@ def chirp_mass_scan(
             + tail_steps
         )
         out, _ = composer.sample_and_log_prob(len(block), context)
-        frames.append(pd.DataFrame({k: v.numpy() for k, v in out.items()}))
+        frames.append(pd.DataFrame({k: v.cpu().numpy() for k, v in out.items()}))
     theta = pd.concat(frames, ignore_index=True)
 
     # Restrict to draws within the prior (unphysical combinations cannot be

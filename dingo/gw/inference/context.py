@@ -411,9 +411,10 @@ class GWSamplerContext:
     def _conditioning_columns(self, conditioning) -> dict[str, torch.Tensor]:
         """Collect the conditioning columns the preparation consumes, keyed by
         their physical names (the `_proxy` suffix names the chain column; the
-        transform chain reads the physical parameter), as float64 (the
-        heterodyne phase is computed in float64, and a float32 chain column
-        must not degrade it)."""
+        transform chain reads the physical parameter), as float64 on the host
+        (the heterodyne phase is computed in float64, and a float32 chain
+        column must not degrade it; the preparation is a numpy transform
+        chain, so columns from a CUDA chain come back to the CPU here)."""
         conditioning = conditioning or {}
         columns = {}
         for name in self.data_prep_conditioning:
@@ -423,9 +424,11 @@ class GWSamplerContext:
                     f"conditioning `{name}`, which the caller does not provide "
                     f"(pass it to prepared_data, e.g. from the chain's pins)."
                 )
-            columns[name[: -len("_proxy")]] = torch.as_tensor(
-                conditioning[name], dtype=torch.float64
-            ).reshape(-1)
+            columns[name[: -len("_proxy")]] = (
+                torch.as_tensor(conditioning[name], dtype=torch.float64)
+                .cpu()
+                .reshape(-1)
+            )
         return columns
 
     def _broadcast_event(self, n_rows: int) -> dict:

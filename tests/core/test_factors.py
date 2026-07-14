@@ -710,3 +710,22 @@ def test_all_point_mass_chain_expands_to_base():
     chain = ChainComposer([DeltaFactor({"a": 2.0, "b": -1.0})])
     samples, log_prob = chain.sample_and_log_prob(4, context=None)
     assert samples["a"].shape == (4,) and log_prob.shape == (4,)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+def test_sample_table_factor_emits_on_context_device():
+    """A table-rooted chain must follow the chain's device policy: the fixed
+    table's fresh tensors join the chain on context.device, so they can
+    condition a network living on the GPU (regression: the chirp-mass scan on
+    CUDA mixed CPU conditioning into a CUDA embedding)."""
+    from types import SimpleNamespace
+
+    from dingo.core.factors import SampleTableFactor
+
+    factor = SampleTableFactor(
+        {"x": torch.arange(4.0)}, log_prob=torch.zeros(4)
+    )
+    context = SimpleNamespace(device="cuda")
+    samples, log_prob = factor.sample_and_log_prob(4, context)
+    assert samples["x"].device.type == "cuda"
+    assert log_prob.device.type == "cuda"
