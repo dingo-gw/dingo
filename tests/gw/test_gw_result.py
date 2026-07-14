@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 import pytest
+from bilby.core.prior import Constraint, PowerLaw, PriorDict, Uniform
+from bilby.core.utils import random as bilby_random
 
 from dingo.gw.domains import UniformFrequencyDomain
 from dingo.gw.gwutils import get_extrinsic_prior_dict
@@ -217,6 +219,149 @@ def test_sample_synthetic_phase_requires_uniform_phase_prior():
     result = make_gw_result(drop_phase=False)
     with pytest.raises(ValueError, match="[Pp]hase prior"):
         result.sample_synthetic_phase({"n_grid": 16})
+
+
+# ---------------------------------------------------------------------------
+# update_prior (importance-sampling prior reweighting)
+# ---------------------------------------------------------------------------
+#
+# The context owns the static training prior; a prior update is applied downstream
+# at the importance-sampling layer (update_prior, and _build_prior on reload). These
+# tests exercise that path on synthetic samples -- pure prior arithmetic, no waveform
+# generation. The update swaps the luminosity-distance Uniform(100, 1000) for a
+# PowerLaw on the same support, so every sample stays inside the prior and the
+# expected reweighting is exactly exp(delta log-prior), computable by hand.
+
+# String-instantiable form ({key: prior_str}), as update_prior requires for saving.
+_LD_PRIOR_UPDATE = {
+    "luminosity_distance": "bilby.core.prior.PowerLaw("
+    "alpha=2.0, minimum=100.0, maximum=1000.0, name='luminosity_distance')"
+}
+
+
+def _seeded_result(n=30, seed=42):
+    np.random.seed(seed)
+    bilby_random.seed(seed)
+    return make_gw_result(n=n)
+
+
+def _ld_log_prior_delta(result):
+    """Per-sample change in total ln-prior under _LD_PRIOR_UPDATE: only the
+    luminosity-distance factor changes, so the delta is its ln-prob difference."""
+    ld = result.samples["luminosity_distance"].to_numpy()
+    new = PowerLaw(alpha=2.0, minimum=100.0, maximum=1000.0)
+    old = Uniform(minimum=100.0, maximum=1000.0)
+    return new.ln_prob(ld) - old.ln_prob(ld)
+
+
+def test_update_prior_updates_prior_and_records_string_form():
+    result = _seeded_result()
+    training_ld = result.prior["luminosity_distance"]
+    assert isinstance(training_ld, Uniform)
+
+    prior_update = dict(_LD_PRIOR_UPDATE)
+    result.update_prior(prior_update)
+    # The caller's dict keeps its string form (update_prior copies before
+    # bilby's in-place instantiation).
+    assert prior_update == _LD_PRIOR_UPDATE
+
+    # The live prior is evolved.
+    assert isinstance(result.prior["luminosity_distance"], PowerLaw)
+    # The update is recorded in its original string-instantiable form, and
+    # PriorDict(prior_update) reconstructs exactly the evolved prior (the round
+    # trip _build_prior performs when a saved Result is reloaded).
+    stored = result.importance_sampling_metadata["prior_update"]
+    assert stored == _LD_PRIOR_UPDATE
+    reconstructed = PriorDict(stored.copy())
+    assert reconstructed["luminosity_distance"] == result.prior["luminosity_distance"]
+    assert reconstructed["luminosity_distance"] != training_ld
+
+
+def test_update_prior_reweights_samples_before_importance_sampling():
+    # Before importance sampling (log_evidence is None), update_prior stores
+    # weights proportional to exp(log_prior_new - log_prior_old).
+    result = _seeded_result()
+    assert result.log_evidence is None
+    param_keys = [
+        k for k, v in result.prior.items() if not isinstance(v, Constraint)
+    ]
+    # ln-prior of the samples under the training prior, evaluated exactly as
+    # update_prior does internally (same PriorDict instance, so the stochastic
+    # constraint-normalization factor is cached and cancels in differences).
+    log_prior_before = result.prior.ln_prob(result.samples[param_keys], axis=0)
+
+    result.update_prior(dict(_LD_PRIOR_UPDATE))
+
+    delta = _ld_log_prior_delta(result)
+    # The log_prior column reflects the evolved prior: it shifts by exactly the
+    # luminosity-distance ln-prob difference.
+    np.testing.assert_allclose(
+        result.samples["log_prior"].to_numpy() - log_prior_before, delta, rtol=1e-8
+    )
+    # Weights are the normalized (mean 1) exponential of that shift -- and the
+    # update genuinely reweights (the PowerLaw is not flat over the samples).
+    expected = np.exp(delta - delta.max())
+    expected /= expected.mean()
+    weights = result.samples["weights"].to_numpy()
+    np.testing.assert_allclose(weights, expected, rtol=1e-8)
+    assert weights.mean() == pytest.approx(1.0)
+    assert weights.std() > 0.1
+
+
+def test_update_prior_reweights_importance_sampled_result():
+    # After importance sampling (log_evidence set), update_prior recomputes the
+    # weights and evidence. The importance-sampled state is fabricated from the
+    # sample columns (_calculate_evidence only reads log_prob / log_likelihood /
+    # log_prior), so no likelihood evaluation is needed.
+    result = _seeded_result()
+    param_keys = [
+        k for k, v in result.prior.items() if not isinstance(v, Constraint)
+    ]
+    result.samples["log_prior"] = result.prior.ln_prob(
+        result.samples[param_keys], axis=0
+    )
+    result.samples["log_likelihood"] = np.random.default_rng(0).normal(
+        0.0, 1.0, len(result.samples)
+    )
+    result._calculate_evidence()
+    assert result.log_evidence is not None
+    weights_before = result.samples["weights"].to_numpy().copy()
+    log_evidence_before = result.log_evidence
+
+    result.update_prior(dict(_LD_PRIOR_UPDATE))
+
+    # New weights are the old ones tilted by exp(delta log-prior), renormalized;
+    # the evidence is recomputed accordingly.
+    expected = weights_before * np.exp(_ld_log_prior_delta(result))
+    expected /= expected.mean()
+    np.testing.assert_allclose(
+        result.samples["weights"].to_numpy(), expected, rtol=1e-8
+    )
+    assert result.log_evidence != log_evidence_before
+    assert np.isfinite(result.log_evidence)
+
+
+def test_update_prior_round_trips_through_file(tmp_path):
+    # A reloaded Result rebuilds the *evolved* prior, not the training prior:
+    # _build_prior re-applies importance_sampling_metadata["prior_update"] on top
+    # of the context's static prior.
+    result = _seeded_result()
+    training_ld = result.prior["luminosity_distance"]
+    result.update_prior(dict(_LD_PRIOR_UPDATE))
+    file_name = str(tmp_path / "result.hdf5")
+    result.to_file(file_name=file_name)
+
+    reloaded = Result(file_name=file_name)
+    assert reloaded.importance_sampling_metadata["prior_update"] == _LD_PRIOR_UPDATE
+    assert isinstance(reloaded.prior["luminosity_distance"], PowerLaw)
+    assert reloaded.prior["luminosity_distance"] == result.prior["luminosity_distance"]
+    assert reloaded.prior["luminosity_distance"] != training_ld
+    # The reweighted samples survive the round trip alongside the evolved prior.
+    np.testing.assert_allclose(
+        reloaded.samples["weights"].to_numpy(),
+        result.samples["weights"].to_numpy(),
+        rtol=1e-12,
+    )
 
 
 # ---------------------------------------------------------------------------
