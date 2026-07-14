@@ -259,9 +259,11 @@ def test_update_prior_updates_prior_and_records_string_form():
     training_ld = result.prior["luminosity_distance"]
     assert isinstance(training_ld, Uniform)
 
-    # Pass a copy: bilby's PriorDict instantiates the {key: prior_str} dict *in
-    # place* (strings become Prior objects), mutating the caller's dict.
-    result.update_prior(dict(_LD_PRIOR_UPDATE))
+    prior_update = dict(_LD_PRIOR_UPDATE)
+    result.update_prior(prior_update)
+    # The caller's dict keeps its string form (update_prior copies before
+    # bilby's in-place instantiation).
+    assert prior_update == _LD_PRIOR_UPDATE
 
     # The live prior is evolved.
     assert isinstance(result.prior["luminosity_distance"], PowerLaw)

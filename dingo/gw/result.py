@@ -255,7 +255,9 @@ class Result(CoreResult):
             the Result and later instantiated.
         """
         self.importance_sampling_metadata["prior_update"] = prior_update.copy()
-        prior_update = PriorDict(prior_update)
+        # PriorDict instantiates in place, so work on a copy: the caller's dict
+        # keeps its string form.
+        prior_update = PriorDict(prior_update.copy())
 
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
         theta = self.samples[param_keys]
