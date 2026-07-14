@@ -429,7 +429,7 @@ class Result(CoreResult):
 
         # Removing the delta function priors on the frequency nodes, amplitude and phase.
         # Usually the frequency nodes are set to delta functions, but we also remove the
-        # the amplitude and phase delta functions if present.
+        # amplitude and phase delta functions if present.
         # This avoids large log probs and log priors, since the density of a delta function
         # at the sampled point is infinite. The delta functions do not affect the sampling,
         # since they just fix certain parameters to constant values.
@@ -463,6 +463,12 @@ class Result(CoreResult):
             # Update prior_update dict with calibration parameters. This is for
             # persistence when saving to hdf5
             for param_name, prior_obj in prior.items():
+                # bilby's Prior.__repr__ isn't parseable for numpy scalars on numpy>2.0
+                # Upstream fix: https://github.com/bilby-dev/bilby/pull/1108
+                # Can be removed once dingo requires a bilby release that includes it.
+                for attr, value in prior_obj.get_instantiation_dict().items():
+                    if isinstance(value, np.generic):
+                        setattr(prior_obj, attr, value.item())
                 prior_update[param_name] = repr(prior_obj)
 
         # Store prior_update for persistence on save/reload
@@ -572,8 +578,25 @@ class Result(CoreResult):
         # Restrict to samples that are within the prior.
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
         theta = self.samples[param_keys]
-        log_prior = self.prior.ln_prob(theta, axis=0)
-        constraints = self.prior.evaluate_constraints(theta)
+
+        # Compute log_prior only for non-DeltaFunction parameters.  DeltaFunction
+        # priors return ln_prob = +inf at the peak, which causes check_ln_prob to
+        # skip constraint evaluation and return +inf for every sample, so
+        # np.isfinite(log_prior) would be False for all samples.  Additionally, RA
+        # corrections (trigger_time vs model ref_time) can shift fixed parameters by
+        # tiny amounts, making DeltaFunction ln_prob = -inf for all samples.
+        prior_keys_for_lp = [
+            k for k, v in self.prior.items()
+            if not isinstance(v, Constraint) and not isinstance(v, DeltaFunction)
+        ]
+        log_prior = self.prior.ln_prob(self.samples[prior_keys_for_lp], axis=0)
+        # Pass a plain dict so bilby's evaluate_constraints handles the argument
+        # correctly.  bilby's evaluate_constraints mishandles a DataFrame argument:
+        # its internal .values() call raises TypeError (DataFrame.values is a
+        # property, not a method), causing the try/except inside bilby to fall
+        # through to ``np.ones_like(out_sample)``, which returns a 2-D array and
+        # causes a shape-broadcast error in the subsequent element-wise multiplication.
+        constraints = self.prior.evaluate_constraints(dict(theta))
         np.putmask(log_prior, constraints == 0, -np.inf)
         within_prior = np.isfinite(log_prior)
 
