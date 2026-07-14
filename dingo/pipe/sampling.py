@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 """Script to sample from a Dingo model. Based on bilby_pipe data analysis script."""
+import copy
 import sys
 from pathlib import Path
 import os
@@ -12,10 +13,12 @@ from bilby_pipe.utils import (
     resolve_filename_with_transfer_fallback,
 )
 
+from dingo.core.factors import FlowFactor
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset
-from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
-from dingo.gw.inference.inference_utils import prepare_log_prob
+from dingo.gw.inference.sampler import GWComposedSampler
+from dingo.gw.inference.steps import GNPEKernelFactor
+from dingo.gw.inference.scan import chirp_mass_scan
 from dingo.pipe.default_settings import DENSITY_RECOVERY_SETTINGS
 from dingo.pipe.parser import create_parser
 
@@ -52,9 +55,21 @@ class SamplingInput(Input):
         self.model_init = args.model_init and (
             resolve_filename_with_transfer_fallback(args.model_init) or args.model_init
         )
+        self.sampler_implementation = args.sampler_implementation
         self.recover_log_prob = args.recover_log_prob
         self.device = args.device
         self.num_gnpe_iterations = args.num_gnpe_iterations
+        self.fixed_context_parameters = (
+            convert_string_to_dict(args.fixed_context_parameters)
+            if args.fixed_context_parameters is not None
+            else None
+        )
+        if args.chirp_mass_scan is None:
+            self.chirp_mass_scan_settings = None
+        elif args.chirp_mass_scan.strip().lower() == "true":
+            self.chirp_mass_scan_settings = {}
+        else:
+            self.chirp_mass_scan_settings = convert_string_to_dict(args.chirp_mass_scan)
         self.num_samples = args.num_samples
         self.batch_size = args.batch_size
         self.density_recovery_settings = args.density_recovery_settings
@@ -114,29 +129,88 @@ class SamplingInput(Input):
         self.event_metadata = event_dataset.settings
 
     def _load_sampler(self):
-        """Load the sampler and set its context based on event data."""
+        """Build the sampler from the model(s) and the event data."""
+        if self.sampler_implementation == "legacy":
+            raise ValueError(
+                "The legacy samplers (GWSampler / GWSamplerGNPE) have been removed; "
+                "use sampler-implementation = composed. The last commit containing "
+                "them is tagged legacy-samplers-final."
+            )
         model = build_model_from_kwargs(
             filename=self.model, device=self.device, load_training_info=False
         )
 
-        if self.model_init is not None:
-            self.gnpe = True
-            init_model = build_model_from_kwargs(
-                filename=self.model_init, device=self.device, load_training_info=False
+        scan_provenance = None
+        if self.chirp_mass_scan_settings is not None:
+            if self.model_init is not None:
+                raise ValueError(
+                    "chirp-mass-scan applies to single-network models; it cannot "
+                    "be combined with model-init (iterative GNPE)."
+                )
+            if (
+                self.fixed_context_parameters is not None
+                and "chirp_mass_proxy" in self.fixed_context_parameters
+            ):
+                raise ValueError(
+                    "chirp-mass-scan and a pinned chirp_mass_proxy in "
+                    "fixed-context-parameters are mutually exclusive; provide one."
+                )
+            scan_kwargs = dict(self.chirp_mass_scan_settings)
+            scan_kwargs.setdefault("num_processes", self.request_cpus)
+            scan = chirp_mass_scan(
+                model,
+                self.context,
+                event_metadata=self.event_metadata,
+                fixed_context_parameters=self.fixed_context_parameters,
+                **scan_kwargs,
             )
-            init_sampler = GWSampler(model=init_model)
-            self.dingo_sampler = GWSamplerGNPE(
-                model=model,
-                init_sampler=init_sampler,
+            logger.info(
+                f"Chirp-mass scan: trigger {scan['chirp_mass_trigger']:.5f}, "
+                f"snr {scan['snr']:.2f}, "
+                f"max log likelihood {scan['max_log_likelihood']:.2f}."
+            )
+            self.fixed_context_parameters = {
+                **(self.fixed_context_parameters or {}),
+                "chirp_mass_proxy": scan["chirp_mass_trigger"],
+            }
+            scan_provenance = {
+                **scan["settings"],
+                "chirp_mass_trigger": scan["chirp_mass_trigger"],
+                "snr": scan["snr"],
+                "max_log_likelihood": scan["max_log_likelihood"],
+            }
+
+        if self.model_init is not None:
+            if self.fixed_context_parameters is not None:
+                raise ValueError(
+                    "fixed-context-parameters pins the context of a single-network "
+                    "model; it cannot be combined with model-init (iterative GNPE)."
+                )
+            self.gnpe = True
+            self._main_model = model
+            init_model = build_model_from_kwargs(
+                filename=self.model_init,
+                device=self.device,
+                load_training_info=False,
+            )
+            self.dingo_sampler = GWComposedSampler.from_gnpe_models(
+                init_model,
+                model,
+                self.context,
+                event_metadata=self.event_metadata,
                 num_iterations=self.num_gnpe_iterations,
             )
-
         else:
             self.gnpe = False
-            self.dingo_sampler = GWSampler(model=model)
-
-        self.dingo_sampler.context = self.context
-        self.dingo_sampler.event_metadata = self.event_metadata
+            self.dingo_sampler = GWComposedSampler.from_model(
+                model,
+                self.context,
+                event_metadata=self.event_metadata,
+                fixed_context_parameters=self.fixed_context_parameters,
+            )
+        self.dingo_sampler.provenance_extra["models"] = self._model_paths()
+        if scan_provenance is not None:
+            self.dingo_sampler.provenance_extra["chirp_mass_scan"] = scan_provenance
 
     @property
     def density_recovery_settings(self):
@@ -180,6 +254,49 @@ class SamplingInput(Input):
     #     result_dir = os.path.join(self.outdir, "result")
     #     return os.path.relpath(result_dir)
 
+    def _model_paths(self) -> dict:
+        paths = {"model": self.model}
+        if self.model_init is not None:
+            paths["model_init"] = self.model_init
+        return paths
+
+    def _recover_log_prob_composed(self):
+        """Recover the sample density for a GNPE model: run the Gibbs chain, train
+        an unconditional NDE on the GNPE proxies, then swap in a single-step
+        (density-preserving) sampler with the NDE as the proxy source. The final
+        samples then carry a log_prob, as required for importance sampling."""
+        settings = copy.deepcopy(self.density_recovery_settings)
+        self.dingo_sampler.run_sampler(
+            settings["num_samples"], batch_size=self.batch_size
+        )
+        # The Gibbs chain that generates the NDE's training samples, recorded in the
+        # recovery provenance below (the final sampler's own chain is the recovered
+        # single-step one).
+        gibbs_chain = self.dingo_sampler.sampler_provenance()["chain"]
+        result = self.dingo_sampler.to_result()
+        nde_settings = settings["nde_settings"]
+        nde_settings["training"]["device"] = str(self._main_model.device)
+        proxy_parameters = GNPEKernelFactor.from_model(self._main_model).parameters
+        unconditional_model = result.train_unconditional_flow(
+            proxy_parameters,
+            nde_settings,
+            threshold_std=settings.get("threshold_std", float("inf")),
+        )
+        self.dingo_sampler = GWComposedSampler.from_singlestep_gnpe(
+            self._main_model,
+            FlowFactor.from_model(unconditional_model),
+            self.context,
+            event_metadata=self.event_metadata,
+        )
+        self.dingo_sampler.provenance_extra["models"] = self._model_paths()
+        # The recovery recipe: the Gibbs chain that generated the NDE's training
+        # samples (with its iteration count inside the GibbsBlock descriptor) plus
+        # the NDE training settings.
+        self.dingo_sampler.provenance_extra["density_recovery"] = {
+            "chain": gibbs_chain,
+            **settings,
+        }
+
     def run_sampler(self):
         if self.gnpe and self.recover_log_prob:
             logger.info(
@@ -187,12 +304,7 @@ class SamplingInput(Input):
                 "samples and training a new network to recover it."
             )
 
-            # Note that this will not save any low latency samples at present.
-            prepare_log_prob(
-                self.dingo_sampler,
-                batch_size=self.batch_size,
-                **self.density_recovery_settings,
-            )
+            self._recover_log_prob_composed()
 
         self.dingo_sampler.run_sampler(self.num_samples, batch_size=self.batch_size)
         self.dingo_sampler.to_hdf5(label=self.label, outdir=self.result_directory)

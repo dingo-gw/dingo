@@ -39,13 +39,11 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         time_marginalization_kwargs: Optional[dict] = None,
         phase_marginalization_kwargs: Optional[dict] = None,
         calibration_marginalization_kwargs: Optional[dict] = None,
-        phase_grid=None,
         use_base_domain: bool = False,
         frequency_update: Optional[
             dict[str, float | dict[str, float | list[float]]]
         ] = None,
     ):
-        # TODO: Does the phase_grid argument ever get used?
         """
         Parameters
         ----------
@@ -152,7 +150,9 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             ]
         )
         self.whiten = True
-        self.phase_grid = phase_grid
+        # Assigned by phase-grid consumers (synthetic phase) or set internally by
+        # phase marginalization; never a construction input.
+        self.phase_grid = None
 
         # optionally initialize time marginalization
         self.time_marginalization = False
@@ -177,6 +177,12 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
         # Initialize calibration marginalization using the setter from GWSignal.
         self.calibration_marginalization_kwargs = calibration_marginalization_kwargs
+
+        # When set, log_likelihood returns (log_likelihood, snr) pairs, where snr
+        # is the matched-filter signal-to-noise ratio of the waveform against the
+        # data (phase-maximized under phase marginalization). Used by the
+        # chirp-mass scan to report trigger quality.
+        self.return_aux_snr = False
 
     def initialize_time_marginalization(self, t_lower, t_upper, n_fft=1):
         """
@@ -314,7 +320,13 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 for d_ifo, mu_ifo in zip(d.values(), mu.values())
             ],
         )
-        return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+        log_likelihood = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+
+        if self.return_aux_snr:
+            snr = kappa2 / rho2opt**0.5
+            return log_likelihood, snr
+
+        return log_likelihood
 
     def log_likelihood_phase_grid(
         self, theta: dict, phases: Optional[np.ndarray] = None
@@ -335,6 +347,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
     def _log_likelihood_phase_grid_manual(
         self, theta: dict, phases: Optional[np.ndarray] = None
     ) -> np.ndarray:
+        if self.return_aux_snr:
+            raise NotImplementedError
         if self.phase_marginalization:
             raise ValueError(
                 "Can't compute likelihood on a phase grid for "
@@ -356,6 +370,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
     def _log_likelihood_phase_grid_mode_decomposed(self, theta, phases=None):
         # TODO: Implement for time marginalization
+        if self.return_aux_snr:
+            raise NotImplementedError
         if self.phase_marginalization:
             raise ValueError(
                 "Can't compute likelihood on a phase grid for "
@@ -512,7 +528,13 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                     for d_ifo, mu_ifo in zip(d.values(), mu.values())
                 ]
             )
-            return self.log_Zn + ln_i0(np.abs(kappa2C)) - 1 / 2.0 * rho2opt
+            log_likelihood = self.log_Zn + ln_i0(np.abs(kappa2C)) - 1 / 2.0 * rho2opt
+
+            if self.return_aux_snr:
+                snr = ln_i0(np.abs(kappa2C)) / rho2opt**0.5
+                return log_likelihood, snr
+
+            return log_likelihood
 
         else:
             log_likelihoods_phase_grid = self.log_likelihood_phase_grid(theta)
@@ -596,7 +618,13 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         alpha = np.max(exponent)
         kappa2 = alpha + np.log(np.sum(np.exp(exponent - alpha)))
 
-        return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+        log_likelihood = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+
+        if self.return_aux_snr:
+            snr = kappa2 / rho2opt**0.5
+            return log_likelihood, snr
+
+        return log_likelihood
 
     def _log_likelihood_calibration_marginalized(self, theta):
         """
@@ -611,6 +639,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         -------
         log_likelihood: float
         """
+        if self.return_aux_snr:
+            raise NotImplementedError
 
         # Step 1: Compute whitened GW strain mu(theta) for parameters theta.
         mu = self.signal(theta)["waveform"]
@@ -640,7 +670,10 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         return logsumexp(likelihoods) - np.log(len(likelihoods))
 
     def d_inner_h_complex_multi(
-        self, theta: pd.DataFrame, num_processes: int = 1
+        self,
+        theta: pd.DataFrame,
+        num_processes: int = 1,
+        return_rho2opt: bool = False,
     ) -> np.ndarray:
         """
         Calculate the complex inner product (d | h(theta)) between the stored data d
@@ -652,26 +685,31 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             Parameters at which to evaluate h.
         num_processes : int
             Number of parallel processes to use.
+        return_rho2opt : bool
+            If True, also return rho2opt = (h|h) for each sample. Useful for
+            synthetic phase sampling where the full likelihood decomposition
+            log L = log_Zn + Re[(d|h)*exp(2i*phase)] - 0.5*(h|h) is needed.
 
         Returns
         -------
-        complex : Inner product
+        np.ndarray or tuple of np.ndarray
+            Complex inner products. If return_rho2opt is True, returns
+            (d_inner_h_complex, rho2opt).
         """
         with threadpool_limits(limits=1, user_api="blas"):
-            # Generator object for theta rows. For idx this yields row idx of
-            # theta dataframe, converted to dict, ready to be passed to
-            # self.log_likelihood.
             theta_generator = (d[1].to_dict() for d in theta.iterrows())
 
             if num_processes > 1:
                 with Pool(processes=num_processes) as pool:
-                    d_inner_h_complex = pool.map(
-                        self.d_inner_h_complex, theta_generator
-                    )
+                    results = pool.map(self._d_inner_h_complex, theta_generator)
             else:
-                d_inner_h_complex = list(map(self.d_inner_h_complex, theta_generator))
+                results = list(map(self._d_inner_h_complex, theta_generator))
 
-        return np.array(d_inner_h_complex)
+        d_inner_h = np.array([r[0] for r in results])
+        if return_rho2opt:
+            rho2opt = np.array([r[1] for r in results]).real
+            return d_inner_h, rho2opt
+        return d_inner_h
 
     def d_inner_h_complex(self, theta):
         """
@@ -685,20 +723,24 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
         Returns
         -------
-        complex : Inner product
+        complex : Inner product (d|h)
         """
         # TODO: Implement for time marginalization.
-        return self._d_inner_h_complex(theta)
+        return self._d_inner_h_complex(theta)[0]
 
     def _d_inner_h_complex(self, theta):
+        """Return (d|h) and (h|h) as a tuple. Computing both is essentially
+        free since the waveform mu is already generated."""
         mu = self.signal(theta)["waveform"]
         d = self.whitened_strains
-        return sum(
+        d_inner_h = sum(
             [
                 inner_product_complex(d_ifo, mu_ifo)
                 for d_ifo, mu_ifo in zip(d.values(), mu.values())
             ]
         )
+        rho2opt = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
+        return d_inner_h, rho2opt
 
 
 def inner_product(a, b, min_idx=0, delta_f=None, psd=None):

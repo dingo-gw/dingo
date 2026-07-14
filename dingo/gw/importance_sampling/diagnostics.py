@@ -8,8 +8,19 @@ from dingo.gw.result import Result
 
 
 def plot_posterior_slice2d(
-    sampler, theta, theta_range, n_grid=100, num_processes=1, outname=None
+    result, theta, theta_range, n_grid=100, num_processes=1, outname=None
 ):
+    """Plot a 2D slice of the (unnormalized) target posterior through `theta`.
+
+    Parameters
+    ----------
+    result : Result
+        An importance-sampled result; provides the likelihood and log evidence.
+    theta : pd.Series
+        The parameter point the slice passes through.
+    theta_range : dict
+        `{parameter: (min, max)}` for the two scanned parameters.
+    """
     # prepare theta grid
     keys = list(theta_range.keys())
     axis0 = np.linspace(theta_range[keys[0]][0], theta_range[keys[0]][1], n_grid)
@@ -26,9 +37,9 @@ def plot_posterior_slice2d(
 
     # compute log_prob
     log_probs_target = (
-        sampler.likelihood.log_likelihood_multi(theta_grid, num_processes)
-        # + sampler.prior.ln_prob(theta_grid, axis=0)
-        - sampler.log_evidence
+        result.likelihood.log_likelihood_multi(theta_grid, num_processes)
+        # + result.prior.ln_prob(theta_grid, axis=0)
+        - result.log_evidence
     )
     log_probs_target -= np.max(log_probs_target)
     plt.clf()
@@ -47,7 +58,8 @@ def plot_posterior_slice2d(
 
 
 def plot_posterior_slice(
-    sampler,
+    result,
+    log_prob_proposal_fn,
     theta,
     theta_range,
     outname=None,
@@ -56,6 +68,21 @@ def plot_posterior_slice(
     parameters=None,
     normalize_conditionals=False,
 ):
+    """Plot 1D slices of the target posterior and the proposal through `theta`.
+
+    Parameters
+    ----------
+    result : Result
+        An importance-sampled result; provides the likelihood, prior, and log
+        evidence.
+    log_prob_proposal_fn : callable
+        Evaluates the proposal log-prob on a DataFrame of parameter points, e.g.
+        `FlowFactor.from_model(nde).log_prob` wrapped for DataFrames.
+    theta : pd.Series
+        The parameter point the slices pass through.
+    theta_range : dict
+        `{parameter: (min, max)}` for each scanned parameter.
+    """
     # Put a cap on number of processes to avoid overhead.
     # num_processes = min(num_processes, n_grid // 50)
 
@@ -81,13 +108,12 @@ def plot_posterior_slice(
         theta_param[param] = param_axis
         # evaluate the posterior at theta_grid
         log_probs_target = (
-            sampler.likelihood.log_likelihood_multi(theta_param, num_processes)
-            + sampler.prior.ln_prob(theta_param, axis=0)
-            - sampler.log_evidence
+            result.likelihood.log_likelihood_multi(theta_param, num_processes)
+            + result.prior.ln_prob(theta_param, axis=0)
+            - result.log_evidence
         )
-        # evaluate nde at theta_grid
-        # log_probs_proposal = get_log_probs_from_proposal(nde, theta_param)
-        log_probs_proposal = sampler.log_prob(theta_param)
+        # evaluate the proposal at theta_grid
+        log_probs_proposal = log_prob_proposal_fn(theta_param)
 
         # plot
         target = np.exp(log_probs_target)
@@ -181,7 +207,8 @@ def plot_diagnostics(
     #     for idx, (_, theta_idx) in enumerate(theta_slice_plots.iterrows()):
     #         # 1d slice plots
     #         plot_posterior_slice(
-    #             sampler,
+    #             result,
+    #             log_prob_proposal_fn,
     #             theta_idx,
     #             theta_range_1d,
     #             num_processes=num_processes,
@@ -201,7 +228,7 @@ def plot_diagnostics(
     #             theta_range_2d["phase"] = (0, 2 * np.pi)
     #             for param_pair in params_slice2d:
     #                 plot_posterior_slice2d(
-    #                     sampler,
+    #                     result,
     #                     theta_idx,
     #                     {k: theta_range_2d[k] for k in param_pair},
     #                     num_processes=num_processes,

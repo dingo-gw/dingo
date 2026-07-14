@@ -407,7 +407,10 @@ def create_parser(top_level=True, usage=None):
     # Mutually exclusive: --psd-dict / --asd-dataset
     if _BILBY_PIPE_V1_8:
         det_parser.add(
-            "--psd-dict", type=nonestr, default=None, help="Dictionary of PSD files to use"
+            "--psd-dict",
+            type=nonestr,
+            default=None,
+            help="Dictionary of PSD files to use",
         )
         det_parser.add(
             "--asd-dataset",
@@ -419,7 +422,10 @@ def create_parser(top_level=True, usage=None):
     else:
         psd_dict_parser = det_parser.add_mutually_exclusive_group()
         psd_dict_parser.add(
-            "--psd-dict", type=nonestr, default=None, help="Dictionary of PSD files to use"
+            "--psd-dict",
+            type=nonestr,
+            default=None,
+            help="Dictionary of PSD files to use",
         )
         psd_dict_parser.add(
             "--asd-dataset",
@@ -1253,7 +1259,9 @@ def create_parser(top_level=True, usage=None):
     )
     # Mutually exclusive: --prior-file / --prior-dict
     if _BILBY_PIPE_V1_8:
-        prior_parser.add("--prior-file", type=nonestr, default=None, help="The prior file")
+        prior_parser.add(
+            "--prior-file", type=nonestr, default=None, help="The prior file"
+        )
         prior_parser.add(
             "--prior-dict",
             type=nonestr,
@@ -1268,7 +1276,9 @@ def create_parser(top_level=True, usage=None):
         )
     else:
         prior_parser_main = prior_parser.add_mutually_exclusive_group()
-        prior_parser_main.add("--prior-file", type=nonestr, default=None, help="The prior file")
+        prior_parser_main.add(
+            "--prior-file", type=nonestr, default=None, help="The prior file"
+        )
         prior_parser_main.add(
             "--prior-dict",
             type=nonestr,
@@ -1523,11 +1533,44 @@ def create_parser(top_level=True, usage=None):
         "specified by the network.",
     )
     sampler_parser.add(
+        "--sampler-implementation",
+        type=str,
+        default="composed",
+        choices=["legacy", "composed"],
+        help="Sampler implementation. 'composed' (the factorized "
+        "GWComposedSampler) is the only implementation; 'legacy' is accepted "
+        "for a clear error message (the last commit containing the legacy "
+        "samplers is tagged legacy-samplers-final). Default 'composed'.",
+    )
+    sampler_parser.add(
         "--recover-log-prob",
         action=StoreBoolean,
         default=True,
         help="For GNPE models, whether to recover the log probability by training an "
         "unconditional flow for the GNPE proxies.",
+    )
+    sampler_parser.add(
+        "--fixed-context-parameters",
+        type=nonestr,
+        default=None,
+        help="Dictionary of fixed values for the model's context parameters, e.g. "
+        "{chirp_mass_proxy: 1.19786, ra: 3.44616, dec: -0.408084}. Required for "
+        "single-network models conditioned on context parameters (single-step "
+        "GNPE, e.g. binary neutron stars): proxy entries parameterize the data "
+        "preparation (chirp-mass heterodyning), and all pinned values are "
+        "recorded with the samples.",
+    )
+    sampler_parser.add(
+        "--chirp-mass-scan",
+        type=nonestr,
+        default=None,
+        help="Determine the trigger chirp mass from the data before sampling, "
+        "instead of pinning chirp_mass_proxy in fixed-context-parameters "
+        "(mutually exclusive with such a pin). 'true' scans with defaults "
+        "derived from the model (grid from the training prior and kernel, 10 "
+        "draws per point, maximum-likelihood winner); a dictionary overrides "
+        "individual settings, e.g. {num_samples: 10, overlap_factor: 2, "
+        "block_size: 32}.",
     )
     sampler_parser.add(
         "--device",
