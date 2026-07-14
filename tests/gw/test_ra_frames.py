@@ -7,8 +7,14 @@ import types
 
 import numpy as np
 import torch
+from astropy.time import Time
+from astropy.utils import iers
 
 from dingo.gw.inference.steps import RAToEventFrame
+
+# Avoid network access (and the associated timeout) when astropy computes sidereal
+# time; the bundled IERS data is sufficient for tests.
+iers.conf.auto_download = False
 
 
 def _context(t_ref, t_event):
@@ -28,6 +34,30 @@ def test_ra_reparam_round_trip():
     assert ra.dtype == torch.float32  # a bounded angle; float32 is sufficient
     assert not torch.allclose(ra, ra_tref)  # the sidereal rotation actually moved it
     assert torch.allclose(back, ra_tref, atol=1e-6)  # forward then inverse recovers it
+
+
+def test_ra_reparam_matches_sidereal_shift():
+    """The forward rotation must shift `ra` by the apparent-sidereal-time difference.
+
+    The round-trip test above holds for any bijection; this pins the magnitude and
+    direction of the rotation to the physical sidereal shift (event minus reference).
+    """
+    t_ref, t_event = 1126259462.4, 1126259462.4 + 3600.0  # 1 h -> real rotation
+    rp = RAToEventFrame()
+    ctx = _context(t_ref=t_ref, t_event=t_event)
+    ra_tref = torch.rand(1000, dtype=torch.float32) * (2 * np.pi)
+
+    ra_correction = (
+        Time(t_event, format="gps", scale="utc").sidereal_time(
+            "apparent", "greenwich"
+        )
+        - Time(t_ref, format="gps", scale="utc").sidereal_time("apparent", "greenwich")
+    ).rad
+
+    ra = rp.forward({"ra@t_ref": ra_tref}, ctx)["ra"]
+    expected = ((ra_tref.double() + ra_correction) % (2 * np.pi)).float()
+    assert torch.equal(ra, expected)
+    assert torch.all((ra >= 0) & (ra < 2 * np.pi))
 
 
 def test_ra_reparam_is_noop_without_a_distinct_event_time():
