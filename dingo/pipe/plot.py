@@ -29,7 +29,7 @@ def create_parser():
     parser.add(
         "--log-probs",
         action="store_true",
-        help="Generate plot of target" "versus proposal log probability",
+        help="Generate plot of target versus proposal log probability",
     )
     # parser.add("--marginal", action="store_true", help="Generate marginal plots")
     # parser.add("--skymap", action="store_true", help="Generate skymap")
