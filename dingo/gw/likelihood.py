@@ -438,22 +438,24 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 ]
             )
 
-        log_likelihoods = np.ones(len(phases))
-        kappa2_all = []
-        rho2opt_all = []
-        for idx, phase in enumerate(phases):
-            # get rho2opt
-            rho2opt = rho2opt_const
-            for (m, n), c in rho2opt_crossterms.items():
-                rho2opt += (c * np.exp(-1j * (n - m) * phase)).real
-            # get kappa2
-            kappa2 = 0
-            for m in m_vals:
-                kappa2 += (kappa2_modes[m] * np.exp(-1j * m * phase)).real
-            rho2opt_all.append(rho2opt)
-            kappa2_all.append(kappa2)
+        # Vectorised evaluation over the phase grid. Per phase ph:
+        #   rho2opt(ph) = rho2opt_const
+        #       + sum_{(m,n)} (crossterm_{m,n} * exp(-i*(n-m)*ph)).real
+        #   kappa2(ph)  = sum_m (kappa2_modes[m] * exp(-i*m*ph)).real
+        phases_arr = np.asarray(phases)
+        deltas = np.array([n - m for (m, n) in rho2opt_crossterms])
+        cs = np.array(list(rho2opt_crossterms.values()))
+        rho2opt = rho2opt_const + (
+            cs[:, None] * np.exp(-1j * deltas[:, None] * phases_arr[None, :])
+        ).real.sum(axis=0)
 
-            log_likelihoods[idx] = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+        m_arr = np.array(m_vals)
+        k_arr = np.array([kappa2_modes[m] for m in m_vals])
+        kappa2 = (
+            k_arr[:, None] * np.exp(-1j * m_arr[:, None] * phases_arr[None, :])
+        ).real.sum(axis=0)
+
+        log_likelihoods = self.log_Zn + kappa2 - 0.5 * rho2opt
 
             # # comment out for cross check:
             # mu = sum_contributions_m(pol_m, phase_shift=phase)

@@ -107,6 +107,10 @@ class WaveformGenerator:
         self.transform = transform
         self._spin_conversion_phase = None
         self.spin_conversion_phase = spin_conversion_phase
+        self.mode_list = mode_list
+        self.use_dft_phase_decomposition = kwargs.get(
+            "use_dft_phase_decomposition", False
+        )
 
     @property
     def domain(self):
@@ -152,6 +156,18 @@ class WaveformGenerator:
                 f"phase parameter for conversion to cartesian spins."
             )
         self._spin_conversion_phase = value
+
+    def _get_ell_max(self):
+        """Get ell_max from mode_list. Falls back to 4 with a warning if
+        mode_list is None."""
+        if self.mode_list is not None:
+            return max(l for l, m in self.mode_list)
+        warnings.warn(
+            "mode_list not provided; falling back to ell_max=4 for the DFT "
+            "phase grid. Pass mode_list to the WaveformGenerator if this is "
+            "not correct."
+        )
+        return 4
 
     def generate_hplus_hcross(
         self, parameters: Dict[str, float], catch_waveform_errors=True
@@ -724,7 +740,34 @@ class WaveformGenerator:
 
         if isinstance(self.domain, UniformFrequencyDomain):
             # Generate FD modes in for frequencies [-f_max, ..., 0, ..., f_max].
-            if LS.SimInspiralImplementedFDApproximants(self.approximant):
+            if (
+                LS.SimInspiralImplementedFDApproximants(self.approximant)
+                and self.use_dft_phase_decomposition
+            ):
+                # DFT approach: evaluate FD polarizations at N phi_c values
+                # centred on the reference phase, and recover m-components via
+                # DFT inversion.
+                ell_max = self._get_ell_max()
+                n_phases = 2 * ell_max + 1
+                phase_ref = parameters["phase"]
+                phi_c_offsets = np.linspace(0, 2 * np.pi, n_phases, endpoint=False)
+
+                hpc_fd_list = []
+                for phi_c in phi_c_offsets:
+                    params_k = {**parameters, "phase": phase_ref + phi_c}
+                    hpc_fd_list.append(
+                        self.generate_hplus_hcross(params_k, catch_waveform_errors=False)
+                    )
+
+                pol_m = wfg_utils.recover_pol_m_from_multi_phase(
+                    hpc_fd_list, phi_c_offsets, ell_max
+                )
+
+                if self._domain_transform is not None:
+                    return self._domain_transform(pol_m)
+                return pol_m
+
+            elif LS.SimInspiralImplementedFDApproximants(self.approximant):
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: FD)
                 hlm_fd, iota = self.generate_FD_modes_LO(parameters)
@@ -924,6 +967,14 @@ class WaveformGenerator:
         return pol_dict
 
 
+def _strip_gwsignal_units(parameters_gwsignal):
+    """Strip astropy units from a gwsignal parameter dict, returning plain floats."""
+    return {
+        k: v.value if hasattr(v, "value") else v
+        for k, v in parameters_gwsignal.items()
+    }
+
+
 class NewInterfaceWaveformGenerator(WaveformGenerator):
     """Generate polarizations using GWSignal routines in the specified domain for a
     single GW coalescence given a set of waveform parameters.
@@ -959,6 +1010,9 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         extra_wf_kwargs = {k: v for k, v in kwargs.items() if k in allowed_extra_kwargs}
         extra_wf_kwargs["lmax_nyquist"] = kwargs.get("lmax_nyquist", 2)
         self.extra_wf_kwargs = extra_wf_kwargs
+        self.use_dft_phase_decomposition = kwargs.get(
+            "use_dft_phase_decomposition", False
+        )
 
     @property
     def domain(self):
@@ -1213,7 +1267,31 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         generator = new_interface_get_waveform_generator(self.approximant_str)
         if isinstance(self.domain, UniformFrequencyDomain):
             # Generate FD modes in for frequencies [-f_max, ..., 0, ..., f_max].
-            if generator.domain == "freq":
+            if generator.domain == "freq" and self.use_dft_phase_decomposition:
+                # DFT approach: evaluate FD polarizations at N phi_c values
+                # centred on the reference phase, and recover m-components via
+                # DFT inversion.
+                ell_max = self._get_ell_max()
+                n_phases = 2 * ell_max + 1
+                phase_ref = parameters["phase"]
+                phi_c_offsets = np.linspace(0, 2 * np.pi, n_phases, endpoint=False)
+
+                hpc_fd_list = []
+                for phi_c in phi_c_offsets:
+                    params_k = {**parameters, "phase": phase_ref + phi_c}
+                    hpc_fd_list.append(
+                        self.generate_hplus_hcross(params_k, catch_waveform_errors=False)
+                    )
+
+                pol_m = wfg_utils.recover_pol_m_from_multi_phase(
+                    hpc_fd_list, phi_c_offsets, ell_max
+                )
+
+                if self._domain_transform is not None:
+                    return self._domain_transform(pol_m)
+                return pol_m
+
+            elif generator.domain == "freq":
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: FD)
                 hlm_fd, iota = self.generate_FD_modes_LO(parameters)
@@ -1225,7 +1303,26 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 self.approximant_str == "SEOBNRv5PHM"
                 or self.approximant_str == "SEOBNRv5HM"
             ):
-                # Step 1: generate waveform modes in L0 frame in native domain of
+                if (
+                    self.use_dft_phase_decomposition
+                    and self.approximant_str == "SEOBNRv5PHM"
+                ):
+                    # Optimized path: DFT over phi_c evaluations.
+                    # Evaluates polarizations from co-precessing modes 
+                    # at N equally-spaced phi_c values
+                    # then recovers m-components via DFT inversion.
+                    hpc_fd_list, ell_max, phi_c_offsets = (
+                        self._generate_multi_phase_fd_pols(parameters)
+                    )
+                    pol_m = wfg_utils.recover_pol_m_from_multi_phase(
+                        hpc_fd_list, phi_c_offsets, ell_max
+                    )
+
+                    if self._domain_transform is not None:
+                        return self._domain_transform(pol_m)
+                    return pol_m
+
+                # Step 1: generate waveform modes in L0 frame in native domain
                 # approximant (here: TD), applying standard conditioning
                 hlm_td, iota = self.generate_TD_modes_L0_conditioned_extra_time(
                     parameters
@@ -1426,6 +1523,78 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 hlms_lal[key] = hlm_lal
 
         return hlms_lal, parameters_gwsignal["inclination"].value
+
+    def _generate_multi_phase_fd_pols(
+        self,
+        parameters: Dict[str, float],
+    ) -> tuple:
+        """
+        Generate FD polarizations at an equally-spaced grid of phi_c values
+        for a DFT-based phase decomposition.
+
+        Parameters
+        ----------
+        parameters: dict
+            Parameter dictionary.
+
+        Returns
+        -------
+        hpc_fd_list: list of dict
+            List of {"h_plus": array, "h_cross": array} on domain frequencies
+            [0, f_max], one per phi_c value.
+        ell_max: int
+            Maximum |m| value used to build the phi_c grid.
+        phi_c_values: np.ndarray
+            The equally-spaced phi_c grid that was used.
+        """
+        from pyseobnr.generate_waveform import GenerateWaveform
+
+        # Convert DINGO parameters to gwsignal format, then strip units
+        parameters_gwsignal = self._convert_parameters(
+            {**parameters, "f_ref": self.f_ref}
+        )
+        pyseobnr_params = _strip_gwsignal_units(parameters_gwsignal)
+
+        # Set pyseobnr-specific keys
+        pyseobnr_params["approximant"] = self.approximant_str
+        pyseobnr_params["f_ref"] = pyseobnr_params.pop("f22_ref", self.f_ref)
+
+        # Pass frequency domain parameters from DINGO's domain
+        pyseobnr_params["deltaF"] = self.domain.delta_f
+        pyseobnr_params["f_max"] = self.domain.f_max
+
+        # Forward SEOBNRv5-specific kwargs
+        for k, v in self.extra_wf_kwargs.items():
+            pyseobnr_params[k] = v
+
+        gen_wf = GenerateWaveform(pyseobnr_params)
+
+        ell_max = self._get_ell_max_for_multi_phase(gen_wf)
+        phi_c_offsets = np.linspace(
+            0, 2 * np.pi, 2 * ell_max + 1, endpoint=False
+        )
+        hpc_fd_list = gen_wf.generate_multi_phase_fd_polarizations(phi_c_offsets)
+        return hpc_fd_list, ell_max, phi_c_offsets
+
+    def _get_ell_max_for_multi_phase(self, gen_wf):
+        """Get ell_max for the DFT phase grid.
+
+        Preference order:
+          1. ``self.mode_list`` if set, via ``_get_ell_max()``.
+          2. ``gen_wf.model.max_ell_returned`` (only for pyseobnr models).
+          3. Fall back to 4 with a warning.
+        """
+        if self.mode_list is not None:
+            return self._get_ell_max()
+        try:
+            return gen_wf.model.max_ell_returned
+        except (ValueError, AttributeError):
+            warnings.warn(
+                "mode_list not provided and model.max_ell_returned not "
+                "available; falling back to ell_max=4 for the DFT phase "
+                "grid."
+            )
+            return 4
 
     def generate_TD_waveform(self, parameters_gwsignal: Dict) -> Dict[str, np.ndarray]:
         """
