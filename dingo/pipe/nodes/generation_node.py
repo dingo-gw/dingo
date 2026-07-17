@@ -56,19 +56,6 @@ class GenerationNode(BilbyGenerationNode):
                 if (value := getattr(self.inputs, attr)) is not None:
                     input_files_to_transfer.append(os.path.abspath(str(value)))
 
-            # modifying the paths for OSDF networks
-            network_files = []
-            for s in [self.inputs.model, self.inputs.model_init]:
-                if s is None:
-                    continue
-                if "osdf" in s:
-                    # stripping osdf prefix as it is not needed
-                    network_files.append(f"igwn+osdf://{s.replace('/osdf', '')}")
-                else:
-                    network_files.append(s)
-
-            input_files_to_transfer.extend(network_files)
-
             if self.transfer_container:
                 input_files_to_transfer.append(self.inputs.container)
             for value in [
