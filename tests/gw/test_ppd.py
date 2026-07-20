@@ -111,7 +111,7 @@ def test_plot_ppd_td_colors_are_per_mode(tmp_path) -> None:
 
 
 def test_plot_ppd_td_draws_overlay(tmp_path) -> None:
-    """``plot_draws`` overlays the requested number of subsampled draw traces."""
+    """``num_plotted_draws`` overlays that many subsampled draw traces; 0 overlays none."""
     rng = np.random.default_rng(6)
     n, T = 200, 100
     times = np.linspace(-1.0, 0.2, T)
@@ -126,7 +126,6 @@ def test_plot_ppd_td_draws_overlay(tmp_path) -> None:
         data_td,
         times,
         filename=str(tmp_path / "draws.png"),
-        plot_draws=True,
         num_plotted_draws=20,
     )
     # 20 extra draw traces, and each is fainter than the band edges.

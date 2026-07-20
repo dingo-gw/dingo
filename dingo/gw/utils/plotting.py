@@ -52,8 +52,7 @@ def plot_ppd_td(
     times: np.ndarray,
     filename: str = "ppd_td.png",
     hdi_level: float = 0.9,
-    plot_draws: bool = False,
-    num_plotted_draws: int = 100,
+    num_plotted_draws: int = 0,
     trigger_time: Optional[float] = None,
     band_colors: Optional[Dict[str, str]] = None,
     data_color: str = "#555555",
@@ -62,8 +61,7 @@ def plot_ppd_td(
 
     One panel per ``(mode, detector)``, stacked vertically. Each fills the pointwise HDI of
     ``p(h(t)|d)`` (:func:`pointwise_hdi`) over the raw whitened data, drawn as a faint grey
-    trace on the whitened-noise scale (bilby/LVK convention). ``t = 0`` is the network
-    reference time.
+    trace on the whitened-noise scale (bilby/LVK convention). ``t = 0`` is the trigger.
 
     Everything is drawn over the full ``times`` array; the axes merely open on the last
     second of inspiral through ringdown, with the y-axis auto-scaled to the whitened noise
@@ -82,16 +80,15 @@ def plot_ppd_td(
     data_td : dict
         ``{ifo: (n_times,) real}`` whitened detector data; its keys set the detectors.
     times : numpy.ndarray
-        ``(n_times,)`` time axis in seconds relative to the reference time (``t = 0``).
+        ``(n_times,)`` time axis in seconds relative to the trigger (``t = 0``).
     filename : str
         Output path for the saved figure.
     hdi_level : float
         Credible level of the filled band, in ``(0, 1)``.
-    plot_draws : bool
-        Overlay the individual waveform draws as faint traces underneath the band. Off by
-        default: with thousands of draws it is slow to render and mostly obscures the band.
     num_plotted_draws : int
-        Number of draws overlaid when ``plot_draws``, taken as an evenly spaced subsample.
+        Overlay this many individual waveform draws, as faint traces underneath the band,
+        taken as an evenly spaced subsample. Zero (the default) draws none: overlaying
+        thousands is slow to render and mostly obscures the band.
     trigger_time : float or None
         GPS time that ``times`` is measured from, written into the title so the axis can be
         read back as an absolute time. ``None`` titles the figure generically.
@@ -138,7 +135,7 @@ def plot_ppd_td(
         ax.plot(
             times, data, color=data_color, lw=0.5, alpha=0.3, zorder=1, label="data",
         )
-        if plot_draws:
+        if num_plotted_draws > 0:
             step = max(1, len(band) // num_plotted_draws)
             for i, draw in enumerate(band[::step][:num_plotted_draws]):
                 ax.plot(

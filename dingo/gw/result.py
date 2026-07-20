@@ -929,7 +929,7 @@ class Result(CoreResult):
         num_waveforms: int = 5000,
         num_processes: int = 1,
         hdi_level: float = 0.9,
-        plot_draws: bool = False,
+        num_plotted_draws: int = 0,
         **kwargs,
     ) -> Tuple[dict, dict, np.ndarray]:
         """Plot the time-domain whitened-strain posterior-predictive distribution.
@@ -939,7 +939,8 @@ class Result(CoreResult):
         :func:`dingo.gw.utils.plotting.plot_ppd_td`.
 
         ``hdi_level`` is the credible level of the band (default 90%).
-        ``plot_draws`` additionally overlays individual waveform draws as faint traces.
+        ``num_plotted_draws`` additionally overlays that many individual waveform draws
+        as faint traces.
         The time axis is measured from ``t_ref``, whose GPS value is written into the
         title. Remaining keyword arguments (the band and data colours, the number of
         overlaid draws) are passed through. Returns the ``(wf_td, data_td, times)`` tuple.
@@ -953,7 +954,7 @@ class Result(CoreResult):
             times,
             filename=filename,
             hdi_level=hdi_level,
-            plot_draws=plot_draws,
+            num_plotted_draws=num_plotted_draws,
             trigger_time=self.t_ref,
             **kwargs,
         )
