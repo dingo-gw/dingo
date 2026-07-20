@@ -25,6 +25,7 @@ classifiers = [
 ]
 
 dependencies = [
+    "arviz",
     "astropy",
     "bilby",
     "bilby_pipe",

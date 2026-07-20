@@ -449,12 +449,10 @@ class Injection(GWSignal):
 def safe_signal(gw_signal: "GWSignal", theta: dict) -> Optional[dict]:
     """Call ``gw_signal.signal(theta)``, returning ``None`` if generation fails.
 
-    Even in-prior posterior draws can hit waveform-model edge cases -- e.g. SEOBNRv5EHM's
-    eccentric interpolation failing on an interior parameter, or simply a waveform backend
-    (pyseobnr / lalsimulation) that differs from the one used when the result was produced.
-    Returning ``None`` lets callers such as :meth:`dingo.gw.result.Result._compute_ppd` drop
-    the offending draw rather than aborting a whole :class:`multiprocessing.Pool` batch.
-    Defined at module level (not a lambda/nested function) so it is picklable for the pool.
+    Occasionally an individual draw can fail waveform generation; returning ``None`` lets
+    callers such as :meth:`dingo.gw.result.Result._compute_ppd` drop that draw rather than
+    aborting a whole :class:`multiprocessing.Pool` batch. Defined at module level (not a
+    lambda/nested function) so it is picklable for the pool.
     """
     try:
         return gw_signal.signal(theta)

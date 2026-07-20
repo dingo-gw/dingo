@@ -154,4 +154,7 @@ dmypy.json
 dingo-venv/
 
 # scratch/output dir for generated images and throwaway artifacts
-local/docs/superpowers/
+local/
+
+# superpowers tooling scratch (design specs etc.) -- never committed
+docs/superpowers/
