@@ -9,24 +9,25 @@ percentile band shaded by bilby's ``plot_interferometer_waveform_posterior``.
 
 from typing import Dict, Optional, Tuple
 
-import arviz as az
 import numpy as np
 from matplotlib import pyplot as plt
 
-# One colour per posterior mode (its credible band and panel label); grey for the data.
-_MODE_COLORS = ["#DD8452", "#4C72B0", "#55A868", "#C44E52", "#8172B3"]
+_BAND_COLOR = "#DD8452"
+# Darker shade of the band colour for its edges, so they stay legible when the individual
+# draws are overlaid and their faint traces saturate the band's interior.
+_EDGE_COLOR = "#9C4C1C"
 _DATA_COLOR = "#555555"
 
 
-def pointwise_hdi(
-    td: np.ndarray,
-    level: float,
-    multimodal: bool = False,
-) -> np.ndarray:
+def pointwise_hdi(td: np.ndarray, level: float) -> np.ndarray:
     """Pointwise highest-density interval (HDI) of ``p(h(t) | d)`` at each time sample.
 
-    Thin wrapper over :func:`arviz.hdi`, which has no weights argument, so ``td`` must be
-    equally weighted draws.
+    The narrowest interval containing a ``level`` fraction of the draws, found by sliding a
+    window of that many draws over the sorted column and keeping the narrowest -- the
+    unimodal algorithm of :func:`arviz.hdi`, vectorised over the time axis. It assumes
+    ``p(h(t)|d)`` is unimodal at fixed ``t``, which whitened-strain draws are in practice;
+    on a multimodal column it bridges the gap between the modes rather than resolving them.
+    There is no weights argument, so ``td`` must be equally weighted draws.
 
     Parameters
     ----------
@@ -34,39 +35,20 @@ def pointwise_hdi(
         ``(n_draws, n_times)`` real whitened time-domain waveforms, equally weighted.
     level : float
         Credible level in ``(0, 1)``, e.g. ``0.9``.
-    multimodal : bool
-        Resolve a multimodal ``p(h(t)|d)`` into disjoint intervals instead of bridging the
-        gap between the modes. Off by default: it estimates a KDE per time sample, which is
-        both far slower and prone to splitting off spurious slivers on draws that are in
-        practice unimodal at fixed ``t``.
 
     Returns
     -------
     numpy.ndarray
-        ``(n_times, n_intervals, 2)`` interval edges, ascending in strain along axis 1 and
-        NaN-padded where a time sample has fewer intervals than the widest one. The unimodal
-        path always yields ``n_intervals == 1``.
+        ``(n_times, 2)`` lower and upper interval edges.
     """
-    td = np.asarray(td, dtype=float)
-    # arviz wants (chain, draw, *shape): one chain, the PPD draws, then the time axis.
-    intervals = np.asarray(az.hdi(td[None], hdi_prob=level, multimodal=multimodal))
-    if not multimodal:
-        intervals = intervals[:, None, :]
-    return intervals
-
-
-def _constant_mode_count_runs(intervals: np.ndarray):
-    """Yield ``(slice, n_modes)`` for maximal time runs with a constant interval count.
-
-    arviz sorts each column's intervals ascending, so slot ``k`` tracks the same branch
-    throughout a run -- a run is the largest stretch fillable as a single polygon.
-    """
-    n_modes = np.isfinite(intervals[:, :, 0]).sum(axis=1)
-    bounds = np.flatnonzero(np.diff(n_modes)) + 1
-    starts = np.concatenate(([0], bounds))
-    stops = np.concatenate((bounds, [len(n_modes)]))
-    for start, stop in zip(starts, stops):
-        yield slice(start, stop), int(n_modes[start])
+    td = np.sort(np.asarray(td, dtype=float), axis=0)
+    n_draws = td.shape[0]
+    # Number of sorted draws spanned by the interval; its two edges are that far apart.
+    span = int(np.floor(level * n_draws))
+    widths = td[span:] - td[: n_draws - span]
+    start = np.argmin(widths, axis=0)
+    cols = np.arange(td.shape[1])
+    return np.stack((td[start, cols], td[start + span, cols]), axis=-1)
 
 
 def plot_ppd_td(
@@ -77,7 +59,8 @@ def plot_ppd_td(
     zoom: Optional[Tuple[float, float]] = None,
     strain_range: Optional[Tuple[float, float]] = None,
     hdi_level: float = 0.9,
-    hdi_multimodal: bool = False,
+    plot_draws: bool = False,
+    num_plotted_draws: int = 100,
 ) -> np.ndarray:
     """Plot the time-domain whitened-strain PPD as pointwise credible bands.
 
@@ -104,8 +87,11 @@ def plot_ppd_td(
         noise; bound it tighter to zoom the y-axis onto the signal.
     hdi_level : float
         Credible level of the filled band, in ``(0, 1)``.
-    hdi_multimodal : bool
-        Resolve disjoint HDI intervals per time sample. See :func:`pointwise_hdi`.
+    plot_draws : bool
+        Overlay the individual waveform draws as faint traces underneath the band. Off by
+        default: with thousands of draws it is slow to render and mostly obscures the band.
+    num_plotted_draws : int
+        Number of draws overlaid when ``plot_draws``, taken as an evenly spaced subsample.
 
     Returns
     -------
@@ -114,7 +100,6 @@ def plot_ppd_td(
     times = np.asarray(times, dtype=float)
     ifos = list(data_td.keys())
     modes = list(wf_td.keys())
-    colors = {mode: _MODE_COLORS[i % len(_MODE_COLORS)] for i, mode in enumerate(modes)}
     zoom = zoom if zoom is not None else (-1.0, 0.2)
 
     # times is monotone, so the zoom window is a contiguous slice -- index with it rather
@@ -130,7 +115,6 @@ def plot_ppd_td(
     axes = axes[:, 0]
 
     for row, (ax, (mode, ifo)) in enumerate(zip(axes, panels)):
-        color = colors[mode]
         band = np.asarray(wf_td[mode][ifo])[:, win]
         data = np.asarray(data_td[ifo])[win]
 
@@ -142,31 +126,33 @@ def plot_ppd_td(
         ax.plot(
             tt, data, color=_DATA_COLOR, lw=0.5, alpha=0.3, zorder=1, label="data",
         )
-        intervals = pointwise_hdi(band, hdi_level, multimodal=hdi_multimodal)
-        labelled = False
-        # A separate fill per (run of constant mode count, interval slot), so a branch
-        # splitting or merging breaks the fill instead of being bridged across.
-        for sl, n_modes in _constant_mode_count_runs(intervals):
-            for k in range(n_modes):
-                lower, upper = intervals[sl, k, 0], intervals[sl, k, 1]
-                lbl = f"{hdi_level:.0%} HDI" if (row == 0 and not labelled) else None
-                labelled = True
-                ax.fill_between(
-                    tt[sl], lower, upper, color=color, alpha=0.30, lw=0, zorder=2,
-                    label=lbl,
+        if plot_draws:
+            step = max(1, len(band) // num_plotted_draws)
+            for i, draw in enumerate(band[::step][:num_plotted_draws]):
+                ax.plot(
+                    tt, draw, color=_BAND_COLOR, lw=0.4, alpha=0.08, zorder=2,
+                    label="draws" if (row == 0 and i == 0) else None,
                 )
-                for edge in (lower, upper):
-                    ax.plot(tt[sl], edge, color=color, lw=0.8, alpha=0.9, zorder=2)
+        lower, upper = pointwise_hdi(band, hdi_level).T
+        ax.fill_between(
+            tt, lower, upper, color=_BAND_COLOR, alpha=0.30, lw=0, zorder=3,
+            label=f"{hdi_level:.0%} HDI" if row == 0 else None,
+        )
+        for edge in (lower, upper):
+            ax.plot(tt, edge, color=_EDGE_COLOR, lw=0.8, alpha=0.9, zorder=4)
 
         ax.set_xlim(*zoom)
         ax.set_ylim(lo, hi)
         ax.set_ylabel("whitened strain")
         ax.text(
             0.01, 0.95, f"{mode} · {ifo}", transform=ax.transAxes,
-            va="top", ha="left", fontweight="bold", color=color,
+            va="top", ha="left", fontweight="bold", color=_BAND_COLOR,
         )
         if row == 0:
-            ax.legend(loc="upper right", fontsize=8, framealpha=0.9)
+            legend = ax.legend(loc="upper right", fontsize=8, framealpha=0.9)
+            # The traces are deliberately faint on the axes; opaque keys keep them readable.
+            for handle in legend.get_lines():
+                handle.set_alpha(1.0)
 
     axes[-1].set_xlabel("time relative to network reference time (s)")
     fig.savefig(filename, dpi=200, bbox_inches="tight")

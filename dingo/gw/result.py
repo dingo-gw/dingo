@@ -882,9 +882,10 @@ class Result(CoreResult):
 
         mode_samples = {"dingo": cap(self.samples[in_prior])}
         if "weights" in self.samples:
-            # max_samples_per_draw=1 => no duplicate waveforms (repeated rows would spike
-            # the KDE behind the multimodal HDI); zero-weight (out-of-prior) draws are never
-            # accepted. clip_weights is essential, not an optimisation: unclipped, the yield
+            # max_samples_per_draw=1 => no duplicate waveforms (repeated rows would narrow
+            # the HDI around whichever draws happened to be duplicated); zero-weight
+            # (out-of-prior) draws are never accepted. clip_weights is essential, not an
+            # optimisation: unclipped, the yield
             # is sum(w)/max(w), which a single large weight can collapse to a few dozen
             # draws regardless of the ESS. See rejection_sample for the clipping scheme.
             mode_samples["dingo-is"] = cap(
@@ -927,6 +928,7 @@ class Result(CoreResult):
         zoom: Optional[Tuple[float, float]] = None,
         strain_range: Optional[Tuple[float, float]] = None,
         hdi_level: float = 0.9,
+        plot_draws: bool = False,
     ) -> Tuple[dict, dict, np.ndarray]:
         """Plot the time-domain whitened-strain posterior-predictive distribution.
 
@@ -937,6 +939,7 @@ class Result(CoreResult):
         ``zoom`` is the (left, right) x-limit in seconds relative to the network reference
         time; defaults to (-1.0, 0.2). ``strain_range`` optionally bounds the y-axis
         (whitened strain). ``hdi_level`` is the credible level of the band (default 90%).
+        ``plot_draws`` additionally overlays individual waveform draws as faint traces.
         Returns the ``(wf_td, data_td, times)`` tuple.
         """
         wf_td, data_td, times = self._compute_ppd(
@@ -950,5 +953,6 @@ class Result(CoreResult):
             zoom=zoom,
             strain_range=strain_range,
             hdi_level=hdi_level,
+            plot_draws=plot_draws,
         )
         return wf_td, data_td, times
