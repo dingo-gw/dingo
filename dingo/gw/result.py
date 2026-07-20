@@ -22,7 +22,7 @@ from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.injection import safe_signal
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
-from dingo.gw.utils.plotting import plot_ppd_td as _plot_ppd_td
+from dingo.gw.utils import plotting as gw_plotting
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.core.utils.backward_compatibility import check_minimum_version
 
@@ -787,16 +787,11 @@ class Result(CoreResult):
         return prior
 
     def _configure_ifos_for_whitened_ifft(self, domain) -> dict:
-        """Configure the likelihood's bilby interferometers for the whitened inverse FFT.
+        """Give the likelihood's bilby interferometers a frequency grid and band mask.
 
-        The interferometers held by the likelihood are otherwise bare (no duration /
-        sampling frequency), so :meth:`Interferometer.get_whitened_time_series_from_\
-whitened_frequency_series` -- which needs a frequency grid and the ``[f_min, f_max]`` band
-        mask -- cannot be called on them. Setting ``sampling_frequency = 2 * f_max`` makes
-        the bilby one-sided frequency array coincide with Dingo's ``domain()`` (same length
-        and spacing), so Dingo's whitened frequency-domain arrays feed straight in.
-
-        Returns ``{ifo_name: Interferometer}``.
+        They are otherwise bare, so bilby's whitened inverse FFT cannot be called on them.
+        ``sampling_frequency = 2 * f_max`` makes bilby's one-sided frequency array coincide
+        with Dingo's ``domain()``. Returns ``{ifo_name: Interferometer}``.
         """
         for ifo in self.likelihood.ifo_list:
             ifo.set_strain_data_from_zero_noise(
@@ -812,34 +807,15 @@ whitened_frequency_series` -- which needs a frequency grid and the ``[f_min, f_m
         self,
         num_waveforms: int = 5000,
         num_processes: int = 1,
-        seed: int = RANDOM_STATE,
-    ) -> Tuple[dict, dict, np.ndarray, dict]:
+    ) -> Tuple[dict, dict, np.ndarray]:
         """Generate whitened time-domain waveforms for the pointwise strain PPD.
 
-        Draws representative posterior waveforms, projects them onto the detectors via the
-        likelihood (already whitened, ``h / asd / noise_std``), and inverse-FFTs them to the
-        time domain using bilby's whitened inverse FFT
-        (:meth:`Interferometer.get_whitened_time_series_from_whitened_frequency_series`),
-        which fixes the strain to bilby's unit-variance convention. Two posteriors are
-        represented, each by an **equally-weighted** set of draws: ``"dingo"`` (a uniform
-        subsample -- the raw network posterior predictive) and, when the result is
-        importance-sampled, ``"dingo-is"`` (a *rejection sample* of the weighted draws --
-        the target posterior predictive).
-
-        Drawing an equally-weighted set (rather than re-weighting a uniform subsample) is
-        what keeps the ``"dingo-is"`` effective sample size up: the importance weights
-        concentrate on a handful of draws, so weighting a uniform subsample would collapse
-        n_eff to a few dozen and produce heavy pointwise speckle.
-        :meth:`~dingo.core.result.Result.rejection_sample` is used rather than importance
-        resampling because it accepts each draw at most once, so the set contains no repeated
-        waveforms; duplicates would spike the KDE behind the multimodal HDI. It is called
-        with ``clip_weights=True``, without which the yield is governed by the single largest
-        weight and collapses to a few dozen draws (see the inline comment). The resulting set
-        is still weight-limited and can be smaller than ``num_waveforms``.
-
-        Unlike the earlier version, this does **not** build a highest-posterior-density set
-        in parameter space; it returns the raw draws so the plot can form the *pointwise*
-        distribution ``p(h(t)|d)`` at each time sample.
+        Projects posterior draws onto the detectors via the likelihood (already whitened,
+        ``h / asd / noise_std``) and inverse-FFTs them to the time domain with bilby's
+        whitened inverse FFT. Each of the two posteriors is represented by an
+        **equally-weighted** set of draws, as :func:`~dingo.gw.utils.plotting.pointwise_hdi`
+        requires: ``"dingo"`` is a uniform subsample and, when the result is
+        importance-sampled, ``"dingo-is"`` is a rejection sample of the weighted draws.
 
         Parameters
         ----------
@@ -848,43 +824,15 @@ whitened_frequency_series` -- which needs a frequency grid and the ``[f_min, f_m
             budget). The ``"dingo-is"`` rejection sample is often smaller, being ESS-limited.
         num_processes : int
             Processes used for waveform generation.
-        seed : int
-            Seed for the subsampling/rejection sampling, for deterministic figures.
 
         Returns
         -------
         wf_td : dict
-            ``{mode: {ifo: (n_kept, n_times) real}}`` whitened time-domain waveforms, one
-            equally-weighted set per mode.
+            ``{mode: {ifo: (n_kept, n_times) real}}`` whitened time-domain waveforms.
         data_td : dict
             ``{ifo: (n_times,) real}`` whitened time-domain detector data.
         times : numpy.ndarray
-            ``(n_times,)`` time axis in seconds relative to the reference time ``t = 0``
-            (see Notes).
-        weights : dict
-            ``{mode: None}`` -- both modes are equally-weighted sets of draws (the
-            importance weighting for ``"dingo-is"`` is baked into the rejection sampling),
-            kept for interface symmetry with
-            :func:`dingo.gw.utils.plotting.plot_ppd_td`.
-
-        All are consumed by :func:`dingo.gw.utils.plotting.plot_ppd_td`.
-
-        Notes
-        -----
-        Reference time (``t = 0``). The whitened arrays share Dingo's data epoch; a cyclic
-        shift by ``t0 = 1 / (2 * delta_f)`` (half the segment) places the network reference
-        time ``t_ref`` at ``t = 0``, so the x-axis reads as seconds relative to ``t_ref``.
-
-        In-prior restriction. Samples are first restricted to the prior support (finite
-        ``log_prior``); the flow proposal leaks a small fraction of draws outside the prior
-        (e.g. tiny negative spin magnitudes) which are unphysical and account for most
-        waveform-generation failures. This is the same in-prior restriction that
-        :meth:`importance_sample` applies.
-
-        Per-sample guard. A waveform model can still fail on an in-prior interior parameter,
-        or because the waveform backend here differs from the one used when the result was
-        produced; such draws are generated through ``safe_signal``, dropped from the
-        distribution with a warning, and only an all-failed batch raises.
+            ``(n_times,)`` time axis in seconds relative to the network reference time.
         """
         if getattr(self, "likelihood", None) is None:
             self._build_likelihood()
@@ -897,26 +845,19 @@ whitened_frequency_series` -- which needs a frequency grid and the ``[f_min, f_m
         ifos = list(self.context["waveform"].keys())
 
         interferometers = self._configure_ifos_for_whitened_ifft(domain)
-        # Cyclic time shift placing t_ref at t = 0 (see Notes).
         t0 = 1 / (2 * domain.delta_f)
-        phase_shift = np.exp(2j * np.pi * domain() * t0)
 
         def to_td(fd, ifo):
             """Whitened frequency-domain array(s) -> time domain (bilby convention)."""
-            return interferometers[
+            td = interferometers[
                 ifo
-            ].get_whitened_time_series_from_whitened_frequency_series(
-                np.asarray(fd) * phase_shift
-            )
+            ].get_whitened_time_series_from_whitened_frequency_series(np.asarray(fd))
+            # Cyclic shift by t0, half the segment, placing t_ref at t = 0. A half-segment
+            # shift is a multiplication by (-1)^k in the frequency domain, i.e. exactly an
+            # fftshift of the time series -- no phase factor needed.
+            return np.fft.fftshift(td, axes=-1)
 
-        # Whitened data, same convention as the (already-whitened) model waveforms and as
-        # bilby's whiten_frequency_series (h -> sqrt(4 delta_f) / asd * h).
-        data_fd = {
-            ifo: np.sqrt(4 * domain.delta_f)
-            * self.context["waveform"][ifo]
-            / self.context["asds"][ifo]
-            for ifo in ifos
-        }
+        data_fd = self.likelihood.whitened_strains
         if len(data_fd[ifos[0]]) != len(domain()):
             raise ValueError(
                 "Whitened data length does not match the inverse-FFT domain; the "
@@ -925,48 +866,30 @@ whitened_frequency_series` -- which needs a frequency grid and the ``[f_min, f_m
         data_td = {ifo: to_td(data_fd[ifo], ifo) for ifo in ifos}
         times = interferometers[ifos[0]].time_array - t0
 
-        # In-prior restriction (shared across modes).
-        non_fixed = [
-            k
-            for k, v in self.prior.items()
-            if not isinstance(v, (Constraint, DeltaFunction))
-        ]
+        # Restrict to the prior support, as importance_sample does: the flow proposal leaks
+        # a few unphysical draws (e.g. tiny negative spin magnitudes) that fail generation.
         in_prior = np.isfinite(
-            np.asarray(self.prior.ln_prob(self.samples[non_fixed], axis=0), dtype=float)
+            np.asarray(
+                self.prior.ln_prob(self.samples[self.search_parameter_keys], axis=0),
+                dtype=float,
+            )
         )
-        in_prior_idx = np.flatnonzero(in_prior)
 
-        # Per-mode draws, so that *both* posterior-predictive distributions are represented
-        # by equally-weighted draws (weights=None below):
-        #   - "dingo": a uniform subsample of the in-prior draws -- the raw network
-        #     posterior predictive.
-        #   - "dingo-is": a rejection sample of the weighted draws -- equally-weighted draws
-        #     from the target posterior, containing **no duplicates**.
         def cap(samples):
             """Bound the per-mode waveform-generation cost, without introducing repeats."""
-            if len(samples) > num_waveforms:
-                return samples.sample(n=num_waveforms, random_state=seed)
-            return samples
+            n = min(num_waveforms, len(samples))
+            return samples.sample(n=n, random_state=RANDOM_STATE)
 
-        mode_samples = {"dingo": cap(self.samples.iloc[in_prior_idx])}
+        mode_samples = {"dingo": cap(self.samples[in_prior])}
         if "weights" in self.samples:
-            # Rejection sampling accepts each draw at most max_samples_per_draw=1 times, so
-            # no waveform is repeated. Importance *resampling* (drawing with replacement
-            # proportional to the weights) would instead duplicate the high-weight draws
-            # heavily, and those repeated rows spike the KDE behind the multimodal HDI.
-            # Zero-weight draws are never accepted, which excludes out-of-prior draws.
-            #
-            # clip_weights is essential here, not an optimisation. Plain rejection sampling
-            # yields sum(w)/max(w) draws, which is set by the single largest weight rather
-            # than by the ESS: on a real O3 event whose top weight held 2.4% of the total
-            # mass that was 46 draws out of 750k (ESS 1153) -- far too few for a pointwise
-            # density. Clipping the ceil(sqrt(N)) largest weights to their mean (Elvira et
-            # al., asymptotically unbiased) lifted the same result to ~2800 draws with still
-            # no duplicates. The trade is a small clipping bias in the extreme tail of the
-            # weight distribution, in exchange for a usable sample size.
+            # max_samples_per_draw=1 => no duplicate waveforms (repeated rows would spike
+            # the KDE behind the multimodal HDI); zero-weight (out-of-prior) draws are never
+            # accepted. clip_weights is essential, not an optimisation: unclipped, the yield
+            # is sum(w)/max(w), which a single large weight can collapse to a few dozen
+            # draws regardless of the ESS. See rejection_sample for the clipping scheme.
             mode_samples["dingo-is"] = cap(
                 self.rejection_sample(
-                    max_samples_per_draw=1, clip_weights=True, random_state=seed
+                    max_samples_per_draw=1, clip_weights=True, random_state=RANDOM_STATE
                 )
             )
 
@@ -993,12 +916,8 @@ whitened_frequency_series` -- which needs a frequency grid and the ``[f_min, f_m
                 for ifo in ifos
             }
 
-        # Both distributions are now equally-weighted sets of draws (weights=None): the
-        # importance weighting for "dingo-is" is baked into the rejection sampling.
         wf_td = {mode: mode_td(samples) for mode, samples in mode_samples.items()}
-        weights = {mode: None for mode in mode_samples}
-
-        return wf_td, data_td, times, weights
+        return wf_td, data_td, times
 
     def plot_ppd_td(
         self,
@@ -1008,39 +927,28 @@ whitened_frequency_series` -- which needs a frequency grid and the ``[f_min, f_m
         zoom: Optional[Tuple[float, float]] = None,
         strain_range: Optional[Tuple[float, float]] = None,
         hdi_level: float = 0.9,
-    ) -> Tuple[dict, dict, np.ndarray, dict]:
+    ) -> Tuple[dict, dict, np.ndarray]:
         """Plot the time-domain whitened-strain posterior-predictive distribution.
 
-        For each mode and detector, generates whitened posterior waveforms, inverse-FFTs
-        them to the time domain (bilby whitened convention; ``t = 0`` at the network
-        reference time ``t_ref``), and fills the *pointwise* credible band of ``p(h(t)|d)``
-        -- the highest-density interval of the whitened strain across the draws at each time
-        sample -- over the raw whitened data (drawn as a faint grey trace on the
-        whitened-noise scale, bilby/LVK convention). Panels are stacked vertically, one per
-        (mode, detector): the **dingo** posterior first and, when the result is
-        importance-sampled, the **dingo-is** posterior below.
+        One stacked panel per (mode, detector), each filling the *pointwise* credible band
+        of ``p(h(t)|d)`` over the raw whitened data. See
+        :func:`dingo.gw.utils.plotting.plot_ppd_td`.
 
-        This differs from bilby's ``plot_interferometer_waveform_posterior``, which shades a
-        central *percentile* band, and from the earlier Dingo min/max envelope of a
-        parameter-space credible set: the band here is the pointwise HDI, the shortest
-        interval covering ``hdi_level`` of the mass at each ``t``.
-
-        ``zoom`` is the (left, right) x-limit in seconds relative to ``t_ref`` (the time
-        window to look at); defaults to (-1.0, 0.2). ``strain_range`` optionally bounds the
-        y-axis (whitened strain) to zoom onto the signal. ``hdi_level`` is the credible level of
-        the band (default 90%). Returns the ``(wf_td, data_td, times, weights)`` tuple.
+        ``zoom`` is the (left, right) x-limit in seconds relative to the network reference
+        time; defaults to (-1.0, 0.2). ``strain_range`` optionally bounds the y-axis
+        (whitened strain). ``hdi_level`` is the credible level of the band (default 90%).
+        Returns the ``(wf_td, data_td, times)`` tuple.
         """
-        wf_td, data_td, times, weights = self._compute_ppd(
+        wf_td, data_td, times = self._compute_ppd(
             num_waveforms=num_waveforms, num_processes=num_processes
         )
-        _plot_ppd_td(
+        gw_plotting.plot_ppd_td(
             wf_td,
             data_td,
             times,
-            weights=weights,
             filename=filename,
             zoom=zoom,
             strain_range=strain_range,
             hdi_level=hdi_level,
         )
-        return wf_td, data_td, times, weights
+        return wf_td, data_td, times

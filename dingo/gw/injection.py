@@ -449,10 +449,8 @@ class Injection(GWSignal):
 def safe_signal(gw_signal: "GWSignal", theta: dict) -> Optional[dict]:
     """Call ``gw_signal.signal(theta)``, returning ``None`` if generation fails.
 
-    Occasionally an individual draw can fail waveform generation; returning ``None`` lets
-    callers such as :meth:`dingo.gw.result.Result._compute_ppd` drop that draw rather than
-    aborting a whole :class:`multiprocessing.Pool` batch. Defined at module level (not a
-    lambda/nested function) so it is picklable for the pool.
+    Lets a caller drop a failed draw rather than abort a whole
+    :class:`multiprocessing.Pool` batch. Module level, so it is picklable for the pool.
     """
     try:
         return gw_signal.signal(theta)

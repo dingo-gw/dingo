@@ -21,11 +21,7 @@ def test_pointwise_hdi_unimodal_matches_normal_quantiles() -> None:
 
 
 def test_pointwise_hdi_splits_bimodal_column() -> None:
-    """A bimodal column resolves into two disjoint intervals that skip the empty gap.
-
-    This is the whole point of the multimodal HDI: the unimodal interval would span the
-    low-density middle, claiming coverage where there are essentially no draws.
-    """
+    """A bimodal column resolves into two disjoint intervals that skip the empty gap."""
     rng = np.random.default_rng(11)
     n = 4000
     bimodal = np.concatenate([rng.normal(-3, 0.3, n // 2), rng.normal(3, 0.3, n // 2)])
@@ -80,8 +76,7 @@ def test_plot_ppd_td_renders_all_panels(tmp_path) -> None:
         "dingo-is": {"H1": rng.normal(size=(n, T)), "L1": rng.normal(size=(n, T))},
     }
     data_td = {"H1": rng.normal(size=T), "L1": rng.normal(size=T)}
-    weights = {"dingo": None, "dingo-is": rng.uniform(size=n)}
     out = tmp_path / "ppd.png"
-    axes = plot_ppd_td(wf_td, data_td, times, weights=weights, filename=str(out))
+    axes = plot_ppd_td(wf_td, data_td, times, filename=str(out))
     assert out.exists()
     assert len(axes) == 4  # 2 modes x 2 detectors
