@@ -62,6 +62,26 @@ def test_plot_ppd_td_renders_all_panels(tmp_path) -> None:
     assert len(axes) == 4  # 2 modes x 2 detectors
 
 
+def test_plot_ppd_td_colors_are_configurable(tmp_path) -> None:
+    """The band, edge and data colours come from the arguments, not module constants."""
+    rng = np.random.default_rng(7)
+    n, T = 50, 40
+    times = np.linspace(-1.0, 0.2, T)
+    axes = plot_ppd_td(
+        {"dingo": {"H1": rng.normal(size=(n, T))}},
+        {"H1": rng.normal(size=T)},
+        times,
+        filename=str(tmp_path / "colors.png"),
+        band_color="#00FF00",
+        edge_color="#0000FF",
+        data_color="#FF0000",
+    )
+    data_line, *edge_lines = axes[0].lines
+    assert data_line.get_color() == "#FF0000"
+    assert {line.get_color() for line in edge_lines} == {"#0000FF"}
+    assert axes[0].collections[0].get_facecolor()[0][1] == 1.0  # green band fill
+
+
 def test_plot_ppd_td_draws_overlay(tmp_path) -> None:
     """``plot_draws`` overlays the requested number of subsampled draw traces."""
     rng = np.random.default_rng(6)

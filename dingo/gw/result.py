@@ -786,23 +786,6 @@ class Result(CoreResult):
                     continue
         return prior
 
-    def _configure_ifos_for_whitened_ifft(self, domain) -> dict:
-        """Give the likelihood's bilby interferometers a frequency grid and band mask.
-
-        They are otherwise bare, so bilby's whitened inverse FFT cannot be called on them.
-        ``sampling_frequency = 2 * f_max`` makes bilby's one-sided frequency array coincide
-        with Dingo's ``domain()``. Returns ``{ifo_name: Interferometer}``.
-        """
-        for ifo in self.likelihood.ifo_list:
-            ifo.set_strain_data_from_zero_noise(
-                sampling_frequency=2 * domain.f_max,
-                duration=1 / domain.delta_f,
-                start_time=0.0,
-            )
-            ifo.minimum_frequency = domain.f_min
-            ifo.maximum_frequency = domain.f_max
-        return {ifo.name: ifo for ifo in self.likelihood.ifo_list}
-
     def _compute_ppd(
         self,
         num_waveforms: int = 5000,
@@ -844,7 +827,18 @@ class Result(CoreResult):
         )
         ifos = list(self.context["waveform"].keys())
 
-        interferometers = self._configure_ifos_for_whitened_ifft(domain)
+        # The likelihood's bilby interferometers are otherwise bare, so bilby's whitened
+        # inverse FFT cannot be called on them. sampling_frequency = 2 * f_max makes bilby's
+        # one-sided frequency array coincide with Dingo's domain().
+        for ifo in self.likelihood.ifo_list:
+            ifo.set_strain_data_from_zero_noise(
+                sampling_frequency=2 * domain.f_max,
+                duration=1 / domain.delta_f,
+                start_time=0.0,
+            )
+            ifo.minimum_frequency = domain.f_min
+            ifo.maximum_frequency = domain.f_max
+        interferometers = {ifo.name: ifo for ifo in self.likelihood.ifo_list}
         t0 = 1 / (2 * domain.delta_f)
 
         def to_td(fd, ifo):
@@ -925,10 +919,9 @@ class Result(CoreResult):
         filename: str = "ppd_td.png",
         num_waveforms: int = 5000,
         num_processes: int = 1,
-        zoom: Optional[Tuple[float, float]] = None,
-        strain_range: Optional[Tuple[float, float]] = None,
         hdi_level: float = 0.9,
         plot_draws: bool = False,
+        **kwargs,
     ) -> Tuple[dict, dict, np.ndarray]:
         """Plot the time-domain whitened-strain posterior-predictive distribution.
 
@@ -936,11 +929,10 @@ class Result(CoreResult):
         of ``p(h(t)|d)`` over the raw whitened data. See
         :func:`dingo.gw.utils.plotting.plot_ppd_td`.
 
-        ``zoom`` is the (left, right) x-limit in seconds relative to the network reference
-        time; defaults to (-1.0, 0.2). ``strain_range`` optionally bounds the y-axis
-        (whitened strain). ``hdi_level`` is the credible level of the band (default 90%).
+        ``hdi_level`` is the credible level of the band (default 90%).
         ``plot_draws`` additionally overlays individual waveform draws as faint traces.
-        Returns the ``(wf_td, data_td, times)`` tuple.
+        Remaining keyword arguments (the band, edge and data colours, the number of
+        overlaid draws) are passed through. Returns the ``(wf_td, data_td, times)`` tuple.
         """
         wf_td, data_td, times = self._compute_ppd(
             num_waveforms=num_waveforms, num_processes=num_processes
@@ -950,9 +942,8 @@ class Result(CoreResult):
             data_td,
             times,
             filename=filename,
-            zoom=zoom,
-            strain_range=strain_range,
             hdi_level=hdi_level,
             plot_draws=plot_draws,
+            **kwargs,
         )
         return wf_td, data_td, times

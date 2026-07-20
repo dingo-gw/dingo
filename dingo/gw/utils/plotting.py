@@ -7,16 +7,10 @@ fills between its edges. This is the *pointwise* credible band, as opposed to th
 percentile band shaded by bilby's ``plot_interferometer_waveform_posterior``.
 """
 
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 
 import numpy as np
 from matplotlib import pyplot as plt
-
-_BAND_COLOR = "#DD8452"
-# Darker shade of the band colour for its edges, so they stay legible when the individual
-# draws are overlaid and their faint traces saturate the band's interior.
-_EDGE_COLOR = "#9C4C1C"
-_DATA_COLOR = "#555555"
 
 
 def pointwise_hdi(td: np.ndarray, level: float) -> np.ndarray:
@@ -56,11 +50,12 @@ def plot_ppd_td(
     data_td: Dict[str, np.ndarray],
     times: np.ndarray,
     filename: str = "ppd_td.png",
-    zoom: Optional[Tuple[float, float]] = None,
-    strain_range: Optional[Tuple[float, float]] = None,
     hdi_level: float = 0.9,
     plot_draws: bool = False,
     num_plotted_draws: int = 100,
+    band_color: str = "#DD8452",
+    edge_color: str = "#9C4C1C",
+    data_color: str = "#555555",
 ) -> np.ndarray:
     """Plot the time-domain whitened-strain PPD as pointwise credible bands.
 
@@ -68,6 +63,16 @@ def plot_ppd_td(
     ``p(h(t)|d)`` (:func:`pointwise_hdi`) over the raw whitened data, drawn as a faint grey
     trace on the whitened-noise scale (bilby/LVK convention). ``t = 0`` is the network
     reference time.
+
+    Everything is drawn over the full ``times`` array; the axes merely open on the last
+    second of inspiral through ringdown, with the y-axis auto-scaled to the whitened noise
+    over that view. Both limits are ordinary matplotlib state, so a caller wanting a
+    different window sets it on the returned axes rather than through an argument here --
+    the figure is closed once saved, but its axes stay live::
+
+        axes = plot_ppd_td(wf_td, data_td, times)
+        axes[0].set_xlim(-0.3, 0.1)  # sharex, so this moves every panel
+        axes[0].figure.savefig("ppd_td_mergerzoom.png", dpi=200, bbox_inches="tight")
 
     Parameters
     ----------
@@ -79,12 +84,6 @@ def plot_ppd_td(
         ``(n_times,)`` time axis in seconds relative to the reference time (``t = 0``).
     filename : str
         Output path for the saved figure.
-    zoom : tuple or None
-        ``(left, right)`` x-limits in seconds relative to the reference time. Default
-        ``(-1.0, 0.2)``.
-    strain_range : tuple or None
-        ``(low, high)`` y-limits (whitened strain). ``None`` auto-scales to the whitened
-        noise; bound it tighter to zoom the y-axis onto the signal.
     hdi_level : float
         Credible level of the filled band, in ``(0, 1)``.
     plot_draws : bool
@@ -92,6 +91,13 @@ def plot_ppd_td(
         default: with thousands of draws it is slow to render and mostly obscures the band.
     num_plotted_draws : int
         Number of draws overlaid when ``plot_draws``, taken as an evenly spaced subsample.
+    band_color : str
+        Fill colour of the credible band, also used for the individual draws.
+    edge_color : str
+        Colour of the band's edges. A darker shade of ``band_color`` by default, so they
+        stay legible when the overlaid draws saturate the band's interior.
+    data_color : str
+        Colour of the whitened detector data trace.
 
     Returns
     -------
@@ -100,13 +106,13 @@ def plot_ppd_td(
     times = np.asarray(times, dtype=float)
     ifos = list(data_td.keys())
     modes = list(wf_td.keys())
-    zoom = zoom if zoom is not None else (-1.0, 0.2)
 
-    # times is monotone, so the zoom window is a contiguous slice -- index with it rather
-    # than a boolean mask, to view the (n_draws, n_times) arrays instead of copying them.
-    start, stop = np.searchsorted(times, zoom)
-    win = slice(start, stop) if stop > start else slice(None)
-    tt = times[win]
+    # The window the axes open on. times is monotone, so it is a contiguous slice -- index
+    # with it rather than a boolean mask, to view the (n_draws, n_times) arrays instead of
+    # copying them. Only the y-scaling reads it; the traces themselves are drawn in full.
+    xlim = (-1.0, 0.2)
+    start, stop = np.searchsorted(times, xlim)
+    view = slice(start, stop) if stop > start else slice(None)
 
     panels = [(mode, ifo) for mode in modes for ifo in ifos]
     fig, axes = plt.subplots(
@@ -115,38 +121,34 @@ def plot_ppd_td(
     axes = axes[:, 0]
 
     for row, (ax, (mode, ifo)) in enumerate(zip(axes, panels)):
-        band = np.asarray(wf_td[mode][ifo])[:, win]
-        data = np.asarray(data_td[ifo])[win]
-
-        lo, hi = (
-            strain_range if strain_range is not None else _strain_range(band, data)
-        )
+        band = np.asarray(wf_td[mode][ifo])
+        data = np.asarray(data_td[ifo])
 
         # Faint raw data underneath (grey noise), then the credible band on top.
         ax.plot(
-            tt, data, color=_DATA_COLOR, lw=0.5, alpha=0.3, zorder=1, label="data",
+            times, data, color=data_color, lw=0.5, alpha=0.3, zorder=1, label="data",
         )
         if plot_draws:
             step = max(1, len(band) // num_plotted_draws)
             for i, draw in enumerate(band[::step][:num_plotted_draws]):
                 ax.plot(
-                    tt, draw, color=_BAND_COLOR, lw=0.4, alpha=0.08, zorder=2,
+                    times, draw, color=band_color, lw=0.4, alpha=0.08, zorder=2,
                     label="draws" if (row == 0 and i == 0) else None,
                 )
         lower, upper = pointwise_hdi(band, hdi_level).T
         ax.fill_between(
-            tt, lower, upper, color=_BAND_COLOR, alpha=0.30, lw=0, zorder=3,
+            times, lower, upper, color=band_color, alpha=0.30, lw=0, zorder=3,
             label=f"{hdi_level:.0%} HDI" if row == 0 else None,
         )
         for edge in (lower, upper):
-            ax.plot(tt, edge, color=_EDGE_COLOR, lw=0.8, alpha=0.9, zorder=4)
+            ax.plot(times, edge, color=edge_color, lw=0.8, alpha=0.9, zorder=4)
 
-        ax.set_xlim(*zoom)
-        ax.set_ylim(lo, hi)
+        ax.set_xlim(*xlim)
+        ax.set_ylim(*_strain_range(band[:, view], data[view]))
         ax.set_ylabel("whitened strain")
         ax.text(
             0.01, 0.95, f"{mode} · {ifo}", transform=ax.transAxes,
-            va="top", ha="left", fontweight="bold", color=_BAND_COLOR,
+            va="top", ha="left", fontweight="bold", color=band_color,
         )
         if row == 0:
             legend = ax.legend(loc="upper right", fontsize=8, framealpha=0.9)
