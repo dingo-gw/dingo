@@ -7,9 +7,10 @@ fills between its edges. This is the *pointwise* credible band, as opposed to th
 percentile band shaded by bilby's ``plot_interferometer_waveform_posterior``.
 """
 
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
+from matplotlib import colors as mcolors
 from matplotlib import pyplot as plt
 
 
@@ -53,8 +54,8 @@ def plot_ppd_td(
     hdi_level: float = 0.9,
     plot_draws: bool = False,
     num_plotted_draws: int = 100,
-    band_color: str = "#DD8452",
-    edge_color: str = "#9C4C1C",
+    trigger_time: Optional[float] = None,
+    band_colors: Optional[Dict[str, str]] = None,
     data_color: str = "#555555",
 ) -> np.ndarray:
     """Plot the time-domain whitened-strain PPD as pointwise credible bands.
@@ -91,11 +92,14 @@ def plot_ppd_td(
         default: with thousands of draws it is slow to render and mostly obscures the band.
     num_plotted_draws : int
         Number of draws overlaid when ``plot_draws``, taken as an evenly spaced subsample.
-    band_color : str
-        Fill colour of the credible band, also used for the individual draws.
-    edge_color : str
-        Colour of the band's edges. A darker shade of ``band_color`` by default, so they
-        stay legible when the overlaid draws saturate the band's interior.
+    trigger_time : float or None
+        GPS time that ``times`` is measured from, written into the title so the axis can be
+        read back as an absolute time. ``None`` titles the figure generically.
+    band_colors : dict or None
+        ``{mode: colour}`` for the band, its draws and the panel label; merged over the
+        defaults (blue for ``"dingo"``, orange for ``"dingo-is"``), with any further mode
+        falling back to the matplotlib property cycle. The band's edges are drawn in a
+        darker shade of it, so they stay legible where overlaid draws saturate the band.
     data_color : str
         Colour of the whitened detector data trace.
 
@@ -106,6 +110,10 @@ def plot_ppd_td(
     times = np.asarray(times, dtype=float)
     ifos = list(data_td.keys())
     modes = list(wf_td.keys())
+    band_colors = {"dingo": "#4C72B0", "dingo-is": "#DD8452", **(band_colors or {})}
+    colors = {
+        mode: band_colors.get(mode, f"C{i}") for i, mode in enumerate(modes)
+    }
 
     # The window the axes open on. times is monotone, so it is a contiguous slice -- index
     # with it rather than a boolean mask, to view the (n_draws, n_times) arrays instead of
@@ -120,9 +128,11 @@ def plot_ppd_td(
     )
     axes = axes[:, 0]
 
-    for row, (ax, (mode, ifo)) in enumerate(zip(axes, panels)):
+    for ax, (mode, ifo) in zip(axes, panels):
         band = np.asarray(wf_td[mode][ifo])
         data = np.asarray(data_td[ifo])
+        band_color = colors[mode]
+        edge_color = _darken(band_color)
 
         # Faint raw data underneath (grey noise), then the credible band on top.
         ax.plot(
@@ -132,13 +142,13 @@ def plot_ppd_td(
             step = max(1, len(band) // num_plotted_draws)
             for i, draw in enumerate(band[::step][:num_plotted_draws]):
                 ax.plot(
-                    times, draw, color=band_color, lw=0.4, alpha=0.08, zorder=2,
-                    label="draws" if (row == 0 and i == 0) else None,
+                    times, draw, color=band_color, lw=0.4, alpha=0.15, zorder=2,
+                    label="draws" if i == 0 else None,
                 )
         lower, upper = pointwise_hdi(band, hdi_level).T
         ax.fill_between(
             times, lower, upper, color=band_color, alpha=0.30, lw=0, zorder=3,
-            label=f"{hdi_level:.0%} HDI" if row == 0 else None,
+            label=f"{hdi_level:.0%} HDI",
         )
         for edge in (lower, upper):
             ax.plot(times, edge, color=edge_color, lw=0.8, alpha=0.9, zorder=4)
@@ -150,16 +160,27 @@ def plot_ppd_td(
             0.01, 0.95, f"{mode} · {ifo}", transform=ax.transAxes,
             va="top", ha="left", fontweight="bold", color=band_color,
         )
-        if row == 0:
-            legend = ax.legend(loc="upper right", fontsize=8, framealpha=0.9)
-            # The traces are deliberately faint on the axes; opaque keys keep them readable.
-            for handle in legend.get_lines():
-                handle.set_alpha(1.0)
+        # A legend per panel, not just the first: the modes differ in colour, so one
+        # shared legend would show the wrong swatch for every panel below it.
+        legend = ax.legend(loc="upper right", fontsize=8, framealpha=0.9)
+        # The traces are deliberately faint on the axes; opaque keys keep them readable.
+        for handle in legend.get_lines():
+            handle.set_alpha(1.0)
 
-    axes[-1].set_xlabel("time relative to network reference time (s)")
+    axes[-1].set_xlabel("time relative to trigger (s)")
+    fig.suptitle(
+        "whitened strain PPD"
+        if trigger_time is None
+        else f"whitened strain PPD · trigger at GPS {trigger_time:.4f}"
+    )
     fig.savefig(filename, dpi=200, bbox_inches="tight")
     plt.close(fig)
     return axes
+
+
+def _darken(color: str, factor: float = 0.65) -> Tuple[float, float, float]:
+    """Scale a colour's RGB channels towards black, for the band edges."""
+    return tuple(factor * channel for channel in mcolors.to_rgb(color))
 
 
 def _strain_range(band: np.ndarray, data: np.ndarray) -> Tuple[float, float]:

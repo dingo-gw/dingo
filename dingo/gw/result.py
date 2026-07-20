@@ -815,7 +815,8 @@ class Result(CoreResult):
         data_td : dict
             ``{ifo: (n_times,) real}`` whitened time-domain detector data.
         times : numpy.ndarray
-            ``(n_times,)`` time axis in seconds relative to the network reference time.
+            ``(n_times,)`` GPS times of the analysed segment less ``t_ref``, so ``t = 0``
+            is the trigger and the axis spans ``[time_buffer - duration, time_buffer]``.
         """
         if getattr(self, "likelihood", None) is None:
             self._build_likelihood()
@@ -827,29 +828,36 @@ class Result(CoreResult):
         )
         ifos = list(self.context["waveform"].keys())
 
+        # download_strain_data_in_FD cut the segment as
+        # [t_ref + time_buffer - duration, t_ref + time_buffer] and then cyclically shifted
+        # it by time_buffer, so index 0 of the inverse FFT is t_ref itself and everything
+        # before the event is wrapped around to the end of the array.
+        duration = 1 / domain.delta_f
+        sampling_frequency = 2 * domain.f_max
+        time_buffer = (self.event_metadata or {}).get("time_buffer", duration / 2)
+        start_time = self.t_ref + time_buffer - duration
+
         # The likelihood's bilby interferometers are otherwise bare, so bilby's whitened
         # inverse FFT cannot be called on them. sampling_frequency = 2 * f_max makes bilby's
         # one-sided frequency array coincide with Dingo's domain().
         for ifo in self.likelihood.ifo_list:
             ifo.set_strain_data_from_zero_noise(
-                sampling_frequency=2 * domain.f_max,
-                duration=1 / domain.delta_f,
-                start_time=0.0,
+                sampling_frequency=sampling_frequency,
+                duration=duration,
+                start_time=start_time,
             )
             ifo.minimum_frequency = domain.f_min
             ifo.maximum_frequency = domain.f_max
         interferometers = {ifo.name: ifo for ifo in self.likelihood.ifo_list}
-        t0 = 1 / (2 * domain.delta_f)
+        # Undo that cyclic shift, so sample j sits at start_time + j / f_s.
+        roll = int(round(time_buffer * sampling_frequency))
 
         def to_td(fd, ifo):
             """Whitened frequency-domain array(s) -> time domain (bilby convention)."""
             td = interferometers[
                 ifo
             ].get_whitened_time_series_from_whitened_frequency_series(np.asarray(fd))
-            # Cyclic shift by t0, half the segment, placing t_ref at t = 0. A half-segment
-            # shift is a multiplication by (-1)^k in the frequency domain, i.e. exactly an
-            # fftshift of the time series -- no phase factor needed.
-            return np.fft.fftshift(td, axes=-1)
+            return np.roll(td, -roll, axis=-1)
 
         data_fd = self.likelihood.whitened_strains
         if len(data_fd[ifos[0]]) != len(domain()):
@@ -858,7 +866,8 @@ class Result(CoreResult):
                 "time-domain PPD requires a uniform frequency domain."
             )
         data_td = {ifo: to_td(data_fd[ifo], ifo) for ifo in ifos}
-        times = interferometers[ifos[0]].time_array - t0
+        # Absolute GPS times, less the trigger time: t = 0 is the event.
+        times = interferometers[ifos[0]].time_array - self.t_ref
 
         # Restrict to the prior support, as importance_sample does: the flow proposal leaks
         # a few unphysical draws (e.g. tiny negative spin magnitudes) that fail generation.
@@ -931,7 +940,8 @@ class Result(CoreResult):
 
         ``hdi_level`` is the credible level of the band (default 90%).
         ``plot_draws`` additionally overlays individual waveform draws as faint traces.
-        Remaining keyword arguments (the band, edge and data colours, the number of
+        The time axis is measured from ``t_ref``, whose GPS value is written into the
+        title. Remaining keyword arguments (the band and data colours, the number of
         overlaid draws) are passed through. Returns the ``(wf_td, data_td, times)`` tuple.
         """
         wf_td, data_td, times = self._compute_ppd(
@@ -944,6 +954,7 @@ class Result(CoreResult):
             filename=filename,
             hdi_level=hdi_level,
             plot_draws=plot_draws,
+            trigger_time=self.t_ref,
             **kwargs,
         )
         return wf_td, data_td, times
