@@ -1,3 +1,5 @@
+from typing import Optional
+
 import numpy as np
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
@@ -442,3 +444,15 @@ class Injection(GWSignal):
             k: float(v) for k, v in theta.items()
         }  # Some parameters are np.float64
         return self.injection(theta)
+
+
+def safe_signal(gw_signal: "GWSignal", theta: dict) -> Optional[dict]:
+    """Call ``gw_signal.signal(theta)``, returning ``None`` if generation fails.
+
+    Lets a caller drop a failed draw rather than abort a whole
+    :class:`multiprocessing.Pool` batch. Module level, so it is picklable for the pool.
+    """
+    try:
+        return gw_signal.signal(theta)
+    except Exception:
+        return None

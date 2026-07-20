@@ -1,6 +1,8 @@
 import copy
 import time
-from typing import Optional
+import warnings
+from functools import partial
+from typing import Optional, Tuple
 
 import numpy as np
 import yaml
@@ -18,7 +20,9 @@ from dingo.gw.conversion import change_spin_conversion_phase
 from dingo.gw.domains import MultibandedFrequencyDomain
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_extrinsic_prior_dict
+from dingo.gw.injection import safe_signal
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
+from dingo.gw.utils import plotting as gw_plotting
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.core.utils.backward_compatibility import check_minimum_version
 
@@ -811,3 +815,177 @@ class Result(CoreResult):
                 except AttributeError:
                     continue
         return prior
+
+    def _compute_ppd(
+        self,
+        num_waveforms: int = 5000,
+        num_processes: int = 1,
+    ) -> Tuple[dict, dict, np.ndarray]:
+        """Generate whitened time-domain waveforms for the pointwise strain PPD.
+
+        Projects posterior draws onto the detectors via the likelihood (already whitened,
+        ``h / asd / noise_std``) and inverse-FFTs them to the time domain with bilby's
+        whitened inverse FFT. Each of the two posteriors is represented by an
+        **equally-weighted** set of draws, as :func:`~dingo.gw.utils.plotting.pointwise_hdi`
+        requires: ``"dingo"`` is a uniform subsample and, when the result is
+        importance-sampled, ``"dingo-is"`` is a rejection sample of the weighted draws.
+
+        Parameters
+        ----------
+        num_waveforms : int
+            Upper bound on the number of posterior draws per mode (a waveform-generation
+            budget). The ``"dingo-is"`` rejection sample is often smaller, being ESS-limited.
+        num_processes : int
+            Processes used for waveform generation.
+
+        Returns
+        -------
+        wf_td : dict
+            ``{mode: {ifo: (n_kept, n_times) real}}`` whitened time-domain waveforms.
+        data_td : dict
+            ``{ifo: (n_times,) real}`` whitened time-domain detector data.
+        times : numpy.ndarray
+            ``(n_times,)`` GPS times of the analysed segment less ``t_ref``, so ``t = 0``
+            is the trigger and the axis spans ``[time_buffer - duration, time_buffer]``.
+        """
+        if getattr(self, "likelihood", None) is None:
+            self._build_likelihood()
+
+        domain = (
+            self.domain.base_domain
+            if hasattr(self.domain, "base_domain")
+            else self.domain
+        )
+        ifos = list(self.context["waveform"].keys())
+
+        # download_strain_data_in_FD cut the segment as
+        # [t_ref + time_buffer - duration, t_ref + time_buffer] and then cyclically shifted
+        # it by time_buffer, so index 0 of the inverse FFT is t_ref itself and everything
+        # before the event is wrapped around to the end of the array.
+        duration = 1 / domain.delta_f
+        sampling_frequency = 2 * domain.f_max
+        time_buffer = (self.event_metadata or {}).get("time_buffer", duration / 2)
+        start_time = self.t_ref + time_buffer - duration
+
+        # The likelihood's bilby interferometers are otherwise bare, so bilby's whitened
+        # inverse FFT cannot be called on them. sampling_frequency = 2 * f_max makes bilby's
+        # one-sided frequency array coincide with Dingo's domain().
+        for ifo in self.likelihood.ifo_list:
+            ifo.set_strain_data_from_zero_noise(
+                sampling_frequency=sampling_frequency,
+                duration=duration,
+                start_time=start_time,
+            )
+            ifo.minimum_frequency = domain.f_min
+            ifo.maximum_frequency = domain.f_max
+        interferometers = {ifo.name: ifo for ifo in self.likelihood.ifo_list}
+        # Undo that cyclic shift, so sample j sits at start_time + j / f_s.
+        roll = int(round(time_buffer * sampling_frequency))
+
+        def to_td(fd, ifo):
+            """Whitened frequency-domain array(s) -> time domain (bilby convention)."""
+            td = interferometers[
+                ifo
+            ].get_whitened_time_series_from_whitened_frequency_series(np.asarray(fd))
+            return np.roll(td, -roll, axis=-1)
+
+        data_fd = self.likelihood.whitened_strains
+        if len(data_fd[ifos[0]]) != len(domain()):
+            raise ValueError(
+                "Whitened data length does not match the inverse-FFT domain; the "
+                "time-domain PPD requires a uniform frequency domain."
+            )
+        data_td = {ifo: to_td(data_fd[ifo], ifo) for ifo in ifos}
+        # Absolute GPS times, less the trigger time: t = 0 is the event.
+        times = interferometers[ifos[0]].time_array - self.t_ref
+
+        # Restrict to the prior support, as importance_sample does: the flow proposal leaks
+        # a few unphysical draws (e.g. tiny negative spin magnitudes) that fail generation.
+        in_prior = np.isfinite(
+            np.asarray(
+                self.prior.ln_prob(self.samples[self.search_parameter_keys], axis=0),
+                dtype=float,
+            )
+        )
+
+        def cap(samples):
+            """Bound the per-mode waveform-generation cost, without introducing repeats."""
+            n = min(num_waveforms, len(samples))
+            return samples.sample(n=n, random_state=RANDOM_STATE)
+
+        mode_samples = {"dingo": cap(self.samples[in_prior])}
+        if "weights" in self.samples:
+            # max_samples_per_draw=1 => no duplicate waveforms (repeated rows would narrow
+            # the HDI around whichever draws happened to be duplicated); zero-weight
+            # (out-of-prior) draws are never accepted. clip_weights is essential, not an
+            # optimisation: unclipped, the yield
+            # is sum(w)/max(w), which a single large weight can collapse to a few dozen
+            # draws regardless of the ESS. See rejection_sample for the clipping scheme.
+            mode_samples["dingo-is"] = cap(
+                self.rejection_sample(
+                    max_samples_per_draw=1, clip_weights=True, random_state=RANDOM_STATE
+                )
+            )
+
+        def mode_td(samples):
+            signals = apply_func_with_multiprocessing(
+                partial(safe_signal, self.likelihood),
+                samples,
+                num_processes=num_processes,
+            )
+            rows = [s for s in signals if s is not None]
+            if not rows:
+                raise RuntimeError(
+                    "All PPD waveform generations failed; cannot build the PPD."
+                )
+            n_failed = len(samples) - len(rows)
+            if n_failed:
+                warnings.warn(
+                    f"{n_failed} in-prior PPD waveform(s) failed to generate and were "
+                    "dropped from the distribution.",
+                    stacklevel=2,
+                )
+            return {
+                ifo: to_td(np.array([s["waveform"][ifo] for s in rows]), ifo)
+                for ifo in ifos
+            }
+
+        wf_td = {mode: mode_td(samples) for mode, samples in mode_samples.items()}
+        return wf_td, data_td, times
+
+    def plot_ppd_td(
+        self,
+        filename: str = "ppd_td.png",
+        num_waveforms: int = 5000,
+        num_processes: int = 1,
+        hdi_level: float = 0.9,
+        num_plotted_draws: int = 0,
+        **kwargs,
+    ) -> Tuple[dict, dict, np.ndarray]:
+        """Plot the time-domain whitened-strain posterior-predictive distribution.
+
+        One stacked panel per (mode, detector), each filling the *pointwise* credible band
+        of ``p(h(t)|d)`` over the raw whitened data. See
+        :func:`dingo.gw.utils.plotting.plot_ppd_td`.
+
+        ``hdi_level`` is the credible level of the band (default 90%).
+        ``num_plotted_draws`` additionally overlays that many individual waveform draws
+        as faint traces.
+        The time axis is measured from ``t_ref``, whose GPS value is written into the
+        title. Remaining keyword arguments (the band and data colours, the number of
+        overlaid draws) are passed through. Returns the ``(wf_td, data_td, times)`` tuple.
+        """
+        wf_td, data_td, times = self._compute_ppd(
+            num_waveforms=num_waveforms, num_processes=num_processes
+        )
+        gw_plotting.plot_ppd_td(
+            wf_td,
+            data_td,
+            times,
+            filename=filename,
+            hdi_level=hdi_level,
+            num_plotted_draws=num_plotted_draws,
+            trigger_time=self.t_ref,
+            **kwargs,
+        )
+        return wf_td, data_td, times
