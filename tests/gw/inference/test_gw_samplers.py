@@ -1,12 +1,17 @@
-"""Tests for GWSampler._initialize_transforms and _run_sampler list-handling."""
+"""Tests for GWSampler._initialize_transforms, _run_sampler, and detector validation."""
 
 import numpy as np
+import pytest
 import torch
 from unittest.mock import MagicMock
 
 from dingo.core.transforms import GetItem
 from dingo.gw.domains import UniformFrequencyDomain
-from dingo.gw.inference.gw_samplers import GWSampler
+from dingo.gw.inference.gw_samplers import (
+    GWSampler,
+    check_detector_update,
+    _validate_detectors_transformer,
+)
 from dingo.gw.transforms import (
     StrainTokenization,
     UnpackDict,
@@ -60,6 +65,7 @@ def _make_sampler_stub(domain, tokenization_settings=None):
     sampler.inference_parameters = INFERENCE_PARAMS
     sampler._minimum_frequency = None
     sampler._maximum_frequency = None
+    sampler._detectors = None
     return sampler
 
 
@@ -198,6 +204,146 @@ def test_transformer_path_waveform_and_position_num_tokens_match():
     context = _make_context(domain)
     waveform, position, mask = sampler.transform_pre(context)
     assert waveform.shape[0] == position.shape[0] == mask.shape[0]
+
+
+# ---------------------------------------------------------------------------
+# _run_sampler list-handling logic
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# check_detector_update / _validate_detectors_transformer
+# ---------------------------------------------------------------------------
+
+
+def _make_metadata(detectors, mask_detectors=None, mask_random_tokens=None):
+    tok = {}
+    if mask_detectors is not None:
+        tok["mask_detectors"] = mask_detectors
+    if mask_random_tokens is not None:
+        tok["mask_random_tokens"] = mask_random_tokens
+    data = {"detectors": detectors}
+    if tok:
+        data["tokenization"] = tok
+    return {"train_settings": {"data": data}}
+
+
+# --- _validate_detectors_transformer ---
+
+HLV_SETTINGS = {
+    "p_mask_012_detectors": [0.6, 0.3, 0.1],
+    "p_mask_hlv": {"H1": 0.3, "L1": 0.3, "V1": 0.4},
+}
+
+HL_SETTINGS = {
+    "p_mask_012_detectors": [0.6, 0.4],
+    "p_mask_hlv": {"H1": 0.5, "L1": 0.5},
+}
+
+
+def test_validate_full_detector_set_allowed():
+    _validate_detectors_transformer(
+        ["H1", "L1", "V1"], ["H1", "L1", "V1"], HLV_SETTINGS
+    )
+
+
+def test_validate_hl_subset_of_hlv_allowed():
+    _validate_detectors_transformer(["H1", "L1"], ["H1", "L1", "V1"], HLV_SETTINGS)
+
+
+def test_validate_single_detector_subset_allowed():
+    _validate_detectors_transformer(["H1"], ["H1", "L1", "V1"], HLV_SETTINGS)
+
+
+def test_validate_two_detector_model_full_set():
+    _validate_detectors_transformer(["H1", "L1"], ["H1", "L1"], HL_SETTINGS)
+
+
+def test_validate_two_detector_model_single_detector():
+    _validate_detectors_transformer(["H1"], ["H1", "L1"], HL_SETTINGS)
+
+
+def test_validate_event_not_subset_raises():
+    with pytest.raises(ValueError, match="only trained with"):
+        _validate_detectors_transformer(["H1", "V1"], ["H1", "L1"], HL_SETTINGS)
+
+
+def test_validate_missing_p_mask_012_raises():
+    settings = {"p_mask_hlv": {"H1": 0.5, "L1": 0.5}}
+    with pytest.raises(ValueError, match="p_mask_012_detectors"):
+        _validate_detectors_transformer(["H1", "L1"], ["H1", "L1"], settings)
+
+
+def test_validate_missing_p_mask_hlv_raises():
+    settings = {"p_mask_012_detectors": [0.6, 0.4]}
+    with pytest.raises(ValueError, match="p_mask_hlv"):
+        _validate_detectors_transformer(["H1", "L1"], ["H1", "L1"], settings)
+
+
+def test_validate_p_mask_zero_for_count_raises():
+    # p_mask_012_detectors[0] = 0 means keeping all 2 active is not allowed.
+    settings = {
+        "p_mask_012_detectors": [0.0, 1.0],
+        "p_mask_hlv": {"H1": 0.5, "L1": 0.5},
+    }
+    with pytest.raises(ValueError, match="not allowing 2 active"):
+        _validate_detectors_transformer(["H1", "L1"], ["H1", "L1"], settings)
+
+
+def test_validate_p_mask_hlv_zero_for_detector_raises():
+    settings = {
+        "p_mask_012_detectors": [0.6, 0.4],
+        "p_mask_hlv": {"H1": 0.0, "L1": 1.0},
+    }
+    with pytest.raises(ValueError, match="p_mask_hlv"):
+        _validate_detectors_transformer(["H1"], ["H1", "L1"], settings)
+
+
+def test_validate_detector_not_in_p_mask_hlv_raises():
+    settings = {
+        "p_mask_012_detectors": [0.6, 0.3, 0.1],
+        "p_mask_hlv": {"H1": 0.5, "L1": 0.5},  # V1 missing
+    }
+    with pytest.raises(ValueError, match="not included in p_mask_hlv"):
+        _validate_detectors_transformer(["V1"], ["H1", "L1", "V1"], settings)
+
+
+# --- check_detector_update ---
+
+
+def test_check_flexible_valid():
+    meta = _make_metadata(["H1", "L1"], mask_detectors=HL_SETTINGS)
+    check_detector_update(meta, ["H1", "L1"])  # no error
+
+
+def test_check_flexible_single_detector():
+    meta = _make_metadata(["H1", "L1"], mask_detectors=HL_SETTINGS)
+    check_detector_update(meta, ["H1"])  # no error
+
+
+def test_check_flexible_invalid_subset_raises():
+    meta = _make_metadata(["H1", "L1"], mask_detectors=HL_SETTINGS)
+    with pytest.raises(ValueError):
+        check_detector_update(meta, ["H1", "V1"])
+
+
+def test_check_mask_random_tokens_any_subset_allowed():
+    # mask_random_tokens alone imposes no detector constraint.
+    meta = _make_metadata(
+        ["H1", "L1"], mask_random_tokens={"p_mask": 0.2, "max_num_tokens": 10}
+    )
+    check_detector_update(meta, ["H1"])  # no error
+
+
+def test_check_no_tokenization_exact_match():
+    meta = _make_metadata(["H1", "L1"])
+    check_detector_update(meta, ["H1", "L1"])  # no error
+
+
+def test_check_no_tokenization_mismatch_raises():
+    meta = _make_metadata(["H1", "L1"])
+    with pytest.raises(ValueError, match="do not match"):
+        check_detector_update(meta, ["H1"])
 
 
 # ---------------------------------------------------------------------------

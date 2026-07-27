@@ -66,6 +66,7 @@ class GWSamplerMixin(object):
         # Has to be specified before init, because the information is required in _initialize_transforms()
         self._minimum_frequency = None
         self._maximum_frequency = None
+        self._detectors = None
         super().__init__(**kwargs)
         self.t_ref = self.base_model_metadata["train_settings"]["data"]["ref_time"]
         self._pesummary_package = "gw"
@@ -73,7 +74,16 @@ class GWSamplerMixin(object):
 
     @property
     def detectors(self: SamplerProtocol):
-        return self.base_model_metadata["train_settings"]["data"]["detectors"]
+        if self._detectors is None:
+            self._detectors = self.base_model_metadata["train_settings"]["data"][
+                "detectors"
+            ]
+        return self._detectors
+
+    @detectors.setter
+    def detectors(self: _GWMixinProtocol, value: list[str]):
+        self._detectors = value
+        self._initialize_transforms()
 
     @property
     def random_strain_cropping(self: SamplerProtocol):
@@ -154,6 +164,10 @@ class GWSamplerMixin(object):
     def event_metadata(self, value):
         if value is not None:
             value = value.copy()
+            # Process detectors first so that frequency validation (which uses
+            # self.detectors) already reflects the event's detector subset.
+            if "detectors" in value and value["detectors"] is not None:
+                self.detectors = value.pop("detectors")
             if "minimum_frequency" in value:
                 self.minimum_frequency = value.pop("minimum_frequency")
             if "maximum_frequency" in value:
@@ -336,9 +350,7 @@ class GWSampler(GWSamplerMixin, Sampler):
         transform_pre.append(ToTorch(device=self.model.device))
 
         if tok:
-            transform_pre.append(
-                UnpackDict(["waveform", "position", "drop_token_mask"])
-            )
+            transform_pre.append(UnpackDict(["waveform", "position", "token_mask"]))
         else:
             transform_pre.append(GetItem("waveform"))
 
@@ -700,3 +712,114 @@ def check_frequency_updates(
         _validate_minimum_frequency(f_min, detectors, domain, crop_settings)
     if f_max is not None:
         _validate_maximum_frequency(f_max, detectors, domain, crop_settings)
+
+
+def _validate_detectors_transformer(
+    detectors_event: list[str],
+    detectors_network: list[str],
+    mask_detector_settings: dict | None,
+):
+    """
+    Validate that a given set of event detectors is compatible with a transformer network
+    trained with detector masking.
+
+    Parameters
+    ----------
+    detectors_event : list[str]
+        Detectors present in the event data.
+    detectors_network : list[str]
+        Detectors the network was trained with.
+    mask_detector_settings : dict or None
+        The ``tokenization.mask_detectors`` sub-dict from the network's train settings.
+        Must contain ``p_mask_012_detectors`` and ``p_mask_hlv``.
+
+    Raises
+    ------
+    ValueError
+        If the event detectors are not a subset of the training detectors, or if the
+        training probabilities do not allow the event's detector count or specific
+        detectors.
+    """
+    if not set(detectors_event).issubset(set(detectors_network)):
+        raise ValueError(
+            f"Event has detectors {detectors_event} but model was only trained with "
+            f"detectors {detectors_network}."
+        )
+
+    num_detectors = len(detectors_event)
+    num_network_detectors = len(detectors_network)
+    if "p_mask_012_detectors" not in mask_detector_settings:
+        raise ValueError(
+            "Adapting detectors at inference time requires p_mask_012_detectors to be "
+            "set in tokenization.mask_detectors."
+        )
+    p_mask_012 = mask_detector_settings["p_mask_012_detectors"]
+    # p_mask_012[k] = probability of masking k detectors out of num_network_detectors.
+    # The number of masked detectors equals num_network_detectors - num_detectors.
+    num_masked = num_network_detectors - num_detectors
+    if p_mask_012[num_masked] == 0.0:
+        raise ValueError(
+            f"Event has detectors {detectors_event}, but model was trained with "
+            f"p_mask_012_detectors={p_mask_012}, not allowing {num_detectors} active "
+            f"detectors."
+        )
+
+    if "p_mask_hlv" not in mask_detector_settings:
+        raise ValueError(
+            "Adapting detectors at inference time requires p_mask_hlv to be set in "
+            "tokenization.mask_detectors."
+        )
+    p_mask_hlv = mask_detector_settings["p_mask_hlv"]
+    for det in detectors_event:
+        if det not in p_mask_hlv:
+            raise ValueError(f"Detector {det} not included in p_mask_hlv={p_mask_hlv}.")
+        if p_mask_hlv[det] == 0.0:
+            raise ValueError(
+                f"Probability of keeping detector {det} is 0 in "
+                f"p_mask_hlv={p_mask_hlv}."
+            )
+
+
+def check_detector_update(
+    model_metadata: dict,
+    detectors: list[str],
+):
+    """
+    Validate that a given set of detectors is compatible with the network.
+
+    For transformer networks trained with ``tokenization.mask_detectors``, the event
+    detectors must be a subset of the training detectors and must be allowed by the
+    masking probabilities.  For networks trained with ``tokenization.mask_random_tokens``
+    only the subset check is performed.  For non-tokenization networks the event detectors
+    must exactly match the training detectors.
+
+    Parameters
+    ----------
+    model_metadata : dict
+        Dictionary containing the network's training settings and data.
+    detectors : list[str]
+        Detectors present in the event data.
+
+    Raises
+    ------
+    ValueError
+        If the detector configuration is incompatible with the model.
+    """
+    detectors_network = model_metadata["train_settings"]["data"]["detectors"]
+    if "tokenization" in model_metadata["train_settings"]["data"]:
+        tok = model_metadata["train_settings"]["data"]["tokenization"]
+        if "mask_detectors" in tok:
+            _validate_detectors_transformer(
+                detectors_event=detectors,
+                detectors_network=detectors_network,
+                mask_detector_settings=tok["mask_detectors"],
+            )
+        elif "mask_random_tokens" in tok:
+            # Token-level masking does not constrain which detectors are present.
+            pass
+    else:
+        if set(detectors) != set(detectors_network):
+            raise ValueError(
+                f"Detectors {detectors} of event do not match detectors "
+                f"{detectors_network} from model."
+            )
