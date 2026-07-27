@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain
-from dingo.gw.transforms import StrainTokenization, DETECTOR_DICT
+from dingo.gw.transforms import StrainTokenization, MaskRandomTokens, DETECTOR_DICT
 
 
 # ---------------------------------------------------------------------------
@@ -51,7 +51,7 @@ def make_sample(domain, batch_size, num_channels=3):
 
 
 def _check_position_and_mask(out, domain, num_tokens_per_block, num_blocks):
-    """Shared checks for position and drop_token_mask outputs."""
+    """Shared checks for position and token_mask outputs."""
     num_tokens = num_tokens_per_block * num_blocks
 
     # position shape
@@ -98,10 +98,10 @@ def _check_position_and_mask(out, domain, num_tokens_per_block, num_blocks):
         len(unique_det_indices) == num_blocks
     ), "Detector indices are not unique across blocks"
 
-    # drop_token_mask: shape and default all-False
-    assert out["drop_token_mask"].shape[-1] == num_tokens
+    # token_mask: shape and default all-False
+    assert out["token_mask"].shape[-1] == num_tokens
     assert not out[
-        "drop_token_mask"
+        "token_mask"
     ].any(), "Default mask should keep all tokens (all False)"
 
 
@@ -285,7 +285,7 @@ def test_three_detectors():
 
 
 def test_output_dtype():
-    """Output arrays preserve input dtype; drop_token_mask is always bool."""
+    """Output arrays preserve input dtype; token_mask is always bool."""
     domain = make_ufd()
 
     for dtype in (np.float32, np.float64):
@@ -299,7 +299,7 @@ def test_output_dtype():
 
         assert out["waveform"].dtype == dtype, f"waveform dtype changed from {dtype}"
         assert out["position"].dtype == dtype, f"position dtype changed from {dtype}"
-        assert out["drop_token_mask"].dtype == bool
+        assert out["token_mask"].dtype == bool
 
 
 def test_mutual_exclusivity():
@@ -319,3 +319,75 @@ def test_mfd_incompatible_nodes():
     domain = make_mfd()
     with pytest.raises(ValueError):
         StrainTokenization(domain, token_size=200, print_output=False)
+
+
+# ---------------------------------------------------------------------------
+# MaskRandomTokens tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "setup",
+    [
+        "ufd_batch",
+        "ufd_no_batch",
+        "ufd_single_batch",
+        "mfd_batch",
+    ],
+)
+def test_MaskRandomTokens(request, setup):
+    domain, num_tokens_per_block, num_blocks, sample = request.getfixturevalue(setup)
+    # Drop random tokens
+    # Initialize StrainTokenization transform
+    token_transformation = StrainTokenization(
+        domain,
+        num_tokens_per_block=num_tokens_per_block,
+    )
+    mask_dict = {
+        "p_mask": 0.2,
+        "max_num_tokens": num_tokens_per_block,
+    }
+    mask_trafo = MaskRandomTokens(
+        p_mask=mask_dict["p_mask"],
+        max_num_tokens=mask_dict["max_num_tokens"],
+    )
+
+    # Evaluate transforms
+    out = token_transformation(sample)
+    out = mask_trafo(out)
+
+    # Check that not more than max_num_tokens are masked per sample
+    num_removed_tokens = np.sum(out["token_mask"], axis=-1)
+    assert np.all(num_removed_tokens <= mask_dict["max_num_tokens"])
+
+    # Only check probabilities if we can average over the batch dimension
+    if len(out["position"].shape) > 2 and out["position"].shape[0] > 1:
+        # Check that p_mask is correct
+        prob_mask = np.mean(np.where(num_removed_tokens > 0.0, 1.0, 0.0))
+        assert np.isclose(prob_mask, mask_dict["p_mask"], atol=0.1, rtol=0.1)
+
+        # Check that dropped tokens are uniformly distributed
+        hist_removed_tokens = np.sum(out["token_mask"], axis=0)
+        mean_removed_tokens = np.mean(hist_removed_tokens)
+        assert np.all(
+            np.isclose(mean_removed_tokens, hist_removed_tokens, atol=5, rtol=5)
+        )
+
+
+def test_MaskRandomTokens_p_mask_zero():
+    """With p_mask=0 no tokens should ever be masked."""
+    domain = make_ufd()
+    sample = make_sample(domain, batch_size=100)
+    out = StrainTokenization(domain, num_tokens_per_block=40)(sample)
+    out = MaskRandomTokens(p_mask=0.0, max_num_tokens=40)(out)
+    assert not out["token_mask"].any()
+
+
+def test_MaskRandomTokens_preserves_existing_mask():
+    """Pre-existing True entries in token_mask must remain True after the transform."""
+    domain = make_ufd()
+    sample = make_sample(domain, batch_size=100)
+    out = StrainTokenization(domain, num_tokens_per_block=40)(sample)
+    out["token_mask"][:, 0] = True
+    out = MaskRandomTokens(p_mask=0.0, max_num_tokens=40)(out)
+    assert np.all(out["token_mask"][:, 0])

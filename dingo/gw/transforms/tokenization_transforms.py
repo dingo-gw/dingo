@@ -21,7 +21,7 @@ class StrainTokenization:
                                num_channels * num_bins_per_token]
     - 'position':        [..., num_tokens, 3]
                          last dim = [f_min, f_max, detector_index]
-    - 'drop_token_mask': [..., num_tokens] bool, False = keep token
+    - 'token_mask': [..., num_tokens] bool, False = keep token
                          (PyTorch transformer convention: True = masked out).
     """
 
@@ -142,7 +142,7 @@ class StrainTokenization:
 
         Returns
         -------
-        dict with keys 'waveform', 'position', 'drop_token_mask' (see class docstring).
+        dict with keys 'waveform', 'position', 'token_mask' (see class docstring).
         """
         sample = input_sample.copy()
         strain = sample["waveform"]
@@ -194,9 +194,115 @@ class StrainTokenization:
             ).copy()
 
         sample["position"] = token_position
-        sample["drop_token_mask"] = np.zeros((*batch_dims, num_tokens), dtype=bool)
+        sample["token_mask"] = np.zeros((*batch_dims, num_tokens), dtype=bool)
 
         return sample
+
+
+class MaskRandomTokens(object):
+    """
+    Randomly mask tokens for data points.
+
+    For each data point, first decides whether to apply any masking at all based on p_mask, then samples the number
+    of tokens to mask uniformly from [1, max_num_tokens]. The masked tokens are chosen at random, disregarding any
+    domain information.
+    """
+
+    def __init__(
+        self,
+        p_mask: float,
+        max_num_tokens: int,
+        print_output: bool = True,
+    ):
+        """
+        Parameters
+        ----------
+        p_mask: float
+            Probability of masking tokens from a data point.
+        max_num_tokens: int
+            Maximum number of tokens that can be masked.
+        print_output: bool
+            Whether to write print statements to the console.
+        """
+        self.p_mask = p_mask
+        self.max_num_tokens = max_num_tokens
+        if print_output:
+            print(
+                f"Transform MaskRandomTokens activated:\n"
+                f"    - Probability of masking tokens for each data point: {self.p_mask}\n"
+                f"    - Maximal number of tokens that can be masked: {self.max_num_tokens}"
+            )
+
+    def __call__(self, input_sample: dict) -> dict:
+        """
+        Parameters
+        ----------
+        input_sample: Dict
+            Values for keys
+            - 'waveform':
+            Sample of shape [batch_size, num_tokens, num_features]
+            - 'position', shape [batch_size, num_tokens, 3]
+               contains information [f_min, f_max, block]
+            - 'token_mask', shape [batch_size, num_tokens]
+
+        Returns
+        ----------
+        sample: Dict
+            input_sample with modified value for key
+            - 'token_mask', shape [batch_size, num_tokens]
+
+        """
+        sample_without_channel = input_sample["waveform"][..., 0]
+        num_tokens = sample_without_channel.shape[-1]
+
+        batch_size = (
+            [*sample_without_channel.shape[:-1]]
+            if sample_without_channel.shape[:-1] != ()
+            else [1]
+        )
+        probs = [self.p_mask, 1 - self.p_mask]
+        apply_mask = np.random.choice(
+            [True, False],
+            p=probs,
+            replace=True,
+            size=batch_size,
+        )
+        num_tokens_to_mask = np.random.choice(
+            np.arange(1, self.max_num_tokens + 1), size=batch_size
+        )
+
+        batch_token_size = (
+            [*sample_without_channel.shape]
+            if sample_without_channel.shape[:-1] != ()
+            else [1, num_tokens]
+        )
+        # Generate random values for all tokens
+        random_scores = np.random.uniform(size=batch_token_size)
+        # Sort the scores in ascending order and get indices
+        sorted_indices = np.argsort(random_scores, axis=-1)
+        # Create an index mask for selecting top-k per row
+        row_indices = np.arange(batch_size[0])[:, np.newaxis]
+        token_ranks = np.arange(num_tokens)
+        # For each row, get threshold index
+        thresholds = num_tokens_to_mask[:, np.newaxis] > token_ranks
+        # Build boolean mask
+        token_mask = np.zeros(batch_token_size, dtype=bool)
+        token_mask[row_indices, sorted_indices] = thresholds
+
+        # Combine masks
+        token_mask = np.logical_and(
+            np.repeat(apply_mask[..., np.newaxis], repeats=num_tokens, axis=-1),
+            token_mask,
+        )
+
+        # Modify mask
+        if len(input_sample["token_mask"].shape) == 1:
+            token_mask = token_mask.squeeze()
+        input_sample["token_mask"] = np.logical_or(
+            input_sample["token_mask"], token_mask
+        )
+
+        return input_sample
 
 
 def _check_mfd_node_compatibility(
