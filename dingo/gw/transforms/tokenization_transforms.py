@@ -305,6 +305,149 @@ class MaskRandomTokens(object):
         return input_sample
 
 
+class MaskDetectors(object):
+    """
+    Randomly mask detectors.
+    """
+
+    def __init__(
+        self,
+        num_blocks: int,
+        p_mask_012_detectors: list | None = None,
+        p_mask_hlv: dict | None = None,
+        print_output: bool = True,
+    ):
+        """
+        Parameters
+        ----------
+        num_blocks: int
+            Number of blocks (= detectors) in GW use case.
+        p_mask_012_detectors: list[float]
+            Specifies the categorical probability distribution for how many detectors to mask, in ascending order.
+            example: [0.1, 0.6, 0.3] = [10% probability to mask 0 detectors (=3 detector setup), 60 % probability for
+            2 detector setup, 30% probability for 1 detector setup]
+        p_mask_hlv: dict
+            Specifies the categorical probability distribution for which specific detectors to mask, order: H1, L1, V1.
+            example: {'H1': 0.1, 'L1': 0.2, 'V1': 0.7} = 10 % probability to mask H1, 20 % probability to mask L1,
+            70% probability to mask V1
+        print_output: bool
+            Whether to write print statements to the console.
+        """
+        self.num_blocks = num_blocks
+        if p_mask_012_detectors is None:
+            p_mask_012_detectors = [1 / num_blocks for _ in range(num_blocks)]
+        if not np.isclose(np.sum(p_mask_012_detectors), 1.0, rtol=1e-6, atol=1e-12):
+            raise ValueError(
+                f"p_mask_012_detectors {p_mask_012_detectors} does not sum to 1."
+            )
+        self.p_mask_012_detectors = p_mask_012_detectors
+        if p_mask_hlv is None:
+            p_mask_hlv = {
+                ["H1", "L1", "V1"][k]: 1 / num_blocks for k in range(num_blocks)
+            }
+        if not np.isclose(
+            np.sum(list(p_mask_hlv.values())), 1.0, rtol=1e-6, atol=1e-12
+        ):
+            raise ValueError(f"p_mask_hlv {p_mask_hlv} does not sum to 1.")
+        # Update keys equivalently to tokenization transform
+        self.p_mask_hlv = {DETECTOR_DICT[k]: v for k, v in p_mask_hlv.items()}
+
+        if len(p_mask_012_detectors) > num_blocks:
+            raise ValueError(
+                f"p_mask_012_detectors {self.p_mask_012_detectors} contains more options than"
+                f"detectors available: {num_blocks}. You need to specify a categorical probability"
+                f"value for masking 0, ..., {num_blocks - 1} detectors."
+            )
+        if len(self.p_mask_hlv) != num_blocks:
+            raise ValueError(
+                f"Provided values for p_mask_hlv={self.p_mask_hlv} is inconsistent with number of "
+                f"detectors: {num_blocks}. You need to specify a categorical probability value for each "
+                f"detector."
+            )
+        if print_output:
+            print(
+                f"Transform MaskDetectors activated: \n"
+                f"    - Probabilities for masking {[i for i in range(num_blocks)]} detectors are "
+                f"{self.p_mask_012_detectors}.\n"
+                f"    - Probabilities for specific detectors are {self.p_mask_hlv}."
+            )
+
+    def __call__(self, input_sample: dict) -> dict:
+        """
+        Parameters
+        ----------
+        input_sample: Dict
+            Values for keys
+            - 'waveform':
+            Sample of shape [batch_size, num_tokens, num_features] =
+            [batch_size, num_blocks * num_tokens_per_block, num_channels * num_bins_per_token]
+            where num_blocks = number of detectors in GW use case,
+            num_channels>=3 (real, imag, auxiliary channels, e.g. asd),
+            and num_bins = number of frequency bins.
+            - 'position', shape [batch_size, num_tokens, 3]
+               contains information [f_min, f_max, block]
+            - 'token_mask', shape [batch_size, num_tokens]
+
+        Returns
+        ----------
+        sample: Dict
+            input_sample with modified value for key
+            - 'token_mask', shape [batch_size, num_tokens]
+
+        """
+        blocks = input_sample["position"][..., 2]
+        num_blocks = len(np.unique(blocks))
+        detectors = np.unique(blocks)
+
+        # Convert p_mask_hlv dict to list
+        p_mask_hlv = [self.p_mask_hlv[k] for k in detectors]
+
+        # Decide how many detectors to mask (either none, or one less than the number of detectors present)
+        # for each element in batch_size
+        mask_n_blocks = np.random.choice(
+            [i for i in range(num_blocks)],
+            p=self.p_mask_012_detectors,
+            size=[*blocks.shape[:-1]],
+        )
+        if np.sum(mask_n_blocks) != 0:
+            # Treat mask 1 vs. 2 blocks separately because which detectors to mask varies
+            # with the number of detectors to mask
+            for n in [i for i in np.unique(mask_n_blocks) if i > 0]:
+                # Construct mask for which batch indices require updates
+                mask_mod = np.where(mask_n_blocks == n, True, False)
+                # Decide which detectors
+                detectors_to_mask = np.apply_along_axis(
+                    np.random.choice,
+                    axis=1,
+                    arr=np.repeat(
+                        np.expand_dims(detectors, 0), repeats=np.sum(mask_mod), axis=0
+                    ),
+                    p=p_mask_hlv,
+                    size=n,
+                    replace=False,
+                )
+                # Create mask such that tokens corresponding to masked detectors are True
+                # (1) Mask one detector
+                mask_detectors = np.where(
+                    blocks[mask_mod].T == detectors_to_mask[:, 0], True, False
+                ).T
+                if detectors_to_mask.shape[-1] > 1:
+                    # (2) Update mask to include masking of any further detector
+                    for i in range(1, detectors_to_mask.shape[-1]):
+                        mask_detectors_i = np.where(
+                            blocks[mask_mod].T == detectors_to_mask[:, i], True, False
+                        ).T
+                        mask_detectors = np.logical_or(mask_detectors_i, mask_detectors)
+                # Keep mask=True from previous transforms with logical OR
+                mask_detectors = np.logical_or(
+                    input_sample["token_mask"][mask_mod], mask_detectors
+                )
+                # Update mask
+                input_sample["token_mask"][mask_mod] = mask_detectors
+
+        return input_sample
+
+
 def _check_mfd_node_compatibility(
     f_mins: np.ndarray,
     f_maxs: np.ndarray,

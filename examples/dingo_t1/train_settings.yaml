@@ -34,24 +34,16 @@ data:
     - psi
   tokenization:
     token_size: 16
-    drop_detectors:
-      p_drop_012_detectors: [0.6, 0.3, 0.1]
-      p_drop_hlv:
+    mask_detectors:
+      num_blocks: 3
+      p_mask_012_detectors: [0.6, 0.3, 0.1]
+      p_mask_hlv:
         H1: 0.3
         L1: 0.3
         V1: 0.4
-    drop_frequency_range:
-      f_cut:
-        p_cut: 0.25
-        f_max_lower_cut: 180.
-        f_min_upper_cut: 80.
-        p_same_cut_all_detectors: 0.7
-        p_lower_upper_both: [0.1, 0.7, 0.2]
-      mask_interval:
-        p_per_detector: 0.1
-        f_min: 20.
-        f_max: 1800.
-        max_width: 10.
+#    mask_random_tokens:
+#      p_mask: 0.2
+#      max_num_tokens: 10
 
 model:
   posterior_model_type: normalizing_flow
