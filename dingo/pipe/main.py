@@ -179,6 +179,13 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
             if ifo_name in asd_dataset.asds:
                 asd_key = ifo_name # normal detector, e.g. 'H1'
             else:
+                # Triangular detector ('ET'): the ASD dataset is keyed by arm name
+                # (ET1/ET2/ET3), but bilby_pipe only accepts 'ET' as a psd_dict key,
+                # so we save the first arm's PSD and use it for all three arms.
+                # Note: different PSDs per-arm are NOT supported. This matches
+                # bilby's current ET definition (all arms share one sensitivity curve);
+                # supporting this would require bilby/bilby_pipe to treat ET1/ET2/ET3
+                # as separate detectors.
                 asd_key = [ifo.name for ifo in InterferometerList([ifo_name])][0]  # 'ET'-> 'ET1' and fixing 'ET1'
             psd_path = asd_dataset.save_psd(args.outdir, asd_key, rng=rng)
             psd_dict[ifo_name] = str(psd_path) # keyed by 'ET'
