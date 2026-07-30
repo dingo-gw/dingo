@@ -41,6 +41,12 @@ data:
         H1: 0.3
         L1: 0.3
         V1: 0.4
+    mask_frequency_edges:
+      p_mask: 0.2
+      f_max_lower: 100.0
+      f_min_upper: 800.0
+      p_lower_upper_both: [0.4, 0.4, 0.2]
+      p_same_all_detectors: 0.7
 #    mask_random_tokens:
 #      p_mask: 0.2
 #      max_num_tokens: 10
@@ -94,7 +100,6 @@ training:
       mode: min
       factor: 0.5
       patience: 10
-      update_every_optimizer_step: False
     early_stopping:
       patience: 30 # This patience has to be larger than the ReduceLROnPlateau patience
       delta: 0.0

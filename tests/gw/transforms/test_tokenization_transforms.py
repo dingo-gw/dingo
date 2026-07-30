@@ -6,6 +6,7 @@ from dingo.gw.transforms import (
     StrainTokenization,
     MaskRandomTokens,
     MaskDetectors,
+    MaskFrequencyEdges,
     DETECTOR_DICT,
 )
 
@@ -524,3 +525,216 @@ def test_MaskDetectors_two_of_three():
     )(out)
     # Exactly 2 * num_tokens_per_block tokens should be masked per sample
     assert np.all(np.sum(out["token_mask"], axis=-1) == 2 * num_tokens_per_block)
+
+
+# ---------------------------------------------------------------------------
+# MaskFrequencyEdges tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("setup", SETUPS)
+def test_MaskFrequencyEdges(request, setup):
+    domain, num_tokens_per_block, num_blocks, sample = request.getfixturevalue(setup)
+
+    token_transformation = StrainTokenization(
+        domain,
+        num_tokens_per_block=num_tokens_per_block,
+        print_output=False,
+    )
+    mask_dict = {
+        "p_mask": 0.2,
+        "f_max_lower": 100.0,
+        "f_min_upper": 800.0,
+        "p_lower_upper_both": [0.4, 0.4, 0.2],
+        "p_same_all_detectors": 0.7,
+    }
+    mask_transformation = MaskFrequencyEdges(
+        domain=domain,
+        p_mask=mask_dict["p_mask"],
+        f_max_lower=mask_dict["f_max_lower"],
+        f_min_upper=mask_dict["f_min_upper"],
+        p_lower_upper_both=mask_dict["p_lower_upper_both"],
+        p_same_all_detectors=mask_dict["p_same_all_detectors"],
+        print_output=False,
+    )
+    out = token_transformation(sample)
+    out = mask_transformation(out)
+
+    # Masked tokens must be at the lower end (f_min < f_max_lower) or
+    # upper end (f_max > f_min_upper) of the frequency range.
+    dropped_f_mins = out["position"][..., 0][out["token_mask"]]
+    dropped_f_maxs = out["position"][..., 1][out["token_mask"]]
+    assert np.all(
+        np.logical_or(
+            dropped_f_mins < mask_dict["f_max_lower"],
+            dropped_f_maxs > mask_dict["f_min_upper"],
+        )
+    )
+
+    # Only run probability checks if we can average over the batch dimension
+    if len(out["position"].shape) > 2 and out["position"].shape[0] > 1:
+        num_masked_tokens = np.sum(out["token_mask"], axis=-1)
+        prob_mask = np.mean(np.where(num_masked_tokens > 0.0, 1.0, 0.0))
+        assert np.isclose(prob_mask, mask_dict["p_mask"], atol=0.1, rtol=0.1)
+
+        # Check p_lower_upper_both
+        mask_lower = (
+            out["position"][..., :num_tokens_per_block, 0] <= mask_dict["f_max_lower"]
+        )
+        mask_upper = (
+            out["position"][..., :num_tokens_per_block, 1] >= mask_dict["f_min_upper"]
+        )
+        lower_blocks = []
+        upper_blocks = []
+        both_blocks = []
+        for b in range(num_blocks):
+            b_min, b_max = b * num_tokens_per_block, (b + 1) * num_tokens_per_block
+            vals = out["token_mask"][:, b_min:b_max]
+            num_masked_lower = np.sum(np.where(mask_lower, vals, False), axis=-1)
+            num_masked_upper = np.sum(np.where(mask_upper, vals, False), axis=-1)
+            lower = np.where(num_masked_lower > 0.0, 1.0, 0.0)
+            upper = np.where(num_masked_upper > 0.0, 1.0, 0.0)
+            both = np.logical_and(lower, upper)
+            lower = np.where(np.logical_and(lower, ~both), 1.0, 0.0)
+            upper = np.where(np.logical_and(upper, ~both), 1.0, 0.0)
+            assert np.isclose(
+                np.mean(lower),
+                mask_dict["p_mask"] * mask_dict["p_lower_upper_both"][0],
+                atol=0.1,
+                rtol=0.1,
+            )
+            assert np.isclose(
+                np.mean(upper),
+                mask_dict["p_mask"] * mask_dict["p_lower_upper_both"][1],
+                atol=0.1,
+                rtol=0.1,
+            )
+            assert np.isclose(
+                np.mean(both),
+                mask_dict["p_mask"] * mask_dict["p_lower_upper_both"][2],
+                atol=0.1,
+                rtol=0.1,
+            )
+            lower_blocks.append(lower)
+            upper_blocks.append(upper)
+            both_blocks.append(both)
+
+        # Check p_same_all_detectors
+        all_lower = np.logical_and(*lower_blocks)
+        all_upper = np.logical_and(*upper_blocks)
+        all_both = np.logical_and(*both_blocks)
+        p_mask_all_detectors = np.mean(
+            np.logical_or.reduce((all_lower, all_upper, all_both))
+        )
+        assert np.isclose(
+            p_mask_all_detectors,
+            mask_dict["p_mask"] * mask_dict["p_same_all_detectors"],
+            atol=0.1,
+            rtol=0.1,
+        )
+
+        # Verify masked-token counts decrease toward higher frequencies at the lower
+        # cut end, and increase toward higher frequencies at the upper cut end.
+        edge_mask_lower = mask_lower[..., :-1] & ~mask_lower[..., 1:]
+        mask_lower_strict = mask_lower.copy()
+        mask_lower_strict[..., :-1][edge_mask_lower] = False
+        edge_mask_upper = ~mask_upper[..., :-1] & mask_upper[..., 1:]
+        mask_upper_strict = mask_upper.copy()
+        mask_upper_strict[..., 1:][edge_mask_upper] = False
+        masked_lower_blocks, masked_upper_blocks = [], []
+        for b in range(num_blocks):
+            b_min, b_max = b * num_tokens_per_block, (b + 1) * num_tokens_per_block
+            vals = out["token_mask"][:, b_min:b_max]
+            masked_lower_blocks.append(np.where(mask_lower_strict, vals, False))
+            masked_upper_blocks.append(np.where(mask_upper_strict, vals, False))
+        num_tokens_masked_lower = np.apply_over_axes(
+            np.sum, np.array(masked_lower_blocks), [0, 1]
+        ).squeeze()
+        num_tokens_masked_upper = np.apply_over_axes(
+            np.sum, np.array(masked_upper_blocks), [0, 1]
+        ).squeeze()
+        assert np.all(num_tokens_masked_lower[1:] <= num_tokens_masked_lower[:-1])
+        assert np.all(num_tokens_masked_upper[1:] >= num_tokens_masked_upper[:-1])
+
+    # Check that we never mask all tokens when f_max_lower > f_min_upper
+    mask_dict_overlap = {
+        "p_mask": 1.0,
+        "f_max_lower": 900.0,
+        "f_min_upper": 100.0,
+        "p_lower_upper_both": [0.1, 0.1, 0.8],
+        "p_same_all_detectors": 0.7,
+    }
+    mask_transformation_overlap = MaskFrequencyEdges(
+        domain=domain,
+        p_mask=mask_dict_overlap["p_mask"],
+        f_max_lower=mask_dict_overlap["f_max_lower"],
+        f_min_upper=mask_dict_overlap["f_min_upper"],
+        p_lower_upper_both=mask_dict_overlap["p_lower_upper_both"],
+        p_same_all_detectors=mask_dict_overlap["p_same_all_detectors"],
+        print_output=False,
+    )
+    out = token_transformation(sample)
+    out = mask_transformation_overlap(out)
+
+    num_masked_tokens = np.sum(out["token_mask"], axis=-1)
+    assert np.all(num_masked_tokens < num_tokens_per_block * num_blocks)
+    dropped_f_mins = out["position"][..., 0][out["token_mask"]]
+    dropped_f_maxs = out["position"][..., 1][out["token_mask"]]
+    assert np.all(
+        np.logical_or(
+            dropped_f_mins < mask_dict_overlap["f_max_lower"],
+            dropped_f_maxs > mask_dict_overlap["f_min_upper"],
+        )
+    )
+
+
+def test_MaskFrequencyEdges_p_mask_zero():
+    """With p_mask=0 no tokens should ever be masked."""
+    domain = make_ufd()
+    sample = make_sample(domain, batch_size=100)
+    out = StrainTokenization(domain, num_tokens_per_block=40, print_output=False)(
+        sample
+    )
+    out = MaskFrequencyEdges(
+        domain=domain,
+        p_mask=0.0,
+        f_max_lower=100.0,
+        f_min_upper=800.0,
+        p_same_all_detectors=0.5,
+        print_output=False,
+    )(out)
+    assert not out["token_mask"].any()
+
+
+def test_MaskFrequencyEdges_preserves_existing_mask():
+    """Pre-existing True entries in token_mask must remain True after the transform."""
+    domain = make_ufd()
+    sample = make_sample(domain, batch_size=100)
+    out = StrainTokenization(domain, num_tokens_per_block=40, print_output=False)(
+        sample
+    )
+    out["token_mask"][:, 0] = True
+    out = MaskFrequencyEdges(
+        domain=domain,
+        p_mask=0.0,
+        f_max_lower=100.0,
+        f_min_upper=800.0,
+        p_same_all_detectors=0.5,
+        print_output=False,
+    )(out)
+    assert np.all(out["token_mask"][:, 0])
+
+
+def test_MaskFrequencyEdges_p_lower_upper_both_not_summing_to_one():
+    """p_lower_upper_both that does not sum to 1 raises ValueError."""
+    domain = make_ufd()
+    with pytest.raises(ValueError, match="does not sum to 1"):
+        MaskFrequencyEdges(
+            domain=domain,
+            p_mask=0.2,
+            f_max_lower=100.0,
+            f_min_upper=800.0,
+            p_same_all_detectors=0.5,
+            p_lower_upper_both=[0.3, 0.3, 0.3],
+            print_output=False,
+        )
