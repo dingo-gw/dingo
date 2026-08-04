@@ -146,7 +146,7 @@ class StrainTokenization:
         """
         sample = input_sample.copy()
         strain = sample["waveform"]
-        *batch_dims, num_blocks, num_channels, _ = strain.shape
+        *batch_dims, num_detectors, num_channels, _ = strain.shape
 
         # (0) Cut or zero-pad the frequency axis to a multiple of num_bins_per_token
         target_bins = self.num_tokens_per_detector * self.num_bins_per_token
@@ -160,7 +160,7 @@ class StrainTokenization:
         #     [..., D, C, F] → [..., D, C, T, P]
         strain = strain.reshape(
             *batch_dims,
-            num_blocks,
+            num_detectors,
             num_channels,
             self.num_tokens_per_detector,
             self.num_bins_per_token,
@@ -174,14 +174,14 @@ class StrainTokenization:
         #     [..., D, T, C, P] → [..., D*T, C*P]
         sample["waveform"] = strain.reshape(
             *batch_dims,
-            num_blocks * self.num_tokens_per_detector,
+            num_detectors * self.num_tokens_per_detector,
             num_channels * self.num_bins_per_token,
         )
 
         # Position: [f_min, f_max, detector_index] per token
-        num_tokens = num_blocks * self.num_tokens_per_detector
-        token_f_min = np.tile(self.f_min_per_token, num_blocks)
-        token_f_max = np.tile(self.f_max_per_token, num_blocks)
+        num_tokens = num_detectors * self.num_tokens_per_detector
+        token_f_min = np.tile(self.f_min_per_token, num_detectors)
+        token_f_max = np.tile(self.f_max_per_token, num_detectors)
         detector_indices = np.array(
             [DETECTOR_DICT[k] for k in input_sample["asds"]], dtype=strain.dtype
         )
@@ -242,7 +242,7 @@ class MaskRandomTokens(object):
             - 'waveform':
             Sample of shape [batch_size, num_tokens, num_features]
             - 'position', shape [batch_size, num_tokens, 3]
-               contains information [f_min, f_max, block]
+               contains information [f_min, f_max, detector_index]
             - 'token_mask', shape [batch_size, num_tokens]
 
         Returns
@@ -380,12 +380,12 @@ class MaskDetectors(object):
             Values for keys
             - 'waveform':
             Sample of shape [batch_size, num_tokens, num_features] =
-            [batch_size, num_blocks * num_tokens_per_block, num_channels * num_bins_per_token]
-            where num_blocks = number of detectors in GW use case,
+            [batch_size, num_detectors * num_tokens_per_detector, num_channels * num_bins_per_token]
+            where num_detectors = number of detectors in GW use case,
             num_channels>=3 (real, imag, auxiliary channels, e.g. asd),
             and num_bins = number of frequency bins.
             - 'position', shape [batch_size, num_tokens, 3]
-               contains information [f_min, f_max, block]
+               contains information [f_min, f_max, detector_index]
             - 'token_mask', shape [batch_size, num_tokens]
 
         Returns
@@ -395,9 +395,9 @@ class MaskDetectors(object):
             - 'token_mask', shape [batch_size, num_tokens]
 
         """
-        blocks = input_sample["position"][..., 2]
-        num_blocks = len(np.unique(blocks))
-        detectors = np.unique(blocks)
+        detector_indices = input_sample["position"][..., 2]
+        num_detectors = len(np.unique(detector_indices))
+        detectors = np.unique(detector_indices)
 
         # Convert p_mask_hlv dict to list
         p_mask_hlv = [self.p_mask_hlv[k] for k in detectors]
@@ -405,12 +405,12 @@ class MaskDetectors(object):
         # Decide how many detectors to mask (either none, or one less than the number of detectors present)
         # for each element in batch_size
         mask_n_blocks = np.random.choice(
-            [i for i in range(num_blocks)],
+            [i for i in range(num_detectors)],
             p=self.p_mask_012_detectors,
-            size=[*blocks.shape[:-1]],
+            size=[*detector_indices.shape[:-1]],
         )
         if np.sum(mask_n_blocks) != 0:
-            # Treat mask 1 vs. 2 blocks separately because which detectors to mask varies
+            # Treat mask 1 vs. 2 detectors separately because which detectors to mask varies
             # with the number of detectors to mask
             for n in [i for i in np.unique(mask_n_blocks) if i > 0]:
                 # Construct mask for which batch indices require updates
@@ -429,13 +429,15 @@ class MaskDetectors(object):
                 # Create mask such that tokens corresponding to masked detectors are True
                 # (1) Mask one detector
                 mask_detectors = np.where(
-                    blocks[mask_mod].T == detectors_to_mask[:, 0], True, False
+                    detector_indices[mask_mod].T == detectors_to_mask[:, 0], True, False
                 ).T
                 if detectors_to_mask.shape[-1] > 1:
                     # (2) Update mask to include masking of any further detector
                     for i in range(1, detectors_to_mask.shape[-1]):
                         mask_detectors_i = np.where(
-                            blocks[mask_mod].T == detectors_to_mask[:, i], True, False
+                            detector_indices[mask_mod].T == detectors_to_mask[:, i],
+                            True,
+                            False,
                         ).T
                         mask_detectors = np.logical_or(mask_detectors_i, mask_detectors)
                 # Keep mask=True from previous transforms with logical OR
@@ -532,7 +534,7 @@ class MaskFrequencyEdges(object):
             - 'waveform':
                 Sample of shape [batch_size, num_tokens, num_features]
             - 'position', shape [batch_size, num_tokens, 3]
-               contains information [f_min, f_max, block]
+               contains information [f_min, f_max, detector_index]
             - 'token_mask', shape [batch_size, num_tokens]
 
         Returns
@@ -543,9 +545,9 @@ class MaskFrequencyEdges(object):
 
         """
         num_tokens = input_sample["waveform"].shape[-2]
-        blocks = input_sample["position"][..., 2]
-        num_blocks = len(np.unique(blocks))
-        num_tokens_per_block = num_tokens // num_blocks
+        detector_indices = input_sample["position"][..., 2]
+        num_detectors = len(np.unique(detector_indices))
+        num_tokens_per_detector = num_tokens // num_detectors
 
         # Mask in frequency domain, where we remove the upper, lower or both part(s),
         #     i.e. [f_min, f_lower], [f_upper, f_max], or both
@@ -556,7 +558,9 @@ class MaskFrequencyEdges(object):
         #   in uniform frequency domain (potentially for each detector)
         # - Convert frequency values to token mask
 
-        batch_size = [*blocks.shape[:-1]] if blocks.shape[:-1] != () else [1]
+        batch_size = (
+            [*detector_indices.shape[:-1]] if detector_indices.shape[:-1] != () else [1]
+        )
         # Decide whether to apply masking for each sample
         apply_cut = np.random.choice(
             [True, False], p=[self.p_mask, 1 - self.p_mask], size=batch_size
@@ -573,9 +577,9 @@ class MaskFrequencyEdges(object):
             False,
         )
         batch_block_size = (
-            [*blocks.shape[:-1], num_blocks]
-            if blocks.shape[:-1] != ()
-            else [1, num_blocks]
+            [*detector_indices.shape[:-1], num_detectors]
+            if detector_indices.shape[:-1] != ()
+            else [1, num_detectors]
         )
         # (1) Different mask applied to every detector
         # Decide whether to mask upper or lower range or both (potentially for each detector)
@@ -589,7 +593,7 @@ class MaskFrequencyEdges(object):
             lower_upper_both_separate == "upper", lower_upper_both_separate == "both"
         )
         # Combine with masks (a) whether we apply masking and (b) whether we apply it to a single detector
-        ones_vec = np.ones((1, num_blocks), dtype=bool)
+        ones_vec = np.ones((1, num_detectors), dtype=bool)
         mask_lower_separate_combined = np.logical_and.reduce(
             (
                 mask_lower_separate,
@@ -636,11 +640,11 @@ class MaskFrequencyEdges(object):
 
         # Construct mask: f_lower >= f_min_per_token and f_upper <= f_max_per_token
         token_mask_separate_lower = (
-            np.repeat(f_lower_separate, repeats=num_tokens_per_block, axis=-1)
+            np.repeat(f_lower_separate, repeats=num_tokens_per_detector, axis=-1)
             >= input_sample["position"][..., 0]
         )
         token_mask_separate_upper = (
-            np.repeat(f_upper_separate, repeats=num_tokens_per_block, axis=-1)
+            np.repeat(f_upper_separate, repeats=num_tokens_per_detector, axis=-1)
             <= input_sample["position"][..., 1]
         )
 
@@ -721,8 +725,8 @@ class MaskFrequencyEdges(object):
         )
         # Construct mask: f_lower >= f_min_per_token and f_upper <= f_max_per_token
         # (Assume that all detectors have same f_min and f_max values)
-        f_mins = input_sample["position"][..., 0:num_tokens_per_block, 0]
-        f_maxs = input_sample["position"][..., 0:num_tokens_per_block, 1]
+        f_mins = input_sample["position"][..., 0:num_tokens_per_detector, 0]
+        f_maxs = input_sample["position"][..., 0:num_tokens_per_detector, 1]
         token_mask_same_lower = f_lower_same[:, np.newaxis] >= f_mins
         token_mask_same_upper = f_upper_same[:, np.newaxis] <= f_maxs
 
@@ -731,14 +735,15 @@ class MaskFrequencyEdges(object):
             token_mask_same_lower, token_mask_same_upper
         )
         if self.prevent_zero_information:
-            # If all tokens are masked in one block, only apply upper or lower mask
+            # If all tokens are masked in one detector, only apply upper or lower mask
             replace_mask = np.where(
-                np.sum(token_mask_same_one_detector, axis=-1) == num_tokens_per_block,
+                np.sum(token_mask_same_one_detector, axis=-1)
+                == num_tokens_per_detector,
                 True,
                 False,
             )
             repl_mask = np.repeat(
-                replace_mask[..., np.newaxis], repeats=num_tokens_per_block, axis=-1
+                replace_mask[..., np.newaxis], repeats=num_tokens_per_detector, axis=-1
             )
             # Decide whether to choose lower or upper instead of both
             lower_upper_probs = self.p_lower_upper_both[:2] / np.sum(
@@ -752,7 +757,7 @@ class MaskFrequencyEdges(object):
             )
             mask_lower_same_repl = np.repeat(
                 mask_lower_same_replace[..., np.newaxis],
-                repeats=num_tokens_per_block,
+                repeats=num_tokens_per_detector,
                 axis=-1,
             )
             # Create replace mask
@@ -765,7 +770,7 @@ class MaskFrequencyEdges(object):
             )
 
         # Duplicate for number of detectors
-        token_mask_same = np.tile(token_mask_same_one_detector, reps=num_blocks)
+        token_mask_same = np.tile(token_mask_same_one_detector, reps=num_detectors)
 
         # Modify mask
         if len(input_sample["token_mask"].shape) == 1:
@@ -773,6 +778,180 @@ class MaskFrequencyEdges(object):
             token_mask_same = token_mask_same.squeeze()
         input_sample["token_mask"] = np.logical_or.reduce(
             (input_sample["token_mask"], token_mask_separate, token_mask_same)
+        )
+
+        return input_sample
+
+
+class MaskFrequencyInterval(object):
+    """
+    Randomly mask tokens corresponding to a contiguous frequency interval per detector.
+
+    This transform does the following things:
+    * Decides whether to mask a frequency interval per detector based on p_per_detector.
+    * Samples f_lower from [f_min, f_max - max_width].
+    * Samples f_upper from [f_lower, f_lower + max_width].
+    * Converts f_lower and f_upper to tokens and creates a token mask removing all tokens in [f_lower, f_upper].
+    """
+
+    def __init__(
+        self,
+        domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
+        p_per_detector: float,
+        f_min: float,
+        f_max: float,
+        max_width: float,
+        print_output: bool = True,
+    ):
+        """
+        Parameters
+        ----------
+        domain: UniformFrequencyDomain | MultibandedFrequencyDomain
+            Domain corresponding to the data being transformed.
+        p_per_detector: float
+            Probability of masking a frequency interval independently per detector.
+        f_min: float
+            Minimal frequency value of the interval within which tokens can be masked.
+        f_max: float
+            Maximal frequency value of the interval within which tokens can be masked.
+        max_width: float
+            Maximal width of the masked frequency interval.
+        print_output: bool
+            Whether to write print statements to the console.
+        """
+        self.domain = domain
+        self.p_per_detector = p_per_detector
+        self.interval_f_min = f_min if domain.f_min < f_min else domain.f_min
+        self.interval_f_max = f_max if domain.f_max > f_max else domain.f_max
+        interval_width = self.interval_f_max - self.interval_f_min
+        self.interval_max_width = (
+            max_width if max_width < interval_width else interval_width
+        )
+        if print_output:
+            print(
+                f"Transform MaskFrequencyInterval activated:\n"
+                f"    - Probability of masking an interval per detector: {self.p_per_detector}\n"
+                f"    - Interval range sampled from [{self.interval_f_min}, {self.interval_f_max}]\n"
+                f"    - Maximal width of interval: {self.interval_max_width}, but the effective interval can be larger "
+                f"if {self.interval_f_min} or {self.interval_f_max} fall in the middle of a token."
+            )
+
+    def __call__(self, input_sample: dict) -> dict:
+        """
+        Parameters
+        ----------
+        input_sample: Dict
+            Values for keys
+            - 'waveform':
+                Sample of shape [batch_size, num_tokens, num_features]
+            - 'position', shape [batch_size, num_tokens, 3]
+               contains information [f_min, f_max, detector_index]
+            - 'token_mask', shape [batch_size, num_tokens]
+
+        Returns
+        ----------
+        sample: Dict
+            input_sample with modified value for key
+            - 'token_mask', shape [batch_size, num_tokens]
+
+        """
+        num_tokens = input_sample["waveform"].shape[-2]
+        detector_indices = input_sample["position"][..., 2]
+        num_detectors = len(np.unique(detector_indices))
+        num_tokens_per_detector = num_tokens // num_detectors
+
+        # Mask frequency interval per detector:
+        # - Decide whether to apply a mask for each detector
+        # - Sample f_lower and f_upper from the base domain frequencies
+        # - Mask all tokens whose frequency range overlaps [f_lower, f_upper]
+
+        batch_block_size = (
+            [*detector_indices.shape[:-1], num_detectors]
+            if detector_indices.shape[:-1] != ()
+            else [1, num_detectors]
+        )
+        # Decide whether to mask a frequency interval for each detector
+        mask_interval = np.random.choice(
+            [True, False],
+            p=[self.p_per_detector, 1 - self.p_per_detector],
+            size=batch_block_size,
+        )
+
+        # Sample f_lower and f_upper from the base domain frequencies
+        if isinstance(self.domain, UniformFrequencyDomain):
+            f_values_base_domain = self.domain.sample_frequencies[
+                self.domain.frequency_mask
+            ]
+        elif isinstance(self.domain, MultibandedFrequencyDomain):
+            f_values_base_domain = self.domain.base_domain.sample_frequencies[
+                self.domain.base_domain.frequency_mask
+            ]
+        else:
+            raise ValueError(f"Unknown domain type: {self.domain}")
+        # f_lower from [interval_f_min, interval_f_max - interval_max_width]
+        mask_f_vals_lower = np.logical_and(
+            self.interval_f_min <= f_values_base_domain,
+            f_values_base_domain <= self.interval_f_max - self.interval_max_width,
+        )
+        possible_f_vals_lower = f_values_base_domain[mask_f_vals_lower]
+        f_lower_full = np.random.choice(
+            possible_f_vals_lower, replace=True, size=batch_block_size
+        )
+        f_lower = np.where(mask_interval, f_lower_full, np.inf)
+
+        # f_upper from [f_lower, f_lower + interval_max_width]
+        # Sampling f_upper depends on the f_lower sampled for each (batch, detector).
+        # np.apply_along_axis(np.argwhere, ...) requires that all (batch, detector)
+        # combinations produce the same number of valid upper frequencies.
+        # This is guaranteed: f_values_base_domain is always uniformly spaced (fixed delta_f),
+        # so any window [f_lower, f_lower + max_width] with f_lower on the grid contains
+        # exactly floor(max_width / delta_f) + 1 frequencies. For MFD we use the base domain,
+        # which is also a UFD, so the same argument holds.
+        mask_f_vals_upper = np.logical_and(
+            f_lower_full[:, :, np.newaxis]
+            <= f_values_base_domain[np.newaxis, np.newaxis, :],
+            f_values_base_domain[np.newaxis, np.newaxis, :]
+            <= f_lower_full[:, :, np.newaxis] + self.interval_max_width,
+        )
+        possible_indices_upper = np.stack(
+            [
+                np.apply_along_axis(
+                    np.argwhere, arr=mask_f_vals_upper[:, b, :], axis=-1
+                ).squeeze()
+                for b in range(num_detectors)
+            ],
+            axis=-2,
+        )
+        possible_f_vals_upper = f_values_base_domain[possible_indices_upper]
+        f_upper_no_mask = np.stack(
+            [
+                np.apply_along_axis(
+                    np.random.choice, arr=possible_f_vals_upper[..., b, :], axis=-1
+                )
+                for b in range(num_detectors)
+            ],
+            axis=-1,
+        )
+        f_upper = np.where(mask_interval, f_upper_no_mask, -1.0)
+
+        # Construct mask: f_lower <= f_max_per_token AND f_upper >= f_min_per_token
+        f_mins = input_sample["position"][..., 0]
+        f_maxs = input_sample["position"][..., 1]
+        token_mask_lower = (
+            np.repeat(f_lower, repeats=num_tokens_per_detector, axis=-1) <= f_maxs
+        )
+        token_mask_upper = (
+            np.repeat(f_upper, repeats=num_tokens_per_detector, axis=-1) >= f_mins
+        )
+
+        # Combine into one mask
+        token_mask = np.logical_and(token_mask_lower, token_mask_upper)
+
+        # Modify mask
+        if len(input_sample["token_mask"].shape) == 1:
+            token_mask = token_mask.squeeze()
+        input_sample["token_mask"] = np.logical_or(
+            input_sample["token_mask"], token_mask
         )
 
         return input_sample

@@ -7,6 +7,7 @@ from dingo.gw.transforms import (
     MaskRandomTokens,
     MaskDetectors,
     MaskFrequencyEdges,
+    MaskFrequencyInterval,
     DETECTOR_DICT,
 )
 
@@ -738,3 +739,152 @@ def test_MaskFrequencyEdges_p_lower_upper_both_not_summing_to_one():
             p_lower_upper_both=[0.3, 0.3, 0.3],
             print_output=False,
         )
+
+
+# ---------------------------------------------------------------------------
+# MaskFrequencyInterval tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("setup", SETUPS)
+def test_MaskFrequencyInterval(request, setup):
+    domain, num_tokens_per_block, num_blocks, sample = request.getfixturevalue(setup)
+
+    token_transformation = StrainTokenization(
+        domain,
+        num_tokens_per_block=num_tokens_per_block,
+        print_output=False,
+    )
+    mask_dict = {
+        "p_per_detector": 0.4,
+        "f_min": 100.0,
+        "f_max": 500.0,
+        "max_width": 100.0,
+    }
+    mask_transformation = MaskFrequencyInterval(
+        domain=domain,
+        p_per_detector=mask_dict["p_per_detector"],
+        f_min=mask_dict["f_min"],
+        f_max=mask_dict["f_max"],
+        max_width=mask_dict["max_width"],
+        print_output=False,
+    )
+    out = token_transformation(sample)
+    out = mask_transformation(out)
+
+    # Masked tokens must overlap with [f_min, f_max]: the f_max of the token must be
+    # >= f_min, and the f_min of the token must be <= f_max.  (A token at the boundary
+    # may straddle f_min or f_max, so we use f_max/f_min of the token for the comparison.)
+    dropped_f_mins = out["position"][..., 1][out["token_mask"]]  # f_max of token
+    dropped_f_maxs = out["position"][..., 0][out["token_mask"]]  # f_min of token
+    assert np.all(
+        np.logical_and(
+            dropped_f_mins >= mask_dict["f_min"],
+            dropped_f_maxs <= mask_dict["f_max"],
+        )
+    )
+
+    # Masked ranges must not be wider than max_width (with token-boundary tolerance)
+    for b in range(num_blocks):
+        b_min, b_max = b * num_tokens_per_block, (b + 1) * num_tokens_per_block
+        vals = out["token_mask"][..., b_min:b_max]
+        first_true_idx = np.argmax(vals, axis=-1)
+        last_true_idx = vals.shape[-1] - 1 - np.argmax(vals[..., ::-1], axis=-1)
+
+        edge_mask_lower = np.zeros_like(vals, dtype=bool)
+        edge_mask_upper = np.zeros_like(vals, dtype=bool)
+        if len(out["position"].shape) > 2:
+            batch_indices = np.arange(vals.shape[0])
+            edge_mask_lower[batch_indices, first_true_idx] = True
+            edge_mask_upper[batch_indices, last_true_idx] = True
+        else:
+            edge_mask_lower[first_true_idx] = True
+            edge_mask_upper[last_true_idx] = True
+
+        has_true = np.any(vals, axis=-1)
+        edge_mask_lower[~has_true] = False
+        edge_mask_upper[~has_true] = False
+
+        # Use f_max of first masked token and f_min of last masked token so that
+        # single-token intervals (where f_min_token > f_max_token measured this way)
+        # are excluded from the width check via the diff_f > 0 guard.
+        dropped_f_mins_lower = out["position"][..., b_min:b_max, 1][edge_mask_lower]
+        dropped_f_maxs_upper = out["position"][..., b_min:b_max, 0][edge_mask_upper]
+        diff_f = dropped_f_maxs_upper - dropped_f_mins_lower
+        assert np.all(np.where(diff_f > 0.0, diff_f <= mask_dict["max_width"], True))
+
+    # Only run probability checks if we can average over the batch dimension
+    if len(out["position"].shape) > 2 and out["position"].shape[0] > 1:
+        mask_has_true = [
+            np.any(
+                out["token_mask"][
+                    ..., b * num_tokens_per_block : (b + 1) * num_tokens_per_block
+                ],
+                axis=-1,
+            )
+            for b in range(num_blocks)
+        ]
+        masked_blocks = np.concatenate(mask_has_true)
+        prob_mask = np.mean(masked_blocks)
+        assert np.isclose(prob_mask, mask_dict["p_per_detector"], atol=0.1, rtol=0.1)
+
+        # For UFD, the lower edge of the masked interval should be uniformly
+        # distributed. Only consider tokens completely within [f_min, f_max - max_width]
+        # — those are the only tokens where f_lower can be sampled.
+        if isinstance(domain, UniformFrequencyDomain):
+            mask_tokens = np.logical_and(
+                out["position"][0, :num_tokens_per_block, 0] >= mask_dict["f_min"],
+                out["position"][0, :num_tokens_per_block, 1]
+                <= mask_dict["f_max"] - mask_dict["max_width"],
+            )
+            lower_edge_counts = np.zeros(num_tokens_per_block, dtype=int)
+            for b in range(num_blocks):
+                b_min = b * num_tokens_per_block
+                vals = out["token_mask"][:, b_min : b_min + num_tokens_per_block]
+                first_true_idx = np.argmax(vals, axis=-1)
+                edge = np.zeros_like(vals, dtype=bool)
+                has_true = np.any(vals, axis=-1)
+                edge[np.arange(vals.shape[0])[has_true], first_true_idx[has_true]] = (
+                    True
+                )
+                lower_edge_counts += np.sum(edge, axis=0)
+            non_zero = lower_edge_counts[mask_tokens]
+            if non_zero.size > 0:
+                assert np.isclose(np.mean(non_zero), non_zero, atol=5, rtol=5).all()
+
+
+def test_MaskFrequencyInterval_p_per_detector_zero():
+    """With p_per_detector=0 no tokens should ever be masked."""
+    domain = make_ufd()
+    sample = make_sample(domain, batch_size=100)
+    out = StrainTokenization(domain, num_tokens_per_block=40, print_output=False)(
+        sample
+    )
+    out = MaskFrequencyInterval(
+        domain=domain,
+        p_per_detector=0.0,
+        f_min=100.0,
+        f_max=500.0,
+        max_width=100.0,
+        print_output=False,
+    )(out)
+    assert not out["token_mask"].any()
+
+
+def test_MaskFrequencyInterval_preserves_existing_mask():
+    """Pre-existing True entries in token_mask must remain True after the transform."""
+    domain = make_ufd()
+    sample = make_sample(domain, batch_size=100)
+    out = StrainTokenization(domain, num_tokens_per_block=40, print_output=False)(
+        sample
+    )
+    out["token_mask"][:, 0] = True
+    out = MaskFrequencyInterval(
+        domain=domain,
+        p_per_detector=0.0,
+        f_min=100.0,
+        f_max=500.0,
+        max_width=100.0,
+        print_output=False,
+    )(out)
+    assert np.all(out["token_mask"][:, 0])

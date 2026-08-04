@@ -47,6 +47,11 @@ data:
       f_min_upper: 800.0
       p_lower_upper_both: [0.4, 0.4, 0.2]
       p_same_all_detectors: 0.7
+    mask_frequency_interval:
+      p_per_detector: 0.3
+      f_min: 0.0
+      f_max: 1024.0
+      max_width: 10.0
 #    mask_random_tokens:
 #      p_mask: 0.2
 #      max_num_tokens: 10
