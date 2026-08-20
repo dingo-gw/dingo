@@ -1,7 +1,10 @@
 import pytest
 import numpy as np
+import torch
+import torch.distributions
 
 from dingo.gw.transforms import SelectStandardizeRepackageParameters
+from dingo.gw.transforms.parameter_transforms import StandardizeParameters
 
 
 def test_SelectStandardizeRepackageParameters():
@@ -40,3 +43,19 @@ def test_SelectStandardizeRepackageParameters():
         par_out = sample_out["inference_parameters"][idx]
         # standardization changes dtype to float32
         assert par_out == np.float32((par_in - m) / std)
+
+
+def test_standardize_parameters_on_distribution():
+    """Check standardization of samples from a multi-normal distribution."""
+    mean_ = torch.tensor([3.0, 2.0, 8.0])
+    std_ = torch.tensor([2.0, 4.0, 7.0])
+    n_samples = 100000
+    parameters = torch.distributions.Normal(mean_, std_).sample((n_samples,)).numpy()
+    samples = {"parameters": {"x": parameters}, "waveform": None}
+    tr = StandardizeParameters({"x": mean_.numpy()}, {"x": std_.numpy()})
+    samples_tr = tr(samples)
+    parameters_tr = samples_tr["parameters"]["x"]
+
+    tol = 0.01
+    assert np.all(np.abs(np.mean(parameters_tr, axis=0)) < tol)
+    assert np.all(np.abs(np.std(parameters_tr, axis=0)) - np.ones(3) < tol)

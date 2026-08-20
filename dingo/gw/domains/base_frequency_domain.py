@@ -214,6 +214,20 @@ class BaseFrequencyDomain(Domain, ABC):
         """
         return 1 / np.sqrt(4.0 * self.delta_f)
 
+    def convert_td_modes_to_fd(self, hlm_td):
+        """
+        Convert time-domain modes to frequency-domain modes.
+
+        Default implementation delegates to `td_modes_to_fd_modes` and works for
+        uniform frequency domains. `MultibandedFrequencyDomain` overrides this
+        method with a base-domain-then-decimate strategy.
+        """
+        from dingo.gw.waveform_generator.polarization_modes_functions.polarization_modes_utils import (
+            td_modes_to_fd_modes,
+        )
+
+        return td_modes_to_fd_modes(hlm_td, self)
+
     def check_data_compatibility(self, data: np.ndarray) -> bool:
         """
         Check that the trailing dimension of data is compatible with the domain, i.e.,

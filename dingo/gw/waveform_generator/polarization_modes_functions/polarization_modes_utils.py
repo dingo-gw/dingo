@@ -119,7 +119,9 @@ def td_modes_to_fd_modes(
     if (n & (n - 1)) != 0:
         raise NotImplementedError("f_nyquist not a power of two of delta_f.")
     chirplen = int(2 * f_nyquist / delta_f)
-    sample_frequencies = domain.sample_frequencies()
+    sample_frequencies = domain.sample_frequencies
+    if callable(sample_frequencies):
+        sample_frequencies = sample_frequencies()
     freqs = np.concatenate((-sample_frequencies[::-1], sample_frequencies[1:]), axis=0)
     assert len(freqs) == chirplen + 1
 

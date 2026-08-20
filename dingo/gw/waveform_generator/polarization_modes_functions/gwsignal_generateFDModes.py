@@ -52,6 +52,7 @@ class _GenerateFDModesLOParameters(GwSignalParameters):
         self,
         spin_conversion_phase: float,
         phase: float,
+        extra_kwargs: Optional[dict] = None,
     ) -> Dict[Mode, Polarization]:
         approximant = _SupportedApproximant
 
@@ -61,6 +62,8 @@ class _GenerateFDModesLOParameters(GwSignalParameters):
 
         generator = gwsignal_get_waveform_generator(approximant)
         params = {k: v for k, v in asdict(self).items() if v is not None}
+        if extra_kwargs:
+            params.update(extra_kwargs)
         hlm_fd: GravitationalWavePolarizations = waveform.GenerateFDModes(
             params, generator
         )
@@ -139,5 +142,7 @@ def gwsignal_generate_FD_modes(
     )
 
     return instance.apply(
-        waveform_gen_params.spin_conversion_phase, waveform_params.phase
+        waveform_gen_params.spin_conversion_phase,
+        waveform_params.phase,
+        extra_kwargs=waveform_gen_params.extra_kwargs,
     )

@@ -4,7 +4,22 @@ import numpy as np
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_mismatch
 from dingo.gw.injection import GWSignal
-from dingo.gw.waveform_generator import sum_contributions_m
+
+
+def _sum_over_m(per_m: dict, phase_shift: float) -> dict:
+    """Sum contributions over m for a per-detector nested dict.
+
+    Input shape: {m: {"H1": arr, "L1": arr, ...}}. Returns
+    {"H1": sum_m arr * exp(-1j m phi), "L1": ...}. The new-API
+    sum_contributions_m in polarizations.py is Polarization-typed; the
+    signal_m output here is per-detector, so we inline the sum locally.
+    """
+    keys = next(iter(per_m.values())).keys()
+    result = {k: 0.0 for k in keys}
+    for k in keys:
+        for m, sample in per_m.items():
+            result[k] = result[k] + sample[k] * np.exp(-1j * m * phase_shift)
+    return result
 
 
 @pytest.fixture
@@ -60,7 +75,7 @@ def test_signal_m_EOB(signal_setup_EOB, BBH_parameters):
     waveform_ref = signal.signal({**p, "phase": p["phase"] + phase_shift})["waveform"]
     waveform_m = signal.signal_m(p)
     waveform_m = {k: v["waveform"] for k, v in waveform_m.items()}
-    waveform = sum_contributions_m(waveform_m, phase_shift=phase_shift)
+    waveform = _sum_over_m(waveform_m, phase_shift=phase_shift)
     mismatches = [
         get_mismatch(
             waveform_ref[k],

@@ -51,7 +51,11 @@ class _GenerateTDModesLO(GwSignalParameters):
         return cls(**asdict(gw_signal_params))
 
     def apply(
-        self, approximant: Approximant, domain: BaseFrequencyDomain, phase: float
+        self,
+        approximant: Approximant,
+        domain: BaseFrequencyDomain,
+        phase: float,
+        extra_kwargs: Optional[dict] = None,
     ) -> Dict[Mode, Polarization]:
         _logger.debug(
             self.to_table("generating polarization using waveform.GenerateTDModes")
@@ -59,6 +63,8 @@ class _GenerateTDModesLO(GwSignalParameters):
 
         generator = gwsignal_get_waveform_generator(approximant)
         params = {k: v for k, v in asdict(self).items() if v is not None}
+        if extra_kwargs:
+            params.update(extra_kwargs)
 
         hlm_td: GravitationalWaveModes = waveform.GenerateTDModes(params, generator)
 
@@ -113,4 +119,5 @@ def gwsignal_generate_TD_modes(
         waveform_gen_params.approximant,
         waveform_gen_params.domain,
         waveform_params.phase,
+        extra_kwargs=waveform_gen_params.extra_kwargs,
     )

@@ -46,7 +46,11 @@ class _GWSignal_GenerateFDModesParameters(GwSignalParameters):
         return cls(**asdict(gw_signal_params))
 
     def apply(
-        self, domain: BaseFrequencyDomain, approximant: Approximant, ref_tol
+        self,
+        domain: BaseFrequencyDomain,
+        approximant: Approximant,
+        ref_tol,
+        extra_kwargs: Optional[dict] = None,
     ) -> Polarization:
         self.lmax_nyquist = 2
 
@@ -59,6 +63,8 @@ class _GWSignal_GenerateFDModesParameters(GwSignalParameters):
 
         generator = gwsignal_get_waveform_generator(approximant)
         params = {k: v for k, v in asdict(self).items() if v is not None}
+        if extra_kwargs:
+            params.update(extra_kwargs)
         hpc: GravitationalWavePolarizations = waveform.GenerateFDWaveform(
             params, generator
         )
@@ -74,11 +80,18 @@ class _GWSignal_GenerateFDModesParameters(GwSignalParameters):
             )
 
         if isinstance(domain, MultibandedFrequencyDomain):
-            base = UniformFrequencyDomain(
-                f_min=0.0,
-                f_max=domain.f_max,
-                delta_f=domain.base_delta_f,
-                window_factor=domain.window_factor,
+            # Generate on the base uniform grid, then decimate to MFD. Use the
+            # stored base_domain when available so length matches MFD.decimate's
+            # expectation; fall back to an ephemeral 0-to-f_max UFD otherwise.
+            base = (
+                domain.base_domain
+                if domain.base_domain is not None
+                else UniformFrequencyDomain(
+                    f_min=0.0,
+                    f_max=domain.f_max,
+                    delta_f=domain.base_delta_f,
+                    window_factor=domain.window_factor,
+                )
             )
             h_plus_full = hp.value
             h_cross_full = hc.value
@@ -94,7 +107,10 @@ class _GWSignal_GenerateFDModesParameters(GwSignalParameters):
             time_shift = np.exp(-1j * 2 * np.pi * dt * base())
             h_plus_full = h_plus_full * time_shift
             h_cross_full = h_cross_full * time_shift
-            return Polarization(h_cross=h_cross_full, h_plus=h_plus_full)
+            return Polarization(
+                h_plus=domain.decimate(h_plus_full),
+                h_cross=domain.decimate(h_cross_full),
+            )
 
         h_plus = np.zeros((len(domain),), dtype=complex)
         h_cross = np.zeros((len(domain),), dtype=complex)
@@ -144,4 +160,9 @@ def gwsignal_generate_FD_modes(
         ),
     )
 
-    return instance.apply(waveform_gen_params.domain, approximant, ref_tol)
+    return instance.apply(
+        waveform_gen_params.domain,
+        approximant,
+        ref_tol,
+        extra_kwargs=waveform_gen_params.extra_kwargs,
+    )

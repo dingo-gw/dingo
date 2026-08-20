@@ -16,7 +16,6 @@ from bilby_pipe.utils import (
     resolve_filename_with_transfer_fallback,
     BilbyPipeError,
 )
-import lalsimulation as LS
 import numpy as np
 
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
@@ -289,26 +288,15 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # Possibly update waveform generator based on supplied settings. Note that
         # default values will have been set by dingo_pipe from the DINGO model.
         waveform_arguments = self.get_injection_waveform_arguments()
-        injection.f_ref = waveform_arguments["reference_frequency"]
-        injection.waveform_generator.approximant = LS.GetApproximantFromString(
-            waveform_arguments["waveform_approximant"]
+        injection.update_waveform_generator(
+            approximant=waveform_arguments["waveform_approximant"],
+            f_ref=waveform_arguments["reference_frequency"],
         )
-        injection.waveform_generator.approximant_str = waveform_arguments[
-            "waveform_approximant"
-        ]
 
         logger.info("Injecting waveform from DINGO with ")
         logger.info(f"data_domain = {injection.data_domain.domain_dict}")
-        for prop in [
-            "t_ref",
-        ]:
-            logger.info(f"{prop} = {getattr(injection, prop)}")
-        for prop in [
-            "approximant_str",
-            "f_ref",
-            "f_start",
-        ]:
-            logger.info(f"{prop} = {getattr(injection.waveform_generator, prop)}")
+        logger.info(f"t_ref = {injection.t_ref}")
+        logger.info(f"wfg_kwargs = {injection._wfg_kwargs}")
 
         # Generate signal
         self.injection_parameters = self.injection_df.iloc[self.idx].to_dict()

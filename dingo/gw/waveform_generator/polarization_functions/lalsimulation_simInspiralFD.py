@@ -314,12 +314,19 @@ def lalsim_inspiral_FD(
     domain = waveform_gen_params.domain
 
     if isinstance(domain, MultibandedFrequencyDomain):
-        # Generate on the base uniform grid, then decimate to MFD
-        base = UniformFrequencyDomain(
-            f_min=0.0,
-            f_max=domain.f_max,
-            delta_f=domain.base_delta_f,
-            window_factor=domain.window_factor,
+        # Generate on the base uniform grid, then decimate to MFD. Use the stored
+        # base_domain (f_min>=0) when available so the generated array's length
+        # matches what MFD.decimate expects; fall back to an ephemeral 0-to-f_max
+        # UFD otherwise.
+        base = (
+            domain.base_domain
+            if domain.base_domain is not None
+            else UniformFrequencyDomain(
+                f_min=0.0,
+                f_max=domain.f_max,
+                delta_f=domain.base_delta_f,
+                window_factor=domain.window_factor,
+            )
         )
         base_sf = base.sample_frequencies
         base_freqs = base_sf() if callable(base_sf) else base_sf

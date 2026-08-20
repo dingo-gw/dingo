@@ -1,22 +1,30 @@
 """
-New-style WaveformGenerator ABC and subclasses, ported from dingo-waveform.
+WaveformGenerator ABC and subclasses.
 
-This module provides a modular, typed waveform generator hierarchy that uses
+Provides a modular, typed waveform generator hierarchy that uses
 Polarization dataclasses and WaveformParameters instead of plain dicts.
-
-The existing WaveformGenerator class in waveform_generator.py is preserved
-for backward compatibility.
+This is the only WFG surface in dingo-gw; the legacy dict-based
+`WaveformGenerator` / `NewInterfaceWaveformGenerator` were removed in the
+refactor.
 """
 
 import logging
+import warnings
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple, Type, TypeAlias, Union, cast
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeAlias, Union, cast
 
 import lal
+import numpy as np
 
 from dingo.gw.approximant import Approximant
-from dingo.gw.domains import Domain, BaseFrequencyDomain, TimeDomain, build_domain
+from dingo.gw.domains import (
+    Domain,
+    BaseFrequencyDomain,
+    MultibandedFrequencyDomain,
+    TimeDomain,
+    build_domain,
+)
 from dingo.gw.imports import check_function_signature, import_function, read_file
 from dingo.gw.types import Mode, Modes
 from . import polarization_functions, polarization_modes_functions
@@ -107,6 +115,7 @@ class NewWaveformGenerator(ABC):
         spin_conversion_phase: Optional[float] = None,
         mode_list: Optional[List[Modes]] = None,
         transform: Optional[Union[str, Callable[[Polarization], Polarization]]] = None,
+        extra_kwargs: Optional[Dict[str, Any]] = None,
     ):
         lal_params: Optional[lal.Dict]
         if mode_list is not None:
@@ -138,6 +147,7 @@ class NewWaveformGenerator(ABC):
             mode_list=mode_list,
             lal_params=lal_params,
             transform=transform,
+            extra_kwargs=dict(extra_kwargs) if extra_kwargs else {},
         )
 
         if _logger.isEnabledFor(logging.INFO):
@@ -147,14 +157,35 @@ class NewWaveformGenerator(ABC):
                 )
             )
 
-        # Batch transform pipeline (for compression, whitening, etc.)
-        self.transform = None
+        # Instance-level transform slot for post-construction attachment
+        # (e.g. whitening + SVD compression pipelines set by dataset generation).
+        # Applied per-waveform inside _apply_post_generation.
+        self.transform: Optional[Callable[[Polarization], Polarization]] = None
+
+    @property
+    def domain(self) -> Domain:
+        return self._waveform_gen_params.domain
+
+    @property
+    def base_domain(self) -> Domain:
+        """UFD backing an MFD, or self.domain when the domain is already UFD/TD."""
+        d = self._waveform_gen_params.domain
+        if isinstance(d, MultibandedFrequencyDomain) and d.base_domain is not None:
+            return d.base_domain
+        return d
 
     @abstractmethod
     def generate_hplus_hcross(
-        self, waveform_parameters: WaveformParameters
+        self,
+        waveform_parameters: WaveformParameters,
+        catch_waveform_errors: bool = False,
     ) -> Polarization:
-        """Generate h+ and h× polarizations for a given set of waveform parameters."""
+        """Generate h+ and h× polarizations for a given set of waveform parameters.
+
+        If catch_waveform_errors is True and the underlying LAL/GWSignal call raises
+        a "Internal function call failed: Input domain error" exception, a warning is
+        emitted and a NaN-filled Polarization is returned instead.
+        """
         ...
 
     def _validate_domain_for_polarization(self) -> None:
@@ -179,8 +210,35 @@ class NewWaveformGenerator(ABC):
             _logger.debug(
                 f"applying transform {self._waveform_gen_params.transform} to polarization"
             )
-            return self._waveform_gen_params.transform(polarization)
+            polarization = self._waveform_gen_params.transform(polarization)
+        if self.transform is not None:
+            _logger.debug(
+                f"applying batch transform {self.transform} to polarization"
+            )
+            polarization = self.transform(polarization)
         return polarization
+
+    _EDOM_MSG = "Internal function call failed: Input domain error"
+
+    def _handle_generation_error(
+        self,
+        exc: Exception,
+        waveform_parameters: WaveformParameters,
+        catch_waveform_errors: bool,
+    ) -> Polarization:
+        """If catch_waveform_errors and exc is a LAL 'Input domain error', warn and
+        return a NaN Polarization sized to the WFG's domain. Otherwise re-raise."""
+        if not catch_waveform_errors:
+            raise exc
+        edom = bool(getattr(exc, "args", None)) and exc.args[0] == self._EDOM_MSG
+        if not edom:
+            raise exc
+        warnings.warn(
+            f"Evaluating the waveform failed with error: {exc}\n"
+            f"The parameters were {waveform_parameters}\n"
+        )
+        pol_nan = np.full(len(self._waveform_gen_params.domain), np.nan, dtype=complex)
+        return Polarization(h_plus=pol_nan, h_cross=pol_nan)
 
     def _log_generation_start(
         self,
@@ -223,7 +281,9 @@ class LALSimWaveformGenerator(NewWaveformGenerator):
     """
 
     def generate_hplus_hcross(
-        self, waveform_parameters: WaveformParameters
+        self,
+        waveform_parameters: WaveformParameters,
+        catch_waveform_errors: bool = False,
     ) -> Polarization:
         self._validate_domain_for_polarization()
 
@@ -239,9 +299,14 @@ class LALSimWaveformGenerator(NewWaveformGenerator):
 
         self._log_generation_start(waveform_parameters, polarization_method.__name__)
 
-        polarization = polarization_method(
-            self._waveform_gen_params, waveform_parameters
-        )
+        try:
+            polarization = polarization_method(
+                self._waveform_gen_params, waveform_parameters
+            )
+        except Exception as e:
+            polarization = self._handle_generation_error(
+                e, waveform_parameters, catch_waveform_errors
+            )
         return self._apply_post_generation(polarization)
 
 
@@ -314,7 +379,9 @@ class GWSignalWaveformGenerator(NewWaveformGenerator):
     """
 
     def generate_hplus_hcross(
-        self, waveform_parameters: WaveformParameters
+        self,
+        waveform_parameters: WaveformParameters,
+        catch_waveform_errors: bool = False,
     ) -> Polarization:
         self._validate_domain_for_polarization()
 
@@ -330,9 +397,14 @@ class GWSignalWaveformGenerator(NewWaveformGenerator):
 
         self._log_generation_start(waveform_parameters, polarization_method.__name__)
 
-        polarization = polarization_method(
-            self._waveform_gen_params, waveform_parameters
-        )
+        try:
+            polarization = polarization_method(
+                self._waveform_gen_params, waveform_parameters
+            )
+        except Exception as e:
+            polarization = self._handle_generation_error(
+                e, waveform_parameters, catch_waveform_errors
+            )
         return self._apply_post_generation(polarization)
 
     def generate_hplus_hcross_m(
@@ -365,7 +437,9 @@ class RandomWaveformGenerator(NewWaveformGenerator):
     """
 
     def generate_hplus_hcross(
-        self, waveform_parameters: WaveformParameters
+        self,
+        waveform_parameters: WaveformParameters,
+        catch_waveform_errors: bool = False,
     ) -> Polarization:
         self._validate_domain_for_polarization()
 
@@ -373,9 +447,14 @@ class RandomWaveformGenerator(NewWaveformGenerator):
 
         self._log_generation_start(waveform_parameters, polarization_method.__name__)
 
-        polarization = polarization_method(
-            self._waveform_gen_params, waveform_parameters
-        )
+        try:
+            polarization = polarization_method(
+                self._waveform_gen_params, waveform_parameters
+            )
+        except Exception as e:
+            polarization = self._handle_generation_error(
+                e, waveform_parameters, catch_waveform_errors
+            )
         return self._apply_post_generation(polarization)
 
     def generate_hplus_hcross_m(
@@ -486,6 +565,8 @@ def _build_from_dict(params: Dict, domain: Domain) -> NewWaveformGenerator:
     if transform is not None:
         transform = str(transform)
 
+    extra_kwargs = params.get("extra_kwargs", None)
+
     cls = _get_waveform_generator_class(approximant)
 
     return cls(
@@ -496,4 +577,5 @@ def _build_from_dict(params: Dict, domain: Domain) -> NewWaveformGenerator:
         spin_conversion_phase=spin_conversion_phase,
         mode_list=mode_list,
         transform=transform,
+        extra_kwargs=extra_kwargs,
     )

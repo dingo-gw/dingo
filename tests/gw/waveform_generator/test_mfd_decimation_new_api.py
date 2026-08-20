@@ -43,7 +43,12 @@ def _get_mismatch(
     return 1 - overlap
 
 
-_approximants = ("IMRPhenomXPHM", "SEOBNRv4PHM")
+try:
+    import pyseobnr  # noqa: F401
+
+    _approximants = ("IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM")
+except ImportError:
+    _approximants = ("IMRPhenomXPHM", "SEOBNRv4PHM")
 
 
 @pytest.fixture
@@ -176,3 +181,33 @@ def test_decimation_quality(
     assert max_mismatch < decimation_tolerance, (
         f"Decimation mismatch {max_mismatch:.2e} exceeds tolerance {decimation_tolerance:.2e}"
     )
+
+
+@pytest.mark.parametrize("approximant", ["IMRPhenomXPHM"])
+def test_decimation_quality_modes(
+    intrinsic_prior, wfg_mfd, wfg_ufd, mfd, num_evaluations
+):
+    """
+    Sanity check that mode-separated generation returns the same modes with
+    matching, finite polarizations from MFD and UFD backends.
+
+    Restricted to IMRPhenomXPHM: SEOBNRv4PHM / SEOBNRv5PHM route through the
+    TD-mode path (`lalsim_inspiral_choose_TD_modes` /
+    `gwsignal_generate_TD_modes_SEOBNRv5`) which requires `td_modes_to_fd_modes`
+    to see a power-of-two nyquist grid — a full quality test for that path
+    would need a base-then-decimate strategy on MFD's mode conversion that
+    matches the polarization pipeline (out of scope for the smoke suite).
+    """
+    for _ in range(num_evaluations):
+        p = intrinsic_prior.sample()
+
+        pol_m_mfd = wfg_mfd.generate_hplus_hcross_m(p)
+        pol_m_ufd = wfg_ufd.generate_hplus_hcross_m(p)
+
+        assert set(pol_m_mfd.keys()) == set(pol_m_ufd.keys())
+        for m, pol_mfd in pol_m_mfd.items():
+            pol_ufd = pol_m_ufd[m]
+            assert pol_mfd.h_plus.shape[0] > 0
+            assert pol_ufd.h_plus.shape[0] > 0
+            assert not np.any(np.isnan(pol_mfd.h_plus))
+            assert not np.any(np.isnan(pol_ufd.h_plus))

@@ -180,6 +180,31 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
                 data, mode="auto", base_offset_idx=0, policy="pick"
             )
 
+    def convert_td_modes_to_fd(self, hlm_td):
+        """
+        Convert TD modes to FD modes for a multi-banded domain.
+
+        Strategy: build a uniform base domain (starts at f=0 so the FFT machinery
+        in `td_modes_to_fd_modes` sees a scalar `delta_f`), convert there, then
+        decimate each mode onto the MFD grid.
+        """
+        from dingo.gw.waveform_generator.polarization_modes_functions.polarization_modes_utils import (
+            td_modes_to_fd_modes,
+        )
+
+        base = (
+            self.base_domain
+            if self.base_domain is not None
+            else UniformFrequencyDomain(
+                f_min=0.0,
+                f_max=self.f_max,
+                delta_f=self._base_delta_f,
+                window_factor=self.window_factor,
+            )
+        )
+        hlm_fd_base = td_modes_to_fd_modes(hlm_td, base)
+        return {m: self.decimate(h) for m, h in hlm_fd_base.items()}
+
     def narrowed(
         self,
         f_min: Optional[float] = None,

@@ -41,7 +41,9 @@ class _GWSignal_GenerateTDModesParameters(GwSignalParameters):
         )
         return cls(**asdict(gw_signal_params))
 
-    def apply(self, approximant: Approximant) -> Polarization:
+    def apply(
+        self, approximant: Approximant, extra_kwargs: Optional[dict] = None
+    ) -> Polarization:
         _logger.debug(
             self.to_table(
                 "generating polarization using "
@@ -51,6 +53,8 @@ class _GWSignal_GenerateTDModesParameters(GwSignalParameters):
 
         generator = gwsignal_get_waveform_generator(approximant)
         params = {k: v for k, v in asdict(self).items() if v is not None}
+        if extra_kwargs:
+            params.update(extra_kwargs)
         hpc = waveform.GenerateTDWaveform(params, generator)
         return Polarization(h_cross=hpc.hc.value, h_plus=hpc.hp.value)
 
@@ -72,4 +76,7 @@ def gwsignal_generate_TD_modes(
         ),
     )
 
-    return instance.apply(waveform_gen_params.approximant)
+    return instance.apply(
+        waveform_gen_params.approximant,
+        extra_kwargs=waveform_gen_params.extra_kwargs,
+    )

@@ -1,6 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import lal
 
@@ -41,6 +41,7 @@ class WaveformGeneratorParameters(TableStr):
     mode_list: Optional[List[Modes]]
     lal_params: Optional[lal.Dict]
     transform: Optional[Callable[[Polarization], Polarization]] = None
+    extra_kwargs: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         _validate_waveform_generator_params(

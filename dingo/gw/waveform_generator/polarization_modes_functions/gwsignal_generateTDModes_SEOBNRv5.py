@@ -137,7 +137,11 @@ class _GenerateTDModesLOConditionalExtraTimeParameters(GwSignalParameters):
         )
 
     def apply(
-        self, approximant: Approximant, domain: BaseFrequencyDomain, phase: float
+        self,
+        approximant: Approximant,
+        domain: BaseFrequencyDomain,
+        phase: float,
+        extra_kwargs: Optional[dict] = None,
     ) -> Dict[Mode, Polarization]:
         SEOBRNRv5_conditioning = (
             self._get_starting_frequency_for_SEOBRNRv5_conditioning()
@@ -150,6 +154,8 @@ class _GenerateTDModesLOConditionalExtraTimeParameters(GwSignalParameters):
         generator = gwsignal_get_waveform_generator(approximant)
         params = {k: v for k, v in asdict(self).items() if v is not None}
         params["f22_start"] = SEOBRNRv5_conditioning.new_f_start * astropy.units.Hz
+        if extra_kwargs:
+            params.update(extra_kwargs)
         hlm_td: GravitationalWaveModes = waveform.GenerateTDModes(params, generator)
 
         _logger.debug("tapering TD modes for SEOBRNRv5 extra time")
@@ -207,5 +213,8 @@ def gwsignal_generate_TD_modes_SEOBNRv5(
     )
 
     return instance.apply(
-        approximant, waveform_gen_params.domain, waveform_params.phase
+        approximant,
+        waveform_gen_params.domain,
+        waveform_params.phase,
+        extra_kwargs=waveform_gen_params.extra_kwargs,
     )
