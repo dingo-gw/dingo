@@ -223,6 +223,7 @@ def build_train_and_test_loaders(
         pin_memory=True,
         num_workers=num_workers,
         worker_init_fn=fix_random_seeds,
+        persistent_workers=num_workers > 0,
     )
     test_loader = DataLoader(
         test_dataset,
@@ -231,6 +232,7 @@ def build_train_and_test_loaders(
         pin_memory=True,
         num_workers=num_workers,
         worker_init_fn=fix_random_seeds,
+        persistent_workers=num_workers > 0,
     )
 
     return train_loader, test_loader

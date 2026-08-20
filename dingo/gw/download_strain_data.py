@@ -57,7 +57,7 @@ def estimate_single_psd(
         psd_strain = TimeSeries.fetch_open_data(
             det, time_start, time_end, sample_rate=f_s, cache=False
         )
-    psd_strain = psd_strain.to_pycbc()
+    psd_strain = psd_strain.astype(np.float64).to_pycbc()
 
     # optionally generate window
     if type(window) == dict:
