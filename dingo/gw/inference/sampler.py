@@ -167,12 +167,9 @@ class GWComposedSampler(ComposedSampler):
         """Provenance of how the samples were made, stored as `settings["sampler"]`
         in the exported `Result`: the executed chain in order (one descriptor per
         step, via `Step.describe()`), plus anything in `provenance_extra`. The
-        block is purely a record -- nothing consumes it at load time -- and the
-        `version` field allows future consumers (e.g. chain reconstruction from
-        file) to evolve the format safely."""
+        block is purely a record; nothing consumes it at load time. The Dingo
+        version that wrote it is recorded by the `Result` itself."""
         return {
-            "version": 1,
-            "implementation": "composed",
             "chain": [step.describe() for step in self.composer.steps],
             **copy.deepcopy(self.provenance_extra),
         }

@@ -145,7 +145,6 @@ def test_to_result_round_trips_samples_and_provenance():
     # Model metadata is carried through, and the chain provenance is recorded.
     assert result.settings["train_settings"] == sampler.metadata["train_settings"]
     provenance = result.settings["sampler"]
-    assert provenance["implementation"] == "composed"
     assert [step["step"] for step in provenance["chain"]] == ["DeltaFactor"]
 
 

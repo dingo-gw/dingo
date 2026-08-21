@@ -206,7 +206,7 @@ def test_sampler_provenance_block():
     )
     sampler.provenance_extra["models"] = {"model": "model.pt"}
     block = sampler.sampler_provenance()
-    assert block["version"] == 1 and block["implementation"] == "composed"
+    assert set(block) == {"chain", "models"}
     assert block["chain"][0]["step"] == "DeltaFactor"
     assert block["models"] == {"model": "model.pt"}
     assert ast.literal_eval(str(block)) == block
