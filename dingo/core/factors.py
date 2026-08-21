@@ -250,10 +250,18 @@ class Factor(ABC):
     conditioning : list[str]
         Earlier chain columns this factor conditions on. The data is not listed
         here; it enters through the context.
+    draws : bool
+        Whether the factor draws new samples (the default) or is a point mass or
+        fixed table that is run once. The chain's `num_samples` lands on the first
+        step that draws.
+    consumes : tuple[str, ...]
+        Columns removed from the chain after this step; none for an ordinary factor.
     """
 
     parameters: list[str]
     conditioning: list[str]
+    draws = True
+    consumes: tuple[str, ...] = ()
 
     @abstractmethod
     def sample_and_log_prob(
@@ -924,10 +932,17 @@ class Step(Protocol):
         The columns produced.
     conditioning : list[str]
         The earlier columns read.
+    draws : bool
+        Whether the step draws new samples, or is run once (a point mass, a sample
+        table, a one-to-one transform).
+    consumes : list[str] or tuple[str, ...]
+        Columns removed from the chain after the step.
     """
 
     parameters: list[str]
     conditioning: list[str]
+    draws: bool
+    consumes: Union[list[str], tuple[str, ...]]
 
     def sample_and_log_prob(
         self,
@@ -944,17 +959,19 @@ class Step(Protocol):
 class Stage:
     """A chain step together with its fan-out.
 
-    `fan_out` is the number of samples drawn for each incoming row. It applies to
-    stages that condition on earlier columns (an unconditioned stage after the root
-    fills one value per row instead). The first stage that draws samples the chain's
-    `num_samples` per row, times its `fan_out`.
+    Every stage multiplies the table by its `fan_out`: for each row so far, `fan_out`
+    samples are drawn (a conditioned step draws them per conditioning row itself; an
+    unconditioned step is asked for the total), and the earlier columns are repeated
+    to match. The first stage that draws uses `num_samples` times its `fan_out`.
+    `fan_out` must be 1 on the root stage, where it would only multiply
+    `num_samples`, and on non-drawing steps.
 
     Attributes
     ----------
     step : Step
         The chain step.
     fan_out : int
-        Samples drawn per incoming row. Default 1.
+        Samples drawn per row of the table so far. Default 1.
     """
 
     step: Step
@@ -991,8 +1008,9 @@ class ChainComposer:
         Raises
         ------
         ValueError
-            If a step conditions on a column that no earlier step produces, or would
-            overwrite an existing column.
+            If a step conditions on a column that no earlier step produces, would
+            overwrite an existing column, or has a `fan_out` other than 1 where it
+            has no effect (the root stage, or a non-drawing step).
         """
         self.stages = [s if isinstance(s, Stage) else Stage(s) for s in stages]
         self._validate()
@@ -1001,7 +1019,15 @@ class ChainComposer:
         """Check that the declared order is a valid topological order of the
         conditioning DAG."""
         produced: set[str] = set()
-        for step in self.steps:
+        for i, stage in enumerate(self.stages):
+            step = stage.step
+            if stage.fan_out != 1 and (i == 0 or not step.draws):
+                raise ValueError(
+                    f"Stage {i} ({type(step).__name__}) has fan_out={stage.fan_out}, "
+                    f"but fan_out must be 1 on the root stage (it would only multiply "
+                    f"num_samples) and on non-drawing steps (point masses, sample "
+                    f"tables, reparametrizations, target corrections)."
+                )
             missing = [c for c in step.conditioning if c not in produced]
             if missing:
                 raise ValueError(
@@ -1027,7 +1053,7 @@ class ChainComposer:
             # Consumed columns leave the produced set, as in the fold, so a later step
             # may re-emit them (e.g. `RAToEventFrame` restoring a pinned `ra` that
             # `RAToTrainingFrame` consumed).
-            produced.difference_update(getattr(step, "consumes", ()))
+            produced.difference_update(step.consumes)
 
     @property
     def steps(self) -> list[Step]:
@@ -1073,60 +1099,44 @@ class ChainComposer:
         )
 
     def _run_chain_once(
-        self, base: int, context: SamplerContext
+        self, num_samples: int, context: SamplerContext
     ) -> tuple[dict[str, torch.Tensor], Optional[torch.Tensor]]:
-        """One pass of the whole chain, for `base` samples per root row.
+        """One pass of the whole chain, for `num_samples` samples per root row.
 
-        Non-drawing steps (point masses, sample tables, reparametrizations, target
-        corrections) run once. The first step that draws samples `base` per row,
-        times its fan-out, in a single conditioned call, and the rows carried so far
-        are repeated to match. Returns the samples and the summed log probability
-        (`None` if any step is density-free).
+        Every stage multiplies the table by a factor `k`: 1 for a non-drawing step,
+        `num_samples` times the stage's fan-out for the first step that draws, and
+        the fan-out for later stages. A conditioned step draws `k` samples per
+        conditioning row itself; an unconditioned step is asked for the total. The
+        rows carried so far are then repeated `k` times so that every row stays
+        complete. Returns the samples and the summed log probability (`None` if any
+        step is density-free).
         """
         samples: dict[str, torch.Tensor] = {}
-        total: torch.Tensor | float = 0.0
-        has_density = True
-        base_pending: Optional[int] = base
-        for i, stage in enumerate(self.stages):
+        total: torch.Tensor | float | None = 0.0
+        pending: Optional[int] = num_samples  # lands on the first step that draws
+        for stage in self.stages:
             step = stage.step
-            if base_pending is not None:
-                if not getattr(step, "draws", True):
-                    # A non-drawing step (point mass, 1:1 transform, sample table)
-                    # runs once; the base count waits for the first step that
-                    # draws.
-                    n = 1
-                else:
-                    n = base_pending * (stage.fan_out if step.conditioning else 1)
-                    base_pending = None
-            elif step.conditioning:
-                n = stage.fan_out  # fan_out samples per conditioning row
+            if not step.draws:
+                k = 1
+            elif pending is not None:
+                k, pending = pending * stage.fan_out, None
             else:
-                # Unconditioned non-root step (e.g. a fixed/delta filler): draw one
-                # value per current row -- it fills the batch rather than fanning out.
-                n = _n_rows(samples)
-            given = {k: samples[k] for k in step.conditioning}
-            block, lp = step.sample_and_log_prob(n, context, given)
-            # A conditioned multi-draw (fan-out, or the base count landing past a
-            # point-mass prefix) expands the batch: repeat each carried row to align
-            # with the step's sub-rows (the block is flattened row-major). 1:1 stages
-            # and unconditioned fillers leave the batch untouched.
-            if step.conditioning and samples and n > 1:
-                samples, total = _interleave_rows(samples, total, n)
+                k = stage.fan_out
+            rows = _n_rows(samples) if samples else 1
+            given = {c: samples[c] for c in step.conditioning}
+            block, lp = step.sample_and_log_prob(
+                k if step.conditioning else rows * k, context, given
+            )
+            if samples and k > 1:
+                samples, total = _interleave_rows(samples, total, k)
             samples.update(block)
-            # Drop any intermediates the step consumed: a reparametrization replaces its
-            # inputs (in-place bijection); a target correction drops the columns it read.
-            for k in getattr(step, "consumes", ()):
-                samples.pop(k, None)
-            # A single density-free step (Gibbs) makes the whole chain density-free.
-            if lp is None:
-                has_density = False
-            elif has_density:
-                total = total + lp
-        # Degenerate all-point-mass chain: no step drew, so expand
-        # the single emitted row to the requested count.
-        if base_pending is not None and base_pending > 1 and samples:
-            samples, total = _interleave_rows(samples, total, base_pending)
-        return samples, (total if has_density else None)
+            for c in step.consumes:
+                samples.pop(c, None)
+            total = None if lp is None or total is None else total + lp
+        if pending is not None and pending > 1:
+            # No step draws (a chain of pins only): repeat the rows instead.
+            samples, total = _interleave_rows(samples, total, pending)
+        return samples, total
 
     def log_prob(
         self, samples: dict[str, torch.Tensor], context: SamplerContext
@@ -1221,6 +1231,9 @@ class GibbsBlock:
     Batching is handled by the enclosing `ChainComposer`, which runs the whole loop
     for each chunk of walkers.
     """
+
+    draws = True
+    consumes: tuple[str, ...] = ()
 
     def __init__(self, init_factor: Factor, factors: list[Factor], num_iterations: int):
         """

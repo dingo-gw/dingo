@@ -153,6 +153,9 @@ class _NoDensityStep:
     """A density-free step (like ``GibbsBlock``): emits a block but returns ``None`` for the
     log-prob. Honors the per-row fan-out contract so it composes like any step."""
 
+    draws = True
+    consumes = ()
+
     def __init__(self, name, conditioning=()):
         self.parameters = [name]
         self.conditioning = list(conditioning)
@@ -403,6 +406,60 @@ def test_unconditioned_factor_as_root_draws_base_count():
     assert torch.equal(out["d"], torch.full((6,), 2.0))  # d | c: sum(c) + 0 == c
 
 
+def test_unconditioned_step_after_pins_is_aligned():
+    # Regression: an unconditioned drawing step after a point-mass prefix used to
+    # leave the pins un-repeated (one row of `a` next to num_samples rows of `b`).
+    comp = ChainComposer([DeltaFactor({"a": 2.0}), _ConstFactor("b")])
+    out = comp.sample(3, context=None)
+    assert out["a"].shape == (3,) and torch.all(out["a"] == 2.0)
+    assert torch.equal(out["b"], torch.arange(3, dtype=torch.float32))
+
+
+def test_unconditioned_stage_fan_out_multiplies_rows():
+    # fan_out applies to unconditioned stages too: k independent draws per row, with
+    # the carried columns repeated.
+    comp = ChainComposer([_ConstFactor("a"), Stage(_ConstFactor("b"), fan_out=3)])
+    assert comp.expansion == 3
+    out = comp.sample(4, context=None)
+    expected_a = torch.arange(4, dtype=torch.float32).repeat_interleave(3)
+    assert torch.equal(out["a"], expected_a)
+    assert torch.equal(out["b"], torch.arange(12, dtype=torch.float32))
+    assert torch.allclose(out["log_prob"], torch.full((12,), 1.0))
+
+
+def test_validation_rejects_fan_out_where_it_has_no_effect():
+    with pytest.raises(ValueError, match="fan_out"):
+        ChainComposer([Stage(_ConstFactor("a"), fan_out=2)])  # root
+    with pytest.raises(ValueError, match="fan_out"):
+        ChainComposer([_ConstFactor("a"), Stage(DeltaFactor({"c": 1.0}), fan_out=2)])
+    with pytest.raises(ValueError, match="fan_out"):
+        ChainComposer([_ConstFactor("u"), Stage(_MockReparam(), fan_out=2)])
+
+
+@pytest.mark.parametrize("num_samples", [1, 3])
+def test_row_count_is_root_rows_times_num_samples_times_expansion(num_samples):
+    # The same tail (a conditioned fan-out, an unconditioned fan-out, a filler) on a
+    # pin root, a drawing root, and a two-row table root.
+    roots = [
+        (DeltaFactor({"t": 0.0}), 1),
+        (_ConstFactor("t"), 1),
+        (SampleTableFactor({"t": torch.arange(2.0)}), 2),
+    ]
+    for root, root_rows in roots:
+        comp = ChainComposer(
+            [
+                root,
+                Stage(_ConstFactor("b", conditioning=["t"]), fan_out=2),
+                Stage(_ConstFactor("c"), fan_out=3),
+                _ConstFillFactor("d"),
+            ]
+        )
+        assert comp.expansion == 6
+        out = comp.sample(num_samples, context=None)
+        n = root_rows * num_samples * 6
+        assert all(v.shape == (n,) for v in out.values()), type(root).__name__
+
+
 class _MockTargetCorrection(TargetCorrection):
     """A mock kind-3 correction: emits ``corr = 2 * x``, contributes 0 to the proposal,
     and (by default) consumes its input."""
@@ -520,6 +577,26 @@ def test_log_prob_replug_kind_aware():
         - 0.5
     )
     assert torch.allclose(lp, manual, atol=1e-6)
+
+
+def test_log_prob_replug_matches_forward_with_fan_outs():
+    # The reverse fold is row-wise and ignores fan-out, so it must reproduce the
+    # forward log_prob on a chain that mixes a pin root, a reparametrization, a
+    # conditioned fan-out, an unconditioned fan-out, and a conditioned tail.
+    torch.manual_seed(0)
+    comp = ChainComposer(
+        [
+            DeltaFactor({"u": 2.0}),
+            _MockReparam(shift=10.0, log_det_val=0.5),
+            Stage(_GaussFactor("a", conditioning=["v"]), fan_out=2),
+            Stage(_GaussFactor("b"), fan_out=3),
+            _GaussFactor("c", conditioning=["a", "b"]),
+        ]
+    )
+    samples, lp_forward = comp.sample_and_log_prob(5, context=None)
+    assert lp_forward.shape == (30,)  # 1 root row * 5 * 6
+    lp_reverse = comp.log_prob(samples, context=None)
+    assert torch.allclose(lp_reverse, lp_forward, atol=1e-5)
 
 
 def test_log_prob_raises_for_density_free_chain():
