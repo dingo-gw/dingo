@@ -225,21 +225,35 @@ def test_sample_table_root_feeds_chain_and_sums_log_prob():
         def log_prob(self, theta_i, context, given=None):
             return torch.full_like(given["a"], 0.25)
 
-    out, lp = ChainComposer([table, _PlusOne()]).sample_and_log_prob(3, None)
+    out, lp = ChainComposer([table, _PlusOne()]).sample_and_log_prob(1, None)
     assert torch.equal(out["a"], torch.tensor([1.0, 2.0, 3.0], dtype=torch.float64))
     assert torch.equal(out["b"], torch.tensor([2.0, 3.0, 4.0], dtype=torch.float64))
     assert torch.equal(lp, stored + 0.25)
 
 
-def test_sample_table_requires_full_length():
+def test_sample_table_is_emitted_once():
     table = SampleTableFactor({"a": torch.arange(3.0)})
-    with pytest.raises(ValueError, match="table length"):
-        table.sample_and_log_prob(2, None)
+    out, _ = table.sample_and_log_prob(1, None)
+    assert torch.equal(out["a"], torch.arange(3.0))
+    with pytest.raises(ValueError, match="emitted once"):
+        table.sample_and_log_prob(3, None)
+
+
+def test_sample_table_root_draws_num_samples_per_row():
+    # The scan shape: a non-drawing table root is emitted once, and the chain's
+    # num_samples lands on the first drawing step, which draws per table row.
+    stored = torch.tensor([0.5, 0.6, 0.7])
+    table = SampleTableFactor({"a": torch.tensor([1.0, 2.0, 3.0])}, log_prob=stored)
+    comp = ChainComposer([table, _ConstFactor("b", conditioning=["a"])])
+    out, lp = comp.sample_and_log_prob(2, None)
+    assert torch.equal(out["a"], torch.tensor([1.0, 1.0, 2.0, 2.0, 3.0, 3.0]))
+    assert torch.equal(out["b"], torch.tensor([1.0, 2.0, 2.0, 3.0, 3.0, 4.0]))
+    assert torch.allclose(lp, torch.repeat_interleave(stored, 2) + 0.5)
 
 
 def test_sample_table_without_log_prob_is_density_free():
     table = SampleTableFactor({"a": torch.arange(3.0)})
-    _, lp = ChainComposer([table]).sample_and_log_prob(3, None)
+    _, lp = ChainComposer([table]).sample_and_log_prob(1, None)
     assert lp is None
 
 
@@ -722,10 +736,8 @@ def test_sample_table_factor_emits_on_context_device():
 
     from dingo.core.factors import SampleTableFactor
 
-    factor = SampleTableFactor(
-        {"x": torch.arange(4.0)}, log_prob=torch.zeros(4)
-    )
+    factor = SampleTableFactor({"x": torch.arange(4.0)}, log_prob=torch.zeros(4))
     context = SimpleNamespace(device="cuda")
-    samples, log_prob = factor.sample_and_log_prob(4, context)
+    samples, log_prob = factor.sample_and_log_prob(1, context)
     assert samples["x"].device.type == "cuda"
     assert log_prob.device.type == "cuda"

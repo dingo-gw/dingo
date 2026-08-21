@@ -1,15 +1,22 @@
 """
-Factorized sampler core: the domain-agnostic spine of the factorized-sampler design
-(see vault/Hackathon/Factorized_Sampler_Design.md).
+Core of the factorized sampler: chain steps, the chain composer, and the runner.
 
-The posterior is an ordered product of conditional factors,
+Dingo samples the posterior with a chain of steps. The factors among them write the
+posterior as an ordered product of conditionals,
 
-    q(theta_1, ..., theta_n | d) = prod_i q_i(theta_i | f_i(theta_<i, d)),
+    q(theta_1, ..., theta_n | d) = prod_i q_i(theta_i | theta_<i, d),
 
-where each `Factor` samples one parameter block and returns its own log-prob, and a
-composer evaluates them. `ChainComposer` runs the factors autoregressively.
+each drawing one block of parameters and returning its own log probability. Other
+steps reparametrize existing columns, or annotate the importance-sampling target. A
+`ChainComposer` runs the steps in order, building up a table of named parameter
+columns together with the summed log probability, and can re-evaluate that log
+probability at given samples by folding the chain in reverse.
 
-Factors work in physical parameter space; a network's standardized space exists only
+Everything in this module is domain-agnostic. The gravitational-wave steps and the
+per-event context live in `dingo.gw.inference`. The concepts are explained in the
+"Sampling chains" page of the documentation.
+
+Factors work in physical parameter space. A network's standardized space exists only
 inside its forward pass, mediated by `Standardization`.
 """
 
@@ -28,69 +35,130 @@ from dingo.core.posterior_models import BasePosteriorModel
 
 class Standardization:
     """
-    Affine map between a network's standardized space (`z = (theta - mean) / std`) and
-    physical parameter space.
+    Affine map between a network's standardized parameter space and physical
+    parameter space, `z = (theta - mean) / std`.
 
-    Holds one network's `mean` and `std` and applies them in both directions:
-    de-standardizing network outputs to physical samples, and standardizing physical
-    parameters for `log_prob`. Different factors (e.g. a GNPE init and main network)
-    carry different instances.
+    Each network has its own `mean` and `std`, so each `FlowFactor` holds its own
+    instance. The map is used in both directions: network outputs are
+    de-standardized into physical samples, and physical parameters are standardized
+    before a `log_prob` evaluation.
     """
 
     def __init__(self, mean: dict[str, float], std: dict[str, float]):
+        """
+        Parameters
+        ----------
+        mean : dict[str, float]
+            Standardization mean, keyed by parameter name.
+        std : dict[str, float]
+            Standardization standard deviation, keyed by parameter name.
+        """
         self.mean = dict(mean)
         self.std = dict(std)
 
     def standardize(
         self, values: dict[str, torch.Tensor], names: list[str]
     ) -> torch.Tensor:
-        """Map physical `values` (a dict of named tensors) to a standardized tensor
-        with columns in `names` order."""
+        """Standardize physical parameter values.
+
+        Parameters
+        ----------
+        values : dict[str, torch.Tensor]
+            Physical values, keyed by parameter name.
+        names : list[str]
+            The parameters to include, in column order.
+
+        Returns
+        -------
+        torch.Tensor
+            Standardized values, with one column per entry of `names`.
+        """
         cols = [(values[n] - self.mean[n]) / self.std[n] for n in names]
         return torch.stack(cols, dim=-1)
 
     def destandardize(
         self, z: torch.Tensor, names: list[str]
     ) -> dict[str, torch.Tensor]:
-        """Map a standardized tensor (columns in `names` order) back to a dict of
-        named physical tensors."""
+        """Map standardized values back to physical parameter values.
+
+        Parameters
+        ----------
+        z : torch.Tensor
+            Standardized values, with columns in `names` order.
+        names : list[str]
+            The parameter name of each column.
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            Physical values, keyed by parameter name.
+        """
         return {n: z[..., i] * self.std[n] + self.mean[n] for i, n in enumerate(names)}
 
     def log_det(self, names: list[str]) -> float:
-        """The term to *add* to a network log-prob to express it in physical space:
-        `log p_theta = log p_z - sum log std`. Same correction in both directions."""
+        """The log-Jacobian term that converts a network log probability to physical
+        parameter space, `log p(theta) = log p(z) - sum(log std)`.
+
+        The same term is added when sampling and when evaluating `log_prob`.
+
+        Parameters
+        ----------
+        names : list[str]
+            The parameters included in the network's output.
+
+        Returns
+        -------
+        float
+            The value of `-sum(log std)` over `names`.
+        """
         return -sum(math.log(self.std[n]) for n in names)
 
 
 @runtime_checkable
 class SamplerContext(Protocol):
     """
-    Per-event shared state referenced by every factor: the data `d` and quantities
-    derived from it (the prepared-data representation, the likelihood, event metadata).
-    Concrete implementations are domain-specific; see
-    `dingo.gw.inference.context.GWSamplerContext`.
+    Protocol for the per-event state shared by all steps of a chain.
 
-    `device` is the torch device the chain runs on: steps that create fresh tensors
-    (rather than transforming existing ones) create them here, so their outputs can
-    join a chain whose network factors run on a GPU.
+    A context holds the event data and metadata, and everything derived from them
+    that a step may need: the data in the representation the networks were trained
+    on (`prepared_data`), and the likelihood. Steps never receive the data directly;
+    they read it through the context. Concrete implementations are domain-specific;
+    see `dingo.gw.inference.context.GWSamplerContext`.
+
+    Attributes
+    ----------
+    event_metadata : dict or None
+        Per-event metadata, such as the event time and analysis settings.
+    device : torch.device or str
+        The device the chain runs on. Steps that create new tensors, rather than
+        transforming existing ones, create them on this device so that they can be
+        combined with the outputs of networks running on a GPU.
     """
 
     event_metadata: Optional[dict]
     device: Union[torch.device, str]
 
     def prepared_data(self, conditioning=None) -> torch.Tensor:
-        """The data representation the factors condition on
-        (whiten/decimate/repackage/...). Without `conditioning`: the single
-        shared representation, computed once and cached. With `conditioning`
-        (the chain columns available to a conditioned factor): row-aligned,
-        one data row per conditioning row. The context consumes only the
-        columns its preparation depends on (e.g. a heterodyning proxy);
-        unconsumed columns condition the network alone, and the shared
-        representation is viewed across their rows."""
+        """The event data in the representation the networks condition on.
+
+        Parameters
+        ----------
+        conditioning : dict[str, torch.Tensor], optional
+            Chain columns available to a conditioned factor. Without it, the single
+            shared representation is returned, computed once and cached. With it,
+            the result has one data row per conditioning row. Only the columns the
+            data preparation depends on (for example a heterodyning proxy) affect
+            the result; the other columns condition the network alone.
+
+        Returns
+        -------
+        torch.Tensor
+        """
         ...
 
     def likelihood(self):
-        """The likelihood, for likelihood-based factors (synthetic phase) and IS."""
+        """The likelihood of the event data, for likelihood-based factors (such as
+        the synthetic phase) and for importance sampling."""
         ...
 
 
@@ -106,10 +174,10 @@ def chunk_and_concat(
     batch_size: Optional[int],
     run_once: Callable[[int], tuple[dict[str, torch.Tensor], Optional[torch.Tensor]]],
 ) -> tuple[dict[str, torch.Tensor], Optional[torch.Tensor]]:
-    """Run `run_once` over batches of `total` and concatenate the results.
+    """Run `run_once` in chunks and concatenate the results.
 
-    Caps peak memory at one chunk. `log_prob` may be `None` (for a composer without a
-    tractable density, i.e. Gibbs).
+    This caps the peak memory at one chunk. The log probability may be `None`, for a
+    density-free chain (one containing a `GibbsBlock`).
 
     Parameters
     ----------
@@ -145,8 +213,8 @@ def _n_rows(block: dict) -> int:
 
 
 def _interleave_rows(samples, total, n):
-    """Repeat each carried chain row `n` times (row-major), keeping the summed
-    log-prob aligned."""
+    """Repeat each row of the carried columns `n` times (the copies of a row are
+    adjacent), keeping the running log probability aligned."""
     samples = {k: v.repeat_interleave(n, 0) for k, v in samples.items()}
     if torch.is_tensor(total):
         total = total.repeat_interleave(n, 0)
@@ -154,9 +222,8 @@ def _interleave_rows(samples, total, n):
 
 
 def _describe_default(step) -> dict:
-    """Default provenance descriptor for a chain step: class name, the parameter
-    block it emits, and what it conditions on. Literal-only (round-trips through
-    `str`/`ast.literal_eval` in saved settings)."""
+    """Default provenance descriptor for a chain step: the class name, the parameters
+    it produces, and the columns it conditions on."""
     return {
         "step": type(step).__name__,
         "parameters": list(step.parameters),
@@ -166,20 +233,23 @@ def _describe_default(step) -> dict:
 
 class Factor(ABC):
     """
-    A conditional distribution `q_i(theta_i | f_i(theta_<i, d))` over one parameter
-    block, emitting physical-space samples and a physical-space log-prob.
+    Base class for a factor: one conditional distribution `q_i(theta_i | theta_<i, d)`
+    in the product that makes up the proposal.
 
-    A call draws `num_samples` samples per conditioning row and returns `n_rows *
-    num_samples` rows in row-major order, where `n_rows` is the number of rows in
-    `given` (1 if unconditioned). This mirrors the network's
+    A factor draws one block of parameters and returns its own log probability, both
+    in physical parameter space (any network standardization is internal). When
+    conditioned, it draws `num_samples` samples for *each* row of the conditioning,
+    returning `n_rows * num_samples` rows with the draws for a given conditioning row
+    adjacent. This matches the convention of the posterior models,
     `sample_and_log_prob(*context, num_samples=n) -> (n_rows, n, dim)`.
 
     Attributes
     ----------
     parameters : list[str]
-        The parameter block this factor produces.
+        The parameters this factor produces.
     conditioning : list[str]
-        Earlier-block parameters it conditions on (data dependence is via the context).
+        Earlier chain columns this factor conditions on. The data is not listed
+        here; it enters through the context.
     """
 
     parameters: list[str]
@@ -192,9 +262,26 @@ class Factor(ABC):
         context: SamplerContext,
         given: Optional[dict[str, torch.Tensor]] = None,
     ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
-        """Draw `num_samples` samples per conditioning row; return `(samples,
-        log_prob)` in physical space. The samples dict may include named columns beyond
-        `parameters`."""
+        """Draw samples and evaluate their log probability.
+
+        Parameters
+        ----------
+        num_samples : int
+            Number of samples to draw per conditioning row.
+        context : SamplerContext
+            The per-event shared state.
+        given : dict[str, torch.Tensor], optional
+            The conditioning columns, one row each. Omitted for an unconditioned
+            factor.
+
+        Returns
+        -------
+        samples : dict[str, torch.Tensor]
+            The drawn values, keyed by parameter name, with `n_rows * num_samples`
+            rows. The dict may also contain named columns beyond `parameters`.
+        log_prob : torch.Tensor
+            The log probability of each row, in physical parameter space.
+        """
 
     @abstractmethod
     def log_prob(
@@ -203,21 +290,44 @@ class Factor(ABC):
         context: SamplerContext,
         given: Optional[dict[str, torch.Tensor]] = None,
     ) -> torch.Tensor:
-        """Evaluate `log q_i` at given physical `theta_i` (one conditioning row per
-        row)."""
+        """Evaluate the log probability at given parameter values.
+
+        Parameters
+        ----------
+        theta_i : dict[str, torch.Tensor]
+            Values of this factor's parameters, one row each.
+        context : SamplerContext
+            The per-event shared state.
+        given : dict[str, torch.Tensor], optional
+            The conditioning columns, one row per row of `theta_i`.
+
+        Returns
+        -------
+        torch.Tensor
+            The log probability per row, in physical parameter space.
+        """
 
     def describe(self) -> dict:
-        """Provenance descriptor for saved-result metadata; steps with salient
-        configuration override this."""
+        """Describe the step for the provenance record of a saved result.
+
+        The default descriptor records the class name, the parameters produced, and
+        the conditioning. Steps with settings worth recording override this. The
+        descriptor must be literal-only: every value round-trips through `str` and
+        `ast.literal_eval` in the saved settings.
+
+        Returns
+        -------
+        dict
+        """
         return _describe_default(self)
 
 
 def _base_model_metadata(model: BasePosteriorModel) -> dict:
-    """The base *analysis* metadata (dataset / domain / detector / data settings): for
-    an unconditional (density-recovery) model this lives under `metadata["base"]`, the
-    metadata of the model whose samples it was trained on. The network-bound settings
-    (`standardization`, `inference_parameters`) are always the model's own and are read
-    from `model.metadata` directly."""
+    """Return the analysis metadata of a model (dataset, domain, detector, and data
+    settings). For an unconditional (density-recovery) model this is the metadata of
+    the base model whose samples it was trained on, stored under `metadata["base"]`.
+    The network's own settings (`standardization`, `inference_parameters`) are always
+    read from `model.metadata` directly."""
     metadata = model.metadata
     if metadata["train_settings"]["data"].get("unconditional", False):
         return metadata["base"]
@@ -226,14 +336,19 @@ def _base_model_metadata(model: BasePosteriorModel) -> dict:
 
 class FlowFactor(Factor):
     """
-    Factor wrapping a posterior model (NPE flow, FMPE, ...). Encapsulates the network's
-    standardization, so its interface is in physical parameter space.
+    Factor wrapping a posterior model (an NPE flow, FMPE, and so on).
 
-    Three conditioning shapes: a data-conditional model draws from the shared
-    `SamplerContext.prepared_data()`; a model with `context_parameters` (GNPE proxies)
-    additionally conditions on the values in `given`; and an *unconditional* model
-    (`unconditional` in its training metadata -- a density-recovery NDE or a
-    model-as-prior) takes no input at all and never touches the context.
+    The factor handles the network's standardization internally, so its interface is
+    in physical parameter space. Three kinds of model are supported. A
+    data-conditional model draws from the shared data representation,
+    `SamplerContext.prepared_data()`. A model with `context_parameters` (for example
+    GNPE proxies, or a prior-conditioning pin) additionally conditions on those chain
+    columns, and the data representation may depend on their values. An
+    unconditional model (flagged `unconditional` in its training metadata, such as a
+    density-recovery NDE) takes no input at all and does not touch the context.
+
+    A factor may expose a trained parameter under an alias (for example `ra` as
+    `ra@t_ref`), so that a later step can convert reference frames by name.
     """
 
     def __init__(
@@ -256,14 +371,13 @@ class FlowFactor(Factor):
         context_parameters : list[str], optional
             Network conditioning inputs (GNPE proxies); empty for plain NPE.
         aliases : dict[str, str], optional
-            Trained-name to exposed-name map at the factor boundary (e.g.
-            `{"ra": "ra@t_ref"}`), so a downstream reparametrization can convert frames
-            by name without retraining.
+            Map from a trained parameter name to the name exposed in the chain (for
+            example `{"ra": "ra@t_ref"}`), so that a later reparametrization can
+            convert reference frames by name without retraining.
         """
         self.model = model
-        # The network's trained parameter names -- standardization is keyed by these. The
-        # factor exposes them under canonical aliases (e.g. ra -> ra@t_ref), so a downstream
-        # reparametrization can convert frames by name without retraining (design Q#7).
+        # The network's trained parameter names; standardization is keyed by these.
+        # The factor exposes them under their aliases (e.g. ra -> ra@t_ref).
         self._net_parameters = parameters
         self.aliases = aliases or {}
         self.parameters = [self.aliases.get(p, p) for p in parameters]
@@ -281,17 +395,17 @@ class FlowFactor(Factor):
     def from_model(
         cls, model: BasePosteriorModel, aliases: Optional[dict[str, str]] = None
     ) -> "FlowFactor":
-        """Build a factor from a model, reading `parameters` and `context_parameters`
-        from its own training metadata (for an unconditional NDE these are its own,
-        e.g. the GNPE proxies it was trained on).
+        """Build a factor from a model, reading the parameter names and the context
+        parameters from its training metadata. (For an unconditional NDE these are its
+        own, for example the GNPE proxies it was trained on.)
 
         Parameters
         ----------
         model : BasePosteriorModel
             The posterior model to wrap.
         aliases : dict[str, str], optional
-            Trained-name to exposed canonical-name map (e.g. `{"ra": "ra@t_ref"}`) at
-            the factor boundary.
+            Map from a trained parameter name to the name exposed in the chain (for
+            example `{"ra": "ra@t_ref"}`).
 
         Returns
         -------
@@ -310,10 +424,13 @@ class FlowFactor(Factor):
         )
 
     def sample_and_log_prob(self, num_samples, context, given=None):
-        """Draw `num_samples` samples per conditioning row. Unconditional: draws with
-        no input (the context is not touched). Data-conditional: `num_samples` draws
-        from the shared data context. Parameter-conditioned: `num_samples` per context
-        row, returning `n_rows * num_samples` rows in row-major order."""
+        """Draw samples from the model.
+
+        A data-conditional model draws from the shared data representation; a model
+        with context parameters draws `num_samples` for each row of `given`, with the
+        data prepared per row; an unconditional model draws with no input. See
+        `Factor.sample_and_log_prob` for the arguments and the row layout.
+        """
         self.model.network.eval()
         if self.unconditional:
             with torch.no_grad():
@@ -353,6 +470,8 @@ class FlowFactor(Factor):
         return theta, log_prob
 
     def log_prob(self, theta_i, context, given=None):
+        """Evaluate the model's log probability at `theta_i`, in physical parameter
+        space. See `Factor.log_prob`."""
         # theta_i uses exposed (aliased) names; map back to the network's trained names.
         theta_net = {
             net: theta_i[self.aliases.get(net, net)] for net in self._net_parameters
@@ -378,36 +497,48 @@ class FlowFactor(Factor):
         return log_prob + self.standardization.log_det(self._net_parameters)
 
     def _network_conditioning(self, given):
-        """The conditioning values keyed by the network's trained names (the chain
-        may carry a frame-corrected alias, e.g. `ra@t_ref` for a trained `ra`)."""
+        """The conditioning values keyed by the network's trained names. (The chain
+        may carry an alias, for example `ra@t_ref` for a trained `ra`.)"""
         return {n: given[self.aliases.get(n, n)] for n in self.context_parameters}
 
     def describe(self) -> dict:
+        """The default descriptor, plus whether the model is unconditional."""
         return {**_describe_default(self), "unconditional": self.unconditional}
 
 
 class DeltaFactor(Factor):
-    """`q_i = delta(theta_i - c)`: a point mass pinning parameters to fixed values,
-    contributing 0 to the proposal log-prob.
+    """
+    A point mass `q_i = delta(theta_i - c)` that pins parameters to fixed values.
 
-    Used as the chain root for prior-conditioning or known proxies (where later factors
-    condition on the pinned values), and as a non-root filler for delta-prior parameters
-    a model does not infer (one constant per current row).
+    A delta factor is used in two ways: as the root of a chain, supplying pinned
+    values (a known proxy, or a prior-conditioning pin) that later factors condition
+    on; and as a filler, supplying delta-prior parameters that the network does not
+    infer. It contributes zero to the proposal log probability: the chain's log
+    probability covers only the parameters that are sampled, and the pinned block is
+    conditioned on rather than integrated over. The importance-sampling target uses
+    the same convention, so the factor cancels in the weights.
 
-    As a point mass, n draws are one value repeated: `draws = False` tells the
-    composer not to place the requested sample count here -- it lands on the first
-    step that draws (e.g. the flow), which then samples it in a single conditioned
-    call.
+    Every draw returns the same values, so the factor does not draw
+    (`draws = False`). As a root it is run once, and the chain's `num_samples` is
+    drawn by the first step that does draw.
     """
 
     draws = False
 
     def __init__(self, values: dict[str, float]):
+        """
+        Parameters
+        ----------
+        values : dict[str, float]
+            The pinned value of each parameter.
+        """
         self.values = values
         self.parameters = list(values)
         self.conditioning = []
 
     def sample_and_log_prob(self, num_samples, context, given=None):
+        """Return `num_samples` copies of the pinned values, with zero log probability.
+        See `Factor.sample_and_log_prob`."""
         # A delta factor creates fresh tensors, so it places them on the chain's
         # device (unlike steps that transform existing rows, which follow their
         # inputs).
@@ -419,15 +550,18 @@ class DeltaFactor(Factor):
         return samples, torch.zeros(num_samples, device=device)
 
     def log_prob(self, theta_i, context, given=None):
-        """0 per row, matching sample time: the point mass is evaluated on its own
-        support (the chain only re-plugs its own samples), so the pinned block is
-        conditioned on, not integrated over. Off-support densities are not
-        represented."""
+        """Return zero for every row.
+
+        The chain only evaluates `log_prob` at its own samples, so the point mass is
+        always evaluated on its support; values off the support are not represented.
+        See `Factor.log_prob`.
+        """
         # One zero per row, on the same device/dtype as the evaluated block.
         reference_column = next(iter(theta_i.values()))
         return torch.zeros_like(reference_column)
 
     def describe(self) -> dict:
+        """The default descriptor, plus the pinned values."""
         return {
             **_describe_default(self),
             "values": {k: float(v) for k, v in self.values.items()},
@@ -436,26 +570,34 @@ class DeltaFactor(Factor):
 
 class SampleTableFactor(Factor):
     """
-    Chain root emitting a fixed table of existing samples (with their stored proposal
-    log-prob, if available) instead of drawing new ones.
+    A chain root that emits a fixed table of existing samples, together with their
+    stored log probability.
 
-    This is how a chain continues from previously drawn samples: the
-    importance-sampling side runs its post-sampling steps (e.g. synthetic phase) as a
-    chain rooted in the proposal sample table, and the composer's ordinary log-prob
-    fold then yields the joint proposal density `log q(theta) + log q(extra | theta)`
-    with no special-casing. Without a stored log-prob the chain is density-free (as
-    with a `GibbsBlock`).
+    Use this to continue a chain from samples drawn earlier. For example, the
+    synthetic phase is added to previously drawn samples by a chain rooted in their
+    table, and the chain's summed log probability is then the joint proposal density
+    `log q(theta) + log q(phase | theta)`. Without a stored log probability the chain
+    is density-free.
+
+    Unlike a `DeltaFactor`, a sample table is not a distribution: it carries the
+    density of the chain that produced its rows and cannot be evaluated at other
+    points, so its `log_prob` raises. Like a delta factor it does not draw
+    (`draws = False`). The table is emitted once, and the chain's `num_samples` is
+    drawn per table row by the first step that does draw (one phase per sample, or
+    `num_samples` posterior draws per grid point in the chirp-mass scan).
     """
+
+    draws = False
 
     def __init__(self, table: dict, log_prob=None):
         """
         Parameters
         ----------
         table : dict
-            The existing samples, one array-like entry per parameter column.
+            The existing samples, one array-like column per parameter.
         log_prob : array-like, optional
-            The stored proposal log-prob of the table rows. If omitted, the chain
-            has no tractable density.
+            The stored log probability of each row. If omitted, the chain has no
+            tractable density.
         """
         self.table = {k: torch.as_tensor(v) for k, v in table.items()}
         self.table_log_prob = (
@@ -465,13 +607,34 @@ class SampleTableFactor(Factor):
         self.conditioning: list[str] = []
 
     def sample_and_log_prob(self, num_samples, context, given=None):
-        """Emit the table; `num_samples` must equal the table length (a fixed table
-        cannot be chunked, so run the chain with `batch_size=None`)."""
-        n = _n_rows(self.table)
-        if num_samples != n:
+        """Emit the table and its stored log probability.
+
+        Parameters
+        ----------
+        num_samples : int
+            Must be 1: the table is emitted once.
+        context : SamplerContext
+            The per-event shared state. The table is moved to its device.
+        given : dict, optional
+            Ignored; a table is unconditioned.
+
+        Returns
+        -------
+        samples : dict[str, torch.Tensor]
+            The table columns.
+        log_prob : torch.Tensor or None
+            The stored log probability per row, or `None` if none was given.
+
+        Raises
+        ------
+        ValueError
+            If `num_samples` is not 1.
+        """
+        if num_samples != 1:
             raise ValueError(
-                f"A sample table is fixed: num_samples must equal the table length "
-                f"({n}), got {num_samples}. Run the chain with batch_size=None."
+                f"A sample table is emitted once (num_samples=1), got {num_samples}. "
+                f"The chain's num_samples is drawn per table row by the first step "
+                f"that draws."
             )
         # The table's fresh tensors join the chain on its device (the same policy
         # as DeltaFactor), so a table-rooted chain can condition a CUDA network.
@@ -483,6 +646,8 @@ class SampleTableFactor(Factor):
         return table, log_prob
 
     def log_prob(self, theta_i, context, given=None):
+        """Raise `NotImplementedError`: a table is not a density. Evaluate the log
+        probability through the chain that produced the samples instead."""
         raise NotImplementedError(
             "A sample table is not a density; its rows carry their stored log-prob. "
             "Evaluate log_prob through the chain that produced the samples instead."
@@ -491,16 +656,28 @@ class SampleTableFactor(Factor):
 
 class Reparametrization(ABC):
     """
-    A deterministic bijection `Step`: it transforms existing parameters (no sampling)
-    and contributes `-log|det J|` to the proposal density. It is 1:1 -- one output
-    row per input row -- so it carries no sample multiplicity in a chain.
+    Base class for a reparametrization: a deterministic, invertible change of
+    variables applied to existing chain columns.
 
-    Unlike a `Factor` it is 1:1 and invertible -- `forward` maps the conditioning block
-    to the `parameters` block, `inverse` maps back (for re-plug / importance sampling),
-    and its density contribution is a Jacobian, not a sampled log-prob. Used to relate a
-    network's coordinates to physical ones (e.g. right ascension from the training reference
-    frame to the event frame). Subclasses implement `forward` / `inverse` and, where the
-    map is not measure-preserving, `log_det`.
+    A reparametrization does not sample. Its `forward` map takes the conditioning
+    columns to the `parameters` it produces, replacing the inputs it `consumes`, and
+    contributes `-log|det J|` to the proposal log probability (zero for a
+    measure-preserving map, the default). It is one-to-one, with one output row per
+    input row, so it carries no sample multiplicity. The `inverse` map rebuilds the
+    consumed inputs, which is what lets `ChainComposer.log_prob` re-evaluate a chain
+    at given samples. Typical uses relate a network's coordinates to physical ones,
+    such as rotating the right ascension from the training reference frame to the
+    event frame.
+
+    Subclasses implement `forward` and `inverse`, and `log_det` when the map is not
+    measure-preserving.
+
+    Attributes
+    ----------
+    parameters : list[str]
+        The columns produced.
+    conditioning : list[str]
+        The columns read.
     """
 
     parameters: list[str]
@@ -511,7 +688,20 @@ class Reparametrization(ABC):
     def forward(
         self, given: dict[str, torch.Tensor], context: "SamplerContext"
     ) -> dict[str, torch.Tensor]:
-        """Map the conditioning block to the `parameters` block."""
+        """Apply the change of variables.
+
+        Parameters
+        ----------
+        given : dict[str, torch.Tensor]
+            The conditioning columns, one row each.
+        context : SamplerContext
+            The per-event shared state.
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            The `parameters` columns.
+        """
 
     @abstractmethod
     def inverse(
@@ -520,17 +710,44 @@ class Reparametrization(ABC):
         context: "SamplerContext",
         given: Optional[dict[str, torch.Tensor]] = None,
     ) -> dict[str, torch.Tensor]:
-        """Rebuild the consumed inputs from the `parameters` block. `given` holds
-        the non-consumed conditioning columns still present in the chain (e.g. a
-        proxy the bijection shifts by, or invariant parameters a coordinate
-        change needs); bijections that depend only on their own outputs may
-        ignore it."""
+        """Rebuild the consumed inputs from the produced parameters.
+
+        Parameters
+        ----------
+        params : dict[str, torch.Tensor]
+            The `parameters` columns, one row each.
+        context : SamplerContext
+            The per-event shared state.
+        given : dict[str, torch.Tensor], optional
+            The conditioning columns that were not consumed and are still in the
+            chain, for example a proxy the map shifts by. Maps that depend only on
+            their own outputs may ignore it.
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            The consumed columns.
+        """
 
     def log_det(
         self, given: dict[str, torch.Tensor], context: "SamplerContext"
     ) -> torch.Tensor:
-        """`log|det J|` of `forward`, per row. Default 0 (measure-preserving), on
-        the device of the transformed rows."""
+        """The log-Jacobian `log|det J|` of `forward`, per row.
+
+        The default is zero, for a measure-preserving map.
+
+        Parameters
+        ----------
+        given : dict[str, torch.Tensor]
+            The conditioning columns, one row each.
+        context : SamplerContext
+            The per-event shared state.
+
+        Returns
+        -------
+        torch.Tensor
+            One value per row, on the device of the transformed rows.
+        """
         reference_column = next(iter(given.values()))
         return torch.zeros_like(reference_column)
 
@@ -540,8 +757,16 @@ class Reparametrization(ABC):
         context: SamplerContext,
         given: Optional[dict[str, torch.Tensor]] = None,
     ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
-        """Apply `forward` to the conditioning; contribute `-log|det J|`. `num_samples`
-        must be 1 (a reparametrization is 1:1)."""
+        """Apply `forward` and contribute `-log|det J|`.
+
+        `num_samples` must be 1, since a reparametrization is one-to-one. See
+        `Factor.sample_and_log_prob` for the arguments.
+
+        Raises
+        ------
+        ValueError
+            If `num_samples` is not 1.
+        """
         if num_samples != 1:
             raise ValueError("A reparametrization is 1:1; use fan_out=1.")
         out = self.forward(given, context)
@@ -549,26 +774,28 @@ class Reparametrization(ABC):
 
     @property
     def consumes(self) -> list[str]:
-        """Inputs the bijection replaces with its outputs (dropped after the step).
-        `ChainComposer.log_prob` rebuilds them via `inverse`."""
+        """The conditioning columns replaced by the outputs, and dropped from the
+        chain after the step. By default, every conditioning column that is not also
+        produced. `ChainComposer.log_prob` rebuilds them via `inverse`."""
         return [c for c in self.conditioning if c not in self.parameters]
 
     def describe(self) -> dict:
-        """Provenance descriptor for saved-result metadata."""
+        """Describe the step for the provenance record of a saved result. See
+        `Factor.describe`."""
         return _describe_default(self)
 
 
 class ProxyOffsetReparam(Reparametrization):
     """
-    Reconstruct a physical parameter from a network's offset output and its proxy:
+    Reconstruct a physical parameter from a network's offset output and its proxy,
     `X = delta_X + X_proxy`.
 
-    A proxy-conditioned network (e.g. the chirp-mass prior conditioning of
+    A proxy-conditioned network (for example the chirp-mass prior conditioning of
     DINGO-BNS) infers the offset `delta_X = X - X_proxy` rather than `X` itself.
-    This step rebuilds `X`, consuming the offset column while keeping the proxy in
-    the chain (it is recorded with the samples, like the GNPE time proxies). A pure
-    shift at fixed proxy, so `log_det = 0`; `inverse` recovers the offset from the
-    proxy the reverse fold supplies.
+    This step rebuilds `X`. It consumes the offset column and keeps the proxy in the
+    chain, where it is recorded with the samples (like the GNPE time proxies). At a
+    fixed proxy the map is a pure shift, so `log_det` is zero; `inverse` recovers the
+    offset from the proxy, which the reverse fold supplies.
     """
 
     def __init__(self, parameter_name: str):
@@ -576,8 +803,8 @@ class ProxyOffsetReparam(Reparametrization):
         Parameters
         ----------
         parameter_name : str
-            The physical parameter name `X`; the step reads `delta_X` and
-            `X_proxy` and produces `X`.
+            The physical parameter name `X`. The step reads `delta_X` and `X_proxy`
+            and produces `X`.
         """
         self.parameter_name = parameter_name
         self.delta_name = f"delta_{parameter_name}"
@@ -602,26 +829,31 @@ class ProxyOffsetReparam(Reparametrization):
             )
         return {self.delta_name: params[self.parameter_name] - given[self.proxy_name]}
 
-    def describe(self) -> dict:
-        return {
-            "step": type(self).__name__,
-            "parameters": list(self.parameters),
-            "conditioning": list(self.conditioning),
-        }
-
 
 class TargetCorrection(ABC):
     """
-    A `Step` that emits an importance-sampling target correction as a side-channel column
-    and contributes nothing to the proposal density.
+    Base class for a target correction: a step that annotates the importance-sampling
+    target and contributes nothing to the proposal.
 
-    Its value belongs to the IS target, not the proposal: it reads earlier blocks, emits a
-    named column, optionally consumes intermediates (`consumes`), and adds 0 to the
-    proposal log-prob. 1:1.
+    Some targets are not simply prior times likelihood. A target correction emits a
+    side-channel column (`delta_log_prob_target` in Dingo's use), which importance
+    sampling adds to the target log density; the step contributes zero to the
+    proposal. It is one-to-one, with one output row per input row. It reads earlier
+    columns and may consume intermediates it no longer needs.
 
-    `consumes` must name only side-channel intermediates (e.g. recomputed detector
-    times), never a sampled parameter: unlike a `Reparametrization`, a correction has no
-    inverse, so anything it consumes cannot be rebuilt by `ChainComposer.log_prob`.
+    A target correction has no inverse. Unlike a `Reparametrization` it may therefore
+    consume only side-channel intermediates (for example detector times computed by
+    an earlier step), never a sampled parameter, since `ChainComposer.log_prob` could
+    not rebuild it.
+
+    Attributes
+    ----------
+    parameters : list[str]
+        The column(s) emitted.
+    conditioning : list[str]
+        The columns read.
+    consumes : list[str]
+        The intermediate columns dropped after the step.
     """
 
     parameters: list[str]
@@ -633,7 +865,20 @@ class TargetCorrection(ABC):
     def correction(
         self, given: dict[str, torch.Tensor], context: "SamplerContext"
     ) -> dict[str, torch.Tensor]:
-        """The side-channel column(s), one value per conditioning row."""
+        """Compute the correction column(s).
+
+        Parameters
+        ----------
+        given : dict[str, torch.Tensor]
+            The conditioning columns, one row each.
+        context : SamplerContext
+            The per-event shared state.
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            The emitted column(s), one value per row.
+        """
 
     def sample_and_log_prob(
         self,
@@ -641,6 +886,16 @@ class TargetCorrection(ABC):
         context: SamplerContext,
         given: Optional[dict[str, torch.Tensor]] = None,
     ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
+        """Emit the correction, with zero proposal log probability.
+
+        `num_samples` must be 1, since a target correction is one-to-one. See
+        `Factor.sample_and_log_prob` for the arguments.
+
+        Raises
+        ------
+        ValueError
+            If `num_samples` is not 1.
+        """
         if num_samples != 1:
             raise ValueError("A target correction is 1:1; use fan_out=1.")
         out = self.correction(given, context)
@@ -649,18 +904,26 @@ class TargetCorrection(ABC):
         return out, torch.zeros_like(reference_column)
 
     def describe(self) -> dict:
-        """Provenance descriptor for saved-result metadata."""
+        """Describe the step for the provenance record of a saved result. See
+        `Factor.describe`."""
         return _describe_default(self)
 
 
 class Step(Protocol):
     """
-    One entry a `ChainComposer` folds over: it emits a parameter block and an optional
-    contribution to the proposal `log_prob`.
+    Protocol for one entry of a chain: anything a `ChainComposer` can fold over.
 
-    Density-contributing steps (`Factor`) return a tensor; density-free sampling blocks
-    (`GibbsBlock`) return `None`. `parameters` names the block produced, `conditioning`
-    the earlier-block parameters read from the chain (data is implicit via the context).
+    A step names the columns it produces (`parameters`) and the earlier columns it
+    reads (`conditioning`), and implements `sample_and_log_prob`. A factor returns a
+    log-probability tensor; a density-free block (`GibbsBlock`) returns `None`. The
+    data is not part of the interface; steps read it through the context.
+
+    Attributes
+    ----------
+    parameters : list[str]
+        The columns produced.
+    conditioning : list[str]
+        The earlier columns read.
     """
 
     parameters: list[str]
@@ -671,13 +934,28 @@ class Step(Protocol):
         num_samples: int,
         context: SamplerContext,
         given: Optional[dict[str, torch.Tensor]] = None,
-    ) -> tuple[dict[str, torch.Tensor], Optional[torch.Tensor]]: ...
+    ) -> tuple[dict[str, torch.Tensor], Optional[torch.Tensor]]:
+        """Produce the step's columns and its proposal log-probability contribution
+        (`None` for a density-free step). See `Factor.sample_and_log_prob`."""
+        ...
 
 
 @dataclass
 class Stage:
-    """A chain `Step` and its fan-out: the number of samples drawn per incoming
-    conditioning row. The root stage draws the base count and ignores `fan_out`."""
+    """A chain step together with its fan-out.
+
+    `fan_out` is the number of samples drawn for each incoming row. It applies to
+    stages that condition on earlier columns (an unconditioned stage after the root
+    fills one value per row instead). The first stage that draws samples the chain's
+    `num_samples` per row, times its `fan_out`.
+
+    Attributes
+    ----------
+    step : Step
+        The chain step.
+    fan_out : int
+        Samples drawn per incoming row. Default 1.
+    """
 
     step: Step
     fan_out: int = 1
@@ -685,34 +963,43 @@ class Stage:
 
 class ChainComposer:
     """
-    Autoregressive composer over an ordered list of `Stage` entries.
+    Runs a chain of steps in order, building up a table of samples and the summed
+    proposal log probability.
 
-    Folds the steps in declared order -- a topological order of the conditioning DAG --
-    expanding each by its fan-out and summing the proposal log-probs. A step is a
-    `Factor` (contributes `log q_i`) or a density-free sampling block (`GibbsBlock`,
-    contributes `None`); if any step is density-free the chain has no tractable density
-    and `sample` omits `log_prob`. Covers plain NPE, single-step GNPE, prior
-    conditioning, synthetic phase, intrinsic/extrinsic splits, and -- via `GibbsBlock` --
-    multi-iteration GNPE.
+    The composer holds an ordered list of `Stage` entries (bare steps are accepted,
+    and wrapped with `fan_out=1`). At construction it checks that the order is
+    consistent: every conditioning column must be produced by an earlier step, and
+    no step may overwrite an existing column, except a `Reparametrization` replacing
+    its own inputs. Sampling folds the steps forward, expanding the table by each
+    stage's fan-out and summing the log-probability contributions; `log_prob` folds
+    the steps in reverse to re-evaluate the same density at given samples. If any
+    step is density-free (a `GibbsBlock`), the chain has no tractable density and
+    `sample` omits `log_prob`.
 
-    Accepts bare steps (wrapped as `Stage(step, fan_out=1)`) or explicit `Stage`
-    entries.
+    This one class covers plain NPE, single-step GNPE, prior conditioning, synthetic
+    phase, and, through `GibbsBlock`, multi-iteration GNPE. See the "Sampling
+    chains" page of the documentation.
     """
 
     def __init__(self, stages: list[Union["Stage", Step]]):
+        """
+        Parameters
+        ----------
+        stages : list[Stage or Step]
+            The chain, in order. Bare steps are wrapped as `Stage(step, fan_out=1)`.
+
+        Raises
+        ------
+        ValueError
+            If a step conditions on a column that no earlier step produces, or would
+            overwrite an existing column.
+        """
         self.stages = [s if isinstance(s, Stage) else Stage(s) for s in stages]
         self._validate()
 
     def _validate(self):
-        """Check the declared order is a valid topological order: every conditioning
-        name is produced by an earlier step, and no step overwrites an existing
-        column -- except a `Reparametrization` replacing its own inputs, which is
-        invertible, so `log_prob` can restore the overwritten state. A step's
-        emitted columns default to its `parameters`, but a step may emit
-        side-channel columns too (`produces`). Consumed columns leave the
-        produced set, mirroring the fold, so a later step may re-emit them
-        (e.g. `RAToEventFrame` restoring a pinned `ra` that `RAToTrainingFrame`
-        consumed)."""
+        """Check that the declared order is a valid topological order of the
+        conditioning DAG."""
         produced: set[str] = set()
         for step in self.steps:
             missing = [c for c in step.conditioning if c not in produced]
@@ -721,6 +1008,10 @@ class ChainComposer:
                     f"A step producing {step.parameters} conditions on {missing}, "
                     f"which no earlier step produces. Check chain order."
                 )
+            # A step's emitted columns default to its `parameters`; a step may also
+            # emit side-channel columns (`produces`). Only a Reparametrization may
+            # overwrite existing columns (its own inputs): it is invertible, so
+            # `log_prob` can restore them.
             emitted = set(getattr(step, "produces", step.parameters))
             replaceable = (
                 set(step.conditioning) if isinstance(step, Reparametrization) else set()
@@ -733,6 +1024,9 @@ class ChainComposer:
                     f"replace columns (its inverse can rebuild them for log_prob)."
                 )
             produced.update(emitted)
+            # Consumed columns leave the produced set, as in the fold, so a later step
+            # may re-emit them (e.g. `RAToEventFrame` restoring a pinned `ra` that
+            # `RAToTrainingFrame` consumed).
             produced.difference_update(getattr(step, "consumes", ()))
 
     @property
@@ -742,8 +1036,8 @@ class ChainComposer:
 
     @property
     def expansion(self) -> int:
-        """Product of the non-root fan-outs; `sample` returns `num_samples *
-        expansion` rows."""
+        """Product of the fan-outs of the stages after the root. `sample` returns
+        `num_samples * expansion` rows per root row."""
         return math.prod(stage.fan_out for stage in self.stages[1:])
 
     def sample_and_log_prob(
@@ -752,9 +1046,28 @@ class ChainComposer:
         context: SamplerContext,
         batch_size: Optional[int] = None,
     ) -> tuple[dict[str, torch.Tensor], Optional[torch.Tensor]]:
-        """Draw samples. `num_samples` is the base (root) count; the result has
-        `num_samples * expansion` rows. `batch_size` chunks the base count (`None`
-        draws in one pass). The log-prob is `None` if any step is density-free."""
+        """Draw samples from the chain.
+
+        Parameters
+        ----------
+        num_samples : int
+            The number of samples drawn per root row. A chain rooted in a pin or a
+            flow has a single root row, so this is the total; a chain rooted in a
+            `SampleTableFactor` draws `num_samples` per table row.
+        context : SamplerContext
+            The per-event shared state.
+        batch_size : int, optional
+            Chunk `num_samples` into batches of this size, to cap the peak memory.
+            `None` draws in one pass.
+
+        Returns
+        -------
+        samples : dict[str, torch.Tensor]
+            The chain's columns, with `(root rows) * num_samples * expansion` rows.
+        log_prob : torch.Tensor or None
+            The proposal log probability per row, or `None` if any step is
+            density-free.
+        """
         return chunk_and_concat(
             num_samples, batch_size, lambda n: self._run_chain_once(n, context)
         )
@@ -762,14 +1075,14 @@ class ChainComposer:
     def _run_chain_once(
         self, base: int, context: SamplerContext
     ) -> tuple[dict[str, torch.Tensor], Optional[torch.Tensor]]:
-        """One pass of the whole chain for `base` root samples. Returns the samples and
-        the summed proposal log-prob, or `None` if any step is density-free.
+        """One pass of the whole chain, for `base` samples per root row.
 
-        The base count is drawn by the first step that draws (`draws = True`, the
-        default): point masses and 1:1 steps (reparametrizations, target
-        corrections) run on a single row, and the first drawing step then samples
-        `base` (times its fan-out) in one conditioned call, with the prefix's
-        carried rows expanded to match."""
+        Non-drawing steps (point masses, sample tables, reparametrizations, target
+        corrections) run once. The first step that draws samples `base` per row,
+        times its fan-out, in a single conditioned call, and the rows carried so far
+        are repeated to match. Returns the samples and the summed log probability
+        (`None` if any step is density-free).
+        """
         samples: dict[str, torch.Tensor] = {}
         total: torch.Tensor | float = 0.0
         has_density = True
@@ -778,8 +1091,8 @@ class ChainComposer:
             step = stage.step
             if base_pending is not None:
                 if not getattr(step, "draws", True):
-                    # A non-drawing step (point mass, 1:1 transform) runs on a
-                    # single row; the base count waits for the first step that
+                    # A non-drawing step (point mass, 1:1 transform, sample table)
+                    # runs once; the base count waits for the first step that
                     # draws.
                     n = 1
                 else:
@@ -818,28 +1131,32 @@ class ChainComposer:
     def log_prob(
         self, samples: dict[str, torch.Tensor], context: SamplerContext
     ) -> torch.Tensor:
-        """Evaluate the chain's proposal log-density at given physical samples
-        (re-plug / importance sampling).
+        """Evaluate the chain's proposal log probability at given samples.
 
-        The steps are folded in exact reverse chain order, so the columns are
-        restored to the state each step saw during sampling: a `Reparametrization`
-        rebuilds its inputs via `inverse` (e.g. `ra@t_ref` from the event-frame
-        `ra`) and contributes `-log|det J|`, a `Factor` contributes its `log_prob`,
-        and a `TargetCorrection` contributes nothing (target-side only). Raises for
-        a density-free chain (one containing a `GibbsBlock`).
+        This is used to re-evaluate saved samples, and for importance sampling. The
+        steps are folded in reverse order, so that the columns are restored to the
+        state each step saw during sampling: a `Reparametrization` rebuilds the
+        inputs it consumed via `inverse` (for example `ra@t_ref` from the event-frame
+        `ra`) and contributes `-log|det J|`; a `Factor` contributes its `log_prob` at
+        the restored conditioning; a `TargetCorrection` contributes nothing.
 
         Parameters
         ----------
         samples : dict[str, torch.Tensor]
-            The chain's emitted columns (one value per row). Consumed intermediates
-            are rebuilt via the reparametrization inverses and need not be present.
+            The chain's emitted columns, one value per row. Consumed intermediates
+            are rebuilt by the reparametrization inverses and need not be present.
         context : SamplerContext
-            Per-event shared state.
+            The per-event shared state.
 
         Returns
         -------
         torch.Tensor
-            The proposal log-density per row.
+            The proposal log probability per row.
+
+        Raises
+        ------
+        ValueError
+            If the chain is density-free (contains a `GibbsBlock`).
         """
         if any(isinstance(step, GibbsBlock) for step in self.steps):
             raise ValueError(
@@ -872,7 +1189,16 @@ class ChainComposer:
         context: SamplerContext,
         batch_size: Optional[int] = None,
     ) -> dict[str, torch.Tensor]:
-        """Per-sample dict of parameters, plus `log_prob` for an all-density chain."""
+        """Draw samples and return them as a single dict.
+
+        The arguments are those of `sample_and_log_prob`.
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            The chain's columns, plus a `log_prob` entry unless the chain is
+            density-free.
+        """
         samples, log_prob = self.sample_and_log_prob(num_samples, context, batch_size)
         if log_prob is None:
             return dict(samples)
@@ -881,19 +1207,19 @@ class ChainComposer:
 
 class GibbsBlock:
     """
-    A density-free sampling-block `Step`: runs blocked Gibbs internally and yields no
-    proposal log-prob.
+    A step that runs blocked Gibbs sampling internally and yields no log probability.
 
-    Seeds the chain with an init factor, then sweeps the factor list in order for
-    `num_iterations` iterations; each factor conditions on the current state and
-    overwrites its own block. As a chain `Step` it produces the swept parameter blocks
-    and returns `None` for the log-prob -- the cyclic dependency has no tractable marginal
-    (recoverable by fitting an unconditional density to the samples and taking one
-    `ChainComposer` step). Dingo uses this only for multi-iteration GNPE (the GNPE factors
-    in `dingo.gw.inference.steps`), but the loop is generic.
+    The block seeds its state from an init factor, then sweeps its list of factors in
+    order for `num_iterations` iterations; each factor conditions on the current
+    state and overwrites its own block. Because of the cyclic dependency the result
+    has no tractable density, so the step returns `None` for the log probability, and
+    a chain containing it is *density-free*: its samples carry no `log_prob`, and the
+    density must be recovered afterwards (by fitting an unconditional model to the
+    samples and taking a chain step with it). Dingo uses this for multi-iteration
+    GNPE, with the factors in `dingo.gw.inference.steps`, but the loop is generic.
 
-    Batching is handled by the enclosing `ChainComposer`: it chunks the walkers and runs
-    the whole loop per chunk (`chunk_and_concat`).
+    Batching is handled by the enclosing `ChainComposer`, which runs the whole loop
+    for each chunk of walkers.
     """
 
     def __init__(self, init_factor: Factor, factors: list[Factor], num_iterations: int):
@@ -901,10 +1227,10 @@ class GibbsBlock:
         Parameters
         ----------
         init_factor : Factor
-            Seeds the chain (e.g. an init network's detector times).
+            Seeds the state (for example an init network's detector times).
         factors : list[Factor]
-            The factors swept in order each iteration; each conditions on the current
-            state and overwrites its own block.
+            The factors swept in order in each iteration. Each conditions on the
+            current state and overwrites its own block.
         num_iterations : int
             Number of Gibbs sweeps.
         """
@@ -922,13 +1248,28 @@ class GibbsBlock:
         context: SamplerContext,
         given: Optional[dict[str, torch.Tensor]] = None,
     ) -> tuple[dict[str, torch.Tensor], None]:
-        """Run the Gibbs loop for `num_samples` walkers; return `(samples, None)`.
-        `num_samples` is the walker (root) count -- Gibbs does not fan out."""
+        """Run the Gibbs loop.
+
+        Parameters
+        ----------
+        num_samples : int
+            The number of walkers. Gibbs does not fan out; each walker is one row.
+        context : SamplerContext
+            The per-event shared state.
+        given : dict, optional
+            Ignored; the block is unconditioned.
+
+        Returns
+        -------
+        samples : dict[str, torch.Tensor]
+            The swept parameter blocks, one row per walker.
+        log_prob : None
+        """
         return self._run_once(num_samples, context), None
 
     def describe(self) -> dict:
-        """Provenance descriptor: the Gibbs structure, with nested descriptors for
-        the init factor and the swept factors."""
+        """Describe the Gibbs structure, with nested descriptors for the init factor
+        and the swept factors. See `Factor.describe`."""
         return {
             "step": type(self).__name__,
             "num_iterations": self.num_iterations,
@@ -953,12 +1294,23 @@ class GibbsBlock:
 
 class ComposedSampler:
     """
-    Generic runner over a `ChainComposer` and a `SamplerContext`: draws samples and
-    returns them as a DataFrame. Domain-specific processing lives in the chain's steps, so
-    the runner is domain-agnostic.
+    Runs a `ChainComposer` over a `SamplerContext` and returns the samples as a
+    DataFrame.
+
+    All domain-specific processing lives in the chain's steps and in the context, so
+    the runner itself is domain-agnostic. The gravitational-wave subclass is
+    `dingo.gw.inference.sampler.GWComposedSampler`.
     """
 
     def __init__(self, composer: ChainComposer, context: SamplerContext):
+        """
+        Parameters
+        ----------
+        composer : ChainComposer
+            The chain to run.
+        context : SamplerContext
+            The per-event shared state.
+        """
         self.composer = composer
         self.context = context
         self.samples: Optional[pd.DataFrame] = None
@@ -966,9 +1318,22 @@ class ComposedSampler:
     def run_sampler(
         self, num_samples: int, batch_size: Optional[int] = None
     ) -> pd.DataFrame:
-        """Draw `num_samples` samples (chunked by `batch_size`) and return them as a
-        DataFrame. An all-density chain includes `log_prob`; a chain with a `GibbsBlock`
-        step does not."""
+        """Draw samples and store them as a DataFrame.
+
+        Parameters
+        ----------
+        num_samples : int
+            The number of samples per root row (see
+            `ChainComposer.sample_and_log_prob`).
+        batch_size : int, optional
+            Chunk size for drawing. `None` draws in one pass.
+
+        Returns
+        -------
+        pandas.DataFrame
+            One row per sample, with a `log_prob` column unless the chain is
+            density-free. Also stored as `self.samples`.
+        """
         merged = self.composer.sample(num_samples, self.context, batch_size)
         merged = {k: v.cpu().numpy() for k, v in merged.items()}
         self.samples = pd.DataFrame(merged)

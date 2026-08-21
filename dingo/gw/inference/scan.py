@@ -24,7 +24,6 @@ from dingo.core.factors import (
     ChainComposer,
     FlowFactor,
     SampleTableFactor,
-    Stage,
     _base_model_metadata,
 )
 from dingo.gw.inference.context import GWSamplerContext
@@ -152,12 +151,11 @@ def chirp_mass_scan(
         + _ra_to_event_steps(inference_parameters)
         + _delta_prior_steps(context.prior, inference_parameters)
     )
-    # Sweep the grid in blocks: a fixed table roots the chain (its length is
-    # the base count, so composer-level chunking does not apply), and the block
-    # size bounds both the transient base-domain memory of the row-wise data
-    # preparation and the network batch. The chain is density-free (no stored
-    # table log-prob) -- the scan selects on the likelihood, not on a proposal
-    # density.
+    # Sweep the grid in blocks: a fixed table roots the chain and the flow draws
+    # `num_samples` per table row, so the block size bounds both the transient
+    # base-domain memory of the row-wise data preparation and the network batch.
+    # The chain is density-free (no stored table log-prob) -- the scan selects on
+    # the likelihood, not on a proposal density.
     frames = []
     for block in np.array_split(grid, math.ceil(len(grid) / block_size)):
         # Chain columns carry the network dtype (float32); the data preparation
@@ -168,12 +166,9 @@ def chirp_mass_scan(
             {k: np.full(len(block), v, dtype=np.float32) for k, v in pins.items()}
         )
         composer = ChainComposer(
-            [SampleTableFactor(table)]
-            + ra_to_training
-            + [Stage(flow, fan_out=num_samples)]
-            + tail_steps
+            [SampleTableFactor(table)] + ra_to_training + [flow] + tail_steps
         )
-        out, _ = composer.sample_and_log_prob(len(block), context)
+        out, _ = composer.sample_and_log_prob(num_samples, context)
         frames.append(pd.DataFrame({k: v.cpu().numpy() for k, v in out.items()}))
     theta = pd.concat(frames, ignore_index=True)
 

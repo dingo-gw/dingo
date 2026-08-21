@@ -49,7 +49,7 @@ def test_chain_replug_rebuilds_offset():
         log_prob=torch.tensor([0.7, -0.3]),
     )
     chain = ChainComposer([table, ProxyOffsetReparam("chirp_mass")])
-    samples, log_prob = chain.sample_and_log_prob(2, context=None)
+    samples, log_prob = chain.sample_and_log_prob(1, context=None)
     assert "chirp_mass" in samples and "delta_chirp_mass" not in samples
     assert torch.allclose(log_prob, torch.tensor([0.7, -0.3]))
 

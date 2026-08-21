@@ -510,9 +510,8 @@ class Result(CoreResult):
             num_processes=num_processes,
         )
         chain = ChainComposer([table, factor])
-        out, log_prob = chain.sample_and_log_prob(
-            len(theta_within), self.sampler_context
-        )
+        # One phase draw per proposal sample (the table root is emitted once).
+        out, log_prob = chain.sample_and_log_prob(1, self.sampler_context)
 
         phase_array = np.full(len(theta), 0.0)
         phase_array[within_prior] = out["phase"].numpy()
