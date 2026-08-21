@@ -394,13 +394,13 @@ class DeltaFactor(Factor):
     condition on the pinned values), and as a non-root filler for delta-prior parameters
     a model does not infer (one constant per current row).
 
-    As a point mass, n draws are one atom repeated: `point_mass = True` tells the
-    composer that a root prefix of such steps carries no multiplicity, so the
-    requested sample count lands on the first stage that does (e.g. the flow), which
-    then draws it in a single conditioned call.
+    As a point mass, n draws are one value repeated: `draws = False` tells the
+    composer not to place the requested sample count here -- it lands on the first
+    step that draws (e.g. the flow), which then samples it in a single conditioned
+    call.
     """
 
-    point_mass = True
+    draws = False
 
     def __init__(self, values: dict[str, float]):
         self.values = values
@@ -478,9 +478,7 @@ class SampleTableFactor(Factor):
         device = getattr(context, "device", None)
         table = {k: v.to(device) for k, v in self.table.items()}
         log_prob = (
-            self.table_log_prob.to(device)
-            if self.table_log_prob is not None
-            else None
+            self.table_log_prob.to(device) if self.table_log_prob is not None else None
         )
         return table, log_prob
 
@@ -507,7 +505,7 @@ class Reparametrization(ABC):
 
     parameters: list[str]
     conditioning: list[str]
-    one_to_one = True
+    draws = False
 
     @abstractmethod
     def forward(
@@ -628,7 +626,7 @@ class TargetCorrection(ABC):
 
     parameters: list[str]
     conditioning: list[str]
-    one_to_one = True
+    draws = False
     consumes: list[str]
 
     @abstractmethod
@@ -767,11 +765,10 @@ class ChainComposer:
         """One pass of the whole chain for `base` root samples. Returns the samples and
         the summed proposal log-prob, or `None` if any step is density-free.
 
-        The base count lands on the first stage that carries multiplicity: a root
-        prefix of point-mass steps (fixed pins) emits a single row each -- n draws
-        from a point mass are one atom repeated -- and 1:1 steps (reparametrizations,
-        target corrections) transform those rows in place. The first sampling stage
-        draws `base` (times its fan-out) in one conditioned call, with the prefix's
+        The base count is drawn by the first step that draws (`draws = True`, the
+        default): point masses and 1:1 steps (reparametrizations, target
+        corrections) run on a single row, and the first drawing step then samples
+        `base` (times its fan-out) in one conditioned call, with the prefix's
         carried rows expanded to match."""
         samples: dict[str, torch.Tensor] = {}
         total: torch.Tensor | float = 0.0
@@ -780,12 +777,10 @@ class ChainComposer:
         for i, stage in enumerate(self.stages):
             step = stage.step
             if base_pending is not None:
-                if getattr(step, "point_mass", False) or getattr(
-                    step, "one_to_one", False
-                ):
-                    # Neither a point mass (one emitted row) nor a 1:1 transform
-                    # carries multiplicity; the base count waits for the first
-                    # sampling stage.
+                if not getattr(step, "draws", True):
+                    # A non-drawing step (point mass, 1:1 transform) runs on a
+                    # single row; the base count waits for the first step that
+                    # draws.
                     n = 1
                 else:
                     n = base_pending * (stage.fan_out if step.conditioning else 1)
@@ -814,7 +809,7 @@ class ChainComposer:
                 has_density = False
             elif has_density:
                 total = total + lp
-        # Degenerate all-point-mass chain: no stage carried multiplicity, so expand
+        # Degenerate all-point-mass chain: no step drew, so expand
         # the single emitted row to the requested count.
         if base_pending is not None and base_pending > 1 and samples:
             samples, total = _interleave_rows(samples, total, base_pending)
