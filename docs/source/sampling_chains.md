@@ -55,7 +55,7 @@ flowchart TB
     class dots ghost
 ```
 
-In the figure, every step is written as a conditional $q_i$, which covers all factors, point masses included (for how reparametrizations enter, see [the proposal density](#the-proposal-density-forward-and-reverse)).
+In the figure, every step is written as a conditional $q_i$, which covers all factors, point masses included.
 
 The generic machinery (steps, stages, the composer, and the runner) is defined in
 `dingo.core.factors`. The gravitational-wave steps, the per-event context, and the
@@ -246,37 +246,17 @@ a new domain family, write a new context class implementing the same interface
 The `ChainComposer` orchestrates passes through the chain to obtain samples and/or log probabilities. This includes managing batching, nontrivial sampling multiplicity, and ensuring consistency of the DAG. It represents the chain as an ordered list of `Stage(step, fan_out)` entries, where `fan_out` allows for multiple output samples per input sample at a given `step` (see below). Bare steps are accepted as well, and are wrapped as stages with `fan_out=1`. The stage list is validated at construction to ensure it satisfies the topological order of the conditioning DAG: every conditioning column must be produced by an earlier
 step, and no factor may overwrite an existing column. A reparametrization, however, may replace its own inputs.
 
-When sampling, the composer is asked for `num_samples` samples, and it returns a table in which each row is one complete joint sample. The question is how this count should be distributed among the steps. Many of the steps in a chain don't sample anything. A `DeltaFactor` returns the same pinned values every time it is called, a `SampleTableFactor` simply emits its table, and a reparametrization transforms the rows it is given, one output row per input row. It would be wasteful to run such steps `num_samples` times. Instead, the composer runs the steps before the first sampling step just once, and the first step that does sample (typically the flow) draws `num_samples` samples for each row produced so far. The earlier columns are then repeated across the new rows, so that every row is complete. In the DINGO-BNS chain above, for instance, the `DeltaFactor` emits a single row of pins, and the flow draws `num_samples` samples conditioned on it. In the [chirp-mass scan](bns.md#the-chirp-mass-scan), the root is a `SampleTableFactor` with one row per grid point of the proxy, and the flow draws `num_samples` samples for each grid point. Later steps that don't condition on anything, such as a `DeltaFactor` filling in a delta-prior parameter, simply add one value to each existing row, leaving the number of rows unchanged.
+When running `ChainComposer.sample_and_log_prob(num_samples, context, batch_size)`, the total number of samples produced by the chain is
 
-It is sometimes useful for a later step to draw more than one sample for each row it receives, for example several extrinsic-parameter samples for each intrinsic sample. This is the purpose of the `fan_out` of a `Stage`. A stage with `fan_out=k` draws $k$ samples for each incoming row, and the table grows by a factor of $k$, with the earlier columns repeated to keep the rows aligned (the $k$ samples for a given input row are adjacent in the output). Altogether, the number of rows returned is `num_samples`, times the number of rows in a table root if there is one, times the fan-outs of any later stages.
+$$
+\text{(total samples)} = \text{(root rows)} \times \texttt{num_samples} \times \prod_{\text{stages } i} \texttt{fan_out}_i .
+$$
+
+Here, the *root rows* are the rows the table starts with: one, unless the chain is rooted in a `SampleTableFactor`, in which case it starts with the rows of that table. The argument `num_samples` is used exactly once, by the first step that actually samples (typically a `FlowFactor`). It then produces `num_samples` samples for each row of the table it receives. A stage with `fan_out=k` draws $k$ further samples for each row it receives, multiplying the table by $k$. This is useful, for example, to draw several extrinsic-parameter samples for each intrinsic sample.
+
+The reason to consume `num_samples` only at the point of sampling is to avoid redundant calculations. For instance, in the DINGO-BNS chirp-mass scan, the `SampleTableFactor` emits a column vector of `chirp_mass_proxy` values, along a grid spanning the prior. For each of these, we prepare one set of heterodyned data. Then the flow draws `num_samples` samples (typically 10) for each grid point. By having the flow perform the expansion (rather than doing it earlier) we avoid redundant data preprocessing and embedding network passes.
 
 `batch_size` splits `num_samples` into chunks, which caps the peak memory at one chunk. For a chain rooted in a `SampleTableFactor`, each chunk still runs over the whole table, so a caller with a large table, such as the chirp-mass scan, splits the table into blocks itself.
-
-(the-proposal-density-forward-and-reverse)=
-### The proposal density: forward and reverse
-
-Sampling folds the chain forward. Each factor's log density and each
-reparametrization's Jacobian term are summed into the proposal log probability,
-which is reported in physical parameter space.
-
-`ChainComposer.log_prob(samples, context)` evaluates the same density at given
-samples. This is needed to re-evaluate saved samples, and to importance sample. The
-steps are folded in exact *reverse* chain order, so that the columns are restored
-to the state each step saw during sampling. A reparametrization rebuilds its
-consumed inputs via `inverse` (for example, `ra@t_ref` from the event-frame `ra`).
-A factor adds its `log_prob`, evaluated at the restored conditioning. A target
-correction contributes nothing. This reverse fold allows single-step GNPE and prior
-conditioning to remain density-preserving end to end.
-
-There are two special cases. A point-mass factor contributes zero to the proposal,
-and the target conditions on the same pinned value, so the analysis is conditional
-on the pins rather than integrating over them. A reparametrization removes the
-columns it consumes. This is valid only for an invertible map: the change of
-variables supplies the density on the new columns, and the reverse fold restores
-the old columns through `inverse`. This is also the reason a `TargetCorrection`,
-which has no inverse, may consume only side-channel intermediates. A `GibbsBlock`
-yields samples whose density is intractable. This is what the term "density-free"
-means.
 
 ### Provenance
 
@@ -287,9 +267,7 @@ descriptor per step, plus any entries added by the caller. For example,
 recipe, and the chirp-mass-scan record.
 
 ```python
-{"version": 1,
- "implementation": "composed",
- "chain": [
+{"chain": [
      {"step": "DeltaFactor",
       "parameters": ["chirp_mass_proxy", "ra", "dec"], "conditioning": [],
       "values": {"chirp_mass_proxy": 1.1976, "ra": 3.446, "dec": -0.408}},
@@ -301,8 +279,7 @@ recipe, and the chirp-mass-scan record.
 
 This block is a record of what was run. Nothing reads it at load time, and in
 particular the chain is not rebuilt from it. The block is also **literal-only**:
-every value round-trips through `str`/`ast.literal_eval` in the saved settings. The
-`version` field allows the format to evolve safely.
+every value round-trips through `str`/`ast.literal_eval` in the saved settings.
 
 ## Building and running a chain
 
@@ -337,7 +314,6 @@ flow = FlowFactor.from_model(model, aliases={"ra": "ra@t_ref"})
 composer = ChainComposer([flow, RAToEventFrame()])
 
 samples = composer.sample(10_000, context, batch_size=5_000)
-log_prob = composer.log_prob(samples, context)  # the reverse fold, re-evaluated
 ```
 
 This is the chain that `from_model` assembles for a plain NPE model (plus a
@@ -358,7 +334,7 @@ DataFrame runner (`run_sampler`) and the `Result` export (`to_result` / `to_hdf5
    `num_samples` draws per conditioning row, flattened in row-major order. A
    reparametrization implements `forward` and `inverse` (and `log_det` when the
    map is not measure-preserving). The inverse must rebuild exactly the consumed
-   columns, since the reverse fold depends on this. A target correction implements
+   columns, since `ChainComposer.log_prob` relies on it to restore them. A target correction implements
    `correction`.
 4. **Read data only through the context.** This keeps the step valid under a
    derived context.
