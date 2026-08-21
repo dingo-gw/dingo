@@ -1143,8 +1143,12 @@ class ChainComposer:
     ) -> torch.Tensor:
         """Evaluate the chain's proposal log probability at given samples.
 
-        This is used to re-evaluate saved samples, and for importance sampling. The
-        steps are folded in reverse order, so that the columns are restored to the
+        Importance sampling does not need this: the proposal density of a chain's
+        own samples is returned by `sample_and_log_prob` and stored with them. The
+        reverse fold evaluates the same density at parameters the chain did not
+        draw (for diagnostics, or to compare proposals), and is what makes the
+        stored density a well-defined function of the final columns. The steps are
+        folded in reverse order, so that the columns are restored to the
         state each step saw during sampling: a `Reparametrization` rebuilds the
         inputs it consumed via `inverse` (for example `ra@t_ref` from the event-frame
         `ra`) and contributes `-log|det J|`; a `Factor` contributes its `log_prob` at
