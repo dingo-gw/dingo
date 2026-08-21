@@ -7,7 +7,7 @@ import numpy as np
 from dingo.gw.domains import build_domain, UniformFrequencyDomain
 from dingo.gw.domains.base_frequency_domain import BaseFrequencyDomain
 from dingo.gw.gwutils import *
-from dingo.gw.dataset import DingoDataset
+from dingo.core.dataset import DingoDataset
 
 HIGH_ASD_VALUE = 1.0
 

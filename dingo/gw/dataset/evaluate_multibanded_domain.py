@@ -4,15 +4,14 @@ import numpy as np
 import yaml
 from scipy.interpolate import interp1d
 
-from dingo.gw.dataset import generate_parameters_and_polarizations
 from dingo.gw.domains import build_domain, MultibandedFrequencyDomain
 from dingo.gw.gwutils import get_mismatch
 from dingo.gw.prior import build_prior_with_defaults
-from dingo.gw.waveform_generator import (
-    NewInterfaceWaveformGenerator,
-    WaveformGenerator,
+from dingo.gw.dataset.generate import (
     generate_waveforms_parallel,
+    generate_parameters_and_polarizations,
 )
+from dingo.gw.waveform_generator.api import build_waveform_generator
 
 
 def _evaluate_multibanding_main(
@@ -46,24 +45,15 @@ def _evaluate_multibanding_main(
     if not isinstance(domain, MultibandedFrequencyDomain):
         raise ValueError("Waveform dataset domain not a MultibandedFrequencyDomain.")
 
-    if settings["waveform_generator"].get("new_interface", False):
-        waveform_generator_mfd = NewInterfaceWaveformGenerator(
-            domain=domain,
-            **settings["waveform_generator"],
-        )
-        waveform_generator_ufd = NewInterfaceWaveformGenerator(
-            domain=domain.base_domain,
-            **settings["waveform_generator"],
-        )
-    else:
-        waveform_generator_mfd = WaveformGenerator(
-            domain=domain,
-            **settings["waveform_generator"],
-        )
-        waveform_generator_ufd = WaveformGenerator(
-            domain=domain.base_domain,
-            **settings["waveform_generator"],
-        )
+    # Strip legacy new_interface flag; new API dispatches by approximant.
+    wfg_kwargs = {
+        k: v for k, v in settings["waveform_generator"].items() if k != "new_interface"
+    }
+
+    waveform_generator_mfd = build_waveform_generator(wfg_kwargs, domain=domain)
+    waveform_generator_ufd = build_waveform_generator(
+        wfg_kwargs, domain=domain.base_domain
+    )
 
     # Generate MFD waveforms.
     parameters, polarizations_mfd = generate_parameters_and_polarizations(
@@ -71,18 +61,24 @@ def _evaluate_multibanding_main(
     )
 
     # Generate UFD waveforms, re-using the parameter choices from before.
-    polarizations_ufd = generate_waveforms_parallel(waveform_generator_ufd, parameters)
+    polarizations_ufd = generate_waveforms_parallel(
+        waveform_generator_ufd, parameters
+    )
 
     # Compare UFD waveforms against MFD waveforms interpolated to MFD.
     mismatches = {}
     ufd = domain.base_domain
     mfd = domain
-    for pol, d in polarizations_mfd.items():
-        mismatches[pol] = np.empty(len(d))
-        for i in range(len(d)):
-            mfd_interpolated = interp1d(mfd(), d[i], fill_value="extrapolate")(ufd())
-            mismatches[pol][i] = get_mismatch(
-                polarizations_ufd[pol][i],
+    for pol_name in ("h_plus", "h_cross"):
+        mfd_data = getattr(polarizations_mfd, pol_name)
+        ufd_data = getattr(polarizations_ufd, pol_name)
+        mismatches[pol_name] = np.empty(len(mfd_data))
+        for i in range(len(mfd_data)):
+            mfd_interpolated = interp1d(
+                mfd(), mfd_data[i], fill_value="extrapolate"
+            )(ufd())
+            mismatches[pol_name][i] = get_mismatch(
+                ufd_data[i],
                 mfd_interpolated,
                 ufd,
                 asd_file="aLIGO_ZERO_DET_high_P_asd.txt",

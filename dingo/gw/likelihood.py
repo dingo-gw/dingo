@@ -14,7 +14,6 @@ from dingo.gw.transforms import (
     DecimateWaveformsAndASDS,
     create_mask_based_on_frequency_update,
 )
-from dingo.gw.waveform_generator import WaveformGenerator
 from dingo.gw.domains import (
     Domain,
     UniformFrequencyDomain,
@@ -798,54 +797,6 @@ def build_stationary_gaussian_likelihood(
     )
 
     return likelihood
-
-
-def get_wfg(wfg_kwargs, data_domain, frequency_range=None):
-    """
-    Set up waveform generator from wfg_kwargs. The domain of the wfg is primarily
-    determined by the data domain, but a new (larger) frequency range can be
-    specified if this is necessary for the waveforms to be generated successfully
-    (e.g., for EOB waveforms which require a sufficiently small f_min and sufficiently
-    large f_max).
-
-    Parameters
-    ----------
-    wfg_kwargs: dict
-        Waveform generator parameters.
-    data_domain: dingo.gw.domains.Domain
-        Domain of event data, with bounds determined by likelihood integral.
-    frequency_range: dict = None
-        Frequency range for waveform generator. If None, that of data domain is used,
-        which corresponds to the bounds of the likelihood integral.
-        Possible keys:
-            'f_start': float
-                Frequency at which to start the waveform generation. Overrides f_start in
-                metadata["model"]["dataset_settings"]["waveform_generator"].
-            'f_end': float
-                Frequency at which to start the waveform generation.
-
-    Returns
-    -------
-    wfg: dingo.gw.waveform_generator.WaveformGenerator
-        Waveform generator object.
-
-    """
-    if frequency_range is None:
-        return WaveformGenerator(domain=data_domain, **wfg_kwargs)
-
-    else:
-        if "f_start" in frequency_range and frequency_range["f_start"] is not None:
-            if frequency_range["f_start"] > data_domain.f_min:
-                raise ValueError("f_start must be less than f_min.")
-            wfg_kwargs["f_start"] = frequency_range["f_start"]
-        if "f_end" in frequency_range and frequency_range["f_end"] is not None:
-            if frequency_range["f_end"] < data_domain.f_max:
-                raise ValueError("f_end must be greater than f_max.")
-            # get wfg domain, but care to not modify the original data_domain
-            data_domain = build_domain(
-                {**data_domain.domain_dict, "f_max": frequency_range["f_end"]}
-            )
-        return WaveformGenerator(domain=data_domain, **wfg_kwargs)
 
 
 def main():

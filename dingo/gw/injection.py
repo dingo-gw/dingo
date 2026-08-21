@@ -17,9 +17,11 @@ from dingo.gw.transforms import (
     SampleCalibrationParameters,
     ApplyCalibrationToWaveform,
 )
-from dingo.gw.waveform_generator.waveform_generator import (
-    WaveformGenerator,
-    NewInterfaceWaveformGenerator,
+from dingo.gw.waveform_generator.api import build_waveform_generator
+from dingo.gw.waveform_generator.adapters import (
+    polarization_to_dict,
+    theta_to_bbh_params,
+    translate_wfg_kwargs,
 )
 
 
@@ -63,13 +65,9 @@ class GWSignal(object):
         # the case for EOB waveforms, which require the larger range to generate
         # robustly. For this reason we have two domains.
 
-        new_interface_flag = wfg_kwargs.get("new_interface", False)
-        if new_interface_flag:
-            self.waveform_generator = NewInterfaceWaveformGenerator(
-                domain=wfg_domain, **wfg_kwargs
-            )
-        else:
-            self.waveform_generator = WaveformGenerator(domain=wfg_domain, **wfg_kwargs)
+        self._wfg_kwargs = dict(wfg_kwargs)
+        self._wfg_domain = wfg_domain
+        self._build_waveform_generator()
 
         self.t_ref = t_ref
         self.ifo_list = InterferometerList(ifo_list)
@@ -97,6 +95,19 @@ class GWSignal(object):
             if domain_in.delta_f != domain_out.delta_f:
                 raise ValueError("Domains must have same delta_f.")
 
+    def _build_waveform_generator(self):
+        self.waveform_generator = build_waveform_generator(
+            translate_wfg_kwargs(self._wfg_kwargs),
+            domain=self._wfg_domain,
+        )
+
+    def update_waveform_generator(self, **new_wfg_kwargs):
+        """Rebuild the waveform generator after changing one or more WFG kwargs
+        (e.g. approximant, f_ref). Kwargs use the same schema as wfg_kwargs at
+        construction time."""
+        self._wfg_kwargs.update(new_wfg_kwargs)
+        self._build_waveform_generator()
+
     @property
     def use_base_domain(self):
         return self._use_base_domain
@@ -106,10 +117,9 @@ class GWSignal(object):
         if value != self._use_base_domain:
             if value:
                 if hasattr(self.data_domain, "base_domain"):
-                    self.waveform_generator.domain = (
-                        self.waveform_generator.full_domain.base_domain
-                    )
+                    self._wfg_domain = self.waveform_generator.base_domain
                     self.data_domain = self.data_domain.base_domain
+                    self._build_waveform_generator()
                     self._use_base_domain = True
                     self._initialize_transform()
             else:
@@ -204,9 +214,12 @@ class GWSignal(object):
         theta_intrinsic = {k: float(v) for k, v in theta_intrinsic.items()}
 
         # Step 1: generate polarizations h_plus and h_cross
-        polarizations = self.waveform_generator.generate_hplus_hcross(theta_intrinsic)
+        pol = self.waveform_generator.generate_hplus_hcross(
+            theta_to_bbh_params(theta_intrinsic)
+        )
         polarizations = {  # truncation, in case wfg has a larger frequency range
-            k: self.data_domain.update_data(v) for k, v in polarizations.items()
+            k: self.data_domain.update_data(v)
+            for k, v in polarization_to_dict(pol).items()
         }
 
         # Step 2: project h_plus and h_cross onto detectors
@@ -258,14 +271,16 @@ class GWSignal(object):
         theta_intrinsic = {k: float(v) for k, v in theta_intrinsic.items()}
 
         # Step 1: generate m-contributions to polarizations h_plus and h_cross
-        pol_m = self.waveform_generator.generate_hplus_hcross_m(theta_intrinsic)
+        pol_m_raw = self.waveform_generator.generate_hplus_hcross_m(
+            theta_to_bbh_params(theta_intrinsic)
+        )
         # truncation, in case wfg has a larger frequency range
         pol_m = {
             k_m: {
                 k_pol: self.data_domain.update_data(v_pol)
-                for k_pol, v_pol in v_m.items()
+                for k_pol, v_pol in polarization_to_dict(v_m).items()
             }
-            for k_m, v_m in pol_m.items()
+            for k_m, v_m in pol_m_raw.items()
         }
 
         # Step 2: project m-contributions to h_plus and h_cross onto detectors

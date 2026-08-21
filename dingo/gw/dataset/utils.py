@@ -7,8 +7,53 @@ import yaml
 from typing import List
 
 from dingo.gw.SVD import SVDBasis
-from dingo.gw.dataset.generate_dataset import train_svd_basis
 from dingo.gw.dataset.waveform_dataset import WaveformDataset
+
+
+def train_svd_basis(dataset: WaveformDataset, size: int, n_train: int):
+    """
+    Train (and optionally validate) an SVD basis from a legacy WaveformDataset.
+
+    Parameters
+    ----------
+    dataset : WaveformDataset
+        Contains waveforms to be used for building SVD.
+    size : int
+        Number of elements to keep for the SVD basis.
+    n_train : int
+        Number of training waveforms to use per polarization. Remainder are
+        used for validation.
+
+    Returns
+    -------
+    SVDBasis, n_train, n_test
+        Since EOB waveforms can fail to generate, this also reports the actual
+        number of samples used for training and validation (possibly smaller
+        than requested).
+    """
+    train_data = np.vstack([val[:n_train] for val in dataset.polarizations.values()])
+    test_data = np.vstack([val[n_train:] for val in dataset.polarizations.values()])
+    test_parameters = pd.concat(
+        [dataset.parameters.iloc[n_train:] for _ in dataset.polarizations]
+    )
+    test_parameters.reset_index(drop=True, inplace=True)
+
+    print("Building SVD basis.")
+    basis = SVDBasis()
+    basis.generate_basis(train_data, size)
+
+    assert np.allclose(basis.V[: dataset.domain.min_idx], 0)
+
+    if test_data.size != 0:
+        basis.compute_test_mismatches(
+            test_data, parameters=test_parameters, verbose=True
+        )
+
+    n_ifos = len(dataset.polarizations)
+    n_train = len(train_data) // n_ifos
+    n_test = len(test_data) // n_ifos
+
+    return basis, n_train, n_test
 
 
 def merge_datasets(dataset_list: List[WaveformDataset]) -> WaveformDataset:

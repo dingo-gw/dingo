@@ -27,7 +27,7 @@ from dingo.core.utils import (
     build_train_and_test_loaders,
 )
 from dingo.core.utils.trainutils import EarlyStopping
-from dingo.gw.dataset import WaveformDataset
+from dingo.gw.dataset.waveform_dataset import WaveformDataset
 from dingo.core.posterior_models import BasePosteriorModel
 
 

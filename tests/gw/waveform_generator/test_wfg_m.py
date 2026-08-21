@@ -1,49 +1,54 @@
 """
-This tests the method WaveformGenerator.generate_hplus_hcross_m, that returns the
-polarzations disentangled into contributions m \in [-l_max, ...,0, ...,l_max],
-that transform as exp(-1j * m * phase_shift) under phase shifts. This is important when
-treating the phase parameter as an extrinsic parameter.
+Phase-shift round-trip test for the new-API generate_hplus_hcross_m.
 
-Note: this only accounts for the modified argument in the spherical harmonics, not for
-the rotation of phase_shift of the cartesian spins in xy plane. Our workaround is to
-set wfg.spin_conversion_phase = 0.0, which sets a constant phase 0 when converting PE
-spins to cartesian spins. This means that phi_12 and phi_jl have different definitions,
-which needs to be accounted for in postprocessing. The tests below all use
-wfg.spin_conversion_phase = 0.0.
+Verifies that summing the m-mode contributions with a phase shift matches
+generating h+/h× directly with phase + phase_shift. Ports the mismatch
+quality test from tests/gw/waveform_generator/test_wfg_m.py, exercising
+IMRPhenomXPHM, SEOBNRv4PHM, SEOBNRv5PHM, SEOBNRv5HM through the new
+WaveformGenerator hierarchy.
 """
-import pytest
-import numpy as np
-from matplotlib import pyplot as plt
 
-from dingo.gw.waveform_generator import (
-    WaveformGenerator,
-    sum_contributions_m,
-    NewInterfaceWaveformGenerator,
-)
-from dingo.gw.gwutils import get_mismatch
+from dataclasses import fields
+
+import numpy as np
+import pytest
+
 from dingo.gw.domains import build_domain
+from dingo.gw.gwutils import get_mismatch
 from dingo.gw.prior import build_prior_with_defaults
+from dingo.gw.waveform_generator.api import build_waveform_generator
+from dingo.gw.waveform_generator.polarizations import Polarization, sum_contributions_m
+from dingo.gw.waveform_generator.waveform_parameters import BBHWaveformParameters
+
+
+_BBH_FIELDS = {f.name for f in fields(BBHWaveformParameters)}
+
+
+def _to_bbh_params(theta: dict) -> BBHWaveformParameters:
+    return BBHWaveformParameters(**{k: v for k, v in theta.items() if k in _BBH_FIELDS})
 
 
 @pytest.fixture
 def uniform_fd_domain():
-    domain_settings = {
-        "type": "UniformFrequencyDomain",
-        "f_min": 10.0,
-        "f_max": 2048.0,  # Note that if this isn't a power of 2, mismatches are worse.
-        "delta_f": 0.125,
-    }
-    domain = build_domain(domain_settings)
-    return domain
+    return build_domain(
+        {
+            "type": "UniformFrequencyDomain",
+            "f_min": 10.0,
+            "f_max": 2048.0,
+            "delta_f": 0.125,
+        }
+    )
 
 
-@pytest.fixture(params=["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM"])
-def approximant(request):
-    return request.param
+try:
+    import pyseobnr  # noqa: F401
+
+    _APPROXIMANTS = ["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM"]
+except ImportError:
+    _APPROXIMANTS = ["IMRPhenomXPHM", "SEOBNRv4PHM"]
 
 
-@pytest.fixture
-def intrinsic_prior(approximant):
+def _intrinsic_prior(approximant: str):
     if "PHM" in approximant:
         intrinsic_dict = {
             "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
@@ -62,7 +67,7 @@ def intrinsic_prior(approximant):
             "geocent_time": 0.0,
         }
     else:
-        # Aligned spins
+        # Aligned-spin approximants (e.g., SEOBNRv5HM) cannot take in-plane spins.
         intrinsic_dict = {
             "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
             "mass_2": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
@@ -75,113 +80,71 @@ def intrinsic_prior(approximant):
             "chi_2": 'bilby.gw.prior.AlignedSpin(name="chi_2", a_prior=Uniform(minimum=0, maximum=0.99))',
             "geocent_time": 0.0,
         }
-    prior = build_prior_with_defaults(intrinsic_dict)
-    return prior
+    return build_prior_with_defaults(intrinsic_dict)
 
 
-@pytest.fixture
-def wfg(uniform_fd_domain, approximant):
-    if approximant in ["SEOBNRv5PHM", "SEOBNRv5HM"]:
-        wfg_class = NewInterfaceWaveformGenerator
-    else:
-        wfg_class = WaveformGenerator
-    return wfg_class(
-        approximant=approximant,
-        domain=uniform_fd_domain,
-        f_ref=10.0,
-        f_start=10.0,
-        spin_conversion_phase=0.0,
-    )
-
-
-@pytest.fixture
-def num_evaluations(approximant):
-    if "Phenom" in approximant:
-        return 10
-    elif approximant == "SEOBNRv4PHM":
+def _num_evaluations(approximant: str) -> int:
+    if approximant == "SEOBNRv4PHM":
         return 1
-    else:
-        return 10
+    return 10
 
 
-@pytest.fixture
-def tolerances(approximant):
+def _tolerances(approximant: str):
     # Return (max, median) mismatches expected.
     if approximant == "IMRPhenomXPHM":
-        # The mismatches are typically be of order 1e-5 to 1e-9. This comes from the
-        # calculation of the magnitude of the orbital angular momentum, which we calculate
-        # to a different order the IMRPhenomXPHM. It's tricky to get this exactly right,
-        # since there are many different methods for this. But the small mismatches we do
-        # get should not have a big effect in practice.
         return 2e-2, 1e-5
-
-    elif approximant == "SEOBNRv4PHM":
-        # The mismatches are typically be of order 1e-5. This is exclusively due to
-        # different tapering. The reference polarizations are tapered and FFTed on the
-        # level of polarizations, while for generate_hplus_hcross_m, the tapering and FFT
-        # happens on the level of complex modes.
-        # We tested the mismatches for 20k waveforms, and the largest mismatch encountered
-        # was 7e-4, while almost all mismatches were of order 1e-5.
+    if approximant == "SEOBNRv4PHM":
         return 5e-4, 5e-4
-
-    elif approximant in ["SEOBNRv5PHM", "SEOBNRv5HM"]:
-        # Tested on 1000 mismatches.
+    if approximant in ("SEOBNRv5PHM", "SEOBNRv5HM"):
         return 1e-9, 1e-12
-
-    else:
-        return 1e-5, 1e-5
+    return 1e-5, 1e-5
 
 
-# Uncomment to test only one approximant.
-try:
-    import pyseobnr
+@pytest.mark.parametrize("approximant", _APPROXIMANTS)
+def test_generate_hplus_hcross_m_phase_shift(approximant, uniform_fd_domain):
+    """Sum-of-modes with a phase shift == direct generation with shifted phase."""
+    prior = _intrinsic_prior(approximant)
+    num_evaluations = _num_evaluations(approximant)
+    max_tol, median_tol = _tolerances(approximant)
 
-    approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM"]
-except ImportError:
-    approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM"]
+    wfg = build_waveform_generator(
+        {
+            "approximant": approximant,
+            "f_ref": 10.0,
+            "f_start": 10.0,
+            "spin_conversion_phase": 0.0,
+        },
+        uniform_fd_domain,
+    )
 
-
-@pytest.mark.parametrize("approximant", approximant_list)
-def test_generate_hplus_hcross_m(intrinsic_prior, wfg, num_evaluations, tolerances):
     mismatches = []
-    for idx in range(num_evaluations):
-        p = intrinsic_prior.sample()
+    for _ in range(num_evaluations):
+        theta = prior.sample()
         phase_shift = np.random.uniform(high=2 * np.pi)
 
-        pol_m = wfg.generate_hplus_hcross_m(p)
-        pol = sum_contributions_m(pol_m, phase_shift=phase_shift)
-        pol_ref = wfg.generate_hplus_hcross({**p, "phase": p["phase"] + phase_shift})
+        pol_m = wfg.generate_hplus_hcross_m(_to_bbh_params(theta))
+        pol: Polarization = sum_contributions_m(pol_m, phase_shift=phase_shift)
+        pol_ref: Polarization = wfg.generate_hplus_hcross(
+            _to_bbh_params({**theta, "phase": theta["phase"] + phase_shift})
+        )
 
         mismatches.append(
             [
                 get_mismatch(
-                    pol[pol_name],
-                    pol_ref[pol_name],
+                    pol.h_plus,
+                    pol_ref.h_plus,
                     wfg.domain,
                     asd_file="aLIGO_ZERO_DET_high_P_asd.txt",
-                )
-                for pol_name in pol
+                ),
+                get_mismatch(
+                    pol.h_cross,
+                    pol_ref.h_cross,
+                    wfg.domain,
+                    asd_file="aLIGO_ZERO_DET_high_P_asd.txt",
+                ),
             ]
         )
 
-        debug = False
-        if debug:
-            maxval = max(mismatches[-1])
-            idx = mismatches[-1].index(maxval)
-            p = list(pol.keys())[idx]
-            plt.figure(figsize=(10, 7))
-            plt.plot(wfg.domain.sample_frequencies, pol[p], label="reconstructed")
-            plt.plot(
-                wfg.domain.sample_frequencies, pol_ref[p], label="ref", linestyle="--"
-            )
-            plt.plot(wfg.domain.sample_frequencies, pol_ref[p] - pol[p], label="diff")
-            plt.legend()
-            plt.xscale("log")
-            plt.xlim((5, 128))
-            plt.title(f"{p}, mismatch={maxval}")
-            plt.show()
-
     mismatches = np.array(mismatches)
-
-    assert np.max(mismatches) < tolerances[0]
-    assert np.median(mismatches) < tolerances[1]
+    assert np.max(mismatches) < max_tol
+    assert np.median(mismatches) < median_tol
