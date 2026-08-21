@@ -6,13 +6,11 @@ import logging
 from pathlib import Path
 from typing import Optional
 from bilby.core.prior import DeltaFunction
-from dingo.core.factors import (
-    ChainComposer,
-    ComposedSampler,
+from dingo.core.inference.composer import ChainComposer, ComposedSampler, GibbsBlock
+from dingo.core.inference.steps import (
     DeltaFactor,
     Factor,
     FlowFactor,
-    GibbsBlock,
     ProxyOffsetReparam,
     _base_model_metadata,
 )

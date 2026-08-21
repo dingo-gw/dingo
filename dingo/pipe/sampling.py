@@ -13,7 +13,7 @@ from bilby_pipe.utils import (
     resolve_filename_with_transfer_fallback,
 )
 
-from dingo.core.factors import FlowFactor
+from dingo.core.inference.steps import FlowFactor
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.inference.sampler import GWComposedSampler

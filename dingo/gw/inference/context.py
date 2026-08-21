@@ -10,7 +10,7 @@ import torch
 import yaml
 from bilby.core.prior import PriorDict, Uniform
 from torchvision.transforms import Compose
-from dingo.core.factors import _n_rows
+from dingo.core.inference.steps import _n_rows
 from dingo.core.posterior_models import BasePosteriorModel
 from dingo.core.transforms import GetItem
 from dingo.gw.domains import build_domain, MultibandedFrequencyDomain
@@ -59,7 +59,7 @@ class GWSamplerContext:
     by every factor in a chain, and serialized as the transport state between pipe
     stages.
 
-    This implements the `dingo.core.factors.SamplerContext` protocol. It owns the
+    This implements the `dingo.core.inference.context.SamplerContext` protocol. It owns the
     one-time data preprocessing (`prepared_data`) and builds the exact likelihood
     (`likelihood`) used by likelihood-based factors (synthetic phase) and importance
     sampling.

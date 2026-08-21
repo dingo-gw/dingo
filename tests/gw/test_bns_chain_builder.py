@@ -6,7 +6,7 @@ Mock metadata only; the real-model smoke lives in the local harnesses."""
 import numpy as np
 import pytest
 
-from dingo.core.factors import DeltaFactor, FlowFactor, ProxyOffsetReparam
+from dingo.core.inference.steps import DeltaFactor, FlowFactor, ProxyOffsetReparam
 from dingo.gw.inference.context import GWSamplerContext
 from dingo.gw.inference.sampler import GWComposedSampler, _proxy_offset_steps
 from dingo.gw.transforms import HeterodynePhase

@@ -16,7 +16,7 @@ from dingo.core.density import (
     interpolated_log_prob_multi,
     interpolated_sample_and_log_prob_multi,
 )
-from dingo.core.factors import (
+from dingo.core.inference.steps import (
     Factor,
     Reparametrization,
     Standardization,

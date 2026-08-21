@@ -19,7 +19,8 @@ imported the now-deleted ``dingo.core.samplers`` and ``dingo.gw.inference.gw_sam
 import numpy as np
 import pytest
 
-from dingo.core.factors import ChainComposer, DeltaFactor
+from dingo.core.inference.composer import ChainComposer
+from dingo.core.inference.steps import DeltaFactor
 from dingo.gw.inference.context import GWSamplerContext
 from dingo.gw.inference.sampler import GWComposedSampler
 from dingo.gw.result import Result

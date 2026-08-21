@@ -198,7 +198,8 @@ def test_context_without_event_data_serves_metadata_views_only():
 def test_sampler_provenance_block():
     import ast
 
-    from dingo.core.factors import ChainComposer, DeltaFactor
+    from dingo.core.inference.composer import ChainComposer
+    from dingo.core.inference.steps import DeltaFactor
     from dingo.gw.inference.sampler import GWComposedSampler
 
     sampler = GWComposedSampler(

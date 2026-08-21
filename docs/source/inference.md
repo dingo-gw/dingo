@@ -71,7 +71,7 @@ proceed on the `Result`.
 
 The full interface is documented under
 {py:class}`dingo.gw.inference.sampler.GWComposedSampler` (and its base class
-{py:class}`dingo.core.factors.ComposedSampler`) in the API reference.
+{py:class}`dingo.core.inference.composer.ComposedSampler`) in the API reference.
 
 ## Injections
 

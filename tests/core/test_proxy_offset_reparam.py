@@ -5,7 +5,8 @@ mass), including the reverse fold through a chain."""
 import pytest
 import torch
 
-from dingo.core.factors import ChainComposer, ProxyOffsetReparam, SampleTableFactor
+from dingo.core.inference.composer import ChainComposer
+from dingo.core.inference.steps import ProxyOffsetReparam, SampleTableFactor
 
 
 def test_contract():

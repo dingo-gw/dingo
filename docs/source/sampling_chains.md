@@ -57,8 +57,9 @@ flowchart TB
 
 In the figure, every step is written as a conditional $q_i$, which covers all factors, point masses included.
 
-The generic machinery (steps, stages, the composer, and the runner) is defined in
-`dingo.core.factors`. The gravitational-wave steps, the per-event context, and the
+The generic machinery is defined in `dingo.core.inference`: `steps` (the step
+types), `composer` (stages, the composer, and the runner), and `context` (the
+context protocol). The gravitational-wave steps, the per-event context, and the
 chain builders are defined in `dingo.gw.inference`. The builders described in
 [](inference.md) assemble the standard chains from model metadata. A chain is
 ordinary Python, however, and can just as well be assembled by hand (see
@@ -236,7 +237,7 @@ with the original, but with updated `domain`, `use_base_domain`, or `wfg_delta_f
 The representation vocabulary in this section (frequency domains, multibanded
 decimation, base-domain likelihoods) is specific to this domain family. To support
 a new domain family, write a new context class implementing the same interface
-(the `dingo.core.factors.SamplerContext` protocol: `prepared_data` and `likelihood`, plus the `prior` and `derive` methods used by importance sampling) rather than extending this one.
+(the `dingo.core.inference.context.SamplerContext` protocol: `prepared_data` and `likelihood`, plus the `prior` and `derive` methods used by importance sampling) rather than extending this one.
 ```
 
 ## Sampling mechanics
@@ -305,7 +306,8 @@ A chain is ordinary Python, and the builders use the same pieces that are availa
 to you:
 
 ```python
-from dingo.core.factors import ChainComposer, FlowFactor
+from dingo.core.inference.composer import ChainComposer
+from dingo.core.inference.steps import FlowFactor
 from dingo.gw.inference.context import GWSamplerContext
 from dingo.gw.inference.steps import RAToEventFrame
 
@@ -351,9 +353,9 @@ DataFrame runner (`run_sampler`) and the `Result` export (`to_result` / `to_hdf5
 
 The classes on this page are documented in the API reference:
 
-* {py:class}`dingo.core.factors.Factor`, with {py:class}`~dingo.core.factors.FlowFactor`, {py:class}`~dingo.core.factors.DeltaFactor`, and {py:class}`~dingo.core.factors.SampleTableFactor`
-* {py:class}`dingo.core.factors.Reparametrization`
-* {py:class}`dingo.core.factors.TargetCorrection`
-* {py:class}`dingo.core.factors.GibbsBlock`
-* {py:class}`dingo.core.factors.Stage` and {py:class}`dingo.core.factors.ChainComposer`
+* {py:class}`dingo.core.inference.steps.Factor`, with {py:class}`~dingo.core.inference.steps.FlowFactor`, {py:class}`~dingo.core.inference.steps.DeltaFactor`, and {py:class}`~dingo.core.inference.steps.SampleTableFactor`
+* {py:class}`dingo.core.inference.steps.Reparametrization`
+* {py:class}`dingo.core.inference.steps.TargetCorrection`
+* {py:class}`dingo.core.inference.composer.GibbsBlock`
+* {py:class}`dingo.core.inference.composer.Stage` and {py:class}`dingo.core.inference.composer.ChainComposer`
 * {py:class}`dingo.gw.inference.context.GWSamplerContext`, and the gravitational-wave steps in {py:mod}`dingo.gw.inference.steps`

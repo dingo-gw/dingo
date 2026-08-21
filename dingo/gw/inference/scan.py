@@ -20,8 +20,8 @@ import numpy as np
 import pandas as pd
 from bilby.gw.prior import BBHPriorDict
 
-from dingo.core.factors import (
-    ChainComposer,
+from dingo.core.inference.composer import ChainComposer
+from dingo.core.inference.steps import (
     FlowFactor,
     SampleTableFactor,
     _base_model_metadata,

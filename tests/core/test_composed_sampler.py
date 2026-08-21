@@ -22,7 +22,8 @@ import numpy as np
 import pytest
 import torch
 
-from dingo.core.factors import ChainComposer, ComposedSampler, FlowFactor
+from dingo.core.inference.composer import ChainComposer, ComposedSampler
+from dingo.core.inference.steps import FlowFactor
 from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
 
 

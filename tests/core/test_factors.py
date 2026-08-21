@@ -1,5 +1,5 @@
 """
-Unit tests for the factorized-sampler core executor (``dingo.core.factors``).
+Unit tests for the factorized-sampler core (``dingo.core.inference``).
 
 These exercise the vertical ``ChainComposer`` and ``chunk_and_concat`` with deterministic
 mock factors (no networks), so they are portable and fast: fan-out expansion + conditioning
@@ -13,17 +13,19 @@ import math
 import pytest
 import torch
 
-from dingo.core.factors import (
+from dingo.core.inference.composer import (
     ChainComposer,
+    GibbsBlock,
+    Stage,
+    chunk_and_concat,
+)
+from dingo.core.inference.steps import (
     DeltaFactor,
     Factor,
     FlowFactor,
-    GibbsBlock,
     Reparametrization,
     SampleTableFactor,
-    Stage,
     TargetCorrection,
-    chunk_and_concat,
 )
 
 
@@ -811,7 +813,7 @@ def test_sample_table_factor_emits_on_context_device():
     CUDA mixed CPU conditioning into a CUDA embedding)."""
     from types import SimpleNamespace
 
-    from dingo.core.factors import SampleTableFactor
+    from dingo.core.inference.steps import SampleTableFactor
 
     factor = SampleTableFactor({"x": torch.arange(4.0)}, log_prob=torch.zeros(4))
     context = SimpleNamespace(device="cuda")

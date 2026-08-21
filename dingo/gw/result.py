@@ -494,7 +494,8 @@ class Result(CoreResult):
         encodes the importance-sampling view (base domain, rebuilt domain, frequency
         updates). Out-of-prior rows get `phase = 0` and `log_prob = nan` (they
         receive zero weight in importance sampling regardless)."""
-        from dingo.core.factors import ChainComposer, SampleTableFactor
+        from dingo.core.inference.composer import ChainComposer
+        from dingo.core.inference.steps import SampleTableFactor
         from dingo.gw.inference.steps import SyntheticPhaseFactor
 
         theta_within = theta.iloc[np.flatnonzero(within_prior)]
