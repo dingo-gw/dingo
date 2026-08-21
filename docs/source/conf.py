@@ -81,6 +81,9 @@ autoclass_content = 'both'
 
 # Napolean Settings
 napoleon_google_docstring = False
+# Render numpy `Attributes` sections as a field list, so they do not duplicate the
+# attribute entries that apidoc's `:undoc-members:` generates for class annotations.
+napoleon_use_ivar = True
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']

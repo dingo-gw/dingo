@@ -43,7 +43,7 @@ this is GNPE with the chirp mass as the proxy parameter (see [GNPE](gnpe.md)). A
 inference the proxy is fixed per event, so a single iteration suffices and the
 density is preserved. A chirp-mass-conditioned model records the kernel and the
 phase order in its metadata under `gnpe_chirp`, and the
-[sampler context](sampling_chains.md#the-sampler-context) reads this to prepare data
+[sampler context](sampling_chains.md#sampler-context) reads this to prepare data
 as a function of `chirp_mass_proxy`. Heterodyning is applied to the raw strain before
 decimation (the two operations do not commute).
 
@@ -82,7 +82,7 @@ flowchart TB
 
 The pinned values have a single owner, the chain root, and are recorded with the
 samples. The heterodyne receives the proxy through the row-aligned `prepared_data`
-contract of the [sampler context](sampling_chains.md#the-sampler-context). Since the
+contract of the [sampler context](sampling_chains.md#sampler-context). Since the
 chain contains no Gibbs block, the samples carry their log probability and
 importance sampling proceeds without a density-recovery step.
 

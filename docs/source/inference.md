@@ -69,12 +69,9 @@ The `metadata` attribute contains all settings that went into producing the samp
 event data; `to_hdf5()` saves it directly. Importance sampling and plotting then
 proceed on the `Result`.
 
-```{eval-rst}
-.. autoclass:: dingo.gw.inference.sampler.GWComposedSampler
-    :members:
-    :inherited-members:
-    :show-inheritance:
-```
+The full interface is documented under
+{py:class}`dingo.gw.inference.sampler.GWComposedSampler` (and its base class
+{py:class}`dingo.core.factors.ComposedSampler`) in the API reference.
 
 ## Injections
 
@@ -83,11 +80,8 @@ Injections (simulated signals in stationary Gaussian noise) are produced with th
 parameters drawn from a prior (`random_injection()`), and it returns data in the
 `event_data` format above, ready to pass to a sampler.
 
-```{eval-rst}
-.. autoclass:: dingo.gw.injection.Injection
-    :members:
-    :show-inheritance:
-```
+The full interface is documented under {py:class}`dingo.gw.injection.Injection` in
+the API reference.
 
 ```{hint}
 The class method `from_posterior_model_metadata()` instantiates an `Injection` with

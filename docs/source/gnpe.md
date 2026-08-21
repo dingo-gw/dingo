@@ -119,12 +119,7 @@ sampler = GWComposedSampler.from_gnpe_models(
 ## The `GibbsBlock` step
 
 GNPE inference uses `GWComposedSampler.from_gnpe_models(init_model, main_model, ...)`,
-which wraps the cyclic GNPE loop in a `GibbsBlock` chain step,
-```{eval-rst}
-.. autoclass:: dingo.core.factors.GibbsBlock
-   :members:
-   :show-inheritance:
-```
+which wraps the cyclic GNPE loop in a {py:class}`~dingo.core.factors.GibbsBlock` chain step.
 The block seeds the chain with samples from the initialization network, perturbs them with the kernel to obtain proxy samples, and then performs `num_iterations` Gibbs sweeps (kernel and main-network factors in turn) to obtain the final samples. Because Gibbs sampling breaks density access, the chain yields no log probability; `dingo_pipe` recovers it by training an unconditional flow for the proxies and re-sampling with a single density-preserving step (see [density recovery](result.md#density-recovery)).
 
 ## Single-step GNPE

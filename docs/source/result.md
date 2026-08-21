@@ -1,13 +1,6 @@
 # The Result class
 
-The `Result` class stores the output of a `Sampler` run, namely a collection of samples. It contains several methods for operating on the samples, including for **importance sampling**, **plotting**, and **density recovery**: 
-
-```{eval-rst}
-.. autoclass:: dingo.gw.result.Result
-    :members:
-    :inherited-members:
-    :show-inheritance:
-```
+The `Result` class stores the output of a `Sampler` run, namely a collection of samples. It contains several methods for operating on the samples, including for **importance sampling**, **plotting**, and **density recovery**. The full interface is documented under {py:class}`dingo.gw.result.Result` (and its base class {py:class}`dingo.core.result.Result`) in the API reference.
 
 Following a sampler run, a `Result` can be obtained using `Sampler.to_result()`. Since `Result` inherits from `DingoDataset` it also possesses `to_file()` and `to_dictionary()` methods for saving samples and associated metadata (including context data, namely event data and ASDs).
 
