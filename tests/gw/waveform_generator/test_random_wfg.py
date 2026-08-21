@@ -16,8 +16,8 @@ import pytest
 
 from dingo.gw.domains import UniformFrequencyDomain
 from dingo.gw.waveform_generator.polarizations import Polarization
-from dingo.gw.waveform_generator.new_api import (
-    NewWaveformGenerator,
+from dingo.gw.waveform_generator.api import (
+    WaveformGenerator,
     RandomWaveformGenerator,
     build_waveform_generator,
 )
@@ -53,7 +53,7 @@ class TestFactory:
         assert isinstance(wfg, RandomWaveformGenerator)
 
     def test_is_waveform_generator(self, wfg):
-        assert isinstance(wfg, NewWaveformGenerator)
+        assert isinstance(wfg, WaveformGenerator)
 
     def test_has_modes_method(self, wfg):
         assert hasattr(wfg, "generate_hplus_hcross_m")

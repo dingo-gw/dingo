@@ -1,9 +1,10 @@
 # Waveform generator API migration
 
 This page shows how the same tasks look under the **new** waveform-generator
-API (the only one now shipped in dingo-gw) versus the **legacy** dict-based
-API that was removed in the 2026-08 refactor. If you are updating scripts or
-notebooks written against the old API, use this as a translation guide.
+API — the primary interface shipped in dingo-gw — versus the **legacy**
+dict-based API, which is still importable as a thin, `@deprecated` wrapper
+over the new interface. If you are updating scripts or notebooks written
+against the old API, use this as a translation guide.
 
 ## What changed and why
 
@@ -19,6 +20,10 @@ Both accepted plain `dict` parameters (both for the WFG kwargs and for the
 per-waveform theta), returned polarizations as `{"h_plus": array,
 "h_cross": array}` dicts, and required callers to pick the right subclass by
 name.
+
+These historic names still resolve — they are now deprecated wrappers under
+`dingo.gw.waveform_generator.legacy` — but every call emits a
+`DeprecationWarning`. Use the natural API described below in new code.
 
 The new API replaces this with:
 
@@ -192,14 +197,14 @@ pol_scaled = wfg.generate_hplus_hcross(params)
 ```
 
 Dataset generation attaches its whitening + SVD compression pipeline via this
-slot automatically; see `dingo/gw/dataset/new_generate.py` for the
+slot automatically; see `dingo/gw/dataset/generate.py` for the
 production example.
 
 ## Dataset generation
 
 The CLI entry point is unchanged (`dingo_generate_dataset --settings_file
 settings.yaml`); the module it invokes now lives in
-`dingo.gw.dataset.new_cli`. In Python, use the new-API entry point directly:
+`dingo.gw.dataset.cli`. In Python, use the new-API entry point directly:
 
 **Legacy (removed):**
 
@@ -212,20 +217,24 @@ from dingo.gw.dataset import generate_dataset  # gone
 ```python
 from dingo.gw.dataset import (
     DatasetSettings,
-    new_generate_waveform_dataset,
-    NewWaveformDataset,
+    generate_waveform_dataset,
+    WaveformDataset,
 )
 
 settings = DatasetSettings.from_dict(yaml.safe_load(open("settings.yaml")))
-dataset: NewWaveformDataset = new_generate_waveform_dataset(
-    settings, num_processes=8
-)
+dataset: WaveformDataset = generate_waveform_dataset(settings, num_processes=8)
 dataset.save("waveform_dataset.hdf5")
 ```
 
-`NewWaveformDataset` stores `BatchPolarizations` for the waveforms and a
-`pandas.DataFrame` for the parameters, plus the source `DatasetSettings` for
-reproducibility.
+`WaveformDataset` (the natural, dataclass-based container at
+`dingo.gw.dataset.WaveformDataset`) stores `BatchPolarizations` for the
+waveforms and a `pandas.DataFrame` for the parameters, plus the source
+`DatasetSettings` for reproducibility.
+
+The legacy `WaveformDataset` container is still importable from its fully
+qualified path (`dingo.gw.dataset.waveform_dataset.WaveformDataset`) since
+the training pipeline currently relies on it. It is expected to be phased
+out as consumers migrate.
 
 ## YAML settings
 
@@ -278,16 +287,40 @@ Two small additions:
   during construction; no config change is needed for existing model
   metadata, though it should be removed from new configs.
 
+## Deprecated wrappers
+
+The following legacy names still resolve, but each emits a
+`DeprecationWarning` and delegates internally to the natural API. Prefer
+the replacements in new code.
+
+| Legacy import | Emits | Replacement |
+| --- | --- | --- |
+| `dingo.gw.waveform_generator.legacy.WaveformGenerator` | DeprecationWarning on `__init__` | `dingo.gw.waveform_generator.build_waveform_generator` + `BBHWaveformParameters` |
+| `dingo.gw.waveform_generator.NewInterfaceWaveformGenerator` | DeprecationWarning on `__init__` | Same as above — the factory dispatches by approximant, no flag needed |
+| `dingo.gw.waveform_generator.legacy.sum_contributions_m` | DeprecationWarning on call | `dingo.gw.waveform_generator.sum_contributions_m` (Polarization-typed) |
+| `dingo.gw.waveform_generator.generate_waveforms_parallel` (legacy `pool=` signature) | DeprecationWarning on call | `dingo.gw.dataset.generate_waveforms_parallel(wfg, parameters, num_processes)` |
+| `dingo.gw.dataset.generate_dataset.generate_dataset` | DeprecationWarning on call | `dingo.gw.dataset.generate_waveform_dataset(settings, num_processes)` |
+| `dingo.gw.dataset.generate_dataset.generate_parameters_and_polarizations` | DeprecationWarning on call | `dingo.gw.dataset.generate_parameters_and_polarizations` (returns `BatchPolarizations`) |
+| `dingo.gw.dataset.generate_dataset._generate_dataset_main` | DeprecationWarning on call | `dingo.gw.dataset.cli.generate_dataset_main` |
+| `dingo.gw.prior.new_build_prior_with_defaults` | DeprecationWarning on call | `dingo.gw.prior.build_prior_with_defaults` (accepts both `IntrinsicPriors` and dict) |
+
+To surface any lingering internal use of these paths, run the test suite
+with warnings promoted to errors:
+
+```bash
+pytest -W error::DeprecationWarning tests/
+```
+
 ## Reference
 
 - Factory: `dingo.gw.waveform_generator.build_waveform_generator`
-- Classes: `NewWaveformGenerator` (ABC),
+- Classes: `WaveformGenerator` (ABC),
   `LALSimWaveformGenerator`, `SEOBNRv4PHMWaveformGenerator`,
   `IMRPhenomXPHMWaveformGenerator`, `GWSignalWaveformGenerator`,
   `RandomWaveformGenerator`
 - Types: `Polarization`, `BatchPolarizations`, `BBHWaveformParameters`,
   `WaveformGeneratorParameters`
-- Dataset: `DatasetSettings`, `NewWaveformDataset`,
-  `new_generate_waveform_dataset`
+- Dataset: `DatasetSettings`, `WaveformDataset`,
+  `generate_waveform_dataset`
 - CLI: `dingo_generate_dataset` (implemented in
-  `dingo.gw.dataset.new_cli:main`)
+  `dingo.gw.dataset.cli:main`)

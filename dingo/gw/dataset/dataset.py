@@ -21,7 +21,7 @@ from .dataset_settings import DatasetSettings
 _logger = logging.getLogger(__name__)
 
 
-class NewWaveformDataset:
+class WaveformDataset:
     """
     Container for waveform parameters and polarizations.
 
@@ -84,7 +84,7 @@ class NewWaveformDataset:
 
     def __repr__(self) -> str:
         return (
-            f"NewWaveformDataset(num_waveforms={len(self)}, "
+            f"WaveformDataset(num_waveforms={len(self)}, "
             f"num_parameters={len(self.parameters.columns)}, "
             f"waveform_length={self.polarizations.num_frequency_bins})"
         )
@@ -131,7 +131,7 @@ class NewWaveformDataset:
         _logger.info(f"Dataset saved successfully ({len(self)} waveforms)")
 
     @classmethod
-    def load(cls, file_path: Union[str, Path]) -> "NewWaveformDataset":
+    def load(cls, file_path: Union[str, Path]) -> "WaveformDataset":
         file_path = Path(file_path)
         _logger.info(f"Loading dataset from {file_path}")
 
@@ -171,7 +171,7 @@ class NewWaveformDataset:
         for key, value in data.items():
             if isinstance(value, dict):
                 subgroup = group.create_group(key)
-                NewWaveformDataset._save_dict_to_group(subgroup, value)
+                WaveformDataset._save_dict_to_group(subgroup, value)
             elif value is None:
                 ds = group.create_dataset(key, data=h5py.Empty("f"))
                 ds.attrs["is_none"] = True
@@ -191,7 +191,7 @@ class NewWaveformDataset:
         for key in group.keys():
             item = group[key]
             if isinstance(item, h5py.Group):
-                result[key] = NewWaveformDataset._load_dict_from_group(item)
+                result[key] = WaveformDataset._load_dict_from_group(item)
             elif isinstance(item, h5py.Dataset):
                 if item.attrs.get("is_none", False):
                     result[key] = None

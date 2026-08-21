@@ -9,7 +9,7 @@ using the new-style WaveformGenerator hierarchy.
 import numpy as np
 import pytest
 from dingo.gw.domains import UniformFrequencyDomain
-from dingo.gw.waveform_generator.new_api import build_waveform_generator
+from dingo.gw.waveform_generator.api import build_waveform_generator
 from dingo.gw.waveform_generator.waveform_parameters import BBHWaveformParameters
 from dingo.gw.waveform_generator.polarizations import Polarization
 

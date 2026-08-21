@@ -9,11 +9,11 @@ import pandas as pd
 import pytest
 
 from dingo.gw.domains import UniformFrequencyDomain
-from dingo.gw.waveform_generator.new_api import build_waveform_generator
+from dingo.gw.waveform_generator.api import build_waveform_generator
 from dingo.gw.waveform_generator.polarizations import BatchPolarizations
-from dingo.gw.dataset.new_generate import (
+from dingo.gw.dataset.generate import (
     generate_waveforms_sequential,
-    new_generate_parameters_and_polarizations,
+    generate_parameters_and_polarizations,
     apply_transforms_to_polarizations,
     train_svd_basis,
 )
@@ -87,7 +87,7 @@ class TestGenerateParametersAndPolarizations:
             }
         )
 
-        parameters, polarizations = new_generate_parameters_and_polarizations(
+        parameters, polarizations = generate_parameters_and_polarizations(
             waveform_generator, prior, num_samples=5
         )
 

@@ -9,11 +9,11 @@ import pytest
 
 from dingo.gw.approximant import Approximant
 from dingo.gw.domains import UniformFrequencyDomain
-from dingo.gw.waveform_generator.new_api import (
+from dingo.gw.waveform_generator.api import (
     GWSignalWaveformGenerator,
     IMRPhenomXPHMWaveformGenerator,
     LALSimWaveformGenerator,
-    NewWaveformGenerator,
+    WaveformGenerator,
     RandomWaveformGenerator,
     SEOBNRv4PHMWaveformGenerator,
     _get_waveform_generator_class,
@@ -64,14 +64,14 @@ class TestBuildWaveformGenerator:
             {"approximant": "RandomApproximant", "f_ref": 20.0}, domain
         )
         assert isinstance(wfg, RandomWaveformGenerator)
-        assert isinstance(wfg, NewWaveformGenerator)
+        assert isinstance(wfg, WaveformGenerator)
 
     def test_builds_lalsim(self, domain):
         wfg = build_waveform_generator(
             {"approximant": "IMRPhenomD", "f_ref": 20.0}, domain
         )
         assert isinstance(wfg, LALSimWaveformGenerator)
-        assert isinstance(wfg, NewWaveformGenerator)
+        assert isinstance(wfg, WaveformGenerator)
         assert not isinstance(wfg, RandomWaveformGenerator)
 
     def test_builds_imrphenomxphm(self, domain):
@@ -95,7 +95,7 @@ class TestBuildWaveformGenerator:
             {"approximant": "SEOBNRv5PHM", "f_ref": 20.0}, domain
         )
         assert isinstance(wfg, GWSignalWaveformGenerator)
-        assert isinstance(wfg, NewWaveformGenerator)
+        assert isinstance(wfg, WaveformGenerator)
         assert hasattr(wfg, "generate_hplus_hcross_m")
 
     def test_build_with_optional_params(self, domain):
@@ -150,7 +150,7 @@ class TestABCNotInstantiable:
 
     def test_cannot_instantiate_abc(self, domain):
         with pytest.raises(TypeError):
-            NewWaveformGenerator(
+            WaveformGenerator(
                 Approximant("RandomApproximant"), domain, 20.0
             )
 
@@ -159,10 +159,10 @@ class TestInheritance:
     """Test the class hierarchy relationships."""
 
     def test_lalsim_is_wfg(self):
-        assert issubclass(LALSimWaveformGenerator, NewWaveformGenerator)
+        assert issubclass(LALSimWaveformGenerator, WaveformGenerator)
 
     def test_random_is_wfg(self):
-        assert issubclass(RandomWaveformGenerator, NewWaveformGenerator)
+        assert issubclass(RandomWaveformGenerator, WaveformGenerator)
 
     def test_random_is_not_lalsim(self):
         assert not issubclass(RandomWaveformGenerator, LALSimWaveformGenerator)
@@ -174,7 +174,7 @@ class TestInheritance:
         assert issubclass(IMRPhenomXPHMWaveformGenerator, LALSimWaveformGenerator)
 
     def test_gwsignal_is_wfg(self):
-        assert issubclass(GWSignalWaveformGenerator, NewWaveformGenerator)
+        assert issubclass(GWSignalWaveformGenerator, WaveformGenerator)
 
     def test_gwsignal_is_not_lalsim(self):
         assert not issubclass(GWSignalWaveformGenerator, LALSimWaveformGenerator)

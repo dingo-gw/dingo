@@ -4,7 +4,7 @@ Tests for Phase A additions to the new-style WaveformGenerator API:
 - catch_waveform_errors kwarg on generate_hplus_hcross
 - extra_kwargs passthrough to gwsignal
 - self.transform slot applied in _apply_post_generation
-- base_domain property on NewWaveformGenerator
+- base_domain property on WaveformGenerator
 """
 
 import numpy as np
@@ -15,7 +15,7 @@ from dingo.gw.domains import (
     UniformFrequencyDomain,
 )
 from dingo.gw.waveform_generator import polarization_functions
-from dingo.gw.waveform_generator.new_api import (
+from dingo.gw.waveform_generator.api import (
     build_waveform_generator,
 )
 from dingo.gw.waveform_generator.polarizations import Polarization
@@ -111,7 +111,7 @@ class TestExtraKwargs:
 
     def test_passed_through_constructor(self, ufd):
         from dingo.gw.approximant import Approximant
-        from dingo.gw.waveform_generator.new_api import RandomWaveformGenerator
+        from dingo.gw.waveform_generator.api import RandomWaveformGenerator
 
         w = RandomWaveformGenerator(
             Approximant("RandomApproximant"),

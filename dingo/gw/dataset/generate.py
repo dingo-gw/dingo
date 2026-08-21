@@ -21,9 +21,9 @@ from dingo.gw.compression.transforms import (
     WhitenAndUnwhiten,
 )
 from dingo.gw.domains import Domain, DomainParameters, build_domain
-from dingo.gw.prior import new_build_prior_with_defaults
-from dingo.gw.waveform_generator.new_api import (
-    NewWaveformGenerator,
+from dingo.gw.prior import build_prior_with_defaults
+from dingo.gw.waveform_generator.api import (
+    WaveformGenerator,
     build_waveform_generator,
 )
 from dingo.gw.waveform_generator.polarizations import BatchPolarizations
@@ -31,12 +31,12 @@ from dingo.gw.waveform_generator.waveform_parameters import BBHWaveformParameter
 from .compression_settings import CompressionSettings
 from .dataset_settings import DatasetSettings
 from .generation_types import WaveformGeneratorConfig, WaveformResult
-from .new_waveform_dataset import NewWaveformDataset
+from .dataset import WaveformDataset
 
 _logger = logging.getLogger(__name__)
 
 # Worker process state (standard ProcessPoolExecutor initializer pattern)
-_worker_generator: Optional[NewWaveformGenerator] = None
+_worker_generator: Optional[WaveformGenerator] = None
 _worker_domain: Optional[Domain] = None
 
 
@@ -110,7 +110,7 @@ def _generate_single_waveform(
 
 
 def generate_waveforms_sequential(
-    waveform_generator: NewWaveformGenerator,
+    waveform_generator: WaveformGenerator,
     parameters: pd.DataFrame,
 ) -> BatchPolarizations:
     """Generate waveforms sequentially (single process)."""
@@ -151,7 +151,7 @@ def generate_waveforms_sequential(
 
 
 def generate_waveforms_parallel(
-    waveform_generator: NewWaveformGenerator,
+    waveform_generator: WaveformGenerator,
     parameters: pd.DataFrame,
     num_processes: int = 4,
 ) -> BatchPolarizations:
@@ -212,7 +212,7 @@ def generate_waveforms_parallel(
 
 
 def generate_waveforms_parallel_optimized(
-    waveform_generator: NewWaveformGenerator,
+    waveform_generator: WaveformGenerator,
     parameters: pd.DataFrame,
     num_processes: int = 4,
     batch_size: Optional[int] = None,
@@ -293,8 +293,8 @@ def generate_waveforms_parallel_optimized(
     return polarizations
 
 
-def new_generate_parameters_and_polarizations(
-    waveform_generator: NewWaveformGenerator,
+def generate_parameters_and_polarizations(
+    waveform_generator: WaveformGenerator,
     prior: BBHPriorDict,
     num_samples: int,
     num_processes: int = 1,
@@ -395,7 +395,7 @@ def build_compression_transforms(
     compression_settings: CompressionSettings,
     domain: Domain,
     prior: BBHPriorDict,
-    waveform_generator: NewWaveformGenerator,
+    waveform_generator: WaveformGenerator,
     num_processes: int,
 ) -> Tuple[Optional[ComposeTransforms], Optional[SVDBasis]]:
     """Build compression transform pipeline from settings."""
@@ -429,7 +429,7 @@ def build_compression_transforms(
                 + svd_settings.num_validation_samples
             )
             train_parameters, train_polarizations = (
-                new_generate_parameters_and_polarizations(
+                generate_parameters_and_polarizations(
                     waveform_generator, prior, n_total, num_processes
                 )
             )
@@ -454,15 +454,15 @@ def build_compression_transforms(
         return None, None
 
 
-def new_generate_waveform_dataset(
+def generate_waveform_dataset(
     settings: DatasetSettings, num_processes: int = 1
-) -> NewWaveformDataset:
+) -> WaveformDataset:
     """Generate a waveform dataset based on settings."""
     settings.validate()
 
     _logger.info("Building domain, prior, and waveform generator...")
     domain = build_domain(settings.domain)
-    prior = new_build_prior_with_defaults(settings.intrinsic_prior)
+    prior = build_prior_with_defaults(settings.intrinsic_prior)
     wfg_dict = settings.waveform_generator.to_dict()
     waveform_generator = build_waveform_generator(wfg_dict, domain)
 
@@ -482,11 +482,11 @@ def new_generate_waveform_dataset(
             waveform_generator.transform = compression_transforms
             _logger.info(f"Compression pipeline: {compression_transforms}")
 
-    parameters, polarizations = new_generate_parameters_and_polarizations(
+    parameters, polarizations = generate_parameters_and_polarizations(
         waveform_generator, prior, settings.num_samples, num_processes
     )
 
-    dataset = NewWaveformDataset(
+    dataset = WaveformDataset(
         parameters=parameters,
         polarizations=polarizations,
         settings=settings,

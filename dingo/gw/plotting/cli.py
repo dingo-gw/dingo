@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 from dingo.gw.domains import TimeDomain, UniformFrequencyDomain, MultibandedFrequencyDomain
-from dingo.gw.waveform_generator.new_api import build_waveform_generator
+from dingo.gw.waveform_generator.api import build_waveform_generator
 from dingo.gw.waveform_generator.waveform_parameters import BBHWaveformParameters
 from dingo.gw.logs import set_logging
 from . import (

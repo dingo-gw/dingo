@@ -10,8 +10,8 @@ import pytest
 import yaml
 
 from dingo.gw.domains import UniformFrequencyDomain
-from dingo.gw.waveform_generator.new_api import (
-    NewWaveformGenerator,
+from dingo.gw.waveform_generator.api import (
+    WaveformGenerator,
     build_waveform_generator,
 )
 from dingo.gw.waveform_generator.waveform_generator_parameters import (
@@ -63,7 +63,7 @@ def config_file_yaml(config_dict, tmp_path):
 
 def _assert_waveform_generator(generator):
     """Helper function to assert common properties of a waveform generator."""
-    assert isinstance(generator, NewWaveformGenerator)
+    assert isinstance(generator, WaveformGenerator)
     assert generator._waveform_gen_params.approximant == "IMRPhenomPv2"
     assert generator._waveform_gen_params.f_ref == 20.0
     assert generator._waveform_gen_params.spin_conversion_phase == 0.0

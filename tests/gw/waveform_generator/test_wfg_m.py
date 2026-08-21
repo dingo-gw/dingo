@@ -5,7 +5,7 @@ Verifies that summing the m-mode contributions with a phase shift matches
 generating h+/h× directly with phase + phase_shift. Ports the mismatch
 quality test from tests/gw/waveform_generator/test_wfg_m.py, exercising
 IMRPhenomXPHM, SEOBNRv4PHM, SEOBNRv5PHM, SEOBNRv5HM through the new
-NewWaveformGenerator hierarchy.
+WaveformGenerator hierarchy.
 """
 
 from dataclasses import fields
@@ -16,7 +16,7 @@ import pytest
 from dingo.gw.domains import build_domain
 from dingo.gw.gwutils import get_mismatch
 from dingo.gw.prior import build_prior_with_defaults
-from dingo.gw.waveform_generator.new_api import build_waveform_generator
+from dingo.gw.waveform_generator.api import build_waveform_generator
 from dingo.gw.waveform_generator.polarizations import Polarization, sum_contributions_m
 from dingo.gw.waveform_generator.waveform_parameters import BBHWaveformParameters
 

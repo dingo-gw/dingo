@@ -93,7 +93,7 @@ polarization_modes_approximants: Tuple[Approximant, ...] = (
 )
 
 
-class NewWaveformGenerator(ABC):
+class WaveformGenerator(ABC):
     """
     Abstract base class for generating gravitational wave polarizations using
     various waveform approximants and domains.
@@ -272,7 +272,7 @@ class NewWaveformGenerator(ABC):
                 )
 
 
-class LALSimWaveformGenerator(NewWaveformGenerator):
+class LALSimWaveformGenerator(WaveformGenerator):
     """
     Waveform generator using the LALSimulation backend.
 
@@ -368,7 +368,7 @@ class IMRPhenomXPHMWaveformGenerator(LALSimWaveformGenerator):
         return polarization_modes
 
 
-class GWSignalWaveformGenerator(NewWaveformGenerator):
+class GWSignalWaveformGenerator(WaveformGenerator):
     """
     Waveform generator using the GWSignal backend.
 
@@ -428,7 +428,7 @@ class GWSignalWaveformGenerator(NewWaveformGenerator):
         return polarization_modes
 
 
-class RandomWaveformGenerator(NewWaveformGenerator):
+class RandomWaveformGenerator(WaveformGenerator):
     """
     Waveform generator for RandomApproximant.
 
@@ -478,8 +478,8 @@ class RandomWaveformGenerator(NewWaveformGenerator):
         return polarization_modes
 
 
-# Mapping from approximant string to NewWaveformGenerator subclass.
-_APPROXIMANT_CLASS_MAP: Dict[str, Type[NewWaveformGenerator]] = {
+# Mapping from approximant string to WaveformGenerator subclass.
+_APPROXIMANT_CLASS_MAP: Dict[str, Type[WaveformGenerator]] = {
     "RandomApproximant": RandomWaveformGenerator,
     "SEOBNRv4PHM": SEOBNRv4PHMWaveformGenerator,
     "IMRPhenomXPHM": IMRPhenomXPHMWaveformGenerator,
@@ -491,17 +491,17 @@ _APPROXIMANT_CLASS_MAP: Dict[str, Type[NewWaveformGenerator]] = {
 
 def _get_waveform_generator_class(
     approximant: Approximant,
-) -> Type[NewWaveformGenerator]:
-    """Return the appropriate NewWaveformGenerator subclass for the given approximant."""
+) -> Type[WaveformGenerator]:
+    """Return the appropriate WaveformGenerator subclass for the given approximant."""
     return _APPROXIMANT_CLASS_MAP.get(str(approximant), LALSimWaveformGenerator)
 
 
 def build_waveform_generator(
     params: Union[Dict, str, Path],
     domain: Optional[Domain] = None,
-) -> NewWaveformGenerator:
+) -> WaveformGenerator:
     """
-    Factory function to build a NewWaveformGenerator from various input types.
+    Factory function to build a WaveformGenerator from various input types.
 
     Parameters
     ----------
@@ -515,7 +515,7 @@ def build_waveform_generator(
 
     Returns
     -------
-    NewWaveformGenerator
+    WaveformGenerator
         An appropriate WaveformGenerator subclass instance.
     """
     if isinstance(params, (str, Path)):
@@ -540,8 +540,8 @@ def build_waveform_generator(
     return _build_from_dict(params, domain)
 
 
-def _build_from_dict(params: Dict, domain: Domain) -> NewWaveformGenerator:
-    """Build a NewWaveformGenerator from a flat dict + domain."""
+def _build_from_dict(params: Dict, domain: Domain) -> WaveformGenerator:
+    """Build a WaveformGenerator from a flat dict + domain."""
     for key in ("approximant", "f_ref"):
         if key not in params:
             raise ValueError(

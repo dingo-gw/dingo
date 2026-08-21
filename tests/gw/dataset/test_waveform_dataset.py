@@ -1,4 +1,4 @@
-"""Tests for NewWaveformDataset.
+"""Tests for WaveformDataset.
 
 Ported from dingo-waveform tests/test_dataset_generation.py (dataset parts).
 """
@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from dingo.gw.waveform_generator.polarizations import BatchPolarizations
-from dingo.gw.dataset.new_waveform_dataset import NewWaveformDataset
+from dingo.gw.dataset.dataset import WaveformDataset
 
 
 class TestNewWaveformDataset:
@@ -34,7 +34,7 @@ class TestNewWaveformDataset:
 
     def test_create_from_batch_polarizations(self, sample_data):
         parameters, polarizations = sample_data
-        dataset = NewWaveformDataset(parameters=parameters, polarizations=polarizations)
+        dataset = WaveformDataset(parameters=parameters, polarizations=polarizations)
 
         assert len(dataset) == 10
         assert dataset.parameters is parameters
@@ -48,7 +48,7 @@ class TestNewWaveformDataset:
             "h_plus": polarizations.h_plus,
             "h_cross": polarizations.h_cross,
         }
-        dataset = NewWaveformDataset(parameters=parameters, polarizations=pol_dict)
+        dataset = WaveformDataset(parameters=parameters, polarizations=pol_dict)
 
         assert len(dataset) == 10
         assert isinstance(dataset.polarizations, BatchPolarizations)
@@ -59,26 +59,26 @@ class TestNewWaveformDataset:
         # Remove some parameters to create mismatch
         parameters_short = parameters.iloc[:5]
         with pytest.raises(ValueError, match="Mismatch"):
-            NewWaveformDataset(
+            WaveformDataset(
                 parameters=parameters_short, polarizations=polarizations
             )
 
     def test_repr(self, sample_data):
         parameters, polarizations = sample_data
-        dataset = NewWaveformDataset(parameters=parameters, polarizations=polarizations)
+        dataset = WaveformDataset(parameters=parameters, polarizations=polarizations)
         repr_str = repr(dataset)
-        assert "NewWaveformDataset" in repr_str
+        assert "WaveformDataset" in repr_str
         assert "num_waveforms=10" in repr_str
 
     def test_save_and_load(self, sample_data, tmp_path):
         parameters, polarizations = sample_data
-        dataset = NewWaveformDataset(parameters=parameters, polarizations=polarizations)
+        dataset = WaveformDataset(parameters=parameters, polarizations=polarizations)
 
         save_path = tmp_path / "test_dataset.hdf5"
         dataset.save(save_path)
         assert save_path.exists()
 
-        loaded = NewWaveformDataset.load(save_path)
+        loaded = WaveformDataset.load(save_path)
         assert len(loaded) == len(dataset)
         assert np.allclose(loaded.polarizations.h_plus, dataset.polarizations.h_plus)
         assert np.allclose(loaded.polarizations.h_cross, dataset.polarizations.h_cross)
@@ -91,7 +91,7 @@ class TestNewWaveformDataset:
             "num_samples": 10,
             "domain": {"type": "FrequencyDomain", "f_min": 20.0, "f_max": 1024.0},
         }
-        dataset = NewWaveformDataset(
+        dataset = WaveformDataset(
             parameters=parameters,
             polarizations=polarizations,
             settings=settings_dict,
@@ -100,7 +100,7 @@ class TestNewWaveformDataset:
         save_path = tmp_path / "test_dataset_settings.hdf5"
         dataset.save(save_path)
 
-        loaded = NewWaveformDataset.load(save_path)
+        loaded = WaveformDataset.load(save_path)
         assert loaded.settings is not None
         assert loaded.settings["num_samples"] == 10
 
@@ -111,7 +111,7 @@ class TestNewWaveformDataset:
         basis = SVDBasis()
         basis.generate_basis(polarizations.h_plus, n_components=5, method="scipy")
 
-        dataset = NewWaveformDataset(
+        dataset = WaveformDataset(
             parameters=parameters,
             polarizations=polarizations,
             svd_basis=basis,
@@ -120,7 +120,7 @@ class TestNewWaveformDataset:
         save_path = tmp_path / "test_dataset_svd.hdf5"
         dataset.save(save_path)
 
-        loaded = NewWaveformDataset.load(save_path)
+        loaded = WaveformDataset.load(save_path)
         assert loaded.svd_basis is not None
         assert loaded.svd_basis.n_components == 5
         assert np.allclose(loaded.svd_basis.V, basis.V)
@@ -128,7 +128,7 @@ class TestNewWaveformDataset:
     def test_settings_as_dict(self, sample_data):
         parameters, polarizations = sample_data
         settings = {"key": "value"}
-        dataset = NewWaveformDataset(
+        dataset = WaveformDataset(
             parameters=parameters, polarizations=polarizations, settings=settings
         )
         assert dataset.settings == {"key": "value"}

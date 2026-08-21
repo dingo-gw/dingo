@@ -28,6 +28,7 @@ from bilby.core.prior import Uniform, Sine, Cosine
 import numpy as np
 import warnings
 
+from dingo.core.utils.deprecation import deprecated
 from dingo.gw.logs import TableStr
 
 if TYPE_CHECKING:
@@ -172,30 +173,33 @@ default_inference_parameters = [
 ]
 
 
-def build_prior_with_defaults(prior_settings: Dict[str, str]):
-    """
-    Generate BBHPriorDict based on dictionary of prior settings,
-    allowing for default values.
-
-    Parameters
-    ----------
-    prior_settings: Dict
-        A dictionary containing prior definitions for intrinsic parameters
-        Allowed values for each parameter are:
-            * 'default' to use a default prior
-            * a string for a custom prior, e.g.,
-               "Uniform(minimum=10.0, maximum=80.0, name=None, latex_label=None, unit=None, boundary=None)"
-
-    Depending on the particular prior choices the dimensionality of a
-    parameter sample obtained from the returned GWPriorDict will vary.
-    """
-
+def _build_prior_from_dict(prior_settings: Dict[str, str]) -> BBHPriorDict:
+    """Legacy dict path — resolves 'default' via default_intrinsic_dict."""
     full_prior_settings = deepcopy(prior_settings)
     for k, v in prior_settings.items():
         if v == "default":
             full_prior_settings[k] = default_intrinsic_dict[k]
-
     return BBHPriorDict(full_prior_settings)
+
+
+def build_prior_with_defaults(
+    prior_settings: "Union[IntrinsicPriors, Mapping[str, Union[str, float]]]",
+) -> BBHPriorDict:
+    """
+    Generate a ``BBHPriorDict`` from prior settings, allowing for default values.
+
+    Parameters
+    ----------
+    prior_settings
+        Either an ``IntrinsicPriors`` dataclass (the natural, typed form) or
+        a plain dictionary mapping parameter names to Bilby prior strings or
+        fixed floats. Dicts may use ``"default"`` for parameters listed in
+        ``default_intrinsic_dict`` and may mix intrinsic and extrinsic keys
+        (a common convenience at inference time).
+    """
+    if isinstance(prior_settings, IntrinsicPriors):
+        return BBHPriorDict(_get_prior_dict(prior_settings))
+    return _build_prior_from_dict(prior_settings)
 
 
 def split_off_extrinsic_parameters(theta):
@@ -424,18 +428,13 @@ def prior_split(
     return _BBHWfP(**intrinsic_dict), _BBHWfP(**extrinsic_dict)
 
 
+@deprecated(
+    "new_build_prior_with_defaults was a coexistence alias; the natural entrypoint "
+    "is build_prior_with_defaults, which now accepts IntrinsicPriors.",
+    replacement="build_prior_with_defaults",
+)
 def new_build_prior_with_defaults(
     prior_settings: Union[IntrinsicPriors, Mapping[str, Union[str, float]]],
 ) -> BBHPriorDict:
-    """
-    Generate BBHPriorDict based on prior settings, allowing for default values.
-
-    This is the new-style version that accepts IntrinsicPriors dataclasses
-    as well as plain dicts.
-    """
-    prior_settings_: IntrinsicPriors
-    if isinstance(prior_settings, dict):
-        prior_settings_ = IntrinsicPriors(**prior_settings)
-    else:
-        prior_settings_ = cast(IntrinsicPriors, prior_settings)
-    return BBHPriorDict(_get_prior_dict(prior_settings_))
+    """Deprecated alias for :func:`build_prior_with_defaults`."""
+    return build_prior_with_defaults(prior_settings)

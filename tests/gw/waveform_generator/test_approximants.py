@@ -6,7 +6,7 @@ Ported from dingo-waveform tests/test_approximants.py.
 
 from dingo.gw.approximant import Approximant
 from dingo.gw.prior import IntrinsicPriors
-from dingo.gw.waveform_generator.new_api import build_waveform_generator
+from dingo.gw.waveform_generator.api import build_waveform_generator
 
 
 def test_IMRPhenomXPHM():

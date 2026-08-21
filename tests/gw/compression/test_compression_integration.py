@@ -12,14 +12,14 @@ import pytest
 from dingo.gw.compression.svd import SVDBasis
 from dingo.gw.compression.transforms import ApplySVD, ComposeTransforms, WhitenAndUnwhiten
 from dingo.gw.dataset.compression_settings import CompressionSettings, SVDSettings
-from dingo.gw.dataset.new_generate import (
+from dingo.gw.dataset.generate import (
     apply_transforms_to_polarizations,
     build_compression_transforms,
     train_svd_basis,
 )
-from dingo.gw.dataset.new_waveform_dataset import NewWaveformDataset
+from dingo.gw.dataset.dataset import WaveformDataset
 from dingo.gw.domains import UniformFrequencyDomain
-from dingo.gw.waveform_generator.new_api import build_waveform_generator
+from dingo.gw.waveform_generator.api import build_waveform_generator
 from dingo.gw.waveform_generator.polarizations import BatchPolarizations
 
 
@@ -225,11 +225,11 @@ class TestBackwardCompatibility:
             h_cross=np.random.randn(2, 100) + 1j * np.random.randn(2, 100),
         )
 
-        dataset = NewWaveformDataset(parameters, polarizations)
+        dataset = WaveformDataset(parameters, polarizations)
 
         path = tmp_path / "old_dataset.hdf5"
         dataset.save(path)
-        loaded = NewWaveformDataset.load(path)
+        loaded = WaveformDataset.load(path)
 
         assert loaded.svd_basis is None
         assert len(loaded) == 2
@@ -252,7 +252,7 @@ class TestBackwardCompatibility:
             sample_polarizations, transforms
         )
 
-        dataset = NewWaveformDataset(
+        dataset = WaveformDataset(
             parameters=parameters,
             polarizations=compressed,
             svd_basis=basis,
@@ -260,7 +260,7 @@ class TestBackwardCompatibility:
 
         path = tmp_path / "compressed_dataset.hdf5"
         dataset.save(path)
-        loaded = NewWaveformDataset.load(path)
+        loaded = WaveformDataset.load(path)
 
         assert loaded.svd_basis is not None
         assert loaded.svd_basis.n_components == 10

@@ -7,11 +7,11 @@ from scipy.interpolate import interp1d
 from dingo.gw.domains import build_domain, MultibandedFrequencyDomain
 from dingo.gw.gwutils import get_mismatch
 from dingo.gw.prior import build_prior_with_defaults
-from dingo.gw.dataset.new_generate import (
+from dingo.gw.dataset.generate import (
     generate_waveforms_parallel,
-    new_generate_parameters_and_polarizations,
+    generate_parameters_and_polarizations,
 )
-from dingo.gw.waveform_generator.new_api import build_waveform_generator
+from dingo.gw.waveform_generator.api import build_waveform_generator
 
 
 def _evaluate_multibanding_main(
@@ -56,7 +56,7 @@ def _evaluate_multibanding_main(
     )
 
     # Generate MFD waveforms.
-    parameters, polarizations_mfd = new_generate_parameters_and_polarizations(
+    parameters, polarizations_mfd = generate_parameters_and_polarizations(
         waveform_generator_mfd, prior, num_samples, 1
     )
 

@@ -16,7 +16,7 @@ from typing import Dict, Any
 import yaml
 
 from .dataset_settings import DatasetSettings
-from .new_generate import new_generate_waveform_dataset
+from .generate import generate_waveform_dataset
 from dingo.gw.logs import set_logging
 
 _logger = logging.getLogger(__name__)
@@ -98,7 +98,7 @@ def generate_dataset_main(
 
     _logger.info("Starting dataset generation...")
     try:
-        dataset = new_generate_waveform_dataset(settings, num_processes=num_processes)
+        dataset = generate_waveform_dataset(settings, num_processes=num_processes)
     except Exception as e:
         _logger.error(f"Dataset generation failed: {e}")
         raise

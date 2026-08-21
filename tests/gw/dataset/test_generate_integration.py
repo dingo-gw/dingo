@@ -9,8 +9,8 @@ import pandas as pd
 import pytest
 
 from dingo.gw.dataset.dataset_settings import DatasetSettings
-from dingo.gw.dataset.new_generate import new_generate_waveform_dataset
-from dingo.gw.dataset.new_waveform_dataset import NewWaveformDataset
+from dingo.gw.dataset.generate import generate_waveform_dataset
+from dingo.gw.dataset.dataset import WaveformDataset
 from dingo.gw.dataset.waveform_generator_settings import WaveformGeneratorSettings
 from dingo.gw.domains import DomainParameters
 from dingo.gw.prior import IntrinsicPriors
@@ -41,12 +41,12 @@ def basic_settings():
 
 
 class TestGenerateWaveformDataset:
-    """Tests for new_generate_waveform_dataset function."""
+    """Tests for generate_waveform_dataset function."""
 
     def test_generate_sequential(self, basic_settings):
-        dataset = new_generate_waveform_dataset(basic_settings, num_processes=1)
+        dataset = generate_waveform_dataset(basic_settings, num_processes=1)
 
-        assert isinstance(dataset, NewWaveformDataset)
+        assert isinstance(dataset, WaveformDataset)
         assert len(dataset) <= basic_settings.num_samples
         assert hasattr(dataset.polarizations, "h_plus")
         assert hasattr(dataset.polarizations, "h_cross")
@@ -58,7 +58,7 @@ class TestGenerateWaveformDataset:
         assert np.abs(dataset.polarizations.h_cross).max() > 0.0
 
     def test_waveform_shapes(self, basic_settings):
-        dataset = new_generate_waveform_dataset(basic_settings, num_processes=1)
+        dataset = generate_waveform_dataset(basic_settings, num_processes=1)
 
         expected_length = int(
             basic_settings.domain.f_max / basic_settings.domain.delta_f
@@ -74,7 +74,7 @@ class TestGenerateWaveformDataset:
         )
 
     def test_parameter_columns(self, basic_settings):
-        dataset = new_generate_waveform_dataset(basic_settings, num_processes=1)
+        dataset = generate_waveform_dataset(basic_settings, num_processes=1)
 
         # Should have the parameters we sampled
         core_params = {"mass_1", "mass_2", "luminosity_distance", "phase"}
@@ -82,17 +82,17 @@ class TestGenerateWaveformDataset:
         assert core_params.issubset(actual_params)
 
     def test_settings_stored(self, basic_settings):
-        dataset = new_generate_waveform_dataset(basic_settings, num_processes=1)
+        dataset = generate_waveform_dataset(basic_settings, num_processes=1)
 
         assert dataset.settings is not None
         assert isinstance(dataset.settings, DatasetSettings)
 
     def test_round_trip_save_load(self, basic_settings, tmp_path):
-        dataset = new_generate_waveform_dataset(basic_settings, num_processes=1)
+        dataset = generate_waveform_dataset(basic_settings, num_processes=1)
 
         save_path = tmp_path / "test_dataset.hdf5"
         dataset.save(save_path)
-        loaded = NewWaveformDataset.load(save_path)
+        loaded = WaveformDataset.load(save_path)
 
         assert len(loaded) == len(dataset)
         assert np.allclose(
@@ -104,8 +104,8 @@ class TestGenerateWaveformDataset:
 
     def test_reproducibility(self, basic_settings):
         """Two datasets with same settings should produce different waveforms (random prior)."""
-        dataset1 = new_generate_waveform_dataset(basic_settings, num_processes=1)
-        dataset2 = new_generate_waveform_dataset(basic_settings, num_processes=1)
+        dataset1 = generate_waveform_dataset(basic_settings, num_processes=1)
+        dataset2 = generate_waveform_dataset(basic_settings, num_processes=1)
 
         # Parameters should be different (random sampling)
         assert not np.allclose(
