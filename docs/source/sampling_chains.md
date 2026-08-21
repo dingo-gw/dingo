@@ -327,15 +327,21 @@ DataFrame runner (`run_sampler`) and the `Result` export (`to_result` / `to_hdf5
    `Reparametrization`. A step that annotates the importance-sampling target is a
    `TargetCorrection`.
 2. **Declare the interface.** Set `parameters` (the columns emitted) and
-   `conditioning` (the columns read), plus `consumes` / `produces` for
-   side-channel columns.
-3. **Implement the contract.** A factor implements `sample_and_log_prob` and
-   `log_prob`, both in physical parameter space. `sample_and_log_prob` returns
-   `num_samples` draws per conditioning row, flattened in row-major order. A
-   reparametrization implements `forward` and `inverse` (and `log_det` when the
-   map is not measure-preserving). The inverse must rebuild exactly the consumed
-   columns, since `ChainComposer.log_prob` relies on it to restore them. A target correction implements
-   `correction`.
+   `conditioning` (the columns read). Set `consumes` if the step removes columns
+   from the chain (a reparametrization's replaced inputs, a correction's
+   intermediates), and `produces` if a factor emits columns beyond `parameters`.
+   A factor that does not draw new samples (a point mass, a fixed table) sets
+   `draws = False`, so that the composer runs it once rather than asking it for
+   `num_samples`.
+3. **Implement the contract.**
+   * A factor implements `sample_and_log_prob` and `log_prob`, both in physical
+     parameter space. `sample_and_log_prob` returns `num_samples` draws per
+     conditioning row, with the draws for a given row adjacent.
+   * A reparametrization implements `forward` and `inverse` (and `log_det` when
+     the map is not measure-preserving). The inverse must rebuild exactly the
+     consumed columns, since `ChainComposer.log_prob` relies on it to restore
+     them.
+   * A target correction implements `correction`.
 4. **Read data only through the context.** This keeps the step valid under a
    derived context.
 5. **Override `describe()`** if the step has configuration worth recording, and
