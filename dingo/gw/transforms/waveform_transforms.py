@@ -636,12 +636,13 @@ def factor_fiducial_waveform(
         if mass_ratio is not None:
             mass_ratio = mass_ratio[:, None]
     elif type(chirp_mass) == torch.Tensor:
+        # torch.outer promotes to the wider dtype (a 0-d tensor would not: the
+        # dimensioned float32 `f` would win), so the phase stays float64.
+        mc_f = torch.outer(chirp_mass.reshape(-1), f)
         if chirp_mass.dim() == 0:
-            mc_f = chirp_mass * f  # scalar tensor, no need for outer
-        else:
-            mc_f = torch.outer(chirp_mass, f)
-            if mass_ratio is not None:
-                mass_ratio = mass_ratio[:, None]
+            mc_f = mc_f.squeeze(0)
+        elif mass_ratio is not None:
+            mass_ratio = mass_ratio[:, None]
     else:
         raise TypeError(
             f"Invalid type {type(chirp_mass)}. "

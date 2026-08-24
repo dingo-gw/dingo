@@ -214,9 +214,11 @@ def test_sample_table_root_feeds_chain_and_sums_log_prob():
     # A chain continuing from existing samples: the table root emits the rows with
     # their stored log-prob, a 1:1 factor adds a block, and the ordinary fold yields
     # the joint proposal density (stored + delta) -- the importance-sampling shape.
-    stored = torch.tensor([0.5, 0.6, 0.7], dtype=torch.float64)
+    stored = torch.tensor([0.5, 0.6, 0.7])
     table = SampleTableFactor(
-        {"a": torch.tensor([1.0, 2.0, 3.0], dtype=torch.float64)}, log_prob=stored
+        # float64 input: the table casts to float32, the chain dtype.
+        {"a": torch.tensor([1.0, 2.0, 3.0], dtype=torch.float64)},
+        log_prob=stored,
     )
 
     class _PlusOne(Factor):
@@ -231,8 +233,9 @@ def test_sample_table_root_feeds_chain_and_sums_log_prob():
             return torch.full_like(given["a"], 0.25)
 
     out, lp = ChainComposer([table, _PlusOne()]).sample_and_log_prob(1, None)
-    assert torch.equal(out["a"], torch.tensor([1.0, 2.0, 3.0], dtype=torch.float64))
-    assert torch.equal(out["b"], torch.tensor([2.0, 3.0, 4.0], dtype=torch.float64))
+    assert out["a"].dtype == torch.float32  # the table casts to the chain dtype
+    assert torch.equal(out["a"], torch.tensor([1.0, 2.0, 3.0]))
+    assert torch.equal(out["b"], torch.tensor([2.0, 3.0, 4.0]))
     assert torch.equal(lp, stored + 0.25)
 
 
@@ -477,12 +480,22 @@ class _MockTargetCorrection(TargetCorrection):
 
 
 def test_target_correction_emits_side_channel_and_contributes_zero():
-    comp = ChainComposer([_ConstFactor("x"), _MockTargetCorrection(reads="x")])
+    # The correction reads and consumes the side channel `s` (not the sampled `x`).
+    comp = ChainComposer(
+        [_SideChannelFactor("x", side="s"), _MockTargetCorrection(reads="s")]
+    )
     out = comp.sample(5, context=None)
-    assert "x" not in out  # consumed
-    assert torch.equal(out["corr"], 2 * torch.arange(5, dtype=torch.float32))
-    # A correction adds 0 to the proposal density: log_prob = factor(0.5) + corr(0).
-    assert torch.allclose(out["log_prob"], torch.full((5,), 0.5))
+    assert "s" not in out and "x" in out  # the side channel is consumed
+    assert torch.equal(out["corr"], torch.zeros(5))
+    # A correction adds 0 to the proposal density.
+    assert torch.allclose(out["log_prob"], torch.zeros(5))
+
+
+def test_validation_rejects_correction_consuming_a_sampled_parameter():
+    # A correction has no inverse, so log_prob could not rebuild a consumed sampled
+    # parameter: reject at construction rather than failing later with a KeyError.
+    with pytest.raises(ValueError, match="side-channel"):
+        ChainComposer([_ConstFactor("x"), _MockTargetCorrection(reads="x")])
 
 
 def test_target_correction_rejects_fan_out():

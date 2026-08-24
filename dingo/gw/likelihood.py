@@ -624,8 +624,11 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         log_likelihood = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
         if self.return_aux_snr:
-            snr = kappa2 / rho2opt**0.5
-            return log_likelihood, snr
+            # Here kappa2 is the time-marginalized term, not a matched-filter
+            # statistic.
+            raise NotImplementedError(
+                "return_aux_snr is not implemented for time marginalization."
+            )
 
         return log_likelihood
 

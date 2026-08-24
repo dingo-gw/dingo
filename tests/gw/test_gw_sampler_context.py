@@ -202,9 +202,7 @@ def test_sampler_provenance_block():
     from dingo.core.inference.steps import DeltaFactor
     from dingo.gw.inference.sampler import GWComposedSampler
 
-    sampler = GWComposedSampler(
-        ChainComposer([DeltaFactor({"a": 1.0})]), None, {}, ["a"]
-    )
+    sampler = GWComposedSampler(ChainComposer([DeltaFactor({"a": 1.0})]), None)
     sampler.provenance_extra["models"] = {"model": "model.pt"}
     block = sampler.sampler_provenance()
     assert set(block) == {"chain", "models"}

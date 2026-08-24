@@ -64,9 +64,10 @@ class SamplingInput(Input):
             if args.fixed_context_parameters is not None
             else None
         )
-        if args.chirp_mass_scan is None:
+        scan = (args.chirp_mass_scan or "").strip().lower()
+        if scan in ("", "none", "false"):
             self.chirp_mass_scan_settings = None
-        elif args.chirp_mass_scan.strip().lower() == "true":
+        elif scan == "true":
             self.chirp_mass_scan_settings = {}
         else:
             self.chirp_mass_scan_settings = convert_string_to_dict(args.chirp_mass_scan)
@@ -266,6 +267,12 @@ class SamplingInput(Input):
         (density-preserving) sampler with the NDE as the proxy source. The final
         samples then carry a log_prob, as required for importance sampling."""
         settings = copy.deepcopy(self.density_recovery_settings)
+        unknown = set(settings) - {"num_samples", "nde_settings", "threshold_std"}
+        if unknown:
+            raise ValueError(
+                f"Unknown density_recovery_settings keys {sorted(unknown)}; expected "
+                f"num_samples, nde_settings, threshold_std."
+            )
         self.dingo_sampler.run_sampler(
             settings["num_samples"], batch_size=self.batch_size
         )

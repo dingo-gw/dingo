@@ -24,7 +24,6 @@ from dingo.core.inference.composer import ChainComposer
 from dingo.core.inference.steps import (
     FlowFactor,
     SampleTableFactor,
-    _base_model_metadata,
 )
 from dingo.gw.inference.context import GWSamplerContext
 from dingo.gw.inference.sampler import (
@@ -116,7 +115,7 @@ def chirp_mass_scan(
         trigger quality), `grid`, `samples` (all within-prior draws with their
         `log_likelihood` and `snr`), and `settings` (the scan configuration).
     """
-    metadata = _base_model_metadata(model)
+    metadata = model.base_metadata
     data_settings = metadata["train_settings"]["data"]
     inference_parameters = data_settings["inference_parameters"]
     context_parameters = data_settings.get("context_parameters") or []

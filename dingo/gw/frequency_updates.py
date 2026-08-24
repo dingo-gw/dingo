@@ -24,7 +24,7 @@ def _validate_maximum_frequency(
     domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
     crop_settings: dict | None,
 ):
-    if isinstance(f_max, float):
+    if isinstance(f_max, (int, float)):
         f_max = {d: f_max for d in detectors}
     if set(f_max) != set(detectors):
         raise ValueError(
@@ -76,7 +76,7 @@ def _validate_minimum_frequency(
     domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
     crop_settings: dict | None,
 ):
-    if isinstance(f_min, float):
+    if isinstance(f_min, (int, float)):
         f_min = {d: f_min for d in detectors}
     if set(f_min) != set(detectors):
         raise ValueError(

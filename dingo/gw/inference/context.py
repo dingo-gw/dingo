@@ -3,6 +3,8 @@ data and its derived views -- the network-input representation, the prior,
 and the likelihood."""
 
 from __future__ import annotations
+
+import copy
 import logging
 from typing import Optional, Union
 import numpy as np
@@ -55,28 +57,25 @@ def _frequency_range_update(domain, event_metadata) -> Optional[dict]:
 
 class GWSamplerContext:
     """
-    Per-event shared GW state: the data `d` and everything derived from it. Referenced
-    by every factor in a chain, and serialized as the transport state between pipe
-    stages.
+    Per-event shared state for a chain of gravitational-wave steps: the event data
+    and everything derived from it.
 
-    This implements the `dingo.core.inference.context.SamplerContext` protocol. It owns the
-    one-time data preprocessing (`prepared_data`) and builds the exact likelihood
-    (`likelihood`) used by likelihood-based factors (synthetic phase) and importance
-    sampling.
+    The context implements the `dingo.core.inference.context.SamplerContext`
+    protocol for this domain family. It prepares the network-input view of the data
+    (`prepared_data`), builds the prior (`prior`) and the exact likelihood
+    (`likelihood`), and carries the per-event metadata: the event time, which sets
+    the likelihood reference time and the right-ascension frame correction, and any
+    per-event analysis settings such as a frequency-range update.
 
-    Event metadata lives here (not on individual factors): it is a property of the data,
-    and it drives frequency cropping, the t_ref/RA correction, and the likelihood.
+    A context is treated as immutable: the data representation is part of its
+    identity. To evaluate the likelihood under a different representation (an
+    updated duration, the undecimated base domain), derive a new context with
+    `derive` rather than passing arguments to `likelihood()`.
 
-    The data representation is part of a context's identity: importance-sampling
-    settings updates produce a *derived* context (`derive`) rather than arguments to
-    `likelihood()`. Contexts are treated as immutable -- to change the representation,
-    derive a new one.
-
-    Note that the representation vocabulary here (frequency domains, multibanded
-    decimation, the base-domain likelihood view, frequency-range masking) is specific
-    to this domain family. A new domain family should get its own context class
-    implementing the same interface (`prepared_data` / `likelihood` / `prior` /
-    `derive`) rather than extending this one.
+    The representation vocabulary here (frequency domains, multibanded decimation,
+    the base-domain likelihood view, frequency-range masking) is specific to this
+    domain family. A new domain family should get its own context class
+    implementing the same interface rather than extending this one.
     """
 
     def __init__(
@@ -254,7 +253,7 @@ class GWSamplerContext:
         (for a conditional model this equals the base analysis metadata). An
         unconditional model prepares no data, so no context can be built from one;
         for the prior/likelihood views alone, use
-        `from_model_metadata(_base_model_metadata(model), ...)`.
+        `from_model_metadata(model.base_metadata, ...)`.
 
         Parameters
         ----------
@@ -274,7 +273,7 @@ class GWSamplerContext:
             raise ValueError(
                 "An unconditional model has no data preparation, so a context "
                 "cannot be built from it. For the prior/likelihood views, use "
-                "GWSamplerContext.from_model_metadata(_base_model_metadata(model), ...)."
+                "GWSamplerContext.from_model_metadata(model.base_metadata, ...)."
             )
         return cls.from_model_metadata(
             model.metadata,
@@ -296,8 +295,11 @@ class GWSamplerContext:
         remain well-defined. Only the representation changes: an updated duration `T`
         rebuilds the data domain at `delta_f = 1/T` (and enters waveform generation as
         `wfg_delta_f`), and `use_base_domain` switches a multibanded likelihood to the
-        undecimated domain. Frequency-range updates act through `event_metadata` (ASD
-        masking in the likelihood) and need no derived state. Caches start fresh.
+        undecimated domain. A frequency-range update (`minimum_frequency`,
+        `maximum_frequency`) rebuilds the data domain with the new bounds (not
+        implemented for a multibanded domain); the likelihood additionally masks the
+        ASDs to the event's range through `event_metadata`. A derived context whose
+        domain changed carries no network-input preparation. Caches start fresh.
 
         Parameters
         ----------
@@ -349,7 +351,8 @@ class GWSamplerContext:
 
         return type(self)(
             domain=domain,
-            data_prep=self._data_prep,
+            # The preparation is bound to the domain it was built for.
+            data_prep=self._data_prep if domain is self.domain else None,
             event_data=self.event_data,
             event_metadata=self.event_metadata,
             model_metadata=self.model_metadata,
@@ -362,29 +365,38 @@ class GWSamplerContext:
         )
 
     def prepared_data(self, conditioning=None) -> torch.Tensor:
-        """The network-input data representation of this event.
+        """The event data in the representation the networks condition on.
 
-        Without `conditioning`: the single shared representation, computed once
-        and cached. With `conditioning` (the chain columns available to a
-        conditioned factor): row-aligned, one data row per conditioning row.
-        Only the columns named in `data_prep_conditioning` are consumed by the
-        preparation (e.g. the chirp-mass heterodyne proxy, injected under its
-        physical name); the remaining columns condition the network only, and a
-        context that consumes nothing serves the shared representation viewed
-        across the rows. A constant consumed value (a pinned proxy) is prepared
-        once and viewed across the rows; varying values (a sweep) run through
-        the batch-native transform chain in one vectorized pass, uncached -- a
-        caller sweeping more rows than memory allows blocks its own request.
+        Called without `conditioning`, this returns the single shared
+        representation, computed once and cached. Called with `conditioning` (the
+        chain columns available to a conditioned factor), the result has one data
+        row per conditioning row. Only the columns named in
+        `data_prep_conditioning` affect the preparation (for example the
+        chirp-mass heterodyne proxy); the other columns condition the network
+        alone. When the consumed value is the same in every row (a pinned proxy),
+        the data are prepared once and viewed across the rows; when it varies (a
+        sweep), the whole batch runs through the transform chain in one pass,
+        uncached, so a caller sweeping a large grid should split it into blocks.
 
-        An event frequency-range update is validated against the training crop
-        license before any preparation.
+        A frequency-range update in the event metadata is validated against the
+        training-time strain cropping before any preparation.
 
         Parameters
         ----------
         conditioning : dict[str, torch.Tensor], optional
-            The chain conditioning available to the calling factor, one value
-            per row. May contain columns irrelevant to the preparation.
+            The chain conditioning available to the calling factor, one value per
+            row. May contain columns irrelevant to the preparation.
+
+        Returns
+        -------
+        torch.Tensor
         """
+        if self._data_prep is None:
+            raise ValueError(
+                "This context carries no network-input preparation (it was derived "
+                "for a different data domain, which the network cannot consume); "
+                "use the context it was derived from for the network-input view."
+            )
         if not self.data_prep_conditioning:
             if self._prepared is None:
                 self._validate_frequency_range()
@@ -489,25 +501,20 @@ class GWSamplerContext:
         calibration_marginalization_kwargs: Optional[dict] = None,
     ) -> StationaryGaussianGWLikelihood:
         """
-        Build the exact GW likelihood on this event's data, in physical parameter space.
+        Build the exact GW likelihood on this event's data, in physical parameter
+        space.
 
-        The network's standardized, decimated view of the data is `prepared_data()`; the
-        likelihood instead takes the raw event data (`event_data`) and builds its own
-        representation -- decimating to the multibanded domain unless `use_base_domain`,
-        and masking the ASDs to the event's frequency range. Its reference time is the
-        event time (the training-frame right-ascension correction is already applied to the
-        samples), or the training reference time when no event time is set.
+        The likelihood does not reuse the network-input view: it takes the raw
+        event data and builds its own representation, decimated to the multibanded
+        domain unless `use_base_domain`, with the ASDs masked to the event's
+        frequency range. Its reference time is the event time, or the training
+        reference time when no event time is set. The representation is context
+        state (change it by deriving a new context); the marginalizations are
+        chosen per call.
 
-        The data representation (the domain, `use_base_domain`, `wfg_delta_f`, the
-        event's frequency range) is context state -- importance-sampling settings
-        updates enter by deriving a new context (`derive`), not as arguments here.
-        Marginalization is per-request and enters as arguments.
-
-        The most recently built likelihood is cached with its arguments: a repeated
-        call with the same arguments returns the shared instance (the synthetic-phase
-        factor requests one per chain chunk), and a call with different arguments
-        builds a replacement. In the exact synthetic-phase mode the consumer assigns
-        a `phase_grid` attribute on the shared instance.
+        The most recently built likelihood is cached: a repeated call with the
+        same arguments returns the shared instance, and a call with different
+        arguments builds a replacement.
 
         Parameters
         ----------
@@ -525,15 +532,17 @@ class GWSamplerContext:
         -------
         StationaryGaussianGWLikelihood
         """
-        # Capture the call's arguments for the cache comparison; this must stay the
-        # first statement so locals() holds exactly the arguments. The comparison
-        # happens before the marginalization bounds are filled in below (which is
-        # deterministic given the same arguments). The representation fields join the
-        # key as a guard against off-contract in-place mutation.
-        settings = dict(locals())
-        settings.pop("self")
-        settings["use_base_domain"] = self.use_base_domain
-        settings["wfg_delta_f"] = self.wfg_delta_f
+        # The most recently built likelihood is cached, keyed on the requested
+        # marginalizations (copied, so a caller mutating its dict later cannot alias
+        # the cache). The comparison happens before the bounds are filled in below,
+        # which is deterministic given the same arguments.
+        settings = copy.deepcopy(
+            {
+                "time_marginalization_kwargs": time_marginalization_kwargs,
+                "phase_marginalization_kwargs": phase_marginalization_kwargs,
+                "calibration_marginalization_kwargs": calibration_marginalization_kwargs,
+            }
+        )
         if settings == self._likelihood_settings:
             return self._likelihood
 

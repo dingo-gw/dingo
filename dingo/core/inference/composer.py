@@ -61,6 +61,8 @@ def chunk_and_concat(
     log_prob : torch.Tensor or None
         The concatenated log-probs, or `None` when `run_once` returns `None`.
     """
+    if total < 1:
+        raise ValueError(f"num_samples must be at least 1, got {total}.")
     bs = batch_size or total
     sample_parts: list[dict[str, torch.Tensor]] = []
     lp_parts: list[Optional[torch.Tensor]] = []
@@ -146,6 +148,7 @@ class ChainComposer:
         """Check that the declared order is a valid topological order of the
         conditioning DAG."""
         produced: set[str] = set()
+        sampled: set[str] = set()  # parameter columns (as opposed to side channels)
         for i, stage in enumerate(self.stages):
             step = stage.step
             if stage.fan_out != 1 and (i == 0 or not step.draws):
@@ -176,11 +179,23 @@ class ChainComposer:
                     f"column(s) {sorted(clobbered)}. Only a Reparametrization may "
                     f"replace columns (its inverse can rebuild them for log_prob)."
                 )
+            if isinstance(step, TargetCorrection):
+                # A correction has no inverse, so `log_prob` cannot rebuild what it
+                # consumes: it may consume side-channel intermediates only.
+                sampled_consumed = set(step.consumes) & sampled
+                if sampled_consumed:
+                    raise ValueError(
+                        f"A target correction producing {step.parameters} consumes "
+                        f"the sampled parameter(s) {sorted(sampled_consumed)}. A "
+                        f"correction may consume only side-channel intermediates."
+                    )
             produced.update(emitted)
+            sampled.update(step.parameters)
             # Consumed columns leave the produced set, as in the fold, so a later step
             # may re-emit them (e.g. `RAToEventFrame` restoring a pinned `ra` that
             # `RAToTrainingFrame` consumed).
             produced.difference_update(step.consumes)
+            sampled.difference_update(step.consumes)
 
     @property
     def steps(self) -> list[Step]:
@@ -211,7 +226,8 @@ class ChainComposer:
             The per-event shared state.
         batch_size : int, optional
             Chunk `num_samples` into batches of this size, to cap the peak memory.
-            `None` draws in one pass.
+            `None` draws in one pass. For a chain rooted in a sample table, the rows
+            of the result are then grouped by chunk rather than by table row.
 
         Returns
         -------

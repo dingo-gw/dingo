@@ -21,7 +21,6 @@ from dingo.core.inference.steps import (
     Reparametrization,
     Standardization,
     TargetCorrection,
-    _base_model_metadata,
     _n_rows,
 )
 from dingo.core.multiprocessing import apply_func_with_multiprocessing
@@ -51,27 +50,26 @@ def _to_numpy(v) -> np.ndarray:
 
 class SyntheticPhaseFactor(Factor):
     """
-    Reconstruct the coalescence phase for a phase-marginalized network:
-    `q(phase | theta_rest, d)` from the likelihood on a phase grid. The terminal factor of
-    the chain.
+    Reconstruct the coalescence phase for a phase-marginalized network: the factor
+    `q(phase | theta_rest, d)`, built from the likelihood on a phase grid.
 
-    For each incoming `theta_rest` it builds the phase-full likelihood
-    (`context.likelihood()`) and evaluates `log L` on a grid over `[0, 2 pi)`, exploiting
-    that the waveform modes computed once at `phase = 0` each transform as `exp(-i m phase)`
-    -- so the whole grid follows from a single waveform evaluation. The grid is
-    exponentiated into a conditional phase distribution, a uniform floor (weight
-    `uniform_weight`) is added to keep it mass-covering, and one phase is drawn per sample
-    from the interpolated distribution. The returned proposal log-prob
-    `log q(phase | theta_rest, d)` joins the chain's proposal density; importance sampling
-    then targets the phase-full posterior (with the phase prior re-added).
+    For each incoming sample the factor evaluates `log L` on a grid over
+    `[0, 2 pi)`. A single waveform evaluation per sample suffices, because the
+    waveform modes computed at `phase = 0` each transform as `exp(-i m phase)`.
+    The grid is exponentiated into a conditional phase distribution, a uniform
+    floor (weight `uniform_weight`) keeps it positive everywhere so that
+    importance sampling stays exact, and one phase is drawn per sample from the
+    interpolated distribution. The returned log probability joins the chain's
+    proposal density; importance sampling then targets the phase-full posterior.
 
-    Two grid modes: `approximation_22_mode=True` assumes a (2, 2)-dominated signal (the
-    whole waveform transforms as `exp(2i phase)`), giving `log L` from the complex overlap
-    `Re[(d | h(phase=0)) exp(2i phase)]`; `False` sums the modes exactly and requires the
-    waveform generator's `spin_conversion_phase = 0`. Note the entry points differ on the
-    default: this factor and `dingo_pipe`'s `PhaseRecoveryDefault` use the exact mode,
-    while `Result.sample_synthetic_phase` defaults to the (2, 2) approximation when the
-    key is omitted.
+    There are two grid modes. With `approximation_22_mode=True` the signal is
+    assumed to be (2, 2)-dominated: the whole waveform transforms as
+    `exp(2i phase)`, so the grid follows from the complex overlap
+    `(d | h(phase=0))`. With `False` the modes are summed exactly, which requires
+    the waveform generator's `spin_conversion_phase = 0`. The entry points differ
+    on the default: this factor and `dingo_pipe`'s `PhaseRecoveryDefault` use the
+    exact mode, while `Result.sample_synthetic_phase` defaults to the (2, 2)
+    approximation when the key is omitted.
     """
 
     def __init__(
@@ -137,6 +135,7 @@ class SyntheticPhaseFactor(Factor):
         return torch.as_tensor(log_prob, device=device)
 
     def describe(self) -> dict:
+        """The default descriptor plus the phase-grid settings."""
         return {
             "step": type(self).__name__,
             "parameters": list(self.parameters),
@@ -196,7 +195,7 @@ def _build_gnpe_transforms(model: BasePosteriorModel):
     gnpe_transform : GNPECoalescenceTimes
         The blur transform itself, shared so the kernel factor can call `sample_proxies`.
     """
-    meta = _base_model_metadata(model)
+    meta = model.base_metadata
     data_settings = meta["train_settings"]["data"]
     ifo_list = InterferometerList(data_settings["detectors"])
     domain = build_domain(meta["dataset_settings"]["domain"])
@@ -332,7 +331,7 @@ class GNPEFlowFactor(Factor):
     multi-iteration GNPE, or a `ChainComposer` factor for single-step GNPE. The recomputed
     detector times are emitted as extra columns (`produces`): the next Gibbs iteration
     blurs them into fresh proxies, and single-step GNPE evaluates the kernel correction at
-    them. One sample per proxy row.
+    them. Draws `num_samples` per proxy row (one in the Gibbs loop).
     """
 
     def __init__(
@@ -406,10 +405,11 @@ class GNPEFlowFactor(Factor):
         )
 
     def sample_and_log_prob(self, num_samples, context, given=None):
-        """Sample one parameter set per proxy row; `num_samples` must be 1 (GNPE is 1:1).
-        Returns theta plus the recomputed detector times, and the network log-prob."""
-        if num_samples != 1:
-            raise ValueError("GNPE is 1:1; draw one sample per proxy (fan_out=1).")
+        """Draw `num_samples` parameter sets per proxy row (the draws for a row are
+        adjacent). Returns theta plus the recomputed detector times, and the network
+        log-prob. In the Gibbs loop and with a drawing proxy source this is called
+        with `num_samples=1`; a value greater than 1 arises only when the proxy
+        source is pinned. See `Factor.sample_and_log_prob`."""
         proxies = {p: given[p] for p in self.proxy_parameters}
         n_rows = _n_rows(proxies)
         x = {"extrinsic_parameters": dict(proxies), "parameters": {}}
@@ -420,14 +420,21 @@ class GNPEFlowFactor(Factor):
         with torch.no_grad():
             if "context_parameters" in x:
                 y, log_prob = self.model.sample_and_log_prob(
-                    x["data"], x["context_parameters"]
+                    x["data"], x["context_parameters"], num_samples=num_samples
                 )
             else:
-                y, log_prob = self.model.sample_and_log_prob(x["data"])
-        # sample_and_log_prob(num_samples=1) adds a singleton dim; the batch is the proxy
-        # rows.
-        x["parameters"] = y.squeeze(1)
-        x["log_prob"] = log_prob.squeeze(1)
+                y, log_prob = self.model.sample_and_log_prob(
+                    x["data"], num_samples=num_samples
+                )
+        # The network returns (n_rows, num_samples, dim): flatten with the draws for a
+        # row adjacent, and repeat the per-row extrinsic parameters (proxies, the
+        # preferred-proxy geocent time) to match before the post-network corrections.
+        x["parameters"] = y.reshape(n_rows * num_samples, y.shape[-1])
+        x["log_prob"] = log_prob.reshape(n_rows * num_samples)
+        x["extrinsic_parameters"] = {
+            k: v.repeat_interleave(num_samples, 0)
+            for k, v in x["extrinsic_parameters"].items()
+        }
         x = self.transform_post(x)
         params = dict(x["parameters"])
         # Expose trained names under their canonical aliases (e.g. ra -> ra@t_ref).
@@ -453,10 +460,9 @@ class GNPEFlowFactor(Factor):
         theta_net = {
             net: theta_i[self.aliases.get(net, net)] for net in self._net_parameters
         }
-        # Mirror transform_post: sampling shifts geocent_time by the preferred proxy
-        # after the network (PostCorrectGeocentTime, using the extrinsic geocent_time
-        # set up by the GNPE transform), so score the network in its own output frame
-        # by applying the inverse correction first.
+        # Mirror transform_post: sampling subtracts the preferred-proxy geocent time
+        # after the network (PostCorrectGeocentTime), so score the network in its own
+        # output frame by applying the inverse correction first.
         y = {
             "parameters": dict(theta_net),
             "extrinsic_parameters": dict(x["extrinsic_parameters"]),
@@ -530,11 +536,11 @@ class RAToEventFrame(Reparametrization):
 class RAToTrainingFrame(RAToEventFrame):
     """
     Rotate a pinned event-frame right ascension (`ra`) into the network's training
-    reference frame (`ra@t_ref`) before it conditions the network: the input-side
-    mirror of `RAToEventFrame`. A parameter that is frame-corrected on the output side
-    must be inversely corrected on the input side, so a sky position pinned at the
-    event time is presented to the network in the frame it was trained in; a
-    trailing `RAToEventFrame` restores the event-frame value in the samples.
+    frame (`ra@t_ref`): the input-side mirror of `RAToEventFrame`.
+
+    A sky position pinned at the event time must be presented to the network in
+    the frame it was trained in. A trailing `RAToEventFrame` then restores the
+    event-frame value in the samples.
     """
 
     def __init__(self):
@@ -550,34 +556,25 @@ class RAToTrainingFrame(RAToEventFrame):
 
 class SpinConventionReparam(Reparametrization):
     """
-    Relabel the precessing-spin angles between Dingo's internal spin-phase
-    convention and the physical (Bilby) one.
+    Relabel the precessing-spin angles between Dingo's internal spin convention
+    and the physical (Bilby) one.
 
     Dingo fixes the spin-conversion phase (usually to 0) so that the Cartesian
-    spins decouple from the coalescence phase; the whole density / likelihood /
-    synthetic-phase pipeline requires that convention, so stored samples keep the
-    plain names `theta_jn` / `phi_jl` in the *network* convention throughout. The
-    physical convention (spin conversion at the sample's own phase) is what Bilby
-    and PESummary mean by the same names, so the relabel happens at the export
-    boundary -- this class is its single home. Only `theta_jn` and `phi_jl`
-    change; the conversion phase and reference frequency are read from the model
-    metadata, and a model trained without a fixed conversion phase (`None`)
-    relabels to the identity.
+    spins decouple from the coalescence phase. Sampling, likelihood, and
+    synthetic phase all work in that convention, and stored samples keep the
+    plain names `theta_jn` / `phi_jl` in it. The physical convention (spin
+    conversion at the sample's own phase) is what Bilby and PESummary mean by the
+    same names, so the relabel happens when samples are exported. Only
+    `theta_jn` and `phi_jl` change; the conversion phase and reference frequency
+    are read from the model metadata, and a model trained without a fixed
+    conversion phase relabels to the identity.
 
-    Unlike `RAToEventFrame` no marked intermediate name is needed: the two conventions
-    never coexist in one table -- each world's plain names denote its own
-    convention, and this bijection is the boundary crossing.
-
-    Exporting a finished weighted sample set needs no Jacobian (proposal, prior,
-    and likelihood transform together), which is how `to_physical` is used. As a
-    chain `Step` the bijection is *not* measure-preserving in the flat
-    `(theta_jn, phi_jl)` coordinates: it rotates the line of sight rigidly about
-    the orbital angular momentum, preserving the spherical measure
-    `sin(theta_jn) dtheta dphi`, so
-    `log_det = log sin(theta_jn) - log sin(theta_jn')` (verified numerically
-    against finite differences through the LAL conversion), and `inverse`
-    rebuilds the network convention from the physical one using the invariant
-    conditioning the reverse fold supplies.
+    Exporting a finished weighted sample set needs no Jacobian, since proposal,
+    prior, and likelihood transform together; that is `to_physical`. As a chain
+    step the map is not measure-preserving in the flat `(theta_jn, phi_jl)`
+    coordinates: it rotates the line of sight rigidly about the orbital angular
+    momentum, preserving the spherical measure `sin(theta_jn) dtheta dphi`, so
+    `log_det = log sin(theta_jn) - log sin(theta_jn')`.
     """
 
     def __init__(self, num_processes: int = 1):
@@ -695,15 +692,25 @@ class SpinConventionReparam(Reparametrization):
 
 class GNPEKernelCorrection(TargetCorrection):
     """
-    The single-step GNPE kernel correction as a target-side chain step.
+    The single-step GNPE kernel correction, as a target-side chain step.
 
-    Emits `delta_log_prob_target = log p(theta_hat | theta)` -- the GNPE kernel evaluated
-    at the proxies and the detector times recomputed from theta -- for importance sampling
-    on the joint proposal `q(theta, theta_hat | d)`. Contributes 0 to the proposal
-    density and consumes the intermediate detector times.
+    Single-step GNPE samples from the joint proposal `q(theta, theta_hat | d)`
+    over parameters and proxies, so the matching importance-sampling target
+    acquires the kernel term `p(theta_hat | theta)`. This step evaluates that
+    term at the proxies and at the detector times the main network recomputed
+    from theta, and emits it as the `delta_log_prob_target` column. It
+    contributes zero to the proposal density and consumes the intermediate
+    detector times.
     """
 
     def __init__(self, kernel_factor: GNPEKernelFactor):
+        """
+        Parameters
+        ----------
+        kernel_factor : GNPEKernelFactor
+            The kernel whose density is evaluated; also names the proxy and
+            detector-time columns.
+        """
         self.kernel_factor = kernel_factor
         self.parameters = ["delta_log_prob_target"]
         self.conditioning = list(kernel_factor.parameters) + list(

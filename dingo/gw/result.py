@@ -515,9 +515,9 @@ class Result(CoreResult):
         out, log_prob = chain.sample_and_log_prob(1, self.sampler_context)
 
         phase_array = np.full(len(theta), 0.0)
-        phase_array[within_prior] = out["phase"].numpy()
+        phase_array[within_prior] = out["phase"].cpu().numpy()
         log_prob_array = np.full(len(theta), np.nan)
-        log_prob_array[within_prior] = log_prob.numpy()
+        log_prob_array[within_prior] = log_prob.cpu().numpy()
         self.samples["phase"] = phase_array
         self.samples["log_prob"] = log_prob_array
 
@@ -588,7 +588,8 @@ class Result(CoreResult):
         # corrections (trigger_time vs model ref_time) can shift fixed parameters by
         # tiny amounts, making DeltaFunction ln_prob = -inf for all samples.
         prior_keys_for_lp = [
-            k for k, v in self.prior.items()
+            k
+            for k, v in self.prior.items()
             if not isinstance(v, Constraint) and not isinstance(v, DeltaFunction)
         ]
         log_prior = self.prior.ln_prob(self.samples[prior_keys_for_lp], axis=0)

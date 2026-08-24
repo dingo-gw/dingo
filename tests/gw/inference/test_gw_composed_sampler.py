@@ -84,6 +84,7 @@ def _metadata():
 
 class _StubModel:
     metadata = _metadata()
+    base_metadata = metadata  # a conditional model: its own metadata
     device = "cpu"
 
 
@@ -127,7 +128,7 @@ def _network_free_sampler():
     context = GWSamplerContext.from_model_metadata(_metadata(), _event_data())
     pins = {"chirp_mass": 30.0, "mass_ratio": 0.8, "ra": 1.0, "dec": 0.1}
     composer = ChainComposer([DeltaFactor(pins)])
-    return GWComposedSampler(composer, context, _metadata(), INFERENCE_PARAMETERS)
+    return GWComposedSampler(composer, context)
 
 
 def test_to_result_round_trips_samples_and_provenance():

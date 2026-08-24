@@ -225,18 +225,6 @@ class Factor(ABC):
         return _describe_default(self)
 
 
-def _base_model_metadata(model: BasePosteriorModel) -> dict:
-    """Return the analysis metadata of a model (dataset, domain, detector, and data
-    settings). For an unconditional (density-recovery) model this is the metadata of
-    the base model whose samples it was trained on, stored under `metadata["base"]`.
-    The network's own settings (`standardization`, `inference_parameters`) are always
-    read from `model.metadata` directly."""
-    metadata = model.metadata
-    if metadata["train_settings"]["data"].get("unconditional", False):
-        return metadata["base"]
-    return metadata
-
-
 class FlowFactor(Factor):
     """
     Factor wrapping a posterior model (an NPE flow, FMPE, and so on).
@@ -497,14 +485,20 @@ class SampleTableFactor(Factor):
         Parameters
         ----------
         table : dict
-            The existing samples, one array-like column per parameter.
+            The existing samples, one array-like column per parameter. Columns are
+            cast to float32, the chain dtype (network outputs and pins are
+            float32).
         log_prob : array-like, optional
-            The stored log probability of each row. If omitted, the chain has no
-            tractable density.
+            The stored log probability of each row, cast to float32. If omitted,
+            the chain has no tractable density.
         """
-        self.table = {k: torch.as_tensor(v) for k, v in table.items()}
+        self.table = {
+            k: torch.as_tensor(v, dtype=torch.float32) for k, v in table.items()
+        }
         self.table_log_prob = (
-            torch.as_tensor(log_prob) if log_prob is not None else None
+            torch.as_tensor(log_prob, dtype=torch.float32)
+            if log_prob is not None
+            else None
         )
         self.parameters = list(self.table)
         self.conditioning: list[str] = []

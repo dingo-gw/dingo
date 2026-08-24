@@ -69,6 +69,7 @@ _BNS_METADATA = {
 
 class _StubBNSModel:
     metadata = _BNS_METADATA
+    base_metadata = _BNS_METADATA  # a conditional model: its own metadata
     device = "cpu"
 
 
@@ -256,6 +257,7 @@ def test_chirp_mass_scan_validates_model_and_pins():
 
     class _StubNonChirpModel:
         metadata = metadata_no_chirp
+        base_metadata = metadata_no_chirp
         device = "cpu"
 
     with pytest.raises(ValueError, match="chirp_mass_proxy"):
